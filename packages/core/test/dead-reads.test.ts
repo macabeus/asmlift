@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DEAD_READ_GATES, type Declarations, pinDeadReads } from '../src/frontend/dead-reads';
+import { DEAD_READ_GATES, type Declarations, leftInDiscardRegister, pinDeadReads } from '../src/frontend/dead-reads';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { deadOps } from '../src/ir/discipline';
 import { T } from '../src/ir/types';
@@ -296,6 +296,202 @@ describe('the gates', () => {
     expect(o4.load.attrs.volatile).toBe(true);
   });
 
+  // Compiled at the keeping levels, one statement per line: a volatile `*p;` is the load into the
+  // register the compiler discards it into (target.ts `discardsUnusedReadsInto`), the plain
+  // `int x; x = p[5]; x = 0; *q = x;` takes a home, and `register int x;` the same.
+  const objdump = (body: string) => `00000000 <f>:\n${body}`;
+  const voidF = (params: string[]) => ({ prototypes: { f: { params, returnsVoid: true } } });
+  test('keeps-unused-reads: mwcc -O0,p discards a volatile read into r0, and a dead local takes a home', () => {
+    const o0 = targetFor('mwcc_242_81', ['-O0,p']).target;
+    const vol = objdump('   0:\tlwz     r0,0(r3)\n   4:\tblr\n');
+    expect(decompile('f', vol, o0, voidF(['volatile s32 *'])).source).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    const home = objdump(
+      '   0:\tstwu    r1,-16(r1)\n   4:\tstw     r31,12(r1)\n   8:\tlwz     r31,20(r3)\n   c:\tli      r31,0\n' +
+        '  10:\tstw     r31,0(r4)\n  14:\tlwz     r31,12(r1)\n  18:\taddi    r1,r1,16\n  1c:\tblr\n',
+    );
+    expect(decompile('f', home, o0, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+  });
+  test('keeps-unused-reads: IDO -O1 and -O0 discard a volatile read into $zero, and a dead local takes a home', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const vol = header + objdump('   0:\tjr\tra\n   4:\tlw\tzero,0(a0)\n');
+    for (const level of ['-O1', '-O0']) {
+      const t = targetFor('ido7.1', ['-mips2', level, '-32', '-non_shared', '-G', '0']).target;
+      expect(decompile('f', vol, t, voidF(['volatile s32 *'])).source).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    }
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    // `register int x;`: the load is in a2, which the next instruction overwrites
+    const reg = objdump(
+      '   0:\tlw\ta2,20(a0)\n   4:\taddiu\tsp,sp,-8\n   8:\tmove\ta2,zero\n   c:\tsw\ta2,0(a1)\n' +
+        '  10:\tjr\tra\n  14:\taddiu\tsp,sp,8\n',
+    );
+    expect(decompile('f', header + reg, o1, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+    // `int x;`: the load is in t6 and stored to the frame
+    const home = objdump(
+      '   0:\tlw\tt6,20(a0)\n   4:\taddiu\tsp,sp,-8\n   8:\tsw\tt6,4(sp)\n   c:\tsw\tzero,4(sp)\n' +
+        '  10:\tsw\tzero,0(a1)\n  14:\tjr\tra\n  18:\taddiu\tsp,sp,8\n',
+    );
+    expect(decompile('f', header + home, o1, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+  });
+  test('keeps-unused-reads: the discard register is what admits a read, not the level', () => {
+    // at mwcc -O0 the same read is stamped when it is handed in as discarded, and left plain when not
+    const o0 = targetFor('mwcc_242_81', ['-O0']).target;
+    const r0 = deadLoad(constAt(0x80001000), { off: 0, width: 4, signed: false });
+    pinDeadReads(r0.blocks, o0, { discarded: new Set(r0.load.results) });
+    expect(r0.load.attrs.volatile).toBe(true);
+    const r31 = deadLoad(constAt(0x80001000), { off: 0, width: 4, signed: false });
+    pinDeadReads(r31.blocks, o0, { discarded: new Set() });
+    expect(r31.load.attrs.volatile).toBeUndefined();
+  });
+
+  test('undecided-at-keeping-level: a keeping level on a compiler with no discard register refuses a read no evidence claims', () => {
+    // agbcc -O0 of `void f(volatile int *p) { *p; }`: `ldr r0, [r1]` nothing reads, the same code as
+    // `register int x; x = p[5]; x = 0;` — dropped or stamped, one of the two is wrong C
+    const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix']).target;
+    const vol =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr1, [r7]\n' +
+      '\tldr\tr0, [r1]\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', vol, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+    // `int x; x = p[5]; x = 0; *q = x;`: the read is stored to the frame, and lifts
+    const home =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tstr\tr1, [r7, #0x4]\n' +
+      '\tldr\tr1, [r7]\n\tadd\tr0, r1, #0\n\tadd\tr0, r0, #0x14\n\tldr\tr1, [r0]\n\tstr\tr1, [r7, #0x8]\n' +
+      '\tmov\tr0, #0x0\n\tstr\tr0, [r7, #0x8]\n\tldr\tr0, [r7, #0x4]\n\tldr\tr1, [r7, #0x8]\n\tstr\tr1, [r0]\n' +
+      '\tadd\tsp, sp, #0xc\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', home, o0, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+    // …and the IR-level pin: a read a gate claims is left plain, one none claims refuses
+    const spilled = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    pinDeadReads(spilled.blocks, o0, { spilled: new Set(spilled.load.results) });
+    expect(spilled.load.attrs.volatile).toBeUndefined();
+    const bare = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    expect(() => pinDeadReads(bare.blocks, o0, { name: 'f' })).toThrow(/cannot lift 'f': a read nothing uses/);
+    // at -O2 the same read is stamped
+    pinDeadReads(bare.blocks, ARMV4T_AGBCC);
+    expect(bare.load.attrs.volatile).toBe(true);
+    // ablated, the read no gate claims is stamped at -O0 too
+    const ablated = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    pinDeadReads(ablated.blocks, o0, { name: 'f' }, without(DEAD_READ_GATES, 'undecided-at-keeping-level'));
+    expect(ablated.load.attrs.volatile).toBe(true);
+    // a compare or a computation is no evidence at a keeping level: agbcc -O0's `if (*vp) {}` is
+    // the same `ldr; cmp; beq` as `if (p[0]) {}`, and a volatile bitfield's `ldr; lsl; lsr` reads
+    // as arithmetic. Both refuse: `compared` and `computed` come after the refusal.
+    const compared = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    expect(() => pinDeadReads(compared.blocks, o0, { name: 'f', compared: new Set(compared.load.results) })).toThrow(
+      /cannot lift 'f'/,
+    );
+    pinDeadReads(
+      compared.blocks,
+      o0,
+      { name: 'f', compared: new Set(compared.load.results) },
+      without(DEAD_READ_GATES, 'undecided-at-keeping-level'),
+    );
+    expect(compared.load.attrs.volatile).toBeUndefined();
+    const ifEmpty =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tcmp\tr1, #0\n\tbeq\t.L3\n.L3:\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', ifEmpty, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+    // `if (*vp) {} else {}` and `*vp ? 1 : 2;` are `beq .L4; b .L4`: the two edges meet only
+    // through the forwarder the `b` sits in, and the branch chooses nothing all the same
+    const forwarded =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tcmp\tr1, #0\n\tbeq\t.L4\n\tb\t.L4\n.L3:\n.L4:\n.L2:\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', forwarded, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+    const bitfield =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tlsl\tr2, r1, #0x18\n\tlsr\tr0, r2, #0x1b\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', bitfield, o0, voidF(['s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+  });
+
+  test('keeps-unused-reads: mwcc -O0,p moves a narrowing assignment out of r0 into a home, which is no discard', () => {
+    // `signed char x; x = p[5]; x = 0;` is `lwz r0` + `extsb r31,r0`: a home, plain or volatile alike
+    const o0 = targetFor('mwcc_242_81', ['-O0,p']).target;
+    const home = objdump(
+      '   0:\tstwu    r1,-16(r1)\n   4:\tstw     r31,12(r1)\n   8:\tlwz     r0,20(r3)\n   c:\textsb   r31,r0\n' +
+        '  10:\tli      r31,0\n  14:\tlwz     r31,12(r1)\n  18:\taddi    r1,r1,16\n  1c:\tblr\n',
+    );
+    expect(decompile('f', home, o0, voidF(['s32 *'])).source).not.toMatch(/volatile/);
+    const param = objdump('   0:\tlwz     r0,20(r3)\n   4:\textsb   r4,r0\n   8:\tblr\n');
+    expect(decompile('f', param, o0, voidF(['s32 *', 's8'])).source).not.toMatch(/volatile/);
+    const moved = objdump('   0:\tlwz     r0,20(r3)\n   4:\tmr      r4,r0\n   8:\tblr\n');
+    expect(decompile('f', moved, o0, voidF(['s32 *', 's32'])).source).not.toMatch(/volatile/);
+    // an extension that stays in r0 is still the discard: `(short)*vp;`
+    const cast = objdump('   0:\tlwz     r0,0(r3)\n   4:\textsh   r0,r0\n   8:\tblr\n');
+    expect(decompile('f', cast, o0, voidF(['volatile s32 *'])).source).toMatch(/volatile s32/);
+  });
+
+  test("keeps-unused-reads: any write of a discarded load's value to another register homes it, whatever the op", () => {
+    // `unsigned char x; x = p[5]; x = 0;` is `lwz r0` + `clrlwi r31,r0,24`, lowered to an `and`:
+    // the write to r31 homes the load, whether the op is lowered to an `and` or a `zext`
+    const load = (): { op: Op; v: ReturnType<typeof mkValue> } => {
+      const v = mkValue(T.unk(32));
+      return { op: mkOp('load', { operands: [mkValue(T.unk(32))], results: [v], attrs: { off: 20, width: 4 } }), v };
+    };
+    const derived = (opcode: 'and' | 'zext' | 'sext', from: ReturnType<typeof mkValue>) => {
+      const v = mkValue(T.unk(32));
+      return { op: mkOp(opcode, { operands: [from], results: [v], attrs: { width: 8 } }), v };
+    };
+    const homedU8 = load();
+    const masked = derived('and', homedU8.v);
+    const viaR0 = load();
+    const extR0 = derived('zext', viaR0.v);
+    const outOfR0 = derived('sext', extR0.v);
+    const kept = load();
+    const keptExt = derived('sext', kept.v);
+    const blocks: Block[] = [
+      {
+        params: [],
+        ops: [homedU8.op, masked.op, viaR0.op, extR0.op, outOfR0.op, kept.op, keptExt.op, mkOp('ret')],
+      },
+    ];
+    const left = leftInDiscardRegister(blocks, new Set([homedU8.v, viaR0.v, kept.v]), [masked.v, outOfR0.v]);
+    // an op's write to r31, and one out of r0 of what r0 computed from the load, home it; a load
+    // whose extension the discard register keeps (`(char)*vp;`) stays discarded
+    expect([...left]).toEqual([kept.v]);
+  });
+
+  test('keeps-unused-reads: IDO discards a volatile doubleword into the pair zero:at', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    const pair = header + objdump('   0:\tlw\tzero,0(a0)\n   4:\tjr\tra\n   8:\tlw\tat,4(a0)\n   c:\tnop\n');
+    const both = decompile('f', pair, o1, voidF(['volatile s32 *'])).source;
+    expect(both).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    expect(both).toMatch(/^\s*\(\(volatile s32 \*\)a0\)\[1\];$/m);
+    // an `at` word that is not the one above the discarded word is not its pair
+    const apart = header + objdump('   0:\tlw\tzero,0(a0)\n   4:\tjr\tra\n   8:\tlw\tat,8(a0)\n   c:\tnop\n');
+    expect(decompile('f', apart, o1, voidF(['volatile s32 *'])).source).not.toMatch(/\[2\]/);
+  });
+
+  test('keeps-unused-reads: the IDO pair zero:at survives what -O1 schedules between its halves', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    const stamped = (body: string, params: string[]) =>
+      (
+        decompile('f', header + objdump(body), o1, voidF(params)).source.match(/\(volatile s32 \*\)a\d\)?(\[1\])?;/g) ??
+        []
+      ).length;
+    // `struct S { volatile long long a; int b; }; s->a; s->b = x;` reordered as -O1 does: a store
+    // through the pair's own base between the halves
+    const store = '   0:\tlw\tzero,0(a0)\n   4:\tsw\ta1,8(a0)\n   8:\tjr\tra\n   c:\tlw\tat,4(a0)\n';
+    expect(stamped(store, ['s32 *', 's32'])).toBe(2);
+    // a load into another register between, and two pairs interleaved
+    const loads =
+      '   0:\tlw\tzero,0(a0)\n   4:\tlw\tzero,0(a1)\n   8:\tlw\tt6,0(a2)\n   c:\tlw\tat,4(a0)\n' +
+      '  10:\tsw\tt6,0(a3)\n  14:\tjr\tra\n  18:\tlw\tat,4(a1)\n';
+    expect(stamped(loads, ['s32 *', 's32 *', 's32 *', 's32 *'])).toBe(4);
+    // a write to the base register moves the address the `at` word reads: no longer the pair half
+    const moved = '   0:\tlw\tzero,0(a0)\n   4:\taddiu\ta0,a0,8\n   8:\tjr\tra\n   c:\tlw\tat,4(a0)\n';
+    expect(stamped(moved, ['s32 *'])).toBe(1);
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,
@@ -309,6 +505,21 @@ describe('the gates', () => {
     expect(['0', '1', '2'].map((l) => keepsUnusedReadsAt('gcc', l))).toEqual([true, false, false]);
     expect(targetFor('ido7.1', ['-O2']).target.compilerBehaviors.keepsUnusedReads).toBeUndefined();
     expect(targetFor('ido7.1', []).target.compilerBehaviors.keepsUnusedReads).toBe(true); // IDO's default is -O1
+  });
+
+  test('the register a keeping level discards an unused read into is a fact of the compiler', () => {
+    // compiled at -O0,p (mwcc) and -O1/-O0 (IDO): a volatile `*p;` is `lwz r0` / `lw zero`; agbcc,
+    // gcc 2.7.2 and KMC at -O0 load it into a register a `register` local takes as well
+    const into = (id: Parameters<typeof targetFor>[0], flags: string[]) =>
+      targetFor(id, flags).target.compilerBehaviors.discardsUnusedReadsInto;
+    for (const id of ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'] as const) {
+      expect(into(id, ['-O0,p'])).toBe('r0');
+    }
+    expect(into('ido7.1', ['-O1'])).toBe('zero');
+    expect(into('ido7.1', ['-O0'])).toBe('zero');
+    for (const id of ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2'] as const) {
+      expect(into(id, ['-O0'])).toBeUndefined();
+    }
   });
 
   test("keeps-unused-reads: a level no flag names keeps, as every family's unflagged compile was measured to", () => {
@@ -387,19 +598,27 @@ describe('the gates', () => {
     expect(run(without(DEAD_READ_GATES, 'computed'))).toBe(true);
   });
 
-  test('computed: a read that is the address of a read the pin left plain is that read’s use', () => {
+  test('addresses-plain-read: a read that is the address of a read the pin left plain is that read’s use', () => {
     // the outer read sign-extends on agbcc, so `not-a-volatile-read` leaves it plain, and the
-    // pointer it read through was the compiler's to compute
-    const pp = mkValue(T.unk(32));
-    const inner = mkOp('load', { operands: [pp], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 4 } });
-    const outer = mkOp('load', {
-      operands: [inner.results[0]],
-      results: [mkValue(T.unk(32))],
-      attrs: { off: 0, width: 2, signed: true },
-    });
-    pinDeadReads([{ params: [pp], ops: [inner, outer, mkOp('ret')] }], ARMV4T_AGBCC);
-    expect(outer.attrs.volatile).toBeUndefined();
-    expect(inner.attrs.volatile).toBeUndefined();
+    // pointer it read through was the compiler's to compute — at -O0 as at -O2, where it is
+    // evidence the refusal does not override
+    const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0']).target;
+    const run = (target: typeof o0, gates?: Parameters<typeof pinDeadReads>[3]) => {
+      const pp = mkValue(T.unk(32));
+      const inner = mkOp('load', { operands: [pp], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 4 } });
+      const outer = mkOp('load', {
+        operands: [inner.results[0]],
+        results: [mkValue(T.unk(32))],
+        attrs: { off: 0, width: 2, signed: true },
+      });
+      pinDeadReads([{ params: [pp], ops: [inner, outer, mkOp('ret')] }], target, { name: 'f' }, gates);
+      expect(outer.attrs.volatile).toBeUndefined();
+      return inner.attrs.volatile;
+    };
+    expect(run(ARMV4T_AGBCC)).toBeUndefined();
+    expect(run(o0)).toBeUndefined();
+    expect(run(ARMV4T_AGBCC, without(DEAD_READ_GATES, 'addresses-plain-read'))).toBe(true);
+    expect(() => run(o0, without(DEAD_READ_GATES, 'addresses-plain-read'))).toThrow(/cannot lift 'f'/);
   });
 
   test('declared-plain: a dead read of a global declared plain stays deletable', () => {

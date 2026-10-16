@@ -30,12 +30,19 @@
  *  of another dead read waits until that one is decided: kept, it is a use, and the inner read is
  *  live — `*(volatile int *)*pp;` qualifies the read of `*pp`'s target, not the read of `pp`.
  *
- *  The reads the rule must not claim are tabled (`DEAD_READ_GATES`) and REPORTED: a caller may hand
- *  its own table (`tallying`, l3/gates.ts) to census the refusals.
- *   • any read of a function built at a level where the compiler keeps a plain read nothing uses
- *     (target.ts `keepsUnusedReadsAt`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in r31, so an
- *     unused read there says nothing about `volatile` — and a level no flag names, or one a word the
- *     flag table cannot read may set (mwcc `-opt off`), is judged as keeping;
+ *  The reads the rule must not claim are tabled (`DEAD_READ_GATES`, in this order) and REPORTED: a
+ *  caller may hand its own table (`tallying`, l3/gates.ts) to census the refusals.
+ *   • a read of a function built at a level where the compiler keeps a plain read nothing uses
+ *     (target.ts `keepsUnusedReadsAt`) on a compiler that names the register it discards a
+ *     volatile read into (target.ts `discardsUnusedReadsInto`), save one the machine loaded into
+ *     that register and left there (`discarded`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in
+ *     r31 and IDO at `-O1` in t6, so a read in a home says nothing about `volatile`, where `*p;`
+ *     through a volatile pointer is `lwz r0` and `lw zero` — and a level no flag names, or one a
+ *     word the flag table cannot read may set (mwcc `-opt off`), is judged as keeping. A load whose
+ *     value, or a value computed from it, is written to another register is not discarded
+ *     (`leftInDiscardRegister`: mwcc's `lwz r0` + `extsb r31,r0` of `signed char x; x = p[5];
+ *     x = 0;`); the second word of IDO's doubleword discard, `lw at,4(a0)` after `lw zero,0(a0)`,
+ *     is (frontend/mips.ts `emitLoad`);
  *   • a read of a global the project declares with no volatile byte where it reads (`declared-plain`:
  *     the symbol map where it lays the object out, else the declaration context): the source spelled
  *     the read plain, so the compiler kept it for some other reason — agbcc merges the identical
@@ -58,24 +65,35 @@
  *     out is unused by the lift, not by the source — agbcc's `g(a, c ? p[1] : p[2])` leaves r0 at
  *     its incoming value, the guess passes nothing, and stamping the r1 loads publishes `g();` beside
  *     two invented volatile reads;
- *   • a read a compare consumed (`compared`, gathered by each frontend that fuses a compare into the
- *     branch that reads it): a compare no branch reads leaves no op, so the read looks dead only
- *     because the lift has no op for its consumer — mwcc 2.3.3 at `-O4,s` keeps
- *     `lwz r0, g; cmpwi r0, 0` for `if (g) { (g != 0); }`;
  *   • a read whose value was stored to the function's own stack (`spilled`, ssa.ts `frameWrites`):
  *     each frontend keeps a stack slot as a variable and drops a store nothing reloads, so a read
  *     only that store consumed looks dead because the lift dropped its consumer — KMC's `struct S
  *     s = *p; return s.a;` stores both words to the frame, IDO a `long long` it truncates;
- *   • a read the machine computed with (`computed`): an op other than an extension consumes the
- *     value, or an extension of it — an op dead in the lift too, but one the compiler emitted, so it
- *     did not judge the value unused there. KMC splits a `long long` sum after flow, and keeps the
- *     high word's `addu` of `v += 3; return (int)v;`. A read that is the address of a read the pin
- *     left plain is that read's use, on the same ground;
+ *   • a read that is the address of a read the pin left plain (`addresses-plain-read`): the outer
+ *     read was decided first, and the pointer it read through was the compiler's to compute;
  *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
- *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
- *  RESIDUE, untabled: reads stamped with a `volatile` the source did not write. The first three
- *  recompile byte-exact and compute the same values; the last two inherit a wrong input.
+ *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read;
+ *   • `undecided-at-keeping-level`, whose verdict REFUSES THE LIFT instead of leaving the read
+ *     plain: a read at a keeping level on a compiler that names no discard register, which none of
+ *     the gates above claims. agbcc, gcc 2.7.2 and KMC at `-O0` load a volatile `*p;` into a
+ *     register nothing then reads (`ldr r0`, `lw v0`), and a `register` local assigned and
+ *     overwritten (`register int x; x = p[5]; x = 0;`) is the same instructions; agbcc's
+ *     `if (*vp) {}` is the same `ldr; cmp; beq` as the plain `if (p[0]) {}`. Neither spelling is in
+ *     evidence, and either one, published, is a function the machine's source did not write:
+ *     dropped, the volatile access is gone; stamped, the plain one gains an access. It sits BEFORE
+ *     the two gates below, which rest on an optimiser's premise a keeping level does not keep;
+ *   • a read a compare consumed (`compared`, gathered by each frontend that fuses a compare into the
+ *     branch that reads it): a compare no branch reads leaves no op, so the read looks dead only
+ *     because the lift has no op for its consumer — mwcc 2.3.3 at `-O4,s` keeps
+ *     `lwz r0, g; cmpwi r0, 0` for `if (g) { (g != 0); }`;
+ *   • a read the machine computed with (`computed`): an op other than an extension or a read
+ *     consumes the value, or an extension of it — an op dead in the lift too, but one the compiler
+ *     emitted, so it did not judge the value unused there. KMC splits a `long long` sum after flow,
+ *     and keeps the high word's `addu` of `v += 3; return (int)v;`.
+ *  RESIDUE, untabled: reads stamped with a `volatile` the source did not write, or spelled at
+ *  another width. The first four recompile byte-exact and compute the same values; the next two
+ *  inherit a wrong input; the last performs the same accesses and does not recompile byte-exact.
  *   • a bare read an inline `asm("" :: "r"(x))` took whole. agbcc leaves the statement as a bare
  *     `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead; where the asm took
  *     an extraction (sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character` with
@@ -85,21 +103,49 @@
  *     (`thumb_load_double_from_address`), so `int f(long long *p) { long long v = *p; return
  *     (int)v; }` keeps `ldr r1, [r0, #4]`. With no such declaration the pair gate refuses it on Thumb
  *     and PowerPC; O32 declines the v0:v1 pair before the pin is asked;
+ *   • a plain read under an arithmetic or a sign-extending cast nothing uses, at mwcc `-O0`:
+ *     `p[5] + 1;` and `(char)p[5];` keep `lwz r0, 20(r3)` (the cast with an `extsb`/`extsh` of r0
+ *     where `char` is signed), which is the register the compiler discards a volatile read into,
+ *     so the read is stamped. A zero-extending cast (`clrlwi r0,r0,24`: `(unsigned char)`, and
+ *     `(char)` under `-char unsigned`, as the 2.4.7 and 2.3.3 projects build) lowers to an `and`,
+ *     which `computed` rejects, so that read is left plain. No unit of Mario Party 4's 409 at
+ *     `-O0,p` holds one;
  *   • merged identical arms where no declaration is in evidence: the same instructions as `gR;` on an
  *     object nothing declares, and as `*p;` through a pointer parameter;
  *   • a read returned by a getter wrongly declared void: the declaration is trusted, as the pair
  *     gate trusts a declared width;
  *   • hand-written assembly, which is outside the compiler claim: klonoa's m4a `sub_0804FE6C` returns
  *     a byte in r3, which no ABI the lift models reads, so the lift's return model has already lost
- *     that byte and its read is stamped. */
+ *     that byte and its read is stamped;
+ *   • IDO's doubleword discard (`volatile long long`/`double` `*p;`, `lw zero` + `lw at`) is
+ *     stamped as two word reads, which recompile to two `lw zero`.
+ *  DROPPED, untabled: volatile reads left plain, which the lift's dead-code pass deletes.
+ *   • a volatile read assigned to a local nothing reads (`x = *vp; x = 0;`, `int x = *vp;`) at a
+ *     keeping level: the same instructions as its plain twin on every compiler measured (mwcc's
+ *     r31 home, or `lwz r0` + `extsb r31,r0` for a `char` local, IDO's `t6` and a frame store,
+ *     agbcc's and gcc's frame store), so no fact tells the two apart, and the plain one is the
+ *     population: of the 925 non-frame loads nothing reads over Mario Party 4's -O0,p units, 924
+ *     sit in r17-r31 and f18-f31 homes, and the other is a volatile read in r0;
+ *   • a read held in the return pair's second register at a return whose width the lift guessed,
+ *     at a keeping level on a compiler with no discard register: agbcc `-O0` keeps
+ *     `return (*p, 1);`'s volatile read in r1, and `held-at-word-return` leaves it plain before
+ *     the refusal is asked. A declaration that pins the return width sends it to the refusal;
+ *   • a read in the discard register that a dead compare or computation consumes, at mwcc `-O0`:
+ *     `-*vp;` (`neg r0,r0`), `!*vp;` and `*vp ? 1 : 2;` are the same instructions as their plain
+ *     twins, which mwcc keeps too; the volatile bitfield `s->b;` (`lbz r0` + `clrlwi r0,r0,27`) is
+ *     not — its plain twin compiles to nothing — and is dropped all the same;
+ *   • a read in a home that a dead compare consumes at IDO `-O1`: `if (*vp) {}` and `*vp ? 1 : 2;`
+ *     are `lw t6` + `beqz t6`, where the plain twins compile to nothing, so the compare is evidence
+ *     of `volatile` there, and no gate reads it (at `-O0` the plain twin is the same code). */
 import { globalBaseOf, globalCellOf } from '../ir/alias';
-import type { Block, Op, Value } from '../ir/core';
+import { type Block, type Op, type Successor, type Value, forwardingTarget } from '../ir/core';
 import { deadOps } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
+import { FrontendUnsupportedError } from './errors';
 import type { SsaBuilder } from './ssa';
 
 /** What a dead-read gate judges: the read, and the facts about it the gates read. */
@@ -120,21 +166,33 @@ export interface DeadRead {
   /** its value, or a value only it feeds, was stored to the function's own stack
    *  (`DeadReadFacts.spilled`) */
   readonly spilled: boolean;
-  /** its value, or an extension of it, is an operand of an op that is no extension (`computedWith`):
-   *  arithmetic the machine emitted, or the address of a read the pin left plain */
+  /** its value, or an extension of it, is an operand of an op that is neither an extension nor a
+   *  read (`usesOf`): arithmetic the machine emitted */
   readonly computed: boolean;
+  /** its value, or an extension of it, is the address of a read the pin left plain (`usesOf`) */
+  readonly addressesPlainRead: boolean;
   /** its address reaches one global, declared with no volatile byte where it reads (`declaredPlain`) */
   readonly declaredPlain: boolean;
+  /** the machine loaded it into the register the compiler discards an unused read into
+   *  (`DeadReadFacts.discarded`, target.ts `discardsUnusedReadsInto`) */
+  readonly discarded: boolean;
   readonly target: TargetDescription;
 }
+
+/** The gate whose verdict is a REFUSAL of the lift, not a read left plain: see its entry in the
+ *  file header. A table without it (`without`) leaves the read to the gates after it. */
+const UNDECIDED = 'undecided-at-keeping-level';
 
 export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
   {
     id: 'keeps-unused-reads',
-    why: 'at these flags the compiler keeps a plain read nothing uses, so an unused read is no evidence of volatile',
-    sound: false,
+    why: 'at these flags the compiler keeps a plain read nothing uses, and this one is not in the register it discards a volatile read into',
+    sound: true,
     guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
-    rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true,
+    rejects: (c) =>
+      c.target.compilerBehaviors.keepsUnusedReads === true &&
+      c.target.compilerBehaviors.discardsUnusedReadsInto !== undefined &&
+      !c.discarded,
   },
   {
     id: 'declared-plain',
@@ -172,13 +230,6 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => c.heldAtUndeclaredCall,
   },
   {
-    id: 'compared',
-    why: 'a compare consumed the value; the lift has no op for a compare no branch reads',
-    sound: false,
-    guardedBy: 'dead-reads.test.ts: compared: a read only a dead compare consumes stays plain',
-    rejects: (c) => c.compared,
-  },
-  {
     id: 'spilled',
     why: 'the machine stored the value to its stack; the lift keeps the slot as a variable and drops a store nothing reloads',
     sound: false,
@@ -186,11 +237,12 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => c.spilled,
   },
   {
-    id: 'computed',
-    why: 'the machine computed with the value, so the compiler did not judge it unused where it emitted that op',
+    id: 'addresses-plain-read',
+    why: 'the value is the address of a read left plain, which the compiler used it to make',
     sound: false,
-    guardedBy: 'dead-reads.test.ts: computed: a read a dead add consumes stays plain',
-    rejects: (c) => c.computed,
+    guardedBy:
+      'dead-reads.test.ts: addresses-plain-read: a read that is the address of a read the pin left plain is that read’s use',
+    rejects: (c) => c.addressesPlainRead,
   },
   {
     id: 'not-a-volatile-read',
@@ -199,10 +251,36 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     guardedBy: 'dead-reads.test.ts: not-a-volatile-read: a dead sign-extending narrow read stays plain on agbcc',
     rejects: (c) => !readCouldBeVolatile(c.target.compilerBehaviors, c.op),
   },
+  {
+    id: UNDECIDED,
+    why: 'at these flags the compiler keeps a plain read nothing uses and has no register of its own for a volatile one, so the lift refuses',
+    sound: true,
+    guardedBy:
+      'dead-reads.test.ts: undecided-at-keeping-level: a keeping level on a compiler with no discard register refuses a read no evidence claims',
+    rejects: (c) =>
+      c.target.compilerBehaviors.keepsUnusedReads === true &&
+      c.target.compilerBehaviors.discardsUnusedReadsInto === undefined,
+  },
+  {
+    id: 'compared',
+    why: 'a compare consumed the value; the lift has no op for a compare no branch reads',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: compared: a read only a dead compare consumes stays plain',
+    rejects: (c) => c.compared,
+  },
+  {
+    id: 'computed',
+    why: 'the machine computed with the value, so the compiler did not judge it unused where it emitted that op',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: computed: a read a dead add consumes stays plain',
+    rejects: (c) => c.computed,
+  },
 ];
 
 /** What a frontend knows about its lift that the IR does not carry, for `pinDeadReads`. */
 export interface DeadReadFacts {
+  /** the function's own name, for the refusal `undecided-at-keeping-level` makes */
+  readonly name?: string;
   /** the function's own declaration: a declared void return's `ret` operand is no use */
   readonly own?: FnProto;
   /** what the return pair's second register may hold at a guessed word return (`unreadPairHalf`) */
@@ -216,8 +294,52 @@ export interface DeadReadFacts {
   /** every value the machine stored to its own stack, which the lift keeps as a slot variable
    *  (ssa.ts `frameWrites`) */
   readonly spilled?: ReadonlySet<Value>;
+  /** every value a load put in the register the compiler discards an unused read into
+   *  (target.ts `discardsUnusedReadsInto`): mwcc's `lwz r0`, IDO's `lw zero` */
+  readonly discarded?: ReadonlySet<Value>;
   /** where a read's object is declared: the project's symbol map and the declaration context */
   readonly declarations?: Declarations;
+}
+
+/** The loads a frontend saw the discard register take (`discarded`) that no write outside that
+ *  register carried, which is what `DeadReadFacts.discarded` holds. `written` is every value the
+ *  frontend wrote to another register; each is walked back through the ops that computed it, and a
+ *  discarded load the walk reaches was put in a home, so it is no read the compiler discarded:
+ *  mwcc at -O0,p reads `signed char x; x = p[5]; x = 0;` as `lwz r0,20(r3)` + `extsb r31,r0`, its
+ *  `unsigned char` twin as `clrlwi r31,r0,24`, and a volatile twin of either is the same
+ *  instructions. Keyed on the write, not on the mnemonics that move or extend, so how a frontend
+ *  lowers the op does not decide it. A block parameter ends the walk. An extension the discard
+ *  register keeps (`(char)*vp;` is `extsb r0,r0`) stays discarded. */
+export function leftInDiscardRegister(
+  irBlocks: readonly Block[],
+  discarded: ReadonlySet<Value>,
+  written: readonly Value[],
+): Set<Value> {
+  if (discarded.size === 0) {
+    return new Set();
+  }
+  const defOf = new Map<Value, Op>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      op.results.forEach((r) => defOf.set(r, op));
+    }
+  }
+  const seen = new Set<Value>();
+  const homed = new Set<Value>();
+  const stack = [...written];
+  while (stack.length > 0) {
+    const v = stack.pop()!;
+    if (seen.has(v)) {
+      continue;
+    }
+    seen.add(v);
+    if (discarded.has(v)) {
+      homed.add(v);
+      continue;
+    }
+    stack.push(...(defOf.get(v)?.operands ?? []));
+  }
+  return new Set([...discarded].filter((v) => !homed.has(v)));
 }
 
 /** The declarations `declared-plain` reads. */
@@ -331,7 +453,21 @@ export function pinDeadReads(
     return declaredPlain(sym, cell?.byte ?? null, byName.get(sym), facts.declarations?.context);
   };
   const voidReturn = declaresVoidReturn(facts.own);
-  const usesOperands = (op: Op): boolean => !(voidReturn && op.opcode === 'ret');
+  // A branch whose two edges reach one block with the same arguments chooses nothing, so its
+  // condition is no use either: agbcc at -O0 keeps `if (*vp) {}` as `ldr; cmp; beq` to the next
+  // instruction, which the structurer would spell `*p == 0;` with the read plain. The edges are
+  // compared by DESTINATION (ir/core.ts `forwardingTarget`), not by identity: agbcc keeps
+  // `if (*vp) {} else {}` and `*vp ? 1 : 2;` as `beq .L4; b .L4`, whose fallthrough edge reaches
+  // the join through a bodyless forwarder. An edge carrying arguments is compared as it stands,
+  // since a forwarder past it would drop the values it supplies.
+  const destination = (e: Successor): Block => (e.args.length === 0 ? forwardingTarget(e.block) : e.block);
+  const choosesNothing = (op: Op): boolean =>
+    op.opcode === 'cond_br' &&
+    op.successors.length === 2 &&
+    destination(op.successors[0]) === destination(op.successors[1]) &&
+    op.successors[0].args.length === op.successors[1].args.length &&
+    op.successors[0].args.every((a, i) => a === op.successors[1].args[i]);
+  const usesOperands = (op: Op): boolean => !(voidReturn && op.opcode === 'ret') && !choosesNothing(op);
   const isRead = (op: Op): boolean => op.opcode === 'load' || op.opcode === 'aload';
   const decided = new Set<Op>();
   for (;;) {
@@ -371,6 +507,7 @@ export function pinDeadReads(
     const atCall = reaching(facts.atUndeclaredCall);
     const compared = reaching(facts.compared);
     const spilled = reaching(facts.spilled);
+    const discarded = reaching(facts.discarded);
     // Who consumes a value among the dead ops: an extension passes the read on, any other op the
     // machine computed with it. A read among them was decided before this one (outermost first)
     // and left plain, so the address it took was the compiler's use.
@@ -380,12 +517,23 @@ export function pinDeadReads(
         usersOf.set(o, [...(usersOf.get(o) ?? []), d]);
       }
     }
-    const computedWith = (v: Value, depth = 0): boolean =>
-      (usersOf.get(v) ?? []).some((u) =>
-        (u.opcode === 'zext' || u.opcode === 'sext') && depth < 8 ? computedWith(u.results[0], depth + 1) : true,
-      );
+    // What consumes the value through its extensions: an op that computes with it, and a read it
+    // is the address of.
+    const usesOf = (v: Value, out = { computed: false, addresses: false }, depth = 0) => {
+      for (const u of usersOf.get(v) ?? []) {
+        if ((u.opcode === 'zext' || u.opcode === 'sext') && depth < 8) {
+          usesOf(u.results[0], out, depth + 1);
+        } else if (isRead(u) && u.operands[0] === v) {
+          out.addresses = true;
+        } else {
+          out.computed = true;
+        }
+      }
+      return out;
+    };
     for (const op of ready) {
       decided.add(op);
+      const uses = usesOf(op.results[0]);
       const read: DeadRead = {
         op,
         fromFrame: fromFrame(op.operands[0]),
@@ -394,11 +542,20 @@ export function pinDeadReads(
         heldAtUndeclaredCall: atCall.has(op),
         compared: compared.has(op),
         spilled: spilled.has(op),
-        computed: computedWith(op.results[0]),
+        computed: uses.computed,
+        addressesPlainRead: uses.addresses,
         declaredPlain: plainGlobal(op),
+        discarded: discarded.has(op),
         target,
       };
-      if (firstRejection(gates, read) === null) {
+      const rejection = firstRejection(gates, read);
+      if (rejection === UNDECIDED) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${facts.name ?? '?'}': a read nothing uses at a level that keeps plain ones, which ${target.compiler} ` +
+            `loads into no register of its own — a volatile read and a register local are the same code here`,
+        );
+      }
+      if (rejection === null) {
         op.attrs = { ...op.attrs, volatile: true };
       }
     }

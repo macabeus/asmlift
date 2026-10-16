@@ -164,9 +164,13 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   (target.ts `keepsUnusedReadsAt`). Inheriting is NOT the rule for a value nothing referees. The
   dead-read pin (frontend/dead-reads.ts) reads that field in every candidate alike, with no dual
   for the differ to weigh, so a profile whose level no flag names, or a word the flag table cannot
-  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — the read
-  dropped as plain — rather than the one that publishes a `volatile` the source may not have written. Every
+  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — keeping —
+  rather than the one that publishes a `volatile` the source may not have written. Every
   family's unflagged compile was measured keeping, so the refusal is also the measured answer.
+  Judged keeping, a read is stamped only where the machine left it in the register the compiler
+  discards a volatile read into (`discardsUnusedReadsInto`: mwcc's r0, IDO's `$zero`), is
+  dropped as plain in a home there, and on a compiler that names no such register (agbcc,
+  gcc 2.7.2, KMC) refuses the lift unless a gate holds evidence the read was plain.
   A pair that comes out one way at one site and the other way at another, on the same
   compiler and the same flags, refutes the field as a declared default rather than its value:
   flipping the constant trades one site for the other, and the field has to be decided from the

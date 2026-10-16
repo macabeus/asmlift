@@ -2523,6 +2523,7 @@ function liftOnce(
   }
   refuseSretOutsideFrame(name, irBlocks);
   pinDeadReads(irBlocks, target, {
+    name,
     own: prototypes[name],
     atWordReturn: pairs.unreadHigh,
     atUndeclaredCall: fill.calls.heldAtUndeclaredCall,

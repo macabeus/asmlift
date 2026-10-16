@@ -50,8 +50,10 @@
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
 //     lowers a `bl` to one as a call through its register), `farJumpRelay` (frontend/thumb.ts,
 //     which lowers a marked `bl` to the branch it stands for), `roundTripsDoubleLiterals`
-//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
-//     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
+//     (raise/floathelpers.ts), `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
+//     raise/declared-volatile.ts through liftStamped and the offset-name pass), and
+//     `keepsUnusedReads` and `discardsUnusedReadsInto` (frontend/dead-reads.ts, the second
+//     gathered by frontend/ppc.ts and frontend/mips.ts as they lower a load). The
 //     field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
@@ -1008,11 +1010,34 @@ export interface TargetDescription {
     // never written in a description: `targetFor` sets it from the optimisation level
     // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
     // the lift finds unused is no evidence of `volatile`, and the dead-read pin
-    // (frontend/dead-reads.ts) stamps none.
+    // (frontend/dead-reads.ts) stamps only one the machine loaded into the register the compiler
+    // discards a volatile read into (`discardsUnusedReadsInto`).
     //
     // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
     // was qualified.
     keepsUnusedReads?: boolean;
+    // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
+    // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
+    // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
+    // `*p;`, `s->b;`, `gV;` and `(*p, 1)` through a volatile lvalue load into `r0` on mwcc 2.4.2,
+    // 2.4.7 and 2.3.3 at `-O0,p`, and into `$zero` on IDO 7.1 at `-O1` and `-O0`; the plain
+    // `x = p[5]; x = 0;` takes a home there instead (`lwz r31`, `lw t6` and a frame store), and so
+    // does a `register` local (`lwz r31`, `lw a2`). Over the 409 complete Mario Party 4 units built
+    // at `-O0,p`, 924 non-frame loads nothing reads land in r17-r31 and f18-f31, and exactly one in
+    // r0: WipeExecAlways's `wipe->type;`, a `volatile u8` member. So a dead load into this
+    // register is a qualified read, and the dead-read pin (frontend/dead-reads.ts) stamps it at a
+    // keeping level too. mwcc keeps one plain read in r0 as well, a read under an arithmetic or a
+    // cast nothing uses (`p[5] + 1;`, `(char)p[5];`), which no real unit holds: that is the pin's
+    // residue. A load this register took and an op then wrote to a home (`lwz r0` + `extsb r31,r0`,
+    // a plain `s8` local) is not discarded (frontend/dead-reads.ts `leftInDiscardRegister`). One
+    // register cannot name a pair: IDO discards a doubleword into zero:at, `lw zero,0(a0)` +
+    // `lw at,4(a0)`, which frontend/mips.ts `emitLoad` reads as the pair this register heads.
+    //
+    // ABSENT ⇒ the compiler has no such register, or it is unmeasured. agbcc, gcc 2.7.2 and KMC
+    // gcc 2.7.2 at `-O0` have none: a volatile `*p;` is an `ldr r0`/`lw v0` nothing stores, the
+    // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
+    // two apart there and refuses rather than drop the read.
+    discardsUnusedReadsInto?: string;
   };
 }
 
@@ -1331,6 +1356,9 @@ export const MIPS_IDO: TargetDescription = {
     // unchanged argument is staged again before each call, and a callee assigns to its stack
     // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
     localsAboveOutgoingArea: true,
+    // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
+    // and a frame store for a plain dead local, `lw a2` for a `register` one.
+    discardsUnusedReadsInto: 'zero',
   },
 };
 
@@ -1565,6 +1593,9 @@ export const PPC_MWCC: TargetDescription = {
     // first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the shared stamp records
     // no slot home on this target at all and a direction here would order nothing until it does.
     spillSlotOrder: 'unknown',
+    // MEASURED on all three builds at -O0,p: the note at the field — `lwz r0` for a volatile read,
+    // an `r31` home for a plain or `register` dead local.
+    discardsUnusedReadsInto: 'r0',
   },
 };
 
@@ -1704,17 +1735,19 @@ export interface ResolvedTarget {
  *  `lwz r31, 20(r3)` in a register nothing reads; IDO 7.1 at `-O0` and at `-O1` (its default) keeps
  *  `lw t6, 20(a0)`; agbcc and KMC gcc 2.7.2 at `-O0` keep the read and store it to the frame. None
  *  of them does at agbcc/KMC `-O1`, `-O2` or `-O3`, IDO `-O2` or `-O3`, or mwcc 2.4.2 `-O1` through
- *  `-O4,p` and `-O4,s`. An expression statement's read (`*p;`) is gone at every level on every one of
- *  them.
+ *  `-O4,p` and `-O4,s`. A plain expression statement's read (`*p;`) is gone at every level on every
+ *  one of them; a volatile one stays, at a keeping level in the register `discardsUnusedReadsInto`
+ *  names where the compiler has one.
  *
  *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS. Every family's unflagged compile was measured keeping:
  *  agbcc's and IDO's are their `-O0` and `-O1` (codegen-flags.ts `EFFECTIVE` names them, so they
  *  never reach here unnamed), KMC gcc 2.7.2 with no `-O` emits `-O0`'s object byte for byte, and
  *  mwcc 2.4.2 with no level, with `-opt off` or with `-opt level=0` keeps `x = p[5]; x = 0;`'s
  *  `lwz r31, 20(r3)` as at `-O0`. And the cost runs one way: answering "keeps" where the compiler
- *  deletes withholds a `volatile` (the read is dropped as plain), while answering "deletes" where it
- *  keeps publishes one the source never wrote — a value this stamp alone decides, with no candidate
- *  to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
+ *  deletes withholds a `volatile` outside the discard register (`discardsUnusedReadsInto`): the
+ *  read is dropped as plain on mwcc and IDO, and the lift refuses on a compiler with none. Answering
+ *  "deletes" where it keeps publishes one the source never wrote, a value this stamp alone decides,
+ *  with no candidate to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
 export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined): boolean {
   if (level === undefined) {
     return true;

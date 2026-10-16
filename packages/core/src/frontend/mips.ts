@@ -1446,6 +1446,12 @@ function liftOnce(
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
   const restores = new Map<Value, { reg: string; addr: number }>();
+  // Every load into the register the compiler discards an unused read into at a level that keeps a
+  // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`):
+  // IDO's `lw zero`, which `write` drops, so the load's value is recorded here or nowhere.
+  const discarded = new Set<Value>();
+  const discardReg = target.compilerBehaviors.discardsUnusedReadsInto;
+  const discards = (r: string) => discardReg !== undefined && (r === discardReg || (isZero(r) && isZero(discardReg)));
   // A `$`-spelt operand is an FPU register or a bare number, and the target's list names neither.
   const savedByCallee = (r: string) =>
     r === 'ra' || (!r.startsWith('$') && !target.callerSaved.includes(r) && !['zero', 'sp', 'gp'].includes(r));
@@ -1722,6 +1728,14 @@ function liftOnce(
     // Set by every case entitled to fold a relocation, cleared per instruction, and answered by
     // `relocPlaceholder`.
     let relocTaken = false;
+    // The words loads into the discard register read whose pair half has not come yet (`emitLoad`):
+    // each one's base register, or the symbol a relocation names, and its offset. IDO's -O1
+    // scheduler puts frame reloads, argument loads and stores between the halves, a store through
+    // the pair's own base among them (`s->a; s->b = x; g(x);` is `lw zero,0(t6); sw t7,8(t6);
+    // lw a0,28(sp); jal g; lw at,4(t6)`). No access makes the `at` word anything but the pair half
+    // — IDO never gives `at` a C value — so a word stays pending across every one of them. What ends
+    // one: a write to its base register, which moves the address the half would read, and a call.
+    let firstWords: { reg: string | undefined; sym: string | undefined; off: number }[] = [];
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
     // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
@@ -1740,6 +1754,12 @@ function liftOnce(
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       relocTaken = false;
+      if (ins.mnemonic.startsWith('jal')) {
+        firstWords = [];
+      } else if (ins.mnemonic !== 'lw') {
+        const w = writtenReg(ins);
+        firstWords = firstWords.filter((f) => f.reg === undefined || f.reg !== w);
+      }
       // The GOT/small-data base register `gp` is set up by IDO's PIC prologue (`lui gp; addiu gp,gp,lo;
       // addu gp,gp,t9`, an `_gp_disp` HI16/LO16 pair). It is a RELOCATION base, never program data — and
       // reading `t9` for the `addu` would fabricate a phantom leading parameter (like the sp/r1 guards).
@@ -2202,12 +2222,38 @@ function liftOnce(
       const sum = raw === undefined ? undefined : frameSums.get(raw);
       return sum === undefined ? undefined : materialize(sum, off);
     };
+    // IDO reads a `volatile` doubleword nothing uses into the register PAIR its discard register
+    // heads: `lw zero,0(a0)` then `lw at,4(a0)` (O32 pairs a register with the next one, and `at`
+    // follows `zero`), measured at -O1 and -O0 for `volatile long long` and `volatile double`
+    // through a pointer, an index and a global (`lui at` re-formed between the words), the `at`
+    // word in the `jr`'s delay slot at -O1. So a word load into `at` is discarded too where it reads
+    // the word above one the discard register took, at the same address, with no write to that
+    // address's base register and no call between (`firstWords`); anywhere else `at` is the
+    // assembler's own temporary.
+    const loaded = (d: string, res: Value, discard: boolean) => {
+      if (discard) {
+        discarded.add(res);
+      }
+      write(d, res);
+    };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
+      const sym = ins.reloc?.type === 'R_MIPS_LO16' ? ins.reloc.sym : undefined;
+      const { off: wordOff, base: wordBase } = parseMem(mem);
+      const word = { reg: sym === undefined ? wordBase : undefined, sym, off: wordOff };
+      const first =
+        d === 'at' && width === 4
+          ? firstWords.find((f) => word.reg === f.reg && word.sym === f.sym && word.off === f.off + 4)
+          : undefined;
+      const discard = discards(d) || first !== undefined;
+      firstWords = firstWords.filter((f) => f !== first && (f.reg === undefined || f.reg !== d));
+      if (discards(d) && width === 4) {
+        firstWords.push(word);
+      }
       const g = globalBase(ins, mem);
       if (g) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [g.base], results: [res], attrs: { off: g.off, width, signed } }));
-        write(d, res);
+        loaded(d, res, discard);
         return;
       }
       const { off, base } = parseMem(mem);
@@ -2216,7 +2262,7 @@ function liftOnce(
       if (at !== undefined) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [at], results: [res], attrs: { off: 0, width, signed } }));
-        write(d, res);
+        loaded(d, res, discard);
         return;
       }
       // A word reload from a stack slot is transparent to dataflow — the SAME value spilled — so
@@ -2270,7 +2316,7 @@ function liftOnce(
       }
       const res = mkValue(T.unk(32));
       ops.push(mkOp('load', { operands: [read(base)], results: [res], attrs: { off, width, signed } }));
-      write(d, res);
+      loaded(d, res, discard);
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
       const g = globalBase(ins, mem);
@@ -2581,9 +2627,11 @@ function liftOnce(
     }
   }
   pinDeadReads(irBlocks, target, {
+    name,
     own: prototypes[name],
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     spilled: ssa.frameWrites,
+    discarded,
     declarations: { symbols, context },
   });
 
