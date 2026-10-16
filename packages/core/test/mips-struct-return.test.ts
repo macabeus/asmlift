@@ -8,6 +8,7 @@
 //   struct S1w mk1(s32); struct S2 mk2(s32); struct S8 mk8(s32); struct S12 mk12(s32);
 //   struct S8 mk5(s32, s32, s32, s32); struct S8 mkil(s32, long long); struct SF mkf(float);
 //   struct S4 mk(u16, u16, u8); extern struct S4 gS4; extern struct S8 gS8;
+//   struct L { s64 v; }; struct S8 tk3(s32, struct L); struct S8 tk(struct L); extern struct L gL;
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -57,6 +58,8 @@ const PROTOS: Prototypes = {
   mkil: returning('S8', S8, ['s32', 'long long']),
   mkf: returning('SF', layout(['f', 'float']), ['float']),
   mk: returning('S4', layout(['a', 'u16'], ['b', 'u8'], ['pad', 'u8']), ['u16', 'u16', 'u8']),
+  tk3: { ...returning('S8', S8, ['s32', 'struct L']), byValueLayouts: { 1: layout(['v', 's64']) } },
+  tk: { ...returning('S8', S8, ['struct L']), byValueLayouts: { 0: layout(['v', 's64']) } },
 };
 
 const KMC_SRET1W: Fixture = {
@@ -350,6 +353,65 @@ const IDO_SRETF: Fixture = {
   ],
 };
 
+// gcc2.7.2kmc `void c9(void){ gW = tk3(1, gL).a; }`: a0 hidden, a1 = 1, gL in a2:a3 (an even word)
+const KMC_C9: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tlui\ta2,0x0',
+    '8:\tlw\ta2,0(a2)',
+    'c:\tlui\ta3,0x0',
+    '10:\tlw\ta3,4(a3)',
+    '14:\taddiu\ta0,sp,16',
+    '18:\tsw\tra,24(sp)',
+    '1c:\tjal\t0 <c9>',
+    '20:\tli\ta1,1',
+    '24:\tlw\tv0,16(sp)',
+    '28:\tlui\tat,0x0',
+    '2c:\tsw\tv0,0(at)',
+    '30:\tlw\tra,24(sp)',
+    '34:\tjr\tra',
+    '38:\taddiu\tsp,sp,32',
+  ],
+  rs: [
+    [0x4, 'R_MIPS_HI16', 'gL'],
+    [0x8, 'R_MIPS_LO16', 'gL'],
+    [0xc, 'R_MIPS_HI16', 'gL'],
+    [0x10, 'R_MIPS_LO16', 'gL'],
+    [0x1c, 'R_MIPS_26', 'tk3'],
+    [0x28, 'R_MIPS_HI16', 'gW'],
+    [0x2c, 'R_MIPS_LO16', 'gW'],
+  ],
+};
+
+// gcc2.7.2kmc `void c8(void){ gW = tk(gL).b; }`: a0 hidden, a1 skipped, gL in a2:a3
+const KMC_C8: Fixture = {
+  lines: [
+    '0:\tlui\ta2,0x0',
+    '4:\tlw\ta2,0(a2)',
+    '8:\tlui\ta3,0x0',
+    'c:\tlw\ta3,4(a3)',
+    '10:\taddiu\tsp,sp,-32',
+    '14:\tsw\tra,24(sp)',
+    '18:\tjal\t0 <c8>',
+    '1c:\taddiu\ta0,sp,16',
+    '20:\tlw\tv0,20(sp)',
+    '24:\tlui\tat,0x0',
+    '28:\tsw\tv0,0(at)',
+    '2c:\tlw\tra,24(sp)',
+    '30:\tjr\tra',
+    '34:\taddiu\tsp,sp,32',
+  ],
+  rs: [
+    [0x0, 'R_MIPS_HI16', 'gL'],
+    [0x4, 'R_MIPS_LO16', 'gL'],
+    [0x8, 'R_MIPS_HI16', 'gL'],
+    [0xc, 'R_MIPS_LO16', 'gL'],
+    [0x18, 'R_MIPS_26', 'tk'],
+    [0x24, 'R_MIPS_HI16', 'gW'],
+    [0x28, 'R_MIPS_LO16', 'gW'],
+  ],
+};
+
 // `void sret1w(s32 x){ struct S1w s = mk1(x); gW = s.x; }` and its 8- and 12-byte twins reading
 // `s.a` and `s.b` (or `s.c`); `void sret2(s32 x){ struct S2 s = mk2(x); gOut = s.h; }`;
 // `void sret5(s32 a, s32 b, s32 c, s32 d){ struct S8 s = mk5(a, b, c, d); gW = s.b; }`
@@ -412,5 +474,19 @@ describe('what the lowering does not build still declines', () => {
 
   test('a float argument', () => {
     expect(() => lift('sretf', IDO_SRETF, MIPS_IDO)).toThrow(/cannot lift 'sretf': `mkf` returns struct SF/);
+  });
+});
+
+// THE EVEN-WORD RULE COUNTS THE HIDDEN POINTER. An 8-aligned struct starts at an even argument word,
+// and a0 is word 0: tk3's struct at a2:a3 needs no skip, tk's would start at a1, which O32 skips.
+describe('a struct passed by value beside the hidden pointer', () => {
+  test('at an even word counting a0, it is passed', () => {
+    expect(lift('c9', KMC_C9, MIPS_GCC)).toMatch(/sp16 = tk3\(1, gL\);/);
+  });
+
+  test('at an odd word counting a0, it refuses as the skipped word', () => {
+    expect(() => lift('c8', KMC_C8, MIPS_GCC)).toThrow(
+      /`tk` takes 'struct L' by value as its parameter 1, and it is aligned to 8 and would start at an odd argument word/,
+    );
   });
 });
