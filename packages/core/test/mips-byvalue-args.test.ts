@@ -390,6 +390,15 @@ describe('a struct passed by value on O32', () => {
     ])('a fixed `%s` refuses the call', (fixed, why) => {
       expect(() => lift('bvwg', KMC_BVWG, MIPS_GCC, ctx(fixed))).toThrow(why);
     });
+    test('a redeclaration that differs only in a top-level qualifier refuses alike', () => {
+      const twice = prototypesFromContext(
+        'struct W { unsigned int x; }; void takeW(const long long x, ...); void takeW(long long x, ...);\n',
+        'c',
+      );
+      expect(() => lift('bvwg', KMC_BVWG, MIPS_GCC, twice)).toThrow(
+        /`takeW` takes 'long long' as its parameter 1, and its declaration is variadic/,
+      );
+    });
     test('fixed parameters that are each one word leave the call to the guess', () => {
       expect(lift('bvwg', KMC_BVWG, MIPS_GCC, ctx('u32 x'))).toContain('takeW(');
     });

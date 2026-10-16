@@ -223,6 +223,48 @@ describe('prototypes from a declaration context', () => {
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  // Compatible redeclarations are one function: read as a conflict, the name would be dropped, and
+  // with it the by-value and variadic refusals its entry carries — the call would take the arity
+  // guess (`takeW(*(s32 *)&gW)`, `takeL(*p0, p0[1])`), and a void callee's v0 would read as its return.
+  test('two declarations of one function that differ only in top-level parameter qualifiers keep the entry', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; struct W { u32 x; }; typedef const int CI;
+       void takeW(const struct W w); void takeW(struct W w);
+       void takeL(const long long x, ...); void takeL(long long x, ...);
+       int logv(const int k, ...); int logv(int k, ...);
+       int g(int *const p); int g(int *p);
+       int f(CI x); int f(int x);
+       int h(const char *s); int h(char *s);
+       int n(int x); int n(long long x);`,
+      'c',
+    );
+    expect(p.takeW).toMatchObject({ returnsVoid: true, params: ['struct W'], byValueParams: [0] });
+    expect(p.takeL).toEqual({ returnsVoid: true, variadicParams: ['long long'] });
+    expect(p.logv).toEqual({ returns: 'int', variadicParams: ['int'] });
+    expect(p.g).toEqual({ returns: 'int', params: ['int *'] });
+    expect(p.f).toEqual({ returns: 'int', params: ['int'] });
+    // a qualifier on what a pointer points at is the parameter's type, and a different type conflicts
+    expect(p.h).toBeUndefined();
+    expect(p.n).toBeUndefined();
+  });
+
+  test('in C, a declaration whose parameters are not read is one with the declaration that states them', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; struct W { u32 x; };
+       void takeW(); void takeW(struct W w);
+       int logv(const char *fmt, ...); int logv(const char *restrict fmt, ...);
+       int r(); long long r(int);`,
+      'c',
+    );
+    expect(p.takeW).toMatchObject({ returnsVoid: true, params: ['struct W'], byValueParams: [0] });
+    expect(p.logv).toEqual({ returns: 'int', variadicParams: ['const char *'] });
+    // the returns disagree: a conflict
+    expect(p.r).toBeUndefined();
+    // in C++, `()` states no parameters, and two lists that differ are overloads
+    const cpp = prototypesFromContext('struct W { int x; }; void takeW(); void takeW(struct W w);', 'c++');
+    expect(cpp.takeW).toBeUndefined();
+  });
+
   test('a parameter nothing sizes is listed where it still travels in one register', () => {
     // an enum, and an array or a function behind a typedef name, which the parameter adjusts to a
     // pointer; a struct or union is passed by value, and a name never seen states nothing

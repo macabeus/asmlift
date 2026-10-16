@@ -961,17 +961,40 @@ function memberShape(
   return { name: d.name, pointer: stars.length > 0, ...(dims.length > 0 ? { dims } : {}), returns: [] };
 }
 
+/** A declaration's reading: the entry as written, and the `key` two declarations are compared by. */
+type Read = { proto: FnProto; key: FnProto };
+
 /** Every function the declarations name by a plain identifier, keyed by it. A declaration that
  *  spells no type is a constructor's, a destructor's or a conversion operator's; one that defines a
  *  body, or spells a `class`, declares no C function. */
 function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: LayoutOf): Prototypes {
-  const found = new Map<string, FnProto | null>();
+  const found = new Map<string, Read | null>();
   const written = typedefTypes(ctx);
   // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
   // the mode names in place of the one spelled (c-common.c:563): compiled, `int x
   // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
   // declaration of it; its return is.
   const unreadParams = new Set<string>();
+  // Two declarations of one function name one type, and the entry is that type's: the same reading
+  // twice, or — in C — a declaration whose parameters are not read (`()`, which states none, or a
+  // list this cannot read, `const char *restrict fmt`) beside one whose are, where the return reads
+  // alike. The C compiler takes the composite of the two (C99 6.2.7p3), which is the one that states
+  // the parameters, so the entry is that one: dropping the name would drop the refusals its
+  // parameters carry with it, and send the call to the arity guess. Anything else is a conflict
+  // (C++ overloads, or a header this misreads), and the name is dropped.
+  const unstated = (p: FnProto) => p.params === undefined && p.variadicParams === undefined;
+  const composite = (a: Read, b: Read): Read | null => {
+    if (same(a.key, b.key)) {
+      return b;
+    }
+    if (ctx.language !== 'c') {
+      return null;
+    }
+    if (unstated(a.key) && same(a.key, returnOnly(b.key))) {
+      return b;
+    }
+    return unstated(b.key) && same(b.key, returnOnly(a.key)) ? a : null;
+  };
   const returnOnly = ({
     params: _unread,
     wordParams: _words,
@@ -1003,22 +1026,34 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
       if (retyped) {
         unreadParams.add(x.name);
       }
-      const read = readSignature(
-        declaredType(s, returns),
-        fn,
-        ctx,
-        table.typedefs,
-        (t) => layoutOf(t, 0),
-        (t) => passingOf(t, table, written),
-      );
-      const proto = unreadParams.has(x.name) ? returnOnly(read) : read;
+      const reading = (qualifiers: 'kept' | 'dropped') =>
+        readSignature(
+          declaredType(s, returns),
+          fn,
+          ctx,
+          table.typedefs,
+          (t) => layoutOf(t, 0),
+          (t) => passingOf(t, table, written),
+          qualifiers,
+        );
+      const read = reading('kept');
+      // what the declaration says of the function's TYPE, which is what two declarations of it are
+      // compared by: a parameter's top-level qualifiers are not part of it (C99 6.7.5.3p15), so
+      // `void takeW(const struct W w);` and `void takeW(struct W w);` declare one function. Read
+      // as a conflict, they would drop the name, and with it every refusal its entry carries
+      // (`byValueRefusal`, `variadicRefusal`): the call would take the arity guess they exist to
+      // refuse. The entry kept is the later declaration's, spelled as written.
+      const typed = reading('dropped');
+      const [proto, key] = unreadParams.has(x.name) ? [returnOnly(read), returnOnly(typed)] : [read, typed];
       const prior = found.get(x.name);
-      const had = prior && unreadParams.has(x.name) ? returnOnly(prior) : prior;
-      found.set(x.name, had === undefined || same(had, proto) ? proto : null);
+      const had =
+        prior && unreadParams.has(x.name) ? { proto: returnOnly(prior.proto), key: returnOnly(prior.key) } : prior;
+      found.set(x.name, had === undefined ? { proto, key } : had === null ? null : composite(had, { proto, key }));
     }
   }
   const out: Prototypes = {};
-  for (const [name, p] of found) {
+  for (const [name, read] of found) {
+    const p = read?.proto ?? null;
     const valid = p === null ? undefined : admissible(name, p);
     if (valid !== undefined) {
       out[name] = valid;
@@ -1046,6 +1081,7 @@ function readSignature(
   typedefs: ReadonlyMap<string, DeclaredType>,
   layoutOf: (t: DeclaredType) => AggregateLayout | undefined,
   passing: (t: DeclaredType) => Passing,
+  qualifiers: 'kept' | 'dropped' = 'kept',
 ): FnProto {
   const proto: FnProto = {};
   const resolved = resolve(ret, typedefs, tokens);
@@ -1103,7 +1139,10 @@ function readSignature(
   // arity is the call's, so they are no `params`, and no layout is read for a struct among them,
   // whose call refuses (`variadicRefusal`).
   const types = params.map((p) => asParameter(declaredType(p.specifiers, p.declarator.derivations)));
-  const spelled = types.map((t) => spellType(resolve(t, typedefs, tokens), tokens));
+  const spelled = types.map((t) => {
+    const r = resolve(t, typedefs, tokens);
+    return spellType(qualifiers === 'kept' ? r : withoutTopQualifiers(r), tokens);
+  });
   if (fn.variadic) {
     proto.variadicParams = spelled;
   } else {
@@ -1132,6 +1171,16 @@ function readSignature(
     }
   }
   return proto;
+}
+
+/** `t` less its top-level qualifiers: the derivation nearest the name's (`char *const`), or the
+ *  base's where there is none (`const struct W`). A pointer's target keeps its own (`const char *`). */
+function withoutTopQualifiers(t: DeclaredType): DeclaredType {
+  const [first, ...rest] = t.derivations;
+  if (first === undefined) {
+    return { ...t, qualifiers: [] };
+  }
+  return first.kind === 'pointer' ? { ...t, derivations: [{ ...first, qualifiers: [] }, ...rest] } : t;
 }
 
 /** How a parameter of type `t` is passed, read through the typedef names it is built on: in ONE
