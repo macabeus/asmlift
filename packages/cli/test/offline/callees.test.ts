@@ -88,6 +88,21 @@ describe('guessedArityCallees', () => {
     expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC)).toEqual(['DecompressAlloc', 'thunk_HeapFree']);
   });
 
+  // The lowering reads a callee its project does not declare at the compiler's runtime table, then
+  // at the C standard's signatures (`calleeDeclaration`), so neither is a guess; a project entry
+  // stating no parameter list leaves it there, and one that states one is read instead.
+  it('does not count a runtime helper or a C-standard function, whose signature the lowering reads', () => {
+    const asm = 'f:\n\tbl\t__addsf3\n\tbl\t__divsi3\n\tbl\tmemcpy\n\tbl\tlogv\n';
+    expect(guessedArityCallees(asm, 'f', ARMV4T_AGBCC)).toEqual(['logv']);
+    expect(guessedArityCallees(asm, 'f', ARMV4T_AGBCC, { __divsi3: { returnsVoid: true } })).toEqual(['logv']);
+    expect(guessedArityCallees(asm, 'f', ARMV4T_AGBCC, { __divsi3: { params: ['Unsized', 'Unsized'] } })).toEqual([
+      '__divsi3',
+      'logv',
+    ]);
+    // PowerPC's table names none of agbcc's helpers
+    expect(guessedArityCallees(asm, 'f', PPC_MWCC)).toEqual(['__addsf3', '__divsi3', 'logv']);
+  });
+
   it('counts a --proto entry, in both the count and the typed-list form', () => {
     expect(
       guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, {

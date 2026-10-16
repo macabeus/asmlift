@@ -40,7 +40,10 @@ const SPILL = `f:
 \tbx\tr1
 `;
 
-const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC);
+// `g` takes the one argument a guess would count, declared: undeclared, `SPILL`'s r2 and r3 hold
+// values past an r1 nothing set, a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`).
+const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } });
+const liftUndeclared = (asm: string) => decompile('f', asm, ARMV4T_AGBCC);
 
 // THE PER-OBJECT REFUSALS STAND WHERE THE ONE-OBJECT ANSWER CANNOT HOLD A WRITER. A callee handed a
 // captured address that may write through it is a writer that answer holds, and so is a store of
@@ -71,10 +74,16 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     // `u16` and not `s16`: `ldrh` zero-extends, so that IS the type the machine used. No
     // `volatile` — the address never leaves the function, so nothing outside can observe a store
     // and the object must not pay volatile's codegen.
-    // The `ldr r3, [r0, #0x4]` nothing uses is still in r3 at `bl g`, whose arity is guessed, so it
-    // may be an argument the guess left out and is no evidence of `volatile`
-    // (frontend/dead-reads.ts `held-at-undeclared-call`); it is no access of the frame object.
-    expect(lift(SPILL).source).toBe('s32 f(u16 *a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n');
+    // The `ldr r3, [r0, #0x4]` nothing uses is no access of the frame object: `g` is declared to
+    // take r0 alone, so it is a read nothing uses, kept (frontend/dead-reads.ts).
+    expect(lift(SPILL).source).toBe(
+      'struct Struct0 { u16 field_0; s32 field_4; };\ns32 f(struct Struct0 *a0) {\n    u16 sp4;\n' +
+        '    sp4 = a0->field_0;\n    ((volatile struct Struct0 *)a0)->field_4;\n    g(a0);\n    return sp4;\n}\n',
+    );
+    // …and undeclared, the same load left in r3 past an r1 nothing set is a gap the guess refuses
+    expect(() => liftUndeclared(SPILL)).toThrow(
+      /the call 'bl g' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
+    );
   });
 
   test('accesses in different blocks name ONE object', () => {
@@ -128,13 +137,13 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
       `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n${move}\tstrh\tr0, [r2]\n\tbl\tg\n` +
       `\tmov\tr2, sp\n${move}\tldrh\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
     // `g` is declared: the capture is still in r2 at the `bl`, past a guessed arity that stops at
-    // r1, and an undeclared `g` might be handed it (`lowerCall`'s `leftOut` refuses that).
+    // r1, and an undeclared `g` might be handed it (a gap the guess refuses, `fallbackArgc`).
     const G1 = { prototypes: { g: { params: 1 } } };
     const want = 's32 f(s32 a0) {\n    u16 sp4;\n    sp4 = a0;\n    g(a0);\n    return sp4;\n}\n';
     expect(decompile('f', moved('\tadd\tr2, r2, #0x4\n'), ARMV4T_AGBCC, G1).source).toBe(want);
     expect(decompile('f', moved('\tadd\tr2, #0x4\n'), ARMV4T_AGBCC, G1).source).toBe(want);
-    expect(() => lift(moved('\tadd\tr2, #0x4\n'))).toThrow(
-      /'bl g' has no prototype, and the arity lifted without one leaves out r2, which may hold a frame address/,
+    expect(() => liftUndeclared(moved('\tadd\tr2, #0x4\n'))).toThrow(
+      /the call 'bl g' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
     );
     // a move DOWN is not one: nothing spells a negative frame offset, and `sub` stays arithmetic
     expect(() => lift(moved('\tsub\tr2, #0x4\n'))).toThrow(/the captured address flows into `sub`/);
@@ -226,10 +235,12 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
   test('a capture that ESCAPES keeps the frame base', () => {
     expect(() => lift(SPILL)).not.toThrow();
     // `g` declared to take `a0` alone, so the capture still in r3 at the call is not handed to it
-    // and the escape is the store's (undeclared, `lowerCall`'s `leftOut` refuses first)
+    // and the escape is the store's (undeclared, the gap past r1 refuses first, `fallbackArgc`)
     const escaped = edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n');
-    expect(() => decompile('f', escaped, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } })).toThrow(CAPTURE);
-    expect(() => lift(escaped)).toThrow(/'bl g' has no prototype, and the arity lifted without one leaves out r3/);
+    expect(() => lift(escaped)).toThrow(CAPTURE);
+    expect(() => liftUndeclared(escaped)).toThrow(
+      /the call 'bl g' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
+    );
   });
 
   test('a REGISTER-offset access through a capture keeps the frame base', () => {
@@ -239,7 +250,7 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     const indexedStore = edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr2, [r3, r1]\n');
     expect(() => lift(alsoPublished(indexedStore))).toThrow(CAPTURE);
     // …and where nothing escapes, the frame is one object the store indexes at a byte offset
-    expect(lift(indexedStore).source).toContain('*(u16 *)((u32)sp0 + a1) = v0;');
+    expect(lift(indexedStore).source).toContain('*(u16 *)((u32)sp0 + a1) = a0->field_0;');
   });
 
   test('a capture that reaches a block PARAMETER keeps the frame base', () => {
@@ -975,7 +986,7 @@ describe('a frame nothing escapes from is one object where the slot model and an
     const afterCall =
       'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tg\n\tmov\tr0, sp\n' +
       '\tstrb\tr4, [r0]\n\tstrb\tr5, [r0, #0x1]\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(lift(afterCall).source).toContain('    g(a0, a1);\n    sp0 = a0;\n    return sp0;\n');
+    expect(liftUndeclared(afterCall).source).toContain('    g(a0, a1);\n    sp0 = a0;\n    return sp0;\n');
     // `int g(); int f(int n, int x){ u8 b[4]; int i, r = 0;
     //   for (i = 0; i < n; i++) { if (g()) { b[1] = x + i; if (x > i) r += b[1]; } } return r; }` —
     // the store reaches the next trip's call unread, but the first trip calls `g` before any store:

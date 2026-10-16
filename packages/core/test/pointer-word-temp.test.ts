@@ -97,13 +97,17 @@ describe('a temp that keeps its integer', () => {
   });
 
   test('when no sum reads it', () => {
-    // read only as a call argument: the byte pointer buys no sum its association
-    const src = run(
-      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tSideEffect\n' +
+    // read only as a call argument: the byte pointer buys no sum its association. `Prep` is
+    // declared: undeclared, the pool address left in r1 past an r0 nothing set is a gap the guessed
+    // arity refuses (frontend/ssa.ts `fallbackArgc`).
+    const src = decompile(
+      'f',
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tPrep\n' +
         '\tmov\tr0, r4\n\tbl\tSideEffect\n\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
         '.L2:\n\t.word\tgP\n',
-      mapWith('pointer'),
-    );
+      ARMV4T_AGBCC,
+      { symbols: mapWith('pointer'), prototypes: { Prep: { params: 0 } } },
+    ).source;
     expect(src).toMatch(/v\d+ = \(s32\)gP;/);
     expect(src).not.toContain('u8 *v');
   });

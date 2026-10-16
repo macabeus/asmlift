@@ -108,10 +108,14 @@ describe('a declared double argument', () => {
 
   // A target that states no general words for a double lays out no declared double, and the call
   // is lifted as a callee nobody declared is.
-  test('on a target that states no double words the declaration abstains', () => {
+  // A floating spelling is known, so its missing layout is not the unsized abstention: the guess
+  // that would stand in drops an argument passed through unchanged (call-plan `refuseUnplacedFloat`)
+  test('on a target that states no double words the declaration refuses', () => {
     const { doubleArgWords, ...none } = ARMV4T_AGBCC;
     expect(doubleArgWords).toBe('high-first');
-    expect(lift('dreg', G, none)).toBe(lift('dreg'));
+    expect(() => lift('dreg', G, none)).toThrow(
+      /`g` is declared to take 'double' as its parameter 1, which this target/,
+    );
   });
 
   // The words' order is the ABI's; that the printed literal reads back as the same double is the

@@ -34,7 +34,19 @@ import { isArgumentPair } from './pairparams';
  *     target's word order into an `fconst` (`a + 1.5` stages `0x3ff80000` in r2, its high word);
  *   - an argument the function also reads on its own, as a word or as one half of a pair;
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
- *     any other call, or carried across an edge.
+ *     any other call, or carried across an edge;
+ *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
+ *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
+ *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the result's one reader was a later call
+ *     that took it in r0, and a guessed arity does not count a register a call wrote (frontend/ssa.ts
+ *     `fallbackArgc`, `trimClobberedCallArgs`): `g1(a * b)` with `g1` undeclared reads as
+ *     `__mulsf3(); return g1();`, and folded would print `return g1();`. A double's pair refuses
+ *     that shape at the frontend, naming the half the next call reads; a single is one word, so it
+ *     reaches here. At -O0 the rule is not asked: agbcc stores the result to the frame, which reads
+ *     it, and nothing folds there, its arguments being read from frame homes. A frontend that reads
+ *     those homes must re-measure this. A result some other op ALSO reads is not refused:
+ *     `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and
+ *     a declaration of `g` closes the trim's `g()` reading (`trimClobberedCallArgs`).
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
  *  set of floats and verify's float rule holds by construction. */
 export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolean {
@@ -140,13 +152,14 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const source = (v: Value, calls: ReadonlySet<Op>) => argument(v, calls) || fromCall(v, calls) || literal(v, calls);
   for (;;) {
     const calls = new Set(sites);
-    const kept = sites.filter(
-      (op) =>
+    const kept = sites.filter((op) => {
+      const read = (users.get(op.results[0]) ?? []).filter((u) => !deadHalf(u));
+      return (
         op.operands.every((o) => source(o, calls)) &&
-        (users.get(op.results[0]) ?? []).every(
-          (u) => deadHalf(u) || floatUse(u, op.results[0], calls) || u?.opcode === 'ret',
-        ),
-    );
+        read.length > 0 &&
+        read.every((u) => floatUse(u, op.results[0], calls) || u?.opcode === 'ret')
+      );
+    });
     if (kept.length === sites.length) {
       break;
     }

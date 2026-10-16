@@ -12,11 +12,15 @@ import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-clobbered-read.s'), 'utf8');
-const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC);
+const lift = (name: string, prototypes = {}) => decompile(name, asm, ARMV4T_AGBCC, { prototypes });
+// The callee is declared where the value it destroys sits in r3 past an r0 nothing set: undeclared,
+// that is a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`) before the read is asked.
+const CALLEE = { callee: { params: 0 } };
+const PRESERVING = { preserves_r3: { params: 0 } };
 
 describe('a value the callee destroyed', () => {
   test('a read of it refuses, naming the register', () => {
-    expect(() => lift('clobbered_read')).toThrow(/r3 is read on a path where a call has destroyed it/);
+    expect(() => lift('clobbered_read', CALLEE)).toThrow(/r3 is read on a path where a call has destroyed it/);
   });
 
   test('it does NOT lift to the pre-call value', () => {
@@ -36,7 +40,9 @@ describe('a value the callee destroyed', () => {
   });
 
   test('a callee that really does preserve the register still declines — the STRICT side', () => {
-    expect(() => lift('preserving_callee_read')).toThrow(/r3 is read on a path where a call has destroyed it/);
+    expect(() => lift('preserving_callee_read', PRESERVING)).toThrow(
+      /r3 is read on a path where a call has destroyed it/,
+    );
   });
 });
 

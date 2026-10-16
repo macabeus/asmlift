@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 240 distinct decline messages (the texts reached by
+// `packages/core/src` throws 243 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -574,9 +574,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
       /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half|the address is never completed/,
   },
   {
+    // The arity of a call is guessed from the argument registers a value reaches, and the guess
+    // cannot be trusted: a gap in them (`frontend/ssa.ts` `fallbackArgc`) — past every register
+    // for an undeclared callee, past the fixed words of a variadic one — or a declaration that
+    // states parameters no layout places — a float on a target with no FPU, or a count the guess
+    // falls short of (`frontend/call-plan.ts` `refuseUnplacedFloat`, `refuseShortOfDeclared`),
+    // both spelt "the arity guess in its place". Two of the three have a declaration, so the label
+    // names the guess, not a missing prototype.
     key: 'no-prototype-args',
-    label: 'Call argument registers with no prototype',
-    pattern: /has no prototype/,
+    label: 'Call arity guessed from the argument registers',
+    pattern: /has no prototype|a prototype stating only its first|the arity guess in its place/,
   },
   {
     // A CALL DECLARED TO RETURN A STRUCT OR UNION BY VALUE that the call plan cannot lower: whether

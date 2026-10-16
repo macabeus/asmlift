@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { type CallLowering, type CallPairs, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { type SsaBuilder, makeSsaBuilder } from '../src/frontend/ssa';
+import { type SsaBuilder, fallbackArgc, makeSsaBuilder } from '../src/frontend/ssa';
 import { type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
@@ -254,6 +254,7 @@ describe('callDeclarations.lower', () => {
       callee,
       ssa,
       bi: 0,
+      guess: { at: 0 },
       read: (r: string) => ssa.readVar(r, 0),
       write: (r: string, v: Value) => ssa.writeVar(r, 0, v),
       stackWord: (k: number) => ssa.readVar(`stack${k}`, 0),
@@ -317,6 +318,16 @@ describe('callDeclarations.lower', () => {
     callDeclarations('f', MIPS_IDO, {}, O32, fail).lower({ ...s, guess, callee: { address, reg: 'a0' } });
     const [call] = s.ssa.irBlocks[0].ops;
     expect([guessed, call.operands.includes(three)]).toEqual([2, true]);
+  });
+
+  // THE REFUSAL HAS NO OPT-OUT: every call site states where it is (`CallSite`'s `guess.at`), so a count
+  // never stops at a gap silently, and a lowering that guesses refuses it on every ISA
+  test('refuses a gap at every call a lowering guesses for', () => {
+    const s = site('g');
+    s.ssa.writeVar('r1', 0, mkValue(T.unk(32)));
+    expect(() => thumbCalls({}).lower({ ...s, guess: { at: "'bl g' in block 'f'" }, pairs: pairsIn(s.ssa) })).toThrow(
+      /'f': the call 'bl g' in block 'f' has no prototype, r1 holds a value and r0 holds none/,
+    );
   });
 
   test('refuses a site that places stack words for a lowering that reads none', () => {
@@ -443,6 +454,53 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
   });
 
   test('plans one where the target passes floats in general registers', () => {
-    expect(thumbCalls({ g: { params: ['float'], returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+    expect(thumbCalls({ g: { params: 1, returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+  });
+
+  // …but a `float` parameter there is a spelling with no layout (`proto.ts` `declaredCallArgs`), and
+  // the arity guess that would stand in for it drops a trailing argument passed through unchanged
+  test('refuses a float parameter where the target lays out no float argument word', () => {
+    expect(() => thumbCalls({ g: { params: ['s32', 'float'], returns: 'float' } }).plan('g')).toThrow(
+      /^cannot lift 'f': `g` is declared to take 'float' as its parameter 2, which this target passes in general argument words that are not laid out here/,
+    );
+  });
+});
+
+describe('fallbackArgc', () => {
+  // r0 and r2 hold a value, r1 none: a gap the count cannot decide
+  const gapped = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r2' };
+  const regs = ['r0', 'r1', 'r2', 'r3'];
+
+  test('names the call by its address in the gap refusal', () => {
+    expect(() => fallbackArgc(gapped, regs, 0, { gap: { name: 'f', at: 0x3c, fail } })).toThrow(
+      /'f': the call at 0x3c has no prototype, r2 holds a value and r1 holds none/,
+    );
+  });
+
+  // an ISA whose instructions carry no address (Thumb's `.s` text) names the call another way
+  test('names the call by a phrase where the lowering has no address for it', () => {
+    expect(() => fallbackArgc(gapped, regs, 0, { gap: { name: 'f', at: "'bl g' in block 'f'", fail } })).toThrow(
+      /'f': the call 'bl g' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
+    );
+  });
+
+  // past a declaration's stated words, a register holding only this function's own incoming value
+  // (which a read leaves behind as a definition) is as undecidable as a gap
+  test('refuses an entry value past the floor, and counts it with no floor', () => {
+    const entry = mkValue(T.unk(32));
+    const read = {
+      hasReachingDef: (reg: string, _b: number, accept: (v: Value) => boolean = () => true) =>
+        (reg === 'r0' || reg === 'r1') && accept(entry),
+    };
+    const isEntry = (reg: string) => reg === 'r1';
+    expect(() => fallbackArgc(read, regs, 0, { gap: { name: 'f', at: 0x10, fail }, floor: 1, entry: isEntry })).toThrow(
+      /'f': the call at 0x10 has a prototype stating only its first 1 argument, and r1 past them still holds this function's own incoming value/,
+    );
+    expect(fallbackArgc(read, regs, 0, { gap: { name: 'f', at: 0x10, fail }, entry: isEntry })).toBe(2);
+  });
+
+  test('does not refuse a contiguous count', () => {
+    const contiguous = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r1' };
+    expect(fallbackArgc(contiguous, regs, 0, { gap: { name: 'f', at: 0, fail } })).toBe(2);
   });
 });

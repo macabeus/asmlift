@@ -199,6 +199,127 @@ describe('a guessed arity that cannot be decided refuses', () => {
       '1c:\taddiu\tsp,sp,24',
     ];
     expect(lift(body, [[0xc, 'R_MIPS_26', 'g']])).toThrow(/a2 holds a value and a1 holds none/);
+    // `int g(int, int, ...)` states its first two argument words, so a1 is this function's own
+    // argument passed on, and only a2, past them, is guessed (frontend/call-plan.ts `variadicFloor`)
+    const variadic = { g: { returns: 's32', variadicParams: ['s32', 's32'] } };
+    expect(src(body, [[0xc, 'R_MIPS_26', 'g']], variadic)).toContain('g(1, a1, 3)');
+  });
+
+  // past a variadic declaration's stated words, a register holding only this function's own
+  // incoming value refuses (frontend/ssa.ts `fallbackArgc`), and one a call destroyed holds none.
+  // IDO 7.1's own output for `int dprint(const char *, ...);` and each source below.
+  test('an incoming value past a variadic floor refuses, and one a call destroyed is no argument', () => {
+    const dprint = { dprint: { returns: 's32', variadicParams: ['const char *'] }, g: { params: [], returns: 's32' } };
+    const withG = { ...dprint, g: { params: ['s32'], returns: 's32' } };
+    // `int pr1(const char *s, int x){ if (x) return dprint(s) + 1; return 0; }`: a1 is read only
+    const pr1 = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tbeqz\ta1,1c <f+0x1c>',
+      '8:\tsw\tra,20(sp)',
+      'c:\tjal\t0 <f>',
+      '10:\tnop',
+      '14:\tb\t20 <f+0x20>',
+      '18:\taddiu\tv0,v0,1',
+      '1c:\tmove\tv0,zero',
+      '20:\tlw\tra,20(sp)',
+      '24:\taddiu\tsp,sp,24',
+      '28:\tjr\tra',
+      '2c:\tnop',
+    ];
+    expect(lift(pr1, [[0xc, 'R_MIPS_26', 'dprint']], dprint, MIPS_IDO)).toThrow(
+      /the call at 0xc has a prototype stating only its first 1 argument, and a1 past them still holds this function's own incoming value/,
+    );
+    // `int rl3(const char *s, int x){ g(x); return dprint(s); }`: `g` destroyed a1
+    const rl3 = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,20(sp)',
+      '8:\tsw\ta0,24(sp)',
+      'c:\tjal\t0 <f>',
+      '10:\tmove\ta0,a1',
+      '14:\tjal\t0 <f>',
+      '18:\tlw\ta0,24(sp)',
+      '1c:\tlw\tra,20(sp)',
+      '20:\taddiu\tsp,sp,24',
+      '24:\tjr\tra',
+      '28:\tnop',
+    ];
+    const out3 = src(
+      rl3,
+      [
+        [0xc, 'R_MIPS_26', 'g'],
+        [0x14, 'R_MIPS_26', 'dprint'],
+      ],
+      withG,
+      MIPS_IDO,
+    );
+    expect(out3).toContain('g(a1);');
+    expect(out3).toContain('return dprint(a0);');
+    // `int rl1(const char *s, int x){ g(); if (x) return dprint(s) + 1; return 0; }`: home-stored,
+    // read back, and destroyed by `g`
+    const rl1 = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,20(sp)',
+      '8:\tsw\ta0,24(sp)',
+      'c:\tjal\t0 <f>',
+      '10:\tsw\ta1,28(sp)',
+      '14:\tlw\tt6,28(sp)',
+      '18:\tmove\tv0,zero',
+      '1c:\tbeqz\tt6,34 <f+0x34>',
+      '20:\tnop',
+      '24:\tjal\t0 <f>',
+      '28:\tlw\ta0,24(sp)',
+      '2c:\tb\t34 <f+0x34>',
+      '30:\taddiu\tv0,v0,1',
+      '34:\tlw\tra,20(sp)',
+      '38:\taddiu\tsp,sp,24',
+      '3c:\tjr\tra',
+      '40:\tnop',
+    ];
+    expect(
+      src(
+        rl1,
+        [
+          [0xc, 'R_MIPS_26', 'g'],
+          [0x24, 'R_MIPS_26', 'dprint'],
+        ],
+        dprint,
+        MIPS_IDO,
+      ),
+    ).toContain('dprint(a0) + 1');
+    // `int rl2(const char *s, int x, int y){ int r = g(y); if (x) return dprint(s) + r; return 0; }`
+    const rl2 = [
+      '0:\taddiu\tsp,sp,-32',
+      '4:\tsw\tra,20(sp)',
+      '8:\tsw\ta0,32(sp)',
+      'c:\tmove\ta0,a2',
+      '10:\tjal\t0 <f>',
+      '14:\tsw\ta1,36(sp)',
+      '18:\tlw\tt6,36(sp)',
+      '1c:\tlw\ta0,32(sp)',
+      '20:\tbeqzl\tt6,40 <f+0x40>',
+      '24:\tmove\tv0,zero',
+      '28:\tjal\t0 <f>',
+      '2c:\tsw\tv0,28(sp)',
+      '30:\tlw\tv1,28(sp)',
+      '34:\tb\t40 <f+0x40>',
+      '38:\taddu\tv0,v0,v1',
+      '3c:\tmove\tv0,zero',
+      '40:\tlw\tra,20(sp)',
+      '44:\taddiu\tsp,sp,32',
+      '48:\tjr\tra',
+      '4c:\tnop',
+    ];
+    const out2 = src(
+      rl2,
+      [
+        [0x10, 'R_MIPS_26', 'g'],
+        [0x28, 'R_MIPS_26', 'dprint'],
+      ],
+      withG,
+      MIPS_IDO,
+    );
+    expect(out2).toContain('g(a2)');
+    expect(out2).toMatch(/dprint\(a0\) \+ v\d/);
   });
 
   test('a pending %hi half is no argument', () => {

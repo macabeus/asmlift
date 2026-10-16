@@ -59,9 +59,11 @@ export interface FnProto {
   /** The FIXED parameters of a VARIADIC declaration, spelled as a typed `params` list spells them.
    *  Such a declaration states no `params`, because its arity is the call's and a list would read
    *  as the whole of it; `wordParams` and `byValueParams` index into this list instead. A context
-   *  states it (`prototypesFromContext`). Read only to refuse a call (`variadicRefusal`): the call
-   *  is placed by the arity guess, which reads argument words one by one, so a fixed parameter that
-   *  is not one word is split or dropped: `void takeV(struct W, ...)` would lift
+   *  states it (`prototypesFromContext`). Read for two things, and never as a layout of its own.
+   *  Where each fixed parameter is one word, they are the call's first argument words, and only
+   *  what the `...` takes is guessed (frontend/call-plan.ts `variadicFloor`). Where one is not, the
+   *  call refuses (`variadicRefusal`): the arity guess reads argument words one by one, so a fixed
+   *  parameter that is not one word is split or dropped: `void takeV(struct W, ...)` would lift
    *  `takeV(*(s32 *)&gW, 5)`, which compiles against the header. */
   variadicParams?: ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
@@ -176,6 +178,19 @@ export function declaresParams(p: FnProto | undefined): boolean {
   return typeof p?.params === 'number' || Array.isArray(p?.params);
 }
 
+/** The declaration a call to `callee` is read at — THE TIER ORDER, written once: the project's own
+ *  entry where it states a parameter list (`declaresParams`), then the compiler's runtime table
+ *  (`helpers`: `runtime-helpers.ts` `helperPrototypes` of the target), then the signatures the C
+ *  standard fixes. `frontend/call-plan.ts` lowers every call at it, and the CLI asks it which
+ *  callees a run guessed, so a callee the lowering reads a signature for is never reported as
+ *  guessed, and one it guesses for always is. `Object.hasOwn` on all three tables: a callee named
+ *  `toString` would otherwise read a `Function` off `Object.prototype` as its entry. */
+export function calleeDeclaration(callee: string, prototypes: Prototypes, helpers: Prototypes): FnProto | undefined {
+  const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+  const own = known(prototypes);
+  return declaresParams(own) ? own : (known(helpers) ?? known(STANDARD_SIGNATURES));
+}
+
 /** What a declaration says about the argument registers a call occupies — the width each declared
  *  parameter travels in, in argument order — or `undefined` when it says nothing this can act on.
  *
@@ -194,7 +209,9 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  own contiguous-arg-register scan — exactly what it does for a callee the project never declared
  *  — and that scan names itself a guess: `SsaBuilder.readGuessedArg` ASKS whether a register was
  *  set up, and `finish()` retracts the ones an intervening call destroyed. Refusing instead would
- *  be a function that lifts when told nothing and declines when told more. Returning
+ *  be a function that lifts when told nothing and declines when told more. The list's LENGTH is
+ *  still read: every parameter is at least one word, so a guess that counts fewer registers has
+ *  dropped one, and that refuses (frontend/call-plan.ts `refuseShortOfDeclared`). Returning
  *  one-register-each instead would be a layout nothing could know to be right, and the frontend
  *  would then ASSERT those registers rather than ask for them.
  *
@@ -223,7 +240,9 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  target that states no such words the list abstains. A `float` states no layout on either: it
  *  is one word on a soft-float target, but that word is a float only to a callee whose declaration
  *  the candidate prints, and `spellableProto` prints no `float` — an undeclared callee is handed a
- *  `float` promoted to a `double`, which is two words. */
+ *  `float` promoted to a `double`, which is two words. A known spelling with no layout is not the
+ *  unsized abstention, so on a target with no FPU a call to such a declaration refuses rather than
+ *  guess (frontend/call-plan.ts `refuseUnplacedFloat`). */
 export function declaredCallArgs(
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'doubleArgWords'>,

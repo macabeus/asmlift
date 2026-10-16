@@ -1138,6 +1138,88 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { k: { params: 1 } },
   },
 
+  // AN ARGUMENT PASSED ON UNCHANGED TO AN UNDECLARED CALLEE, with another set up past it. Nothing
+  // states the callee's arity, so it is guessed from the argument registers a value reaches, and a
+  // register this function never wrote may still hold its own incoming argument: `s` stays in the
+  // first argument register while `1` goes into the second, and a count that stops at the first
+  // lifts `logv() + 1`. Every frontend refuses the gap (frontend/ssa.ts `fallbackArgc`), so both
+  // rows are declined witnesses. `ctx` declares neither callee, so neither decompiler is told the
+  // arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
+  // machine code as `g2()`, so no row expects a decline for it.
+  {
+    sym: 'passgap',
+    src: 'int logv();\nint passgap(const char *s){ return logv(s, 1) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int passgap(const char *);',
+  },
+  {
+    sym: 'passmid',
+    src: 'int g3();\nint passmid(int a, int b){ return g3(1, b, 3) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int passmid(int, int);',
+  },
+  // …AND THE SAME PASS-THROUGH TO A CALLEE THAT IS DECLARED, where the declaration states no
+  // layout for all of its arguments and a guess stands in for the rest. There a TRAILING argument
+  // passed on unchanged leaves no gap: `logv(s + 1, c)` sets the first argument register and leaves
+  // `c` in the second, the bytes of `logv(s + 1)`. A variadic declaration whose fixed parameters are
+  // each one word states its first argument words exactly, so they are read as stated and only what
+  // the `...` takes is guessed, above them (frontend/call-plan.ts `variadicFloor`): `passvar` lifts
+  // `logv(a0 + 1, a1)`, and `passfmt`, the `DebugPrintf(fmt, …)` shape, keeps the format it passes
+  // through below a set-up argument where a guess from the first register refuses the gap. mwcc's
+  // variadic call clears a condition-register bit (`crclr`), which the PowerPC frontend does not
+  // model, so those cells decline. agbcc lays out a `double` in general
+  // words and a `float` not at all, so `g(int, float)` refuses there (`refuseUnplacedFloat`); a
+  // target with an FPU refuses it already, so that row is agbcc's alone, a declined witness.
+  {
+    sym: 'passfmt',
+    src: 'int dprint(const char *, ...);\nint passfmt(const char *s){ return dprint(s, 1) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int dprint(const char *, ...);\nint passfmt(const char *);',
+    proto: { dprint: { returns: 'int', variadicParams: ['const char *'] } },
+  },
+  {
+    sym: 'passvar',
+    src: 'int logv(const char *, int, ...);\nint passvar(const char *s, int c){ return logv(s + 1, c); }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int logv(const char *, int, ...);\nint passvar(const char *, int);',
+    proto: { logv: { returns: 'int', variadicParams: ['const char *', 'int'] } },
+  },
+  // …AND PAST THAT FLOOR, A REGISTER THE FUNCTION ONLY READ. A read of its own incoming argument (a
+  // compare, IDO's home store of an unused parameter) leaves the entry value behind as a definition,
+  // so a guess would count it as set up and hand the callee an argument the source never passed:
+  // `passread` lifted `dprint(a0, a1)`, and on IDO `passhome` lifted `logv(a0, a1, a2)`. Whether
+  // the call is handed it is the gap's own undecidable question, so both refuse there
+  // (frontend/ssa.ts `fallbackArgc`). `passhome` leaves its unused `x` untouched on the other
+  // compilers, where `logv(a0, a1)` is the bytes it compiles to.
+  {
+    sym: 'passread',
+    src: 'int dprint(const char *, ...);\nint passread(const char *s, int x){ if (x) return dprint(s) + 1; return 0; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int dprint(const char *, ...);\nint passread(const char *, int);',
+    proto: { dprint: { returns: 'int', variadicParams: ['const char *'] } },
+  },
+  {
+    sym: 'passhome',
+    src: 'int logv(const char *, int, ...);\nint passhome(const char *s, int c, int x){ return logv(s, c) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int logv(const char *, int, ...);\nint passhome(const char *, int, int);',
+    proto: { logv: { returns: 'int', variadicParams: ['const char *', 'int'] } },
+  },
+  {
+    sym: 'passflt',
+    src: 'int g(int, float);\nint passflt(int a, float b){ return g(a + 1, b); }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'int g(int, float);\nint passflt(int, float);',
+    proto: { g: { params: ['int', 'float'], returns: 'int' } },
+  },
+
   // ── nested control flow ─────────────────────────────────────────────────────────────────
   {
     sym: 'nestedif',
@@ -2216,6 +2298,33 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'arithmetic'],
     toolchains: ALL,
     ctx: 'float fma1(float,float,float);',
+  },
+  // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
+  // folds to a negation; a conversion is a helper the table signs and cannot fold, so `fconv`
+  // declines naming `__fixsfsi` (as `f2i`, `i2f` and `fcmp` above do on agbcc); and a helper whose
+  // result reaches only a GUESSED call declines. That call does not count r0, which the helper
+  // wrote, so `g1(a * b)` reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product
+  // deleted (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
+  {
+    sym: 'fneg',
+    src: 'float fneg(float a){ return -a; }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float fneg(float);',
+  },
+  {
+    sym: 'fconv',
+    src: 'int fconv(float a,float b){ return (int)(a+b); }',
+    features: ['float', 'cast', 'float-to-int', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'int fconv(float,float);',
+  },
+  {
+    sym: 'fcall',
+    src: 'float g1(float);\nfloat fcall(float a,float b){ return g1(a*b); }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float fcall(float,float);',
   },
   {
     sym: 'dadd',

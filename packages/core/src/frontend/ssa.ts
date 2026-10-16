@@ -116,6 +116,9 @@ export interface SsaBuilder {
    *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
    *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
   holdsEntryValue(reg: string, b: number): boolean;
+  /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
+   *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
+  writtenSinceCall(reg: string, b: number): boolean;
   /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
    *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
    *  erased, so the address appears in no operand. The refusal of a read a call destroyed
@@ -142,7 +145,7 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs` and `asksEveryCut`: see
+   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs`, `asksEveryCut` and `floor`: see
    *  {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
@@ -152,6 +155,7 @@ export interface SsaBuilder {
     trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
     withholdsSetupArgs?: () => boolean,
     asksEveryCut?: () => boolean,
+    floor?: number,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -1294,6 +1298,7 @@ export function makeSsaBuilder(
     everyReachingDef,
     entryValue,
     holdsEntryValue,
+    writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     useOutsideOps: (v: Value, b: number) => {
       usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
     },
@@ -1315,6 +1320,7 @@ export function makeSsaBuilder(
       trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
       withholdsSetupArgs?: () => boolean,
       asksEveryCut?: () => boolean,
+      floor?: number,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
@@ -1324,6 +1330,7 @@ export function makeSsaBuilder(
         trimmed,
         withholdsSetupArgs,
         asksEveryCut,
+        ...(floor ? { floor } : {}),
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1583,26 +1590,62 @@ export function fallbackArgc(
   bi: number,
   opts: {
     accept?: (v: Value) => boolean;
-    /** the call's function and address, and the frontend's own refusal */
-    gap?: { name: string; at: number; fail: FrontendRefusal };
-  } = {},
+    /** the call's function, where it is (`CallSite`'s `guess.at`), and the frontend's own refusal */
+    gap: { name: string; at: number | string; fail: FrontendRefusal };
+    /** the leading arguments a declaration states (`GuessedCallSite.floor`): counted whether or not
+     *  the caller set them up, so only the registers above them are guessed */
+    floor?: number;
+    /** whether argument register `reg` still holds this function's own incoming value at the call
+     *  (an entry parameter, which a read leaves behind as a definition) on some path the caller
+     *  did not set it up on: one a call destroyed it on ends there, and one this block wrote it on
+     *  since its last call set it up (`CallDeclarations.lower` asks it) */
+    entry?: (reg: string) => boolean;
+  },
 ): number {
+  const accept = opts.accept ?? (() => true);
   // whether the caller set argument register k up: a definition reaches it, through a call too
-  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
-  let n = 0;
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, accept);
+  const { name, at, fail } = opts.gap;
+  const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
+  const floor = opts.floor ?? 0;
+  let n = floor;
   while (n < argRegs.length && setUp(n)) {
+    // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
+    // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
+    // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
+    // function's own argument passed on, or one the call is not handed. Counted, it is an argument
+    // the source never passed — `int logv(const char *, int, ...)` and `logv(s, c) + 1` in a
+    // function whose unused third parameter IDO home-stores lifts `logv(a0, a1, a2)`. Below a
+    // floor the scan never asks, and with none the guess keeps counting it: there it is the far
+    // commoner `if (a) g(a)`, and the same refusal declines 17 lifts of kleod's 20 units and 40 of
+    // sa3's (`DecompressAlloc(a0)`, `m4aSongNumStart(a1)`), where the floored rule moves none.
+    //
+    // ONLY A PATH THE ENTRY VALUE STILL ARRIVES BY IS ASKED. `setUp` walks through calls, so an
+    // entry value a call destroyed reaches it too — `g(x); dprint(s)` — and that register holds
+    // nothing; the trim cuts it (`trimClobberedCallArgs`) and `dprint(a0)` is the bytes. And a
+    // register this block wrote since its last call was set up here, by the copy that put the
+    // value back — `g(y); dprint(s, x)` re-sets r1 from a saved copy — whatever value SSA names.
+    if (floor > 0 && opts.entry?.(argRegs[n])) {
+      fail(
+        `cannot lift '${name}': the call ${call} has a prototype stating only its first ${floor} ` +
+          `argument${floor === 1 ? '' : 's'}, and ${argRegs[n]} past them still holds this function's own incoming ` +
+          'value — an argument passed on unchanged and one the call is not handed look the same here, so the ' +
+          'argument count is not decidable',
+      );
+    }
     n++;
   }
-  if (opts.gap !== undefined) {
-    const { name, at, fail } = opts.gap;
-    for (let k = n + 1; k < argRegs.length; k++) {
-      if (setUp(k)) {
-        fail(
-          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${argRegs[k]} holds a ` +
-            `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
-            `the call does not pass look the same here, so the argument count is not decidable`,
-        );
-      }
+  for (let k = n + 1; k < argRegs.length; k++) {
+    if (setUp(k)) {
+      fail(
+        `cannot lift '${name}': the call ${call} ` +
+          (opts.floor
+            ? `has a prototype stating only its first ${opts.floor} argument${opts.floor === 1 ? '' : 's'}`
+            : 'has no prototype') +
+          `, ${argRegs[k]} holds a ` +
+          `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
+          `the call does not pass look the same here, so the argument count is not decidable`,
+      );
     }
   }
   return n;
@@ -1640,6 +1683,10 @@ export interface GuessedCallSite {
    *  earlier block's leftovers included ({@link narrowingKeepsFrameAddresses};
    *  `CallSite.asksEveryCut`). Absent where it asks only of what the call's own block wrote. */
   asksEveryCut?: () => boolean;
+  /** how many leading arguments a declaration STATES, so neither reading cuts below them: the
+   *  fixed parameters of a variadic declaration that are each one word (frontend/call-plan.ts
+   *  `variadicFloor`). Only the arguments past them are guessed. Absent where none is stated. */
+  floor?: number;
 }
 
 export interface CallArgTrim {
@@ -1885,7 +1932,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   };
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
-    const n = argcAt(s, fresh);
+    const n = Math.max(s.floor ?? 0, argcAt(s, fresh));
     if (n < callArgs(s.op).length) {
       // only the FRESH ones: an unfresh register is the trim's proof (a path reaches here with
       // nothing set up in it since a call), a fresh one went with a hole below it
@@ -1912,7 +1959,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const dropsPassed = passed && provenConstant(new Set([result, callArgs(s.op)[0]]), s.block);
     const localFresh =
       setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
-    const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
+    const local = Math.min(Math.max(s.floor ?? 0, runOfFresh(localFresh, 0)), callArgs(s.op).length);
     if (
       local < callArgs(s.op).length &&
       s.withholdsSetupArgs?.() !== true &&

@@ -181,12 +181,16 @@ const SPILL = `f:
 \tbx\tr1
 `;
 
+// `g` declared to take the r0 a guess would count: undeclared, r2 and r3 past an r1 nothing set are a
+// gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`)
+const G1 = { prototypes: { g: { params: 1 } } };
+
 test('the default keeps the plain declaration — the slot is a fact, the qualifier is not', () => {
-  expect(decompile('f', SPILL, ARMV4T_AGBCC).source).toContain('u16 sp4;');
+  expect(decompile('f', SPILL, ARMV4T_AGBCC, G1).source).toContain('u16 sp4;');
 });
 
 test('/vol-slot is enumerated for the spill, and declares the slot volatile', () => {
-  const cands = enumerateCandidates('f', SPILL, ARMV4T_AGBCC);
+  const cands = enumerateCandidates('f', SPILL, ARMV4T_AGBCC, G1);
   const vol = cands.find((c) => hasVariation(c.variations.slice(-1), 'vol-slot'));
   expect(vol).toBeDefined();
   expect(vol!.source).toContain('volatile u16 sp4;');

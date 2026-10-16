@@ -75,7 +75,14 @@ const conv = (arms: string[], tail = '.Lend:\n\tbx\tlr\n') =>
   `.Lp:\n\t.word\t.Ltab\n.Ltab:\n${arms.map((_, i) => `\t.word\t.Lc${i}\n`).join('')}` +
   arms.map((a, i) => `.Lc${i}:\n${a}`).join('') +
   tail;
-const convSrc = (arms: string[]) => decompile('f', conv(arms), ARMV4T_AGBCC).source;
+// THE ARMS' CALLEES ARE DECLARED TO TAKE NOTHING where an arm's call sets no register up. They are
+// effect markers, and the dispatch idiom switches on r1: undeclared, such a call sees r1 read and r0
+// not, a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`) before any switch question.
+const SIDES = Object.fromEntries(
+  ['sideA', 'sideB', 'sideC', 'sideD', 'sideEnd', 'sideZ'].map((n) => [n, { params: 0, returns: 's32' }]),
+);
+const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: SIDES }).source;
+const convSrc = (arms: string[]) => lift(conv(arms));
 const CALL_A = '\tbl\tsideA\n', // an arm body with a visible side effect
   LEAVE = '\tb\t.Lend\n';
 
@@ -100,7 +107,7 @@ test('an arm that runs into the NEXT arm is recovered as C fall-through', () => 
   const out = convSrc([CALL_A, '\tbl\tsideB\n' + LEAVE]);
   expect(out).not.toContain('ASMLIFT_ERROR');
   // case 0 runs sideA and does NOT break before case 1
-  expect(out).toMatch(/case 0:\s*\n\s*a0 = sideA\(\);\s*\n\s*case 1:/);
+  expect(out).toMatch(/case 0:\s*\n\s*sideA\(\);\s*\n\s*case 1:/);
   // …and the body it falls into is emitted ONCE, under case 1.
   expect(out.match(/sideB\(/g)).toHaveLength(1);
 });
@@ -126,13 +133,9 @@ test('the LAST case may fall into a default that has a body — C emits the defa
     `.Lp:\n\t.word\t.Ltab\n.Ltab:\n${arms.map((_, i) => `\t.word\t.Lc${i}\n`).join('')}` +
     arms.map((a, i) => `.Lc${i}:\n${a}`).join('') +
     `.Ldef:\n${def}.Lend:\n\tbl\tsideZ\n\tbx\tlr\n`;
-  const out = decompile(
-    'f',
-    withDefault([CALL_A + LEAVE, '\tbl\tsideB\n'], '\tbl\tsideD\n' + LEAVE),
-    ARMV4T_AGBCC,
-  ).source;
+  const out = lift(withDefault([CALL_A + LEAVE, '\tbl\tsideB\n'], '\tbl\tsideD\n' + LEAVE));
   expect(out).not.toContain('ASMLIFT_ERROR');
-  expect(out).toMatch(/case 1:\s*\n\s*a0 = sideB\(\);\s*\n\s*default:/);
+  expect(out).toMatch(/case 1:\s*\n\s*sideB\(\);\s*\n\s*default:/);
 });
 
 test('a fall-through that would carry an effect out of a loop DECLINES', () => {
@@ -147,7 +150,11 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   // with `sideA()` inside the loop, which is what the asm does. What still reaches the decline is
   // an `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists.
   const loop = (body: string) => `\tmov\tr4, #3\n.Llp:\n${body}\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n`;
-  const recovered = convSrc([loop('\tbl\tsideA\n'), '\tbl\tsideB\n' + LEAVE]);
+  // `sideB` takes one argument, so `sideA`'s result rides the loop's exit edge into it
+  const intoNext = { ...SIDES, sideB: { params: 1, returns: 's32' } };
+  const recovered = decompile('f', conv([loop('\tbl\tsideA\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, {
+    prototypes: intoNext,
+  }).source;
   expect(recovered).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
   expect(recovered.match(/sideA\(/g)).toHaveLength(1);
   expect(() => decompile('f', conv([loop('\tmrs\tr0, cpsr\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
@@ -164,7 +171,7 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
   // The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a `return`, which
   // legitimately removes the second exit — these fixtures need the exit to survive as an edge.
   const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
-  const sw = (arms: string[]) => () => decompile('f', conv(arms, tail), ARMV4T_AGBCC);
+  const sw = (arms: string[]) => () => lift(conv(arms, tail));
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
@@ -184,11 +191,7 @@ test('an arm falling into a case the table does not put next is CHAINED, not dec
   // anything, and `chainArms` is what makes the position follow the exit. So the emitted order is
   // 0, 2, 1: the chain, then the arm it displaced, each still under its own label.
   const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
-  const out = decompile(
-    'f',
-    conv([CALL_A + '\tb\t.Lc2\n', '\tbl\tsideB\n' + LEAVE, '\tbl\tsideC\n' + LEAVE], tail),
-    ARMV4T_AGBCC,
-  ).source;
+  const out = lift(conv([CALL_A + '\tb\t.Lc2\n', '\tbl\tsideB\n' + LEAVE, '\tbl\tsideC\n' + LEAVE], tail));
   expect([...out.matchAll(/case (\d+):/g)].map((m) => Number(m[1]))).toEqual([0, 2, 1]);
   expect(out).toMatch(/case 0:[\s\S]*?\n\s*case 2:/); // no `break;` between them
   expect(out.match(/sideC\(/g)).toHaveLength(1); // emitted once, not duplicated into case 0
@@ -371,7 +374,7 @@ const returningArms = (early: string) =>
 const EARLY_RETURN = '\tcmp\tr2, #0\n\tbeq\t.Lend\t@cond_branch\n\tbl\tsideB\n\tbx\tlr\n';
 
 test('a jump table whose arms return still has an end', () => {
-  const out = decompile('f', returningArms(EARLY_RETURN), ARMV4T_AGBCC).source;
+  const out = lift(returningArms(EARLY_RETURN));
   expect(out).not.toContain('ASMLIFT_ERROR');
   expect(out).toContain('switch (');
   // one `break;` per arm — the arms end, they do not run on into anything
@@ -397,7 +400,7 @@ test('a jump table whose arms return still has an end', () => {
 const UNCONDITIONAL_RETURN = '\tbl\tsideB\n\tmov\tr0, #1\n\tbx\tlr\n';
 
 test('a jump-table arm that returns on its own leaves the other arms an end', () => {
-  const out = decompile('f', returningArms(UNCONDITIONAL_RETURN), ARMV4T_AGBCC).source;
+  const out = lift(returningArms(UNCONDITIONAL_RETURN));
   expect(out).not.toContain('ASMLIFT_ERROR');
   expect(out).toContain('switch (');
   // the two arms that reach the tail end in `break`; the returning arm ends in its own `return`
@@ -417,7 +420,7 @@ test('an arm that returns on its own does not re-spell a switch the stop reading
     '.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n',
     '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n',
   );
-  const out = decompile('f', oneFalls, ARMV4T_AGBCC).source;
+  const out = lift(oneFalls);
   expect(out).not.toContain('ASMLIFT_ERROR');
   expect(out).toContain('default:');
   expect(count(out, 'sideEnd(')).toBe(1);
@@ -566,13 +569,11 @@ test('a table with no shared `ret` at all still falls back to the enclosing stop
   // EVERY arm returns by itself, so no `ret` is reachable from every successor and the follow is
   // null. That is the `?? stop` tail, and it must keep the shape it always had: the arms are
   // structured to their own ends. Without the fallback this commit would change four corpus sites.
-  const out = decompile(
-    'f',
+  const out = lift(
     returningArms(EARLY_RETURN)
       .replace('.Lc0:\n\tbl\tsideA\n\tb\t.Lend\n', '.Lc0:\n\tbl\tsideA\n\tbx\tlr\n')
       .replace('.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n', '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n'),
-    ARMV4T_AGBCC,
-  ).source;
+  );
   expect(out).not.toContain('ASMLIFT_ERROR');
   expect(out).toContain('switch (');
   expect(count(out, 'sideA();')).toBe(1);

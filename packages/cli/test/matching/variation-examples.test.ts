@@ -6,6 +6,8 @@
 // "Different" is objdiff's verdict, the scorer's own eye: a relocation is compared by the symbol
 // it names, never by the placeholder bytes in the section, and only the example function's
 // instructions and literal pool are read. A pair that builds one object is a wrong example.
+import type { Prototypes } from '@asmlift/core/proto';
+import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   EXAMPLE_COMPILER_TOOLCHAINS,
@@ -93,6 +95,14 @@ describe('every compiler behavior a target gate reads is shown by a compiled pai
   }
 });
 
+/** What the unit, as the page shows it, declares of its callees: the lift reads the declarations a
+ *  reader sees, and nothing beside them. The example's own entry is left out, as the CLI leaves a
+ *  function's own out of its `--context` (`withContextPrototypes`). */
+const calleeDeclarations = (unit: string): Prototypes => {
+  const { [EXAMPLE_FUNCTION]: _, ...callees } = prototypesFromContext(unit.replace(EXAMPLE_HOLE, ''), 'c');
+  return callees;
+};
+
 // THE STRONGER CLAIM, where it holds: asmlift lifts the object `after` built and matches it byte for
 // byte, and every candidate that matches carries the variation, so the example is a spelling this
 // variation emits and nothing else in the fan does. Not every example can say it: an example whose
@@ -119,7 +129,9 @@ describe("asmlift matches an example's `after` only through its variation", () =
       expect(example.compiler).toBe('agbcc');
       const asm = compileTargetAsm(spell(example.unit, example.after), flagsOf('agbcc'));
       const matched = (
-        await decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm))
+        await decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm), {
+          prototypes: calleeDeclarations(example.unit),
+        })
       ).candidates.filter((c) => c.score.match);
       expect(matched.length).toBeGreaterThan(0);
       expect(matched.filter((c) => !hasVariation(c.variations, name)).map((c) => c.variations.join('/'))).toEqual([]);

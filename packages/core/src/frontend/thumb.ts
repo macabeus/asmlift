@@ -82,6 +82,9 @@ interface Instr {
    *  dropped at tokenizing, and a call thunk is the same `bl` to a label of this function. */
   farJump?: true;
 }
+/** The label a block the .s does not label is given — one no .s spells (`thumbCallLocator`). */
+const ANON_BLOCK_PREFIX = '.L_anon';
+
 interface AsmBlock {
   label: string;
   instrs: Instr[];
@@ -1774,7 +1777,7 @@ function decode(
         continue;
       }
       if (!cur) {
-        cur = { label: first ? name : `.L_anon${anon++}`, instrs: [] };
+        cur = { label: first ? name : `${ANON_BLOCK_PREFIX}${anon++}`, instrs: [] };
         blocks.push(cur);
         first = false;
       }
@@ -5642,6 +5645,28 @@ function lowerStore(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   irb.ops.push(mkOp('store', { operands: [storeBase, readData(reg(a), bi)], attrs: { off, width } }));
 }
 
+/** WHERE A READER FINDS A CALL IN THE .s, for a refusal that names it: a Thumb `Instr` carries no
+ *  address. A block the .s labels (the function's own entry, a `.L3`) names it by that label and
+ *  the call; a block the splitter opened after a branch has only a label it made up (`.L_anon0`),
+ *  which appears nowhere in the .s, so the call is named by its ordinal among the calls to the same
+ *  callee in the function, in the order the .s lists them. */
+function thumbCallLocator(blocks: readonly AsmBlock[], bi: number, ins: Instr): string {
+  const call = `'${ins.mnemonic} ${ins.ops[0]}'`;
+  const label = blocks[bi].label;
+  if (!label.startsWith(ANON_BLOCK_PREFIX)) {
+    return `${call} in block '${label}'`;
+  }
+  const same = blocks.flatMap((b) => b.instrs).filter((i) => i.mnemonic === ins.mnemonic && i.ops[0] === ins.ops[0]);
+  const k = same.indexOf(ins);
+  if (k < 0 || same.length === 1) {
+    return `${call} in '${blocks[0].label}'`;
+  }
+  return `${call} in '${blocks[0].label}' (the ${ordinal(k + 1)} of its ${same.length} calls there)`;
+}
+
+const ordinal = (n: number): string =>
+  `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+
 /** `bl` / `blx`: the call its callee's declaration plans, lowered by `CallDeclarations.lower`. */
 function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { name, target, text, calls, frame, ssa, pairs } = fill;
@@ -5688,13 +5713,13 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT IS AN ARGUMENT ALL THE SAME. The frame walks
     // read the call as handed every argument register it holds (`frameAddressReceivers`), and the
     // lift reads the object as written by that receiver (`isFrameObjectAccess`, with no reaching-
-    // definition test). The guessed count stops at the first register this function did not write,
-    // which is also an incoming argument passed on unchanged, so a capture in r3 behind r1 and r2
-    // left at their incoming values falls outside it: the call is lifted without the address, and
-    // the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])` as `func()`,
-    // then `*data = sp1`). A call through r1 stops at the bound r1 sets and leaves r2 out the same
-    // way (`CallDeclarations.lower`'s KNOWN GAP). Which count is right the register file cannot
-    // say, so this refuses.
+    // definition test). A count that leaves out a register holding one lifts the call without the
+    // address, and the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])`
+    // as `func()`, then `*data = sp1`). A GUESSED count leaves one out only past a register it did
+    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is a call
+    // through r1, which stops at the bound r1 sets and leaves r2 out (`CallDeclarations.lower`'s
+    // KNOWN GAP), and the `/setup-args` cut (`asksEveryCut`). Which count is right the register
+    // file cannot say, so this refuses.
     //
     // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
     // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside
@@ -5729,6 +5754,17 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
     // same bytes), as it does with four parameters.
     withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
+    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`): `logv(s, 1)` sets r1 alone and
+    // leaves `s` in r0, so a count that stops at r0 would lift `logv()`. A run of incoming arguments
+    // passed on with no register set up past it (`g2(a, b)`) leaves no gap, is the same machine code
+    // as `g2()`, and is lifted as the shorter call. The instruction carries no address, so the
+    // refusal names the call by where the .s puts it (`thumbCallLocator`).
+    //
+    // No `refuse`: a guess that fills r0..r3 asks nothing of the outgoing area here. A word agbcc
+    // stages at [sp, #k] for the call is an argument only where `analyzeOutgoingArgs` licensed the
+    // block, and the frame model refuses any other store there. agbcc's `g5(1, 2, 3, 4, a)` to an
+    // undeclared `g5` declines as "stack pointer used as data" before any call is lowered.
+    guess: { at: thumbCallLocator(fill.cfg.asmBlocks, bi, ins) },
     // …AND AT EVERY OTHER CALL OF A FUNCTION WHOSE VERDICT LEANED ON AN ESCAPE, the reading asks
     // `leftOut` of every register it cuts, not only of those this block wrote. The verdict read every
     // argument register as possibly handed over, so a frame address an EARLIER block left there is

@@ -34,11 +34,11 @@ describe('a guessed argument that survived from an earlier block', () => {
   });
 
   test('…and inert where the block set up a LATER argument register for the call', () => {
-    // `bl __mulsf3; add r1, r4, #0; bl __addsf3` — the block's own `add r1` proves __addsf3 takes
-    // arguments, so the product still in r0 is one of them. Calling that dead would be the variation
-    // asserting the instruction two above the `bl` is dead code.
-    const cs = cands('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n');
-    expect(cs.every((c) => c.source.includes('__addsf3(__mulsf3(), '))).toBe(true);
+    // `bl foo; add r1, r4, #0; bl bar` — the block's own `add r1` proves bar takes arguments, so
+    // the result still in r0 is one of them. Calling that dead would be the variation asserting the
+    // instruction two above the `bl` is dead code.
+    const cs = cands('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n');
+    expect(cs.every((c) => c.source.includes('bar(foo(), '))).toBe(true);
     expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
   });
 
@@ -94,8 +94,10 @@ describe('a frame address the narrower reading would cut', () => {
     '\tbeq\t.L5\n\tadd\tr0, r2, #0\n\tmov\tr2, sp\n\tbl\tg\n.L5:\n\tmov\tr0, #0x0\n.L6:\n' +
     '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L7:\n\t.word\tgv\n';
 
+  // `f` is declared: at its call r2 holds agbcc's copy of `a` and r1 nothing, a gap its guess
+  // refuses (frontend/ssa.ts `fallbackArgc`)
   test('is kept in every candidate, the `/setup-args` ones included', () => {
-    const cs = enumerateCandidates('v1', V1, ARMV4T_AGBCC);
+    const cs = enumerateCandidates('v1', V1, ARMV4T_AGBCC, { prototypes: { f: { params: 0 } } });
     const narrowed = cs.filter((c) => hasVariation(c.variations, 'setup-args'));
     expect(narrowed.length).toBeGreaterThan(0);
     expect(narrowed.some((c) => /\bf2\(\)/.test(c.source))).toBe(true);

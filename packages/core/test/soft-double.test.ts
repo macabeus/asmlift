@@ -13,7 +13,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { AGBCC_RUNTIME_HELPERS, isFloatHelper } from '../src/runtime-helpers';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, type TargetDescription, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-double.s'), 'utf8');
@@ -99,38 +99,36 @@ describe('what refuses', () => {
     );
   });
 
-  // A double into a compare, a conversion or an ordinary callee is no long long, and the refusal
-  // says so rather than asking for a prototype that states one: with one, the pair is built and the
-  // fold refuses it (`a result passed to an ordinary callee declared to take a long long` above).
+  // A double into a compare or a conversion is a call to a helper the table SIGNS: its pair is
+  // built off the signature, the fold refuses the arithmetic that feeds it, and the helper itself
+  // has no op to fold into, so both decline naming the runtime.
   test.each([
     ['d2i', '__fixdfsi', '__muldf3'],
     ['dgt', '__gtdf2', '__adddf3'],
     ['d2f', '__truncdfsf2', '__subdf3'],
-    ['dpass', 'use', '__adddf3'],
   ])('%s: a double into %s', (name, callee, producer) => {
     expect(() => lift(name)).toThrow(
-      `argument 1 of the call to '${callee}' is the low half of a 64-bit value, the double '${producer}' returned`,
+      `no model for the runtime helper '${producer}'; no model for the runtime helper '${callee}'`,
     );
-    expect(() => lift(name)).not.toThrow(/long long/);
+  });
+
+  // A double into an ordinary callee is no long long, and the refusal says so rather than asking
+  // for a prototype that states one: with one, the pair is built and the fold refuses it (`a result
+  // passed to an ordinary callee declared to take a long long` above).
+  test('dpass: a double into use', () => {
+    expect(() => lift('dpass')).toThrow(
+      "argument 1 of the call to 'use' is the low half of a 64-bit value, the double '__adddf3' returned",
+    );
+    expect(() => lift('dpass')).not.toThrow(/long long/);
   });
 });
 
-// THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so a single-precision row is a
-// table entry and nothing else. The shipped table leaves the singles out (its note says why), so
-// these rows are stated here, over agbcc's own listings of the same four shapes.
-describe('a single-precision helper folds through the same path', () => {
+// THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so the single-precision arithmetic
+// is a table entry and nothing else, over agbcc's own listings of the same shapes.
+describe('the single-precision arithmetic helpers are the float ops', () => {
   const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
-  const withSingles: TargetDescription = {
-    ...ARMV4T_AGBCC,
-    runtimeHelpers: {
-      ...AGBCC_RUNTIME_HELPERS,
-      __addsf3: { op: 'fadd', params: [32, 32], returns: 32 },
-      __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
-      __negsf2: { op: 'fneg', params: [32], returns: 32 },
-    },
-  };
   const liftSingle = (name: string, prototypes: Prototypes = {}) =>
-    decompile(name, single, withSingles, { prototypes }).source;
+    decompile(name, single, ARMV4T_AGBCC, { prototypes }).source;
 
   test.each([
     ['fadd', 'float fadd(float a0, float a1) {\n    return a0 + a1;\n}\n'],
@@ -144,19 +142,68 @@ describe('a single-precision helper folds through the same path', () => {
   test('a result passed to an ordinary callee refuses', () => {
     expect(() => liftSingle('fpass', { fuse: { params: 1 } })).toThrow(/no model for the runtime helper '__addsf3'/);
   });
+
+  // A RESULT NOTHING READS IS ONE A GUESSED ARITY CUT. The call after the helper guesses its arity,
+  // and a register a call wrote is not one it counts, so `fuse(a + b)` reads as `fuse()`. Folded,
+  // the sum would be dead and `dce` would delete it; the helper stays a call, and the function
+  // declines naming it.
+  test('fpass: a result nothing reads refuses', () => {
+    expect(() => liftSingle('fpass')).toThrow("no model for the runtime helper '__addsf3'");
+  });
+
+  // A result into a conversion is a result passed to a call, and the conversion is a helper the
+  // table signs and cannot fold: both decline.
+  test('fconv: a result into a conversion refuses', () => {
+    expect(() => liftSingle('fconv')).toThrow(
+      "no model for the runtime helper '__addsf3'; no model for the runtime helper '__fixsfsi'",
+    );
+  });
 });
 
 describe('what the table names', () => {
-  // The IR has no int<->float op to fold a compare or a conversion into; the singles' absence is the
-  // table note's trade.
-  test('only the double arithmetic', () => {
-    for (const name of ['__addsf3', '__mulsf3', '__gtdf2', '__eqdf2', '__floatsidf', '__fixdfsi', '__extendsfdf2']) {
-      expect(AGBCC_RUNTIME_HELPERS[name], name).toBeUndefined();
+  // The IR has no int<->float op to fold a compare or a conversion into, so the table SIGNS each
+  // and states no op: a call to one refuses, where unnamed its arity would be guessed and the argument
+  // it is handed unchanged dropped (`(int)x` as `__fixsfsi()`).
+  test('every compare and conversion, signed and with no op', () => {
+    const signed = {
+      __gtsf2: [[32, 32], 32],
+      __fixsfsi: [[32], 32],
+      __floatsisf: [[32], 32],
+      __gtdf2: [[64, 64], 32],
+      __eqdf2: [[64, 64], 32],
+      __floatsidf: [[32], 64],
+      __fixdfsi: [[64], 32],
+      __extendsfdf2: [[32], 64],
+      __truncdfsf2: [[64], 32],
+      __floatdisf: [[64], 32],
+    } as const;
+    for (const [name, [params, returns]] of Object.entries(signed)) {
+      expect(AGBCC_RUNTIME_HELPERS[name], name).toEqual({ params, returns });
     }
   });
 
-  test('the double arithmetic is float helpers, and nothing else in the table is', () => {
+  test.each([
+    ['f2i', '__fixsfsi'],
+    ['i2f', '__floatsisf'],
+    ['fcmp', '__gtsf2'],
+  ])('%s: a call to %s refuses', (name, helper) => {
+    const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
+    expect(() => decompile(name, single, ARMV4T_AGBCC).source).toThrow(`no model for the runtime helper '${helper}'`);
+  });
+
+  test('the float arithmetic is float helpers, and nothing else in the table is', () => {
     const floats = Object.keys(AGBCC_RUNTIME_HELPERS).filter((name) => isFloatHelper(AGBCC_RUNTIME_HELPERS[name]));
-    expect(floats).toEqual(['__adddf3', '__subdf3', '__muldf3', '__divdf3', '__negdf2']);
+    expect(floats).toEqual([
+      '__adddf3',
+      '__subdf3',
+      '__muldf3',
+      '__divdf3',
+      '__negdf2',
+      '__addsf3',
+      '__subsf3',
+      '__mulsf3',
+      '__divsf3',
+      '__negsf2',
+    ]);
   });
 });

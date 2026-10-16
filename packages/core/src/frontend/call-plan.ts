@@ -28,7 +28,7 @@ import {
   type FnProto,
   type ParamClass,
   type Prototypes,
-  STANDARD_SIGNATURES,
+  calleeDeclaration,
   declaredCallArgs,
   declaredReturnWidth,
   declaresAggregateReturn,
@@ -166,12 +166,16 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
-  /** what a guessed arity refuses on; without it a gap in the argument registers ends the count */
-  readonly guess?: {
-    /** the call's address, for the gap refusal */
-    readonly at: number;
-    /** refuses a guess of `argc` words this ABI's outgoing area could extend */
-    refuse(argc: number): void;
+  /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
+   *  no opt-out: a count that stopped at the first register nothing reaches would drop every
+   *  argument past an incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`). */
+  readonly guess: {
+    /** where the call is, for the gap refusal: its address, or — for an ISA whose instructions
+     *  carry none (Thumb's `.s` text) — a phrase that names it, printed as written */
+    readonly at: number | string;
+    /** refuses a guess of `argc` words this ABI's outgoing area could extend; absent where the
+     *  frontend's frame model already refuses every word such a guess could leave out */
+    refuse?(argc: number): void;
   };
   /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
    *  past a guessed count, or past the bound of a call through an argument register — and the ones
@@ -341,11 +345,8 @@ export function callDeclarations(
   // because it is the most specific thing that was seen.
   const known = (t: Prototypes, callee: string) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
   /** the declaration a callee is read at: the project's, then the runtime table's, then the C
-   *  standard's (the tier order `declaredCall` gives the reasons for) */
-  const declarationOf = (callee: string): FnProto | undefined => {
-    const own = known(prototypes, callee);
-    return declaresParams(own) ? own : (known(helperProtos, callee) ?? known(STANDARD_SIGNATURES, callee));
-  };
+   *  standard's (`proto.ts` `calleeDeclaration`; `declaredCall` gives the reasons for the order) */
+  const declarationOf = (callee: string): FnProto | undefined => calleeDeclaration(callee, prototypes, helperProtos);
   const declaredParams = (callee: string): readonly DeclaredParam[] | null => {
     const params = declarationOf(callee)?.params;
     if (typeof params === 'number') {
@@ -366,9 +367,10 @@ export function callDeclarations(
   // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
   // word: a parameter the declaration names a struct or union is known not to be.
   //
-  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: its
-  // call is placed by the guess alone (`FnProto.variadicParams`), which splits a struct, a 64-bit
-  // value or a `double` into words. Its parameters are the project's fact, read off its own entry,
+  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: it
+  // states a layout only where each fixed parameter is one word (`variadicFloor`), and otherwise its
+  // call is placed by the guess (`FnProto.variadicParams`), which splits a struct, a 64-bit value or
+  // a `double` into words. Its parameters are the project's fact, read off its own entry,
   // which `declarationOf` reads past because it states no `params`.
   const refuseUnplacedByValue = (callee: string, hidden: number): void => {
     const own = known(prototypes, callee);
@@ -387,6 +389,30 @@ export function callDeclarations(
       fail(
         `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
           `parameter ${why.param + 1}, and ${why.refused} — a struct passed by value is lifted only where its argument words are known`,
+      );
+    }
+  };
+  // A FLOATING PARAMETER THE DECLARATION STATES BUT NOTHING LAYS OUT REFUSES; IT IS NOT GUESSED.
+  // Where the target has an FPU, `plan` refuses every floating parameter first (it travels in the
+  // FPU's registers). Where it has none — agbcc — a `double` is laid out in general words
+  // (`TargetDescription.doubleArgWords`) and a `float` or `long double` is not (`proto.ts`
+  // `declaredCallArgs`), so the call would fall to the arity guess, which is wrong both ways: a
+  // trailing argument passed through unchanged is dropped (`int g(int, float)`: `g(a + 1, b)` as
+  // `g(a0 + 1)`), and a register left over from the caller is counted (`float h(float)`: `h(v)` as
+  // `h(a1, a1)`). Neither compiles against the header. The unsized-typedef abstention does not
+  // apply: a floating spelling is known, and what is missing is a layout, not a width.
+  const refuseUnplacedFloat = (callee: string): void => {
+    const p = declarationOf(callee);
+    const params = p?.params;
+    if (target.fpu !== undefined || !Array.isArray(params)) {
+      return;
+    }
+    const at = params.findIndex((_, k) => paramClassOf(p!, params, k) === 'float');
+    if (at >= 0) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` is declared to take '${params[at]}' as its parameter ${at + 1}, ` +
+          'which this target passes in general argument words that are not laid out here — the arity guess ' +
+          'in its place drops an argument passed through unchanged, or counts a leftover register as one',
       );
     }
   };
@@ -412,6 +438,7 @@ export function callDeclarations(
     const params = declared?.widths;
     if (params === undefined) {
       refuseUnplacedByValue(callee, hidden);
+      refuseUnplacedFloat(callee);
     }
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -580,6 +607,50 @@ export function callDeclarations(
       declaredVoid,
     };
   };
+  // A VARIADIC DECLARATION WHOSE FIXED PARAMETERS ARE EACH ONE WORD STATES ITS FIRST ARGUMENTS:
+  // they are the first that many argument words, exactly, so they are read as stated words and only
+  // what the `...` takes is guessed, above them (`fallbackArgc`'s and the trim's `floor`). Read the
+  // way a call through argument register rN reads the registers below N (`lower`): one this
+  // function never wrote is its own argument passed on, and one a call destroyed names nothing and
+  // refuses (`SsaBuilder.finish`). So `int logv(const char *, int, ...)` lifts `logv(s + 1, c)` as
+  // `logv(a0 + 1, a1)`, where a guess from r0 sees r1 untouched and refuses the gap. A fixed list
+  // holding an UNSIZED spelling states no such words — the one may be two — and gets no floor; a
+  // fixed parameter known not to be one word refuses (`refuseUnplacedByValue`, in `declaredCall`).
+  const variadicFloor = (callee: string | undefined): number => {
+    const own = callee === undefined ? undefined : known(prototypes, callee);
+    const fixed = own?.params === undefined ? own?.variadicParams : undefined;
+    return fixed !== undefined && fixed.every((_, k) => paramClassOf(own!, fixed, k) === 'word') ? fixed.length : 0;
+  };
+  // A GUESS SHORTER THAN THE DECLARATION REFUSES. A declaration the lowering cannot lay out (an
+  // UNSIZED spelling: `proto.ts` `declaredCallArgs`), or a variadic one whose fixed parameters
+  // include one, still states how many parameters it has — fixed ones, for a variadic — and every
+  // one of them is at least one argument word. A guess that counts fewer registers has dropped
+  // arguments: the last one passed through unchanged leaves its register with no definition, so
+  // `void h(int, Foo)` with `Foo` unresolved lifts `h(n + 1, v)` as `h(a0 + 1)`. The count bounds
+  // the guess from below only — an unsized parameter may be two words, or a struct of several. A
+  // variadic call with a `variadicFloor` never reaches the bound: its guess starts there.
+  //
+  // KNOWN GAP: this bounds the count `fallbackArgc` takes, not what `SsaBuilder.finish` later
+  // retracts from it (a register a call between the setup and this one destroyed).
+  const refuseShortOfDeclared = (callee: string | undefined, argc: number): void => {
+    if (callee === undefined) {
+      return;
+    }
+    const p = declarationOf(callee);
+    const own = known(prototypes, callee);
+    const stated = Array.isArray(p?.params)
+      ? { n: p.params.length, what: 'parameters' }
+      : own?.variadicParams !== undefined && own.params === undefined
+        ? { n: own.variadicParams.length, what: 'fixed parameters before its `...`' }
+        : undefined;
+    if (stated !== undefined && argc < stated.n) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` is declared with ${stated.n} ${stated.what}, which no layout here ` +
+          `places, and the arity guess in its place finds ${argc} argument register${argc === 1 ? '' : 's'} set up — ` +
+          'an argument passed through unchanged leaves its register with nothing the guess can see',
+      );
+    }
+  };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
@@ -621,15 +692,26 @@ export function callDeclarations(
     // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
     // the same answer the callee would get with no prototype at all.
     const { widths, returns } = p;
+    // the leading arguments a variadic declaration states, where the rest is guessed
+    const floor = widths === null ? variadicFloor(callee) : 0;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !placeholders?.has(v),
-            gap: guess && { name, at: guess.at, fail },
+            gap: { name, at: guess.at, fail },
+            floor,
+            entry: (reg) =>
+              !ssa.writtenSinceCall(reg, bi) &&
+              ssa.holdsValue(
+                reg,
+                bi,
+                (v) => !placeholders?.has(v) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
+              ),
           })
         : wordsOf(widths, target);
     if (widths === null) {
-      guess?.refuse(argc);
+      guess.refuse?.(argc);
+      refuseShortOfDeclared(callee, argc);
     }
     // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
     // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read
@@ -644,9 +726,9 @@ export function callDeclarations(
     }
     // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
     // count, or past the bound a call through an argument register sets, that a value reaches.
-    // Where the frontend states `guess`, the gap refusal has already fired on any such register
-    // past a guess; otherwise the register leaves the call silently, and the frontend says whether
-    // it knows that one to be an argument all the same.
+    // The gap refusal has already fired on any such register past a guess; past the bound, the
+    // register leaves the call silently, and the frontend says whether it knows that one to be an
+    // argument all the same.
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
       site.leftOut(
         target.argRegs
@@ -675,7 +757,7 @@ export function callDeclarations(
       // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
       // the second reading anyway, since the structurer materialises an effectful call once
       // per result. Its words are wherever the frontend's ABI placed them.
-      args.push(w > 32 ? pairs!.fuse(word(k), word(k + 1)) : widths === null ? guessed(k) : word(k));
+      args.push(w > 32 ? pairs!.fuse(word(k), word(k + 1)) : widths === null && k >= floor ? guessed(k) : word(k));
       k += w > 32 ? 2 : 1;
     }
     // A 64-BIT VALUE MAY NOT LEAVE AS A WORD WHERE NOTHING SAYS HOW WIDE THE PARAMETER IS,
@@ -701,8 +783,9 @@ export function callDeclarations(
       // no prototype keys a call through a register, so the hint names one only for a named callee
       const theCall = indirect === undefined ? `the call to '${callee}'` : `the call through ${indirect.reg}`;
       const itsParams = indirect === undefined ? `'${callee}'s parameters` : "the function pointer's parameters";
+      // a stated fixed word (`variadicFloor`) takes a half as the narrowing its declaration authorises
       for (const [j, v] of args.entries()) {
-        const half = pairs.halfOf.get(v);
+        const half = j < floor ? undefined : pairs.halfOf.get(v);
         // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
         // reader to the wrong declaration: a double leaves a soft-float helper only into
         // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
@@ -786,6 +869,7 @@ export function callDeclarations(
               ),
         site.withholdsSetupArgs,
         site.asksEveryCut,
+        floor,
       );
     }
     if (p.declaredVoid) {

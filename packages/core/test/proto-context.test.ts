@@ -49,6 +49,14 @@ describe('prototypes from a declaration context', () => {
     expect(prototypesFromContext(src, 'c++').f).toEqual({ returns: 'int', params: [] });
   });
 
+  // `int k(V)` read as a list of one parameter spelled `void` would pass the first argument
+  // register, and `k()` would lift as `k(a0)` on every toolchain
+  test('a list of one `void` through a typedef is empty, and a pointer to it is a parameter', () => {
+    const p = prototypesFromContext('typedef void V; typedef V *VP; int k(V); int kp(VP);', 'c');
+    expect(p.k).toEqual({ returns: 'int', params: [] });
+    expect(p.kp?.params).toHaveLength(1);
+  });
+
   test('keeps qualifiers, reads arrays and function-pointer parameters as pointers', () => {
     const p = prototypesFromContext(
       'typedef unsigned long size_t; void *memcpy(void *dst, const void *src, size_t n); int sum(int v[4], int (*cmp)(int, int));',

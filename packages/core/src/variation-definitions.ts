@@ -862,8 +862,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     example: {
       compiler: 'agbcc',
+      // The callees are PROTOTYPED here, unlike `CALLS`: `bl f` sees `c` read in r2 and a0 untouched
+      // in r0, which a pass-through `f(a0, a1, c)` would leave the same way, so an undeclared `f`
+      // declines (frontend/ssa.ts `fallbackArgc` refuses the gap). The lift reads these declarations
+      // off the unit as shown.
       unit:
-        CALLS +
+        's32 f(void); s32 g(void); s32 h(s32, s32);\n' +
         's32 example(s32 a0, s32 a1, s32 c) { s32 v1; s32 v2; if (c) { v1 = f() + 1; v2 = g(); } else { @ } return h(v1, v2); }',
       before: 'v2 = a1; v1 = a0;',
       after: 'v1 = a0; v2 = a1;',
