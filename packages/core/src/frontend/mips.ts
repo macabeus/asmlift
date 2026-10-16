@@ -855,6 +855,10 @@ const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
   sdr: [7, 15],
 };
 
+/** `k0`/`k1`, which O32 reserves to the kernel: an exception handler may overwrite them at any
+ *  instruction, so a copy of the return address kept there is not proved to survive to the return. */
+const isKernelReg = (r: string) => /^\$?(k[01]|2[67])$/.test(r);
+
 /** EVERY `jr ra` OF THIS FUNCTION JUMPS TO THE CALLER'S RETURN ADDRESS, or the lift declines — the
  *  MIPS half of what `refuseReturnsNotThroughCallersLr` asks of Thumb (frontend/thumb.ts).
  *
@@ -880,6 +884,10 @@ const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
  *  register was saved in already refuses (`emitLoad`). No compiler emits a violation; hand-written
  *  asm can, and it lifted as a C `return`. A tail call (`j` to another function) and an indirect
  *  `jr` already refuse in `lift`, so `jr ra` is the only exit asked.
+ *
+ *  A copy into `k0`/`k1` holds nothing: an exception handler may overwrite them at any instruction,
+ *  so `move k0,ra` … `move ra,k0` declines (O32 reserves them to the kernel; only hand-written asm
+ *  names them).
  *
  *  NOT ASKED: a store through a register holding a frame address is not traced to the save word.
  *  A compiler addresses that word only through `sp`. */
@@ -950,7 +958,7 @@ function refuseReturnsNotThroughCallersRa(
         isStackPtr(parseMem(mem).base) &&
         parseMem(mem).off + depth === slot;
       const copy = copiedReg(ins);
-      const holds = reload || (copy !== undefined && regs.has(canon(copy)));
+      const holds = !isKernelReg(dest) && (reload || (copy !== undefined && regs.has(canon(copy))));
       if (isStackPtr(dest)) {
         depth =
           depth !== null &&

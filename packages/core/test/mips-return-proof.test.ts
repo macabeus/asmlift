@@ -135,6 +135,33 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
     expect(frame('nop', '14:\tmove\tra,s0', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toMatch(/return 7;/);
   });
 
+  test('a copy of ra in k0 or k1 holds nothing, since an exception handler may overwrite them', () => {
+    // `m_k0`: the copy kept in k0 across the call — lifted `return ext() + 1;`
+    for (const k of ['k0', 'k1']) {
+      expect(() =>
+        src(
+          [
+            '0:\taddiu\tsp,sp,-24',
+            `4:\tmove\t${k},ra`,
+            '8:\tjal\t0 <f>',
+            'c:\tnop',
+            `10:\tmove\tra,${k}`,
+            '14:\taddiu\tsp,sp,24',
+            '18:\tjr\tra',
+            '1c:\taddiu\tv0,v0,1',
+          ],
+          [[8, 'ext']],
+        ),
+      ).toThrow(
+        /the 'jr ra' at 0x18 may not return through the caller's return address — on some path the 'move' at 0x10/,
+      );
+      // and between two instructions with no call between them
+      expect(() =>
+        src([`0:\tmove\t${k},ra`, '4:\tli\tra,0', `8:\tmove\tra,${k}`, 'c:\tjr\tra', '10:\tli\tv0,7']),
+      ).toThrow(NOT_THROUGH_RA);
+    }
+  });
+
   test("the compilers' own save of ra is a return, and so is a leaf", () => {
     // `m_good`
     expect(
