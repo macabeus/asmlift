@@ -368,9 +368,10 @@ export function callDeclarations(
   // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
   // word: a parameter the declaration names a struct or union is known not to be.
   //
-  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: its
-  // call is placed by the guess alone (`FnProto.variadicParams`), which splits a struct, a 64-bit
-  // value or a `double` into words. Its parameters are the project's fact, read off its own entry,
+  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: it
+  // states a layout only where each fixed parameter is one word (`variadicFloor`), and otherwise its
+  // call is placed by the guess (`FnProto.variadicParams`), which splits a struct, a 64-bit value or
+  // a `double` into words. Its parameters are the project's fact, read off its own entry,
   // which `declarationOf` reads past because it states no `params`.
   const refuseUnplacedByValue = (callee: string, hidden: number): void => {
     const own = known(prototypes, callee);
@@ -609,13 +610,28 @@ export function callDeclarations(
       declaredVoid,
     };
   };
+  // A VARIADIC DECLARATION WHOSE FIXED PARAMETERS ARE EACH ONE WORD STATES ITS FIRST ARGUMENTS:
+  // they are the first that many argument words, exactly, so they are read as stated words and only
+  // what the `...` takes is guessed, above them (`fallbackArgc`'s and the trim's `floor`). Read the
+  // way a call through argument register rN reads the registers below N (`lower`): one this
+  // function never wrote is its own argument passed on, and one a call destroyed names nothing and
+  // refuses (`SsaBuilder.finish`). So `int logv(const char *, int, ...)` lifts `logv(s + 1, c)` as
+  // `logv(a0 + 1, a1)`, where a guess from r0 sees r1 untouched and refuses the gap. A fixed list
+  // holding an UNSIZED spelling states no such words — the one may be two — and gets no floor; a
+  // fixed parameter known not to be one word has already refused (`refuseUnplacedByValue`).
+  const variadicFloor = (callee: string | undefined): number => {
+    const own = callee === undefined ? undefined : known(prototypes, callee);
+    const fixed = own?.params === undefined ? own?.variadicParams : undefined;
+    return fixed !== undefined && fixed.every((_, k) => paramClassOf(own!, fixed, k) === 'word') ? fixed.length : 0;
+  };
   // A GUESS SHORTER THAN THE DECLARATION REFUSES. A declaration the lowering cannot lay out (an
-  // UNSIZED spelling: `proto.ts` `declaredCallArgs`) or a variadic one, whose call is placed by the
-  // guess alone, still states how many parameters it has — fixed ones, for a variadic — and every
+  // UNSIZED spelling: `proto.ts` `declaredCallArgs`), or a variadic one whose fixed parameters
+  // include one, still states how many parameters it has — fixed ones, for a variadic — and every
   // one of them is at least one argument word. A guess that counts fewer registers has dropped
   // arguments: the last one passed through unchanged leaves its register with no definition, so
   // `void h(int, Foo)` with `Foo` unresolved lifts `h(n + 1, v)` as `h(a0 + 1)`. The count bounds
-  // the guess from below only — an unsized parameter may be two words, or a struct of several.
+  // the guess from below only — an unsized parameter may be two words, or a struct of several. A
+  // variadic call with a `variadicFloor` never reaches the bound: its guess starts there.
   //
   // KNOWN GAP: this bounds the count `fallbackArgc` takes, not what `SsaBuilder.finish` later
   // retracts from it (a register a call between the setup and this one destroyed).
@@ -679,11 +695,14 @@ export function callDeclarations(
     // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
     // the same answer the callee would get with no prototype at all.
     const { widths, returns } = p;
+    // the leading arguments a variadic declaration states, where the rest is guessed
+    const floor = widths === null ? variadicFloor(callee) : 0;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !placeholders?.has(v),
             gap: { name, at: guess.at, fail },
+            floor,
           })
         : wordsOf(widths, target);
     if (widths === null) {
@@ -734,7 +753,7 @@ export function callDeclarations(
       // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
       // the second reading anyway, since the structurer materialises an effectful call once
       // per result. Its words are wherever the frontend's ABI placed them.
-      args.push(w > 32 ? pairs!.fuse(word(k), word(k + 1)) : widths === null ? guessed(k) : word(k));
+      args.push(w > 32 ? pairs!.fuse(word(k), word(k + 1)) : widths === null && k >= floor ? guessed(k) : word(k));
       k += w > 32 ? 2 : 1;
     }
     // A 64-BIT VALUE MAY NOT LEAVE AS A WORD WHERE NOTHING SAYS HOW WIDE THE PARAMETER IS,
@@ -760,8 +779,9 @@ export function callDeclarations(
       // no prototype keys a call through a register, so the hint names one only for a named callee
       const theCall = indirect === undefined ? `the call to '${callee}'` : `the call through ${indirect.reg}`;
       const itsParams = indirect === undefined ? `'${callee}'s parameters` : "the function pointer's parameters";
+      // a stated fixed word (`variadicFloor`) takes a half as the narrowing its declaration authorises
       for (const [j, v] of args.entries()) {
-        const half = pairs.halfOf.get(v);
+        const half = j < floor ? undefined : pairs.halfOf.get(v);
         // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
         // reader to the wrong declaration: a double leaves a soft-float helper only into
         // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
@@ -845,6 +865,7 @@ export function callDeclarations(
               ),
         site.withholdsSetupArgs,
         site.asksEveryCut,
+        floor,
       );
     }
     if (p.declaredVoid) {

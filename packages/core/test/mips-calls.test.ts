@@ -199,6 +199,10 @@ describe('a guessed arity that cannot be decided refuses', () => {
       '1c:\taddiu\tsp,sp,24',
     ];
     expect(lift(body, [[0xc, 'R_MIPS_26', 'g']])).toThrow(/a2 holds a value and a1 holds none/);
+    // `int g(int, int, ...)` states its first two argument words, so a1 is this function's own
+    // argument passed on, and only a2, past them, is guessed (frontend/call-plan.ts `variadicFloor`)
+    const variadic = { g: { returns: 's32', variadicParams: ['s32', 's32'] } };
+    expect(src(body, [[0xc, 'R_MIPS_26', 'g']], variadic)).toContain('g(1, a1, 3)');
   });
 
   test('a pending %hi half is no argument', () => {

@@ -689,6 +689,17 @@ describe('the remaining families each name what a round would build', () => {
       'no-prototype-args',
     ],
     [
+      "lift: cannot lift 'vgap': the call at 0xc has a prototype stating only its first 2 arguments, a3 holds a " +
+        'value and a2 holds none — an argument register left at its incoming value and one the call does not ' +
+        'pass look the same',
+      'no-prototype-args',
+    ],
+    [
+      "lift: cannot lift 'passflt': `g` is declared to take 'float' as its parameter 2, which this target passes " +
+        'in general argument words that are not laid out here — the arity guess in its place drops an argument',
+      'no-prototype-args',
+    ],
+    [
       "structure: cannot structure 'dma_wait': a post-loop read reaches a temp the guarded body may never assign",
       'loop-exit-values',
     ],
@@ -1173,6 +1184,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
+    ['no-prototype-args', 'has a prototype stating only its first', 'packages/core/src/frontend/ssa.ts'],
     ['no-prototype-args', 'the arity guess in its place', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', 'is declared to return ', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', ' by value, and ', 'packages/core/src/frontend/call-plan.ts'],

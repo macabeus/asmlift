@@ -1160,15 +1160,27 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'int passmid(int, int);',
   },
-  // …AND THE SAME PASS-THROUGH TO A CALLEE THAT IS DECLARED, where the declaration states no layout
-  // the lowering can act on and the guess stands in for it. There a TRAILING argument passed on
-  // unchanged leaves no gap: `logv(s + 1, c)` sets the first argument register and leaves `c` in the
-  // second, the bytes of `logv(s + 1)`. A variadic declaration is placed by the guess alone, and it
-  // states two fixed parameters, so a guess of one refuses (frontend/call-plan.ts
-  // `refuseShortOfDeclared`) on every frontend. agbcc lays out a `double` in general words and a
-  // `float` not at all, so `g(int, float)` refuses there too (`refuseUnplacedFloat`); a target
-  // with an FPU refuses it already, so that row is agbcc's alone. Both declined witnesses: each
-  // lifted the dropped call before.
+  // …AND THE SAME PASS-THROUGH TO A CALLEE THAT IS DECLARED, where the declaration states no
+  // layout for all of its arguments and a guess stands in for the rest. There a TRAILING argument
+  // passed on unchanged leaves no gap: `logv(s + 1, c)` sets the first argument register and leaves
+  // `c` in the second, the bytes of `logv(s + 1)`. A variadic declaration whose fixed parameters are
+  // each one word states its first argument words exactly, so they are read as stated and only what
+  // the `...` takes is guessed, above them (frontend/call-plan.ts `variadicFloor`): `passvar` lifts
+  // `logv(a0 + 1, a1)`, and `passfmt`, the `DebugPrintf(fmt, …)` shape, keeps the format it passes
+  // through below a set-up argument where a guess from the first register refuses the gap. On
+  // main, agbcc lifted both as the dropped call and ido7.1, gcc2.7.2kmc and gcc2.7.2 lifted
+  // `passvar` so. mwcc's variadic call clears a condition-register bit (`crclr`), which the PowerPC
+  // frontend does not model, so those cells decline. agbcc lays out a `double` in general
+  // words and a `float` not at all, so `g(int, float)` refuses there (`refuseUnplacedFloat`); a
+  // target with an FPU refuses it already, so that row is agbcc's alone, a declined witness.
+  {
+    sym: 'passfmt',
+    src: 'int dprint(const char *, ...);\nint passfmt(const char *s){ return dprint(s, 1) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int dprint(const char *, ...);\nint passfmt(const char *);',
+    proto: { dprint: { returns: 'int', variadicParams: ['const char *'] } },
+  },
   {
     sym: 'passvar',
     src: 'int logv(const char *, int, ...);\nint passvar(const char *s, int c){ return logv(s + 1, c); }',

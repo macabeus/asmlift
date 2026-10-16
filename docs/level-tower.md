@@ -738,8 +738,15 @@ passes `Q` off an `extern struct Q`. Where no rule places a declared by-value
 parameter at all (no layout, a union, a target with no word rule, an 8-aligned struct at an odd
 word), the call refuses on every target (`refuseUnplacedByValue`) rather than take the arity
 guess, which would drop the struct or split it into separate arguments. A variadic declaration's
-call is placed by that guess alone, so it refuses where any of its fixed parameters
-(`variadicParams`) is not one word: a struct, a 64-bit value or a floating type (`variadicRefusal`). The call names the operand it passes by value (`byValue`), the audit judges a frame one as
+fixed parameters (`variadicParams`) are its only layout. Where each is one word they are the first
+that many argument words, read as stated, so one this function passes through untouched is its own
+argument and one a call destroyed refuses; only what the `...` takes is guessed, above them, and a
+gap there refuses as for an undeclared callee (frontend/call-plan.ts `variadicFloor`). Where one is
+a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
+unsized spelling, which may be two words, the guess places the call from the first register. Every
+parameter is at least one word, so a guess that counts fewer registers than that declaration's fixed
+parameters, or than an unsized plain list's parameters (`void h(int, Foo)` with `Foo` unresolved),
+has dropped an argument passed through untouched, and refuses (`refuseShortOfDeclared`). The call names the operand it passes by value (`byValue`), the audit judges a frame one as
 the struct and counts the call as a read of it (`byValueReads`), and the one-object answer is
 withheld, since a call handed the one object would pass a pointer. Structure spells the operand
 bare, `take2(sp0)` or `sub_0803D4AC(a0, gUnk_03003620)`, and the declarations block defines the

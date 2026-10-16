@@ -4336,11 +4336,14 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
     expect(() => decompile('pr', PR, ARMV4T_AGBCC)).toThrow(GAP);
   });
 
-  // `int logv(const char *fmt, ...)`: a variadic declaration states no arity, so the call is guessed
-  test('…and so does the same call to a callee declared variadic', () => {
-    expect(() =>
-      decompile('pr', PR, ARMV4T_AGBCC, { prototypes: { logv: { returns: 's32', variadicParams: ['const char *'] } } }),
-    ).toThrow(GAP);
+  // `int logv(const char *fmt, ...)`: a variadic declaration states its fixed word, so r0 is passed
+  // as stated and only what the `...` takes is guessed — `1`, in r1. An unsized fixed parameter
+  // states no word, and the guess from r0 refuses the gap as for an undeclared callee.
+  test('…and the same call to a callee declared variadic passes its stated fixed word', () => {
+    const variadic = (fixed: string) =>
+      decompile('pr', PR, ARMV4T_AGBCC, { prototypes: { logv: { returns: 's32', variadicParams: [fixed] } } }).source;
+    expect(variadic('const char *')).toContain('logv(a0, 1) + 1');
+    expect(() => variadic('Fmt')).toThrow(GAP);
   });
 
   // CONTROL: a declaration that states the arity passes both
@@ -4416,9 +4419,31 @@ describe('a declared callee whose parameters are not laid out does not lose its 
     ).toContain('g(a0 + 1, a1 + 2)');
   });
 
-  // `int logv(const char *, int, ...); int vs(const char *s, int c){ return logv(s + 1, c); }`
-  test('a guess shorter than a variadic declaration`s fixed parameters refuses', () => {
-    expect(() => lift({ g: { returns: 's32', variadicParams: ['const char *', 's32'] } })).toThrow(
+  // `int logv(const char *, int, ...); int vs(const char *s, int c){ return logv(s + 1, c); }`: the
+  // fixed parameters are each one word, so they are the first two argument words, and the guess
+  // stands in only for what the `...` takes, above them
+  test('a variadic declaration`s one-word fixed parameters are read as stated, and only the rest is guessed', () => {
+    expect(lift({ g: { returns: 's32', variadicParams: ['const char *', 's32'] } })).toContain('g(a0 + 1, a1)');
+    // past the fixed words the guess still refuses a gap: r3 set up above an r2 left at its incoming value
+    const gap = 'fj:\n\tpush\t{lr}\n\tadd\tr3, #0x1\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() =>
+      decompile('fj', gap, ARMV4T_AGBCC, {
+        prototypes: { g: { returns: 's32', variadicParams: ['const char *', 's32'] } },
+      }),
+    ).toThrow(/has a prototype stating only its first 2 arguments, r3 holds a value and r2 holds none/);
+    // a stated fixed word a call destroyed names nothing, and refuses rather than pass the callee's leftover
+    const destroyed = 'fj:\n\tpush\t{lr}\n\tadd\tr0, #0x1\n\tbl\th\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() =>
+      decompile('fj', destroyed, ARMV4T_AGBCC, {
+        prototypes: { g: { returns: 's32', variadicParams: ['const char *', 's32'] } },
+      }),
+    ).toThrow(/r1 is read on a path where a call has destroyed it/);
+  });
+
+  // `int logu(const char *, Foo, ...);` with `Foo` unresolved: an unsized fixed parameter may be two
+  // words, so it states no floor, and a guess short of the count refuses
+  test('a guess shorter than a variadic declaration`s unsized fixed parameters refuses', () => {
+    expect(() => lift({ g: { returns: 's32', variadicParams: ['const char *', 'Foo'] } })).toThrow(
       /`g` is declared with 2 fixed parameters before its `...`, which no layout here places/,
     );
   });

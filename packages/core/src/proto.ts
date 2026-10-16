@@ -59,9 +59,11 @@ export interface FnProto {
   /** The FIXED parameters of a VARIADIC declaration, spelled as a typed `params` list spells them.
    *  Such a declaration states no `params`, because its arity is the call's and a list would read
    *  as the whole of it; `wordParams` and `byValueParams` index into this list instead. A context
-   *  states it (`prototypesFromContext`). Read only to refuse a call (`variadicRefusal`): the call
-   *  is placed by the arity guess, which reads argument words one by one, so a fixed parameter that
-   *  is not one word is split or dropped: `void takeV(struct W, ...)` would lift
+   *  states it (`prototypesFromContext`). Read for two things, and never as a layout of its own.
+   *  Where each fixed parameter is one word, they are the call's first argument words, and only
+   *  what the `...` takes is guessed (frontend/call-plan.ts `variadicFloor`). Where one is not, the
+   *  call refuses (`variadicRefusal`): the arity guess reads argument words one by one, so a fixed
+   *  parameter that is not one word is split or dropped: `void takeV(struct W, ...)` would lift
    *  `takeV(*(s32 *)&gW, 5)`, which compiles against the header. */
   variadicParams?: ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
