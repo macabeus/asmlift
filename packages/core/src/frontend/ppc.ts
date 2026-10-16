@@ -573,8 +573,8 @@ const PARAM_AREA_AT = 8;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
- *  none — a linked image, or an objdump without `-r` — is an ordinary call to an unnamed target, and
- *  the frame address its routine would have consumed then refuses at the end of `lift`. */
+ *  none — a linked image, or an objdump without `-r` — is no routine, and `case 'bl'` refuses it
+ *  there as a call with no callee symbol. */
 const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
   ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24'
     ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
@@ -1462,9 +1462,9 @@ function liftOnce(
    *    routine (`saveRoutineOf`), which takes it in the target's `registerSaveRoutines.frameReg`, so
    *    that register is the only destination deferred; every other `addi rD,r1,N` refuses where it
    *    stands. Any other use is the frame read as data, and refuses as the `addi` itself would. One
-   *    no routine took refuses too, even where nothing reads it (`assertNonValuesConsumed`): a `bl`
-   *    to the routine that carries no relocation (a linked image, or objdump without `-r`) is lowered
-   *    as an ordinary call, which never reads r11 and destroys the registers the routine preserves.
+   *    no routine took refuses too, even where nothing reads it (`assertNonValuesConsumed`). A `bl`
+   *    to the routine that carries no relocation (a linked image, or objdump without `-r`) never gets
+   *    that far: it is no routine, and `case 'bl'` refuses it as a call with no callee symbol.
    *  - `restored`: the caller's value a restore puts back in a callee-saved register
    *    (`restoreFrom`). No C value names it, so it has no consumer.
    *  - `return-address`: what `mflr rD` copies out of the link register, with the address of the
