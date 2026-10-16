@@ -441,6 +441,12 @@ const KMC_PC: Fixture = {
   ],
 };
 
+// gcc2.7.2kmc `struct S1w rmk1(s32 x){ struct S1w r; r.x = x + 1; return r; }`: the callee's half
+const KMC_RMK1: Fixture = {
+  lines: ['0:\tmove\tv0,a0', '4:\taddiu\ta1,a1,1', '8:\tjr\tra', 'c:\tsw\ta1,0(v0)'],
+  rs: [],
+};
+
 // `void sret1w(s32 x){ struct S1w s = mk1(x); gW = s.x; }` and its 8- and 12-byte twins reading
 // `s.a` and `s.b` (or `s.c`); `void sret2(s32 x){ struct S2 s = mk2(x); gOut = s.h; }`;
 // `void sret5(s32 a, s32 b, s32 c, s32 d){ struct S8 s = mk5(a, b, c, d); gW = s.b; }`
@@ -524,5 +530,21 @@ describe('a struct passed by value beside the hidden pointer', () => {
     expect(() => lift('c8', KMC_C8, MIPS_GCC)).toThrow(
       /`tk` takes 'struct L' by value as its parameter 1, and it is aligned to 8 and would start at an odd argument word/,
     );
+  });
+});
+
+// The function's own declaration is the caller's to state (a context's is left out, as the map's is)
+describe('a function that itself returns a struct', () => {
+  test('refuses where its declaration is stated', () => {
+    const prototypes = { ...PROTOS, rmk1: returning('S1w', layout(['x', 'u32']), ['s32']) };
+    expect(() =>
+      decompile('rmk1', obj('rmk1', KMC_RMK1.lines), MIPS_GCC, { asmData: relocs(KMC_RMK1.rs), prototypes }),
+    ).toThrow(
+      /cannot lift 'rmk1': it is declared to return struct S1w by value, and O32 returns that through a hidden pointer in a0/,
+    );
+  });
+
+  test('is the pointer function it compiles to where nothing states it', () => {
+    expect(lift('rmk1', KMC_RMK1, MIPS_GCC)).toMatch(/s32 \* rmk1\(s32 \*a0, s32 a1\)/);
   });
 });

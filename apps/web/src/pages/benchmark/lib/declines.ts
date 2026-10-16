@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 239 distinct decline messages (the texts reached by
+// `packages/core/src` throws 240 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -590,7 +590,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // TWO MORE THROWS ARE THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
     // for a call that does lower but whose hidden pointer is not a local of this frame (a global, a
     // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2 — or is a
-    // local's address that reaches the call through a merge (no row reaches it).
+    // local's address that reaches the call through a merge (no row reaches it). And
+    // `frontend/mips.ts`'s refusal of a function whose own stated declaration returns a struct (the
+    // callee's half), which opens on the same clause as `plan`'s; no row states its own.
     //
     // ITS FIRST INHABITANTS WERE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc, before O32
     // stated its return rule; it is `sret12` on mwcc_242_81 now, which the PowerPC lowering does not
