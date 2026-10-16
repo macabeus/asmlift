@@ -2230,7 +2230,15 @@ function liftOnce(
             saveRoutine(ins, routine);
             break;
           }
-          const sym = ins.reloc?.sym ?? 'func';
+          // A `bl` no relocation names is a call the assembler resolved to an offset in this
+          // section — into this function's own body, or to a neighbour — and has no name to call.
+          if (ins.reloc?.type !== 'R_PPC_REL24') {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': the 'bl' at 0x${ins.addr.toString(16)} has no callee symbol — no ` +
+                `R_PPC_REL24 relocation names it, so it calls an offset in this section, which has no name to call it by`,
+            );
+          }
+          const sym = ins.reloc.sym;
           calls.lower({
             callee: sym,
             ssa,

@@ -11,7 +11,7 @@ import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO, PPC_MWCC, targetFor } from '../src/target';
 
 /** An objdump listing of `f` from instruction lines, four bytes apart. `L:` on its own line labels the
- *  next instruction; `@L` in an operand is that label's address; `#HA sym` / `#LO sym` after an
+ *  next instruction; `@L` in an operand is that label's address; `#HA sym` / `#LO sym` / `#REL24 sym` after an
  *  instruction attaches that PPC relocation. Returns the listing and the label addresses. */
 function listing(lines: string[], head = '00000000 <f>:'): { asm: string; at: Map<string, number> } {
   const at = new Map<string, number>();
@@ -37,7 +37,11 @@ function listing(lines: string[], head = '00000000 <f>:'): { asm: string; at: Ma
     out.push(`${pc.toString(16).padStart(4)}:\t${text}`);
     if (reloc) {
       const [kind, sym] = reloc.split(' ');
-      out.push(`\t\t\t${(pc + 2).toString(16)}: R_PPC_ADDR16_${kind}\t${sym}`);
+      out.push(
+        kind === 'REL24'
+          ? `\t\t\t${pc.toString(16)}: R_PPC_REL24\t${sym}`
+          : `\t\t\t${(pc + 2).toString(16)}: R_PPC_ADDR16_${kind}\t${sym}`,
+      );
     }
     pc += 4;
   }
@@ -502,7 +506,7 @@ test('…but with no declaration, a word computed only to be returned shows the 
       'mflr    r0',
       'stw     r0,4(r1)',
       'stwu    r1,-8(r1)',
-      'bl      0 <f>',
+      'bl      0 <f> #REL24 g',
       'addi    r1,r1,8',
       'lwz     r0,4(r1)',
       'mtlr    r0',

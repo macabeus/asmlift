@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import type { AsmData } from '../src/frontend/asmdata';
 import { lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
-import { PPC_MWCC } from '../src/target';
+import { PPC_MWCC, targetFor } from '../src/target';
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 
@@ -82,7 +82,7 @@ describe('PPC frontend robustness', () => {
     // `if (a0 != 0)`, a test of flags the callee was free to overwrite.
     const asm =
       '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tcmpwi   r3,0\n' +
-      '10:\tbl      10 <cc+0x10>\n14:\tbeq-    24 <cc+0x24>\n18:\tli      r3,1\n1c:\tb       28 <cc+0x28>\n' +
+      '10:\tbl      10 <cc+0x10>\n\t\t\t10: R_PPC_REL24\tg\n14:\tbeq-    24 <cc+0x24>\n18:\tli      r3,1\n1c:\tb       28 <cc+0x28>\n' +
       '24:\tli      r3,2\n28:\tlwz     r0,20(r1)\n2c:\tmtlr    r0\n30:\taddi    r1,r1,16\n34:\tblr\n';
     expect(() => dis('cc', asm)).toThrow('tests cr0, but the call at 0x10 destroyed it');
   });
@@ -167,7 +167,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         // ARGUMENT register is left empty below one that holds a value — the arity guard below has
         // nothing to say here and the CTR clobber is what this case is about.
         '0:\tli      r31,0\n4:\tmtctr   r3\n8:\tcmpwi   r3,0\nc:\tble     20 <callloop+0x20>\n' +
-          '10:\tbl      40 <foo>\n14:\tadd     r31,r31,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
+          '10:\tbl      40 <foo>\n\t\t\t10: R_PPC_REL24\tfoo\n14:\tadd     r31,r31,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
           '20:\tmr      r3,r31\n24:\tblr\n',
       ),
     ).toThrow(/CTR loop body contains 'bl'.*clobbers CTR/);
@@ -182,11 +182,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const src = dis(
       'f',
       framed(
-        '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\nc:\tli      r3,1\n10:\tbl      50 <bar>\n14:\tblr\n',
+        '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\n\t\t\t8: R_PPC_REL24\tfoo\n' +
+          'c:\tli      r3,1\n10:\tbl      50 <bar>\n\t\t\t10: R_PPC_REL24\tbar\n14:\tblr\n',
       ),
     );
-    expect(src).toContain('func(1)');
-    expect(src).not.toContain('func(1, 7)');
+    expect(src).toContain('bar(1)');
+    expect(src).not.toContain('bar(1, 7)');
   });
 
   // The other half of the same question. A guessed arity counts CONTIGUOUSLY from r3, so an empty
@@ -198,14 +199,17 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // multiply and five arguments gone. The function's own arity is precisely what is missing here,
   // so the gap refuses.
   test('a guessed arity with a GAP in the argument registers refuses, rather than dropping the tail', () => {
-    expect(() => dis('gap', '0:\tli      r5,3\n4:\tbl      40 <foo>\n8:\tblr\n')).toThrow(
+    expect(() => dis('gap', '0:\tli      r5,3\n4:\tbl      40 <foo>\n\t\t\t4: R_PPC_REL24\tfoo\n8:\tblr\n')).toThrow(
       /r5 holds a value and r3 holds none — an argument register left at its incoming value/,
     );
   });
   test('control: no gap, so the contiguous count stands', () => {
-    expect(dis('nogap', framed('0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n'))).toContain(
-      'func(1, 3)',
-    );
+    expect(
+      dis(
+        'nogap',
+        framed('0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\n\t\t\t8: R_PPC_REL24\tfoo\nc:\tblr\n'),
+      ),
+    ).toContain('foo(1, 3)');
   });
   // A DECLARATION THIS FRONTEND CANNOT HONOUR IS A REFUSAL, NOT AN ARITY. `void llsink(long long)`
   // spends two argument registers on one parameter, and this frontend turns every argument
@@ -289,12 +293,34 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // `bl` with the callee recovered from the interleaved R_PPC_REL24 relocation (an unresolved bl in
   // a .o encodes a 0 offset placeholder; the name lives only in the relocation).
   test('bl recovers the callee symbol from the R_PPC_REL24 relocation line', () => {
-    // The bl's encoded target is a 0 placeholder; the name `g` lives only in the relocation. It is
-    // recovered as the call target (not the `func` fallback used when no relocation is present).
+    // The bl's encoded target is a 0 placeholder; the name `g` lives only in the relocation.
     const src = dis('callsym', framed('0:\tbl      4 <callsym+0x4>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n'));
     expect(src).toContain('g(');
-    expect(src).not.toContain('func');
   });
+
+  // A `bl` with no relocation is one the assembler resolved inside this section: in these hand-written
+  // asm functions, into the function's own body. Each lifted a call to an invented `func` on all three
+  // mwcc builds (`q_localfall` as `func(); return 7;`, `q_local` as `return func();`).
+  test.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const)(
+    'on %s, a `bl` no relocation names declines',
+    (tc) => {
+      const { target } = targetFor(tc, ['-O4,p']);
+      const NO_CALLEE = /the 'bl' at 0x4 has no callee symbol — no R_PPC_REL24 relocation names it/;
+      const lift = (name: string, body: string) => () => decompile(name, `0 <${name}>:\n${body}`, target);
+      expect(
+        lift(
+          'q_localfall',
+          '0:\tmflr    r31\n4:\tbl      8 <q_localfall+0x8>\n8:\tmtlr    r31\nc:\tli      r3,7\n10:\tblr\n',
+        ),
+      ).toThrow(NO_CALLEE);
+      expect(
+        lift(
+          'q_local',
+          '0:\tmflr    r31\n4:\tbl      10 <q_local+0x10>\n8:\tmtlr    r31\nc:\tblr\n10:\tli      r3,7\n14:\tblr\n',
+        ),
+      ).toThrow(NO_CALLEE);
+    },
+  );
 
   // rlwinm right-shift extract `(x>>n)&m` (ME=31) — modelled as shift + mask. The rotate makes
   // the shift LOGICAL, which is what the lift records (`shr_u`); over the `s32`-declared `a0` a
@@ -349,10 +375,10 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         's32 gs(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
       );
     });
-    test('a routine call with no relocation is no routine, and its frame address refuses', () => {
+    test('a routine call with no relocation is no routine, and refuses', () => {
       // A linked image, or objdump without `-r`: `bl <_savegpr_NN>` names its target only in the
-      // text, so it is lowered as an ordinary call that destroys r3..r12 and never reads r11. Lifted
-      // that way, the routine's "return value" would stand for the argument it preserves.
+      // text. Lowered as an ordinary call, the routine's "return value" would stand for the argument
+      // it preserves; a `bl` no relocation names is no call either.
       const bare = (sym: string) => `bl      200 <${sym}>`;
       const asm = lines(
         'stwu    r1,-32(r1)',
@@ -366,7 +392,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         bare('_restgpr_30'),
         ...EPI,
       );
-      expect(() => dis('bare', asm)).toThrow(/stack pointer r1 used as data/);
+      expect(() => dis('bare', asm)).toThrow(/the 'bl' at 0x10 has no callee symbol/);
     });
     test('the routine preserves r0: the return address `mflr` left there is still read as one', () => {
       // synthetic uninit_spill: a path that reads r0 with nothing else written reads the return
