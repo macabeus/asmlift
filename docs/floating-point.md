@@ -335,7 +335,14 @@ pass hands a double to a parameter an ordinary callee is declared to take as one
 two argument words wherever they fall (`synthetic:stkwide:agbcc`, `dreg`, `dsplit`). A double
 reaches either only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
 register, so a load, a store or a read of one word refuses (`test/soft-double.test.ts`,
-`test/double-args.test.ts`), and two constant words are a literal read high word first, an `fconst`. The
-compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
-ordinary calls: the IR has no int<->float op to fold them into, and naming one would decline the
-functions that pass through them.
+`test/double-args.test.ts`), and two constant words are a literal read high word first, an `fconst`.
+A `float` is the same story in one register: `__addsf3`, `__subsf3`, `__mulsf3`, `__divsf3` and
+`__negsf2` fold the same way over an `f32` (`synthetic:fadd:agbcc`, `fma1`, `fneg`). Left unnamed they
+were wrong C that matched: a call nothing declares is lifted at a GUESSED arity, and the guess drops
+an argument passed on unchanged, so `a * b + c` published as `__addsf3(__mulsf3(), a2)`. A helper
+result nothing reads refuses (`synthetic:fcall:agbcc`): agbcc deletes a helper call whose result is
+dead, so the reader was a guessed call after it that took the result in r0, and folding would delete
+the arithmetic. The compares and the conversions of both precisions (`__gtsf2`, `__fixsfsi`,
+`__floatsidf`, `__extendsfdf2` …) are named too, with no op: the IR has no int<->float op to fold
+one into, so a call to one declines naming the runtime (`synthetic:f2i:agbcc`, `i2f`, `fcmp`,
+`fconv`), where unnamed each was the same guess, `(int)x` published as `__fixsfsi()`.
