@@ -542,7 +542,7 @@ describe('a function that itself returns a struct', () => {
     expect(() =>
       decompile('rmk1', obj('rmk1', KMC_RMK1.lines), MIPS_GCC, { asmData: relocs(KMC_RMK1.rs), prototypes }),
     ).toThrow(
-      /cannot lift 'rmk1': it is declared to return struct S1w by value, and O32 returns that through a hidden pointer in a0/,
+      /cannot lift 'rmk1': it is declared to return struct S1w by value, and this target returns that through a hidden pointer in a0/,
     );
   });
 

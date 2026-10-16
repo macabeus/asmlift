@@ -912,7 +912,8 @@ MIPS and Thumb pass it, and PowerPC refuses a call that would. THE CALLEE HALF, 
 that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
 returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. Its
 own declaration is left out of a context's prototypes (`withContextPrototypes`), so nothing there
-contradicts that; MIPS refuses it where the caller states that declaration, and Thumb does not ask.
+contradicts that; where the caller states that declaration, every frontend refuses it (`call-plan.ts`
+`callDeclarations`).
 A symbol map states a
 signless return of a word or less as nothing, since it is an enum as often as a struct; and a
 context return spelled by a typedef the reader never saw keeps its parameters.

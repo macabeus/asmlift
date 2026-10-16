@@ -568,3 +568,40 @@ describe('a callee declared to return a struct or union by value', () => {
     );
   });
 });
+
+// THE CALLEE HALF IS NOT MODELLED on any frontend (call-plan.ts `callDeclarations`). agbcc's
+// `struct S8 rmk8(s32 x){ struct S8 s; s.a = x; s.b = x + 1; return s; }` stores through the r0 it
+// was handed, and lifted as is it is `s32 *rmk8(s32 *a0, s32 a1)`; mwcc_242_81's `rmk12`, a
+// 12-byte struct, stores through r3. A struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`)
+// is the lift's own return.
+describe('a function that itself returns a struct', () => {
+  const u32s = (...names: string[]) => ({
+    kind: 'struct' as const,
+    members: names.map((name) => ({ name, type: 'u32' })),
+  });
+  test('through memory, it refuses where its declaration is stated, on agbcc', () => {
+    const rmk8 = 'rmk8:\n\tadd\tr2, r1, #0\n\tadd\tr3, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr3, [r0, #0x4]\n\tbx\tlr\n';
+    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
+    expect(() => decompile('rmk8', rmk8, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /cannot lift 'rmk8': it is declared to return struct S8 by value, and this target returns that through a hidden pointer in r0/,
+    );
+    expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, {}).source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
+  });
+
+  test('through memory, it refuses where its declaration is stated, on mwcc', () => {
+    const rmk12 =
+      '14 <rmk12>:\n14:\tstwu    r1,-32(r1)\n18:\taddi    r5,r4,1\n1c:\taddi    r0,r4,2\n20:\tstw     r4,0(r3)\n' +
+      '24:\tstw     r5,4(r3)\n28:\tstw     r4,8(r1)\n2c:\tstw     r5,12(r1)\n30:\tstw     r0,16(r1)\n' +
+      '34:\tstw     r0,8(r3)\n38:\taddi    r1,r1,32\n3c:\tblr\n';
+    const prototypes = { rmk12: { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') } };
+    expect(() => decompile('rmk12', rmk12, PPC_MWCC, { prototypes })).toThrow(
+      /cannot lift 'rmk12': it is declared to return struct S12 by value, and this target returns that through a hidden pointer in r3/,
+    );
+  });
+
+  test('in the return register, it lifts', () => {
+    const rmk1 = 'rmk1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
+    const prototypes = { rmk1: { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') } };
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+  });
+});

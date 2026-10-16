@@ -937,9 +937,10 @@ export interface TargetDescription {
     //     alike (compiled: `{u8}`, `{u16}`, `{u32}`, `{float}`, `{double}`, 4-, 8- and 12-byte
     //     structs, `union {u32; u16;}` and `{u32 a:8; u32 b:8;}` are each handed `addiu a0,sp,N`
     //     ahead of the `jal`, with the declared arguments from a1 on, and the callee returns that
-    //     pointer, `move v0,a0`). Only the caller's half is lowered (frontend/call-plan.ts); a
-    //     function that itself returns a struct refuses where its declaration is stated, and is
-    //     read as the pointer function it compiles to where it is not (frontend/mips.ts).
+    //     pointer, `move v0,a0`).
+    // Under every rule only the caller's half is lowered (frontend/call-plan.ts); a function that
+    // itself returns a struct through memory refuses where its declaration is stated, and is read
+    // as the pointer function it compiles to where it is not (call-plan.ts `callDeclarations`).
     // ABSENT ⇒ unmeasured, and such a call declines.
     aggregateReturn?: 'apcs' | 'svr4' | 'memory';
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free

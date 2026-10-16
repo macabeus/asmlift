@@ -18,11 +18,10 @@
 // with no consuming branch (e.g. `return a>b` → `slt v0,a1,a0`) stays an icmp value. Unsigned
 // compares (`sltu`/`sltiu`) lower to `icmp_ult`; recover types their operands u32 so the backend
 // re-emits `sltu` (the operator is the same `<` — the signedness lives in the operand types).
-import { returnedAggregate, returnsInMemory } from '../aggregate';
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaresAggregateReturn, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
+import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -1375,20 +1374,6 @@ function liftOnce(
   const fail: FrontendRefusal = (message) => {
     throw new FrontendUnsupportedError(message);
   };
-  // THE CALLEE HALF OF `aggregateReturn: 'memory'` IS NOT MODELLED. A function declared to return a
-  // struct or union by value is handed its caller's hidden pointer in a0 and returns it in v0, so
-  // its declared parameters sit one register up and its result is a run of stores through a0.
-  // Lifted as is, it is `s32 *f(s32 *a0, s32 a1)`: the machine code's function, and not the one
-  // the declaration names, so where the caller states that declaration it refuses rather than
-  // publish a signature that contradicts it. A context's own entry for the function is left out
-  // (`withContextPrototypes`), and there the pointer function is all the lift is told.
-  if (declaresAggregateReturn(own) && returnsInMemory(returnedAggregate(own!), target) !== false) {
-    fail(
-      `cannot lift '${name}': it is declared to return ${own!.returns ?? 'a struct or union'} by value, and O32 returns that ` +
-        `through a hidden pointer in ${target.argRegs[0]}, which the function hands back in ${target.returnReg} — ` +
-        'a function that itself returns a struct through a hidden pointer is not modelled',
-    );
-  }
   const highHalves = makeHighHalves({ hi: '%hi', hiArticle: 'a', lo: '%lo', fail });
   /** The jump-table bases a recovered dispatch reads from outside its own block — the `%lo` that
    *  completes one defines no value but the base (frontend/jump-table.ts). */
