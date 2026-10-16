@@ -1387,14 +1387,15 @@ function liftOnce(
     has: (v: Value) => highHalves.has(v) || tableBases.has(v),
     guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
   };
-  // O32 passes the words past a0..a3 on the stack and returns a word in v0. This lowering builds no
-  // register pair and receives no struct through a hidden pointer, so the plan refuses both. A call
-  // through an argument register bounds no arity here: a leading float leaves a0 free.
+  // O32 passes the words past a0..a3 on the stack, returns a word in v0, and returns every struct
+  // and union through a hidden pointer in a0 (`aggregateReturn: 'memory'`). This lowering builds no
+  // register pair, so the plan refuses one. A call through an argument register bounds no arity
+  // here: a leading float leaves a0 free.
   const calls = callDeclarations(
     name,
     target,
     prototypes,
-    { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
+    { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call

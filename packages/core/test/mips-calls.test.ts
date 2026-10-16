@@ -284,7 +284,9 @@ describe('what this lowering cannot carry out refuses', () => {
     expect(lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], { g }, MIPS_GCC)).toThrow(message);
   });
 
-  test('a callee declared to return a struct', () => {
+  // the struct comes back through the pointer in a0 (mips-struct-return.test.ts), so the v0 this
+  // fixture reads past the call is the callee's
+  test('a callee declared to return a struct, whose v0 is read', () => {
     expect(
       lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], {
         g: {
@@ -293,7 +295,7 @@ describe('what this lowering cannot carry out refuses', () => {
           returnLayout: { kind: 'struct', members: [{ name: 'a', type: 's32' }] },
         },
       }),
-    ).toThrow(/'g' is declared to return struct S by value — a struct returned through a hidden pointer/);
+    ).toThrow(/v0 is read on a path where a call has destroyed it/);
   });
 
   test('a call in a function that uses the FPU', () => {
