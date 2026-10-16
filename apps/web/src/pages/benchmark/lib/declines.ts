@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 233 distinct decline messages (the texts reached by
+// `packages/core/src` throws 234 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 108 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -73,13 +73,14 @@
 //                               return address (after a `bl` nothing put the saved address back
 //                               from, or through an `mtlr` of anything else), and a `b` out of
 //                               the function (a tail call)
-//   frontend/mips.ts        15  a relocation with an addend, an address below the symbol, a
+//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, a
 //                               non-numeric immediate, the caller's value a restore writes
 //                               read as a value (at the read, or through a merge), five refusals
 //                               about a disassembly the reader cannot account for, a `jal` no
 //                               relocation names, one relocated against a section, one in a delay
-//                               slot, one whose own slot is not the next word of its block, and a
-//                               `j` to another function (a tail call)
+//                               slot, one whose own slot is not the next word of its block, a
+//                               `j` to another function (a tail call), and a `jr ra` that may not
+//                               jump to the caller's return address
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)

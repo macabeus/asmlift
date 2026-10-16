@@ -830,6 +830,182 @@ function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): Rea
 // branching block; leaders are the entry, every branch target, and each conditional branch's
 // fall-through. A branch-LIKELY's slot is not consumed — it becomes its own block (see
 // `normaliseBranchLikely`). Unreachable trailing blocks (padding `nop`s) are dropped.
+/** What the return proof knows at one point: which registers hold the caller's return address on
+ *  every path (`regs`, `ra` among them while it is untouched), the instruction that last wrote
+ *  something else into `ra` on some path (`lost`), the entry-`sp` offset of the word it was saved
+ *  in (`slot`), and `sp`'s depth below its entry value (`depth`), each null where unknown. */
+interface RaState {
+  readonly regs: ReadonlySet<string>;
+  readonly lost: Instr | null;
+  readonly slot: number | null;
+  readonly depth: number | null;
+}
+
+/** Bytes a store mnemonic writes, or undefined for an instruction that stores nothing. `swl`/`swr`
+ *  write part of the aligned word around their address, so they are taken to reach the whole word
+ *  either side of it. */
+const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
+  sb: [0, 1],
+  sh: [0, 2],
+  sw: [0, 4],
+  sc: [0, 4],
+  swc1: [0, 4],
+  swl: [3, 7],
+  swr: [3, 7],
+  sd: [0, 8],
+  sdc1: [0, 8],
+  sdl: [7, 15],
+  sdr: [7, 15],
+};
+
+/** EVERY `jr ra` OF THIS FUNCTION JUMPS TO THE CALLER'S RETURN ADDRESS, or the lift declines — the
+ *  MIPS half of what `refuseReturnsNotThroughCallersLr` asks of Thumb (frontend/thumb.ts).
+ *
+ *  `jr ra` reads as a return from its operand alone, and it is one only where `ra` holds the address
+ *  this function was called with. It reads `ra` when it runs, before its delay slot. A forward
+ *  dataflow over the blocks tracks where that address is:
+ *    • `ra` holds it at entry; a call (`jal`, and every linking branch) writes `ra` and destroys every
+ *      register O32 lets a callee destroy; a copy (`move`, `addu`/`or` with `zero`) carries it on;
+ *      any other write to a register — `lw ra,0(a0)`, `addiu ra,ra,8`, `lui ra` — loses it;
+ *    • a `sw` of a register holding it through `sp` puts it in that word, named by its offset from
+ *      the entry `sp` (this walk follows `addiu sp,sp,N`; any other write to `sp` makes the depth
+ *      unknown), and a `lw` from that word copies it back out. Any other store reaching those bytes,
+ *      a store through `sp` at an unknown depth, and a call whose home area (`[sp, sp+16)` at the
+ *      call) holds the word overwrite it.
+ *  Paths meet by agreement: a register or the word holds the address only if it does on every path
+ *  in, and a depth the paths disagree on is unknown.
+ *
+ *  So `move ra,a1; jr ra`, `lw ra,0(a0)`, `addiu ra,ra,8`, `lui ra,0x8000`, a `move ra` on one path
+ *  only, and a `jal` whose `ra` nothing reloaded all decline, where every compiler's `sw ra,N(sp)` …
+ *  `lw ra,N(sp)` and a leaf that never names `ra` are returns. A reload from a word another
+ *  register was saved in already refuses (`emitLoad`). No compiler emits a violation; hand-written
+ *  asm can, and it lifted as a C `return`. A tail call (`j` to another function) and an indirect
+ *  `jr` already refuse in `lift`, so `jr ra` is the only exit asked.
+ *
+ *  NOT ASKED: a store through a register holding a frame address is not traced to the save word.
+ *  A compiler addresses that word only through `sp`. */
+function refuseReturnsNotThroughCallersRa(
+  name: string,
+  blocks: readonly MipsBlock[],
+  succIdx: readonly number[][],
+  callerSaved: readonly string[],
+): void {
+  const canon = (r: string) => (r === '$ra' || r === '$31' ? 'ra' : r);
+  const join = (a: RaState, b: RaState): RaState => {
+    const regs = new Set([...a.regs].filter((r) => b.regs.has(r)));
+    const depth = a.depth !== null && a.depth === b.depth ? a.depth : null;
+    return {
+      regs,
+      lost: regs.has('ra') ? null : ((a.regs.has('ra') ? null : a.lost) ?? (b.regs.has('ra') ? null : b.lost)),
+      slot: depth !== null && a.slot !== null && a.slot === b.slot ? a.slot : null,
+      depth,
+    };
+  };
+  const same = (a: RaState, b: RaState) =>
+    a.lost === b.lost &&
+    a.slot === b.slot &&
+    a.depth === b.depth &&
+    a.regs.size === b.regs.size &&
+    [...a.regs].every((r) => b.regs.has(r));
+
+  const run = (bi: number, inState: RaState): RaState => {
+    const regs = new Set(inState.regs);
+    let { lost, slot, depth } = inState;
+    const b = blocks[bi];
+    for (const ins of [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])]) {
+      const mn = ins.mnemonic;
+      if (mn === 'jr' && canon(ins.ops[0] ?? '') === 'ra' && !regs.has('ra')) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the 'jr ra' at 0x${ins.addr.toString(16)} may not return through the caller's ` +
+            `return address — ` +
+            (lost === null
+              ? `ra does not hold it on some path`
+              : `on some path the '${lost.mnemonic}' at 0x${lost.addr.toString(16)} wrote ra, and no reload from ` +
+                `the word it was saved in put it back`),
+        );
+      }
+      const store = STORE_BYTES[mn];
+      if (store !== undefined) {
+        const mem = ins.ops[1] ?? '';
+        if (mem.includes('(') && isStackPtr(parseMem(mem).base)) {
+          const at = depth === null ? null : parseMem(mem).off + depth;
+          if (mn === 'sw' && at !== null && regs.has(canon(ins.ops[0]))) {
+            slot = at;
+          } else if (at === null || (slot !== null && at - store[0] < slot + 4 && at - store[0] + store[1] > slot)) {
+            slot = null;
+          }
+        }
+        continue;
+      }
+      if (isCallInstr(ins)) {
+        for (const r of [...callerSaved, 'ra']) {
+          regs.delete(r);
+        }
+        lost = ins;
+        if (slot !== null && (depth === null || (slot >= depth && slot < depth + STACK_ARGS_AT))) {
+          slot = null;
+        }
+        continue;
+      }
+      const w = writtenReg(ins);
+      if (w === null) {
+        continue;
+      }
+      const dest = canon(w);
+      const mem = ins.ops[1] ?? '';
+      const reload =
+        mn === 'lw' &&
+        slot !== null &&
+        depth !== null &&
+        mem.includes('(') &&
+        isStackPtr(parseMem(mem).base) &&
+        parseMem(mem).off + depth === slot;
+      const copy = copiedReg(ins);
+      const holds = reload || (copy !== undefined && regs.has(canon(copy)));
+      if (isStackPtr(dest)) {
+        depth =
+          depth !== null &&
+          /^addiu?$/.test(mn) &&
+          isStackPtr(ins.ops[1] ?? '') &&
+          /^-?(0x)?[0-9a-f]+$/i.test(ins.ops[2] ?? '')
+            ? depth + parseImm(ins.ops[2])
+            : null;
+      }
+      if (holds) {
+        regs.add(dest);
+      } else {
+        regs.delete(dest);
+        if (dest === 'ra') {
+          lost = ins;
+        }
+      }
+      if (dest === 'ra' && holds) {
+        lost = null;
+      }
+    }
+    return { regs, lost, slot, depth };
+  };
+
+  if (blocks.length === 0) {
+    return;
+  }
+  const into: Array<RaState | undefined> = blocks.map(() => undefined);
+  into[0] = { regs: new Set(['ra']), lost: null, slot: null, depth: 0 };
+  const work = [0];
+  while (work.length) {
+    const bi = work.pop()!;
+    const out = run(bi, into[bi]!);
+    for (const s of succIdx[bi]) {
+      const prev = into[s];
+      const next = prev === undefined ? out : join(prev, out);
+      if (prev === undefined || !same(prev, next)) {
+        into[s] = next;
+        work.push(s);
+      }
+    }
+  }
+}
+
 function toBlocks(
   instrs: Instr[],
   jts: Map<number, MipsJT>,
@@ -2369,6 +2545,13 @@ function liftOnce(
     declarations: { symbols, context },
   });
 
+  // Asked once everything else lifted, so a function that declines for another reason keeps it.
+  refuseReturnsNotThroughCallersRa(
+    name,
+    blocks,
+    blocks.map((b) => succAddrs.get(b)!.flatMap((a) => (idxOf.has(a) ? [idxOf.get(a)!] : []))),
+    target.callerSaved,
+  );
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
 }
