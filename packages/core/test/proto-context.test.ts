@@ -265,6 +265,40 @@ describe('prototypes from a declaration context', () => {
     expect(cpp.takeW).toBeUndefined();
   });
 
+  // `()` is compatible only with a list that is not variadic and whose parameters keep their types
+  // under the default argument promotions (C99 6.7.5.3p15). agbcc, gcc2.7.2kmc and gcc2.7.2 compile
+  // `void f(char); void f();` without a word and the call unprototyped, so reading it as `f(char)`
+  // would trim `f(1, 2)` to `f(1)`. An enum may be narrow (`-fshort-enums`), and a name never
+  // resolved may be `u8`: neither composes.
+  test('in C, a `()` declaration is one with a list only where no parameter is promoted', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned char u8; typedef int s32; typedef float F; enum E { A, B };
+       typedef struct { int x; } S; struct W { int x; };
+       void c(char); void c();
+       void cr(); void cr(char);
+       void sh(short, char); void sh();
+       void u(u8); void u();
+       void b(_Bool); void b();
+       void fl(F); void fl();
+       void e(enum E); void e();
+       void un(Unknown); void un();
+       void v(int, ...); void v();
+       void ok(s32, double, char *, struct W, S, int[4]); void ok();
+       void ov(void); void ov();
+       int rs(const char *restrict s, ...); int rs(const char *s, int n);
+       int ra(const char *restrict s, int n); int ra(const char *s);
+       int rk(const char *restrict s, int n); int rk(const char *s, int n);`,
+      'c',
+    );
+    for (const name of ['c', 'cr', 'sh', 'u', 'b', 'fl', 'e', 'un', 'v', 'rs', 'ra']) {
+      expect(p[name], name).toBeUndefined();
+    }
+    expect(p.ok).toMatchObject({ returnsVoid: true, byValueParams: [3, 4] });
+    expect(p.ok?.params).toHaveLength(6);
+    expect(p.ov).toEqual({ returnsVoid: true, params: [] });
+    expect(p.rk).toEqual({ returns: 'int', params: ['const char *', 'int'] });
+  });
+
   test('a parameter nothing sizes is listed where it still travels in one register', () => {
     // an enum, and an array or a function behind a typedef name, which the parameter adjusts to a
     // pointer; a struct or union is passed by value, and a name never seen states nothing

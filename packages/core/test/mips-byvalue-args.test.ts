@@ -542,3 +542,25 @@ describe('a struct passed by value on O32', () => {
     });
   });
 });
+
+// `void f(char); void f(); void g(void) { f(1, 2); }` — gcc2.7.2kmc and gcc2.7.2 compile the pair
+// without a word, and the later `()` wins: the call is compiled unprototyped. Read as `f(char)`, it
+// would lift as `f(1)`.
+describe('a `()` declaration beside a list a promotion changes', () => {
+  const AR3: Fixture = {
+    lines: [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,16(sp)',
+      '8:\tli\ta0,1',
+      'c:\tjal\t0 <g>',
+      '10:\tli\ta1,2',
+      '14:\tlw\tra,16(sp)',
+      '18:\tjr\tra',
+      '1c:\taddiu\tsp,sp,24',
+    ],
+    rs: [[0xc, 'R_MIPS_26', 'f']],
+  };
+  test.each(['void f(char); void f();', 'void f(); void f(char);'])('`%s` leaves the call its own arity', (ctx) => {
+    expect(lift('g', AR3, MIPS_GCC, prototypesFromContext(ctx, 'c'))).toContain('f(1, 2);\n');
+  });
+});

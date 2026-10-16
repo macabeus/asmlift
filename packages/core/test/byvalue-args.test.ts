@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
+import { prototypesFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -381,5 +382,26 @@ describe('a variadic declaration with a fixed parameter wider than a word', () =
     expect(() => decompile(name, asm, ARMV4T_AGBCC, { prototypes })).toThrow(
       new RegExp(`\`${callee}\` takes '${type}' as its parameter 2, and its declaration is variadic`),
     );
+  });
+});
+
+// `void f(char); void f();` compiles without a word on agbcc, and the later `()` wins: the call is
+// compiled unprototyped, any arity and no conversion. Read as the composite of the two, the list's
+// arity would trim or pad the call — `f(1)` off `f(1, 2)`, and `f(5, a1)` off `f(5)` — so a `()`
+// is one with a list only where no parameter changes under the default argument promotions.
+describe('a `()` declaration beside a list it is not compatible with', () => {
+  const pairs = (ctx: string) => prototypesFromContext(ctx, 'c');
+  // `void f(char); void f(); void g(void) { f(1, 2); }`
+  const AR3 = 'g:\n\tpush\t{lr}\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tbl\tf\n\tpop\t{r0}\n\tbx\tr0\n';
+  // `void f(short, char); void f(); void g(void) { f(5); }`
+  const AR4 = 'g:\n\tpush\t{lr}\n\tmov\tr0, #0x5\n\tbl\tf\n\tpop\t{r0}\n\tbx\tr0\n';
+  test.each([
+    ['void f(char); void f();', AR3, '    f(1, 2);\n'],
+    ['void f(); void f(char);', AR3, '    f(1, 2);\n'],
+    ['void f(short, char); void f();', AR4, '    f(5);\n'],
+  ])('`%s` leaves the call its own arity', (ctx, asm, call) => {
+    const { source } = decompile('g', asm, ARMV4T_AGBCC, { prototypes: pairs(ctx) });
+    expect(source).toContain(call);
+    expect(source).toContain('void g(void) {');
   });
 });

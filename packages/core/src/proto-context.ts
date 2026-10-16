@@ -961,8 +961,19 @@ function memberShape(
   return { name: d.name, pointer: stars.length > 0, ...(dims.length > 0 ? { dims } : {}), returns: [] };
 }
 
-/** A declaration's reading: the entry as written, and the `key` two declarations are compared by. */
-type Read = { proto: FnProto; key: FnProto };
+/** A declaration's reading: the entry as written, the `key` two declarations are compared by, and
+ *  the `lists` of every declaration it stands for, which say whether a declaration that states no
+ *  parameters can be one with a declaration that does (`composable`). */
+type Read = { proto: FnProto; key: FnProto; lists: readonly ParameterList[] };
+
+/** What a declaration's parentheses say of its parameters, as `composable` needs it: `()` in C,
+ *  which states none; a list this could not read, with how many FIXED parameters its top-level commas
+ *  separate and whether it ends in `...`; or a list it read, with whether every parameter keeps its
+ *  type under the default argument promotions (C99 6.5.2.2p6) — undefined where one may not. */
+type ParameterList =
+  | { kind: 'unstated' }
+  | { kind: 'unread'; fixed: number; variadic: boolean }
+  | { kind: 'read'; fixed: number; variadic: boolean; promotes: boolean };
 
 /** Every function the declarations name by a plain identifier, keyed by it. A declaration that
  *  spells no type is a constructor's, a destructor's or a conversion operator's; one that defines a
@@ -978,22 +989,29 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
   // Two declarations of one function name one type, and the entry is that type's: the same reading
   // twice, or — in C — a declaration whose parameters are not read (`()`, which states none, or a
   // list this cannot read, `const char *restrict fmt`) beside one whose are, where the return reads
-  // alike. The C compiler takes the composite of the two (C99 6.2.7p3), which is the one that states
-  // the parameters, so the entry is that one: dropping the name would drop the refusals its
-  // parameters carry with it, and send the call to the arity guess. Anything else is a conflict
-  // (C++ overloads, or a header this misreads), and the name is dropped.
+  // alike and the two are COMPATIBLE (`composable`). The C compiler takes the composite of the two
+  // (C99 6.2.7p3), which is the one that states the parameters, so the entry is that one: dropping
+  // the name would drop the refusals its parameters carry with it, and send the call to the arity
+  // guess. Anything else is a conflict (C++ overloads, or a header this misreads), and the name is
+  // dropped.
+  //
+  // `()` beside a list that is not compatible with it is no composite: agbcc, gcc2.7.2kmc and
+  // gcc2.7.2 compile `void f(char); void f();` without a word, the later `()` wins, and a call is
+  // compiled UNPROTOTYPED — any arity, no conversion. Read as `f(char)`, `f(1, 2)` would lift as
+  // `f(1)`, and `f(5)` under `f(short, char)` as `f(5, a1)`.
   const unstated = (p: FnProto) => p.params === undefined && p.variadicParams === undefined;
+  const merged = (kept: Read, a: Read, b: Read): Read => ({ ...kept, lists: [...a.lists, ...b.lists] });
   const composite = (a: Read, b: Read): Read | null => {
     if (same(a.key, b.key)) {
-      return b;
+      return merged(b, a, b);
     }
     if (ctx.language !== 'c') {
       return null;
     }
-    if (unstated(a.key) && same(a.key, returnOnly(b.key))) {
-      return b;
+    if (unstated(a.key) && same(a.key, returnOnly(b.key)) && composable(a.lists, b.lists)) {
+      return merged(b, a, b);
     }
-    return unstated(b.key) && same(b.key, returnOnly(a.key)) ? a : null;
+    return unstated(b.key) && same(b.key, returnOnly(a.key)) && composable(b.lists, a.lists) ? merged(a, a, b) : null;
   };
   const returnOnly = ({
     params: _unread,
@@ -1045,10 +1063,16 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
       // refuse. The entry kept is the later declaration's, spelled as written.
       const typed = reading('dropped');
       const [proto, key] = unreadParams.has(x.name) ? [returnOnly(read), returnOnly(typed)] : [read, typed];
+      const lists = [parameterList(fn, ctx, table.typedefs, (t) => passingOf(t, table, written))];
       const prior = found.get(x.name);
       const had =
-        prior && unreadParams.has(x.name) ? { proto: returnOnly(prior.proto), key: returnOnly(prior.key) } : prior;
-      found.set(x.name, had === undefined ? { proto, key } : had === null ? null : composite(had, { proto, key }));
+        prior && unreadParams.has(x.name)
+          ? { ...prior, proto: returnOnly(prior.proto), key: returnOnly(prior.key) }
+          : prior;
+      found.set(
+        x.name,
+        had === undefined ? { proto, key, lists } : had === null ? null : composite(had, { proto, key, lists }),
+      );
     }
   }
   const out: Prototypes = {};
@@ -1060,6 +1084,81 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
     }
   }
   return out;
+}
+
+/** Whether declarations that state no parameters (`unstated`, each `()` or a list this could not
+ *  read) are compatible with ones that state them (`stated`), as two declarations of one C function
+ *  must be for their composite to be the stated one (C99 6.7.5.3p15). `()` is compatible with a
+ *  list that is not variadic and whose every parameter keeps its type under the default argument
+ *  promotions: not `char`, `short`, `float`, `_Bool`, nor a typedef or an enum that may be one — an
+ *  enum's type is the compiler's to pick, and it may be narrow (`-fshort-enums`, mwcc's `-enum
+ *  min`). An unread list is compatible with a list of as many fixed parameters, variadic alike. */
+function composable(unstated: readonly ParameterList[], stated: readonly ParameterList[]): boolean {
+  const lists = stated.filter((l) => l.kind === 'read');
+  return (
+    lists.length > 0 &&
+    unstated.every((u) =>
+      lists.every((l) =>
+        u.kind === 'unstated'
+          ? !l.variadic && !l.promotes
+          : u.kind === 'unread' && u.fixed === l.fixed && u.variadic === l.variadic,
+      ),
+    )
+  );
+}
+
+/** What `fn`'s parentheses say of its parameters (`ParameterList`). */
+function parameterList(
+  fn: Extract<Derivation, { kind: 'function' }>,
+  { tokens, language }: ParsedContext,
+  typedefs: ReadonlyMap<string, DeclaredType>,
+  passing: (t: DeclaredType) => Passing,
+): ParameterList {
+  const { params, list } = fn;
+  if (params === undefined) {
+    // the top-level commas, and a trailing `...`
+    let items = list.to > list.from ? 1 : 0;
+    let variadic = false;
+    for (let i = list.from; i < list.to; i++) {
+      const close = tokens.match(i);
+      if (close > i) {
+        i = close;
+      } else if (tokens.is(i, ',')) {
+        items++;
+      } else if (tokens.is(i, '...')) {
+        variadic = true;
+      }
+    }
+    return { kind: 'unread', fixed: variadic ? items - 1 : items, variadic };
+  }
+  if (params.length === 0 && !fn.variadic && language === 'c') {
+    return { kind: 'unstated' };
+  }
+  if (list.to === list.from + 1 && tokens.is(list.from, 'void')) {
+    return { kind: 'read', fixed: 0, variadic: false, promotes: false };
+  }
+  const promotes = params.some((p) => {
+    const declared = asParameter(declaredType(p.specifiers, p.declarator.derivations));
+    if (passing(declared) === 'by-value') {
+      // a struct, union or class, which no promotion converts
+      return false;
+    }
+    const t = resolve(declared, typedefs, tokens);
+    if (t.derivations.length > 0) {
+      // a pointer, or an array or a function the parameter adjusts to one
+      return false;
+    }
+    if (t.type.kind === 'tag') {
+      return t.type.keyword === 'enum';
+    }
+    const spelled = spellType(withoutTopQualifiers(t), tokens);
+    if (spelled === 'double' || spelled === 'long double') {
+      return false;
+    }
+    const width = declaredWidth(spelled);
+    return width === undefined || width < 32;
+  });
+  return { kind: 'read', fixed: params.length, variadic: fn.variadic, promotes };
 }
 
 /** The entry as a table `validatePrototypes` accepts, the check every `--proto` table passes, so a
