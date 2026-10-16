@@ -1124,6 +1124,25 @@ function composable(unstated: readonly ParameterList[], stated: readonly Paramet
   );
 }
 
+/** Whether `fn`'s parentheses are C's empty list: `(void)`, or one parameter whose type is `void`
+ *  through a typedef (`typedef void V; int k(V);`, C99 6.7.5.3p10). Read as a list of one
+ *  parameter spelled `void`, the second has the call pass a register nothing set up for it:
+ *  `k()` lifted `k(a0)`. */
+function isVoidList(
+  fn: Extract<Derivation, { kind: 'function' }>,
+  tokens: Tokens,
+  typedefs: ReadonlyMap<string, DeclaredType>,
+): boolean {
+  if (fn.list.to === fn.list.from + 1 && tokens.is(fn.list.from, 'void')) {
+    return true;
+  }
+  const only = fn.params?.length === 1 && !fn.variadic ? fn.params[0] : undefined;
+  return (
+    only !== undefined &&
+    spellType(resolve(declaredType(only.specifiers, only.declarator.derivations), typedefs, tokens), tokens) === 'void'
+  );
+}
+
 /** What `fn`'s parentheses say of its parameters (`ParameterList`). */
 function parameterList(
   fn: Extract<Derivation, { kind: 'function' }>,
@@ -1151,7 +1170,7 @@ function parameterList(
   if (params.length === 0 && !fn.variadic && language === 'c') {
     return { kind: 'unstated' };
   }
-  if (list.to === list.from + 1 && tokens.is(list.from, 'void')) {
+  if (isVoidList(fn, tokens, typedefs)) {
     return { kind: 'read', fixed: 0, variadic: false, promotes: false };
   }
   const promotes = params.some((p) => {
@@ -1238,7 +1257,7 @@ function readSignature(
     }
     return proto;
   }
-  if (fn.list.to === fn.list.from + 1 && tokens.is(fn.list.from, 'void')) {
+  if (isVoidList(fn, tokens, typedefs)) {
     proto.params = [];
     return proto;
   }
