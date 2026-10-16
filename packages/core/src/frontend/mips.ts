@@ -1728,10 +1728,14 @@ function liftOnce(
     // Set by every case entitled to fold a relocation, cleared per instruction, and answered by
     // `relocPlaceholder`.
     let relocTaken = false;
-    // The word the last load into the discard register read (`emitLoad`'s pair half): its base
-    // register, or the symbol a relocation names, and its offset. Any other memory access ends it,
-    // and so does a write to that base register or a call.
-    let firstWord: { reg: string | undefined; sym: string | undefined; off: number } | undefined;
+    // The words loads into the discard register read whose pair half has not come yet (`emitLoad`):
+    // each one's base register, or the symbol a relocation names, and its offset. IDO's -O1
+    // scheduler puts frame reloads, argument loads and stores between the halves, a store through
+    // the pair's own base among them (`s->a; s->b = x; g(x);` is `lw zero,0(t6); sw t7,8(t6);
+    // lw a0,28(sp); jal g; lw at,4(t6)`). No access makes the `at` word anything but the pair half
+    // — IDO never gives `at` a C value — so a word stays pending across every one of them. What ends
+    // one: a write to its base register, which moves the address the half would read, and a call.
+    let firstWords: { reg: string | undefined; sym: string | undefined; off: number }[] = [];
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
     // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
@@ -1750,12 +1754,11 @@ function liftOnce(
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       relocTaken = false;
-      if (
-        firstWord !== undefined &&
-        ins.mnemonic !== 'lw' &&
-        (ins.mnemonic.startsWith('jal') || (firstWord.reg !== undefined && writtenReg(ins) === firstWord.reg))
-      ) {
-        firstWord = undefined;
+      if (ins.mnemonic.startsWith('jal')) {
+        firstWords = [];
+      } else if (ins.mnemonic !== 'lw') {
+        const w = writtenReg(ins);
+        firstWords = firstWords.filter((f) => f.reg === undefined || f.reg !== w);
       }
       // The GOT/small-data base register `gp` is set up by IDO's PIC prologue (`lui gp; addiu gp,gp,lo;
       // addu gp,gp,t9`, an `_gp_disp` HI16/LO16 pair). It is a RELOCATION base, never program data — and
@@ -2224,8 +2227,10 @@ function liftOnce(
     // follows `zero`), measured at -O1 and -O0 for `volatile long long` and `volatile double`
     // through a pointer, an index and a global (`lui at` re-formed between the words), the `at`
     // word in the `jr`'s delay slot at -O1. So a word load into `at` is discarded too where it reads
-    // the word above the one the discard register took, with no memory access between and the
-    // same address (`firstWord`); anywhere else `at` is the assembler's own temporary.
+    // the word above one the discard register took, at the same address, with no write to that
+    // address's base register between (`firstWords`); anywhere else `at` is the
+    // assembler's own temporary. -O1 schedules other accesses between the halves: `*p; g(x);` is
+    // `lw zero,0(t6); lw a0,28(sp); jal g; lw at,4(t6)`, the `at` word in the call's delay slot.
     const loaded = (d: string, res: Value, discard: boolean) => {
       if (discard) {
         discarded.add(res);
@@ -2236,15 +2241,15 @@ function liftOnce(
       const sym = ins.reloc?.type === 'R_MIPS_LO16' ? ins.reloc.sym : undefined;
       const { off: wordOff, base: wordBase } = parseMem(mem);
       const word = { reg: sym === undefined ? wordBase : undefined, sym, off: wordOff };
-      const pairHalf =
-        firstWord !== undefined &&
-        d === 'at' &&
-        width === 4 &&
-        word.reg === firstWord.reg &&
-        word.sym === firstWord.sym &&
-        word.off === firstWord.off + 4;
-      const discard = discards(d) || pairHalf;
-      firstWord = discards(d) && width === 4 ? word : undefined;
+      const first =
+        d === 'at' && width === 4
+          ? firstWords.find((f) => word.reg === f.reg && word.sym === f.sym && word.off === f.off + 4)
+          : undefined;
+      const discard = discards(d) || first !== undefined;
+      firstWords = firstWords.filter((f) => f !== first && (f.reg === undefined || f.reg !== d));
+      if (discards(d) && width === 4) {
+        firstWords.push(word);
+      }
       const g = globalBase(ins, mem);
       if (g) {
         const res = mkValue(T.unk(32));
@@ -2315,7 +2320,6 @@ function liftOnce(
       loaded(d, res, discard);
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
-      firstWord = undefined;
       const g = globalBase(ins, mem);
       if (g) {
         ops.push(mkOp('store', { operands: [g.base, read(srcReg)], attrs: { off: g.off, width } }));

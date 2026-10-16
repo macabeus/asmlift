@@ -472,6 +472,28 @@ describe('the gates', () => {
     expect(decompile('f', apart, o1, voidF(['volatile s32 *'])).source).not.toMatch(/\[2\]/);
   });
 
+  test('keeps-unused-reads: the IDO pair zero:at survives what -O1 schedules between its halves', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    const stamped = (body: string, params: string[]) =>
+      (
+        decompile('f', header + objdump(body), o1, voidF(params)).source.match(/\(volatile s32 \*\)a\d\)?(\[1\])?;/g) ??
+        []
+      ).length;
+    // `struct S { volatile long long a; int b; }; s->a; s->b = x;` reordered as -O1 does: a store
+    // through the pair's own base between the halves
+    const store = '   0:\tlw\tzero,0(a0)\n   4:\tsw\ta1,8(a0)\n   8:\tjr\tra\n   c:\tlw\tat,4(a0)\n';
+    expect(stamped(store, ['s32 *', 's32'])).toBe(2);
+    // a load into another register between, and two pairs interleaved
+    const loads =
+      '   0:\tlw\tzero,0(a0)\n   4:\tlw\tzero,0(a1)\n   8:\tlw\tt6,0(a2)\n   c:\tlw\tat,4(a0)\n' +
+      '  10:\tsw\tt6,0(a3)\n  14:\tjr\tra\n  18:\tlw\tat,4(a1)\n';
+    expect(stamped(loads, ['s32 *', 's32 *', 's32 *', 's32 *'])).toBe(4);
+    // a write to the base register moves the address the `at` word reads: no longer the pair half
+    const moved = '   0:\tlw\tzero,0(a0)\n   4:\taddiu\ta0,a0,8\n   8:\tjr\tra\n   c:\tlw\tat,4(a0)\n';
+    expect(stamped(moved, ['s32 *'])).toBe(1);
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,
