@@ -271,6 +271,12 @@ export interface TargetDescription {
    *  construction one the callee may destroy — and `clobberedByCall` (frontend/ssa.ts) checks that
    *  rather than trusting it, the way `checkedLiveInModel` checks the register partition. */
   callerSaved: readonly string[];
+  /** Registers the ABI reserves to the kernel, which an exception handler may overwrite between ANY
+   *  two instructions (O32's `k0`/`k1`), so no value written to one is proved to be there when it is
+   *  read. A read of one refuses, and the return proof never counts one as holding the return
+   *  address (frontend/mips.ts). Only hand-written asm names them. Absent on an ABI that reserves
+   *  none. */
+  kernelRegs?: readonly string[];
   /** The COMPILER RUNTIME HELPERS this compiler's codegen calls, and what each computes
    *  (runtime-helpers.ts). A compiler fact, which is why it lives here and not in `proto.ts`: that
    *  file holds signatures fixed by the C STANDARD, and a helper name is fixed by a runtime
@@ -1275,6 +1281,7 @@ export const MIPS_IDO: TargetDescription = {
   scratchRegs: O32_SCRATCH_REGS,
   // Every scratch register, for the measurement at `O32_SCRATCH_REGS`.
   hiddenInputRegs: O32_SCRATCH_REGS,
+  kernelRegs: ['k0', 'k1'],
   runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
@@ -1362,6 +1369,7 @@ export const MIPS_GCC: TargetDescription = {
   nonArgRegs: O32_NON_ARG_REGS,
   scratchRegs: O32_SCRATCH_REGS,
   hiddenInputRegs: O32_SCRATCH_REGS,
+  kernelRegs: ['k0', 'k1'],
   runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,

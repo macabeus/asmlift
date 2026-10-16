@@ -848,9 +848,9 @@ const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
   sw: [0, 4],
 };
 
-/** `k0`/`k1`, which O32 reserves to the kernel: an exception handler may overwrite them at any
- *  instruction, so a copy of the return address kept there is not proved to survive to the return. */
-const isKernelReg = (r: string) => /^\$?(k[01]|2[67])$/.test(r);
+/** Whether `r` is one of the target's `kernelRegs` (O32's `k0`/`k1`), in any spelling. */
+const isKernelReg = (kernelRegs: readonly string[], r: string) =>
+  kernelRegs.includes(r === '$26' ? 'k0' : r === '$27' ? 'k1' : r.replace(/^\$/, ''));
 
 /** EVERY `jr ra` OF THIS FUNCTION JUMPS TO THE CALLER'S RETURN ADDRESS, or the lift declines — the
  *  MIPS half of what `refuseReturnsNotThroughCallersLr` asks of Thumb (frontend/thumb.ts).
@@ -879,9 +879,8 @@ const isKernelReg = (r: string) => /^\$?(k[01]|2[67])$/.test(r);
  *  asm can, and it lifted as a C `return`. A tail call (`j` to another function) and an indirect
  *  `jr` already refuse in `lift`, so `jr ra` is the only exit asked.
  *
- *  A copy into `k0`/`k1` holds nothing: an exception handler may overwrite them at any instruction,
- *  so `move k0,ra` … `move ra,k0` declines (O32 reserves them to the kernel; only hand-written asm
- *  names them).
+ *  A copy into a kernel register (`kernelRegs`, O32's `k0`/`k1`) holds nothing: an exception handler
+ *  may overwrite it at any instruction, so `move k0,ra` … `move ra,k0` declines.
  *
  *  NOT ASKED: a store through a register holding a frame address is not traced to the save word.
  *  A compiler addresses that word only through `sp`. */
@@ -890,6 +889,7 @@ function refuseReturnsNotThroughCallersRa(
   blocks: readonly MipsBlock[],
   succIdx: readonly number[][],
   callerSaved: readonly string[],
+  kernelRegs: readonly string[],
 ): void {
   const canon = (r: string) => (r === '$ra' || r === '$31' ? 'ra' : r);
   const join = (a: RaState, b: RaState): RaState => {
@@ -955,7 +955,7 @@ function refuseReturnsNotThroughCallersRa(
         isStackPtr(parseMem(mem).base) &&
         parseMem(mem).off + depth === slot;
       const copy = copiedReg(ins);
-      const holds = !isKernelReg(dest) && (reload || (copy !== undefined && regs.has(canon(copy))));
+      const holds = !isKernelReg(kernelRegs, dest) && (reload || (copy !== undefined && regs.has(canon(copy))));
       if (isStackPtr(dest)) {
         depth =
           depth !== null &&
@@ -1617,6 +1617,14 @@ function liftOnce(
       if (isStackPtr(r)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': stack pointer used as data (address-taken local / frame arithmetic) — local stack frames not supported`,
+        );
+      }
+      // A KERNEL REGISTER (`target.kernelRegs`) holds nothing this function wrote: an exception
+      // handler may overwrite it between any two instructions.
+      if (isKernelReg(target.kernelRegs ?? [], r)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${r} read as a value — the ABI reserves it to the kernel, and an exception ` +
+            'handler may overwrite it at any instruction',
         );
       }
       // `gp` writes (the PIC prologue) are skipped as transparent; a `gp` READ that survives here is a
@@ -2587,6 +2595,7 @@ function liftOnce(
     blocks,
     blocks.map((b) => succAddrs.get(b)!.flatMap((a) => (idxOf.has(a) ? [idxOf.get(a)!] : []))),
     target.callerSaved,
+    target.kernelRegs ?? [],
   );
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;

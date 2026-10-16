@@ -136,9 +136,13 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
     expect(frame('nop', '14:\tmove\tra,s0', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toMatch(/return 7;/);
   });
 
-  test('a copy of ra in k0 or k1 holds nothing, since an exception handler may overwrite them', () => {
-    // `m_k0`: the copy kept in k0 across the call — lifted `return ext() + 1;`
+  // O32 reserves k0/k1 to the kernel (`kernelRegs`): an exception handler may overwrite them at any
+  // instruction, so a read of one is no value this function wrote. Each lifted wrong C before.
+  test('a read of k0 or k1 declines, whatever it was copied from', () => {
+    const KERNEL_READ = (k: string) =>
+      new RegExp(`cannot lift 'f': ${k} read as a value — the ABI reserves it to the kernel`);
     for (const k of ['k0', 'k1']) {
+      // `m_k0`: ra kept in k0 across the call — lifted `return ext() + 1;`
       expect(() =>
         src(
           [
@@ -153,18 +157,32 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
           ],
           [[8, 'ext']],
         ),
-      ).toThrow(
-        /the 'jr ra' at 0x18 may not return through the caller's return address — on some path the 'move' at 0x10/,
-      );
-      // and between two instructions with no call between them
+      ).toThrow(KERNEL_READ(k));
+      // `m_k0call`: an argument kept in k0 across the call — lifted `return ext(a0) + a0;`
       expect(() =>
-        src([`0:\tmove\t${k},ra`, '4:\tli\tra,0', `8:\tmove\tra,${k}`, 'c:\tjr\tra', '10:\tli\tv0,7']),
-      ).toThrow(NOT_THROUGH_RA);
+        src(
+          [
+            '0:\taddiu\tsp,sp,-24',
+            '4:\tsw\tra,20(sp)',
+            `8:\tmove\t${k},a0`,
+            'c:\tjal\t0 <f>',
+            '10:\tnop',
+            `14:\taddu\tv0,v0,${k}`,
+            '18:\tlw\tra,20(sp)',
+            '1c:\taddiu\tsp,sp,24',
+            '20:\tjr\tra',
+            '24:\tnop',
+          ],
+          [[0xc, 'ext']],
+        ),
+      ).toThrow(KERNEL_READ(k));
+      // `m_k0data`, with no call: lifted `return a0;`
+      expect(() => src([`0:\tmove\t${k},a0`, '4:\tjr\tra', `8:\tmove\tv0,${k}`])).toThrow(KERNEL_READ(k));
     }
   });
 
-  // THE PROOF ITSELF, on one block ending `jr ra; nop`. The lowering refuses an unmodelled store
-  // before the proof runs, so a lift cannot reach this answer.
+  // THE PROOF ITSELF, on one block ending `jr ra; nop`. The lowering refuses an unmodelled store and
+  // a kernel-register read before the proof runs, so a lift cannot reach these two answers.
   const prove = (body: [mnemonic: string, ...ops: string[]][]) => () => {
     const ins = (k: number, [mnemonic, ...ops]: [string, ...string[]]) => ({ addr: 4 * k, mnemonic, ops });
     __testing.refuseReturnsNotThroughCallersRa(
@@ -180,6 +198,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
       ],
       [[]],
       target.callerSaved,
+      target.kernelRegs ?? [],
     );
   };
 
@@ -201,6 +220,28 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
     }
     // a store the proof sizes, into another word, leaves the save word holding ra
     expect(framed('sw', '16(sp)')).not.toThrow();
+  });
+
+  test('in the proof, a copy of ra in k0 or k1 holds nothing', () => {
+    for (const k of ['k0', 'k1', '$26', '$27']) {
+      expect(
+        prove([
+          ['move', k, 'ra'],
+          ['li', 'ra', '0'],
+          ['move', 'ra', k],
+        ]),
+      ).toThrow(
+        /the 'jr ra' at 0xc may not return through the caller's return address — on some path the 'move' at 0x8/,
+      );
+    }
+    // the same copy kept in s0 is a return
+    expect(
+      prove([
+        ['move', 's0', 'ra'],
+        ['li', 'ra', '0'],
+        ['move', 'ra', 's0'],
+      ]),
+    ).not.toThrow();
   });
 
   test("the compilers' own save of ra is a return, and so is a leaf", () => {
