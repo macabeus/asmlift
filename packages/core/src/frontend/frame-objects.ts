@@ -2715,8 +2715,8 @@ function gcd(a: number, b: number): number {
   return b === 0 ? Math.abs(a) : gcd(b, a % b);
 }
 
-/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/thumb.ts
- *  types the call's result as that struct). */
+/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/call-plan.ts
+ *  types the call's result as that struct, for every frontend whose lowering passes the pointer). */
 function returnedSize(call: Op): number {
   const t = call.results[0].type;
   if (t.kind !== 'struct' || t.size === undefined) {
@@ -2725,8 +2725,108 @@ function returnedSize(call: Op): number {
   return t.size;
 }
 
+/** The block parameters every incoming value of which is a local's address or another such
+ *  parameter: the greatest set closed under that, so a loop-carried address is one too. Each maps to
+ *  the frame offsets its incoming addresses name, through such parameters. The entry block's are the
+ *  function's parameters, and are left out. */
+function mergedFrameAddresses(irBlocks: readonly Block[]): Map<Value, ReadonlySet<number>> {
+  const laddrOff = new Map<Value, number>();
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if (op.opcode === 'laddr') {
+      laddrOff.set(op.results[0], op.attrs.off as number);
+    }
+  }
+  const incoming = new Map<Value, Value[]>();
+  for (const b of irBlocks.slice(1)) {
+    for (const p of b.params) {
+      incoming.set(p, []);
+    }
+  }
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    for (const succ of op.successors) {
+      succ.block.params.forEach((p, i) => incoming.get(p)?.push(succ.args[i]));
+    }
+  }
+  const merged = new Set([...incoming].filter(([, vs]) => vs.length > 0).map(([p]) => p));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const p of merged) {
+      if (incoming.get(p)!.some((v) => !laddrOff.has(v) && !merged.has(v))) {
+        merged.delete(p);
+        changed = true;
+      }
+    }
+  }
+  const out = new Map<Value, ReadonlySet<number>>();
+  for (const p of merged) {
+    const offs = new Set<number>();
+    const seen = new Set<Value>([p]);
+    const work = [p];
+    while (work.length > 0) {
+      for (const v of incoming.get(work.pop()!)!) {
+        if (laddrOff.has(v)) {
+          offs.add(laddrOff.get(v)!);
+        } else if (!seen.has(v)) {
+          seen.add(v);
+          work.push(v);
+        }
+      }
+    }
+    out.set(p, offs);
+  }
+  return out;
+}
+
+/** A STRUCT RETURNED THROUGH A MERGE OF ONE LOCAL'S ADDRESS IS THAT LOCAL. gcc rotates a loop that
+ *  calls a struct-returning function, `while (lo > 0) { qr = ldiv(lo, 10); … }`, so `addiu a0,sp,16`
+ *  runs once ahead of the loop and once in the delay slot of its back branch, and hoists it into
+ *  both arms of `if (x) a = f(x); else a = f(x + 1);` ahead of one shared `jal`. The call then
+ *  reads a block parameter, but every path hands it the same frame address, so the call is handed
+ *  that address: an `laddr` of it, minted ahead of the call, which the frame-object audit types as
+ *  the struct (`declaredStructs`) and `refuseSretOutsideFrame` accepts. A merge of two offsets is
+ *  two objects, and is left for the audit to refuse. Run before the audit, on every frontend whose call
+ *  lowering passes the hidden pointer. */
+export function nameMergedSretObjects(irBlocks: Block[]): void {
+  const merged = mergedFrameAddresses(irBlocks);
+  for (const b of irBlocks) {
+    b.ops = b.ops.flatMap((op) => {
+      const offs = op.opcode === 'call' && op.attrs.sret === true ? merged.get(op.operands[0]) : undefined;
+      if (offs === undefined || offs.size !== 1) {
+        return [op];
+      }
+      const at = mkValue(T.unk(32));
+      op.operands = [at, ...op.operands.slice(1)];
+      return [mkOp('laddr', { results: [at], attrs: { off: [...offs][0] } }), op];
+    });
+  }
+}
+
+/** A STRUCT RETURNED THROUGH MEMORY IS SPELLED `local = f(..)`, which hands the callee that local's
+ *  address: the hidden pointer must be a frame object the audit accepted. A global or a pointer
+ *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
+ *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. A
+ *  merge of frame addresses never reaches here: one that names one address on every path was handed
+ *  that address's `laddr` before the audit (`nameMergedSretObjects`), and a merge of two names no one
+ *  storage, which the audit refuses first (`addressFlow`: `a phi merges the frame objects`). Asked
+ *  of every frontend whose call lowering passes the hidden pointer
+ *  (`CallLowering.memoryReturn`). */
+export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {
+  const laddrs = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
+  );
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in ${target.argRegs[0]}, ` +
+          'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
+          'through a pointer is not modelled',
+      );
+    }
+  }
+}
+
 /** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the
- *  binding above, so a process outside core can put a wrapped `gates` table in front of a real
+ *  `auditFrameObjects` binding, so a process outside core can put a wrapped `gates` table in front of a real
  *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
  *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
 export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectVerdict } = {

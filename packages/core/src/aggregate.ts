@@ -162,6 +162,9 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
   if (rule === undefined) {
     return undefined;
   }
+  if (rule === 'memory') {
+    return true;
+  }
   if (rule === 'svr4') {
     const size = aggregateSize(layout, target)?.size;
     return size === undefined ? undefined : size > 8;
@@ -277,8 +280,9 @@ type ByValueLayout =
 export function byValueCallArgs(
   p: FnProto | undefined,
   target: TargetDescription,
+  hidden = 0,
 ): { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] } | undefined {
-  const laid = layOutByValue(p, target);
+  const laid = layOutByValue(p, target, hidden);
   return laid === undefined || 'refused' in laid ? undefined : laid;
 }
 
@@ -288,12 +292,15 @@ export function byValueCallArgs(
 export function byValueRefusal(
   p: FnProto | undefined,
   target: TargetDescription,
+  hidden = 0,
 ): { refused: string; param: number } | undefined {
-  const laid = layOutByValue(p, target);
+  const laid = layOutByValue(p, target, hidden);
   return laid !== undefined && 'refused' in laid ? laid : undefined;
 }
 
-function layOutByValue(p: FnProto | undefined, target: TargetDescription): ByValueLayout | undefined {
+/** `hidden` is the argument words ahead of the declared list — 1 for a call handed a hidden
+ *  struct-return pointer in argument 0 — which the even-word rule counts and `widths` leaves out. */
+function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden: number): ByValueLayout | undefined {
   if (!Array.isArray(p?.params)) {
     return undefined;
   }
@@ -327,10 +334,12 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription): ByVal
       // An 8-aligned struct starts at an even argument word where the target aligns one
       // (`evenWordAlignedArgs`). Placed at an even word that changes nothing; placed at an odd
       // one, the skipped word would be an argument operand nothing passes, so that one refuses.
+      // The word is counted from argument 0, a hidden struct-return pointer included: O32's
+      // `struct S8 f(s32 k, struct L l)` passes `l` in a2:a3, and `struct S8 f(struct L l)` skips a1.
       if (
         target.evenWordAlignedArgs === true &&
         (aggregateSize(layout, target)?.align ?? 0) >= 8 &&
-        wordsOf(widths, target) % 2 === 1
+        (hidden + wordsOf(widths, target)) % 2 === 1
       ) {
         return {
           refused:

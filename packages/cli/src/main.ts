@@ -24,6 +24,7 @@ import {
   globalsFromContext,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
@@ -726,7 +727,7 @@ export async function runCli(
       };
     }
     prototypes = withContextPrototypes(
-      prototypes,
+      withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
       prototypesFromContext(text, unitTarget.dialect ?? 'c'),
       name,
       symbols,
@@ -738,7 +739,7 @@ export async function runCli(
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
-  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols);
+  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score

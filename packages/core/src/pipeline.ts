@@ -1,5 +1,6 @@
 // asmlift — the library entry point. `decompile(name, asm, target)` runs the raising tower and
 // returns structured results: the source, the per-level IR dumps, and diagnostics.
+import { aggregateSize, returnedAggregate, returnsInMemory } from './aggregate';
 import { cBackend } from './backend/c';
 import {
   ContractError,
@@ -25,7 +26,14 @@ import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type FnProto, type Prototypes, declaresVoidReturn, ownReturnWidth, prototypesFromSymbols } from './proto';
+import {
+  type FnProto,
+  type Prototypes,
+  declaresAggregateReturn,
+  declaresVoidReturn,
+  ownReturnWidth,
+  prototypesFromSymbols,
+} from './proto';
 import type { ContextGlobals } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
@@ -257,11 +265,59 @@ export function liftStamped(
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
 ): Fn {
+  const own = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
+  refuseOwnStructReturnThroughMemory(name, target, own);
   const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols, contextGlobals);
   verify(fn);
-  refuseNarrowReturnsOfWideDeclaration(fn, name, prototypes[name]);
+  refuseNarrowReturnsOfWideDeclaration(fn, name, own);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));
   return fn;
+}
+
+/** THE CALLEE HALF OF A STRUCT RETURNED THROUGH MEMORY IS NOT MODELLED, on any frontend. A function
+ *  declared to return a struct or union by value that its target's rule (`returnsInMemory`)
+ *  returns through memory is handed its caller's hidden pointer in the first argument register, so
+ *  its declared parameters sit one register up and its result is a run of stores through that
+ *  pointer. Lifted as is, it is `s32 *f(s32 *a0, s32 a1)`: the machine code's function, and not
+ *  the one the declaration names, so where the caller states that declaration it refuses rather
+ *  than publish a signature that contradicts it — and where the rule cannot answer, because the
+ *  target states none or nothing sizes the struct, it refuses too, saying which. A struct the rule
+ *  hands back in one register (agbcc's one-word struct in r0) is the lift's own return; one it hands
+ *  back in two (mwcc's svr4 eight-byte struct in r3:r4) refuses, since the lift returns one word.
+ *
+ *  A context's own entry for the function is left out (`withContextPrototypes`), so there the
+ *  pointer function is all the lift is told; a stated return naming a struct the context lays out
+ *  reaches here with that layout (`withOwnReturnLayout`). Asked of the declaration alone, before
+ *  any frontend runs. */
+function refuseOwnStructReturnThroughMemory(name: string, target: TargetDescription, own: FnProto | undefined): void {
+  if (!declaresAggregateReturn(own)) {
+    return;
+  }
+  const layout = returnedAggregate(own!);
+  const inMemory = returnsInMemory(layout, target);
+  // A struct wider than a word that comes back in registers (mwcc's svr4 rule hands up to eight
+  // bytes back in r3:r4) is a pair the lift returns one word of, dropping the second register
+  const size = aggregateSize(layout, target)?.size;
+  if (inMemory === false && size !== undefined && size > 4) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': it is declared to return ${own!.returns ?? 'a struct or union'} by value, and this target hands its ` +
+        `${size} bytes back in two registers — a function that itself returns a struct in a register pair is not modelled`,
+    );
+  }
+  if (inMemory === false) {
+    return;
+  }
+  const how =
+    inMemory === true
+      ? `this target returns that through a hidden pointer in ${target.argRegs[0]}`
+      : target.compilerBehaviors.aggregateReturn === undefined
+        ? `nothing here says whether this target returns it through a hidden pointer in ${target.argRegs[0]}`
+        : `nothing here lays it out, and this target's rule needs its layout to say whether it comes back through a ` +
+          `hidden pointer in ${target.argRegs[0]}`;
+  throw new FrontendUnsupportedError(
+    `cannot lift '${name}': it is declared to return ${own!.returns ?? 'a struct or union'} by value, and ${how} — ` +
+      'a function that itself returns a struct through a hidden pointer is not modelled',
+  );
 }
 
 /** A FUNCTION DECLARED TO RETURN AN INTEGER WIDER THAN A REGISTER, whose lift returns one word or

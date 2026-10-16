@@ -851,7 +851,8 @@ parameters from the argument registers names the pointer as the first of them, a
 **Whether it goes through memory is the target's, and it is DATA.** agbcc puts a struct there when
 it is wider than a word or has a second member that is not a bitfield (thumb.c:1423-1493), passes
 the address in r0 and shifts the arguments (thumb.h:644-645, 672); mwcc hands back up to eight
-bytes in r3/r3:r4 and passes a pointer in r3 past that. `compilerBehaviors.aggregateReturn`,
+bytes in r3/r3:r4 and passes a pointer in r3 past that; ido7.1, gcc2.7.2kmc and gcc2.7.2 pass a
+pointer in a0 for every struct and union, whatever its size (`'memory'`). `compilerBehaviors.aggregateReturn`,
 `aggregateBoundary` and `largestAlignment` state it, with `enumBytes` and `bitfieldPacking` for the
 members whose size or place is the compiler's (agbcc states both; a float is 4 bytes and a double 8
 everywhere, a storage size that is not `declaredWidth`'s register count). `aggregate.ts` is the one
@@ -888,7 +889,7 @@ inside the project's headers drops that block.
 | frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
 | frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
 | frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
-| frontend    | PowerPC and MIPS: a memory return                                                                                     | only the register return is lowered there                            |
+| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
 | frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
 | frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
@@ -901,14 +902,33 @@ declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmemb
 `PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
 sp-relative load — into the member reads its uses take.
 
+**A hidden pointer that reaches the call through a merge.** gcc rotates a loop that calls a
+struct-returning function, so `addiu a0,sp,16` runs once ahead of the loop and once in the delay
+slot of its back branch, and it hoists the same instruction into both arms of an `if` ahead of one
+shared `jal`. The call then reads a block parameter. Where every path hands that parameter the same
+frame address, a shared pre-audit step (`frame-objects.ts` `nameMergedSretObjects`, on MIPS and
+Thumb) hands the call an `laddr` of that address, minted just ahead of it, and the audit types it
+as the struct like any other return temp. A merge of two different addresses names no one storage,
+and the audit refuses it (`a phi merges the frame objects`).
+
 **What is NOT built.** A member read of a returned struct at any word but the temp's first: the
 Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it
 onto the temp, but the frontend does not route a word there to an `laddr` as it does inside a
-by-value block. A struct returned straight into a global. MIPS,
-which returns every struct through a hidden pointer and refuses the call: the pointer is an address
-in its frame (`addiu a0,sp,N`), and while MIPS now lifts such an address as a frame object through
-the same audit (`measureO32Frame` draws the O32 local area), its call lowering builds no memory
-return. A symbol map states a
+by-value block. A struct returned straight into a global, through a pointer, or through the
+caller's own forwarded pointer — each refuses on every frontend that passes the pointer
+(`frame-objects.ts` `refuseSretOutsideFrame`); so does one returned into whichever of two locals the
+path chose (the audit, above). MIPS and Thumb pass the pointer, and PowerPC refuses a call that
+would. THE CALLEE HALF, on every frontend: a function
+that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
+returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. Its
+own declaration is left out of a context's prototypes (`withContextPrototypes`), so nothing there
+contradicts that; where the caller states that declaration, every frontend refuses it, before any
+frontend runs (`pipeline.ts` `refuseOwnStructReturnThroughMemory`, beside the refusal of a narrow
+return of a wide declaration). A stated return the context lays out — `struct S`, or a typedef of
+one — is read with that layout (`proto-context.ts` `withOwnReturnLayout`), so a one-word struct the
+rule returns in a register lifts as its word, and one it returns in a register pair (mwcc's svr4
+eight bytes in r3:r4) refuses, since the lift returns one word.
+A symbol map states a
 signless return of a word or less as nothing, since it is an enum as often as a struct; and a
 context return spelled by a typedef the reader never saw keeps its parameters.
 

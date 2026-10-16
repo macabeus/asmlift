@@ -1377,6 +1377,42 @@ export function withContextPrototypes(
   return out;
 }
 
+/** The caller's stated entry for `own`, with the struct or union its stated `returns` names laid out
+ *  by the context — `struct S`, or a typedef of one, `T8` over `typedef struct {u32 a, b;} T8;` —
+ *  read as the context reads a declaration's return (`readSignature`, through a declaration of that
+ *  return the context is handed for the purpose). A `--proto` table spells a type and lays nothing
+ *  out, and `withContextPrototypes` leaves the context's own entry for `own` out, so without this
+ *  the lifted function's own struct return is a spelling: `struct S1` sized by nothing, where the
+ *  rule that decides whether it comes back through a hidden pointer reads a size
+ *  (`returnsInMemory`), and `T8`, which reads as no aggregate at all and lifts as the pointer
+ *  function its hidden pointer makes it (pipeline.ts `refuseOwnStructReturnThroughMemory`).
+ *  A return already laid out, a scalar, a pointer or a floating type is left as stated, and so is
+ *  a name the context does not lay out. */
+export function withOwnReturnLayout(
+  stated: Prototypes | undefined,
+  own: string,
+  src: string,
+  language: Language,
+): Prototypes | undefined {
+  const p = stated !== undefined && Object.hasOwn(stated, own) ? stated[own] : undefined;
+  const r = p?.returns?.trim();
+  if (
+    p === undefined ||
+    p === null ||
+    r === undefined ||
+    p.returnLayout !== undefined ||
+    r === 'void' ||
+    r.includes('*') ||
+    declaredWidth(r) !== undefined ||
+    isFloatingSpelling(r)
+  ) {
+    return stated;
+  }
+  const probe = '__asmlift_own_return';
+  const layout = prototypesFromContext(`${src}\n${r} ${probe}(void);\n`, language)[probe]?.returnLayout;
+  return layout === undefined ? stated : { ...stated, [own]: { ...p, returnLayout: layout } };
+}
+
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
 
 /** A context's prototypes, less the entries the symbol map states better. `prototypesFromSymbols`

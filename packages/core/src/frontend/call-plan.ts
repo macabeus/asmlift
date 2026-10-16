@@ -370,7 +370,7 @@ export function callDeclarations(
   // call is placed by the guess alone (`FnProto.variadicParams`), which splits a struct, a 64-bit
   // value or a `double` into words. Its parameters are the project's fact, read off its own entry,
   // which `declarationOf` reads past because it states no `params`.
-  const refuseUnplacedByValue = (callee: string): void => {
+  const refuseUnplacedByValue = (callee: string, hidden: number): void => {
     const own = known(prototypes, callee);
     const fixed = variadicRefusal(own);
     if (fixed !== undefined) {
@@ -382,7 +382,7 @@ export function callDeclarations(
       );
     }
     const p = declarationOf(callee);
-    const why = byValueRefusal(p, target);
+    const why = byValueRefusal(p, target, hidden);
     if (why !== undefined) {
       fail(
         `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
@@ -405,12 +405,13 @@ export function callDeclarations(
     // read a `Function` off `Object.prototype` as its prototype entry.
     const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
+    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const declared:
       { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
-      declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target);
+      declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target, hidden);
     const params = declared?.widths;
     if (params === undefined) {
-      refuseUnplacedByValue(callee);
+      refuseUnplacedByValue(callee, hidden);
     }
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -443,7 +444,6 @@ export function callDeclarations(
         `cannot lift '${name}': ${via}, and a parameter type of its declaration has no spelling the lifted source can declare it with`,
       );
     }
-    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
     const byValue = (declared!.byValue ?? []).map((b) => ({
@@ -514,9 +514,16 @@ export function callDeclarations(
       // register as its own value would honour the declaration by handing the callee one half.
       const wideAt = declared.widths.findIndex((w) => w > 32);
       if (wideAt >= 0) {
+        // `widths` holds argument words — a hidden struct-return pointer ahead of the declared
+        // list, and each word of a struct passed by value — and the text names the parameter
+        const hidden = declared.returned !== undefined && declared.returned !== 'register' ? 1 : 0;
+        const param =
+          wideAt -
+          hidden -
+          (declared.byValue ?? []).filter((b) => b.word < wideAt).reduce((n, b) => n + b.words - 1, 0);
         fail(
           `cannot lift '${name}': one half of a 64-bit value would be handed to '${callee}' — its parameter ` +
-            `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+            `${param + 1} is declared wider than a register, and this frontend passes each argument ` +
             'register as its own value rather than building the pair the ABI passes it in',
         );
       }

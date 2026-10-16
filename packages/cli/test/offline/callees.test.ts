@@ -39,6 +39,34 @@ glabel func_80012340
     expect(calleeNames('  bl 8004b60 <thunk_HeapFree+0x12>\n', 'Fn')).toEqual([]);
   });
 
+  // `objdump -dr` of an O32 object: `jal 0` is unrelocated, so its `<name>` is whatever sits at
+  // .text+0, and the relocation under it names the callee; the dump holds every function in the
+  // object, and only the lifted one's calls are its callees
+  it('reads a call through its relocation, and only in the lifted function of a whole-object dump', () => {
+    const dump = [
+      '00000000 <rt8>:',
+      '   0:\t27bdfff8 \taddiu\tsp,sp,-8',
+      '   4:\t03e00008 \tjr\tra',
+      '00000054 <ct8>:',
+      '  60:\t0c000000 \tjal\t0 <rt8>',
+      '\t\t\t60: R_MIPS_26\ttm8',
+      '  68:\t0c00000c \tjal\t30 <st>',
+      '\t\t\t68: R_MIPS_26\t.text',
+      '  70:\t0c000004 \tjal\t10 <rt8+0x10>',
+      '\t\t\t70: R_MIPS_26\tother',
+    ].join('\n');
+    expect(calleeNames(dump, 'ct8')).toEqual(['tm8', 'st', 'other']);
+    expect(calleeNames(dump, 'rt8')).toEqual([]);
+    // the MIPS dump prints no relocation; the object's side table holds it
+    const bare = ['Disassembly of section .text:', ...dump.split('\n').filter((l) => !l.includes('R_MIPS'))].join('\n');
+    const relocs = [
+      { section: '.text', offset: 0x60, type: 'R_MIPS_26', sym: 'tm8', addend: 0 },
+      { section: '.text', offset: 0x68, type: 'R_MIPS_26', sym: '.text', addend: 0 },
+    ];
+    expect(calleeNames(bare, 'ct8', relocs)).toEqual(['tm8', 'st']);
+    expect(calleeNames(bare, 'ct8')).toEqual(['rt8', 'st']);
+  });
+
   it('ignores a register-indirect call and a mnemonic inside a comment', () => {
     expect(calleeNames('  jalr $t9\n  @ bl NotACall\n  # jal NotACall\n', 'Fn')).toEqual([]);
   });
