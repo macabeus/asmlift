@@ -471,7 +471,7 @@ test('an indexed half completed by the %lo of ANOTHER symbol refuses', () => {
 
 test('an indexed half pairs only for a consumer that says it completes the index', () => {
   // The index rides on the SHARED HighHalfInfo, so a consumer that builds `gaddr(sym) + addend`
-  // and never reads it (PowerPC's folds today) would drop the index and still compile. pair()
+  // and never reads it (PowerPC's folds) would drop the index and still compile. pair()
   // makes the opt-in explicit, so such a consumer refuses instead.
   const hh = makeHighHalves({
     hi: '%hi',

@@ -56,12 +56,10 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        13  a relocation with an addend, a
-//                               non-numeric immediate, the caller's value a restore writes read as
-//                               a value (at the read, or through a merge), five refusals about a
-//                               disassembly the reader cannot account for, a `jal` relocated
-//                               against a section, one in a delay
-//                               slot, one whose own slot is not the next word of its block, and a
+//   frontend/mips.ts        13  a relocation with an addend, a non-numeric immediate, the caller's
+//                               value a restore writes read as a value (at the read, or through a
+//                               merge), five refusals about a disassembly the reader cannot account
+//                               for, a `jal` relocated against a section, one in a delay slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
 //   frontend/ppc.ts         15  `stwu` with update, a relocation on a stack-pointer adjust, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), the

@@ -10812,10 +10812,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // A GLOBAL INDEXED BETWEEN ITS RELOCATED HALVES. ido 7.1, KMC GCC and GCC 2.7.2 address `S[i]` as
   // `lui rH,%hi(S); addu rH,rH,idx; l*/s* x,%lo(S)(rH)` — the scaled index added to the HIGH half,
   // the constant element or field offset riding the %lo immediate (negative for `S[i - k]`), and a
-  // store's half in `at` (measured by compiling each body below on all three). Before these rows
-  // the only synthetic MIPS `lui; addu` were jump-table dispatches (`sw_jt*`), so nothing in the
-  // tier pinned the data access. agbcc and mwcc_242_81 are controls: agbcc adds the index to a
-  // pooled address and mwcc to an `@ha/@l` pair completed first, neither of which is this shape.
+  // store's half in `at` (measured by compiling each body below on all three). agbcc and
+  // mwcc_242_81 are controls: agbcc adds the index to a pooled address and mwcc to an `@ha/@l` pair
+  // completed first, neither of which is this shape.
   {
     sym: 'hidx_ld',
     src: 'extern u8 gTab[16];\nu32 hidx_ld(u32 i)\n{\n    return gTab[i];\n}',
