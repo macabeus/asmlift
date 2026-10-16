@@ -35,7 +35,7 @@
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, alignment fill that depends on the function's base
 //                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
@@ -43,8 +43,7 @@
 //                               `bl` whose target this asm defines as a data label, an unmarked `bl`
 //                               to a label of this function (a call thunk), a call
 //                               through `sp` or `lr`, a return that does not jump through the
-//                               caller's lr, a struct a call
-//                               returns into anything but a local, and the reaching-compare throw
+//                               caller's lr, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
@@ -96,6 +95,7 @@
 //                               and a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
+//   frontend/frame-objects.ts 1  a struct a call returns into anything but a local (Thumb and MIPS)
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
 // EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all thirteen of them, and the file

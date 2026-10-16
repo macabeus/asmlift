@@ -48,6 +48,7 @@ import {
   areaAboveOutgoing,
   landsOnArea,
   liftWithRelift,
+  refuseSretOutsideFrame,
 } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
@@ -2626,6 +2627,7 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, symbols);
     }
   }
+  refuseSretOutsideFrame(name, irBlocks, target);
   pinDeadReads(irBlocks, target, {
     name,
     own: prototypes[name],

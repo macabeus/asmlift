@@ -2729,6 +2729,26 @@ function returnedSize(call: Op): number {
  *  binding above, so a process outside core can put a wrapped `gates` table in front of a real
  *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
  *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
+/** A STRUCT RETURNED THROUGH MEMORY IS SPELLED `local = f(..)`, which hands the callee that local's
+ *  address: the hidden pointer must be a frame object the audit accepted. A global or a pointer
+ *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
+ *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states.
+ *  Asked of every frontend whose call lowering passes the hidden pointer (`CallLowering.memoryReturn`). */
+export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {
+  const laddrs = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
+  );
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in ${target.argRegs[0]}, ` +
+          'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
+          'through a pointer is not modelled',
+      );
+    }
+  }
+}
+
 export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectVerdict } = {
   run: (audit) => auditFrameObjects(audit),
 };

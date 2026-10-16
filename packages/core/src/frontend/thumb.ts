@@ -20,7 +20,7 @@
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { T, typeToString } from '../ir/types';
+import { T } from '../ir/types';
 import { type FnProto, type Prototypes, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
@@ -39,6 +39,7 @@ import {
   type FrameObjectRelift,
   type FrameRange,
   liftWithRelift,
+  refuseSretOutsideFrame,
 } from './frame-objects';
 import type { Frontend } from './frontend';
 import {
@@ -2521,7 +2522,7 @@ function liftOnce(
   if (verdict !== undefined) {
     pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
-  refuseSretOutsideFrame(name, irBlocks);
+  refuseSretOutsideFrame(name, irBlocks, target);
   pinDeadReads(irBlocks, target, {
     name,
     own: prototypes[name],
@@ -5826,25 +5827,6 @@ function fallLabel(asmBlocks: readonly AsmBlock[], name: string, bi: number): st
     );
   }
   return nb.label;
-}
-
-// A struct returned through memory is spelled `local = f(..)`, which hands the callee that local's
-// address: the destination must be a frame object the audit accepted. A global or a pointer handed
-// over directly is another spelling (`gDst = f(..)` needs the global declared as the struct), which
-// nothing here states.
-function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[]): void {
-  const laddrs = new Set(
-    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
-  );
-  for (const op of irBlocks.flatMap((b) => b.ops)) {
-    if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in r0, ` +
-          'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
-          'through a pointer is not modelled',
-      );
-    }
-  }
 }
 
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
