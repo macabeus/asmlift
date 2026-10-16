@@ -1224,7 +1224,15 @@ const O32_NON_ARG_REGS = [
  *  (`… addiu t0,t0,-1; bnez t0,inner; …; bnezl a1,inner; li t0,8`): the outer arm's constant is a
  *  definition of its own at the inner loop's header, so the entry value counts as met and the first
  *  pass reads an undeclared local — the input is dropped. Nothing tells it from compiled
- *  `int t; do { do { … } while (--t); t = 8; } while (--n);`, and none of the 29,399 is either. */
+ *  `int t; do { do { … } while (--t); t = 8; } while (--n);`, and none of the 29,399 is either.
+ *  The same side holds an input RELOADED FROM MEMORY on one arm and then transformed: hand
+ *  func_8082E4E0_jp its count in a2 as well (drop its `move a2,zero`), and the arm that runs when
+ *  the count is not 0 reads the caller's bit buffer in t0, but the loop header's join meets the
+ *  shift `sll t0,t0,1`, which reaches t0's entry value only through the join the load `lw t0,0(a0)`
+ *  also feeds. So the shift is a definition of its own, the routine lifts with `int code;` read on
+ *  that first pass, and the caller's t0 is dropped. Nothing tells it from compiled `int code;`
+ *  with the bit count a parameter, and none of the 29,399 is that shape: the real routine zeroes
+ *  a2 before the loop, so its load runs first. */
 const O32_SCRATCH_REGS = ['at', 'v0', 'v1', ...Array.from({ length: 10 }, (_, i) => `t${i}`)] as const;
 
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
