@@ -265,8 +265,9 @@ describe('prototypes from a declaration context', () => {
     expect(cpp.takeW).toBeUndefined();
   });
 
-  // `()` is compatible only with a list that is not variadic and whose parameters keep their types
-  // under the default argument promotions (C99 6.7.5.3p15). agbcc, gcc2.7.2kmc and gcc2.7.2 compile
+  // `()` before a list is compatible with it only where the list is not variadic and its parameters
+  // keep their types under the default argument promotions (C99 6.7.5.3p15); after one, it is a
+  // conflict whatever the types (byvalue-args.test.ts, mwcc). agbcc, gcc2.7.2kmc and gcc2.7.2 compile
   // `void f(char); void f();` without a word and the call unprototyped, so reading it as `f(char)`
   // would trim `f(1, 2)` to `f(1)`. An enum may be narrow (`-fshort-enums`), and a name never
   // resolved may be `u8`: neither composes.
@@ -276,15 +277,15 @@ describe('prototypes from a declaration context', () => {
        typedef struct { int x; } S; struct W { int x; };
        void c(char); void c();
        void cr(); void cr(char);
-       void sh(short, char); void sh();
-       void u(u8); void u();
-       void b(_Bool); void b();
-       void fl(F); void fl();
-       void e(enum E); void e();
-       void un(Unknown); void un();
-       void v(int, ...); void v();
-       void ok(s32, double, char *, struct W, S, int[4]); void ok();
-       void ov(void); void ov();
+       void sh(); void sh(short, char);
+       void u(); void u(u8);
+       void b(); void b(_Bool);
+       void fl(); void fl(F);
+       void e(); void e(enum E);
+       void un(); void un(Unknown);
+       void v(); void v(int, ...);
+       void ok(); void ok(s32, double, char *, struct W, S, int[4]);
+       void ov(); void ov(void);
        int rs(const char *restrict s, ...); int rs(const char *s, int n);
        int ra(const char *restrict s, int n); int ra(const char *s);
        int rk(const char *restrict s, int n); int rk(const char *s, int n);`,

@@ -9,7 +9,7 @@ import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import { prototypesFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 // `struct A { u16 a, b, c, d; s8 e, f; }; void take2(struct A a); void byvalregs(u16 x, u16 y) {
 //  struct A a; a.a = x; a.b = y; a.c = 0xF0; a.d = 0x78; a.e = a.f = 4; take2(a); }` (the synthetic
@@ -403,5 +403,93 @@ describe('a `()` declaration beside a list it is not compatible with', () => {
     const { source } = decompile('g', asm, ARMV4T_AGBCC, { prototypes: pairs(ctx) });
     expect(source).toContain(call);
     expect(source).toContain('void g(void) {');
+  });
+});
+
+// mwcc (2.4.2, 2.4.7, 2.3.3) lets a `()` that FOLLOWS a list replace the prototype outright, even
+// where every parameter is a word: `void f(int); void f();` compiles `f(1, 2)` as `li r3,1; li r4,2`,
+// `f(1.5)` in f1, and `f(1)` under `void f(double)` or `void f(long long)` in r3 alone. So that
+// order is a conflict on every target, and the call takes the arity guess main gave it. The reverse
+// order (`void f(); void f(int);`), which mwcc rejects, is the list's. mwcc_242_81's own output at
+// the corpus flags, read with pikmin's `powerpc-eabi-objdump -dr`.
+describe('a `()` declaration after a parameter list', () => {
+  const ppc = (lines: string[]) => '00000000 <g>:\n' + lines.map((l) => `   ${l}\n`).join('');
+  const frame = (body: string[]) =>
+    ppc([
+      '0:\tstwu    r1,-16(r1)',
+      '4:\tmflr    r0',
+      ...body,
+      '18:\tlwz     r0,20(r1)',
+      '1c:\tmtlr    r0',
+      '20:\taddi    r1,r1,16',
+      '24:\tblr',
+    ]);
+  // `void g(void) { f(1, 2); }`
+  const I1 = frame([
+    '8:\tli      r3,1',
+    'c:\tli      r4,2',
+    '10:\tstw     r0,20(r1)',
+    '14:\tbl      14 <g+0x14>',
+    '\t\t\t14: R_PPC_REL24\tf',
+  ]);
+  // `void g(struct S *s, int n) { f(s, n, 3); }`
+  const P2 = frame([
+    '8:\tli      r5,3',
+    'c:\tstw     r0,20(r1)',
+    '10:\tbl      10 <g+0x10>',
+    '\t\t\t10: R_PPC_REL24\tf',
+  ]);
+  // `int g(int a, int b) { return f(a, b) + 1; }`
+  const I4 = ppc([
+    '0:\tstwu    r1,-16(r1)',
+    '4:\tmflr    r0',
+    '8:\tstw     r0,20(r1)',
+    'c:\tbl      c <g+0xc>',
+    '\t\t\tc: R_PPC_REL24\tf',
+    '10:\tlwz     r0,20(r1)',
+    '14:\taddi    r3,r3,1',
+    '18:\tmtlr    r0',
+    '1c:\taddi    r1,r1,16',
+    '20:\tblr',
+  ]);
+  // `void g(void) { f(1); }`, under `f(double)` and under `f(long long)` alike
+  const D1 = frame([
+    '8:\tli      r3,1',
+    'c:\tstw     r0,20(r1)',
+    '10:\tbl      10 <g+0x10>',
+    '\t\t\t10: R_PPC_REL24\tf',
+  ]);
+  const lift = (asm: string, ctx: string) =>
+    decompile('g', asm, PPC_MWCC, { prototypes: prototypesFromContext(ctx, 'c') }).source;
+
+  test('i1: `void f(int); void f();` keeps both arguments', () => {
+    expect(lift(I1, 'void f(int); void f();')).toContain('f(1, 2)');
+  });
+  test('p2: `void f(struct S *); void f();` declines, as an undeclared callee does', () => {
+    expect(() => lift(P2, 'struct S { int a; int b; }; void f(struct S *); void f();')).toThrow(
+      /the call at 0x10 has no prototype/,
+    );
+  });
+  test('i4: `int f(int); int f();` passes no argument the list names', () => {
+    expect(lift(I4, 'int f(int); int f();')).not.toContain('f(a0)');
+  });
+  test.each(['void f(double); void f();', 'void f(long long); void f();'])('d1/l1: `%s` lifts `f(1)`', (ctx) => {
+    expect(lift(D1, ctx)).toContain('f(1)');
+  });
+  test.each([
+    ['void f(); void f(int);', { returnsVoid: true, params: ['int'] }],
+    ['struct S { int a; int b; }; void f(); void f(struct S *);', { returnsVoid: true, params: ['struct S *'] }],
+    ['int f(); int f(int);', { returns: 'int', params: ['int'] }],
+    ['void f(); void f(double);', { returnsVoid: true, params: ['double'] }],
+    ['void f(); void f(long long);', { returnsVoid: true, params: ['long long'] }],
+  ])('the reverse order `%s` is the list', (ctx, entry) => {
+    expect(prototypesFromContext(ctx, 'c').f).toEqual(entry);
+  });
+  test.each([
+    'void f(int); void f();',
+    'void f(); void f(int); void f();',
+    'int f(const char *restrict s); int f(); int f(const char *s);',
+  ])('`%s` is a conflict', (ctx) => {
+    expect(prototypesFromContext(ctx, 'c').f).toBeUndefined();
   });
 });

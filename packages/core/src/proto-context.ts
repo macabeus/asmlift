@@ -995,17 +995,33 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
   // guess. Anything else is a conflict (C++ overloads, or a header this misreads), and the name is
   // dropped.
   //
-  // `()` beside a list that is not compatible with it is no composite: agbcc, gcc2.7.2kmc and
+  // A `()` is read with a list only where it PRECEDES it: one that follows a list is a conflict,
+  // whatever the types (below). And `()` beside a list that is not compatible with it is no
+  // composite: agbcc, gcc2.7.2kmc and
   // gcc2.7.2 compile `void f(char); void f();` without a word, the later `()` wins, and a call is
   // compiled UNPROTOTYPED — any arity, no conversion. Read as `f(char)`, `f(1, 2)` would lift as
   // `f(1)`, and `f(5)` under `f(short, char)` as `f(5, a1)`.
   const unstated = (p: FnProto) => p.params === undefined && p.variadicParams === undefined;
   const merged = (kept: Read, a: Read, b: Read): Read => ({ ...kept, lists: [...a.lists, ...b.lists] });
   const composite = (a: Read, b: Read): Read | null => {
+    if (b.lists.some((l) => l.kind === 'unstated') && a.lists.some((l) => l.kind === 'read')) {
+      // a `()` AFTER a parameter list: mwcc (2.4.2, 2.4.7, 2.3.3) lets it replace the prototype
+      // outright, even where every parameter is a word — `void f(int); void f();` compiles `f(1, 2)`
+      // as two arguments, `f(1.5)` in f1, and `f(1)` under `void f(double)` in r3 — so the list is
+      // no fact about the call. Read as the list, `f(1, 2)` lifts as `f(1)`. gcc and IDO reject what
+      // that call would need, so nothing is lost on them by a conflict.
+      return null;
+    }
     if (same(a.key, b.key)) {
       return merged(b, a, b);
     }
-    if (ctx.language !== 'c') {
+    // …and where the list follows a `()` that itself followed a list this could not read, the `()`
+    // still replaced it: the two keep their return (`same`, above), and no later list joins them
+    const all = [...a.lists, ...b.lists];
+    if (
+      ctx.language !== 'c' ||
+      all.some((l, i) => l.kind === 'unstated' && all.slice(0, i).some((m) => m.kind !== 'unstated'))
+    ) {
       return null;
     }
     if (unstated(a.key) && same(a.key, returnOnly(b.key)) && composable(a.lists, b.lists)) {
@@ -1092,7 +1108,8 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
  *  list that is not variadic and whose every parameter keeps its type under the default argument
  *  promotions: not `char`, `short`, `float`, `_Bool`, nor a typedef or an enum that may be one — an
  *  enum's type is the compiler's to pick, and it may be narrow (`-fshort-enums`, mwcc's `-enum
- *  min`). An unread list is compatible with a list of as many fixed parameters, variadic alike. */
+ *  min`). A name the context never resolves is read by its spelling as `declaredWidth` reads it
+ *  (`s32` is a word, `u8` a byte) and is otherwise taken to promote. An unread list is compatible with a list of as many fixed parameters, variadic alike. */
 function composable(unstated: readonly ParameterList[], stated: readonly ParameterList[]): boolean {
   const lists = stated.filter((l) => l.kind === 'read');
   return (
