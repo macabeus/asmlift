@@ -2241,10 +2241,11 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'float fma1(float,float,float);',
   },
   // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
-  // folds to a negation, and a helper whose result reaches only a GUESSED call declines. That call
-  // does not count r0, which the helper wrote, so `(int)(a + b)` would read `__addsf3();
-  // return __fixsfsi();` and, folded, `return __fixsfsi();`, the sum deleted
-  // (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
+  // folds to a negation; a conversion is a helper the table signs and cannot fold, so `fconv`
+  // declines naming `__fixsfsi` (as `f2i`, `i2f` and `fcmp` above do on agbcc); and a helper whose
+  // result reaches only a GUESSED call declines. That call does not count r0, which the helper
+  // wrote, so `g1(a * b)` reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product
+  // deleted (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
   {
     sym: 'fneg',
     src: 'float fneg(float a){ return -a; }',

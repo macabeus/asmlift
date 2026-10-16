@@ -36,12 +36,18 @@ import { isArgumentPair } from './pairparams';
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` deletes the arithmetic.
- *     A call whose result nothing reads is not proof the source dropped it: a guessed arity leaves
- *     one, where a call after the helper takes its result in r0 and the guess (frontend/ssa.ts
- *     `fallbackArgc`, `trimClobberedCallArgs`) does not count a register a call wrote. agbcc's
- *     `(int)(a + b)` reads as `__addsf3(); return __fixsfsi();`, and folded it would print
- *     `return __fixsfsi();`. A double's pair refuses that shape at the frontend already, naming
- *     the half the next call reads; a single is one word, so it reaches here.
+ *     A call whose result nothing reads is not proof the source dropped it — it is proof the
+ *     source USED it: agbcc deletes a helper call whose result is dead (`s = a * b; g(); return 0;`
+ *     calls no `__mulsf3`), so the one reader there was is a call after the helper that took the
+ *     result in r0, and the guess there (frontend/ssa.ts `fallbackArgc`, `trimClobberedCallArgs`)
+ *     does not count a register a call wrote. agbcc's `g1(a * b)` with `g1` undeclared reads as
+ *     `__mulsf3(); return g1();`, and folded it would print `return g1();`. A double's pair refuses
+ *     that shape at the frontend already, naming the half the next call reads; a single is one
+ *     word, so it reaches here.
+ *     A result some other op ALSO reads proves no such thing, and is not refused: `s = a * b; g(s);
+ *     return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and the trim's
+ *     `g()` is the reading every guessed call after a call gets (`trimClobberedCallArgs`, which a
+ *     declaration of `g` closes).
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
  *  set of floats and verify's float rule holds by construction. */
 export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolean {
