@@ -161,6 +161,45 @@ describe('a carry this frontend cannot name refuses at its reader, saying why', 
   });
 });
 
+describe('a `subfze` constant mwcc hoisted out of the loop it sits in', () => {
+  // 2.3.3's remainder loop of `x += p[i] >= x`: `li r6,-1` ahead of the loop, `subfze r0,r6` in it
+  const loop = (pre: string[]) =>
+    '0 <f>:\n' +
+    [
+      ...pre,
+      'mtctr   r5',
+      'lwz     r0,0(r3)',
+      'addi    r3,r3,4',
+      'subfc   r0,r4,r0',
+      'subfze  r0,r6',
+      'add     r4,r4,r0',
+      `bdnz+   ${(4 * (pre.length + 1)).toString(16)} <f+0x${(4 * (pre.length + 1)).toString(16)}>`,
+      'mr      r3,r4',
+      'blr',
+    ]
+      .map((ins, i) => `   ${(4 * i).toString(16)}:\t${ins}\n`)
+      .join('');
+
+  test('is read as that constant where every path brings it', () => {
+    const src = decompile('f', loop(['li      r6,-1']), PPC_MWCC).source;
+    expect(src).toMatch(/v\d+ = v\d+ \+ \(\(u32\)\*v\d+ >= v\d+\);|>=/);
+    expect(src).not.toMatch(/~/);
+  });
+
+  test('refuses where the paths bring different values', () => {
+    // r6 is -1 on one path into the join and 5 on the other
+    const asm =
+      '0 <f>:\n   0:\tcmpwi   r5,0\n   4:\tli      r6,-1\n   8:\tbeq-    10 <f+0x10>\n' +
+      '   c:\tli      r6,5\n  10:\tsubfc   r0,r4,r3\n  14:\tsubfze  r3,r6\n  18:\tblr\n';
+    expect(() => decompile('f', asm, PPC_MWCC)).toThrow(
+      /unmodelled instruction 'subfze' at 0x14 — it reads r6, which is not one constant/,
+    );
+    // the same constant on both is that constant
+    const same = asm.replace('li      r6,5', 'li      r6,-1');
+    expect(decompile('f', same, PPC_MWCC).source).toMatch(/a0 >= a1/);
+  });
+});
+
 test('`subfe rD,rY,rY` reads no rY, so one over the return address mflr copied out still lifts', () => {
   // mwcc 2.3.3's `int t = a < b; g(t); g(t);`, whose `subfe r0,r0,r0` names r0 while it holds LR
   const asm =

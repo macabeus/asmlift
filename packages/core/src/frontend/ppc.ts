@@ -39,7 +39,7 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
-import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -1650,6 +1650,9 @@ function liftOnce(
   // Every value written to a register other than the discard register: `leftInDiscardRegister`
   // takes out of `discarded` each load one of them derives from, which mwcc put in a home.
   const writtenElsewhere: Value[] = [];
+  // A `subfze` over a register this block takes in from a join: modelled as `~rA + CA`, and kept
+  // only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
+  const joinedCarryConsts: { ins: Instr; not: Op; add: Op; ca: Value }[] = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -2658,13 +2661,27 @@ function liftOnce(
           break;
         }
         case 'subfze': {
-          const k = constIn(read(s));
-          if (k === undefined) {
+          const x = read(s);
+          const k = constIn(x);
+          if (k !== undefined) {
+            const ca = readCarry(ins);
+            ~k === 0 ? write(d, ca) : emitBin('add', d, constVal(~k), ca);
+            break;
+          }
+          // mwcc hoists the constant out of a loop (`li r3,-1` ahead of the loop, `subfze r0,r3` in
+          // its body), so the register comes in through a join. Whether every path brings the same
+          // constant is known only once every block is filled; the exact `~rA + CA` stands until then.
+          // An entry parameter is the caller's value, never a constant.
+          if (bi === 0 || !irBlocks[bi].params.includes(x)) {
             emitOpaqueDest(ins);
             break;
           }
           const ca = readCarry(ins);
-          ~k === 0 ? write(d, ca) : emitBin('add', d, constVal(~k), ca);
+          const inv = mkValue(T.unk(32));
+          const not = mkOp('not', { operands: [x], results: [inv] });
+          ops.push(not);
+          emitBin('add', d, inv, ca);
+          joinedCarryConsts.push({ ins, not, add: ops[ops.length - 1], ca });
           break;
         }
         case 'adde':
@@ -3099,6 +3116,7 @@ function liftOnce(
   const argSlots = ppcArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS, prototypes[name]);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
+  resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
@@ -3145,6 +3163,77 @@ function liftOnce(
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();
   return ssa.fn;
+}
+
+/** Settle each `subfze rD,rA` whose rA came in through a join (the `subfze` decode): where every
+ *  path brings the same constant K — the join's incoming values followed back, each a `const` or a
+ *  join of its own, a cycle adding nothing — the `~rA + CA` becomes `~K + CA`, which is CA itself
+ *  for mwcc's `li -1`. Anything else refuses, as an unmodelled `subfze` does in its own block: over
+ *  a register that is no constant it is the high half of a 64-bit negate. */
+function resolveJoinedCarryConsts(
+  name: string,
+  fn: Fn,
+  pending: readonly { ins: Instr; not: Op; add: Op; ca: Value }[],
+): void {
+  if (pending.length === 0) {
+    return;
+  }
+  const defs = new Map<Value, Op>();
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      o.results.forEach((r) => defs.set(r, o));
+      for (const succ of o.successors) {
+        succ.args.forEach((a, i) => {
+          const p = succ.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  // The one constant `v` is on every path, `null` where it is none, `undefined` where only a cycle
+  // brings it (which says nothing).
+  const constantOf = (v: Value, seen: Set<Value>): number | null | undefined => {
+    const def = defs.get(v);
+    if (def !== undefined) {
+      return def.opcode === 'const' && typeof def.attrs.value === 'number' ? def.attrs.value | 0 : null;
+    }
+    const ins = incoming.get(v);
+    if (ins === undefined) {
+      return null; // an entry parameter
+    }
+    if (seen.has(v)) {
+      return undefined;
+    }
+    seen.add(v);
+    let k: number | undefined;
+    for (const a of ins) {
+      const c = constantOf(a, seen);
+      if (c === null || (c !== undefined && k !== undefined && c !== k)) {
+        return null;
+      }
+      k ??= c;
+    }
+    return k ?? null;
+  };
+  for (const { ins, not, add, ca } of pending) {
+    const k = constantOf(not.operands[0], new Set());
+    if (k === null || k === undefined) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': unmodelled instruction '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — it reads ` +
+          `${ins.ops[1]}, which is not one constant on every path into its block, and a subfze over a register is the ` +
+          'upper word of a 64-bit negate',
+      );
+    }
+    const home = fn.blocks.find((b) => b.ops.includes(add))!;
+    if (~k === 0) {
+      replaceAllUsesWith(fn, add.results[0], ca);
+      home.ops.splice(home.ops.indexOf(add), 1);
+      home.ops.splice(home.ops.indexOf(not), 1);
+    } else {
+      Object.assign(not, { opcode: 'const', operands: [], attrs: { value: ~k } });
+    }
+  }
 }
 
 function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {
