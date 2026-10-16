@@ -4387,6 +4387,70 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
   });
 });
 
+// PAST A VARIADIC DECLARATION'S STATED WORDS, A REGISTER HOLDING ONLY THIS FUNCTION'S OWN INCOMING
+// VALUE REFUSES (frontend/ssa.ts `fallbackArgc`): a read leaves the entry value behind as a
+// definition, and whether the call is handed it is not decidable. agbcc's own output for
+// `int dprint(const char *, ...);` and each source below. The value a call destroyed reaches only
+// through that call, and the copy that re-sets the register sets it up, so neither is the entry
+// value still standing.
+describe('an incoming value past a variadic floor', () => {
+  const dprint = { returns: 's32', variadicParams: ['const char *'] };
+  const lift = (sym: string, body: string, g: string[] = []) =>
+    decompile(sym, `${sym}:\n${body}`, ARMV4T_AGBCC, { prototypes: { dprint, g: { params: g, returns: 's32' } } })
+      .source;
+  const EPI = '\tpop\t{r1}\n\tbx\tr1\n';
+
+  // `int pr1(const char *s, int x){ if (x) return dprint(s) + 1; return 0; }`: r1 is read only
+  test('refuses a register the function only read', () => {
+    const body =
+      '\tpush\t{lr}\n\tcmp\tr1, #0\n\tbne\t.L3\n\tmov\tr0, #0x0\n\tb\t.L4\n.L3:\n\tbl\tdprint\n' +
+      `\tadd\tr0, r0, #0x1\n.L4:\n${EPI}`;
+    expect(() => lift('pr1', body)).toThrow(
+      /the call 'bl dprint' in block '.L3' has a prototype stating only its first 1 argument, and r1 past them still holds this function's own incoming value/,
+    );
+  });
+
+  // `void rl3(const char *s, int x){ g(x); dprint(s); }`: `g` destroyed r1
+  test('passes nothing a call destroyed', () => {
+    const body =
+      '\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr0, r1, #0\n\tbl\tg\n\tadd\tr0, r4, #0\n\tbl\tdprint\n' +
+      '\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const out = lift('rl3', body, ['s32']);
+    expect(out).toContain('g(a1);');
+    expect(out).toContain('dprint(a0);');
+  });
+
+  // `int rl1(const char *s, int x){ g(); if (x) return dprint(s) + 1; return 0; }`: read, but a call
+  // destroyed it on the way
+  test('passes nothing a call destroyed after the read', () => {
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tadd\tr4, r1, #0\n\tbl\tg\n\tcmp\tr4, #0\n\tbne\t.L3\n' +
+      '\tmov\tr0, #0x0\n\tb\t.L4\n.L3:\n\tadd\tr0, r5, #0\n\tbl\tdprint\n\tadd\tr0, r0, #0x1\n.L4:\n' +
+      `\tpop\t{r4, r5}\n${EPI}`;
+    expect(lift('rl1', body)).toContain('dprint(a0) + 1');
+  });
+
+  // `int rl2(const char *s, int x, int y){ int r = g(y); if (x) return dprint(s) + r; return 0; }`
+  test('passes nothing a call destroyed, with its result kept', () => {
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tadd\tr6, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tbl\tg\n' +
+      '\tadd\tr5, r0, #0\n\tcmp\tr4, #0\n\tbne\t.L3\n\tmov\tr0, #0x0\n\tb\t.L4\n.L3:\n\tadd\tr0, r6, #0\n' +
+      `\tbl\tdprint\n\tadd\tr0, r0, r5\n.L4:\n\tpop\t{r4, r5, r6}\n${EPI}`;
+    const out = lift('rl2', body, ['s32']);
+    expect(out).toContain('g(a2)');
+    expect(out).toMatch(/dprint\(a0\) \+ v\d/);
+  });
+
+  // `void rl4(const char *s, int x, int y){ g(y); dprint(s, x); }`: r1 re-set from a saved copy is
+  // set up here, whatever value SSA names it
+  test('passes a register re-set since the last call', () => {
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tadd\tr0, r2, #0\n\tbl\tg\n' +
+      '\tadd\tr0, r4, #0\n\tadd\tr1, r5, #0\n\tbl\tdprint\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(lift('rl4', body, ['s32'])).toContain('dprint(a0, a1);');
+  });
+});
+
 // A DECLARATION THE LOWERING CANNOT LAY OUT STILL BOUNDS OR REFUSES THE GUESS. Where the arity falls
 // to the guess behind a declaration, a trailing argument passed through unchanged leaves no gap for
 // `fallbackArgc` to see: agbcc's `g(a + 1, b)` sets r0 and leaves `b` in r1, the bytes of `g(a + 1)`.

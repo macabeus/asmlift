@@ -116,6 +116,9 @@ export interface SsaBuilder {
    *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
    *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
   holdsEntryValue(reg: string, b: number): boolean;
+  /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
+   *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
+  writtenSinceCall(reg: string, b: number): boolean;
   /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
    *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
    *  erased, so the address appears in no operand. The refusal of a read a call destroyed
@@ -1295,6 +1298,7 @@ export function makeSsaBuilder(
     everyReachingDef,
     entryValue,
     holdsEntryValue,
+    writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     useOutsideOps: (v: Value, b: number) => {
       usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
     },
@@ -1591,9 +1595,11 @@ export function fallbackArgc(
     /** the leading arguments a declaration states (`GuessedCallSite.floor`): counted whether or not
      *  the caller set them up, so only the registers above them are guessed */
     floor?: number;
-    /** whether `v` is this function's own incoming value of argument register `reg` (an entry
-     *  parameter), which a read leaves behind as a definition */
-    entry?: (reg: string, v: Value) => boolean;
+    /** whether argument register `reg` still holds this function's own incoming value at the call
+     *  (an entry parameter, which a read leaves behind as a definition) on some path the caller
+     *  did not set it up on: one a call destroyed it on ends there, and one this block wrote it on
+     *  since its last call set it up (`CallDeclarations.lower` asks it) */
+    entry?: (reg: string) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -1613,11 +1619,13 @@ export function fallbackArgc(
     // floor the scan never asks, and with none the guess keeps counting it: there it is the far
     // commoner `if (a) g(a)`, and the same refusal declines 17 lifts of kleod's 20 units and 40 of
     // sa3's (`DecompressAlloc(a0)`, `m4aSongNumStart(a1)`), where the floored rule moves none.
-    if (
-      floor > 0 &&
-      opts.entry !== undefined &&
-      ssa.hasReachingDef(argRegs[n], bi, (v) => accept(v) && opts.entry!(argRegs[n], v))
-    ) {
+    //
+    // ONLY A PATH THE ENTRY VALUE STILL ARRIVES BY IS ASKED. `setUp` walks through calls, so an
+    // entry value a call destroyed reaches it too — `g(x); dprint(s)` — and that register holds
+    // nothing; the trim cuts it (`trimClobberedCallArgs`) and `dprint(a0)` is the bytes. And a
+    // register this block wrote since its last call was set up here, by the copy that put the
+    // value back — `g(y); dprint(s, x)` re-sets r1 from a saved copy — whatever value SSA names.
+    if (floor > 0 && opts.entry?.(argRegs[n])) {
       fail(
         `cannot lift '${name}': the call ${call} has a prototype stating only its first ${floor} ` +
           `argument${floor === 1 ? '' : 's'}, and ${argRegs[n]} past them still holds this function's own incoming ` +

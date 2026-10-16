@@ -700,7 +700,13 @@ export function callDeclarations(
             accept: (v) => !placeholders?.has(v),
             gap: { name, at: guess.at, fail },
             floor,
-            entry: (reg, v) => ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
+            entry: (reg) =>
+              !ssa.writtenSinceCall(reg, bi) &&
+              ssa.holdsValue(
+                reg,
+                bi,
+                (v) => !placeholders?.has(v) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
+              ),
           })
         : wordsOf(widths, target);
     if (widths === null) {

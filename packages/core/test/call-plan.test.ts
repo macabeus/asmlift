@@ -492,7 +492,7 @@ describe('fallbackArgc', () => {
       hasReachingDef: (reg: string, _b: number, accept: (v: Value) => boolean = () => true) =>
         (reg === 'r0' || reg === 'r1') && accept(entry),
     };
-    const isEntry = (reg: string, v: Value) => reg === 'r1' && v === entry;
+    const isEntry = (reg: string) => reg === 'r1';
     expect(() => fallbackArgc(read, regs, 0, { gap: { name: 'f', at: 0x10, fail }, floor: 1, entry: isEntry })).toThrow(
       /'f': the call at 0x10 has a prototype stating only its first 1 argument, and r1 past them still holds this function's own incoming value/,
     );
