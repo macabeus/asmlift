@@ -7029,7 +7029,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'dvdwcall',
     src: 'void g(s32);\nvoid dvdwcall(volatile s64 *p, s32 x)\n{\n    *p;\n    g(x);\n}',
-    features: ['pointer', 'call'],
+    features: ['pointer'],
     toolchains: ['ido7.1'],
     cflags: ['-mips2', '-O1', '-32', '-non_shared', '-G', '0'],
     ctx: 'void g(s32);\nvoid dvdwcall(volatile s64 *p, s32 x);',
