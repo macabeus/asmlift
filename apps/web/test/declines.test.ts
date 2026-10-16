@@ -957,10 +957,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // caller's home area, an outgoing-area word of a function that calls, a frame that takes its own
   // address — and no benchmark row reaches any of them.
   //
-  // `return-target` is a class whose witnesses are synthetic rows (`retmtlr` on the three mwcc
-  // builds, `retjr` on gcc2.7.2kmc and gcc2.7.2), and they enter the artifact when it is next
-  // regenerated: until then no committed row carries the marker.
-  //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
@@ -972,7 +968,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'far-jump',
     'no-prototype-args',
     'pool-word-shape',
-    'return-target',
     'stack-frames',
     'structs',
     'tu-scoped-name',
