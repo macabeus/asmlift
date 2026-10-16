@@ -574,9 +574,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
       /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half|the address is never completed/,
   },
   {
+    // The arity of a call is guessed from the argument registers a value reaches, and the guess
+    // cannot be trusted: a gap in them (`frontend/ssa.ts` `fallbackArgc`), or a declaration that
+    // states parameters no layout places — a float on a target with no FPU, or a count the guess
+    // falls short of (`frontend/call-plan.ts` `refuseUnplacedFloat`, `refuseShortOfDeclared`),
+    // both spelt "the arity guess in its place".
     key: 'no-prototype-args',
     label: 'Call argument registers with no prototype',
-    pattern: /has no prototype/,
+    pattern: /has no prototype|the arity guess in its place/,
   },
   {
     // A CALL DECLARED TO RETURN A STRUCT OR UNION BY VALUE that the call plan cannot lower: whether

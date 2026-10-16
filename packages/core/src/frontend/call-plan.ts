@@ -392,6 +392,32 @@ export function callDeclarations(
       );
     }
   };
+  // A FLOATING PARAMETER THE DECLARATION STATES BUT NOTHING LAYS OUT REFUSES; IT IS NOT GUESSED.
+  // Where the target has an FPU, `plan` refuses every floating parameter first (it travels in the
+  // FPU's registers). Where it has none — agbcc — a `double` is laid out in general words
+  // (`TargetDescription.doubleArgWords`) and a `float` or `long double` is not (`proto.ts`
+  // `declaredCallArgs`), so the list states no layout and the call would fall to the arity guess.
+  // That guess is wrong in both directions against the very declaration that was read past: a
+  // trailing argument passed through unchanged has no definition and is dropped (`int g(int,
+  // float)`: `g(a + 1, b)` as `g(a0 + 1)`), and a register left over from the caller is counted
+  // (`float h(float)`: `h(v)` as `h(a1, a1)`). Both compile without the header and neither compiles
+  // against it. The abstention an unsized typedef gets does not apply: a floating spelling is
+  // known, and what is missing is a layout, not a width.
+  const refuseUnplacedFloat = (callee: string): void => {
+    const p = declarationOf(callee);
+    const params = p?.params;
+    if (target.fpu !== undefined || !Array.isArray(params)) {
+      return;
+    }
+    const at = params.findIndex((_, k) => paramClassOf(p!, params, k) === 'float');
+    if (at >= 0) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` is declared to take '${params[at]}' as its parameter ${at + 1}, ` +
+          'which this target passes in general argument words that are not laid out here — the arity guess ' +
+          'in its place drops an argument passed through unchanged, or counts a leftover register as one',
+      );
+    }
+  };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
@@ -414,6 +440,7 @@ export function callDeclarations(
     const params = declared?.widths;
     if (params === undefined) {
       refuseUnplacedByValue(callee, hidden);
+      refuseUnplacedFloat(callee);
     }
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -582,6 +609,35 @@ export function callDeclarations(
       declaredVoid,
     };
   };
+  // A GUESS SHORTER THAN THE DECLARATION REFUSES. A declaration the lowering cannot lay out (an
+  // UNSIZED spelling: `proto.ts` `declaredCallArgs`) or a variadic one, whose call is placed by the
+  // guess alone, still states how many parameters it has — fixed ones, for a variadic — and every
+  // one of them is at least one argument word. A guess that counts fewer registers has dropped
+  // arguments: the last one passed through unchanged leaves its register with no definition, so
+  // `void h(int, Foo)` with `Foo` unresolved lifts `h(n + 1, v)` as `h(a0 + 1)`. The count bounds
+  // the guess from below only — an unsized parameter may be two words, or a struct of several.
+  //
+  // KNOWN GAP: this bounds the count `fallbackArgc` takes, not what `SsaBuilder.finish` later
+  // retracts from it (a register a call between the setup and this one destroyed).
+  const refuseShortOfDeclared = (callee: string | undefined, argc: number): void => {
+    if (callee === undefined) {
+      return;
+    }
+    const p = declarationOf(callee);
+    const own = known(prototypes, callee);
+    const stated = Array.isArray(p?.params)
+      ? { n: p.params.length, what: 'parameters' }
+      : own?.variadicParams !== undefined && own.params === undefined
+        ? { n: own.variadicParams.length, what: 'fixed parameters before its `...`' }
+        : undefined;
+    if (stated !== undefined && argc < stated.n) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` is declared with ${stated.n} ${stated.what}, which no layout here ` +
+          `places, and the arity guess in its place finds ${argc} argument register${argc === 1 ? '' : 's'} set up — ` +
+          'an argument passed through unchanged leaves its register with nothing the guess can see',
+      );
+    }
+  };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
@@ -632,6 +688,7 @@ export function callDeclarations(
         : wordsOf(widths, target);
     if (widths === null) {
       guess.refuse?.(argc);
+      refuseShortOfDeclared(callee, argc);
     }
     // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
     // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read

@@ -454,7 +454,15 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
   });
 
   test('plans one where the target passes floats in general registers', () => {
-    expect(thumbCalls({ g: { params: ['float'], returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+    expect(thumbCalls({ g: { params: 1, returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+  });
+
+  // …but a `float` parameter there is a spelling with no layout (`proto.ts` `declaredCallArgs`), and
+  // the arity guess that would stand in for it drops a trailing argument passed through unchanged
+  test('refuses a float parameter where the target lays out no float argument word', () => {
+    expect(() => thumbCalls({ g: { params: ['s32', 'float'], returns: 'float' } }).plan('g')).toThrow(
+      /^cannot lift 'f': `g` is declared to take 'float' as its parameter 2, which this target passes in general argument words that are not laid out here/,
+    );
   });
 });
 

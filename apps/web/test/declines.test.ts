@@ -915,10 +915,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
   // is a population, not a capability.
   //
-  // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
-  // row's own context declares, and that declaration now reaches the lift. A call no declaration
-  // covers still declines there.
-  //
   // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
   // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
   // spells. The class still takes the refusals keyed on its text that no earlier class claims —
@@ -962,7 +958,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',
-    'no-prototype-args',
     'pool-word-shape',
     'structs',
     'tu-scoped-name',
@@ -1178,6 +1173,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
+    ['no-prototype-args', 'the arity guess in its place', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', 'is declared to return ', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', ' by value, and ', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', ' by value — ', 'packages/core/src/frontend/call-plan.ts'],

@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import type { Prototypes } from '../src/proto';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -4379,6 +4380,46 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
     );
     expect(() => decompile('loc', loc('\tmov\tr1, #0x2\n\tbl\tlogv\n'), ARMV4T_AGBCC)).toThrow(
       /the call 'bl logv' in 'loc' \(the 1st of its 2 calls there\) has no prototype/,
+    );
+  });
+});
+
+// A DECLARATION THE LOWERING CANNOT LAY OUT STILL BOUNDS OR REFUSES THE GUESS. Where the arity falls
+// to the guess behind a declaration, a trailing argument passed through unchanged leaves no gap for
+// `fallbackArgc` to see: agbcc's `g(a + 1, b)` sets r0 and leaves `b` in r1, the bytes of `g(a + 1)`.
+describe('a declared callee whose parameters are not laid out does not lose its arguments to the guess', () => {
+  const FJ = 'fj:\n\tpush\t{lr}\n\tadd\tr0, #0x1\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+  const lift = (prototypes: Prototypes) => decompile('fj', FJ, ARMV4T_AGBCC, { prototypes }).source;
+
+  // agbcc has no FPU, and lays out a `double` in general words but not a `float` or a `long double`:
+  // `int g(int, float);` lifted `g(a0 + 1)`, and `float h(float);` `h(v)` as `h(a1, a1)`
+  test('a parameter declared float or long double refuses on agbcc', () => {
+    for (const t of ['float', 'f32', 'long double']) {
+      expect(() => lift({ g: { params: ['s32', t], returns: 's32' } })).toThrow(
+        new RegExp(`\`g\` is declared to take '${t}' as its parameter 2, which this target passes in general`),
+      );
+    }
+    // CONTROL: a `double` is laid out, as two words
+    expect(lift({ g: { params: ['s32', 'double'], returns: 's32' } })).toContain('g(a0 + 1, ');
+  });
+
+  // `void h(int, Foo);` with `Foo` unresolved: the list is unsized, the guess stands in, and it
+  // counted one register for a declaration of two
+  test('a guess shorter than an unsized declaration refuses', () => {
+    expect(() => lift({ g: { params: ['s32', 'Foo'], returns: 's32' } })).toThrow(
+      /`g` is declared with 2 parameters, which no layout here places, and the arity guess in its place finds 1 argument register set up/,
+    );
+    // CONTROL: one set up past r0 meets the count, and an unsized parameter may be wider, so it lifts
+    const both = 'fj:\n\tpush\t{lr}\n\tadd\tr0, #0x1\n\tadd\tr1, #0x2\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(
+      decompile('fj', both, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 'Foo'], returns: 's32' } } }).source,
+    ).toContain('g(a0 + 1, a1 + 2)');
+  });
+
+  // `int logv(const char *, int, ...); int vs(const char *s, int c){ return logv(s + 1, c); }`
+  test('a guess shorter than a variadic declaration`s fixed parameters refuses', () => {
+    expect(() => lift({ g: { returns: 's32', variadicParams: ['const char *', 's32'] } })).toThrow(
+      /`g` is declared with 2 fixed parameters before its `...`, which no layout here places/,
     );
   });
 });

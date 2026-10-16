@@ -207,7 +207,9 @@ export function calleeDeclaration(callee: string, prototypes: Prototypes, helper
  *  own contiguous-arg-register scan — exactly what it does for a callee the project never declared
  *  — and that scan names itself a guess: `SsaBuilder.readGuessedArg` ASKS whether a register was
  *  set up, and `finish()` retracts the ones an intervening call destroyed. Refusing instead would
- *  be a function that lifts when told nothing and declines when told more. Returning
+ *  be a function that lifts when told nothing and declines when told more. The list's LENGTH is
+ *  still read: every parameter is at least one word, so a guess that counts fewer registers has
+ *  dropped one, and that refuses (frontend/call-plan.ts `refuseShortOfDeclared`). Returning
  *  one-register-each instead would be a layout nothing could know to be right, and the frontend
  *  would then ASSERT those registers rather than ask for them.
  *
@@ -236,7 +238,9 @@ export function calleeDeclaration(callee: string, prototypes: Prototypes, helper
  *  target that states no such words the list abstains. A `float` states no layout on either: it
  *  is one word on a soft-float target, but that word is a float only to a callee whose declaration
  *  the candidate prints, and `spellableProto` prints no `float` — an undeclared callee is handed a
- *  `float` promoted to a `double`, which is two words. */
+ *  `float` promoted to a `double`, which is two words. A known spelling with no layout is not the
+ *  unsized abstention, so on a target with no FPU a call to such a declaration refuses rather than
+ *  guess (frontend/call-plan.ts `refuseUnplacedFloat`). */
 export function declaredCallArgs(
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'doubleArgWords'>,
