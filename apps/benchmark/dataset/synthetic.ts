@@ -1160,6 +1160,31 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'int passmid(int, int);',
   },
+  // …AND THE SAME PASS-THROUGH TO A CALLEE THAT IS DECLARED, where the declaration states no layout
+  // the lowering can act on and the guess stands in for it. There a TRAILING argument passed on
+  // unchanged leaves no gap: `logv(s + 1, c)` sets the first argument register and leaves `c` in the
+  // second, the bytes of `logv(s + 1)`. A variadic declaration is placed by the guess alone, and it
+  // states two fixed parameters, so a guess of one refuses (frontend/call-plan.ts
+  // `refuseShortOfDeclared`) on every frontend. agbcc lays out a `double` in general words and a
+  // `float` not at all, so `g(int, float)` refuses there too (`refuseUnplacedFloat`); a target
+  // with an FPU refuses it already, so that row is agbcc's alone. Both declined witnesses: each
+  // lifted the dropped call before.
+  {
+    sym: 'passvar',
+    src: 'int logv(const char *, int, ...);\nint passvar(const char *s, int c){ return logv(s + 1, c); }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int logv(const char *, int, ...);\nint passvar(const char *, int);',
+    proto: { logv: { returns: 'int', variadicParams: ['const char *', 'int'] } },
+  },
+  {
+    sym: 'passflt',
+    src: 'int g(int, float);\nint passflt(int a, float b){ return g(a + 1, b); }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'int g(int, float);\nint passflt(int, float);',
+    proto: { g: { params: ['int', 'float'], returns: 'int' } },
+  },
 
   // ── nested control flow ─────────────────────────────────────────────────────────────────
   {
