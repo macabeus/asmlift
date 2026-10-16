@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 105 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -95,7 +95,6 @@
 //                               and a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
-//   frontend/frame-objects.ts 1  a struct a call returns into anything but a local (Thumb and MIPS)
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
 // EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all thirteen of them, and the file
@@ -145,7 +144,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 4 of the 13 rows, so a pattern requiring the decided spelling claims 9 of
+    // disjunction is 5 of the 16 rows, so a pattern requiring the decided spelling claims 11 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -588,15 +587,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // for a lowering that receives no struct through memory (MIPS, PowerPC) — and both open on
     // the same clause, straight after the function's name and the callee's.
     //
-    // ITS FIRST INHABITANTS ARE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc: a four-byte
-    // struct the O32 target states no return rule for. The same rows on agbcc are not here — agbcc
-    // returns it through memory, the call lowers, and the frame temp it lands in is read through
-    // its members. The call-plan refusals that only HAVE a struct return in them — its
+    // A THIRD THROW IS THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
+    // for a call that does lower but whose hidden pointer is not a local of this frame (a global, a
+    // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2.
+    //
+    // ITS FIRST INHABITANTS WERE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc, before O32
+    // stated its return rule; it is `sret12` on mwcc_242_81 now, which the PowerPC lowering does not
+    // pass a hidden pointer for. The call-plan refusals that only HAVE a struct return in them — its
     // parameters unsized, its declaration unprintable, a struct and a 64-bit value at once — stay
     // in the residue: what each names to build is the declaration, not the return.
     key: 'struct-return',
     label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
-    pattern: /is declared to return [^,—]+ by value(?:, and | — )/,
+    pattern:
+      /is declared to return [^,—]+ by value(?:, and | — )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
   },
   {
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.

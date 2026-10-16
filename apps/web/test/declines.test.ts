@@ -939,12 +939,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // that clobbers CTR, and a dispatch the recognizer refuses, and no benchmark row reaches any of
   // them.
   //
-  // `stack-frames` joins on the population reading: its last inhabitants were mwcc rows refusing a
-  // capture, a sub-word r1 access or an unread frame word, which frontend/ppc.ts now lifts as frame
-  // objects inside mwcc's local area (`measurePpcFrame`) or as incoming stack arguments, or refuses
-  // under a later guard. The refusals keyed on its text still fire on frames the models do not
-  // describe — a second push, a depth r1 does not hold, a reload nothing stored — and no benchmark
-  // row reaches any of them.
+  // `stack-frames` is inhabited again, by `sret1w` and `sret8` on mwcc_242_81: mwcc returns 4 and
+  // 8 bytes in r3/r3:r4 and stores them to a frame word the lift never sees read back.
   //
   // `far-jump` keys on the far-jump lowering's own refusals in `frontend/thumb.ts` — a relay whose
   // lr is not provably dead, or whose target is not a code label of this function — and no row
@@ -968,7 +964,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'far-jump',
     'no-prototype-args',
     'pool-word-shape',
-    'stack-frames',
     'structs',
     'tu-scoped-name',
     'unread-data-directive',
@@ -1041,14 +1036,14 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   //
   // THE STACK PAIR IS ONE THROW, and `stack-frames` says why it loses: an sp-as-data refusal is
-  // keyed on the throw, and its `why` is what names a capability. All three markers are
+  // keyed on the throw, and its `why` is what names a capability. All four markers are
   // `mips.ts`'s spelling, the disjunction the class comment names — `byvalregs` on ido7.1 and
-  // gcc2.7.2kmc, and `af:suMtxMakeSRT` on ido7.1. No Thumb row reaches a stack pair:
+  // gcc2.7.2kmc, `sret4two` and `af:suMtxMakeSRT` on ido7.1. No Thumb row reaches a stack pair:
   // agbcc's `uninitfirst` and `spilldead` lift, as a frame word read before any store and as
   // locals above the lowest loaded word.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > stack-frames', 3],
+    ['address-taken-local > stack-frames', 4],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
@@ -1278,10 +1273,9 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/call-plan.ts', 5],
     ['frontend/ssa.ts', 2],
     ['frontend/format.ts', 1],
-    ['frontend/frame-objects.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 105;
+  const RESIDUE_TOTAL = 104;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
