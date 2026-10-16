@@ -384,6 +384,19 @@ test('two indexes off ONE high half each complete their own access (hand-written
   expect(src).toMatch(/\[a0\] \+ [\s\S]*\[a1\]/);
 });
 
+test('an INDEXED half may complete below the symbol: S[i - k] puts -k elements in the %lo (ido, KMC, GCC 2.7.2)', () => {
+  // `return gTab[i - 1];` is `lw v0,-4(v0)` on all three. With an index between the halves the
+  // address is S + idx - 4, which C spells as a subscript, so only the UN-indexed below-symbol
+  // address keeps its refusal (the test above). Recompiled byte-identical on all three.
+  const asm =
+    '00000000 <off_neg>:\n   0:\tsll\tt6,a0,0x2\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,v0,t6\n   c:\tjr\tra\n  10:\tlw\tv0,-4(v0)\n';
+  expect(lift('off_neg', asm, pair('gTab', 4, 0x10), true)).toContain('((s32 *)&gTab)[a0 + -1]');
+  // a store two halfwords below: `gTab[i - 2] = v;` on s16 (GCC 2.7.2: `sh a1,-4(at)`)
+  const st =
+    '00000000 <st_neg>:\n   0:\tsll\ta0,a0,0x1\n   4:\tlui\tat,0x0\n   8:\taddu\tat,at,a0\n   c:\tjr\tra\n  10:\tsh\ta1,-4(at)\n';
+  expect(lift('st_neg', st, pair('gTab', 4, 0x10))).toMatch(/\(\(u16 \*\)&gTab\)\[a0 \+ -2\] = a1;/);
+});
+
 // The refusals. Every one is hand-written: no compiler measured emits these shapes, and each would
 // otherwise lift a placeholder as a number or drop the address it was building.
 test('an indexed half READ AS A VALUE refuses', () => {
