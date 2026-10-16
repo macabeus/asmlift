@@ -1583,9 +1583,9 @@ export function fallbackArgc(
   bi: number,
   opts: {
     accept?: (v: Value) => boolean;
-    /** the call's function, where it is (`CallLowering`'s `guess.at`), and the frontend's own refusal */
-    gap?: { name: string; at: number | string; fail: FrontendRefusal };
-  } = {},
+    /** the call's function, where it is (`CallSite`'s `guess.at`), and the frontend's own refusal */
+    gap: { name: string; at: number | string; fail: FrontendRefusal };
+  },
 ): number {
   // whether the caller set argument register k up: a definition reaches it, through a call too
   const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
@@ -1593,17 +1593,15 @@ export function fallbackArgc(
   while (n < argRegs.length && setUp(n)) {
     n++;
   }
-  if (opts.gap !== undefined) {
-    const { name, at, fail } = opts.gap;
-    const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
-    for (let k = n + 1; k < argRegs.length; k++) {
-      if (setUp(k)) {
-        fail(
-          `cannot lift '${name}': the call ${call} has no prototype, ${argRegs[k]} holds a ` +
-            `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
-            `the call does not pass look the same here, so the argument count is not decidable`,
-        );
-      }
+  const { name, at, fail } = opts.gap;
+  const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
+  for (let k = n + 1; k < argRegs.length; k++) {
+    if (setUp(k)) {
+      fail(
+        `cannot lift '${name}': the call ${call} has no prototype, ${argRegs[k]} holds a ` +
+          `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
+          `the call does not pass look the same here, so the argument count is not decidable`,
+      );
     }
   }
   return n;

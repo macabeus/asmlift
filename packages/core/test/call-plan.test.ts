@@ -254,6 +254,7 @@ describe('callDeclarations.lower', () => {
       callee,
       ssa,
       bi: 0,
+      guess: { at: 0 },
       read: (r: string) => ssa.readVar(r, 0),
       write: (r: string, v: Value) => ssa.writeVar(r, 0, v),
       stackWord: (k: number) => ssa.readVar(`stack${k}`, 0),
@@ -317,6 +318,16 @@ describe('callDeclarations.lower', () => {
     callDeclarations('f', MIPS_IDO, {}, O32, fail).lower({ ...s, guess, callee: { address, reg: 'a0' } });
     const [call] = s.ssa.irBlocks[0].ops;
     expect([guessed, call.operands.includes(three)]).toEqual([2, true]);
+  });
+
+  // THE REFUSAL HAS NO OPT-OUT: every call site states where it is (`CallSite`'s `guess.at`), so a count
+  // never stops at a gap silently, and a lowering that guesses refuses it on every ISA
+  test('refuses a gap at every call a lowering guesses for', () => {
+    const s = site('g');
+    s.ssa.writeVar('r1', 0, mkValue(T.unk(32)));
+    expect(() => thumbCalls({}).lower({ ...s, guess: { at: "'bl g' in block 'f'" }, pairs: pairsIn(s.ssa) })).toThrow(
+      /'f': the call 'bl g' in block 'f' has no prototype, r1 holds a value and r0 holds none/,
+    );
   });
 
   test('refuses a site that places stack words for a lowering that reads none', () => {
@@ -451,10 +462,6 @@ describe('fallbackArgc', () => {
   // r0 and r2 hold a value, r1 none: a gap the count cannot decide
   const gapped = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r2' };
   const regs = ['r0', 'r1', 'r2', 'r3'];
-
-  test('stops at the first argument register nothing reaches when the lowering states no guess', () => {
-    expect(fallbackArgc(gapped, regs, 0)).toBe(1);
-  });
 
   test('names the call by its address in the gap refusal', () => {
     expect(() => fallbackArgc(gapped, regs, 0, { gap: { name: 'f', at: 0x3c, fail } })).toThrow(

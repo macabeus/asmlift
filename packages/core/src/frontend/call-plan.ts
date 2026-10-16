@@ -166,13 +166,17 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
-  /** what a guessed arity refuses on; without it a gap in the argument registers ends the count */
-  readonly guess?: {
+  /** what a guessed arity refuses on. REQUIRED, because the gap refusal is (`fallbackArgc`): a
+   *  count that stopped at the first register nothing reaches would drop every argument past an
+   *  incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`), and no frontend may opt
+   *  out of it by omission. */
+  readonly guess: {
     /** where the call is, for the gap refusal: its address, or — for an ISA whose instructions
      *  carry none (Thumb's `.s` text) — a phrase that names it, printed as written */
     readonly at: number | string;
-    /** refuses a guess of `argc` words this ABI's outgoing area could extend */
-    refuse(argc: number): void;
+    /** refuses a guess of `argc` words this ABI's outgoing area could extend; absent where the
+     *  frontend's frame model already refuses every word such a guess could leave out */
+    refuse?(argc: number): void;
   };
   /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
    *  past a guessed count, or past the bound of a call through an argument register — and the ones
@@ -623,11 +627,11 @@ export function callDeclarations(
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !placeholders?.has(v),
-            gap: guess && { name, at: guess.at, fail },
+            gap: { name, at: guess.at, fail },
           })
         : wordsOf(widths, target);
     if (widths === null) {
-      guess?.refuse(argc);
+      guess.refuse?.(argc);
     }
     // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
     // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read
@@ -642,9 +646,9 @@ export function callDeclarations(
     }
     // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
     // count, or past the bound a call through an argument register sets, that a value reaches.
-    // Where the frontend states `guess`, the gap refusal has already fired on any such register
-    // past a guess; otherwise the register leaves the call silently, and the frontend says whether
-    // it knows that one to be an argument all the same.
+    // The gap refusal has already fired on any such register past a guess; past the bound, the
+    // register leaves the call silently, and the frontend says whether it knows that one to be an
+    // argument all the same.
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
       site.leftOut(
         target.argRegs

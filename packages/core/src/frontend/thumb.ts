@@ -5737,14 +5737,12 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // A run of incoming arguments passed on with no register set up past it (`g2(a, b)`) leaves no
     // gap, is the same machine code as `g2()`, and is still lifted as the shorter call. The
     // instruction carries no address, so the refusal names the call by its block.
-    guess: {
-      at: `'${ins.mnemonic} ${callee}' in block '${fill.cfg.asmBlocks[bi].label}'`,
-      // A guess that fills r0..r3 asks nothing of the outgoing area here: a word agbcc stages at
-      // [sp, #k] for the call is an argument only where `analyzeOutgoingArgs` licensed the block,
-      // and the frame model refuses any other store there. agbcc's `g5(1, 2, 3, 4, a)` to an
-      // undeclared `g5` declines as "stack pointer used as data" before any call is lowered.
-      refuse: () => {},
-    },
+    //
+    // No `refuse`: a guess that fills r0..r3 asks nothing of the outgoing area here. A word agbcc
+    // stages at [sp, #k] for the call is an argument only where `analyzeOutgoingArgs` licensed the
+    // block, and the frame model refuses any other store there. agbcc's `g5(1, 2, 3, 4, a)` to an
+    // undeclared `g5` declines as "stack pointer used as data" before any call is lowered.
+    guess: { at: `'${ins.mnemonic} ${callee}' in block '${fill.cfg.asmBlocks[bi].label}'` },
     // …AND AT EVERY OTHER CALL OF A FUNCTION WHOSE VERDICT LEANED ON AN ESCAPE, the reading asks
     // `leftOut` of every register it cuts, not only of those this block wrote. The verdict read every
     // argument register as possibly handed over, so a frame address an EARLIER block left there is
