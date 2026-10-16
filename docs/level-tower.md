@@ -851,7 +851,8 @@ parameters from the argument registers names the pointer as the first of them, a
 **Whether it goes through memory is the target's, and it is DATA.** agbcc puts a struct there when
 it is wider than a word or has a second member that is not a bitfield (thumb.c:1423-1493), passes
 the address in r0 and shifts the arguments (thumb.h:644-645, 672); mwcc hands back up to eight
-bytes in r3/r3:r4 and passes a pointer in r3 past that. `compilerBehaviors.aggregateReturn`,
+bytes in r3/r3:r4 and passes a pointer in r3 past that; ido7.1, gcc2.7.2kmc and gcc2.7.2 pass a
+pointer in a0 for every struct and union, whatever its size (`'memory'`). `compilerBehaviors.aggregateReturn`,
 `aggregateBoundary` and `largestAlignment` state it, with `enumBytes` and `bitfieldPacking` for the
 members whose size or place is the compiler's (agbcc states both; a float is 4 bytes and a double 8
 everywhere, a storage size that is not `declaredWidth`'s register count). `aggregate.ts` is the one
@@ -904,11 +905,15 @@ sp-relative load — into the member reads its uses take.
 **What is NOT built.** A member read of a returned struct at any word but the temp's first: the
 Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it
 onto the temp, but the frontend does not route a word there to an `laddr` as it does inside a
-by-value block. A struct returned straight into a global. MIPS,
-which returns every struct through a hidden pointer and refuses the call: the pointer is an address
-in its frame (`addiu a0,sp,N`), and while MIPS now lifts such an address as a frame object through
-the same audit (`measureO32Frame` draws the O32 local area), its call lowering builds no memory
-return. A symbol map states a
+by-value block. A struct returned straight into a global, through a pointer, through the caller's
+own forwarded pointer, or into a local whose address reaches the call through a merge — each
+refuses on every frontend that passes the pointer (`frame-objects.ts` `refuseSretOutsideFrame`);
+MIPS and Thumb pass it, and PowerPC refuses a call that would. THE CALLEE HALF, on every frontend: a function
+that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
+returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. Its
+own declaration is left out of a context's prototypes (`withContextPrototypes`), so nothing there
+contradicts that; MIPS refuses it where the caller states that declaration, and Thumb does not ask.
+A symbol map states a
 signless return of a word or less as nothing, since it is an enum as often as a struct; and a
 context return spelled by a typedef the reader never saw keeps its parameters.
 
