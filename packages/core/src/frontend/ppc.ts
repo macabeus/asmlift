@@ -1646,6 +1646,13 @@ function liftOnce(
   // Every value a carry reader consumed by folding it away: the constant a `subfze` reads, and the
   // `rB - 1` a `subfe rD,rA,rB` cancels. The machine read them, and no op says so (`computedPairHalf`).
   const readWithoutOp = new Set<Value>();
+  // Every `subfc`/`subfic` difference whose carry a reader turned into a 0/1 truth value: the
+  // difference is the by-product of a 32-bit compare, not the low word of a 64-bit result
+  // (`computedPairHalf`). `carrySource` maps each carry compare to the difference its writer
+  // computed, and `truthPending` each reader result one step short of the truth value to it.
+  const comparedDifference = new Set<Value>();
+  const carrySource = new Map<Value, Value>();
+  const truthPending = new Map<Value, { diff: Value; via: 'neg' | 'and1' }>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
   const discarded = new Set<Value>();
@@ -2641,17 +2648,25 @@ function liftOnce(
         case 'subfco': {
           const b = read(t);
           const a = read(s);
-          emitBin('sub', d, b, a);
+          const diff = emitBin('sub', d, b, a);
           if (mnem.startsWith('subfc')) {
-            setCarry(() => kit.tmp('icmp_uge', [b, a]));
+            setCarry(() => {
+              const c = kit.tmp('icmp_uge', [b, a]);
+              carrySource.set(c, diff);
+              return c;
+            });
           }
           break; // rD = rB - rA (reversed)
         }
         case 'subfic': {
           const k = constVal(parseImm(t));
           const a = read(s);
-          emitBin('sub', d, k, a);
-          setCarry(() => (parseImm(t) === 0 ? kit.tmp('icmp_eq', [a, constVal(0)]) : kit.tmp('icmp_uge', [k, a])));
+          const diff = emitBin('sub', d, k, a);
+          setCarry(() => {
+            const c = parseImm(t) === 0 ? kit.tmp('icmp_eq', [a, constVal(0)]) : kit.tmp('icmp_uge', [k, a]);
+            carrySource.set(c, diff);
+            return c;
+          });
           break; // rD = imm - rA
         }
         // The carry READERS, each over the carry its block's writer left (`readCarry`):
@@ -2664,7 +2679,12 @@ function liftOnce(
         // that is no constant is a 64-bit negate: both stay unmodelled, as do `addme`/`subfme`.
         case 'subfe': {
           if (s === t) {
-            emitBin('add', d, readCarry(ins), constVal(-1));
+            const c = readCarry(ins);
+            const r = emitBin('add', d, c, constVal(-1));
+            const diff = carrySource.get(c);
+            if (diff !== undefined) {
+              truthPending.set(r, { diff, via: 'neg' }); // CA - 1; its negation is the 0/1 `rA <u rB`
+            }
             break;
           }
           const b = read(t);
@@ -2707,12 +2727,23 @@ function liftOnce(
         case 'adde':
           emitBin('add', d, binTmp('add', read(s), read(t)), readCarry(ins, true));
           break;
-        case 'addze':
-          emitBin('add', d, read(s), readCarry(ins, true));
+        case 'addze': {
+          const c = readCarry(ins, true);
+          const r = emitBin('add', d, read(s), c);
+          const diff = carrySource.get(c);
+          if (diff !== undefined) {
+            truthPending.set(r, { diff, via: 'and1' }); // mwcc's signed compare keeps bit 0 of this
+          }
           break;
-        case 'neg':
-          emitUn('neg', d, read(s));
+        }
+        case 'neg': {
+          const x = read(s);
+          if (truthPending.get(x)?.via === 'neg') {
+            comparedDifference.add(truthPending.get(x)!.diff);
+          }
+          emitUn('neg', d, x);
           break;
+        }
         case 'mullw':
         case 'mullwo':
           emitBin('mul', d, read(s), read(t));
@@ -2825,9 +2856,14 @@ function liftOnce(
           break;
         }
         // rotate-and-mask, rotate 0 only: `clrlwi rD,rS,n` = rS & (~0>>>n); `clrrwi` = rS & (~0<<n).
-        case 'clrlwi':
-          emitBin('and', d, read(s), constVal((0xffffffff >>> parseImm(t)) >>> 0));
+        case 'clrlwi': {
+          const x = read(s);
+          if (parseImm(t) === 31 && truthPending.get(x)?.via === 'and1') {
+            comparedDifference.add(truthPending.get(x)!.diff);
+          }
+          emitBin('and', d, x, constVal((0xffffffff >>> parseImm(t)) >>> 0));
           break;
+        }
         case 'clrrwi':
           emitBin('and', d, read(s), constVal((0xffffffff << parseImm(t)) >>> 0));
           break;
@@ -3158,7 +3194,7 @@ function liftOnce(
   const droppedPairHalf = computedPairHalf(
     irBlocks,
     unreadHigh,
-    (v) => compared.has(v) || readWithoutOp.has(v) || ssa.frameWrites.has(v),
+    (v) => compared.has(v) || readWithoutOp.has(v) || comparedDifference.has(v) || ssa.frameWrites.has(v),
   );
   ssa.finish();
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
@@ -3231,8 +3267,11 @@ function liftOnce(
  *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exempt` names a value
  *  the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
  *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns
- *  `(x >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`) and one stored to the frame
- *  (`frameWrites`). A function that holds an unmodelled instruction is not asked: the `opaque` may
+ *  `(x >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`), a `subfc`/`subfic` difference
+ *  whose carry a reader turned into a 0/1 truth value (`comparedDifference`: 2.3.3's `a + (a < b)`
+ *  is `subfc r4,r4,r3; subfe r0,r0,r0; neg r0,r0; add r3,r3,r0`, over the dead `b`, and the signed
+ *  one keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1` and neither
+ *  negates it nor masks it to a bit) and one stored to the frame (`frameWrites`). A function that holds an unmodelled instruction is not asked: the `opaque` may
  *  read r4 without naming it, and it declines under its own name. A value r4 holds that the
  *  function did not compute — its entry value, the caller's `a` that `long long z(unsigned a) {
  *  return a; }` moves there — is not seen, and that word return still drops the low word. */

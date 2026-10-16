@@ -305,6 +305,30 @@ describe('a word return whose r4 holds a value the function computed and nothing
     expect(decompile('f', asm(['addic   r4,r3,-1', 'subfe   r3,r4,r3']), PPC_MWCC).source).toMatch(/a0 != 0/);
   });
 
+  test('nor is a difference whose carry a reader made a 0/1 truth value', () => {
+    // 2.3.3 writes a 32-bit compare's difference over the dead `b` in r4 and reads only its carry:
+    // `a + (a < b)` negates the cancelling `subfe`, and the signed one keeps bit 0 of an `addze`
+    const ult = ['subfc   r4,r4,r3', 'subfe   r0,r0,r0', 'neg     r0,r0', 'add     r3,r3,r0'];
+    expect(decompile('f', asm(ult), PPC_MWCC).source).toMatch(/a0 \+ \(a0 < a1\)/);
+    const slt = [
+      'eqv     r0,r4,r3',
+      'subfc   r4,r4,r3',
+      'srwi    r0,r0,31',
+      'addze   r0,r0',
+      'clrlwi  r0,r0,31',
+      'add     r3,r3,r0',
+    ];
+    expect(decompile('f', asm(slt), PPC_MWCC).source).toMatch(/a0 \+ \(a0 < a1\)/);
+    // 2.3.3's `(unsigned long long)a - b` reads the same carry as the high word, not a truth value,
+    // and so does 2.4.7's `((unsigned long long)a - b) | ((unsigned long long)c << 32)`
+    expect(() => decompile('f', asm(['subfc   r4,r4,r3', 'li      r0,0', 'subfe   r3,r0,r0']), PPC_MWCC)).toThrow(
+      refusal,
+    );
+    expect(() => decompile('f', asm(['subfc   r4,r4,r3', 'subfe   r0,r3,r3', 'or      r3,r5,r0']), PPC_MWCC)).toThrow(
+      refusal,
+    );
+  });
+
   test('a value r4 holds that something reads is no evidence', () => {
     expect(decompile('f', asm(['addi    r4,r3,1', 'stw     r4,0(r5)', 'mr      r3,r4']), PPC_MWCC).source).toMatch(
       /a0 \+ 1/,
