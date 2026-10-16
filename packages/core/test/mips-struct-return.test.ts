@@ -412,6 +412,35 @@ const KMC_C8: Fixture = {
   ],
 };
 
+// gcc2.7.2kmc `void pc(s32 x){ struct S8 a; if (x) a = mk8(x); else a = mk8(x + 1); gW = a.a; }`:
+// `addiu a0,sp,16` in both arms, ahead of one shared `jal`
+const KMC_PC: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tmove\ta1,a0',
+    '8:\tbeqz\ta1,18 <pc+0x18>',
+    'c:\tsw\tra,24(sp)',
+    '10:\tj\t20 <pc+0x20>',
+    '14:\taddiu\ta0,sp,16',
+    '18:\taddiu\ta0,sp,16',
+    '1c:\tli\ta1,1',
+    '20:\tjal\t0 <pc>',
+    '24:\tnop',
+    '28:\tlw\tv0,16(sp)',
+    '2c:\tlui\tat,0x0',
+    '30:\tsw\tv0,0(at)',
+    '34:\tlw\tra,24(sp)',
+    '38:\tjr\tra',
+    '3c:\taddiu\tsp,sp,32',
+  ],
+  rs: [
+    [0x10, 'R_MIPS_26', '.text'],
+    [0x20, 'R_MIPS_26', 'mk8'],
+    [0x2c, 'R_MIPS_HI16', 'gW'],
+    [0x30, 'R_MIPS_LO16', 'gW'],
+  ],
+};
+
 // `void sret1w(s32 x){ struct S1w s = mk1(x); gW = s.x; }` and its 8- and 12-byte twins reading
 // `s.a` and `s.b` (or `s.c`); `void sret2(s32 x){ struct S2 s = mk2(x); gOut = s.h; }`;
 // `void sret5(s32 a, s32 b, s32 c, s32 d){ struct S8 s = mk5(a, b, c, d); gW = s.b; }`
@@ -462,6 +491,13 @@ describe('a hidden pointer that is not a local of this frame declines', () => {
     ['gcc2.7.2 forwarded', 'sretfwd', GCC_SRETFWD, MIPS_GCC],
   ])('%s', (_label, name, f, target) => {
     expect(() => lift(name, f, target)).toThrow(outside);
+  });
+
+  // ido7.1 puts a call in each arm, so each names its own `laddr` and the source lifts
+  test('a local address that reaches the call through a merge says so', () => {
+    expect(() => lift('pc', KMC_PC, MIPS_GCC)).toThrow(
+      /`mk8` returns struct S8 through the pointer in a0, and that pointer is a local's address that reaches the call through a merge/,
+    );
   });
 });
 

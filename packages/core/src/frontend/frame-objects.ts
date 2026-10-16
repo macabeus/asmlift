@@ -2715,8 +2715,8 @@ function gcd(a: number, b: number): number {
   return b === 0 ? Math.abs(a) : gcd(b, a % b);
 }
 
-/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/thumb.ts
- *  types the call's result as that struct). */
+/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/call-plan.ts
+ *  types the call's result as that struct, for every frontend whose lowering passes the pointer). */
 function returnedSize(call: Op): number {
   const t = call.results[0].type;
   if (t.kind !== 'struct' || t.size === undefined) {
@@ -2725,21 +2725,50 @@ function returnedSize(call: Op): number {
   return t.size;
 }
 
-/** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the
- *  binding above, so a process outside core can put a wrapped `gates` table in front of a real
- *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
- *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
 /** A STRUCT RETURNED THROUGH MEMORY IS SPELLED `local = f(..)`, which hands the callee that local's
  *  address: the hidden pointer must be a frame object the audit accepted. A global or a pointer
  *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
- *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states.
- *  Asked of every frontend whose call lowering passes the hidden pointer (`CallLowering.memoryReturn`). */
+ *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. So is
+ *  a local's address that reaches the call through a merge: gcc hoists `addiu a0,sp,16` into both
+ *  arms of `if (x) a = f(x); else a = f(x + 1);` ahead of one shared `jal`, and the call then names
+ *  no one `laddr`. Asked of every frontend whose call lowering passes the hidden pointer
+ *  (`CallLowering.memoryReturn`). */
 export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {
   const laddrs = new Set(
     irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
   );
+  // The block parameters every incoming value of which is a local's address or another such
+  // parameter: the greatest set closed under that, so a loop-carried address is one too.
+  const incoming = new Map<Value, Value[]>();
+  for (const b of irBlocks) {
+    for (const p of b.params) {
+      incoming.set(p, []);
+    }
+  }
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    for (const succ of op.successors) {
+      succ.block.params.forEach((p, i) => incoming.get(p)?.push(succ.args[i]));
+    }
+  }
+  const merged = new Set([...incoming].filter(([, vs]) => vs.length > 0).map(([p]) => p));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const p of merged) {
+      if (incoming.get(p)!.some((v) => !laddrs.has(v) && !merged.has(v))) {
+        merged.delete(p);
+        changed = true;
+      }
+    }
+  }
   for (const op of irBlocks.flatMap((b) => b.ops)) {
     if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
+      if (merged.has(op.operands[0])) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} ` +
+            `through the pointer in ${target.argRegs[0]}, and that pointer is a local's address that reaches the call through a merge ` +
+            'of paths, not one the call names — a struct returned through a merged address is not modelled',
+        );
+      }
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in ${target.argRegs[0]}, ` +
           'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
@@ -2749,6 +2778,10 @@ export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[],
   }
 }
 
+/** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the
+ *  `auditFrameObjects` binding, so a process outside core can put a wrapped `gates` table in front of a real
+ *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
+ *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
 export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectVerdict } = {
   run: (audit) => auditFrameObjects(audit),
 };
