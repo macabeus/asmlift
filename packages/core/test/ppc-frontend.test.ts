@@ -667,8 +667,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(lifted({ params: 2 })).toBe(local);
     expect(lifted({ params: ['s32', 'float', 's32 *'] })).toBe(local);
     expect(lifted({ params: 3 })).toBe(param);
-    // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3)
-    expect(lifted({ params: ['s32', 'long long'] })).toBe(param);
+    // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),
+    // so r5 stays a parameter, which the split-pair refusal then names (raise/pairparams.ts)
+    expect(() => lifted({ params: ['s32', 'long long'] })).toThrow(/reads the two halves of a 64-bit value/);
     expect(lifted({ variadicParams: ['s32'] })).toBe(param);
   });
   test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
