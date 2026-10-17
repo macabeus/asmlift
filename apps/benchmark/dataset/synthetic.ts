@@ -10560,6 +10560,19 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct P { int a, b, c; };\nstruct P ownar_sret(int, int, int);',
     proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
   },
+  // The hidden return pointer comes FIRST, so O32's even-word rule counts it: `x` skips a1 and
+  // takes a2:a3. Laid out after the declared words, the bound was 3 and a3 (x's low word) was read
+  // as an uninitialised local. agbcc aligns nothing and passes x in r1:r2.
+  {
+    sym: 'ownar_sretdbl',
+    src:
+      'struct P { int a, b, c; };\n' +
+      'struct P ownar_sretdbl(double x){ struct P p; int *q = (int *)&x; p.a = q[0]; p.b = q[1]; p.c = 7; return p; }',
+    features: ['struct-return', 'float'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct P { int a, b, c; };\nstruct P ownar_sretdbl(double);',
+    proto: { ownar_sretdbl: { params: ['double'] } },
+  },
   {
     sym: 'byvalregs',
     src:
