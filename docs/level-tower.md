@@ -663,7 +663,10 @@ and with a declared 64-bit return the narrow lift refuses after it; an r4 that o
 value (`long long z(unsigned a) { return a; }`) is not seen, and that word return still drops it.
 Two r4 values are not that low word. A compare's difference whose carry a reader turns into a 0/1
 value is one: 2.3.3 writes `a + (a < b)`'s `subfc` over the dead `b` and negates its `subfe`, where
-a 64-bit high word uses the borrow as `CA - 1`. The other is a dead store to a parameter at -O0,
+a 64-bit high word uses the borrow as `CA - 1`. It is let through only where that `neg` (or the
+signed form's `clrlwi 31` over `addze`) is the carry value's sole reader, in its block, and neither
+value is r3's word: `u64 d = (u64)a - b; *p = -(int)(d >> 32); return d;` negates the very `subfe`
+it returns as the high word. The other is a dead store to a parameter at -O0,
 which mwcc keeps in that parameter's register; there a return of r3's entry value is not asked,
 because -O0 writes both words of a 64-bit op.
 
