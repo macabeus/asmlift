@@ -21,7 +21,7 @@
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, ownArgumentWords, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -4696,10 +4696,11 @@ function thumbFillOf(
   // the treatment a target claiming no partition gets. The save is asked only of the registers the
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
-  // (frontend/ssa.ts) composes it, as it does for PPC.
+  // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
+  // argument registers (`ownArgumentWords`): agbcc homes a local in r3 past a two-parameter one.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs),
+    ...registerLiveIns(target, frame.savedRegs, ownArgumentWords(prototypes[name], target)),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({

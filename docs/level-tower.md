@@ -1482,7 +1482,12 @@ the `prologueSavedRegs` of PPC and MIPS; `registerLiveIns` composes it for all t
 `scratchRegs`, which need no save, less the `hiddenInputRegs` a runtime passes a value in, whose
 entry value may reach the body only through a join) —
 and it is not the elision the sentence feared, only a read of the prologue that was already
-happening for the frame.
+happening for the frame. The function's OWN declaration moves the same partition's edge: an argument
+register at or past the words it fills (`proto.ts` `ownArgumentWords`, an upper bound that abstains
+on anything it cannot bound) is one no caller fills, so `registerLiveIns` moves it to the
+uninitialised side — KMC's `a2` past `uninit_spill(int, int *)`, agbcc's `r3`, mwcc 2.3.3's
+`r5`..`r10`. Only a stated declaration (`--proto`, a row's `proto`) is read there, never the
+context's entry for the function itself.
 
 With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
 argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`

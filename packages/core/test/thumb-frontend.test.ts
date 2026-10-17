@@ -1057,6 +1057,44 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
   });
 
+  // THE FUNCTION'S OWN DECLARATION BOUNDS ITS ARGUMENT REGISTERS (`ownArgumentWords`). agbcc,
+  // canonical flags: `extern int gOut; int ufirst(int k, int *p){ int x; if (k > 5) gOut = x;
+  // return *p + k; }` homes `x` in r3, which no caller of a two-parameter function fills. Without
+  // the declaration the read is a made-up fourth parameter, and with it `gOut = a3` is wrong C.
+  describe('an argument register past the own declaration is an uninitialised local', () => {
+    const UFIRST =
+      'ufirst:\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x5\n\tble\t.L6\n\tldr\tr0, .L7\n\tstr\tr3, [r0]\n' +
+      '.L6:\n\tldr\tr3, [r1]\n\tadd\tr0, r3, r2\n\tbx\tlr\n.L7:\n\t.word\tgOut\n';
+    const lifted = (prototypes: Prototypes) => decompile('ufirst', UFIRST, ARMV4T_AGBCC, { prototypes }).source;
+    const local =
+      's32 ufirst(s32 a0, s32 *a1) {\n    s32 uninit_r3;\n    if (a0 > 5) gOut = uninit_r3;\n    return *a1 + a0;\n}\n';
+    const param =
+      's32 ufirst(s32 a0, s32 *a1, s32 a2, s32 a3) {\n    if (a0 > 5) gOut = a3;\n    return *a1 + a0;\n}\n';
+
+    test('a count or a typed list bounds it', () => {
+      expect(lifted({ ufirst: { params: 2 } })).toBe(local);
+      expect(lifted({ ufirst: { params: ['s32', 's32 *'] } })).toBe(local);
+    });
+
+    test('no declaration, a variadic one or an unsized one bounds nothing', () => {
+      expect(lifted({})).toBe(param);
+      expect(lifted({ ufirst: { variadicParams: ['s32'] } })).toBe(param);
+      expect(lifted({ ufirst: { params: ['s32', 'Unsized'] } })).toBe(param);
+    });
+
+    // `int f(int a, int b, int c){ return a + c; }`: r1 is declared and unread, so it stays
+    // the parameter that keeps r2 in its slot.
+    test('a declared register the body never reads is still a parameter', () => {
+      const hole = 'f:\n\tadd\tr0, r0, r2\n\tbx\tlr\n';
+      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: { params: 3 } } }).source).toBe(
+        's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n',
+      );
+      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: { params: 1 } } }).source).toBe(
+        's32 f(s32 a0) {\n    s32 uninit_r2;\n    return a0 + uninit_r2;\n}\n',
+      );
+    });
+  });
+
   // synthetic:uninitfirst:agbcc — `if (k > 5) gOut = v0 + …; switch (k) { case 0: v0 = p[0]; … }`:
   // the local is read BEFORE any store, so no store reaches the read on any path. A callee that
   // assigned the word as its stack parameter would have run before the read, and agbcc loads no

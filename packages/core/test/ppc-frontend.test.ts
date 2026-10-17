@@ -656,6 +656,21 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       ),
     ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
   });
+  // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
+  // two-parameter function fills; without its own declaration each read is a made-up parameter
+  // (a0..a7). A float takes no general word on this ABI (`fpu.slots: 'separate'`).
+  test('an argument register past the own declaration is an uninitialised local (ownArgumentWords)', () => {
+    const body = '0 <f>:\n0:\tadd     r3,r3,r5\n4:\tblr\n';
+    const lifted = (f: object) => decompile('f', body, PPC_MWCC, { prototypes: { f } }).source;
+    const local = 's32 f(s32 a0) {\n    s32 uninit_r5;\n    return a0 + uninit_r5;\n}\n';
+    const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
+    expect(lifted({ params: 2 })).toBe(local);
+    expect(lifted({ params: ['s32', 'float', 's32 *'] })).toBe(local);
+    expect(lifted({ params: 3 })).toBe(param);
+    // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3)
+    expect(lifted({ params: ['s32', 'long long'] })).toBe(param);
+    expect(lifted({ variadicParams: ['s32'] })).toBe(param);
+  });
   test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
     // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
     // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,

@@ -44,7 +44,14 @@ import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
-import { type FnProto, type Prototypes, declaredWidth, declaresVoidReturn, isFloatingSpelling } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  declaredWidth,
+  declaresVoidReturn,
+  isFloatingSpelling,
+  ownArgumentWords,
+} from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { SymbolMap } from '../symbols';
@@ -1341,12 +1348,14 @@ function liftOnce(
   // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
   // ABI lets a callee use unsaved, is an uninitialised local. `registerLiveIns` (frontend/ssa.ts)
   // composes it, as it does for Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
-  // the treatment a target claiming no partition gets.
+  // the treatment a target claiming no partition gets. The function's own declaration bounds the
+  // general argument registers (`ownArgumentWords`): mwcc 2.3.3 homes locals in r5..r10 past a
+  // two-parameter one. The FPRs are not bounded here.
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () => registerLiveIns(target, savedRegs),
+    () => registerLiveIns(target, savedRegs, ownArgumentWords(prototypes[name], target)),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;

@@ -73,6 +73,27 @@ describe('the O32 register partition', () => {
   });
 });
 
+// KMC and gcc 2.7.2 home a local in a2/a3 past a two-parameter declaration (`uninit_spill`,
+// `uninitfirst`); only the function's own declaration tells that read from an argument
+// (`ownArgumentWords`). IDO homes the same locals in frame words, so it never reaches this.
+describe('an argument register past the own declaration', () => {
+  const READ_A2 = ['0:\taddu\tv0,a0,a2', '4:\tjr\tra', '8:\tnop'];
+  const local = 's32 f(s32 a0) {\n    s32 uninit_a2;\n    return a0 + uninit_a2;\n}\n';
+  const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('is an uninitialised local, and a declared one stays a parameter (%s)', (_c, target) => {
+    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(local);
+    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'] } })).toBe(local);
+    expect(src(READ_A2, target)).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: 3 } })).toBe(param);
+    // O32 passes `(s32, double)`'s double in a2:a3, skipping a1
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'double'] } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'Unsized'] } })).toBe(param);
+  });
+});
+
 describe('the register half: scratch and saved registers', () => {
   // `int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }`, gcc2.7.2kmc -O2 (and gcc2.7.2
   // -O1, byte-identical): r lives in v0, set only in the branch-likely slot. Without the model it
