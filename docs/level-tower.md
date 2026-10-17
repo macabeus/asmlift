@@ -1491,7 +1491,14 @@ hidden return pointer wherever the return is not shown to be a scalar, and a C++
 a bare count is the argument registers, read as a call reads it. Only a
 stated declaration (`--proto`, a row's `proto`) or a mangled symbol's parameter codes is read there,
 never the context's entry for the function itself, and an incoming stack argument past the bound
-refuses, since no local lives in the caller's frame.
+refuses, since no local lives in the caller's frame. The context's own entry is left out on a
+measured trade (`proto-context.ts` `withContextPrototypes`): on kleod, whose headers its compiler
+checked, honouring it takes the lifts with more parameters than their header from 52 of 377 to 1 of
+373 and corrects 5 wrong-C reads, but the entry of a function still `INCLUDE_ASM` was never checked
+against a definition, one too short turns a real argument into `uninit_<reg>`, and no corpus
+measures how often that happens — every real bench row restates its own entry as `proto`. Nor is
+any declaration read for a hand-written body (PowerPC: one naming a callee-saved register it never
+saved), whose declared type is no register interface.
 
 With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
 argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`

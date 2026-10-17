@@ -1366,6 +1366,19 @@ function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<strin
  *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
  *  fact, and only what the caller states about it is kept.
  *
+ *  SO THE OWN ENTRY BOUNDS NO ARGUMENT REGISTER (`proto.ts` `ownArgumentWords`), and that was
+ *  measured, not assumed. On kleod, whose every header its compiler checked, handing each agbcc
+ *  function its own context entry as a stated proto takes the lifts with more parameters than
+ *  their header from 52 of 377 to 1 of 373, and corrects 5 that read agbcc's uninitialised r0..r3
+ *  as parameters (`PuzzleStageScrollUpdate`, declared `void (void)`), with no new wrong C. It stays
+ *  out because the risk sits on the very functions a user decompiles: the header entry of one still
+ *  `INCLUDE_ASM` was written with no compiler checking it against a definition, and an entry too
+ *  short turns a real argument into `uninit_<reg>` — wrong C, where every other error of the bound
+ *  only keeps a parameter. No corpus measures that risk: kleod's headers were all checked, and every
+ *  real bench row restates its own header entry as `proto`, from a header its matching source
+ *  compiled against, so the bench measures the stated path and not this one. A user who trusts the
+ *  entry restates it with `--proto`.
+ *
  *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
  *  false` as nothing) keeps the context's return by `contextReturnUnder`'s rule: a struct return
  *  always — it is what says argument 0 may be a hidden pointer, and an entry stating only the arity
