@@ -53,11 +53,10 @@ export function groupBy<K extends string>(
 export interface MatchRateRow<K extends string> {
   key: K;
   total: number;
-  asmlift: number; // match rate 0..1
-  m2c: number; // match rate 0..1
+  rate: number; // asmlift match rate 0..1
 }
 
-/** Match rate per group, for both decompilers. */
+/** asmlift's match rate per group. */
 export function matchRateBy<K extends string>(
   rows: FunctionResult[],
   keyOf: (r: FunctionResult) => K,
@@ -66,19 +65,17 @@ export function matchRateBy<K extends string>(
   return groupBy(rows, keyOf, order).map(({ key, rows: g }) => ({
     key,
     total: g.length,
-    asmlift: matchRate(g, 'asmlift'),
-    m2c: matchRate(g, 'm2c'),
+    rate: matchRate(g, 'asmlift'),
   }));
 }
 
 export interface FeatureStat {
   feature: string;
   count: number;
-  asmlift: number; // match rate 0..1
-  m2c: number; // match rate 0..1
+  rate: number; // asmlift match rate 0..1
 }
 
-/** Per-feature match rate. A function contributes to every feature tag it carries. */
+/** Per-feature asmlift match rate. A function contributes to every feature tag it carries. */
 export function featureStats(rows: FunctionResult[]): FeatureStat[] {
   const byFeature = new Map<string, FunctionResult[]>();
   for (const r of rows) {
@@ -95,8 +92,7 @@ export function featureStats(rows: FunctionResult[]): FeatureStat[] {
     .map(([feature, g]) => ({
       feature,
       count: g.length,
-      asmlift: matchRate(g, 'asmlift'),
-      m2c: matchRate(g, 'm2c'),
+      rate: matchRate(g, 'asmlift'),
     }))
     .sort((a, b) => b.count - a.count);
 }
@@ -120,44 +116,6 @@ export function tally(rows: FunctionResult[], keysOf: (r: FunctionResult) => str
     }
   }
   return acc;
-}
-
-export interface H2HRow<K extends string> {
-  key: K;
-  total: number;
-  both: number; //        both decompilers byte-exact
-  asmliftOnly: number; // asmlift matched, m2c did not
-  m2cOnly: number; //     m2c matched, asmlift did not
-  neither: number; //     neither matched
-}
-
-/** Head-to-head verdict for a set of rows: who matched, exclusively or jointly. This is the
- *  competitive question the per-decompiler match rates don't answer directly. */
-export function headToHead(rows: FunctionResult[]): Omit<H2HRow<'all'>, 'key'> {
-  const acc = { total: rows.length, both: 0, asmliftOnly: 0, m2cOnly: 0, neither: 0 };
-  for (const r of rows) {
-    const a = r.asmlift.outcome === 'match';
-    const m = r.m2c.outcome === 'match';
-    if (a && m) {
-      acc.both++;
-    } else if (a) {
-      acc.asmliftOnly++;
-    } else if (m) {
-      acc.m2cOnly++;
-    } else {
-      acc.neither++;
-    }
-  }
-  return acc;
-}
-
-/** Head-to-head verdict per group (by ISA, compiler, tier, …). */
-export function headToHeadBy<K extends string>(
-  rows: FunctionResult[],
-  keyOf: (r: FunctionResult) => K,
-  order?: K[],
-): H2HRow<K>[] {
-  return groupBy(rows, keyOf, order).map(({ key, rows: g }) => ({ key, ...headToHead(g) }));
 }
 
 export interface Headline {

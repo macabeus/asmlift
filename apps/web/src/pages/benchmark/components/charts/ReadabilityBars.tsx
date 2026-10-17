@@ -1,7 +1,7 @@
 import type { ReadabilityStats } from '../../lib/stats';
 import { DECOMPILER_COLOR } from '../../theme';
 import { EChart } from './EChart';
-import { axisCommon, legendDefaults, tooltipDefaults } from './echarts';
+import { axisCommon, tooltipDefaults } from './echarts';
 import type { EChartsOption } from './echarts';
 
 const METRICS = [
@@ -12,20 +12,11 @@ const METRICS = [
   { key: 'verbosity', label: 'lines per\nreference line' },
 ] as const;
 
-/** Readability-penalty density of each decompiler's compiling outputs. Lower is better. */
-export function ReadabilityBars({ asmlift, m2c }: { asmlift: ReadabilityStats; m2c: ReadabilityStats }) {
-  const mk = (dec: 'asmlift' | 'm2c', s: ReadabilityStats) => ({
-    name: dec,
-    type: 'bar' as const,
-    emphasis: { focus: 'series' as const },
-    itemStyle: { color: DECOMPILER_COLOR[dec], borderRadius: 3 },
-    barMaxWidth: 26,
-    data: METRICS.map((m) => Number(s[m.key].toFixed(2))),
-  });
+/** Readability-penalty density of asmlift's compiling outputs. Lower is better. */
+export function ReadabilityBars({ stats }: { stats: ReadabilityStats }) {
   const option: EChartsOption = {
     tooltip: { ...tooltipDefaults, trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { ...legendDefaults, top: 0 },
-    grid: { left: 8, right: 24, top: 40, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 24, top: 16, bottom: 8, containLabel: true },
     xAxis: {
       type: 'category',
       data: METRICS.map((m) => m.label),
@@ -33,7 +24,15 @@ export function ReadabilityBars({ asmlift, m2c }: { asmlift: ReadabilityStats; m
       axisLabel: { ...axisCommon.axisLabel, interval: 0 },
     },
     yAxis: { type: 'value', ...axisCommon },
-    series: [mk('asmlift', asmlift), mk('m2c', m2c)],
+    series: [
+      {
+        name: 'asmlift',
+        type: 'bar',
+        itemStyle: { color: DECOMPILER_COLOR.asmlift, borderRadius: 3 },
+        barMaxWidth: 26,
+        data: METRICS.map((m) => Number(stats[m.key].toFixed(2))),
+      },
+    ],
   };
   return <EChart option={option} height={240} />;
 }

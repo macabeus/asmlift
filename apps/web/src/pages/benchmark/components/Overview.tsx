@@ -1,10 +1,9 @@
 import { FEATURE_BY_ID, type FunctionResult } from '@asmlift/bench-schema';
 
-import { featureStats, headToHead, headToHeadBy, headline, matchRate, matchRateBy } from '../lib/stats';
+import { featureStats, headline, matchRate, matchRateBy } from '../lib/stats';
 import { LOC_BUCKETS, locBucketOf, readabilityStats } from '../lib/stats';
-import { H2H_COLOR, ISA_LABEL, ISA_ORDER, TOOLCHAIN_LABEL, TOOLCHAIN_ORDER } from '../theme';
+import { ISA_LABEL, ISA_ORDER, TOOLCHAIN_LABEL, TOOLCHAIN_ORDER } from '../theme';
 import type { ExplorerPreset } from './Explorer';
-import { HeadToHead } from './charts/HeadToHead';
 import { MatchRateBars } from './charts/MatchRateBars';
 import { OutcomeDistribution } from './charts/OutcomeDistribution';
 import { ReadabilityBars } from './charts/ReadabilityBars';
@@ -23,12 +22,9 @@ export function Overview({
   const byToolchain = matchRateBy(rows, (r) => r.toolchain, TOOLCHAIN_ORDER);
   const byIsa = matchRateBy(rows, (r) => r.isa, ISA_ORDER);
   const byTier = matchRateBy(rows, (r) => r.tier, ['synthetic', 'real']);
-  const h2h = headToHead(rows);
-  const h2hByIsa = headToHeadBy(rows, (r) => r.isa, ISA_ORDER);
-  const h2hByTier = headToHeadBy(rows, (r) => r.tier, ['synthetic', 'real']);
   const topFeatures = featureStats(rows).slice(0, 15);
   const byLoc = matchRateBy(rows, locBucketOf, [...LOC_BUCKETS]);
-  const readability = { asmlift: readabilityStats(rows, 'asmlift'), m2c: readabilityStats(rows, 'm2c') };
+  const readability = readabilityStats(rows, 'asmlift');
 
   return (
     <div className="space-y-6">
@@ -47,52 +43,8 @@ export function Overview({
         subtitle="The headline: every function lands in one of five outcomes. Hover a legend label for its definition."
       >
         <OutcomeDistribution rows={rows} />
-        <div className="mt-3 grid grid-cols-2 gap-4 text-xs text-slate-400">
+        <div className="mt-3 text-xs text-slate-400">
           <MatchLine label="asmlift match rate" rate={matchRate(rows, 'asmlift')} color="#2dd4bf" />
-          <MatchLine label="m2c match rate" rate={matchRate(rows, 'm2c')} color="#a855f7" />
-        </div>
-      </Panel>
-
-      {/* Head-to-head: the competitive view */}
-      <Panel
-        title="Head-to-head — who matches byte-exact"
-        subtitle="Beyond each decompiler's own rate: where each WINS exclusively. Cyan = only asmlift matched; purple = only m2c matched; green = both; slate = neither."
-      >
-        <div className="mb-3 flex flex-wrap gap-3">
-          <Verdict
-            label="asmlift exclusive wins"
-            value={h2h.asmliftOnly}
-            color={H2H_COLOR.asmliftOnly}
-            onClick={() => onExplore({ verdict: 'asmlift-only' })}
-          />
-          <Verdict
-            label="m2c exclusive wins"
-            value={h2h.m2cOnly}
-            color={H2H_COLOR.m2cOnly}
-            onClick={() => onExplore({ verdict: 'm2c-only' })}
-          />
-          <Verdict
-            label="both match"
-            value={h2h.both}
-            color={H2H_COLOR.both}
-            onClick={() => onExplore({ verdict: 'both' })}
-          />
-          <Verdict
-            label="neither"
-            value={h2h.neither}
-            color={H2H_COLOR.neither}
-            onClick={() => onExplore({ verdict: 'neither' })}
-          />
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <p className="mb-1 text-xs font-medium text-slate-400">by assembly (ISA)</p>
-            <HeadToHead data={h2hByIsa} labelOf={(k) => ISA_LABEL[k] ?? k} height={200} />
-          </div>
-          <div>
-            <p className="mb-1 text-xs font-medium text-slate-400">synthetic vs real</p>
-            <HeadToHead data={h2hByTier} labelOf={(k) => (k === 'synthetic' ? 'Synthetic' : 'Real')} height={200} />
-          </div>
         </div>
       </Panel>
 
@@ -125,7 +77,7 @@ export function Overview({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Panel
           title="Match rate: synthetic vs real"
-          subtitle="Both decompilers do far better on authored probes than real game code."
+          subtitle="asmlift does far better on authored probes than on real game code."
         >
           <MatchRateBars
             data={byTier}
@@ -151,8 +103,7 @@ export function Overview({
           data={topFeatures.map((f) => ({
             key: f.feature,
             total: f.count,
-            asmlift: f.asmlift,
-            m2c: f.m2c,
+            rate: f.rate,
           }))}
           labelOf={(k) => FEATURE_BY_ID.get(k)?.label ?? k}
           horizontal
@@ -164,36 +115,11 @@ export function Overview({
 
       <Panel
         title="Readability of compiling output"
-        subtitle={`When both emit code, whose is cleaner? Over each decompiler's compiling outputs (asmlift ${readability.asmlift.n}, m2c ${readability.m2c.n}) — lower is better. Gotos = structured control flow lost; casts = type noise; raw memory casts = type recovery failed; address derefs = symbol recovery failed (not score-penalized); verbosity = emitted lines per reference line.`}
+        subtitle={`How clean is the code asmlift emits? Over its ${readability.n} compiling outputs — lower is better. Gotos = structured control flow lost; casts = type noise; raw memory casts = type recovery failed; address derefs = symbol recovery failed (not score-penalized); verbosity = emitted lines per reference line.`}
       >
-        <ReadabilityBars asmlift={readability.asmlift} m2c={readability.m2c} />
+        <ReadabilityBars stats={readability} />
       </Panel>
     </div>
-  );
-}
-
-function Verdict({
-  label,
-  value,
-  color,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="Open in the Function Explorer"
-      className="flex items-center gap-2 rounded-md bg-slate-800/50 px-3 py-1.5 transition-colors hover:bg-slate-700/60"
-    >
-      <span className="inline-block h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: color }} />
-      <span className="text-xs text-slate-300">{label}</span>
-      <span className="font-mono text-sm font-semibold text-white">{value}</span>
-    </button>
   );
 }
 

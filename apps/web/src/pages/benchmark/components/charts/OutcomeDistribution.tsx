@@ -7,12 +7,11 @@ import { axisCommon, legendDefaults, tooltipDefaults } from './echarts';
 import type { EChartsOption } from './echarts';
 
 /**
- * The headline chart: two stacked horizontal bars (asmlift, m2c) showing the
+ * The headline chart: one stacked horizontal bar showing asmlift's
  * match / nonmatch / noncompile / declined / failed split.
  */
 export function OutcomeDistribution({ rows }: { rows: FunctionResult[] }) {
   const asmlift = outcomeCounts(rows, 'asmlift');
-  const m2c = outcomeCounts(rows, 'm2c');
 
   const series = OUTCOME_ORDER.map((outcome) => ({
     name: OUTCOME_LABEL[outcome],
@@ -30,7 +29,7 @@ export function OutcomeDistribution({ rows }: { rows: FunctionResult[] }) {
       fontWeight: 600 as const,
       formatter: (p: { value?: unknown }) => (Number(p.value) > 0 ? `${p.value}` : ''),
     },
-    data: [m2c[outcome], asmlift[outcome]], // categories are rendered bottom-up
+    data: [asmlift[outcome]],
   }));
 
   const option: EChartsOption = {
@@ -59,7 +58,7 @@ export function OutcomeDistribution({ rows }: { rows: FunctionResult[] }) {
     xAxis: { type: 'value', ...axisCommon },
     yAxis: {
       type: 'category',
-      data: ['m2c', 'asmlift'],
+      data: ['asmlift'],
       ...axisCommon,
       axisLabel: {
         ...axisCommon.axisLabel,
@@ -70,5 +69,5 @@ export function OutcomeDistribution({ rows }: { rows: FunctionResult[] }) {
     series,
   };
 
-  return <EChart option={option} height={200} />;
+  return <EChart option={option} height={120} />;
 }

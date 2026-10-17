@@ -1,13 +1,13 @@
 import type { MatchRateRow } from '../../lib/stats';
 import { DECOMPILER_COLOR } from '../../theme';
 import { EChart } from './EChart';
-import { axisCommon, legendDefaults, tooltipDefaults } from './echarts';
+import { axisCommon, tooltipDefaults } from './echarts';
 import type { EChartsOption } from './echarts';
 
 const pct = (v: number) => Math.round(v * 100);
 
 /**
- * Grouped bar of match-rate (%) per category for both decompilers.
+ * Bar of asmlift's match rate (%) per category.
  * `horizontal` flips it for long category lists (features).
  */
 export function MatchRateBars<K extends string>({
@@ -28,14 +28,7 @@ export function MatchRateBars<K extends string>({
 }) {
   const categories = data.map((d) => (showCount ? `${labelOf(d.key)} (${d.total})` : labelOf(d.key)));
 
-  const mkSeries = (dec: 'asmlift' | 'm2c') => ({
-    name: dec,
-    type: 'bar' as const,
-    emphasis: { focus: 'series' as const },
-    itemStyle: { color: DECOMPILER_COLOR[dec], borderRadius: 3 },
-    barMaxWidth: 22,
-    data: data.map((d) => pct(d[dec])),
-  });
+  const rates = data.map((d) => pct(d.rate));
 
   const valueAxis = {
     type: 'value' as const,
@@ -55,7 +48,7 @@ export function MatchRateBars<K extends string>({
   };
 
   // For horizontal we reverse category order so the highest-count feature is on top.
-  const seriesData = (dec: 'asmlift' | 'm2c') => (horizontal ? [...mkSeries(dec).data].reverse() : mkSeries(dec).data);
+  const seriesData = horizontal ? [...rates].reverse() : rates;
 
   const option: EChartsOption = {
     tooltip: {
@@ -64,19 +57,23 @@ export function MatchRateBars<K extends string>({
       axisPointer: { type: 'shadow' },
       valueFormatter: (v) => `${v}%`,
     },
-    legend: { ...legendDefaults, top: 0 },
     grid: {
-      left: horizontal ? 8 : 8,
+      left: 8,
       right: 24,
-      top: 40,
+      top: 16,
       bottom: 8,
       containLabel: true,
     },
     xAxis: horizontal ? valueAxis : catAxis,
     yAxis: horizontal ? catAxis : valueAxis,
     series: [
-      { ...mkSeries('asmlift'), data: seriesData('asmlift') },
-      { ...mkSeries('m2c'), data: seriesData('m2c') },
+      {
+        name: 'asmlift',
+        type: 'bar',
+        itemStyle: { color: DECOMPILER_COLOR.asmlift, borderRadius: 3 },
+        barMaxWidth: 22,
+        data: seriesData,
+      },
     ],
   };
 

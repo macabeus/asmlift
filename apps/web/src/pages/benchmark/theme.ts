@@ -115,21 +115,6 @@ export const ISA_LABEL: Record<string, string> = {
 
 export const ISA_ORDER: string[] = ['arm', 'mips', 'ppc'];
 
-/** Head-to-head verdict colors (both-match / asmlift-only / m2c-only / neither). */
-export const H2H_COLOR = {
-  both: '#22c55e', // emerald — both byte-exact
-  asmliftOnly: '#2dd4bf', // teal-400 — asmlift matches, m2c does not
-  m2cOnly: '#a855f7', // purple — m2c matches, asmlift does not
-  neither: '#475569', // slate — neither matched
-} as const;
-
-export const H2H_LABEL = {
-  both: 'both match',
-  asmliftOnly: 'asmlift only',
-  m2cOnly: 'm2c only',
-  neither: 'neither',
-} as const;
-
 /** Shared chart chrome. */
 export const CHART = {
   grid: '#334155', // slate-700 gridlines
