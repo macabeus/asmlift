@@ -355,13 +355,15 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
  *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
  *  copy of the declaration. A COUNT IS ARGUMENT REGISTERS, as `FnProto.params` defines it and as
- *  the call side reads it (`frontend/call-plan.ts`): every register the call fills, `this` and a
- *  constructor's flag among them, and one more only where the declaration states an aggregate
- *  return, whose hidden pointer the call side adds too. So `{params: 2}` is two words whether the
- *  function is called or decompiled. IT ABSTAINS where neither states a list, or on one it cannot
- *  lay out: an unsized spelling (which may be two words), a struct passed by value (sized by a
- *  layout this does not read), a `long double`; and, under a list, on a constructor or destructor,
- *  which may be handed a flag beside `this`. A variadic declaration states no `params` and so
+ *  the call side reads it (`frontend/call-plan.ts`), so a C function's `{params: 2}` is two words
+ *  whether it is called or decompiled; but a count may also be a count of C parameters, which
+ *  leaves out a hidden word in argument 0, and the bound takes the larger reading wherever that
+ *  word may be there (`ownArguments`): `this` on a symbol that may name a method, the return
+ *  pointer where a stated return is not shown a scalar, and never fewer words than a mangled
+ *  symbol records. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
+ *  unsized spelling (which may be two words), a struct passed by value (sized by a layout this
+ *  does not read), a `long double`; and on a constructor or destructor, which may be handed a flag
+ *  beside `this`. A variadic declaration states no `params` and so
  *  abstains: its arity is each caller's. */
 export function ownArgumentWords(
   name: string,
@@ -391,7 +393,7 @@ export function ownArgumentWords(
 export function ownFirstArgumentPassed(
   name: string,
   p: FnProto | undefined,
-  target: Pick<TargetDescription, 'fpu'>,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
 ): boolean | undefined {
   const own = ownArguments(name, p, target);
   if (own === undefined) {
@@ -407,38 +409,64 @@ export function ownFirstArgumentPassed(
  *  hidden words that may come ahead of them (`undefined` where they cannot be bounded: a
  *  constructor's or destructor's flag), and whether `this` is surely passed (`true` for a
  *  constructor or destructor, `false` for a free function, `undefined` for a symbol that only may
- *  be a method). A count is registers: its widths hold every word, `this` included, but a stated
- *  aggregate return's pointer. */
+ *  be a method).
+ *
+ *  A COUNT IS READ AS REGISTERS, but never below a reading that keeps more words, because a count
+ *  too low is the error that costs wrong C: a count of a method's C parameters (`get__3Fooii`
+ *  `{params: 2}`) or of a struct-returning function's (`Pt mk(int, int, int)` `{params: 3, returns:
+ *  "Pt"}`) leaves out the hidden word in argument 0, and the last real parameter would become
+ *  `uninit_<reg>`. The two readings cannot be told apart from the entry, so a count is bounded by
+ *  the larger one: `this` is added where the symbol may name a method (and a constructor or
+ *  destructor abstains, its flag unbounded), the return pointer where `returns` is STATED and not
+ *  shown a scalar or `void` (as a typed list reads it; a count that states no return is its
+ *  registers, so `uninit_spill` `{params: 2}` stays two), and the parameters the mangled symbol
+ *  records where they lay out to more words than the count. */
 function ownArguments(
   name: string,
   p: FnProto | undefined,
-  target: Pick<TargetDescription, 'fpu'>,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
 ): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
+  const implicit = implicitArgumentWords(name);
   if (typeof p?.params === 'number') {
-    if (!Number.isInteger(p.params) || p.params < 0) {
+    if (!Number.isInteger(p.params) || p.params < 0 || implicit === undefined) {
       return undefined;
     }
-    return {
-      widths: Array.from({ length: p.params }, () => 32),
-      hidden: declaresAggregateReturn(p) ? 1 : 0,
-      passesThis: false,
-    };
+    const hidden = (p.returns !== undefined && !showsScalarReturn(p) ? 1 : 0) + implicit;
+    const passesThis = implicit === 0 ? false : undefined;
+    const counted = Array.from({ length: p.params }, () => 32);
+    if (demangle(name) === null) {
+      return { widths: counted, hidden, passesThis };
+    }
+    // the compiler's own copy of the parameter list; one this cannot lay out may be the longer
+    const recorded = ownParamWidths(name, undefined, target);
+    if (recorded === undefined) {
+      return undefined;
+    }
+    const lead = Array.from({ length: hidden }, () => 32);
+    const longer = wordsOf([...lead, ...recorded], target) > wordsOf([...lead, ...counted], target);
+    return { widths: longer ? recorded : counted, hidden, passesThis };
   }
   const widths = ownParamWidths(name, p ?? undefined, target);
   if (widths === undefined) {
     return undefined;
   }
-  const implicit = implicitArgumentWords(name);
-  const scalarReturn =
+  return {
+    widths,
+    hidden: implicit === undefined ? undefined : (showsScalarReturn(p) ? 0 : 1) + implicit,
+    passesThis: implicit === undefined ? true : implicit === 0 ? false : undefined,
+  };
+}
+
+/** Whether a declaration shows its return is a scalar or `void`, so no struct pointer is handed
+ *  in ahead of its parameters: a `void`, or a stated return that is no aggregate and whose width
+ *  or floating type this can read. A project typedef (`Pt`) shows nothing. */
+function showsScalarReturn(p: FnProto | undefined): boolean {
+  return (
     declaresVoidReturn(p) ||
     (p?.returns !== undefined &&
       !declaresAggregateReturn(p) &&
-      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)));
-  return {
-    widths,
-    hidden: implicit === undefined ? undefined : (scalarReturn ? 0 : 1) + implicit,
-    passesThis: implicit === undefined ? true : implicit === 0 ? false : undefined,
-  };
+      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)))
+  );
 }
 
 /** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */

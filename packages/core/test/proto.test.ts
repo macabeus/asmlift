@@ -332,19 +332,30 @@ describe('ownArgumentWords', () => {
     expect(ownArgumentWords('uninitfirst__FiPi', { params: 3, ...S32 }, PPC_MWCC)).toBe(3);
   });
 
-  // `FnProto.params` defines a count as the argument REGISTERS the call fills, and the call side
-  // adds a hidden word to it only for a stated aggregate return (`frontend/call-plan.ts`). The own
-  // side reads it the same way, so one declaration has one arity: `{params: 2}` is 2 words whether
-  // `uninit_spill` is called or decompiled. A count counts `this` and a constructor's flag too.
-  test('a count is the registers the call fills, hidden words included', () => {
+  // `FnProto.params` defines a count as the argument REGISTERS the call fills, and a C function's
+  // count reads that way on the own side too: `{params: 2}` is 2 words whether `uninit_spill` is
+  // called or decompiled. But a count may also count only the C parameters, which leaves out a
+  // hidden word in argument 0, and a bound too low turns the last real parameter into
+  // `uninit_<reg>`: so where that word may be there, the larger reading is taken.
+  test('a count is the registers the call fills, never fewer than a hidden word may need', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
       expect(ownArgumentWords('uninit_spill', { params: 2 }, t)).toBe(2);
       expect(ownArgumentWords('g', { params: 0 }, t)).toBe(0);
       expect(ownArgumentWords('mk', { params: 3, returns: 'struct P' }, t)).toBe(4);
-      expect(ownArgumentWords('mk', { params: 3, returns: 'Pt' }, t)).toBe(3);
+      // a stated return not shown a scalar may be a struct: `Pt mk(int, int, int)` passes z in
+      // argument 3; one that shows a scalar adds nothing
+      expect(ownArgumentWords('mk', { params: 3, returns: 'Pt' }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: 3, returns: 's32' }, t)).toBe(3);
     }
-    expect(ownArgumentWords('pick__3FooFiPi', { params: 3 }, PPC_MWCC)).toBe(3);
-    expect(ownArgumentWords('__dt__3FooFv', { params: 2 }, PPC_MWCC)).toBe(2);
+    // a method's count of its C parameters leaves out `this`: `int Foo::get(int, int)`
+    expect(ownArgumentWords('get__3Fooii', { params: 2, returns: 'int' }, MIPS_GCC)).toBe(3);
+    expect(ownArgumentWords('get__3FooFii', { params: 2, returns: 'int' }, PPC_MWCC)).toBe(3);
+    expect(ownArgumentWords('pick__3FooFiPi', { params: 3, ...S32 }, PPC_MWCC)).toBe(4);
+    // a count is never read as fewer words than the mangled symbol records
+    expect(ownArgumentWords('uninitfirst__FiPi', { params: 1, ...S32 }, PPC_MWCC)).toBe(2);
+    expect(ownArgumentWords('take__F3Vec', { params: 1, ...S32 }, PPC_MWCC)).toBeUndefined();
+    // a constructor's or destructor's flag is unbounded
+    expect(ownArgumentWords('__dt__3FooFv', { params: 2 }, PPC_MWCC)).toBeUndefined();
   });
 
   // PowerPC asks whether a bare word return hands back r3's entry value (`frontend/ppc.ts`
