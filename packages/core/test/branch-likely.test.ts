@@ -401,6 +401,51 @@ test('the stolen-slot rewrite asks for the same relocation, not only the same te
   expect(decompile('f', asm, MIPS_GCC, { asmData: asmData('B') }).source).toBe(want);
 });
 
+test('a stolen slot that completes a `%lo` keeps its slot, so each path pairs it with its own `%hi`', () => {
+  // Each path loads v1's high half for itself (0x0 and 0xc for the likely branch; 0x8 and 0x14
+  // for the `b`). Retargeted, the one copy at T-4 would read v1 at a join, where it is the block
+  // parameter and not the half, and the fold would refuse a function that lifts.
+  const asmData = (lo: number[], hi: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(8)]]),
+    relocs: [
+      ...hi.map((offset) => ({ section: '.text', offset, type: 'R_MIPS_HI16', sym: 'A', addend: 0 })),
+      ...lo.map((offset) => ({ section: '.text', offset, type: 'R_MIPS_LO16', sym: 'A', addend: 0 })),
+    ],
+    symbols: new Map([['A', { section: '.data', value: 0, size: 4, index: 1 }]]),
+    symbolCount: 1,
+    bigEndian: true,
+  });
+  const likely = obj(
+    '0:\tlui\tv1,0x0',
+    '4:\tbnezl\ta0,18 <f+0x18>',
+    '8:\tlw\tv0,0(v1)',
+    'c:\tlui\tv1,0x0',
+    '10:\tli\ta1,3',
+    '14:\tlw\tv0,0(v1)',
+    '18:\tjr\tra',
+    '1c:\taddu\tv0,v0,a1',
+  );
+  expect(decompile('f', likely, MIPS_IDO, { asmData: asmData([0x8, 0x14], [0x0, 0xc]) }).source).toBe(
+    's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 == 0) a1 = 3;\n    v0 = A;\n    return v0 + a1;\n}\n',
+  );
+  const jump = obj(
+    '0:\tbeqz\ta0,14 <f+0x14>',
+    '4:\tli\ta1,1',
+    '8:\tlui\tv1,0x0',
+    'c:\tb\t24 <f+0x24>',
+    '10:\tlw\tv0,0(v1)',
+    '14:\tlui\tv1,0x0',
+    '18:\tli\ta1,3',
+    '1c:\tsw\ta1,0(a2)',
+    '20:\tlw\tv0,0(v1)',
+    '24:\tjr\tra',
+    '28:\taddu\tv0,v0,a1',
+  );
+  const out = decompile('f', jump, MIPS_IDO, { asmData: asmData([0x10, 0x20], [0x8, 0x14]) }).source;
+  expect(out).toContain('v0 = A;');
+  expect(out).toContain('*a2 = 3;');
+});
+
 test('the stolen-slot rewrite leaves alone a target-4 that is a delay slot or outside the function', () => {
   // 0x10 is `beqz`'s slot: it runs after that branch, and a branch landing on it is not modelled.
   // Not taken: a1 = 6, then 9 or 6 by a2; taken: a1 + 1.

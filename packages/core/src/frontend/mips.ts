@@ -606,7 +606,12 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
 //     `lui at,0x0` against one symbol from the same text against another;
 //   - T-4 is not the slot itself (T = branch+8, a slot that skips only itself: nothing to share);
 //   - T-4 and T are both in the function, and T-4 is no transfer's delay slot — a slot runs only
-//     after its own transfer, so falling into one from T-8's side is not what its bytes say.
+//     after its own transfer, so falling into one from T-8's side is not what its bytes say;
+//   - the slot completes no `%lo`. Its `%hi` is a register each path loads for itself (`lui v1;
+//     b T; lw v1,%lo(g)(v1)` against `lui v1; …; lw v1,%lo(g)(v1); T:`), and retargeted, the one
+//     copy at T-4 reads that register at a join, where it is the block parameter and not the half:
+//     the high/low fold then refuses a function that lifted before. Exact either way, so the
+//     shape keeps its slot rather than trade a lift for a decline (ido fuzz, 1 in 900 lifts).
 // A branch landing on the slot refuses below, rewrite or not; a recovered jump-table arm landing on
 // a freed slot refuses in `lift`, where the tables exist.
 //
@@ -654,7 +659,8 @@ function normaliseBranchLikely(
       stolen === undefined ||
       !at.has(target) ||
       (beforeStolen !== undefined && isControlTransfer(beforeStolen)) ||
-      !sameWord(slot, stolen, relocOf)
+      !sameWord(slot, stolen, relocOf) ||
+      relocOf(slot)?.type === 'R_MIPS_LO16'
     ) {
       return false;
     }
