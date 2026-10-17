@@ -80,7 +80,7 @@ import {
   landsOnArea,
   liftWithRelift,
 } from './frame-objects';
-import type { Frontend } from './frontend';
+import type { Frontend, LiftOptions } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -1308,9 +1308,10 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
   context?: ContextGlobals,
+  options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject),
+    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject, options.contextOwnWords),
   );
 }
 
@@ -1322,6 +1323,7 @@ function liftOnce(
   asmData: AsmData | undefined,
   declarations: Declarations,
   oneObject: FrameRange | undefined,
+  contextOwnWords: number | undefined,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1442,7 +1444,15 @@ function liftOnce(
     blocks.length,
     preds,
     () =>
-      registerLiveIns(target, savedRegs, ownDeclared ? ownArgumentWords(name, prototypes[name], target) : undefined),
+      registerLiveIns(
+        target,
+        savedRegs,
+        !ownDeclared
+          ? undefined
+          : Object.hasOwn(prototypes, name) || contextOwnWords === undefined
+            ? ownArgumentWords(name, prototypes[name], target)
+            : contextOwnWords,
+      ),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;

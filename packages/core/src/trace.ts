@@ -13,7 +13,7 @@ import { verify } from './ir/verify';
 import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked, stubResult } from './pipeline';
-import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import type { ContextGlobals } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
@@ -94,6 +94,7 @@ export interface TraceOptions {
   asmData?: AsmData; // data-section side table (Regime-B jump tables), as in decompile()
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   contextGlobals?: ContextGlobals; // the declaration context's globals, as in decompile()
+  ownContextProto?: FnProto; // the context's own entry, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
    *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
@@ -197,7 +198,17 @@ function traceTower(
   const patternEvents: PatternEvent[] = [];
 
   // (1) lift → typed-SSA IR
-  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
+  const fn = liftStamped(
+    name,
+    asm,
+    target,
+    prototypes,
+    opts.asmData,
+    opts.symbols,
+    opts.contextGlobals,
+    undefined,
+    opts.ownContextProto,
+  );
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
   // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
   // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.

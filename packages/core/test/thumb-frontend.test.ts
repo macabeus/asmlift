@@ -1130,6 +1130,95 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
   });
 
+  // The declaration context's OWN entry (`ownContextProto`, pipeline.ts `liftWithinContextBound`)
+  // bounds the same registers SOFTLY: a register past it the lift never reads is no parameter, and
+  // one it reads stays the parameter a context-less lift makes it, with a note — never
+  // `uninit_<reg>`, since a header entry for a function still in assembly was checked by no
+  // compiler. `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0); while (zq(a) != 5) sl(); return
+  // gX; }` at agbcc's canonical flags: r2/r3 reach only the guessed calls `zq` and `sl`.
+  describe("the context's own entry bounds them softly", () => {
+    const OC_PH =
+      'oc_ph:\n\tpush\t{r4, lr}\n\tlsl\tr0, r0, #0x10\n\tlsr\tr4, r0, #0x10\n\tldr\tr0, .L8\n\tldr\tr0, [r0]\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.L3\n\tlsl\tr0, r4, #0x10\n\tasr\tr0, r0, #0x10\n\tmov\tr2, #0x2\n\tmov\tr3, #0x0\n' +
+      '\tbl\tk4\n.L3:\n\tlsl\tr4, r4, #0x10\n\tb\t.L4\n.L8:\n\t.word\tgX\n.L6:\n\tbl\tsl\n.L4:\n\tasr\tr0, r4, #0x10\n' +
+      '\tbl\tzq\n\tcmp\tr0, #0x5\n\tbne\t.L6\n\tldr\tr0, .L10\n\tldr\tr0, [r0]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L10:\n\t.word\tgX\n';
+    const k4 = { k4: { params: ['int', 'int', 'int', 'int'], returnsVoid: true } };
+    const ocPh = (ownContextProto?: Prototypes[string]) =>
+      decompile('oc_ph', OC_PH, ARMV4T_AGBCC, { prototypes: k4, ...(ownContextProto ? { ownContextProto } : {}) });
+
+    test('an argument register past it that nothing reads is no parameter', () => {
+      expect(ocPh().source).toMatch(/^s32 oc_ph\(u16 a0, s32 a1, s32 a2, s32 a3\) \{/m);
+      const r = ocPh({ params: ['short', 'int'], returns: 'int' });
+      expect(r.source).toMatch(/^s32 oc_ph\(u16 a0, s32 a1\) \{/m);
+      expect(r.source).not.toMatch(/uninit_/);
+      expect(r.ownArityNotes).toEqual([]);
+      // the body is the stated entry's, byte for byte
+      expect(r.source).toBe(
+        decompile('oc_ph', OC_PH, ARMV4T_AGBCC, {
+          prototypes: { ...k4, oc_ph: { params: ['short', 'int'], returns: 'int' } },
+        }).source,
+      );
+    });
+
+    // `void oc_cb(void);` ahead of `void oc_cb(struct T *t){ g(&t->b, t->c + 1); }`: the shape of
+    // sbk2's task callbacks, whose `(void)` forward declarations were short when they were decompiled
+    test('a register past it that the body reads stays a parameter, with a note', () => {
+      const OC_CB =
+        'oc_cb:\n\tpush\t{lr}\n\tadd\tr2, r0, #0x4\n\tldr\tr1, [r0, #0x8]\n\tadd\tr1, r1, #0x1\n\tadd\tr0, r2, #0\n' +
+        '\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';
+      const g = { g: { params: ['int *', 'int'], returnsVoid: true } };
+      const plain = decompile('oc_cb', OC_CB, ARMV4T_AGBCC, { prototypes: g });
+      const r = decompile('oc_cb', OC_CB, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: [], returnsVoid: true },
+      });
+      expect(r.source).toBe(plain.source);
+      expect(r.source).toMatch(/^void oc_cb\(s32 \*a0\) \{/m);
+      expect(r.ownArityNotes).toEqual([
+        'oc_cb: its context declaration `void oc_cb(void)` fills 0 argument words, and the body reads r0 past ' +
+          'them — kept as a parameter, which the header contradicts',
+      ]);
+      // stated, the same entry is the caller's word: r0 is an uninitialised local
+      expect(
+        decompile('oc_cb', OC_CB, ARMV4T_AGBCC, { prototypes: { ...g, oc_cb: { params: [], returnsVoid: true } } })
+          .source,
+      ).toMatch(/uninit_r0/);
+    });
+
+    test('a read of the last argument register lifts as without it, and a stated entry wins', () => {
+      const UFIRST =
+        'ufirst:\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x5\n\tble\t.L6\n\tldr\tr0, .L7\n\tstr\tr3, [r0]\n' +
+        '.L6:\n\tldr\tr3, [r1]\n\tadd\tr0, r3, r2\n\tbx\tlr\n.L7:\n\t.word\tgOut\n';
+      const own = { params: ['s32', 's32 *'], returns: 's32' };
+      const soft = decompile('ufirst', UFIRST, ARMV4T_AGBCC, { ownContextProto: own });
+      expect(soft.source).toBe(decompile('ufirst', UFIRST, ARMV4T_AGBCC).source);
+      expect(soft.ownArityNotes).toHaveLength(1);
+      expect(soft.ownArityNotes[0]).toMatch(/reads r3 past them/);
+      const stated = decompile('ufirst', UFIRST, ARMV4T_AGBCC, { prototypes: { ufirst: own }, ownContextProto: own });
+      expect(stated.source).toBe(decompile('ufirst', UFIRST, ARMV4T_AGBCC, { prototypes: { ufirst: own } }).source);
+      expect(stated.ownArityNotes).toEqual([]);
+    });
+
+    // the stack refusal a stated entry has is no decline here: the lift goes back to its
+    // context-less self, and says why
+    test('an incoming stack argument past it lifts as without it, with a note', () => {
+      const ST2 =
+        'st2:\n\tpush\t{r4, lr}\n\tldr\tr4, [sp, #0x8]\n\tbl\tg\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { g: { params: 1 } };
+      const r = decompile('st2', ST2, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: ['s32', 's32'], returns: 's32' },
+      });
+      expect(r.source).toBe(decompile('st2', ST2, ARMV4T_AGBCC, { prototypes: g }).source);
+      expect(r.ownArityNotes).toEqual([
+        'st2: lifted without its context declaration `s32 st2(s32, s32)`, which it could not be lifted within ' +
+          "(cannot lift 'st2': it reads incoming stack argument 4, past the 2 argument words its own declaration " +
+          'fills — the declaration and the body disagree)',
+      ]);
+    });
+  });
+
   // synthetic:uninitfirst:agbcc — `if (k > 5) gOut = v0 + …; switch (k) { case 0: v0 = p[0]; … }`:
   // the local is read BEFORE any store, so no store reaches the read on any path. A callee that
   // assigned the word as its stack parameter would have run before the read, and agbcc loads no

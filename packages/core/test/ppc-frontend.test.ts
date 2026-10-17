@@ -684,6 +684,44 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
     expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
   });
+  // The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
+  // `liftWithinContextBound`). mwcc 2.4.2's `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0);
+  // while (zq(a) != 5) sl(); return gX; }`: r5/r6 reach only the guessed calls `zq` and `sl`.
+  test("the context's own entry drops a register past it nothing reads, and keeps one it reads", () => {
+    const OC_PH =
+      '00000000 <oc_ph>:\n0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tstw     r31,12(r1)\n' +
+      '10:\tmr      r31,r3\n14:\tlwz     r0,0(0)\n\t\t\t14: R_PPC_EMB_SDA21\tgX\n18:\tcmpwi   r0,0\n' +
+      '1c:\tbeq-    54 <oc_ph+0x54>\n20:\textsh   r3,r31\n24:\tli      r5,2\n28:\tli      r6,0\n' +
+      '2c:\tbl      2c <oc_ph+0x2c>\n\t\t\t2c: R_PPC_REL24\tk4\n30:\tb       54 <oc_ph+0x54>\n34:\tb       3c <oc_ph+0x3c>\n' +
+      '38:\tbl      38 <oc_ph+0x38>\n\t\t\t38: R_PPC_REL24\tsl\n3c:\tmr      r3,r31\n40:\tbl      40 <oc_ph+0x40>\n' +
+      '\t\t\t40: R_PPC_REL24\tzq\n44:\tcmpwi   r3,5\n48:\tbne+    38 <oc_ph+0x38>\n4c:\tlwz     r3,0(0)\n' +
+      '\t\t\t4c: R_PPC_EMB_SDA21\tgX\n50:\tb       5c <oc_ph+0x5c>\n54:\textsh   r31,r31\n58:\tb       3c <oc_ph+0x3c>\n' +
+      '5c:\tlwz     r0,20(r1)\n60:\tlwz     r31,12(r1)\n64:\tmtlr    r0\n68:\taddi    r1,r1,16\n6c:\tblr\n';
+    const k4 = { k4: { params: ['int', 'int', 'int', 'int'], returnsVoid: true } };
+    const own = { params: ['short', 'int'], returns: 'int' };
+    expect(decompile('oc_ph', OC_PH, PPC_MWCC, { prototypes: k4 }).source).toMatch(
+      /^s32 oc_ph\(s32 a0, s32 a1, s32 a2, s32 a3\) \{/m,
+    );
+    const r = decompile('oc_ph', OC_PH, PPC_MWCC, { prototypes: k4, ownContextProto: own });
+    expect(r.source).toMatch(/^s32 oc_ph\(s32 a0, s32 a1\) \{/m);
+    expect(r.source).not.toMatch(/uninit_/);
+    expect(r.ownArityNotes).toEqual([]);
+    expect(r.source).toBe(decompile('oc_ph', OC_PH, PPC_MWCC, { prototypes: { ...k4, oc_ph: own } }).source);
+
+    const body = '0 <f>:\n0:\tadd     r3,r3,r5\n4:\tblr\n';
+    const read = decompile('f', body, PPC_MWCC, { ownContextProto: { params: ['s32', 's32'], returns: 's32' } });
+    expect(read.source).toBe('s32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n');
+    expect(read.ownArityNotes).toEqual([
+      'f: its context declaration `s32 f(s32, s32)` fills 2 argument words, and the body reads r5 past them — ' +
+        'kept as a parameter, which the header contradicts',
+    ]);
+    // a hand-written body is bounded by no declaration, stated or not
+    const hand = decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC, {
+      ownContextProto: { params: [], returnsVoid: true },
+    });
+    expect(hand.source).toBe(decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC).source);
+    expect(hand.ownArityNotes).toEqual([]);
+  });
   // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
   // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
   // no register interface, and read as one it would turn r7 into `uninit_r7`. A callee-saved register

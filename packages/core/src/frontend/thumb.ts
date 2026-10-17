@@ -42,7 +42,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import type { Frontend } from './frontend';
+import type { Frontend, LiftOptions } from './frontend';
 import {
   type LocalStatics,
   gasPoolReferrers,
@@ -2458,9 +2458,10 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
   context?: ContextGlobals,
+  options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options.contextOwnWords),
   );
 }
 
@@ -2482,8 +2483,9 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
+  contextOwnWords: number | undefined,
 ): Fn | FrameObjectRelift {
-  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject);
+  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, contextOwnWords);
   const { cfg, frame, ssa, pairs, statics } = fill;
   const { fn, irBlocks, paramReg } = ssa;
 
@@ -4688,6 +4690,7 @@ function thumbFillOf(
   prototypes: Prototypes,
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
+  contextOwnWords?: number,
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -4710,7 +4713,13 @@ function thumbFillOf(
   // argument registers (`ownArgumentWords`): agbcc homes a local in r3 past a two-parameter one.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, ownArgumentWords(name, prototypes[name], target)),
+    ...registerLiveIns(
+      target,
+      frame.savedRegs,
+      Object.hasOwn(prototypes, name) || contextOwnWords === undefined
+        ? ownArgumentWords(name, prototypes[name], target)
+        : contextOwnWords,
+    ),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({

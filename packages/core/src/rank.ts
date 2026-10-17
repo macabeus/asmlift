@@ -63,7 +63,7 @@ import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked } from './pipeline';
-import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import type { ContextGlobals } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
@@ -168,6 +168,8 @@ export interface EnumerateOptions {
   symbols?: SymbolMap;
   /** same contract as DecompileOptions.contextGlobals */
   contextGlobals?: ContextGlobals;
+  /** same contract as DecompileOptions.ownContextProto */
+  ownContextProto?: FnProto;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -646,7 +648,17 @@ export function enumerateCandidates(
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
-  const sharedLift = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
+  const sharedLift = liftStamped(
+    name,
+    asm,
+    target,
+    prototypes,
+    opts.asmData,
+    opts.symbols,
+    opts.contextGlobals,
+    undefined,
+    opts.ownContextProto,
+  );
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
   // half. Read off the shared lift's LIFTED form — before the fold below and the tower rewrite it —
   // because the base-materialization order the derivation's licence reads does not survive them.
@@ -697,7 +709,17 @@ export function enumerateCandidates(
     if (symbols === opts.symbols) {
       return { treeOwned: sharedLiftTreeOwned, extendedReaders: sharedLiftExtendedReaders };
     }
-    const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols, opts.contextGlobals);
+    const p = liftStamped(
+      name,
+      asm,
+      target,
+      prototypes,
+      opts.asmData,
+      symbols,
+      opts.contextGlobals,
+      undefined,
+      opts.ownContextProto,
+    );
     applyIdiomPatterns(p, target, opts.patterns);
     const seen = { treeOwned: false, extendedReaders: false };
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
@@ -1952,6 +1974,7 @@ export function enumerateCandidates(
             tailSlot = true;
           },
         },
+        opts.ownContextProto,
       );
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
@@ -2067,9 +2090,17 @@ export function enumerateCandidates(
           fn =
             liftSetting.variations.length === 0
               ? base
-              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals, {
-                  keepTailSlots: liftSetting.keepTailSlots,
-                });
+              : liftStamped(
+                  name,
+                  asm,
+                  target,
+                  prototypes,
+                  opts.asmData,
+                  symbolSetting.symbols,
+                  opts.contextGlobals,
+                  { keepTailSlots: liftSetting.keepTailSlots },
+                  opts.ownContextProto,
+                );
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it
           }
