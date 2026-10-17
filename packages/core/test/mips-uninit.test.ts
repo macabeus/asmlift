@@ -84,15 +84,17 @@ describe('an argument register past the own declaration', () => {
     ['gcc', MIPS_GCC],
     ['ido', MIPS_IDO],
   ])('is an uninitialised local, and a declared one stays a parameter (%s)', (_c, target) => {
-    expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 's32' } })).toBe(local);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 's32' } })).toBe(local);
     expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'], returns: 's32' } })).toBe(local);
     expect(src(READ_A2, target)).toBe(param);
-    expect(src(READ_A2, target, undefined, { f: { params: 3, returns: 's32' } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32', 's32'], returns: 's32' } })).toBe(param);
     // a list whose return is not shown to be a scalar may follow a struct's hidden pointer in a0
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'] } })).toBe(param);
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 'Pt' } })).toBe(param);
-    // a count is the registers the call fills (`FnProto.params`), as the call side reads it
-    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(local);
+    // a count does not say whether it counts registers or C parameters, either of which may be a
+    // pair: `{params: 2}` may be `(s32, long long)`, which passes a2:a3
+    expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 's32' } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(param);
     // O32 passes `(s32, double)`'s double in a2:a3, skipping a1
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'double'], returns: 's32' } })).toBe(param);
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'Unsized'], returns: 's32' } })).toBe(param);

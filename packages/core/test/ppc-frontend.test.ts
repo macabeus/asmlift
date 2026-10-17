@@ -664,13 +664,14 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const lifted = (f: object) => decompile('f', body, PPC_MWCC, { prototypes: { f } }).source;
     const local = 's32 f(s32 a0) {\n    s32 uninit_r5;\n    return a0 + uninit_r5;\n}\n';
     const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
-    expect(lifted({ params: 2, returns: 's32' })).toBe(local);
+    expect(lifted({ params: ['s32', 's32'], returns: 's32' })).toBe(local);
     expect(lifted({ params: ['s32', 'float', 's32 *'], returns: 's32' })).toBe(local);
-    expect(lifted({ params: 3, returns: 's32' })).toBe(param);
+    expect(lifted({ params: ['s32', 's32', 's32'], returns: 's32' })).toBe(param);
     // a list whose return is not shown to be a scalar may follow a struct's hidden pointer, in r3;
-    // a count is the registers the call fills (`FnProto.params`), as the call side reads it
+    // a count may count C parameters, any of them a pair: `{params: 2}` may be `(s32, s64)`, r3 and
+    // r5:r6
     expect(lifted({ params: ['s32', 's32'] })).toBe(param);
-    expect(lifted({ params: 2 })).toBe(local);
+    expect(lifted({ params: 2, returns: 's32' })).toBe(param);
     // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),
     // so r5 stays a parameter, which the split-pair refusal then names (raise/pairparams.ts)
     expect(() => lifted({ params: ['s32', 'long long'], returns: 's32' })).toThrow(
@@ -691,9 +692,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // compiled code saves r31 before it touches it, and keeps the bound
     const saved =
       '0 <f>:\n0:\tstw     r31,-4(r1)\n4:\tmr      r31,r5\n8:\tadd     r3,r3,r31\nc:\tlwz     r31,-4(r1)\n10:\tblr\n';
-    expect(decompile('f', saved, PPC_MWCC, { prototypes: { f: { params: 2, returns: 's32' } } }).source).toContain(
-      'uninit_r5',
-    );
+    expect(
+      decompile('f', saved, PPC_MWCC, { prototypes: { f: { params: ['s32', 's32'], returns: 's32' } } }).source,
+    ).toContain('uninit_r5');
   });
   // `int Foo::pick(int k, int *p){ return base + k + p[1]; }` (-lang=c++): `this` takes r3, which
   // the declared parameters leave out, so p is in r5.
