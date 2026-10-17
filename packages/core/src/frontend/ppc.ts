@@ -43,7 +43,6 @@ import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } fr
 import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { demangle } from '../mangle';
 import {
   type FnProto,
   type Prototypes,
@@ -51,6 +50,7 @@ import {
   declaresVoidReturn,
   isFloatingSpelling,
   ownArgumentWords,
+  ownFirstArgumentPassed,
 } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
@@ -1779,31 +1779,25 @@ function liftOnce(
     return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
-   *  decides when there is one: a non-void return and at least one integer-class parameter (the
-   *  first such takes r3) or a nonzero register count. Without one, only the body can show it: r3
-   *  is already an entry parameter, or a higher argument register is live in, which puts an
-   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or every word
-   *  return hands back a value computed only to be returned (`r3WrittenToReturn`) — then the
-   *  function returns a word, and a bare return of it hands back what the caller left in r3. */
+   *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
+   *  non-void return and a parameter word or `this` first, or a nonzero register count — and a
+   *  free function of none (`ksNesInit13__Fv`) or a count of 0 is passed nothing, which no body
+   *  evidence overrides. Without one, only the body can show it: r3 is already an entry parameter,
+   *  or a higher argument register is live in, which puts an argument in r3 by position (the
+   *  obligation `mintArgSlotHoles` discharges), or every word return hands back a value computed
+   *  only to be returned (`r3WrittenToReturn`) — then the function returns a word, and a bare
+   *  return of it hands back what the caller left in r3. */
   const r3IsAnArgument = (): boolean => {
     const own = prototypes[name];
     if (declaresVoidReturn(own)) {
       return false;
     }
-    if (typeof own?.params === 'number') {
-      return own.params > 0;
-    }
-    if (Array.isArray(own?.params)) {
-      return own.params.some((t) => declaredWidth(t) !== undefined);
+    const declared = ownFirstArgumentPassed(name, own, target);
+    if (declared !== undefined) {
+      return declared;
     }
     const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
-    if (ARG_REGS.some((r) => live.has(r))) {
-      return true;
-    }
-    // A CodeWarrior C++ symbol is a declaration of its own parameters: `ksNesInit13__Fv` is a free
-    // function of none, which no body evidence overrides.
-    const mangled = demangle(name);
-    return !(mangled !== null && mangled.cls === undefined && mangled.params.length === 0) && r3WrittenToReturn();
+    return ARG_REGS.some((r) => live.has(r)) || r3WrittenToReturn();
   };
   const returnUntouchedArg = () => {
     if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {

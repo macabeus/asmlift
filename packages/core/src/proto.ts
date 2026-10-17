@@ -31,7 +31,8 @@ export type ParamType = string;
 export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
-   *  for how many argument REGISTERS the call occupies. The two are the same number only while
+   *  for how many argument REGISTERS the call occupies — read so at a call and in the function's
+   *  own bound alike (`ownArgumentWords`), a stated struct return's pointer aside. The two are the same number only while
    *  every parameter fits in a register, and `declaredCallArgs` is what converts the first into
    *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
@@ -344,43 +345,100 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *     EABI), and everywhere else a `float` takes one and a `double` two, as a `long long` does
  *     (O32's leading floats still take their integer slots, and agbcc passes both in general
  *     words).
- *   - TWO HIDDEN WORDS ARE ADDED where they may come first, because no parameter list states them
- *     and each pushes every declared parameter one register up. A return the declaration does not
- *     show is a scalar or `void` may be a struct handed back through a pointer in argument 0, and
- *     a symbol that may name a C++ member function is handed `this` there (`mangle.ts`
- *     `implicitArgumentWords`). Both are "may": a static member or a struct returned in registers
- *     leaves one register a parameter.
+ *   - TWO HIDDEN WORDS ARE ADDED to a typed list where they may come first, because no parameter
+ *     list states them and each pushes every declared parameter one register up. A return the
+ *     declaration does not show is a scalar or `void` may be a struct handed back through a
+ *     pointer in argument 0, and a symbol that may name a C++ member function is handed `this`
+ *     there (`mangle.ts` `implicitArgumentWords`). Both are "may": a static member or a struct
+ *     returned in registers leaves one register a parameter.
  *
  *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
  *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
- *  copy of the declaration. A COUNT is the user's word for the declared argument registers
- *  (`FnProto.params`), the hidden ones aside. IT ABSTAINS where neither states a list, or on one it
- *  cannot lay out: an unsized spelling (which may be two words), a struct passed by value (sized
- *  by a layout this does not read), a `long double`; and on a constructor or destructor, which may
- *  be handed a flag beside `this`. A variadic declaration states no `params` and
- *  so abstains: its arity is each caller's. */
+ *  copy of the declaration. A COUNT IS ARGUMENT REGISTERS, as `FnProto.params` defines it and as
+ *  the call side reads it (`frontend/call-plan.ts`): every register the call fills, `this` and a
+ *  constructor's flag among them, and one more only where the declaration states an aggregate
+ *  return, whose hidden pointer the call side adds too. So `{params: 2}` is two words whether the
+ *  function is called or decompiled. IT ABSTAINS where neither states a list, or on one it cannot
+ *  lay out: an unsized spelling (which may be two words), a struct passed by value (sized by a
+ *  layout this does not read), a `long double`; and, under a list, on a constructor or destructor,
+ *  which may be handed a flag beside `this`. A variadic declaration states no `params` and so
+ *  abstains: its arity is each caller's. */
 export function ownArgumentWords(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
 ): number | undefined {
-  const widths = ownParamWidths(name, p ?? undefined, target);
-  const implicit = implicitArgumentWords(name);
-  if (widths === undefined || implicit === undefined) {
+  const own = ownArguments(name, p, target);
+  if (own === undefined || own.hidden === undefined) {
     return undefined;
   }
-  const scalarReturn =
-    declaresVoidReturn(p) ||
-    (p?.returns !== undefined &&
-      !declaresAggregateReturn(p) &&
-      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)));
   // The hidden words are laid out WITH the declared ones, not added after them: they come first,
   // so they move where the even-word rule puts a 64-bit parameter. O32's `struct P f(double x)`
   // passes the struct pointer in a0, skips a1 and passes `x` in a2:a3 — 4 words, where `1 +
   // wordsOf([64])` says 3 and turns a3 into `uninit_a3`. The call side counts the same way
   // (`frontend/call-plan.ts`, `[32, ...params]`).
-  const hidden = (scalarReturn ? 0 : 1) + implicit;
-  return wordsOf([...Array.from({ length: hidden }, () => 32), ...widths], target);
+  return wordsOf([...Array.from({ length: own.hidden }, () => 32), ...own.widths], target);
+}
+
+/** WHETHER THE OWN DECLARATION SAYS THE CALLER FILLS ARGUMENT 0, asked of a function that RETURNS A
+ *  WORD — so no hidden struct pointer is in question: `true` where a declared parameter word or
+ *  `this` comes first, `false` where it states no argument word at all (`ksNesInit13__Fv`, a free
+ *  function of none), and `undefined` where it does not say (no declaration, one {@link
+ *  ownArgumentWords} cannot lay out, or no parameters on a symbol that only MAY be a method, which a
+ *  static member is not). The PowerPC frontend asks it before a bare return hands back r3's entry
+ *  value (`frontend/ppc.ts` `r3IsAnArgument`), and it reads the declaration the bound reads, so the
+ *  two cannot give one declaration two answers. */
+export function ownFirstArgumentPassed(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu'>,
+): boolean | undefined {
+  const own = ownArguments(name, p, target);
+  if (own === undefined) {
+    return undefined;
+  }
+  if (own.widths.length > 0 || own.passesThis === true) {
+    return true;
+  }
+  return own.passesThis === false ? false : undefined;
+}
+
+/** The own declaration as both readers above read it: the declared parameter words' widths, the
+ *  hidden words that may come ahead of them (`undefined` where they cannot be bounded: a
+ *  constructor's or destructor's flag), and whether `this` is surely passed (`true` for a
+ *  constructor or destructor, `false` for a free function, `undefined` for a symbol that only may
+ *  be a method). A count is registers: its widths hold every word, `this` included, but a stated
+ *  aggregate return's pointer. */
+function ownArguments(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu'>,
+): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
+  if (typeof p?.params === 'number') {
+    if (!Number.isInteger(p.params) || p.params < 0) {
+      return undefined;
+    }
+    return {
+      widths: Array.from({ length: p.params }, () => 32),
+      hidden: declaresAggregateReturn(p) ? 1 : 0,
+      passesThis: false,
+    };
+  }
+  const widths = ownParamWidths(name, p ?? undefined, target);
+  if (widths === undefined) {
+    return undefined;
+  }
+  const implicit = implicitArgumentWords(name);
+  const scalarReturn =
+    declaresVoidReturn(p) ||
+    (p?.returns !== undefined &&
+      !declaresAggregateReturn(p) &&
+      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)));
+  return {
+    widths,
+    hidden: implicit === undefined ? undefined : (scalarReturn ? 0 : 1) + implicit,
+    passesThis: implicit === undefined ? true : implicit === 0 ? false : undefined,
+  };
 }
 
 /** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
@@ -389,9 +447,6 @@ function ownParamWidths(
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu'>,
 ): number[] | undefined {
-  if (typeof p?.params === 'number') {
-    return Number.isInteger(p.params) && p.params >= 0 ? Array.from({ length: p.params }, () => 32) : undefined;
-  }
   const mangled = Array.isArray(p?.params) ? null : demangle(name);
   const decl: FnProto | undefined = Array.isArray(p?.params)
     ? p

@@ -667,8 +667,10 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(lifted({ params: 2, returns: 's32' })).toBe(local);
     expect(lifted({ params: ['s32', 'float', 's32 *'], returns: 's32' })).toBe(local);
     expect(lifted({ params: 3, returns: 's32' })).toBe(param);
-    // a return not shown to be a scalar may be a struct's hidden pointer, in r3
-    expect(lifted({ params: 2 })).toBe(param);
+    // a list whose return is not shown to be a scalar may follow a struct's hidden pointer, in r3;
+    // a count is the registers the call fills (`FnProto.params`), as the call side reads it
+    expect(lifted({ params: ['s32', 's32'] })).toBe(param);
+    expect(lifted({ params: 2 })).toBe(local);
     // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),
     // so r5 stays a parameter, which the split-pair refusal then names (raise/pairparams.ts)
     expect(() => lifted({ params: ['s32', 'long long'], returns: 's32' })).toThrow(

@@ -1082,9 +1082,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const f = (own: Prototypes[string]) => decompile('f', r2, ARMV4T_AGBCC, { prototypes: { f: own } }).source;
       const kept = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
       expect(f({ params: 2, returns: 's32' })).toMatch(/uninit_r2/);
-      for (const own of [{ params: 2 }, { params: ['s32', 's32'], returns: 'Pt' }]) {
+      for (const own of [{ params: ['s32', 's32'] }, { params: ['s32', 's32'], returns: 'Pt' }]) {
         expect(f(own)).toBe(kept);
       }
+      // a count is the registers the call fills (`FnProto.params`), as the call side reads it
+      expect(f({ params: 2 })).toMatch(/uninit_r2/);
     });
 
     // `int st2(int a, int b, int c, int d, int e){ return g(a) + e; }` declared with two

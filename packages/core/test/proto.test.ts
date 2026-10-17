@@ -15,6 +15,7 @@ import {
   declaredReturnWidth,
   declaredWidth,
   ownArgumentWords,
+  ownFirstArgumentPassed,
   prototypesFromSymbols,
   spellableProto,
   spellableType,
@@ -302,7 +303,6 @@ describe('ownArgumentWords', () => {
   // r3 / a3 / r6: bounded from argument 0, z was `uninit_<reg>`.
   test('a return not shown to be a scalar may take a hidden pointer in argument 0', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-      expect(ownArgumentWords('mk', { params: 3 }, t)).toBe(4);
       expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'] }, t)).toBe(4);
       expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'], returns: 'Pt' }, t)).toBe(4);
       expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'], returns: 'struct P' }, t)).toBe(4);
@@ -330,6 +330,38 @@ describe('ownArgumentWords', () => {
     expect(ownArgumentWords('take__F3Vec', S32, PPC_MWCC)).toBeUndefined();
     // a stated list wins
     expect(ownArgumentWords('uninitfirst__FiPi', { params: 3, ...S32 }, PPC_MWCC)).toBe(3);
+  });
+
+  // `FnProto.params` defines a count as the argument REGISTERS the call fills, and the call side
+  // adds a hidden word to it only for a stated aggregate return (`frontend/call-plan.ts`). The own
+  // side reads it the same way, so one declaration has one arity: `{params: 2}` is 2 words whether
+  // `uninit_spill` is called or decompiled. A count counts `this` and a constructor's flag too.
+  test('a count is the registers the call fills, hidden words included', () => {
+    for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+      expect(ownArgumentWords('uninit_spill', { params: 2 }, t)).toBe(2);
+      expect(ownArgumentWords('g', { params: 0 }, t)).toBe(0);
+      expect(ownArgumentWords('mk', { params: 3, returns: 'struct P' }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: 3, returns: 'Pt' }, t)).toBe(3);
+    }
+    expect(ownArgumentWords('pick__3FooFiPi', { params: 3 }, PPC_MWCC)).toBe(3);
+    expect(ownArgumentWords('__dt__3FooFv', { params: 2 }, PPC_MWCC)).toBe(2);
+  });
+
+  // PowerPC asks whether a bare word return hands back r3's entry value (`frontend/ppc.ts`
+  // `r3IsAnArgument`) off the declaration the bound reads, so the two cannot disagree.
+  test('whether argument 0 is passed is read off the same declaration', () => {
+    expect(ownFirstArgumentPassed('ksNesInit13__Fv', undefined, PPC_MWCC)).toBe(false);
+    expect(ownFirstArgumentPassed('g', { params: 0 }, PPC_MWCC)).toBe(false);
+    expect(ownFirstArgumentPassed('g', { params: [], ...S32 }, PPC_MWCC)).toBe(false);
+    expect(ownFirstArgumentPassed('g', { params: 1 }, PPC_MWCC)).toBe(true);
+    expect(ownFirstArgumentPassed('uninitfirst__FiPi', undefined, PPC_MWCC)).toBe(true);
+    expect(ownFirstArgumentPassed('g', { params: ['float'], ...S32 }, PPC_MWCC)).toBe(false);
+    // a constructor is surely handed `this`; a method with no parameters may be a static member
+    expect(ownFirstArgumentPassed('__ct__3FooFv', { params: [] }, PPC_MWCC)).toBe(true);
+    expect(ownFirstArgumentPassed('get__3FooFv', undefined, PPC_MWCC)).toBeUndefined();
+    // no declaration, or one that cannot be laid out, says nothing
+    expect(ownFirstArgumentPassed('g', undefined, PPC_MWCC)).toBeUndefined();
+    expect(ownFirstArgumentPassed('g', { params: ['Unsized'], ...S32 }, PPC_MWCC)).toBeUndefined();
   });
 
   // The hidden word comes FIRST, so the even-word rule counts it: O32's `struct P sd2(double x)`
