@@ -38,8 +38,9 @@ export interface FrameObjectAudit {
   declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
   usedSlotOffsets: ReadonlySet<number>;
   /** per IR block index, the frame offsets the frontend read as SSA slots, not as memory — loads
-   *  the IR does not show this audit. Read only under `outgoingAreaNeverLoaded`, where any load
-   *  proves a word a local's (`storedNeverRead`). Absent where the frontend records none. */
+   *  the IR does not show this audit. Read only under `outgoingAreaNeverLoadedFrom`, where any load
+   *  from that offset up proves a word a local's (`storedNeverRead`). Absent where the frontend
+   *  records none. */
   slotLoads?: ReadonlyMap<number, ReadonlySet<number>>;
   capturedObjectIsTheWholeFrame: boolean;
   /** the frame offsets whose escape the frontend's outgoing-argument verdict leans on — each one
@@ -322,7 +323,7 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  In either model, a store through a capture that reaches a call unread on every path, beneath
  *  every word a load proves a local's, declines: it may be that call's stack argument
  *  (`storedNeverRead`). Which load proves it is the compiler's premise: one after a call under
- *  `localsAboveOutgoingArea`, and any load at all under `outgoingAreaNeverLoaded` (agbcc).
+ *  `localsAboveOutgoingArea`, and any load from the offset up under `outgoingAreaNeverLoadedFrom`.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -1586,8 +1587,10 @@ function chooseFrameModel({
  *  one outgoing area at the frame bottom, below every local, and never reads it back after a call;
  *  so a frame byte loaded after a call before anything re-stores it held a value across that call,
  *  its word is a local's, and so is every word above it. Under the strong form,
- *  `outgoingAreaNeverLoaded` (agbcc), any load at all bounds it, the bound stackargs'
- *  `loadedWordBound` takes; MIPS and mwcc state only the after-call form (`target.ts` says why).
+ *  `outgoingAreaNeverLoadedFrom`, any load in a word at or above that offset bounds it, the bound
+ *  stackargs' `loadedWordBound` takes: from 0 on agbcc, past the a0..a3 home on O32 (whose
+ *  compilers load a by-value aggregate's home words back) and from the parameter area on mwcc
+ *  (`target.ts` says why).
  *  Every compiled outgoing-argument shape sits beneath any such bound, and a local the source reads
  *  after a call does not: `g(); b[0] = x; b[1] = y; return b[0];` reaches no call, `b[0] = x; g();
  *  return b[0];` is above the bound. What this still refuses that is honest is a local the source
@@ -1659,22 +1662,30 @@ function storedNeverRead(
       }
     }
   }
-  // …and under the STRONG form (`outgoingAreaNeverLoaded`) the caller loads no word of the area
-  // before a call either, so ANY frame byte loaded in a block the entry reaches bounds it: one this
-  // audit sees at a fixed offset, and one the frontend read as a slot, which the IR does not show
-  // (`slotLoads`). Without the slot loads, `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]`
-  // refuses the `strh` on a word the code itself proves a local's.
-  const neverLoaded = target.compilerBehaviors.outgoingAreaNeverLoaded === true;
-  if (neverLoaded) {
+  // …and under the STRONG form (`outgoingAreaNeverLoadedFrom`) the caller loads no word of the
+  // area from that offset up before a call either, so ANY frame byte loaded there in a block the
+  // entry reaches bounds it: one this audit sees at a fixed offset, and one the frontend read as a
+  // slot, which the IR does not show (`slotLoads`). Without the slot loads,
+  // `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]` refuses the `strh` on a word the code
+  // itself proves a local's. A load in a word below the offset proves nothing: O32 compilers load
+  // the a1..a3 home words they stage a by-value aggregate in.
+  const from = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+  if (from !== undefined) {
+    const proves = (off: number) => {
+      const word = off - (off % 4);
+      if (word >= from) {
+        bound = Math.min(bound, word);
+      }
+    };
     for (const b of live) {
       for (const op of irBlocks[b].ops) {
         const a = byOp.get(op);
         if (a?.isLoad && a.frameOnly) {
-          bound = Math.min(bound, a.at - (a.at % 4));
+          proves(a.at);
         }
       }
       for (const off of slotLoads?.get(b) ?? []) {
-        bound = Math.min(bound, off - (off % 4));
+        proves(off);
       }
     }
   }
@@ -1768,7 +1779,7 @@ function storedNeverRead(
           fail(
             `the ${store.width}-byte store at [sp,#${store.at}) through a captured address reaches the call to ` +
               `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no ` +
-              `${neverLoaded ? 'load at or beneath it' : 'load after a call'} proves it a local's — it may be ` +
+              `${from === undefined ? 'load after a call' : from === 0 ? 'load at or beneath it' : `load at or beneath it, from [sp,#${from}) up,`} proves it a local's — it may be ` +
               "that call's stack argument, which the lift would drop",
           );
         }

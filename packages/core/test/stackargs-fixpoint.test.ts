@@ -28,7 +28,7 @@ const run = (
   preds: number[][],
   localArea: number,
   capturedWholeFrame = false,
-  outgoingAreaNeverLoaded = true,
+  neverLoadedFromZero = true,
 ) =>
   analyzeOutgoingArgs<string>({
     blocks,
@@ -37,7 +37,7 @@ const run = (
     localArea,
     argRegs: 4,
     capturedWholeFrame,
-    outgoingAreaNeverLoaded,
+    outgoingAreaNeverLoadedFrom: neverLoadedFromZero ? 0 : undefined,
   });
 /** A straight line of blocks, each falling through to the next; the last one ends the function. */
 const line = (...events: Ev[][]) => events.map(blk);
@@ -187,7 +187,7 @@ describe('a word this function LOADS is a local, and bounds every call’s area'
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
   });
@@ -248,6 +248,23 @@ describe('the licence’s NOTHING EXTRA reads the same bound', () => {
   test('…and without the compiler’s layout claim it is an extra word again', () => {
     const r = run(line([st(0), st(4), call('five', 1), ld(4)]), chain(1), 8, false, false);
     expect(r.blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
+  });
+
+  test('…and a load beneath the offset the compiler claims from proves nothing', () => {
+    // O32 compilers load the a0..a3 home words back (`outgoingAreaNeverLoadedFrom` is 16 there), so
+    // a load at [sp,#4] under a claim from [sp,#8] up bounds nothing
+    const claimedFrom = (from: number) =>
+      analyzeOutgoingArgs<string>({
+        blocks: line([st(0), st(4), call('five', 1), ld(4)]),
+        preds: chain(1),
+        live: new Set([0]),
+        localArea: 8,
+        argRegs: 4,
+        capturedWholeFrame: false,
+        outgoingAreaNeverLoadedFrom: from,
+      });
+    expect(claimedFrom(8).blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
+    expect(claimedFrom(4).blocker).toBeNull();
   });
 
   test('a declared block that reaches the bound contradicts it, and refuses', () => {
@@ -362,7 +379,7 @@ describe('an escaped frame address is read by its receiver, from that address up
       localArea: 8,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
@@ -387,7 +404,7 @@ describe('the fixpoint terminates and does not depend on block order', () => {
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });

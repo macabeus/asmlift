@@ -6,7 +6,7 @@
 // (`docs/level-tower.md`, RE-READABLE IS NOT RE-MEASURABLE).
 //
 //   agbcc-restage.s — `loadedWordBound` (frontend/stackargs.ts) applies the contrapositive of "agbcc
-//     never reads a word of its outgoing area" (`target.ts` `outgoingAreaNeverLoaded`).
+//     never reads a word of its outgoing area" (`target.ts` `outgoingAreaNeverLoadedFrom`).
 //     `twice` re-stages an unchanged argument before its second call, `owns` assigns to its own
 //     incoming stack parameter, which is its caller's outgoing word, and `libcalls`/`nested`/
 //     `cond`/`spills` put calls inside stack arguments and spills beside them, and load no word of

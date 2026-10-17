@@ -509,3 +509,54 @@ describe('the outgoing extent is computed only where every call can be sized', (
     expect(measure(ido, () => null, 'above-saved-registers')?.area).toEqual({ from: 24, to: 40 });
   });
 });
+
+// THE STRONG BOUND FROM 16 (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, frame-objects.ts
+// `storedNeverRead`). `char b[8]; b[0] = x; b[4] = y; g(b[0]);` with the array in ido's local area
+// at sp+24: `b[4]` is a dead store that reaches the call unread, and no load after the call proves
+// it a local's — but `b[0]` is LOADED, at 24, before the call, and ido loads no word of its
+// outgoing area from 16(sp) up, so 24 and every word above it are locals.
+describe('a dead store above a frame word the function loads is a local', () => {
+  const DEADB = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tsw\tra,20(sp)',
+    '8:\taddiu\tt0,sp,24',
+    'c:\tsb\ta0,0(t0)',
+    '10:\tsb\ta1,4(t0)',
+    '14:\tlbu\ta0,0(t0)',
+    '18:\tjal\t0 <f>',
+    '1c:\tnop',
+    '20:\tlw\tra,20(sp)',
+    '24:\tjr\tra',
+    '28:\taddiu\tsp,sp,32',
+  ];
+  const protos: Prototypes = {
+    g: { params: ['s32'], returnsVoid: true },
+    f: { params: ['s32', 's32'], returnsVoid: true },
+  };
+  const g: [number, string, string][] = [[0x18, 'R_MIPS_26', 'g']];
+
+  test('lifts, the dead store dropped', () => {
+    expect(src(DEADB, g, MIPS_IDO, protos)).toBe(
+      'void f(s32 a0, s32 a1) {\n    u8 sp24;\n    sp24 = a0;\n    g(sp24);\n}\n',
+    );
+  });
+
+  test('…and with no load of the array, the store may be the argument again', () => {
+    expect(
+      lift(
+        DEADB.filter((l) => !l.startsWith('14:')),
+        g,
+        MIPS_IDO,
+        protos,
+      ),
+    ).toThrow(/the 1-byte store at \[sp,#24\) .* no load at or beneath it, from \[sp,#16\) up, proves it a local's/);
+  });
+
+  test('…and on a target that states only the after-call form, it refuses as before', () => {
+    const weak = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(lift(DEADB, g, weak, protos)).toThrow(/the 1-byte store at \[sp,#28\) .* no load after a call proves it/);
+  });
+});

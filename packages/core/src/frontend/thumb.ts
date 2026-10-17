@@ -3549,7 +3549,7 @@ function measureThumbFrame({
       localArea,
       argRegs: target.argRegs.length,
       capturedWholeFrame: capturedObjectIsTheWholeFrame,
-      outgoingAreaNeverLoaded: target.compilerBehaviors.outgoingAreaNeverLoaded === true,
+      outgoingAreaNeverLoadedFrom: target.compilerBehaviors.outgoingAreaNeverLoadedFrom,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
@@ -5581,7 +5581,7 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // before the load, so the load is after a call, which the after-call layout claim
   // (`localsAboveOutgoingArea`) says no word of the outgoing area is; with no call reaching the
   // load there is no such callee. Without the claim it may be one, and falls through to the
-  // decline. The stronger `outgoingAreaNeverLoaded` adds nothing here: a load BEFORE a call reads
+  // decline. The stronger `outgoingAreaNeverLoadedFrom` adds nothing here: a load BEFORE a call reads
   // a staged word, and a staged word has a reaching store. The other is a callee holding an
   // address of the frame, which the frame-object audit refuses: an `undef` slot an escaped writer
   // reaches (`writer-over-undef`), or one a captured object overlaps.

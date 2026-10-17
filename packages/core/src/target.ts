@@ -565,7 +565,7 @@ export interface TargetDescription {
     // It promises the AFTER-CALL form and no more: a compiler may still load a staged word BEFORE a
     // call — o32 gcc defines REG_PARM_STACK_SPACE, so calls.c's save_fixed_argument_area loads
     // staged reg-parm words around a nested call. The stronger form, no load of the area at all,
-    // is its own field (`outgoingAreaNeverLoaded`), stated per compiler and never read off this.
+    // is its own field (`outgoingAreaNeverLoadedFrom`), stated per compiler and never read off this.
     //
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
@@ -579,28 +579,45 @@ export interface TargetDescription {
     // reader there too, and on mwcc it is LOAD-BEARING: it is what refuses an undeclared call whose
     // ninth argument the arity guess cannot see (frontend/ppc.ts `measurePpcFrame`).
     localsAboveOutgoingArea?: boolean;
-    // The STRONG form of `localsAboveOutgoingArea`, which it requires: the caller never loads a word
-    // of its outgoing area at all — not after a call, and not before one either. The area holds only
-    // what the caller staged for a callee; every argument that contains a call is computed before
-    // any word is staged, and nothing is saved there around a nested call. So ANY word this function
-    // loads is a local, and so is every word above it, since the area is one region at the frame
-    // bottom. Its readers apply that contrapositive, at exactly the soundness of the universal:
-    // `frontend/stackargs.ts` `loadedWordBound` bounds the area at the lowest word the function
-    // loads, and `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores at the
-    // lowest frame word loaded through a slot or an object. A word no store reaches on any path
-    // needs only the after-call form (see `localsAboveOutgoingArea`).
+    // The STRONG form of `localsAboveOutgoingArea`, which it requires: from this offset up, the
+    // caller never loads a word of its outgoing area at all — not after a call, and not before one
+    // either. The offset counts from the area's start, the frame bottom: `[sp,#0]` on Thumb, `0(sp)`
+    // on O32 (whose area opens with the a0..a3 home), `0(r1)` past the push on PowerPC (whose
+    // parameter area opens at 8, past the callee's back chain and link-register words). From it up
+    // the area holds only what the caller staged for a callee; every argument that contains a call
+    // is computed before any word is staged, and nothing is saved there around a nested call. So
+    // ANY frame word this function loads at or above the offset is a local, and so is every word
+    // above it, since the area is one region at the frame bottom. Its readers apply that
+    // contrapositive, at exactly the soundness of the universal: `frontend/stackargs.ts`
+    // `loadedWordBound` bounds the area at the lowest such word the function loads,
+    // `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores the same way, and the
+    // MIPS and PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`)
+    // and PPC's unread-slot decline weigh only the stores beneath it. A load BELOW the offset proves
+    // nothing, and the readers do not count it. A word no store reaches on any path needs only the
+    // after-call form (see `localsAboveOutgoingArea`).
     // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
     //
-    // Set on agbcc alone, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's
-    // save_fixed_argument_area — which loads staged words around a nested call — is not compiled;
-    // calls.c:1599-1610 precomputes every argument containing a call; and store_one_arg
-    // (calls.c:3420-3470) saves an argument word only when a nested call overlaps it, which the
-    // precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word of the area around
-    // calls in stack arguments. NOT set on the MIPS targets — o32 gcc defines REG_PARM_STACK_SPACE,
-    // the mechanism of a counterexample — nor on mwcc, whose probes measured the after-call form
-    // only. Like `stagesOutgoingArgsInFrame`, a second armv4t compiler must state this premise
+    // Its residue is the universal's: hand-written asm that loads a word it staged, then stages it
+    // for a call, loses that argument. Each value is MEASURED, and the compiled probes are committed
+    // (`packages/core/test/outgoing-area-probes.test.ts` reads every one):
+    //   • agbcc, 0, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's
+    //     save_fixed_argument_area — which loads staged words around a nested call — is not
+    //     compiled; calls.c:1599-1610 precomputes every argument containing a call; and
+    //     store_one_arg (calls.c:3420-3470) saves an argument word only when a nested call overlaps
+    //     it, which the precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word
+    //     of the area around calls in stack arguments.
+    //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels and
+    //     at -O0. NOT 0 — ido stages a by-value aggregate's register words in the a1..a3 home and
+    //     loads them back before the call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for
+    //     a char-array struct (`d3`, `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's
+    //     save_fixed_argument_area (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No
+    //     probe loads a word from 16(sp) up the area.
+    //   • mwcc, 8, on all three builds at the rows' flags, at -O0,p and at -O4,s: no probe loads a
+    //     word of the parameter area; a struct-return temp or a by-value copy sits at 8(r1) only
+    //     where no call takes a stack word, and above the area beside one that does.
+    // Like `stagesOutgoingArgsInFrame`, a second compiler of the same ISA must state this premise
     // rather than inherit it.
-    outgoingAreaNeverLoaded?: boolean;
+    outgoingAreaNeverLoadedFrom?: number;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
     // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
@@ -1196,7 +1213,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // agbcc re-stages before each call and never reads back after one (agbcc-restage.s).
     localsAboveOutgoingArea: true,
     // …nor loads at all, before a call or after: no REG_PARM_STACK_SPACE (see the field).
-    outgoingAreaNeverLoaded: true,
+    outgoingAreaNeverLoadedFrom: 0,
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
@@ -1368,6 +1385,9 @@ export const MIPS_IDO: TargetDescription = {
     // unchanged argument is staged again before each call, and a callee assigns to its stack
     // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
     localsAboveOutgoingArea: true,
+    // MEASURED at -O2 and -O0 (`test/corpus/ido71*-outarea.txt`): no load from 16(sp) up the area,
+    // but the a1..a3 home words a by-value aggregate is staged in are loaded back (see the field).
+    outgoingAreaNeverLoadedFrom: 16,
     // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
     // and a frame store for a plain dead local, `lw a2` for a `register` one.
     discardsUnusedReadsInto: 'zero',
@@ -1505,6 +1525,9 @@ export const MIPS_GCC: TargetDescription = {
     o32LocalArea: 'above-outgoing-area',
     // MEASURED on BOTH toolchains this description serves, the probe at `o32LocalArea` (`twice`).
     localsAboveOutgoingArea: true,
+    // MEASURED on BOTH toolchains at their rows' levels and at -O0 (`test/corpus/gcc272*-outarea.txt`):
+    // no load from 16(sp) up the area; a char-array struct's home words are loaded (see the field).
+    outgoingAreaNeverLoadedFrom: 16,
   },
 };
 
@@ -1602,6 +1625,9 @@ export const PPC_MWCC: TargetDescription = {
     // word below the area unread): Mario Party 4's -O0,p homes a parameter in the area and reloads
     // it after a call, which proves the word a local's (`ee`, `synthetic:homecall:mwcc_242_81`).
     localsAboveOutgoingArea: true,
+    // MEASURED on all three builds, at the rows' flags, -O0,p and -O4,s (`test/corpus/mwcc*-outarea.txt`):
+    // no load of the parameter area, which starts at 8(r1) (see the field).
+    outgoingAreaNeverLoadedFrom: 8,
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at

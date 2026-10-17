@@ -484,7 +484,11 @@ describe('a word stored below the captured object and reaching a call unread', (
   test('may be the stack argument on a target that does not state the universal', () => {
     const unstated = {
       ...PPC_MWCC,
-      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, localsAboveOutgoingArea: undefined },
+      compilerBehaviors: {
+        ...PPC_MWCC.compilerBehaviors,
+        localsAboveOutgoingArea: undefined,
+        outgoingAreaNeverLoadedFrom: undefined,
+      },
     };
     expect(() => decompile('homecall', fn('homecall', HOMECALL), unstated, { prototypes: PROTOS })).toThrow(
       /the 4-byte store at \[sp,#8\) through a captured address reaches the call to `fill` unread/,
@@ -520,5 +524,61 @@ describe('an incoming stack argument is a parameter', () => {
         h: { params: ['s32', 's32', 's32', 's32', 's32', 's32', 's32', 's64'] },
       }),
     ).toThrow(/beside a parameter declared 's64'/);
+  });
+});
+
+// THE STRONG BOUND FROM THE PARAMETER AREA (`compilerBehaviors.outgoingAreaNeverLoadedFrom`,
+// frame-objects.ts `storedNeverRead`). `int fo1(int x, int y) { char b[8]; b[0] = x; b[4] = y;
+// x = b[0]; g(); return x; }` at mwcc_242_81 and Mario Party 4's -O0,p: `b[4]` (16(r1)) is a dead
+// store that reaches the call unread and no load after the call proves it a local's — but `y`'s
+// home at 8(r1) and `b[0]` at 12(r1) are LOADED before it, and mwcc loads no word of its
+// parameter area, so every word from 8 up is a local.
+describe('a dead store above a frame word the function loads is a local', () => {
+  const FO1 = [
+    'stwu    r1,-32(r1)',
+    'mflr    r0',
+    'stw     r0,36(r1)',
+    'stw     r31,28(r1)',
+    'mr      r31,r3',
+    'stw     r4,8(r1)',
+    'clrlwi  r0,r31,24',
+    'stb     r0,12(r1)',
+    'lwz     r0,8(r1)',
+    'clrlwi  r0,r0,24',
+    'stb     r0,16(r1)',
+    'lbz     r31,12(r1)',
+    'bl      g',
+    'mr      r3,r31',
+    'lwz     r31,28(r1)',
+    'lwz     r0,36(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,32',
+    'blr',
+  ];
+  const protos: Prototypes = { g: { params: 0 } };
+
+  test('lifts, the dead store dropped', () => {
+    expect(lift('fo1', FO1, protos)).toBe(
+      's32 fo1(s32 a0, s32 a1) {\n    s32 v0;\n    u8 sp12;\n    sp12 = a0 & 255;\n    v0 = sp12;\n    g();\n    return v0;\n}\n',
+    );
+  });
+
+  test('…and with no frame word loaded, the store may be the argument again', () => {
+    const unloaded = FO1.filter((l) => !/^(lwz     r0,8|stw     r4,8)/.test(l)).map((l) =>
+      l.startsWith('lbz') ? 'clrlwi  r31,r31,24' : l.startsWith('clrlwi  r0,r0') ? 'clrlwi  r0,r4,24' : l,
+    );
+    expect(() => lift('fo1', unloaded, protos)).toThrow(
+      /the 1-byte store at \[sp,#12\) .* no load at or beneath it, from \[sp,#8\) up, proves it a local's/,
+    );
+  });
+
+  test('…and on a target that states only the after-call form, it refuses as before', () => {
+    const weak = {
+      ...PPC_MWCC,
+      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(() => decompile('fo1', fn('fo1', FO1), weak, { prototypes: protos })).toThrow(
+      /the 1-byte store at \[sp,#16\) .* no load after a call proves it a local's/,
+    );
   });
 });
