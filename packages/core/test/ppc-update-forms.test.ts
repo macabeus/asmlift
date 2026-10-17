@@ -210,6 +210,17 @@ test('a load that writes a second register refuses in annotate mode too, rather 
   for (const out of both(['lswi    r5,r3,8', 'mr      r3,r6', 'blr'])) {
     expect(out).toContain(`unmodelled instruction 'lswi' writes the registers after it as well as r5`);
   }
+  // the guard is case-blind, as the store and FP classes are: an upper-case spelling (pasted asm)
+  // misses the lower-case decode and must not become a one-destination opaque either
+  for (const [line, msg] of [
+    ['LBZUX   r0,r3,r4', `'LBZUX' writes its base r3 as well as r0`],
+    ['LWZU    r0,4(r3)', `'LWZU' writes its base r3 as well as r0`],
+    ['Lmw     r30,0(r3)', `'Lmw' writes r31 as well as r30`],
+  ]) {
+    for (const out of both([line, ...tail])) {
+      expect(out).toContain(`unmodelled instruction ${msg}`);
+    }
+  }
   // one destination still degrades to an honest opaque, and the plain indexed load still lifts
   expect(both(['lmw     r31,0(r3)', 'mr      r3,r31', 'blr'])[1]).toContain(
     `ASMLIFT_ERROR("unmodelled instruction 'lmw'")`,

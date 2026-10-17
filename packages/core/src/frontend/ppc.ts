@@ -2063,11 +2063,14 @@ function liftOnce(
       // `*a0` where the byte is at `a0 + a1`. So refuse, as a store refuses, every load that writes
       // more than its first operand: an indexed update load (`lbzux`, `lhzux`, `lhaux`, `lwzux`,
       // which also write rA, as `mayWriteGpr` knows), `lmw` below r31 and the string loads. The FP
-      // update forms keep the floating-point refusal `opaqueDest` gives them.
-      const mn = ins.mnemonic;
+      // update forms keep the floating-point refusal `opaqueDest` gives them. The test is on the
+      // lower-cased mnemonic, as `opaqueDest`'s classes are case-blind: the decode's cases are
+      // lower case, so an upper-case `LWZU` or `LBZUX` (pasted asm; objdump and dtk never print
+      // one) reaches here undecoded, and the displacement update forms are refused with the indexed.
+      const mn = ins.mnemonic.toLowerCase();
       const lmwFirst = mn === 'lmw' ? Number(ins.ops[0]?.slice(1)) : NaN;
-      const second = /^l(?!f)\w*ux$/.test(mn)
-        ? `its base ${ins.ops[1]}`
+      const second = /^l(?!f)\w*ux?$/.test(mn)
+        ? `its base ${mn.endsWith('x') ? ins.ops[1] : parseMem(ins.ops[1] ?? '').base}`
         : lmwFirst < 31
           ? `r${lmwFirst + 1}${lmwFirst + 1 < 31 ? '..r31' : ''}`
           : /^lsw[ix]$/.test(mn)
@@ -2075,7 +2078,7 @@ function liftOnce(
             : null;
       if (second !== null) {
         throw new PpcUnsupportedError(
-          `cannot lift '${name} @0x${ins.addr.toString(16)}': unmodelled instruction '${mn}' writes ${second} ` +
+          `cannot lift '${name} @0x${ins.addr.toString(16)}': unmodelled instruction '${ins.mnemonic}' writes ${second} ` +
             `as well as ${ins.ops[0]}, and an opaque stands for one destination`,
         );
       }
