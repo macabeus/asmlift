@@ -1047,9 +1047,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // gcc2.7.2kmc, `sret4two` and `af:suMtxMakeSRT` on ido7.1. No Thumb row reaches a stack pair:
   // agbcc's `uninitfirst` and `spilldead` lift, as a frame word read before any store and as
   // locals above the lowest loaded word.
+  //
+  // THE OUTGOING PAIR IS THE FRAME-OBJECT AUDIT naming what lies below the local area: a capture
+  // there is "an outgoing stack argument word or a saved register", so the marker also carries
+  // `outgoing-stack-args`' phrase, and the decided cause, an address-taken local, wins. All three
+  // are `upd_lcopy` on the three CodeWarrior builds, whose struct copy into a local steps a base
+  // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`).
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 4],
+    ['address-taken-local > outgoing-stack-args', 3],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {

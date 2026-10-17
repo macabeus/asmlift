@@ -1266,7 +1266,15 @@ function liftOnce(
   // the address perfectly would still leave a name no C source can write, so no amount of lifting
   // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
   // waits on the fold. Saying which one a row hit is the whole value of the message.
-  const relocSite = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  //
+  // An update form is decoded as the `addi` that advances its base and then the plain access
+  // (`withUpdate` in `decode`); a refusal of that `addi`'s relocation, or of either one's write
+  // (`write`), names the instruction the listing holds, not the one it was decoded through.
+  const decodedFrom = new WeakMap<Instr, Instr>();
+  const relocSite = (at: Instr) => {
+    const ins = decodedFrom.get(at) ?? at;
+    return `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  };
   /** Whether the decode of the instruction in hand has TAKEN its relocation. `decode` asks once, of
    *  every modelled instruction, so a relocation no case consumed refuses instead of being dropped.
    *  A per-case guard would only cover the cases that remember to carry one, and every other
@@ -1954,7 +1962,37 @@ function liftOnce(
       write(dstReg, readVar(stackSlotKey(off), bi));
       return true;
     };
+    /** The instruction `decode` is lifting, for a refusal raised below it. */
+    let decoding: Instr | null = null;
+    // THE STACK POINTER IS NO VALUE A LIFT WRITES. The frame push, `addi r1,r1,N` and the reload of
+    // the back chain move r1, and `r1Displacements` follows them; none reaches here. Any other write
+    // (`lwz r1,4(r3)` in a longjmp, `mr r1,r10` in a context switch) would land in an SSA
+    // variable nothing reads, since a read of r1 is refused as data (`read`), and the lift
+    // would drop the write: a load into r1 would become a discarded volatile read. So it refuses.
+    // THE SMALL-DATA BASES ARE NONE EITHER, for the same reason one step removed: an access through
+    // r13 or r2 is read off its `R_PPC_EMB_SDA21` relocation (`sdaAccess`), never off the register,
+    // so a write to either (`lwzu r13,4(r3)`, `mr r2,r4`) would be dropped and every later small-data
+    // access would still name its symbol as if the base had not moved.
     const write = (r: string, v: Value) => {
+      // the instruction the listing holds, not the plain access an update form is decoded through
+      const by = () => {
+        const listed = decoding === null ? null : (decodedFrom.get(decoding) ?? decoding);
+        return listed === null
+          ? 'an instruction'
+          : `'${listed.mnemonic} ${listed.ops.join(',')}' at 0x${listed.addr.toString(16)}`;
+      };
+      if (r === 'r1') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${by()} writes the stack pointer r1 — only the frame push, 'addi r1,r1,N' ` +
+            `and the back-chain reload move r1 here, and the value it would take is not one this lift tracks`,
+        );
+      }
+      if (SMALL_DATA_BASES.includes(r)) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${by()} writes the small-data base ${r} — a small-data access is read ` +
+            `off its relocation, not off the register, so a moved base is not one this lift tracks`,
+        );
+      }
       writeVar(r, bi, v);
       lastDef = v;
       if (discardReg !== undefined && r !== discardReg) {
@@ -2019,6 +2057,31 @@ function liftOnce(
     // emit an honest `opaque` instead, which fails LOUD at assertResolved whether or not anything
     // reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
+      // AN OPAQUE STANDS FOR ONE DESTINATION, `ops[0]`. An unmodelled load that writes a second
+      // GPR would leave that one holding its old value with nothing marking it, which annotate mode
+      // (the CLI and bench default) then prints as ordinary C: `lwzux r0,r3,r4; lbz r3,0(r3)` read
+      // `*a0` where the byte is at `a0 + a1`. So refuse, as a store refuses, every load that writes
+      // more than its first operand: an indexed update load (`lbzux`, `lhzux`, `lhaux`, `lwzux`,
+      // which also write rA, as `mayWriteGpr` knows), `lmw` below r31 and the string loads. The FP
+      // update forms keep the floating-point refusal `opaqueDest` gives them. The test is on the
+      // lower-cased mnemonic, as `opaqueDest`'s classes are case-blind: the decode's cases are
+      // lower case, so an upper-case `LWZU` or `LBZUX` (pasted asm; objdump and dtk never print
+      // one) reaches here undecoded, and the displacement update forms are refused with the indexed.
+      const mn = ins.mnemonic.toLowerCase();
+      const lmwFirst = mn === 'lmw' ? Number(ins.ops[0]?.slice(1)) : NaN;
+      const second = /^l(?!f)\w*ux?$/.test(mn)
+        ? `its base ${mn.endsWith('x') ? ins.ops[1] : parseMem(ins.ops[1] ?? '').base}`
+        : lmwFirst < 31
+          ? `r${lmwFirst + 1}${lmwFirst + 1 < 31 ? '..r31' : ''}`
+          : /^lsw[ix]$/.test(mn)
+            ? 'the registers after it'
+            : null;
+      if (second !== null) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name} @0x${ins.addr.toString(16)}': unmodelled instruction '${ins.mnemonic}' writes ${second} ` +
+            `as well as ${ins.ops[0]}, and an opaque stands for one destination`,
+        );
+      }
       // storeClass: every PPC store mnemonic is st* — an unmodelled one (`stwbrx`, `sthbrx`, …)
       // must throw, never skip (its first token is the SOURCE register).
       const od = opaqueDest(ins.mnemonic, ins.ops, {
@@ -2288,6 +2351,7 @@ function liftOnce(
     };
 
     const decode = (ins: Instr) => {
+      decoding = ins;
       const [d, s, t] = ins.ops;
       // Record form: a trailing `.` (the Rc bit) means the op ALSO sets cr0 from a signed compare
       // of its result against 0 (e.g. `andi.`, `addic.`). Decode the base op, then record that
@@ -2306,6 +2370,61 @@ function liftOnce(
       } else if (/^b.*l$/.test(mnem)) {
         clobberCarry('is a call, which clobbers it');
       }
+      // A LOAD OR STORE WITH UPDATE (`lbzu`/`lhzu`/`lhau`/`lwzu`, `stbu`/`sthu`/`stwu`) addresses
+      // `rA + D` and leaves that address in rA: `lbzu rD,1(r3)` is `r3 += 1; rD = *(u8 *)r3`, and
+      // `stbu rS,1(r3)` is `r3 += 1; *(u8 *)r3 = rS`. mwcc emits them for a fully unrolled scan of a
+      // table, a run of stores to a global array and a pre-increment pointer walk (`*++p`) at -O4,p,
+      // and for the word loop of a struct copy at every level. Decoded as exactly that: the
+      // `addi rA,rA,D` this frontend already lifts, then the plain access at `0(rA)`. So an `@l` displacement (`lhzu r0,gH@l(r4)`, the
+      // FIRST access of a run over a `u16`/`u32` table or a store run) completes its `lis` the way
+      // `addi rD,rHi,gH@l` does, and leaves `&gH` in rA; a base holding a frame address moves as a
+      // capture moved by `addi` does, and the frame-object audit judges what it then reaches.
+      //
+      // It refuses where that reading is not the instruction's:
+      //   • a base field of 0 (`r0`) is the literal 0, which the ISA makes an invalid form for every
+      //     update form, and so is a load into its own base (rD == rA): neither has one meaning;
+      //   • a store of its own base (rS == rA) stores the value BEFORE the update, which an
+      //     `addi`-first decode would not;
+      //   • a base of r1 moves the stack pointer, which `r1Displacements` tracks only for the frame
+      //     push (`case 'stwu'`) and `addi r1,r1,N`, and so does a load into r1;
+      //   • a relocation other than `R_PPC_ADDR16_LO` (no compiler emits one).
+      // Not decoded, and refused as unmodelled (`emitOpaqueDest` refuses the loads, which write a
+      // second register an opaque cannot stand for; `opaqueDest` the stores): the INDEXED update forms
+      // (`lwzux`, `stbux`, …), which in 2004 functions with an update form across pikmin,
+      // ac-decomp and marioparty4 appear only in hand-written asm, and the floating-point ones
+      // (`lfsu`, `stfdu`, …), whose plain forms this frontend does not lift either.
+      const withUpdate = (plain: string, store: boolean) => {
+        const [r, mem] = ins.ops;
+        const { off, base } = parseMem(mem ?? '');
+        const why =
+          !isReg(base) || base === 'r0'
+            ? `its base is ${base === 'r0' ? 'r0' : `'${mem}'`}, which the ISA makes an invalid form of an update`
+            : base === 'r1'
+              ? 'it moves the stack pointer, which only the frame push may do here'
+              : !store && r === 'r1'
+                ? 'it loads into the stack pointer, a value this lift does not track'
+                : r === base
+                  ? store
+                    ? `it stores its own base ${r}, whose stored value is the one before the update`
+                    : `it loads into its own base ${r}, which the ISA makes an invalid form`
+                  : ins.reloc !== undefined && ins.reloc.type !== 'R_PPC_ADDR16_LO'
+                    ? `it carries a '${ins.reloc.type}' relocation, which no update form is decoded under`
+                    : undefined;
+        if (why !== undefined) {
+          throw new PpcUnsupportedError(
+            `cannot lift '${name}': '${ins.mnemonic} ${ins.ops.join(',')}' at 0x${ins.addr.toString(16)} is a ` +
+              `${store ? 'store' : 'load'} with update not modelled — ${why}`,
+          );
+        }
+        const advance: Instr = { ...ins, mnemonic: 'addi', ops: [base, base, String(off)] };
+        decodedFrom.set(advance, ins);
+        decode(advance);
+        const access: Instr = { addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] };
+        decodedFrom.set(access, ins);
+        decode(access);
+        // The `addi` took the relocation or threw, at its own choke point.
+        relocTaken = true;
+      };
       switch (mnem) {
         case 'nop':
           break;
@@ -2402,8 +2521,7 @@ function liftOnce(
         // puts it back.
         // A word store or load on r1 is a save or a value slot (`frameStore`/`frameLoad`); `stmw`
         // records save slots.
-        // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a real store-with-BASE-UPDATE
-        // (`*(rA+D)=rS; rA+=D`) — neither effect is modelled here, so loud-fail rather than drop both.
+        // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a store with update (`withUpdate`).
         // The push itself must be the only one, taken from the entry r1: every slot is named by its
         // offset from there (`r1Displacements`), and a push from anywhere else moves that origin.
         case 'stwu':
@@ -2422,9 +2540,8 @@ function liftOnce(
             saveSlots.set(parseMem(s).off, 'r1');
             break;
           }
-          throw new PpcUnsupportedError(
-            `cannot lift '${name}': stwu with update on ${parseMem(s).base} (store-with-base-update) not modelled`,
-          );
+          withUpdate('stw', true);
+          break;
         case 'mflr': {
           refuseOverwrittenLink(ins);
           const lr = mkValue(T.unk(32));
@@ -2539,7 +2656,9 @@ function liftOnce(
           // The STACK POINTER first, before any fold looks at the operands. `addi r1,r1,N` is frame
           // teardown and is skipped; a relocation on it is no known compiler's output, and folding
           // one would write an address into r1 and let the function lift as if the teardown had
-          // happened — silent, and about the frame rather than the value.
+          // happened — silent, and about the frame rather than the value. Only `addi r1,r1,N` is the
+          // teardown: `addi r1,r3,N` sets r1 to another register's value, and falls through to
+          // `write`, which refuses it like any other write to the stack pointer.
           if (d === 'r1') {
             if (ins.reloc) {
               throw new PpcUnsupportedError(
@@ -2547,7 +2666,9 @@ function liftOnce(
                   `adjust — an address built in r1 is not a shape this frontend models`,
               );
             }
-            break;
+            if (s === 'r1') {
+              break;
+            }
           }
           // A capture, `addi rD,r1,k`, is the `laddr` of the local area's offset k, where the frame
           // has one (`measurePpcFrame`); without one it reaches `read`'s r1-as-data refusal. A capture
@@ -2585,11 +2706,13 @@ function liftOnce(
             break;
           }
           // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
-          // addend). It is the only `@l` consumer modelled here. The others — `ori`, `addic`, and
-          // the `@l`-in-a-displacement form (1,935 integer load/store sites across the three
-          // checkouts, plus the float loads) — are left unbuilt per docs/level-tower.md's "earn the
-          // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
-          // high half none of them consumed is caught by `readReg` or by the dangling-`@ha` check.
+          // addend). It is the only `@l` consumer modelled here, and an update form's `@l`
+          // displacement reaches it as the `addi` that advances its base (`withUpdate`). The others —
+          // `ori`, `addic`, and the `@l`-in-a-displacement form of a PLAIN load or store (1,935
+          // integer load/store sites across the three checkouts, plus the float loads) — are left
+          // unbuilt per docs/level-tower.md's "earn the level": no row in this benchmark reaches
+          // them. Each refuses at its own guard, and a high half none of them consumed is caught
+          // by `readReg` or by the dangling-`@ha` check.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
             const base = parseImm(t) === 0 ? foldTableBase(ins, s) : null;
             if (base !== null) {
@@ -2942,6 +3065,17 @@ function liftOnce(
           break;
         case 'stb':
           emitStore(ins, d, s, 1);
+          break;
+        // The update forms (`withUpdate`); `stwu` is decoded with the frame push above.
+        case 'lwzu':
+        case 'lhzu':
+        case 'lhau':
+        case 'lbzu':
+          withUpdate(mnem.slice(0, -1), false);
+          break;
+        case 'sthu':
+        case 'stbu':
+          withUpdate(mnem.slice(0, -1), true);
           break;
         // Register+register indexed forms (variable-index array access). Widths/signedness mirror the
         // displacement loads/stores above; `lhax` is the sign-extending halfword (algebraic).

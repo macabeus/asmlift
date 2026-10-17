@@ -87,6 +87,8 @@ const MWCC_O0P = [
   '-Cpp_exceptions',
   'off',
 ];
+// The same set at -O4,p, which the update-form rows (`upd_*`) build at.
+const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
 const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // see the header for ido7.1
 
 // The map the `/no-ptr-elem` row below is fed: a struct global with a SIZED pointer member
@@ -10130,8 +10132,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      bytes or less in r3/r3:r4 and declines, and lowers no hidden pointer for 12.
   //   3. break_value (2). A `break` that carries a different value than the normal exit gets its
   //      own empty edge block, so the loop has two exit targets and none is a return. agbcc only:
-  //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, and mwcc_242_81 on
-  //      `lbzu`, so the row would measure those links there instead.
+  //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, so the row would
+  //      measure that link there instead. Its CodeWarrior twins, whose -O4,p unrolls the loop into
+  //      a chain of `lbzu`, are in the update-form section.
   //   4. spilldead (2). A spilled loop local whose last store reaches `bl done` unread read as
   //      that call's outgoing stack argument, although `done` is declared with one parameter and
   //      the slot is reloaded inside the loop. agbcc lifts it since a word the function loads
@@ -10927,6 +10930,176 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['global', 'array', 'variable-index', 'multi-arg'],
     toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
     ctx: 'u32 hidx_neg2d(u32 i, u32 j);',
+  },
+  // ── PowerPC LOADS AND STORES WITH UPDATE (frontend/ppc.ts `withUpdate`) ─────────────────────
+  // `lbzu rD,D(rA)` is `rA += D; rD = *(u8 *)rA`, and `stbu rS,D(rA)` `rA += D; *(u8 *)rA = rS`.
+  // CodeWarrior emits them in four shapes, measured on 2.4.2, 2.3.3 and 2.4.7 (no mwcc source
+  // exists, so a compiled probe is the evidence):
+  //   • a FULLY UNROLLED compare chain over a table, at -O4,p only: `upd_bscan`, `upd_hscan`,
+  //     `upd_shscan`, `upd_wscan` and `break_value` on every build, and `upd_pscan` (a pointer
+  //     parameter) on 2.3.3 alone — 2.4.2 and 2.4.7 keep its `bdnz` loop. For a `u16`/`s16`/`u32`
+  //     table the FIRST load's displacement is the `@l` half of the table's address
+  //     (`lhzu r0,gH@l(r4)`), so the base it leaves is `&gH`;
+  //   • a run of stores to a global array, at -O4,p only: the first is `stbu r3,gB@l(r4)` and the
+  //     rest plain `stb`. The flat `gB[0] = v; … gB[7] = v;` (`upd_bfillflat`) compiles to the same
+  //     run as the loop (`upd_bfill`);
+  //   • the word loop of a struct copy, `lwz; lwzu 8; stw; stwu 8; bdnz`, at every level
+  //     (`upd_scopy`, `upd_gcopy` of 72 bytes; `upd_scopy0` of 80 at -O0,p). Into a LOCAL
+  //     (`upd_lcopy`) the destination base is `addi r5,r1,4`, a word below the object, and the
+  //     stores step it: the frame-object audit refuses that capture, and the row declines rather
+  //     than guess an object;
+  //   • a PRE-INCREMENT pointer walk, at -O4,p on every build: `*++p` is one `lbzu` in the loop body,
+  //     its base a loop-carried phi (`upd_skipsp`, `upd_slen`), and `*++d = *++s` an `lbzu` and an
+  //     `stbu` whose stored value the loop then tests (`upd_scpy`, MSL's `strcpy` shape). A
+  //     post-increment walk (`while (*p++)`) emits none.
+  // The pre-increment walks match on CodeWarrior and the rest do not yet, which is not this
+  // capability's gap: an unrolled chain needs its loop RE-ROLLED (the flat `if (gTab[1] == 0x1C) …`
+  // spelling compiles to `lbz D(r3)` with no update form), a constant chain is spelled
+  // `(u32)&gTab + 2 + 1 + 1`, and a copy loop wants a struct assignment recovered from it. The same
+  // sources on agbcc, ido7.1 and gcc2.7.2kmc are the controls, which have no update form to emit.
+  ...(
+    [
+      [['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc'], undefined],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] =>
+    (
+      [
+        ['upd_bscan', 'u8', 'gTab', 16, 16],
+        ['upd_hscan', 'u16', 'gH', 16, 8],
+        ['upd_shscan', 's16', 'gS', 16, 8],
+        ['upd_wscan', 'u32', 'gW', 16, 8],
+      ] as const
+    )
+      .map(([sym, type, table, size, n]): SynthSpec => ({
+        sym,
+        src:
+          `extern ${type} ${table}[${size}];\ns32 ${sym}(${type} x)\n{\n    s32 i;\n    for (i = 0; i < ${n}; i++) {\n` +
+          `        if (${table}[i] == x) {\n            return i;\n        }\n    }\n    return -1;\n}`,
+        features: ['array', 'global', 'compare'],
+        toolchains: [...toolchains],
+        ...(cflags ? { cflags } : {}),
+        ctx: `s32 ${sym}(${type} x);`,
+      }))
+      .concat([
+        {
+          sym: 'upd_pscan',
+          src:
+            's32 upd_pscan(u8 *p, u8 x)\n{\n    s32 i;\n    for (i = 0; i < 8; i++) {\n' +
+            '        if (p[i] == x) {\n            return i;\n        }\n    }\n    return -1;\n}',
+          features: ['array', 'pointer', 'compare'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 's32 upd_pscan(u8 *p, u8 x);',
+        },
+        {
+          sym: 'upd_skipsp',
+          src: "u8 *upd_skipsp(u8 *p)\n{\n    while (*++p == ' ') {\n    }\n    return p;\n}",
+          features: ['pointer', 'compare'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'u8 *upd_skipsp(u8 *p);',
+        },
+        {
+          sym: 'upd_slen',
+          src: 's32 upd_slen(u8 *s)\n{\n    u8 *p = s - 1;\n    while (*++p) {\n    }\n    return p - s;\n}',
+          features: ['pointer', 'arithmetic'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 's32 upd_slen(u8 *s);',
+        },
+        {
+          sym: 'upd_scpy',
+          src: 'void upd_scpy(u8 *d, u8 *s)\n{\n    d--;\n    s--;\n    while ((*++d = *++s) != 0) {\n    }\n}',
+          features: ['pointer', 'store'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'void upd_scpy(u8 *d, u8 *s);',
+          proto: { upd_scpy: { returnsVoid: true } },
+        },
+        ...(
+          [
+            ['upd_bfill', 'u8', 'gB'],
+            ['upd_hfill', 'u16', 'gH'],
+            ['upd_wfill', 'u32', 'gW'],
+          ] as const
+        ).map(([sym, type, table]): SynthSpec => ({
+          sym,
+          src:
+            `extern ${type} ${table}[16];\nvoid ${sym}(${type} v)\n{\n    s32 i;\n` +
+            `    for (i = 0; i < 8; i++) {\n        ${table}[i] = v;\n    }\n}`,
+          features: ['array', 'global', 'store'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: `void ${sym}(${type} v);`,
+          proto: { [sym]: { returnsVoid: true } },
+        })),
+        {
+          sym: 'upd_bfillflat',
+          src:
+            'extern u8 gB[16];\nvoid upd_bfillflat(u8 v)\n{\n    gB[0] = v;\n    gB[1] = v;\n    gB[2] = v;\n' +
+            '    gB[3] = v;\n    gB[4] = v;\n    gB[5] = v;\n    gB[6] = v;\n    gB[7] = v;\n}',
+          features: ['array', 'global', 'store'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'void upd_bfillflat(u8 v);',
+          proto: { upd_bfillflat: { returnsVoid: true } },
+        },
+        {
+          sym: 'upd_scopy',
+          src: 'struct UpdBig { s32 w[18]; };\nvoid upd_scopy(struct UpdBig *d, struct UpdBig *s)\n{\n    *d = *s;\n}',
+          features: ['struct-copy', 'pointer'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'struct UpdBig { s32 w[18]; };\nvoid upd_scopy(struct UpdBig *d, struct UpdBig *s);',
+          proto: { upd_scopy: { returnsVoid: true } },
+        },
+        {
+          sym: 'upd_gcopy',
+          src:
+            'struct UpdBig { s32 w[18]; };\nextern struct UpdBig gUpdA;\nextern struct UpdBig gUpdB;\n' +
+            'void upd_gcopy(void)\n{\n    gUpdA = gUpdB;\n}',
+          features: ['struct-copy', 'global'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'struct UpdBig { s32 w[18]; };\nvoid upd_gcopy(void);',
+          proto: { upd_gcopy: { returnsVoid: true } },
+        },
+        {
+          sym: 'upd_lcopy',
+          src:
+            'struct UpdBig { s32 w[18]; };\nextern void upd_useb(struct UpdBig *p);\n' +
+            'void upd_lcopy(struct UpdBig *s)\n{\n    struct UpdBig b;\n    b = *s;\n    upd_useb(&b);\n}',
+          features: ['struct', 'struct-copy', 'stack-addr'],
+          // ido7.1 is off, as for every call row (see the header)
+          toolchains: toolchains.filter((t) => t !== 'ido7.1'),
+          ...(cflags ? { cflags } : {}),
+          ctx: 'struct UpdBig { s32 w[18]; };\nvoid upd_useb(struct UpdBig *p);\nvoid upd_lcopy(struct UpdBig *s);',
+          proto: { upd_useb: { params: ['struct UpdBig *'], returnsVoid: true }, upd_lcopy: { returnsVoid: true } },
+        },
+      ]),
+  ),
+  {
+    sym: 'upd_scopy0',
+    src: 'struct UpdBig0 { s32 w[20]; };\nvoid upd_scopy0(struct UpdBig0 *d, struct UpdBig0 *s)\n{\n    *d = *s;\n}',
+    features: ['struct-copy', 'pointer'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O0P,
+    ctx: 'struct UpdBig0 { s32 w[20]; };\nvoid upd_scopy0(struct UpdBig0 *d, struct UpdBig0 *s);',
+    proto: { upd_scopy0: { returnsVoid: true } },
+  },
+  // break_value's twin on the three CodeWarrior builds: six or seven `lbzu` at -O4,p.
+  {
+    sym: 'break_value',
+    src:
+      'extern u8 gTab[16];\nextern u8 gVal[16];\nextern s32 gOut;\n' +
+      'void break_value(void)\n{\n    u32 i;\n    u32 r = 1;\n    for (i = 1; i < 9; i++) {\n' +
+      '        if (gTab[i] == 0x1C) {\n            r = i;\n            break;\n        }\n    }\n    gOut = gVal[r];\n}',
+    features: ['break', 'array'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'void break_value(void);',
+    proto: { break_value: { returnsVoid: true } },
   },
 ];
 

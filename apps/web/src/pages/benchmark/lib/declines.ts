@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 250 distinct decline messages (the texts reached by
+// `packages/core/src` throws 253 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -61,11 +61,13 @@
 //                               merge), five refusals about a disassembly the reader cannot account
 //                               for, a `jal` relocated against a section, one in a delay slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
-//   frontend/ppc.ts         15  `stwu` with update, a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), the
-//                               return address `mflr` copies out stored anywhere but the link
-//                               register's save word, the reaching-compare throw whose reason is
-//                               interpolated (as Thumb's), the two-armed branch denylist, whose
+//   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
+//                               r1, a load into r1, its own base loaded or stored, a relocation
+//                               other than `@l`), a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), the return address
+//                               `mflr` copies out stored anywhere but the link register's save word,
+//                               the reaching-compare throw whose reason is interpolated (as Thumb's),
+//                               the two-armed branch denylist, whose
 //                               template is interpolation end to end, the caller's value a restore
 //                               puts back read as a value, a `stmw` or save routine saving a register
 //                               this function already wrote or read, and four ways a `bl` into a register
@@ -142,7 +144,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 5 of the 16 rows, so a pattern requiring the decided spelling claims 11 of
+    // disjunction is 5 of the 20 rows, so a pattern requiring the decided spelling claims 15 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -198,11 +200,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // (`r1Displacements` in `frontend/ppc.ts`), so no slot can be named there: this class's gap seen
     // one step earlier. `not the one frame push` refuses a push that is not `stwu r1,-N(r1)` from the
     // entry r1 — a second push, or `stwu` storing another register, whose store and r1 move are both
-    // unmodelled.
+    // unmodelled. `writes the stack pointer` refuses any other write to r1 (a longjmp's
+    // `lwz r1,4(r3)`, a context switch's `mr r1,r10`), which the lift would otherwise drop.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
+      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push|writes the stack pointer/,
   },
   {
     // A branch whose block has NO predecessor reads flags nothing in this function set: at the
@@ -278,7 +281,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // placeholder are the same capability. Its one corpus inhabitant is `synthetic:tax_gprel`,
     // because every MIPS toolchain's canonical set turns small data off (`TOOLCHAIN_TARGETS` in
     // `packages/core/src/target.ts`: `-non_shared -G 0`, `-mno-abicalls -fno-PIC -G 0`) — a flag
-    // choice rather than a shape the toolchain cannot emit. That row sets `-G 8`.
+    // choice rather than a shape the toolchain cannot emit. That row sets `-G 8`. A WRITE to r13 or
+    // r2 (`ppc.ts` `writes the small-data base`) is the same gap from the other side: a moved base
+    // no relocation-read access would follow.
     key: 'pic-globals',
     label: 'Small-data globals (gp-relative / GPREL / an SDA base with no relocation)',
     // One alternative per producer, each the whole phrase that site emits. Bare `PIC` and bare
@@ -288,7 +293,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
     // pushes it past the 200-character cap this file opens with.
     pattern:
-      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
+      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation|writes the small-data base/,
   },
   {
     key: 'float',
