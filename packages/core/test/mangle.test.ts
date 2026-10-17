@@ -142,6 +142,12 @@ describe('implicitArgumentWords', () => {
       'get__t3Vec1Zii',
       'get__Ct3Vec1Zii',
       '__as__t3Vec1ZiRCt3Vec1Zi',
+      // gcc 2 puts a const or volatile mark before a nested or template class, and spells volatile V
+      'get__CQ21A1Bi',
+      'get__V3Fooi',
+      'get__CV3Fooi',
+      'get__CQ2t1V1Zi2Ini',
+      'get__Q_12_1A1B1C1D1E1F1G1H1I1J1K1Li',
     ]) {
       expect(implicitArgumentWords(sym)).toBe(1);
     }
@@ -157,6 +163,10 @@ describe('implicitArgumentWords', () => {
       '_._3Foo',
       '__t3Vec1Zii',
       '_$_t3Vec1Zi',
+      // a nested class's destructor is handed `this` and the in-charge flag all the same
+      '_._Q21A1B',
+      '_$_Q21A1B',
+      '__Q_12_1A1B1C1D1E1F1G1H1I1J1K1L',
     ]) {
       expect(implicitArgumentWords(sym)).toBeUndefined();
     }

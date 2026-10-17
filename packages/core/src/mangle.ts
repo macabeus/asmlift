@@ -129,22 +129,34 @@ export function demangle(sym: string): CppSig | null {
   return { name, cls, params };
 }
 
+/** How a class opens where gcc 2 names one: a length (`3Foo`), a nesting count (`Q21A1B`, and
+ *  `Q_12_` past nine levels) or a template (`t3Vec1Zi`). A member function's const and volatile
+ *  marks come before it (`get__C3Fooi`, `get__V3Fooi`, `get__CQ21A1Bi`), and CodeWarrior's class
+ *  opens the same way, its marks following the class (`getStartHour__11PlayerStateCFv`). */
+const GCC2_CLASS = String.raw`(?:\d|Q(?:\d|_\d+_)|t\d)`;
+
 /** How many argument words a C++ symbol may be handed ahead of its declared parameters: 1 where it
  *  may name a MEMBER function, whose `this` the declared list leaves out; 0 where it cannot; and
  *  `undefined` for a constructor or destructor, which may also take a flag no declaration states
  *  (an in-charge or delete flag, beside `this`). Either mangling scheme a target here compiles with
  *  puts the class right after the `__`, length-prefixed or `Q<n>`-nested: CodeWarrior's
  *  `pick__3FooFiPi` (`__ct__3FooFv`, `__dt__3FooFv`), and gcc 2's `pick__3FooiPi` (a const method
- *  `pick__C3FooiPi`, a constructor `__3Foo`, a destructor `_$_3Foo` or `_._3Foo`), where a TEMPLATE
+ *  `pick__C3FooiPi`, a volatile one `pick__V3FooiPi`, a constructor `__3Foo`, a destructor `_$_3Foo`
+ *  or `_._3Foo`, of a nested class `_._Q21A1B`, which this abstains on whatever follows), where a TEMPLATE
  *  class is spelled `t<n><name><args>` in the class's place (`get__t3Vec1Zii`, a constructor
  *  `__t3Vec1Zii`, `operator=` `__as__t3Vec1ZiRCt3Vec1Zi`). A free function
  *  (`f__Fii`) and a plain C name answer 0. A STATIC member mangles as a method does and takes no
- *  `this`, so 1 is "may", and a reader that needs the exact count must not take it as one. */
+ *  `this`, so 1 is "may", and a reader that needs the exact count must not take it as one.
+ *
+ *  THE PATTERNS ERR TOWARDS A MEMBER, because the errors cost differently: a method read as free
+ *  loses its `this` word, and the own-declaration bound (`proto.ts` `ownArgumentWords`) then turns
+ *  its last parameter into an uninitialised local, where a C name read as a method only leaves one
+ *  more register a parameter. */
 export function implicitArgumentWords(sym: string): 0 | 1 | undefined {
-  if (/^__(?:ct|dt)__/.test(sym) || /^__(?:\d|Q\d|t\d)/.test(sym) || /^_[$.]_(?:\d|t\d)/.test(sym)) {
+  if (/^__(?:ct|dt)__/.test(sym) || new RegExp(`^__${GCC2_CLASS}`).test(sym) || /^_[$.]_/.test(sym)) {
     return undefined;
   }
-  return /__(?:C?\d|Q\d|C?t\d)/.test(sym) ? 1 : 0;
+  return new RegExp(`__[CV]*${GCC2_CLASS}`).test(sym) ? 1 : 0;
 }
 
 /** A class qualifier off the front of `s` — `12RefCountable`, or `Q23zen17particleGenerator` for a
