@@ -374,7 +374,13 @@ export function ownArgumentWords(
     (p?.returns !== undefined &&
       !declaresAggregateReturn(p) &&
       (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)));
-  return (scalarReturn ? 0 : 1) + implicit + wordsOf(widths, target);
+  // The hidden words are laid out WITH the declared ones, not added after them: they come first,
+  // so they move where the even-word rule puts a 64-bit parameter. O32's `struct P f(double x)`
+  // passes the struct pointer in a0, skips a1 and passes `x` in a2:a3 — 4 words, where `1 +
+  // wordsOf([64])` says 3 and turns a3 into `uninit_a3`. The call side counts the same way
+  // (`frontend/call-plan.ts`, `[32, ...params]`).
+  const hidden = (scalarReturn ? 0 : 1) + implicit;
+  return wordsOf([...Array.from({ length: hidden }, () => 32), ...widths], target);
 }
 
 /** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */

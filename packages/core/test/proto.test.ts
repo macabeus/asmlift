@@ -332,6 +332,23 @@ describe('ownArgumentWords', () => {
     expect(ownArgumentWords('uninitfirst__FiPi', { params: 3, ...S32 }, PPC_MWCC)).toBe(3);
   });
 
+  // The hidden word comes FIRST, so the even-word rule counts it: O32's `struct P sd2(double x)`
+  // passes the pointer in a0, skips a1 and passes x in a2:a3, and `Foo::get(s64)` takes `this` in
+  // a0 / r3 and the s64 in a2:a3 / r5:r6. Added after the layout, the bound was 3 and a3 / r6
+  // became `uninit_<reg>`.
+  test('a hidden word is laid out with the declared ones, before the even-word rule', () => {
+    for (const t of [MIPS_IDO, MIPS_GCC]) {
+      expect(ownArgumentWords('sd2', { params: ['double'] }, t)).toBe(4);
+      expect(ownArgumentWords('sd2', { params: ['double', 's32'], returns: 'Pt' }, t)).toBe(5);
+      expect(ownArgumentWords('put__3Food', { params: ['double'], returns: 'void' }, t)).toBe(4);
+    }
+    for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+      expect(ownArgumentWords('get__3FooFx', S32, t)).toBe(4);
+    }
+    // agbcc aligns nothing
+    expect(ownArgumentWords('sd2', { params: ['double'] }, ARMV4T_AGBCC)).toBe(3);
+  });
+
   // `wordsOf` lays them out: mwcc 2.4.2, 2.3.3 and 2.4.7 pass `void f(s32 k, s64 v)`'s v in r5:r6
   // and O32 in a2:a3, where agbcc passes it in r1:r2.
   test('a 64-bit parameter is two words, at an even word where the target aligns one', () => {
