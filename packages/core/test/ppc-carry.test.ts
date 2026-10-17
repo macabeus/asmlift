@@ -329,6 +329,45 @@ describe('a word return whose r4 holds a value the function computed and nothing
     );
   });
 
+  test('but a truth value over a carry something else reads, or that r3 returns, is the high word', () => {
+    // `u64 q2(u32 a, u32 b, int *p) { u64 d = (u64)a - b; *p = -(int)(d >> 32); return d; }`: the
+    // `subfe` is the high word r3 returns, and the `neg` beside it is a second reader
+    const o0 = (tc: 'mwcc_242_81' | 'mwcc_247_107') => targetFor(tc, ['-proc', 'gekko', '-O0,p', '-fp', 'hard']).target;
+    for (const tc of ['mwcc_242_81', 'mwcc_247_107'] as const) {
+      const o4 = targetFor(tc, ['-proc', 'gekko', '-O4,p', '-fp', 'hard']).target;
+      const subfe = tc === 'mwcc_242_81' ? 'subfe   r3,r4,r4' : 'subfe   r3,r3,r3';
+      const q2 = ['subfc   r4,r4,r3', subfe, 'neg     r0,r3', 'stw     r0,0(r5)'];
+      expect(() => decompile('f', asm(q2), o4)).toThrow(refusal);
+      const q2o0 = [
+        ...['stwu    r1,-16(r1)', 'stw     r31,12(r1)', 'stw     r30,8(r1)', 'subfc   r31,r4,r3'],
+        tc === 'mwcc_242_81' ? 'subfe   r30,r31,r31' : 'subfe   r30,r3,r3',
+        ...['li      r0,0', 'neg     r0,r30', 'stw     r0,0(r5)', 'mr      r4,r31', 'mr      r3,r30'],
+        ...['lwz     r31,12(r1)', 'lwz     r30,8(r1)', 'addi    r1,r1,16'],
+      ];
+      expect(() => decompile('f', asm(q2o0), o0(tc))).toThrow(refusal);
+      // `u64 d = 9 - (u64)a`: the `subfic` difference moves to r4 after the high word's `neg`
+      const t9 = ['subfic  r5,r3,9', 'li      r0,0', 'subfe   r3,r0,r0', 'neg     r0,r3', 'stw     r0,0(r4)'];
+      expect(() => decompile('f', asm([...t9, 'mr      r4,r5']), o4)).toThrow(refusal);
+      // -O0's `int h = (int)(d >> 32); *p = h < 0 ? -h : h; return d;` negates on one arm only
+      const t14 = [
+        ...['stwu    r1,-32(r1)', 'stw     r31,28(r1)', 'stw     r30,24(r1)', 'stw     r29,20(r1)'],
+        ...['stw     r28,16(r1)', 'subfc   r30,r4,r3'],
+        tc === 'mwcc_242_81' ? 'subfe   r29,r30,r30' : 'subfe   r29,r3,r3',
+        ...['li      r0,0', 'mr      r31,r29', 'mr      r31,r29', 'cmpwi   r31,0', 'bge-    38 <f+0x38>'],
+        ...['neg     r28,r31', 'b       3c <f+0x3c>', 'mr      r28,r31', 'stw     r28,0(r5)', 'mr      r4,r30'],
+        ...['mr      r3,r29', 'lwz     r31,28(r1)', 'lwz     r30,24(r1)', 'lwz     r29,20(r1)'],
+        ...['lwz     r28,16(r1)', 'addi    r1,r1,32'],
+      ];
+      expect(() => decompile('f', asm(t14), o0(tc))).toThrow(refusal);
+    }
+    // a carry the `neg` shares with a store is no truth value's alone, though r3 returns neither
+    const shared = ['subfc   r4,r4,r3', 'subfe   r0,r4,r4', 'neg     r6,r0', 'stw     r6,0(r5)'];
+    expect(() => decompile('f', asm([...shared, 'stw     r0,4(r5)', 'li      r3,0']), PPC_MWCC)).toThrow(refusal);
+    // and the signed one's `addze` likewise
+    const slt = ['eqv     r0,r4,r3', 'subfc   r4,r4,r3', 'srwi    r0,r0,31', 'addze   r0,r0', 'clrlwi  r6,r0,31'];
+    expect(() => decompile('f', asm([...slt, 'stw     r0,0(r5)', 'mr      r3,r6']), PPC_MWCC)).toThrow(refusal);
+  });
+
   test('nor, at a level that keeps dead code, is a dead parameter store beside an untouched r3', () => {
     // mwcc -O0 keeps `b = a + 1;` in b's register: `int f(int a, int b) { b = a + 1; return a; }`
     const o0 = targetFor('mwcc_242_81', ['-O0']).target;

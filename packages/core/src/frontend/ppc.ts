@@ -1649,10 +1649,11 @@ function liftOnce(
   // `rB - 1` a `subfe rD,rA,rB` cancels. The machine read them, and no op says so (`computedPairHalf`).
   const readWithoutOp = new Set<Value>();
   // Every `subfc`/`subfic` difference whose carry a reader turned into a 0/1 truth value: the
-  // difference is the by-product of a 32-bit compare, not the low word of a 64-bit result
-  // (`computedPairHalf`). `carrySource` maps each carry compare to the difference its writer
-  // computed, and `truthPending` each reader result one step short of the truth value to it.
-  const comparedDifference = new Set<Value>();
+  // difference may be the by-product of a 32-bit compare, not the low word of a 64-bit result,
+  // which `computedPairHalf` settles (`TruthDifference`). `carrySource` maps each carry compare to
+  // the difference its writer computed, and `truthPending` each reader result one step short of
+  // the truth value to it.
+  const truthDifferences: TruthDifference[] = [];
   const carrySource = new Map<Value, Value>();
   const truthPending = new Map<Value, { diff: Value; via: 'neg' | 'and1' }>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
@@ -2743,10 +2744,10 @@ function liftOnce(
         }
         case 'neg': {
           const x = read(s);
+          const n = emitUn('neg', d, x);
           if (truthPending.get(x)?.via === 'neg') {
-            comparedDifference.add(truthPending.get(x)!.diff);
+            truthDifferences.push({ diff: truthPending.get(x)!.diff, carry: x, truth: n });
           }
-          emitUn('neg', d, x);
           break;
         }
         case 'mullw':
@@ -2863,10 +2864,10 @@ function liftOnce(
         // rotate-and-mask, rotate 0 only: `clrlwi rD,rS,n` = rS & (~0>>>n); `clrrwi` = rS & (~0<<n).
         case 'clrlwi': {
           const x = read(s);
+          const m = emitBin('and', d, x, constVal((0xffffffff >>> parseImm(t)) >>> 0));
           if (parseImm(t) === 31 && truthPending.get(x)?.via === 'and1') {
-            comparedDifference.add(truthPending.get(x)!.diff);
+            truthDifferences.push({ diff: truthPending.get(x)!.diff, carry: x, truth: m });
           }
-          emitBin('and', d, x, constVal((0xffffffff >>> parseImm(t)) >>> 0));
           break;
         }
         case 'clrrwi':
@@ -3202,7 +3203,8 @@ function liftOnce(
     target.compilerBehaviors.keepsUnusedReads === true
       ? (v) => paramReg.get(v) === RET && irBlocks[0].params.includes(v)
       : undefined,
-    (v) => compared.has(v) || readWithoutOp.has(v) || comparedDifference.has(v) || ssa.frameWrites.has(v),
+    truthDifferences,
+    (v) => compared.has(v) || readWithoutOp.has(v) || ssa.frameWrites.has(v),
   );
   ssa.finish();
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
@@ -3282,41 +3284,86 @@ function liftOnce(
  *
  *  Asked BEFORE `ssa.finish`, while every join is still a parameter with its incoming values wired,
  *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an
- *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exempt` names a value
- *  the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
+ *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exemptValue` names a
+ *  value the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
  *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns `(x
  *  >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`), a `subfc`/`subfic` difference whose
- *  carry a reader turned into a 0/1 truth value (`comparedDifference`: 2.3.3's `a + (a < b)` is
+ *  carry a reader turned into a 0/1 truth value (`truthDifferences`, kept only where that reader is
+ *  the carry's sole consumer in its block and neither is r3's word: 2.3.3's `a + (a < b)` is
  *  `subfc r4,r4,r3; subfe r0,r0,r0; neg r0,r0; add r3,r3,r0` over the dead `b`, and the signed one
- *  keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1` and neither negates
- *  it nor masks it to a bit), and one stored to the frame (`frameWrites`). A function that holds an
+ *  keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1`, which r3 returns),
+ *  and one stored to the frame (`frameWrites`). A function that holds an
  *  unmodelled instruction is not asked: the `opaque` may read r4 without naming it, and it declines
  *  under its own name. A value r4 holds that the function did not compute — its entry value, the
  *  caller's `a` that `long long z(unsigned a) { return a; }` moves there — is not seen, and that
  *  word return still drops the low word. */
 type PairReturn = { word: Value; high: ReadonlySet<Value> };
+/** A `subfc`/`subfic` difference (`diff`) whose carry a reader made a 0/1 truth value: `carry` is
+ *  the `subfe rX,rY,rY` (CA - 1) or `addze` result, `truth` the `neg` or `clrlwi 31` over it. */
+type TruthDifference = { diff: Value; carry: Value; truth: Value };
 function computedPairHalf(
   blocks: readonly Block[],
   returns: readonly PairReturn[],
   entryWord: ((v: Value) => boolean) | undefined,
-  exempt: (v: Value) => boolean,
+  truthDifferences: readonly TruthDifference[],
+  exemptValue: (v: Value) => boolean,
 ): boolean {
   if (returns.every((r) => r.high.size === 0) || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
     return false;
   }
   const defOf = new Map<Value, Op>();
+  const blockOf = new Map<Op, Block>();
   const incoming = new Map<Value, Value[]>();
+  // Every reader of each value: the ops that take it as an operand, a join argument counting as one.
+  const readers = new Map<Value, number>();
+  const readBy = (v: Value) => readers.set(v, (readers.get(v) ?? 0) + 1);
   for (const b of blocks) {
     for (const o of b.ops) {
+      blockOf.set(o, b);
       o.results.forEach((r) => defOf.set(r, o));
+      o.operands.forEach(readBy);
       for (const succ of o.successors) {
         succ.args.forEach((a, i) => {
+          readBy(a);
           const p = succ.block.params[i];
           incoming.set(p, [...(incoming.get(p) ?? []), a]);
         });
       }
     }
   }
+  // What r3 may hold at a word return: the word itself, and every value a join of it carries in.
+  const returned = new Set<Value>();
+  const toReturn = returns.map((r) => r.word);
+  while (toReturn.length > 0) {
+    const v = toReturn.pop()!;
+    if (!returned.has(v)) {
+      returned.add(v);
+      toReturn.push(...(incoming.get(v) ?? []));
+    }
+  }
+  // A truth value's difference is the compare's by-product only where nothing else saw the carry:
+  // the reader is its sole consumer and runs in its block, so on every path the difference takes,
+  // and neither the carry nor the truth value is what r3 returns. mwcc's `u64 d = (u64)a - b; *p =
+  // -(int)(d >> 32); return d;` is `subfc r4,r4,r3; subfe r3,r4,r4; neg r0,r3`: that `subfe` is
+  // the high word, the `neg` beside it is a second reader, and r4 is the low word.
+  const comparedDifference = new Set<Value>();
+  for (const { diff, carry, truth } of truthDifferences) {
+    const reader = defOf.get(truth);
+    const writer = defOf.get(carry);
+    if (
+      reader !== undefined &&
+      writer !== undefined &&
+      reader.operands.filter((x) => x === carry).length === 1 &&
+      readers.get(carry) === 1 &&
+      !exemptValue(carry) &&
+      blockOf.get(reader) === blockOf.get(writer) &&
+      !returned.has(carry) &&
+      !returned.has(truth)
+    ) {
+      comparedDifference.add(diff);
+    }
+  }
+  const exempt = (v: Value) => exemptValue(v) || comparedDifference.has(v);
   // What some kept op reads, through the joins that carry it there.
   const read = new Set<Value>();
   const work: Value[] = [];
