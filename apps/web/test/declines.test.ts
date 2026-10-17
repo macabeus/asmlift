@@ -964,11 +964,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
   //
-  // `loop-exit-values` joins on the population reading: its last inhabitants were loops behind a
-  // guard that is not the loop's own test (`dma_wait` and `upd_scpy` on gcc2.7.2kmc, `upd_scpy` on
-  // ido7.1, `ucmp` on mwcc_242_81), and a kept guard that meets one of its refusals is now an
-  // ordinary `if` around a do-while (structure.ts `keptGuardDoWhiles`). The refusals still fire on a
-  // FUSED guard, and no benchmark row reaches one.
+  // `loop-exit-values` has no rows: a kept guard (one that is not the loop's own test) that meets
+  // one of its refusals is an ordinary `if` around a do-while (structure.ts `keptGuardDoWhiles`).
+  // The refusals fire only on a FUSED guard, and no benchmark row reaches one.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',

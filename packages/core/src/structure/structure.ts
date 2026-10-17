@@ -5964,8 +5964,8 @@ export function structure(
         // header or its preheader, so that the `while`'s first test is the evaluation that replaces
         // the guard's. Read through anywhere else — a call the function made once, ahead of both,
         // whose result the loop's test names — a cached result would equal a fresh call, and fusion
-        // would delete the fresh one with the guard (`if (v < f(a)) do {} while (v < v)` lost the
-        // `f(a)`: the kept-guard do-while fuzz at depth 1, seed 2898).
+        // would delete the fresh one with the guard (`if (v < f(a)) do {} while (v < v)` would lose
+        // the `f(a)`).
         const evaluatedAtTest = (v: Value): boolean => {
           const d = defs.get(v);
           const at = d === undefined ? undefined : opBlock.get(d);

@@ -219,7 +219,7 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData, freed: Rea
     if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16' && r.type !== 'R_MIPS_26')) {
       continue;
     }
-    // A likely slot `normaliseBranchLikely` emptied holds a `nop` now; its old word's relocation
+    // A slot `normaliseBranchLikely` emptied holds a `nop` now; its old word's relocation
     // describes the copy at the target, which carries its own.
     if (freed.has(r.offset)) {
       continue;
@@ -610,8 +610,8 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
 //   - the slot completes no `%lo`. Its `%hi` is a register each path loads for itself (`lui v1;
 //     b T; lw v1,%lo(g)(v1)` against `lui v1; …; lw v1,%lo(g)(v1); T:`), and retargeted, the one
 //     copy at T-4 reads that register at a join, where it is the block parameter and not the half:
-//     the high/low fold then refuses a function that lifted before. Exact either way, so the
-//     shape keeps its slot rather than trade a lift for a decline (ido fuzz, 1 in 900 lifts).
+//     the high/low fold would refuse a function the kept slot lifts. Exact either way, so the
+//     shape keeps its slot rather than trade a lift for a decline.
 // A branch landing on the slot refuses below, rewrite or not; a recovered jump-table arm landing on
 // a freed slot refuses in `lift`, where the tables exist.
 //
@@ -746,8 +746,8 @@ function normaliseBranchLikely(
     // against `sll; sra; T:` (ido `mergenarrow`) is one sign extension per arm, written out twice,
     // or a stolen `sra` whose arms the source merged — the same object either way. Retargeted, the
     // `<< 16` stays in each arm and the `>> 16` moves past the join; kept, each arm reads as the
-    // one `(s16)` it is. Neither reading wins on the corpus (of the af/mp3/sbk2 splat functions
-    // this shape blocked, retargeting shortened 19 lifts and lengthened 3, `func_80026D34` the
+    // one `(s16)` it is. Neither reading wins on the corpus (over the af/mp3/sbk2 splat functions
+    // with this shape, retargeting shortens 19 lifts and lengthens 3, `func_80026D34` the
     // `mergenarrow` case), so the default retargets and the kept slot is the `/kept-slot` lift
     // variation the differ referees. A likely slot emptied above the `b` is no common tail; one
     // emptied before T still counts, as the word it was. A `nop` is no tail at all.

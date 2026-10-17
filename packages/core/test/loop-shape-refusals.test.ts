@@ -6,31 +6,31 @@
 // `packages/core/test` (3,744 tests). The counts below EXCLUDE this file's own inventory assertion,
 // which counts `continue;` tokens and so reddens on every ablation alike:
 //
-//   1. (retired) guarded self-loop — a self-loop a guard-shaped pred enters is recognized too, and
-//                                    kept aside (`keptGuardDoWhiles`): emitWhile spells it where the
-//                                    guard claims it, and where no guard does it is a do-while
-//                                    (GUARDED_SELFLOOP, GSL2 below)
-//   2. multi-latch        several latches                         left to `while (1)` — loop-forever.test.ts,
+//   1. multi-latch        several latches                         left to `while (1)` — loop-forever.test.ts,
 //                                                                 and THIS FILE's MULTILATCH
-//   3. not admissible     an overlapping inner loop, or an entry   0 failed — UNWITNESSED
+//   2. not admissible     an overlapping inner loop, or an entry   0 failed — UNWITNESSED
 //                         into the body past the header
 //                         (`admissible`, which `while (1)` asks too)
-//   4. neither shape      no clean pre-tested/bottom-tested exit  left to `while (1)` — loop-forever.test.ts
-//   5. multiple exits     `!singleExit`                           10 failed — loop-dowhile-break.test.ts,
+//   3. neither shape      no clean pre-tested/bottom-tested exit  left to `while (1)` — loop-forever.test.ts
+//   4. multiple exits     `!singleExit`                           10 failed — loop-dowhile-break.test.ts,
 //                                                                 loop-break-exit.test.ts and the two
 //                                                                 loop-bearing fuzz sweeps
+//
+// A guarded self-loop is NOT refused: it is recognized and kept aside (`keptGuardDoWhiles`), so
+// emitWhile spells it where a guard claims it, and where none does it is a do-while
+// (GUARDED_SELFLOOP, GSL2 below).
 //
 // So ONE of the four is unwitnessed, and its irreducible half is this file's named debt,
 // instrumented below. For its overlapping half all that is measured is the ablation — the whole
 // core suite is green without it — which says no existing test distinguishes it and says nothing
-// about whether a fixture could. #5 is where a `do-while` hands a break to `while (1)`: an edge into
+// about whether a fixture could. #4 is where a `do-while` hands a break to `while (1)`: an edge into
 // its exit that no early-return arm owns refuses it, and ablated, the do-while claims loops it cannot
-// spell. A `while`'s edges to its own exit are admitted as `break`s ahead of #5
+// spell. A `while`'s edges to its own exit are admitted as `break`s ahead of #4
 // (loop-break-exit.test.ts). Naming the unwitnessed one is the point: an unwitnessed refusal that
 // nobody has written down reads exactly like a witnessed one.
 //
 // WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". The multi-latch
-// fixture below, which #2 leaves to the `while (1)` recognizer, structures there correctly on all
+// fixture below, which #1 leaves to the `while (1)` recognizer, structures there correctly on all
 // 64 seeds `irTraceOf` judges. So these are CAPABILITY limits of the do-while recognizer, and where
 // no other recognizer takes the loop, the loud decline is the contract they ship under: a row that
 // hits one gets an `ASMLIFT_ERROR` marker rather than a plausible wrong answer, which is this
@@ -39,20 +39,19 @@
 //
 // EVERY TEST BELOW IS ABLATED AGAINST THE REFUSAL IT NAMES: a test that reads as a pin and passes
 // with its rule deleted is worse than no test. Two of the fixtures need their own note:
-//   • guarded self-loop — RETIRED, AND THE CORRECTNESS CLAIM IS PINNED BY THE TERMINATING FIXTURE.
-//                    `GUARDED_SELFLOOP` CANNOT say anything about the widening, because its loop
-//                    never terminates (every path into `^bb3` establishes `%0 < %1`, which is the
-//                    latch test, re-read from the same two entry params): 0 of 64 seeds reach `f0`
-//                    at all, so what the oracle judges is the seeds that SKIP the loop, and its
-//                    spelling is read by hand below. `GSL2` is the terminating version — a latch
-//                    test over a value the body increments — and it is the one that measures the
-//                    widening: 0 capped, 44 of 64 seeds actually running the loop, 64 of 64 judged,
-//                    0 differing. Reach at the sweep scale: with `generateSsaFn`'s `isLatch` widened
-//                    by one character to emit self-loops (a probe, not committed), the widening with
-//                    the kept-guard hand-back moves 349 of 4,000 depth-1 seeds from a loud decline to
-//                    a structured tree, 0 of them disagreeing with the IR. Seed 327, the wrong answer
-//                    the bare ablation once surfaced, still declines (its post-loop read holds the
-//                    init on a zero-trip run, which emitWhile refuses after it has emitted).
+//   • guarded self-loop — THE CORRECTNESS CLAIM IS PINNED BY THE TERMINATING FIXTURE.
+//                    `GUARDED_SELFLOOP` CANNOT say anything about it, because its loop never
+//                    terminates (every path into `^bb3` establishes `%0 < %1`, which is the latch
+//                    test, re-read from the same two entry params): 0 of 64 seeds reach `f0` at all,
+//                    so what the oracle judges is the seeds that SKIP the loop, and its spelling is
+//                    read by hand below. `GSL2` is the terminating version — a latch test over a
+//                    value the body increments — and it is the one that measures it: 0 capped, 44
+//                    of 64 seeds actually running the loop, 64 of 64 judged, 0 differing. Reach at
+//                    the sweep scale: with `generateSsaFn`'s `isLatch` widened by one character to
+//                    emit self-loops (a probe, not committed), 349 of 4,000 depth-1 seeds structure
+//                    through it, 0 of them disagreeing with the IR. Seed 327 declines: its post-loop
+//                    read holds the init on a zero-trip run, which emitWhile refuses after it has
+//                    emitted.
 //   • irreducible  — the file's named debt: `irreducible` declines with `admissible` ablated too.
 //                    Instrumented rather than assumed — a two-block loop entered at BOTH blocks from
 //                    outside still declines with the whole of `admissible` ablated, and with the
@@ -119,8 +118,7 @@ const SELFLOOP = `fn selfloop {
 
 /** A guarded self-loop no guard claims: `^bb3` is its own latch, and unlike `SELFLOOP` it is
  *  entered from TWO predecessors (`^bb1` and `^bb2`). `^bb2` claims its entry and spells it
- *  `while`; `^bb1`'s entry reaches the header as the do-while it is (`keptGuardDoWhiles`) — once
- *  read as a plain block whose back edge re-entered it, and declined.
+ *  `while`; `^bb1`'s entry reaches the header as the do-while it is (`keptGuardDoWhiles`).
  *
  *  This loop, once entered, never exits: every path into `^bb3` establishes `%0 < %1` (via `^bb1`'s
  *  false arm, or via `^bb2`'s true arm, which IS that test) and `^bb3`'s back edge re-reads the same

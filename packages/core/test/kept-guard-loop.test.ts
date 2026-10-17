@@ -356,9 +356,9 @@ test('a zero-trip read after a nested guarded loop still declines', () => {
 
 // A CALL IN THE GUARD IS NOT THE LOOP'S TEST BECAUSE IT CALLS THE SAME FUNCTION. The loop tests
 // `v < v` over the result `%2` of a call the entry block made once; the guard tests `v < f0(a0)`, a
-// second call. Read through both calls, the two compares look alike, and fusion deleted the guard
-// and with it the call `f0(a0)` and the test. A call is read through only where it runs at its own
-// test, so the guard is kept, and so is the call.
+// second call. Read through both calls, the two compares look alike, and fusion would delete the
+// guard and with it the call `f0(a0)` and the test. A call is read through only where it runs at
+// its own test, so the guard is kept, and so is the call.
 const CALL_IN_THE_GUARD = `fn callguard {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = call %0 {target="f0"}

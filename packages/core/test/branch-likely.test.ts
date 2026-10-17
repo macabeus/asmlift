@@ -490,7 +490,7 @@ test('an unconditional `b`/`j` whose slot is the target-4 word, stolen, retarget
     ).toBe(want);
   }
   // A branch landing on the `b`'s slot runs it and falls on to 0x10, not to T: the slot keeps its
-  // word, and that landing still refuses as it did.
+  // word, and that landing refuses.
   expect(
     lift(
       '0:\tbeqz\ta0,c <f+0xc>',
@@ -652,7 +652,7 @@ test('a latch retargeted onto its stolen word is a guarded self-loop the kept gu
   // `while (*s) { n++; s++; }` at IDO: the retarget turns `14:..1c: bnezl t7,14; lbu t7,1(a0)` into
   // one block, `t = s[1]; n++; s++; while (t)`, behind the `*s` guard. The guard is not the loop's
   // own test (`s[0]` against `s[1]`), so it stays an `if`; emitWhile, which would merge the guard's
-  // exit edge into the loop's, cannot spell a test that reads `s` before its update and declined.
+  // exit edge into the loop's, cannot spell a test that reads `s` before its update.
   // The do-while emitter spells it with a `++` at the leaf.
   const strlen1 = src(
     ' 0:\tlbu\tt6,0(a0)',
