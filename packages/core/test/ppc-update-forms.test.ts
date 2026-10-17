@@ -185,9 +185,9 @@ test('a write to a small-data base refuses, rather than leaving later small-data
 });
 
 test('a load that writes a second register refuses in annotate mode too, rather than leaving it stale', () => {
-  // An opaque stands for its first operand only. Before this refused, annotate mode (the CLI and
-  // bench default) lifted `lwzux r0,r3,r4; lbz r3,0(r3)` as `*a0 + ASMLIFT_ERROR(...)`: the byte
-  // read through the unmoved base, where it is at `a0 + a1`.
+  // An opaque stands for its first operand only, so annotate mode (the CLI and bench default) would
+  // print `lwzux r0,r3,r4; lbz r3,0(r3)` as `*a0 + ASMLIFT_ERROR(...)`: the byte read through the
+  // unmoved base, where it is at `a0 + a1`.
   const both = (lines: string[]) =>
     (['strict', 'annotate'] as const).map((onGap) => {
       const asm = `0 <g>:\n${lines.map((l, k) => `  ${(4 * k).toString(16)}:\t${l}`).join('\n')}\n`;

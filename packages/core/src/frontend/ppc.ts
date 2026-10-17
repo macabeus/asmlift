@@ -1966,8 +1966,8 @@ function liftOnce(
     let decoding: Instr | null = null;
     // THE STACK POINTER IS NO VALUE A LIFT WRITES. The frame push, `addi r1,r1,N` and the reload of
     // the back chain move r1, and `r1Displacements` follows them; none reaches here. Any other write
-    // (`lwz r1,4(r3)` in a longjmp, `mr r1,r10` in a context switch, `lwzu r1,4(r3)`) would land in
-    // an SSA variable nothing reads, since a read of r1 is refused as data (`read`), and the lift
+    // (`lwz r1,4(r3)` in a longjmp, `mr r1,r10` in a context switch) would land in an SSA
+    // variable nothing reads, since a read of r1 is refused as data (`read`), and the lift
     // would drop the write: a load into r1 would become a discarded volatile read. So it refuses.
     // THE SMALL-DATA BASES ARE NONE EITHER, for the same reason one step removed: an access through
     // r13 or r2 is read off its `R_PPC_EMB_SDA21` relocation (`sdaAccess`), never off the register,
@@ -2370,9 +2370,9 @@ function liftOnce(
       // A LOAD OR STORE WITH UPDATE (`lbzu`/`lhzu`/`lhau`/`lwzu`, `stbu`/`sthu`/`stwu`) addresses
       // `rA + D` and leaves that address in rA: `lbzu rD,1(r3)` is `r3 += 1; rD = *(u8 *)r3`, and
       // `stbu rS,1(r3)` is `r3 += 1; *(u8 *)r3 = rS`. mwcc emits them for a fully unrolled scan of a
-      // table, a run of stores to a global array, and the word loop of a struct copy (at -O4,p; the
-      // copy at every level). Decoded as exactly that: the `addi rA,rA,D` this frontend already
-      // lifts, then the plain access at `0(rA)`. So an `@l` displacement (`lhzu r0,gH@l(r4)`, the
+      // table, a run of stores to a global array and a pre-increment pointer walk (`*++p`) at -O4,p,
+      // and for the word loop of a struct copy at every level. Decoded as exactly that: the
+      // `addi rA,rA,D` this frontend already lifts, then the plain access at `0(rA)`. So an `@l` displacement (`lhzu r0,gH@l(r4)`, the
       // FIRST access of a run over a `u16`/`u32` table or a store run) completes its `lis` the way
       // `addi rD,rHi,gH@l` does, and leaves `&gH` in rA; a base holding a frame address moves as a
       // capture moved by `addi` does, and the frame-object audit judges what it then reaches.
@@ -2383,7 +2383,7 @@ function liftOnce(
       //   • a store of its own base (rS == rA) stores the value BEFORE the update, which an
       //     `addi`-first decode would not;
       //   • a base of r1 moves the stack pointer, which `r1Displacements` tracks only for the frame
-      //     push (`case 'stwu'`) and `addi r1,r1,N`, and a load into r1 writes it (`write`);
+      //     push (`case 'stwu'`) and `addi r1,r1,N`, and so does a load into r1;
       //   • a relocation other than `R_PPC_ADDR16_LO` (no compiler emits one).
       // Not decoded, and refused as unmodelled (`emitOpaqueDest` refuses the loads, which write a
       // second register an opaque cannot stand for; `opaqueDest` the stores): the INDEXED update forms

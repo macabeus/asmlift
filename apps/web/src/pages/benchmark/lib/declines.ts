@@ -63,9 +63,8 @@
 //                               `j` to another function (a tail call)
 //   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
 //                               r1, a load into r1, its own base loaded or stored, a relocation
-//                               other than `@l`),
-//                               a relocation on a stack-pointer adjust, a branch testing a cr
-//                               field a call destroyed (no compiler emits it), the return address
+//                               other than `@l`), a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), the return address
 //                               `mflr` copies out stored anywhere but the link register's save word,
 //                               the reaching-compare throw whose reason is interpolated (as Thumb's),
 //                               the two-armed branch denylist, whose

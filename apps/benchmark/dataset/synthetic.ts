@@ -10933,7 +10933,7 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // ── PowerPC LOADS AND STORES WITH UPDATE (frontend/ppc.ts `withUpdate`) ─────────────────────
   // `lbzu rD,D(rA)` is `rA += D; rD = *(u8 *)rA`, and `stbu rS,D(rA)` `rA += D; *(u8 *)rA = rS`.
-  // CodeWarrior emits them in three shapes, measured on 2.4.2, 2.3.3 and 2.4.7 (no mwcc source
+  // CodeWarrior emits them in four shapes, measured on 2.4.2, 2.3.3 and 2.4.7 (no mwcc source
   // exists, so a compiled probe is the evidence):
   //   • a FULLY UNROLLED compare chain over a table, at -O4,p only: `upd_bscan`, `upd_hscan`,
   //     `upd_shscan`, `upd_wscan` and `break_value` on every build, and `upd_pscan` (a pointer
@@ -10954,10 +10954,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //     post-increment walk (`while (*p++)`) emits none.
   // The pre-increment walks match on CodeWarrior and the rest do not yet, which is not this
   // capability's gap: an unrolled chain needs its loop RE-ROLLED (the flat `if (gTab[1] == 0x1C) …`
-  // spelling compiles to `lbz D(r3)` with no update form), a constant chain is spelled `(u32)&gTab + 2 + 1 + 1`, and a copy loop
-  // wants a struct assignment recovered from it. Before `withUpdate` every mwcc row here holding an
-  // update form declined. The same sources on agbcc, ido7.1 and gcc2.7.2kmc are the controls,
-  // which have no update form to emit.
+  // spelling compiles to `lbz D(r3)` with no update form), a constant chain is spelled
+  // `(u32)&gTab + 2 + 1 + 1`, and a copy loop wants a struct assignment recovered from it. The same
+  // sources on agbcc, ido7.1 and gcc2.7.2kmc are the controls, which have no update form to emit.
   ...(
     [
       [['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
