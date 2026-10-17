@@ -87,6 +87,8 @@ const MWCC_O0P = [
   '-Cpp_exceptions',
   'off',
 ];
+// The same set at -O4,p, which the update-form rows (`upd_*`) build at.
+const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
 const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // see the header for ido7.1
 
 // The map the `/no-ptr-elem` row below is fed: a struct global with a SIZED pointer member
@@ -10954,7 +10956,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // which have no update form to emit.
   ...(
     [
-      [['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'], MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f))],
+      [['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
       [['agbcc', 'ido7.1', 'gcc2.7.2kmc'], undefined],
     ] as const
   ).flatMap(([toolchains, cflags]): SynthSpec[] =>
@@ -11067,7 +11069,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        if (gTab[i] == 0x1C) {\n            r = i;\n            break;\n        }\n    }\n    gOut = gVal[r];\n}',
     features: ['break', 'array'],
     toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
-    cflags: MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f)),
+    cflags: MWCC_O4P,
     ctx: 'void break_value(void);',
     proto: { break_value: { returnsVoid: true } },
   },
