@@ -137,6 +137,8 @@ const isStackPtr = (r: string) => r === 'sp' || r === '$sp' || r === '$29';
 // a0..a3, and argument k is the word at `16 + 4(k − 4)` above the `sp` the call is made at.
 // Compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2: `g(a, b, 1, 2, 3)` stores the 3 to `16(sp)`.
 const STACK_ARGS_AT = 16;
+/** Every load an `off(base)` operand ends: integer, unaligned and FPU. */
+const FRAME_LOAD = /^(lb|lbu|lh|lhu|lw|lwl|lwr|lwu|ll|ld|ldl|ldr|lwc1|ldc1)$/;
 // SSA-variable name for the stack slot at a constant `sp`-offset. Distinct namespace from the
 // register names (which are alphabetic / `$N`), so it never collides with a real register var.
 const stackSlot = stackSlotKey; // shared spelling: frontend/ssa.ts
@@ -1517,6 +1519,34 @@ function liftOnce(
     return true;
   };
 
+  // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 16 on all three O32
+  // toolchains): the lowest frame word this function LOADS at the frame's own depth from that
+  // offset up, or `Infinity`. The compiler loads no word of its outgoing area there — not after a
+  // call, and not before one — so a word it loads is a local's, and since the area is one region
+  // at the frame bottom every word at or above it is no call's stack argument. Below 16 a load
+  // proves nothing: the compilers stage a by-value aggregate's register words in the a1..a3 home
+  // and load them back. Every block here is entry-reachable, so every load counted can run; a load
+  // at another depth names other storage under the same raw offset and is not counted.
+  const loadedWordBound = ((): number => {
+    const from = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+    if (from === undefined || frameSize === undefined || depthAt === null) {
+      return Infinity;
+    }
+    let bound = Infinity;
+    for (const ins of code) {
+      const last = ins.ops[ins.ops.length - 1] ?? '';
+      if (!FRAME_LOAD.test(ins.mnemonic) || !last.includes('(') || depthAt.get(ins) !== frameSize) {
+        continue;
+      }
+      const { base, off } = parseMem(last);
+      const word = off - (((off % 4) + 4) % 4);
+      if (isStackPtr(base) && word >= from) {
+        bound = Math.min(bound, word);
+      }
+    }
+    return bound;
+  })();
+
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
   // sp-relative access it keys is word-width. If a SUB-WORD sp access aliases a word slot
   // (`sw a0,4(sp)` then `lbu v0,4(sp)`), routing the word store to an SSA slot while the sub-word
@@ -2463,7 +2493,11 @@ function liftOnce(
               }
               const staged = [...valueSlots]
                 .filter(
-                  (off) => off >= STACK_ARGS_AT && off < frame.area.from && ssa.hasReachingDef(stackSlot(off), bi),
+                  (off) =>
+                    off >= STACK_ARGS_AT &&
+                    off < frame.area.from &&
+                    off < loadedWordBound &&
+                    ssa.hasReachingDef(stackSlot(off), bi),
                 )
                 .sort((x, y) => x - y)[0];
               if (staged !== undefined) {
@@ -2477,8 +2511,15 @@ function liftOnce(
             if (argc < ARG_REGS.length) {
               return;
             }
+            // …save a word at or above the loaded-word bound, which is a local's
             const passed = [...valueSlots]
-              .filter((off) => off >= STACK_ARGS_AT && off < frameSize && ssa.hasReachingDef(stackSlot(off), bi))
+              .filter(
+                (off) =>
+                  off >= STACK_ARGS_AT &&
+                  off < frameSize &&
+                  off < loadedWordBound &&
+                  ssa.hasReachingDef(stackSlot(off), bi),
+              )
               .sort((x, y) => x - y)[0];
             if (passed !== undefined) {
               throw new FrontendUnsupportedError(
