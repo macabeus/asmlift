@@ -1,12 +1,15 @@
 // THE LOOP SHAPES `structure()` REFUSES, and what removing each refusal actually does.
 //
-// FIVE `continue`s in the do-while recognizer decide which loops it will judge at all, and the count
-// is asserted against the source below so a sixth cannot be added without landing here. Each is
+// FOUR `continue`s in the do-while recognizer decide which loops it will judge at all, and the count
+// is asserted against the source below so a fifth cannot be added without landing here. Each is
 // named with what ablating it costs — its `continue;` replaced by a no-op, then the whole of
 // `packages/core/test` (3,744 tests). The counts below EXCLUDE this file's own inventory assertion,
 // which counts `continue;` tokens and so reddens on every ablation alike:
 //
-//   1. guarded self-loop  `nl.selfLoop && loops.has(h)`         2 failed — THIS FILE  (GUARDED_SELFLOOP, GSL2)
+//   1. (retired) guarded self-loop — a self-loop a guard-shaped pred enters is recognized too, and
+//                                    kept aside (`keptGuardDoWhiles`): emitWhile spells it where the
+//                                    guard claims it, and where no guard does it is a do-while
+//                                    (GUARDED_SELFLOOP, GSL2 below)
 //   2. multi-latch        several latches                         left to `while (1)` — loop-forever.test.ts,
 //                                                                 and THIS FILE's MULTILATCH
 //   3. not admissible     an overlapping inner loop, or an entry   0 failed — UNWITNESSED
@@ -17,7 +20,7 @@
 //                                                                 loop-break-exit.test.ts and the two
 //                                                                 loop-bearing fuzz sweeps
 //
-// So ONE of the five is unwitnessed, and its irreducible half is this file's named debt,
+// So ONE of the four is unwitnessed, and its irreducible half is this file's named debt,
 // instrumented below. For its overlapping half all that is measured is the ablation — the whole
 // core suite is green without it — which says no existing test distinguishes it and says nothing
 // about whether a fixture could. #5 is where a `do-while` hands a break to `while (1)`: an edge into
@@ -36,21 +39,20 @@
 //
 // EVERY TEST BELOW IS ABLATED AGAINST THE REFUSAL IT NAMES: a test that reads as a pin and passes
 // with its rule deleted is worse than no test. Two of the fixtures need their own note:
-//   • guarded self-loop — THE DECLINE AND THE CORRECTNESS CLAIM ARE PINNED BY DIFFERENT FIXTURES.
-//                    `GUARDED_SELFLOOP` pins the refusal and CANNOT say anything about widening it,
-//                    because its loop never terminates (every path into `^bb3` establishes
-//                    `%0 < %1`, which is the latch test, re-read from the same two entry params):
-//                    0 of 64 seeds reach `f0` at all and 21 cap, so the "43 judged, 0 differing" an
-//                    ablation reports is 43 seeds that SKIP the loop. `GSL2` is the terminating
-//                    version — same refusal, a latch test over a value the body increments — and it
-//                    is the one that measures the widening: 0 capped, 44 of 64 seeds actually
-//                    running the loop, and with the refusal ablated 64 of 64 judged, 0 differing.
-//                    Reach at the sweep scale agrees: with `generateSsaFn`'s `isLatch` widened by
-//                    one character to emit self-loops (a probe, not committed), ablating the refusal
-//                    moves 62 of 4,000 depth-1 seeds from a loud decline to a structured tree — and
-//                    the wrong-answer count against the IR does not move. That probe also surfaces a
-//                    wrong answer at depth 1 (seed 327) that is not fixed here, which is why the
-//                    widening is not what ships. What ships is the decline, pinned.
+//   • guarded self-loop — RETIRED, AND THE CORRECTNESS CLAIM IS PINNED BY THE TERMINATING FIXTURE.
+//                    `GUARDED_SELFLOOP` CANNOT say anything about the widening, because its loop
+//                    never terminates (every path into `^bb3` establishes `%0 < %1`, which is the
+//                    latch test, re-read from the same two entry params): 0 of 64 seeds reach `f0`
+//                    at all, so what the oracle judges is the seeds that SKIP the loop, and its
+//                    spelling is read by hand below. `GSL2` is the terminating version — a latch
+//                    test over a value the body increments — and it is the one that measures the
+//                    widening: 0 capped, 44 of 64 seeds actually running the loop, 64 of 64 judged,
+//                    0 differing. Reach at the sweep scale: with `generateSsaFn`'s `isLatch` widened
+//                    by one character to emit self-loops (a probe, not committed), the widening with
+//                    the kept-guard hand-back moves 349 of 4,000 depth-1 seeds from a loud decline to
+//                    a structured tree, 0 of them disagreeing with the IR. Seed 327, the wrong answer
+//                    the bare ablation once surfaced, still declines (its post-loop read holds the
+//                    init on a zero-trip run, which emitWhile refuses after it has emitted).
 //   • irreducible  — the file's named debt: `irreducible` declines with `admissible` ablated too.
 //                    Instrumented rather than assumed — a two-block loop entered at BOTH blocks from
 //                    outside still declines with the whole of `admissible` ablated, and with the
@@ -115,17 +117,15 @@ const SELFLOOP = `fn selfloop {
 }
 `;
 
-/** The guarded self-loop the recognizer REFUSES: `^bb3` is its own latch, and unlike `SELFLOOP` it
- *  is entered from TWO predecessors (`^bb1` and `^bb2`), which is what the emitter that would
- *  otherwise claim it cannot spell. Ablate the refusal (`nl.selfLoop && loops.has(h)`) and this
- *  structures — into THREE copies of the loop from the two entry predecessors, spelled
- *  `while` / `do-while` / `while` (one entry arm reaches the header twice).
+/** A guarded self-loop no guard claims: `^bb3` is its own latch, and unlike `SELFLOOP` it is
+ *  entered from TWO predecessors (`^bb1` and `^bb2`). `^bb2` claims its entry and spells it
+ *  `while`; `^bb1`'s entry reaches the header as the do-while it is (`keptGuardDoWhiles`) — once
+ *  read as a plain block whose back edge re-entered it, and declined.
  *
- *  A REFUSAL PIN AND NOTHING MORE. This loop, once entered, never exits: every path into `^bb3`
- *  establishes `%0 < %1` (via `^bb1`'s false arm, or via `^bb2`'s true arm, which IS that test) and
- *  `^bb3`'s back edge re-reads the same two entry params. So the IR oracle cannot referee the
- *  widening here — 0 of its 64 seeds reach `f0`, 21 cap, and the 43 it judges under the ablation are
- *  the 43 that skip the loop. `GSL2` below is the fixture that can. */
+ *  This loop, once entered, never exits: every path into `^bb3` establishes `%0 < %1` (via `^bb1`'s
+ *  false arm, or via `^bb2`'s true arm, which IS that test) and `^bb3`'s back edge re-reads the same
+ *  two entry params. So the IR oracle cannot referee it — 0 of its 64 seeds reach `f0` — and its
+ *  spelling is read by hand. `GSL2` below is the fixture the oracle can referee. */
 const GUARDED_SELFLOOP = `fn guardedselfloop {
 ^bb0(%0: s32, %1: s32):
   %2: u32 = icmp_slt %0, %1
@@ -145,17 +145,15 @@ const GUARDED_SELFLOOP = `fn guardedselfloop {
 }
 `;
 
-/** THE SAME REFUSAL, ON A LOOP THAT TERMINATES — the fixture the widening's correctness claim rests
+/** THE SAME SHAPE, ON A LOOP THAT TERMINATES — the fixture the widening's correctness claim rests
  *  on. Two predecessors again, and the one that matters is `^bb2`: a guard-shaped pred (header-or-
- *  exit) is what puts the header in `loops` and fires `nl.selfLoop && loops.has(h)`. The near miss:
- *  two PLAIN `br` entries do not reach the refusal at all, structuring as an ordinary do-while with
- *  it present and ablated.
+ *  exit) is what puts the header among the guarded self-loops. The near miss: two PLAIN `br` entries
+ *  are an ordinary do-while either way.
  *
  *  The latch tests `%6 + 1` against the entry param rather than re-reading the entry params, so the
  *  body's increment decides the trip count: 44 of 64 oracle seeds run `f0` at least once and none
- *  cap. With the refusal ablated it structures into a `for` and a `do-while` (one per entry arm) and
- *  the oracle judges all 64 with 0 disagreeing — which is the measurement the header cites, and the
- *  one `GUARDED_SELFLOOP` cannot make. */
+ *  cap. It structures into a `for` and a `do-while` (one per entry arm), and the oracle judges all 64
+ *  with 0 disagreeing. */
 const GSL2 = `fn gsl2 {
 ^bb0(%0: s32, %1: s32):
   %2: u32 = icmp_slt %0, %1
@@ -189,12 +187,25 @@ test('a loop with several latches is left to the `while (1)` recognizer', () => 
   }
 });
 
-test('a guarded self-loop entered from TWO predecessors declines LOUD', () => {
-  expect(() => lift(GUARDED_SELFLOOP)).toThrow(/unrecovered back-edge/);
+test('a guarded self-loop entered from TWO predecessors is a `while` on one arm and a do-while on the other', () => {
+  // Read by hand: `a0 < a1` is the latch test on both arms; `^bb2` enters under it (`while`), `^bb1`
+  // only where `a1 >= a0` already holds it (do-while).
+  const c = lift(GUARDED_SELFLOOP);
+  expect(c).toMatch(/if \(a0 >= a1\) \{\n\s+while \(a0 < a1\) \{\n\s+f0\(a0\);/);
+  expect(c).toMatch(/if \(a1 >= a0\) \{\n\s+do \{\n\s+f0\(a0\);\n\s+\} while \(a0 < a1\);/);
 });
 
-test('the same refusal on a loop that TERMINATES, so the oracle can referee the widening', () => {
-  expect(() => lift(GSL2)).toThrow(/unrecovered back-edge/);
+test('the same shape on a loop that TERMINATES, refereed by the oracle', () => {
+  const fn = parse(GSL2);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn, {});
+  const c = cBackend.emit(tree);
+  expect(c).toContain('for (');
+  expect(c).toContain('do {');
+  for (let seed = 1; seed <= 64; seed++) {
+    expect(tracesDiffer({ off: irTraceOf(fn, seed), on: traceOf(tree, seed) }), `seed ${seed}`).toBe(false);
+  }
 });
 
 // THE PROPERTY THAT MAKES `GSL2` THE MEASURABLE ONE, asserted rather than described — a fixture
@@ -225,7 +236,7 @@ test('the oracle runs GSL2 body and never runs GUARDED_SELFLOOP body', () => {
 // THE INVENTORY, LINKED TO THE CODE. The header above lists five refusals as prose, and nothing but
 // this stops it drifting from them. Counting `continue;` in the recognizer's own region rather than
 // pattern-matching a line, so the assertion survives reformatting — the same shape
-// `locals-written.test.ts` uses over `rank.ts`. Six: the five shape refusals plus the inner-`for`
+// `locals-written.test.ts` uses over `rank.ts`. Five: the four shape refusals plus the inner-`for`
 // skip of the already-counted exit edge in the single-exit walk, which is not a refusal.
 test('the do-while recognizer has exactly the refusals this file inventories', () => {
   const src = readFileSync(join(import.meta.dirname, '..', 'src', 'structure', 'structure.ts'), 'utf8');
@@ -234,14 +245,13 @@ test('the do-while recognizer has exactly the refusals this file inventories', (
   expect(start, 'recognizer start anchor').toBeGreaterThan(0);
   expect(end, 'recognizer end anchor').toBeGreaterThan(start);
   const region = src.slice(start, end);
-  expect(region.split('continue;').length - 1, 'five shape refusals + one inner-loop skip').toBe(6);
+  expect(region.split('continue;').length - 1, 'four shape refusals + one inner-loop skip').toBe(5);
 });
 
-// NOT a refusal pin, and named so it cannot be counted as one: this passes with the guarded
-// self-loop refusal deleted. What it records is that the ONE-ENTRY shape never reaches that
-// refusal, because `emitWhile` claims it first and spells it the same way either way — which is
-// the reason `GUARDED_SELFLOOP` above needed a second predecessor.
-test('a ONE-ENTRY guarded self-loop is spelled by the top-tested emitter, refusal or not', () => {
+// NOT a refusal pin, and named so it cannot be counted as one. What it records is that the
+// ONE-ENTRY shape never reaches the kept-aside do-while, because `emitWhile` claims it first — which
+// is the reason `GUARDED_SELFLOOP` above needed a second predecessor.
+test('a ONE-ENTRY guarded self-loop is spelled by the top-tested emitter', () => {
   const src = lift(SELFLOOP);
   expect(src).toContain('for (');
   expect(src).not.toContain('do {');

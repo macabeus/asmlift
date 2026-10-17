@@ -2870,11 +2870,13 @@ export function structure(
     ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
+  const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
-    if (nl.selfLoop && loops.has(h)) {
-      continue;
-    } // guarded self-loops use emitWhile (above); UNGUARDED ones are single-block do-whiles
+    // Guarded self-loops use emitWhile (above); UNGUARDED ones are single-block do-whiles. A
+    // guarded one's do-while reading is kept aside all the same (`keptGuardDoWhiles`), for the
+    // guard that emitWhile cannot fuse and then declines.
+    const guarded = nl.selfLoop && loops.has(h);
     if (!nl.selfLoop && nl.latches.length !== 1) {
       continue;
     } // single latch only
@@ -2983,7 +2985,14 @@ export function structure(
         breaks,
       });
     } else {
-      doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, arms });
+      (guarded ? keptGuardDoWhiles : doWhileLoops).set(h, {
+        header: h,
+        latch,
+        exit,
+        forwardPreds: nl.forwardPreds,
+        body: nl.body,
+        arms,
+      });
     }
   }
 
@@ -5523,7 +5532,9 @@ export function structure(
     // Bottom-test `do-while`: this block is a do-while header (the body-first loop entry). Emit the
     // do-while — its body includes `b`'s own ops (structured via structureRegion with the hook masked),
     // so do NOT emit sideEffects(b) here. The init was already emitted by the predecessor's argAssigns.
-    const dw = doWhileLoops.get(b);
+    // A guarded self-loop its guard did not claim (`keptGuardDoWhiles`) is a do-while like any
+    // other: read as a plain block, its back edge would re-enter it and decline.
+    const dw = doWhileLoops.get(b) ?? keptGuardDoWhiles.get(b);
     if (dw && !dwActive.has(b)) {
       return emitDoWhile(dw, stop);
     }
@@ -5986,6 +5997,16 @@ export function structure(
         // BEFORE the body ever ran — reading a temp uninitialized on the first test. The kept-guard
         // `do-while` tests after the body, so it carries no such restriction.
         const fused = guardProven && !li.header.ops.some((o) => materialize.has(o));
+        // A KEPT GUARD IS AN ORDINARY `if` AROUND AN ORDINARY `do-while`, and emitWhile's hazards
+        // below are the price of merging the guard's exit edge into the loop's post-loop copies,
+        // which only the fused `while` needs, since it drops that edge. So where a kept guard meets
+        // one of them, it is not claimed here: the `if` recovery below takes the guard, carrying each
+        // exit edge's copies on that edge, and the loop reaches `structureBlock` as the do-while it
+        // is (`keptGuardDoWhiles`), with the do-while's repairs — a `++` for the test's own
+        // pre-update read, the exit-copy sink, the pre-update homes. Asked only where emitWhile
+        // declines, so a guarded loop that structures here keeps its spelling. IDO's stolen-slot
+        // latch reaches it (`strlen1`: `if (*s) do { t = s[1]; n++; s++; } while (t);`).
+        const handBack = (): boolean => !fused && keptGuardDoWhiles.has(li.header);
         // A pre-update exit copy is repairable rather than fatal: emitted INSIDE the body, ahead of
         // the update, it captures the value the exit edge carries rather than the updated one.
         // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
@@ -6012,6 +6033,9 @@ export function structure(
           (a, j) => !sunk.has(j) && !sameAtEntry(a, guardExit.args[j] as Value, entryVals, false, evaluatedAtTest),
         );
         if (staleExit >= 0) {
+          if (handBack()) {
+            break;
+          }
           throw new StructureError(
             `cannot structure '${fn.name}': the fused guard's exit edge carries a value the post-loop ` +
               `copies do not reproduce on a zero-trip run`,
@@ -6029,6 +6053,9 @@ export function structure(
             null,
           )
         ) {
+          if (handBack()) {
+            break;
+          }
           // NO `n++` REPAIR HERE, and the SHAPE is why rather than an oversight. The fold
           // (`preUpdateCondFold`) trades the update copy at the foot of the body for a `++` at the
           // leaf, which is the same program only for a BOTTOM test: it runs once per iteration, in
@@ -6046,6 +6073,9 @@ export function structure(
         const seed = argAssigns(b, li.exit, null, sunkSlot);
         const seedWrites = new Set(seed.filter((st) => st.k === 'assign').map((st) => st.name));
         if (initArgs.some((a) => readsClobbered(a, new Map(), seedWrites))) {
+          if (handBack()) {
+            break;
+          }
           throw new StructureError(
             `cannot structure '${fn.name}': seeding the zero-trip value would overwrite a value the ` +
               `loop initialisation reads`,
@@ -6098,6 +6128,9 @@ export function structure(
             hexitArgs.some((a, j) => !sunk.has(j) && reachesBodyTemp(a)) ||
             [...(liveIn.get(li.exit) ?? [])].some(bodyTemp)
           ) {
+            if (handBack()) {
+              break;
+            }
             throw new StructureError(
               `cannot structure '${fn.name}': a post-loop read reaches a temp the guarded body may never assign`,
             );
@@ -6129,6 +6162,9 @@ export function structure(
           // `gsub`, whose mapped values the inits deliberately hold.
           const writes = new Set([...seedWrites, ...updateWriteSet(inits)]);
           if (readsClobbered(term.operands[0], gsub, writes)) {
+            if (handBack()) {
+              break;
+            }
             throw new StructureError(
               `cannot structure '${fn.name}': the kept guard's condition reads a name the loop initialisation overwrites`,
             );

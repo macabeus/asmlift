@@ -103,8 +103,11 @@ test('a materialized header def structures as guard + do-while instead of declin
 
 // ZERO-TRIP hazard: a materialized header def (u reads sibling t → t materializes) carried on
 // the exit edge. Inside `if (guard)` the temp is assigned only when the guard held, so a
-// post-loop read of its name on the guard-false path is uninitialized — decline loud, for the
-// proven-guard shape (kept only because the header holds materialized defs) and the unproven one.
+// post-loop read of its name on the guard-false path would be uninitialized — which emitWhile, which
+// merges the guard's exit edge into the loop's post-loop copies, cannot spell. A kept guard is an
+// ordinary `if` around a do-while, so the guard is handed to the `if` recovery instead, and each
+// exit edge carries its own copies on that edge: for the proven-guard shape (kept only because the
+// header holds materialized defs) and the unproven one.
 const ZERO_TRIP_PROVEN = `fn zerotrip {
 ^bb0(%0: s32):
   %1: s32 = const {value=1}
@@ -133,9 +136,19 @@ const ZERO_TRIP_UNPROVEN = ZERO_TRIP_PROVEN.replace('fn zerotrip', 'fn unproven'
   '%6: u32 = icmp_sle %0, %5\n  cond_br %6, ^bb2(%2, %4), ^bb1(%0)',
 );
 
-test('a materialized temp on the exit edge declines: the guarded body may never assign it', () => {
-  expect(() => emit(ZERO_TRIP_PROVEN)).toThrow(/a post-loop read reaches a temp/);
-  expect(() => emit(ZERO_TRIP_UNPROVEN)).toThrow(/a post-loop read reaches a temp/);
+test('a materialized temp on the exit edge hands the kept guard to the `if` recovery, one copy per edge', () => {
+  // Read by hand: the oracle cannot judge this loop (it counts down by two, past zero for odd n).
+  // `return (n - 1) + (n - 1 + 5)` on the zero-trip edge; the loop's own `t`, `t + 5` on the other.
+  const zeroTripCopies = /v3 = v0 \+ 5;/;
+  const loopCopies = /do \{\n\s+v1 = v2 - 1;\n\s+v2 = v2 - 2;\n\s+\} while \(v2 != 0\);\n\s+v0 = v1;\n\s+v3 = v1 \+ 5;/;
+  for (const ir of [ZERO_TRIP_PROVEN, ZERO_TRIP_UNPROVEN]) {
+    const c = emit(ir);
+    expect(c).toMatch(zeroTripCopies);
+    expect(c).toMatch(loopCopies);
+    expect(c).toContain('return v0 + v3;');
+  }
+  expect(emit(ZERO_TRIP_PROVEN)).toContain('if (a0 == 0) {');
+  expect(emit(ZERO_TRIP_UNPROVEN)).toContain('if (a0 > 0) {');
 });
 
 // A PURE PREHEADER between the guard and the self-loop — the compiler's loop-invariant motion

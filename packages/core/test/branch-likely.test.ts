@@ -647,3 +647,43 @@ test('a recovered switch arm landing on a slot the rewrite emptied refuses', () 
     decompile('f', asm.replace('bnezl\ta1,44', 'b\t44'), MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) }),
   ).toThrow(want);
 });
+
+test('a latch retargeted onto its stolen word is a guarded self-loop the kept guard spells as `if` + `do-while`', () => {
+  // `while (*s) { n++; s++; }` at IDO: the retarget turns `14:..1c: bnezl t7,14; lbu t7,1(a0)` into
+  // one block, `t = s[1]; n++; s++; while (t)`, behind the `*s` guard. The guard is not the loop's
+  // own test (`s[0]` against `s[1]`), so it stays an `if`; emitWhile, which would merge the guard's
+  // exit edge into the loop's, cannot spell a test that reads `s` before its update and declined.
+  // The do-while emitter spells it with a `++` at the leaf.
+  const strlen1 = src(
+    ' 0:\tlbu\tt6,0(a0)',
+    ' 4:\tmove\tv1,zero',
+    ' 8:\tbeqz\tt6,24 <f+0x24>',
+    ' c:\tnop',
+    '10:\tlbu\tt7,1(a0)',
+    '14:\taddiu\tv1,v1,1',
+    '18:\taddiu\ta0,a0,1',
+    '1c:\tbnezl\tt7,14 <f+0x14>',
+    '20:\tlbu\tt7,1(a0)',
+    '24:\tjr\tra',
+    '28:\tmove\tv0,v1',
+  );
+  expect(strlen1).toMatch(
+    /if \(\*a0 != 0\) \{\n\s+v0 = 0;\n\s+do \{\n\s+v0 = v0 \+ 1;\n\s+\} while \(a0\+\+\[1\] != 0\);/,
+  );
+  // `while (*++p == ' ') {}`: the guard's exit edge carries `p + 1` too, which the fused form's
+  // post-loop copy cannot reproduce; the `if` recovery carries each exit edge's copy on that edge.
+  const skipsp = src(
+    ' 0:\tlbu\tt6,1(a0)',
+    ' 4:\tli\tv0,32',
+    ' 8:\taddiu\ta0,a0,1',
+    ' c:\tbne\tv0,t6,24 <f+0x24>',
+    '10:\tnop',
+    '14:\tlbu\tt7,1(a0)',
+    '18:\taddiu\ta0,a0,1',
+    '1c:\tbeql\tv0,t7,18 <f+0x18>',
+    '20:\tlbu\tt7,1(a0)',
+    '24:\tjr\tra',
+    '28:\tmove\tv0,a0',
+  );
+  expect(skipsp).toMatch(/do \{\n\s+\} while \(32 == \w+\+\+\[1\]\);/);
+});
