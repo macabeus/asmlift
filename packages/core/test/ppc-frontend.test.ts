@@ -10,6 +10,12 @@ import { decompile } from '../src/pipeline';
 import { PPC_MWCC, targetFor } from '../src/target';
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
+/** `dis` on a target that claims no start offset past which it never loads its outgoing area. */
+const disUnclaimed = (sym: string, lines: string) =>
+  decompile(sym, `0 <${sym}>:\n${lines}`, {
+    ...PPC_MWCC,
+    compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+  }).source;
 
 /** A fixture that makes a call, wrapped in mwcc's link-register save (`stwu`/`mflr`/`stw` …
  *  `lwz`/`mtlr`/`addi`): a `bl` whose `blr` puts no saved return address back declines
@@ -816,6 +822,27 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /^cannot lift 'livespill': local stack frames not supported — '8\(r1\)' is stored at 0x10 and never read back/,
     );
   });
+  test('…save one above a frame word the function loads, which is a dead local', () => {
+    // `bigdead` at mwcc_242_81 -O4,p, cut to one spill: `12(r1)` is stored and never read back, and
+    // `8(r1)` is loaded before the call. mwcc loads no word of its parameter area
+    // (`compilerBehaviors.outgoingAreaNeverLoadedFrom`), so 8 and every word above it is a local.
+    const dead = (load: string) =>
+      pro(16) +
+      'c:\tstw     r3,8(r1)\n10:\taddi    r0,r3,1\n14:\tstw     r0,12(r1)\n' +
+      `18:\t${load}\n1c:\tbl      1c <deadspill+0x1c>\n\t\t\t1c: R_PPC_REL24\te1\n` +
+      epi(0x20, 16);
+    const e1 = { prototypes: { e1: { params: 1 } } };
+    expect(decompile('deadspill', `0 <deadspill>:\n${dead('lwz     r3,8(r1)')}`, PPC_MWCC, e1).source).toBe(
+      's32 deadspill(s32 a0) {\n    return e1(a0);\n}\n',
+    );
+    // …but not one BENEATH the lowest word loaded: a call's stack argument would sit there
+    const below = dead('lwz     r3,8(r1)')
+      .replace('stw     r3,8(r1)', 'stw     r3,12(r1)')
+      .replace('stw     r0,12(r1)', 'stw     r0,8(r1)');
+    expect(() =>
+      decompile('deadspill', `0 <deadspill>:\n${below.replace('lwz     r3,8(r1)', 'lwz     r3,12(r1)')}`, PPC_MWCC, e1),
+    ).toThrow(/'8\(r1\)' is stored at 0x\w+ and never read back/);
+  });
   // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
   // ninth argument, in g9's parameter area 8 bytes above the pushed r1. `tail` follows the eight
   // `li`s; `head` goes between the store and them.
@@ -837,15 +864,22 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         s9('s9', '', (at) => epi(at, 24)),
       ),
     ).toThrow(ninth);
-    // Reading the word back, after the call or before it, does not make it any less the ninth argument.
+    // Reading the word back, after the call or before it, does not make it any less the ninth
+    // argument on a compiler that may load its outgoing area…
     const after = s9('s9a', '', (at) => `${at.toString(16)}:\tlwz     r3,8(r1)\n` + epi(at + 4, 24));
-    expect(() => dis('s9a', after)).toThrow(ninth);
+    expect(() => disUnclaimed('s9a', after)).toThrow(ninth);
     const before = s9(
       's9b',
       '10:\tlwz     r31,8(r1)\n',
       (at) => `${at.toString(16)}:\tmr      r3,r31\n` + epi(at + 4, 24),
     );
-    expect(() => dis('s9b', before)).toThrow(ninth);
+    expect(() => disUnclaimed('s9b', before)).toThrow(ninth);
+    // …but mwcc loads no word of its parameter area (`compilerBehaviors.outgoingAreaNeverLoadedFrom`),
+    // so a word it loads there is a local's and the call takes no stack word. Both read-backs are
+    // hand-written: compiled, `int s9b(int a) { int r = g9(1, …, 8, a); return r + a; }` keeps `a` in
+    // a saved register on all three builds — the premise's residue, as on agbcc.
+    expect(dis('s9a', after)).toBe('s32 s9a(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
+    expect(dis('s9b', before)).toBe('s32 s9b(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
     // A declaration says where the list ends: eight parameters, and the word is a local.
     expect(
       decompile('s9a', `0 <s9a>:\n${after}`, PPC_MWCC, { prototypes: { g9: { params: Array(8).fill('int') } } }).source,
@@ -868,9 +902,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '28:\tstw     r3,8(r1)\n2c:\tli      r3,1\n30:\tbl      30 <ll1r+0x30>\n\t\t\t30: R_PPC_REL24\tg7l\n' +
       '34:\tlwz     r4,8(r1)\n38:\tlwz     r5,12(r1)\n3c:\tadd     r3,r3,r4\n40:\tadd     r3,r3,r5\n' +
       epi(0x44, 24);
-    expect(() => dis('ll1r', asm)).toThrow(
+    expect(() => disUnclaimed('ll1r', asm)).toThrow(
       /^cannot lift 'll1r': outgoing stack arguments not modelled — the undeclared call to 'g7l' at 0x30 fills 7 argument registers/,
     );
+    // On mwcc a word loaded there is a local's, so the pair is no argument (the reload is
+    // hand-written: compiled, `x` is kept in saved registers across the call on all three builds).
+    expect(dis('ll1r', asm)).toContain('g7l(1, 2, 3, 4, 5, 6, 7)');
   });
   test('control: a call that leaves an argument register free has no ninth argument to hide', () => {
     let asm = pro(24) + 'c:\tstw     r3,8(r1)\n';

@@ -581,6 +581,8 @@ const LR_SAVE_WORD = 4;
 /** The caller's parameter area, as an offset from the entry r1: past the back chain and the link
  *  register's save word, the words a call takes past its eight argument registers. */
 const PARAM_AREA_AT = 8;
+/** Every load an `off(rA)` operand addresses: integer, multiple, update and floating-point. */
+const FRAME_LOAD = /^(lbz|lhz|lha|lwz|lmw|lbzu|lhzu|lhau|lwzu|lfs|lfd|lfsu|lfdu|psq_l|psq_lu)$/;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
@@ -1611,6 +1613,35 @@ function liftOnce(
   const incomingStackKey = (entryOff: number): string | undefined =>
     incomingStackArgKey(entryOff, PARAM_AREA_AT, ARG_REGS.length);
   const valueSlots = new Map<number, { addr: number; mem: string; read: boolean }>();
+  // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 8 on mwcc), per r1
+  // depth: the lowest frame word, as an offset from the entry r1, that this function LOADS at that
+  // depth from the parameter area up, past the callee's back chain and link-register words. mwcc
+  // loads no word of its outgoing area, before a call or after, so a word it loads is a local's,
+  // and since the area is one region at the frame bottom every word at or above it is no call's
+  // stack argument. Only an instruction the entry reaches has a depth, so every load counted can
+  // run; one at another depth names another frame's words.
+  const loadedWordBound = (() => {
+    const from = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+    const bounds = new Map<number, number>();
+    if (from === undefined) {
+      return () => Infinity;
+    }
+    for (const b of blocks) {
+      for (const ins of b.body) {
+        const depth = r1At.get(ins);
+        const mem = ins.ops.find((o) => /^-?\d+\(r1\)$/.test(o));
+        if (typeof depth !== 'number' || mem === undefined || !FRAME_LOAD.test(ins.mnemonic)) {
+          continue;
+        }
+        const off = parseMem(mem).off;
+        const word = off - (((off % 4) + 4) % 4);
+        if (word >= from) {
+          bounds.set(depth, Math.min(bounds.get(depth) ?? Infinity, depth + word));
+        }
+      }
+    }
+    return (depth: number) => bounds.get(depth) ?? Infinity;
+  })();
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
       throw new PpcUnsupportedError(
@@ -2496,9 +2527,11 @@ function liftOnce(
               // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
               // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
               // back chain and the LR save word), and a value stored there that reaches the call is that
-              // argument or a local the compiler put in the same words. Reading the word back, before or
-              // after the call, does not decide it, so the end-of-lift check for a store nothing reloads
-              // is not enough here. Without a prototype this refuses; a declared arity says which.
+              // argument or a local the compiler put in the same words. Reading THAT word back does not
+              // decide it on a compiler that may load its outgoing area, so the end-of-lift check for a
+              // store nothing reloads is not enough here. Without a prototype this refuses; a declared
+              // arity says which — and so does the loaded-word bound: mwcc loads no word of its
+              // parameter area, so a word at or above the lowest one it loads is a local's.
               //
               // A guess of seven is the same question for one shape. A 64-bit argument takes an aligned
               // register pair, so one that follows seven words skips r10 and fills the first two words
@@ -2520,13 +2553,17 @@ function liftOnce(
                 }
                 const depth = r1At.get(ins);
                 const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
+                // …save a word at or above the loaded-word bound, which is a local's
                 const inParamArea = (off: number) =>
-                  typeof depth !== 'number' || (off >= depth + PARAM_AREA_AT && off < 0);
+                  typeof depth !== 'number' ||
+                  (off >= depth + PARAM_AREA_AT && off < 0 && off + 4 <= loadedWordBound(depth));
                 const word = [...valueSlots.keys()].find((off) => inParamArea(off) && reaching(off));
                 const passed =
                   argc === ARG_REGS.length || typeof depth !== 'number'
                     ? word
-                    : reaching(depth + PARAM_AREA_AT) && reaching(depth + PARAM_AREA_AT + 4)
+                    : reaching(depth + PARAM_AREA_AT) &&
+                        reaching(depth + PARAM_AREA_AT + 4) &&
+                        inParamArea(depth + PARAM_AREA_AT + 4)
                       ? depth + PARAM_AREA_AT
                       : undefined;
                 if (passed !== undefined) {
@@ -3353,9 +3390,13 @@ function liftOnce(
   // A value stored to the frame that nothing reloads is either a home the body never reads or an
   // OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same
-  // store, and dropping the second loses an argument.
-  for (const { addr, mem, read } of valueSlots.values()) {
-    if (!read) {
+  // store, and dropping the second loses an argument — save a word at or above the loaded-word
+  // bound of the frame it was stored in, which is no call's argument and so a dead local's.
+  const depthOfAddr = new Map(blocks.flatMap((b) => b.body.map((ins) => [ins.addr, r1At.get(ins)] as const)));
+  for (const [off, { addr, mem, read }] of valueSlots) {
+    const depth = depthOfAddr.get(addr);
+    const deadLocal = typeof depth === 'number' && off < 0 && off >= loadedWordBound(depth);
+    if (!read && !deadLocal) {
       throw new PpcUnsupportedError(
         `cannot lift '${name}': local stack frames not supported — '${mem}' is stored at 0x${addr.toString(16)} ` +
           `and never read back, and an unread home and a call's argument passed on the stack are the same store`,
