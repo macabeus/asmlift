@@ -10,7 +10,6 @@ import { useCallback } from 'react';
 import summary from '../../data/summary.json';
 import { useCurrentHash } from '../../shared/utils/hash-adapter';
 import type { ShareState } from '../../shared/utils/permalink';
-import { Disclaimer } from './components/Disclaimer';
 import { Explorer, type ExplorerPreset } from './components/Explorer';
 import { FanExplorer } from './components/FanExplorer';
 import { FeatureDetail } from './components/FeatureDetail';
@@ -30,7 +29,6 @@ import {
   VARIATION_TERM_PARSER,
   tabParser,
 } from './lib/explorer-url';
-import { DECOMPILER_COLOR } from './theme';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -70,34 +68,21 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <div className="flex flex-col gap-1">
-            <div>
-              <span className="font-mono text-sm">
-                <span style={{ color: DECOMPILER_COLOR.asmlift }}>asmlift</span>
-                <span className="text-slate-500"> vs </span>
-                <span style={{ color: DECOMPILER_COLOR.m2c }}>m2c</span>
+        <p className="text-xs text-slate-500">
+          {meta.counts.total} functions · {meta.toolchains.length} toolchains · generated{' '}
+          {meta.generatedAt.slice(0, 10)}
+          {meta.asmlift && (
+            <>
+              {' '}
+              · asmlift{' '}
+              <span className="font-mono">
+                {meta.asmlift.commit.slice(0, 7)}
+                {meta.asmlift.dirty ? '+dirty' : ''}
               </span>
-              <p className="text-xs text-slate-500">
-                {meta.counts.total} functions · {meta.toolchains.length} toolchains · generated{' '}
-                {meta.generatedAt.slice(0, 10)}
-                {meta.asmlift && (
-                  <>
-                    {' '}
-                    · asmlift{' '}
-                    <span className="font-mono">
-                      {meta.asmlift.commit.slice(0, 7)}
-                      {meta.asmlift.dirty ? '+dirty' : ''}
-                    </span>
-                  </>
-                )}{' '}
-                · m2c <span className="font-mono">{summary.m2cCommit.slice(0, 7)}</span>
-              </p>
-            </div>
-
-            <Disclaimer />
-          </div>
-        </div>
+            </>
+          )}{' '}
+          · m2c <span className="font-mono">{summary.m2cCommit.slice(0, 7)}</span>
+        </p>
 
         <nav className="mt-4 flex flex-wrap gap-1">
           {TABS.map((t) => (
