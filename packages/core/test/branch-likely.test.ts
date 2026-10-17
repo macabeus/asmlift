@@ -10,7 +10,9 @@ import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (...lines: string[]) =>
@@ -503,26 +505,46 @@ test('an unconditional `b`/`j` whose slot is the target-4 word, stolen, retarget
   ).toThrow(/branch to 0xc is not a block boundary/);
 });
 
-test('a `b` whose slot is one of two arms written out twice keeps it, so each arm keeps its own copy', () => {
-  // ido `mergenarrow`: `sll; b T; sra` against `sll; sra; T:` — a two-word common tail, the slot
-  // filled from its own arm. Retargeted, the `<< 16` stays in each arm and the `>> 16` moves past
-  // the join; kept, each arm reads as the one `(s16)` it is.
-  expect(
-    src(
-      '0:\tbeqz\ta3,18 <f+0x18>',
-      '4:\tsubu\tv0,a1,a2',
-      '8:\taddu\tv0,a1,a2',
-      'c:\tsll\tv0,v0,0x10',
-      '10:\tb\t20 <f+0x20>',
-      '14:\tsra\tv0,v0,0x10',
-      '18:\tsll\tv0,v0,0x10',
-      '1c:\tsra\tv0,v0,0x10',
-      '20:\tjr\tra',
-      '24:\tsw\tv0,0(a0)',
-    ),
-  ).toContain('v0 = (s16)(a1 + a2);');
+test('a `b` whose slot ends a common tail of both arms retargets by default, and `/kept-slot` keeps it', () => {
+  // ido `mergenarrow`: `sll; b T; sra` against `sll; sra; T:` — one `(s16)` per arm written out
+  // twice, or a stolen `sra` past arms the source merged. One object either way, so the default lift
+  // retargets and the kept slot is a lift variation the differ referees.
+  const mergenarrow = obj(
+    '0:\tbeqz\ta3,18 <f+0x18>',
+    '4:\tsubu\tv0,a1,a2',
+    '8:\taddu\tv0,a1,a2',
+    'c:\tsll\tv0,v0,0x10',
+    '10:\tb\t20 <f+0x20>',
+    '14:\tsra\tv0,v0,0x10',
+    '18:\tsll\tv0,v0,0x10',
+    '1c:\tsra\tv0,v0,0x10',
+    '20:\tjr\tra',
+    '24:\tsw\tv0,0(a0)',
+  );
+  const merged = decompile('f', mergenarrow, MIPS_IDO).source;
+  expect(merged).toContain('v0 = a1 + a2 << 16;');
+  expect(merged).toContain('*a0 = v0 >> 16;');
+  const cands = enumerateCandidates('f', mergenarrow, MIPS_IDO, {});
+  const kept = cands.filter((c) => hasVariation(c.variations, 'kept-slot'));
+  expect(kept.length).toBeGreaterThan(0);
+  expect(kept.some((c) => c.source.includes('v0 = (s16)(a1 + a2);'))).toBe(true);
+  expect(cands.some((c) => !hasVariation(c.variations, 'kept-slot') && c.source.includes('a1 + a2 << 16'))).toBe(true);
+  // A slot no common tail ends offers no `/kept-slot` at all: nothing for it to keep.
+  const plain = obj(
+    '0:\tbeqz\ta0,10 <f+0x10>',
+    '4:\tnop',
+    '8:\tb\t18 <f+0x18>',
+    'c:\taddiu\ta1,a1,1',
+    '10:\tli\ta1,5',
+    '14:\taddiu\ta1,a1,1',
+    '18:\tjr\tra',
+    '1c:\tmove\tv0,a1',
+  );
+  expect(enumerateCandidates('f', plain, MIPS_IDO, {}).filter((c) => hasVariation(c.variations, 'kept-slot'))).toEqual(
+    [],
+  );
   // ido `mergeu16`: `b T; S; S; T:` jumps over exactly the one copy, so retargeted it would jump to
-  // its own next word and merge the two arms.
+  // its own next word: nothing was stolen, and the slot is kept on every lift.
   expect(
     src(
       '0:\tbeqz\ta3,14 <f+0x14>',

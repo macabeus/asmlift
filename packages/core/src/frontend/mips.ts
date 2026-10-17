@@ -54,7 +54,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import type { Frontend } from './frontend';
+import type { Frontend, LiftOptions } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -624,6 +624,7 @@ function normaliseBranchLikely(
   instrs: Instr[],
   startAddr: number,
   relocOf: (ins: Instr) => DisasmReloc | null,
+  options: LiftOptions = {},
 ): { likely: Set<number>; freed: Set<number> } {
   const likely = instrs.filter((ins) => ins.mnemonic in LIKELY_BASE);
   const uncond = instrs.filter(isUncond);
@@ -735,21 +736,30 @@ function normaliseBranchLikely(
     ) {
       continue;
     }
-    // TWO ARMS THE COMPILER WROTE OUT TWICE are not a stolen word, and the rewrite — exact either
-    // way — then merges what the source kept apart, which scores worse. The `b` jumps over exactly
-    // the one copy (`b T; S; S; T:`, KMC `sw_void`, ido `mergeu16`), so retargeted it would jump to
-    // its own next word; or the copy is the last of a longer common tail (`sll; b T; sra` against
-    // `sll; sra; T:`, ido `mergenarrow`), so retargeted it would split one extension across the
-    // join. A likely slot emptied above the `b` is no common tail; one emptied before T still
-    // counts, as the word it was.
-    const before = listed.get(br.target - 8);
-    if (
-      br.target - 4 === br.addr + 8 ||
-      (prev !== undefined && prev.mnemonic !== 'nop' && before !== undefined && sameWord(prev, before, relocOf))
-    ) {
+    // A `b` THAT JUMPS OVER EXACTLY THE ONE COPY (`b T; S; S; T:`, KMC `sw_void`, ido `mergeu16`)
+    // would, retargeted, jump to its own next word: the two arms are each written out, and nothing
+    // was stolen from T. That is a fact of the jump, so it is answered here.
+    if (br.target - 4 === br.addr + 8) {
       continue;
     }
-    unsteal(br, slot);
+    // A COMMON TAIL OF TWO OR MORE WORDS is the question the asm leaves open: `sll; b T; sra`
+    // against `sll; sra; T:` (ido `mergenarrow`) is one sign extension per arm, written out twice,
+    // or a stolen `sra` whose arms the source merged — the same object either way. Retargeted, the
+    // `<< 16` stays in each arm and the `>> 16` moves past the join; kept, each arm reads as the
+    // one `(s16)` it is. Neither reading wins on the corpus (of the af/mp3/sbk2 splat functions
+    // this shape blocked, retargeting shortened 19 lifts and lengthened 3, `func_80026D34` the
+    // `mergenarrow` case), so the default retargets and the kept slot is the `/kept-slot` lift
+    // variation the differ referees. A likely slot emptied above the `b` is no common tail; one
+    // emptied before T still counts, as the word it was. A `nop` is no tail at all.
+    const before = listed.get(br.target - 8);
+    const tail =
+      prev !== undefined && prev.mnemonic !== 'nop' && before !== undefined && sameWord(prev, before, relocOf);
+    if (tail && options.keepTailSlots === true) {
+      continue;
+    }
+    if (unsteal(br, slot) && tail) {
+      options.onTailSlot?.();
+    }
   }
   return { likely: rewritten, freed };
 }
@@ -1284,9 +1294,10 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
   context?: ContextGlobals,
+  options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options),
   );
 }
 
@@ -1299,6 +1310,7 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
+  options: LiftOptions,
 ): Fn | FrameObjectRelift {
   // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
   // and Splat-disassembled `.s` (pmret-style N64 projects). Splat is normalised to the SAME
@@ -1334,7 +1346,7 @@ function liftOnce(
   // A word's relocation is on the word in Splat text, and in the object's table for objdump.
   const relocOf = (ins: Instr): DisasmReloc | null =>
     splat ? (ins.reloc ?? null) : asmData ? textRelocAt(asmData, ins.addr) : null;
-  const { likely: likelyAddrs, freed: freedSlots } = normaliseBranchLikely(name, instrs, startAddr, relocOf);
+  const { likely: likelyAddrs, freed: freedSlots } = normaliseBranchLikely(name, instrs, startAddr, relocOf, options);
   // Regime B: recover jump tables from the `jr`-dispatch idiom + the AsmData table. A recovered
   // dispatch's `jr` is subsumed into a `switch_br` (emitted from its bounds block), so it is
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
