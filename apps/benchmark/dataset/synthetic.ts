@@ -10502,6 +10502,21 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int ownar_spill(int, int *);',
     proto: { ownar_spill: { params: ['int', 'int *'], returns: 'int' } },
   },
+  // A BARE COUNT is the registers the call fills (`FnProto.params`), and the own bound reads it as
+  // the call side does: `{params: 2}` is two words, with no slack for a struct return it does not
+  // state. Read as three, it left KMC's and gcc 2.7.2's a2 home a made-up parameter.
+  {
+    sym: 'ownar_count',
+    src:
+      'int ownar_count(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' for(i=0;i<5;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_count(int, int *);',
+    proto: { ownar_count: { params: 2 } },
+  },
   {
     sym: 'ownar_first',
     src:
