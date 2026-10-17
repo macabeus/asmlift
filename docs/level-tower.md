@@ -242,7 +242,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   (`frontend/stackargs.ts` `loadedWordBound`). The offset is part of the universal: 0 on agbcc, 16
   on the three O32 toolchains, whose compilers stage a by-value aggregate's words in the a1..a3
   home and load them back, and 8 on mwcc, where the callee's parameter area starts. Each frontend
-  measures the bound once and hands the one number to every reader. Its weaker sibling
+  measures the bound once and hands the one number to every reader: on MIPS and PowerPC it caps
+  where the outgoing area of a call nothing declares can end (`o32OutgoingArea`'s `widest`,
+  `measurePpcFrame`'s `outgoingEnd`), and the local area's partition, the owned range of an
+  uninitialised read, the undeclared-call guess and the frame-object audit all read that end. Its
+  weaker sibling
   `localsAboveOutgoingArea` states only the after-call form, and the strong form is never read off
   it. The converse,
   that a word never read back is an argument, is false, because a dead local is never read back

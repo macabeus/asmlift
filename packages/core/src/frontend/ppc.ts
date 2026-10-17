@@ -992,6 +992,44 @@ const SUBWORD_MEM: ReadonlySet<string> = new Set(['lbz', 'lha', 'lhz', 'stb', 's
 const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
   ins.mnemonic === 'addi' && ins.ops[1] === 'r1' && ins.ops[0] !== 'r1' && ins.ops[0] !== frameReg && !ins.reloc;
 
+/** THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 8 on mwcc), per r1
+ *  depth: the lowest frame word, as an offset from the entry r1, that this function LOADS at that
+ *  depth from the parameter area up, past the callee's back chain and link-register words. mwcc
+ *  loads no word of its outgoing area, before a call or after, so a word it loads is a local's,
+ *  and since the area is one region at the frame bottom every word at or above it is no call's
+ *  stack argument. Only an instruction the entry reaches has a depth, so every load counted can
+ *  run; one at another depth names another frame's words. Measured once, in `liftPrelude`: the
+ *  local area's partition (`measurePpcFrame`'s `outgoingEnd`), the undeclared-call guess, the
+ *  unread-store decline and the frame-object audit (`loadedWords`) all take this number, and it
+ *  counts what the IR does not show the audit — the slot reloads and the epilogue's restores.
+ *  `Infinity` at every depth where the target states no such offset. */
+function ppcLoadedWordBound(
+  blocks: readonly PpcBlock[],
+  r1At: ReadonlyMap<Instr, number | string>,
+  target: TargetDescription,
+): (depth: number) => number {
+  const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+  if (loadedFrom === undefined) {
+    return () => Infinity;
+  }
+  const bounds = new Map<number, number>();
+  for (const b of blocks) {
+    for (const ins of b.body) {
+      const depth = r1At.get(ins);
+      const mem = ins.ops.find((o) => /^-?\d+\(r1\)$/.test(o));
+      if (typeof depth !== 'number' || mem === undefined || !PPC_FRAME_LOAD.test(ins.mnemonic)) {
+        continue;
+      }
+      const off = parseMem(mem).off;
+      const word = off - (((off % 4) + 4) % 4);
+      if (word >= loadedFrom) {
+        bounds.set(depth, Math.min(bounds.get(depth) ?? Infinity, depth + word));
+      }
+    }
+  }
+  return (depth: number) => bounds.get(depth) ?? Infinity;
+}
+
 /** THE LOCAL AREA of a function that takes a frame address, reaches its frame below a word, or
  *  keeps a dead local there, and the size of the one frame it pushes — or null, which leaves every
  *  such access the refusal it had without one. Null where none of the three happens; where the
@@ -1038,6 +1076,7 @@ function measurePpcFrame({
   r1At,
   target,
   calls,
+  loadedWordBound,
   fail,
 }: {
   name: string;
@@ -1047,8 +1086,10 @@ function measurePpcFrame({
   r1At: ReadonlyMap<Instr, number | string>;
   target: TargetDescription;
   calls: CallDeclarations;
+  /** `ppcLoadedWordBound`, the one the lift reads */
+  loadedWordBound: (depth: number) => number;
   fail: FrontendRefusal;
-}): { area: FrameRange; size: number } | null {
+}): { area: FrameRange; size: number; outgoingEnd: number } | null {
   const code = blocks.flatMap((b) => [...b.body, ...(b.branch ? [b.branch] : [])]);
   const bls = blocks.flatMap((b) => b.body).filter((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
   const frameReg = target.registerSaveRoutines?.frameReg;
@@ -1145,7 +1186,11 @@ function measurePpcFrame({
       );
     }
   }
-  return { area, size };
+  // Every call a declaration sizes takes no stack word, or refused above. One nothing declares
+  // takes none past the loaded-word bound of the pushed frame, the most its area can reach.
+  const undeclared = bls.some((ins) => calls.declaredParams(ins.reloc?.sym ?? '') === null);
+  const outgoingEnd = undeclared ? Math.max(PARAM_AREA_AT, loadedWordBound(-size) + size) : PARAM_AREA_AT;
+  return { area, size, outgoingEnd };
 }
 
 /** What a call's lowering on this frontend carries out (`CallLowering`): no pair, no stack word, no
@@ -1228,6 +1273,7 @@ function liftPrelude(
   // proves, as on Thumb and MIPS, and every word access outside it keeps the slot model. Null where
   // neither happens, or the frame is one this cannot partition, and then every capture keeps its
   // r1-as-data refusal and every sub-word access its own.
+  const loadedWordBound = ppcLoadedWordBound(blocks, r1At, target);
   const frame = measurePpcFrame({
     name,
     blocks,
@@ -1235,9 +1281,10 @@ function liftPrelude(
     r1At,
     target,
     calls,
+    loadedWordBound,
     fail: ppcRefusal,
   });
-  return { blocks, succIdx, r1At, savedRegs: saves.regs, calls, frame };
+  return { blocks, succIdx, r1At, savedRegs: saves.regs, calls, frame, loadedWordBound };
 }
 
 /** Lift disassembled PowerPC text → an L1 Fn with block-argument SSA. `asmData` (optional) supplies
@@ -1341,7 +1388,13 @@ function liftOnce(
     );
   };
   const fail = ppcRefusal;
-  const { blocks, succIdx, r1At, savedRegs, calls, frame } = liftPrelude(name, instrs, target, prototypes, jts);
+  const { blocks, succIdx, r1At, savedRegs, calls, frame, loadedWordBound } = liftPrelude(
+    name,
+    instrs,
+    target,
+    prototypes,
+    jts,
+  );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 
   const preds: number[][] = blocks.map(() => []);
@@ -1614,37 +1667,7 @@ function liftOnce(
   const incomingStackKey = (entryOff: number): string | undefined =>
     incomingStackArgKey(entryOff, PARAM_AREA_AT, ARG_REGS.length);
   const valueSlots = new Map<number, { addr: number; mem: string; read: boolean }>();
-  // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 8 on mwcc), per r1
-  // depth: the lowest frame word, as an offset from the entry r1, that this function LOADS at that
-  // depth from the parameter area up, past the callee's back chain and link-register words. mwcc
-  // loads no word of its outgoing area, before a call or after, so a word it loads is a local's,
-  // and since the area is one region at the frame bottom every word at or above it is no call's
-  // stack argument. Only an instruction the entry reaches has a depth, so every load counted can
-  // run; one at another depth names another frame's words. Read once: the undeclared-call guess,
-  // the unread-store decline and the frame-object audit (`loadedWords`) all take this number, and
-  // it counts what the IR does not show the audit — the slot reloads and the epilogue's restores.
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
-  const loadedWordBound = (() => {
-    const bounds = new Map<number, number>();
-    if (loadedFrom === undefined) {
-      return () => Infinity;
-    }
-    for (const b of blocks) {
-      for (const ins of b.body) {
-        const depth = r1At.get(ins);
-        const mem = ins.ops.find((o) => /^-?\d+\(r1\)$/.test(o));
-        if (typeof depth !== 'number' || mem === undefined || !PPC_FRAME_LOAD.test(ins.mnemonic)) {
-          continue;
-        }
-        const off = parseMem(mem).off;
-        const word = off - (((off % 4) + 4) % 4);
-        if (word >= loadedFrom) {
-          bounds.set(depth, Math.min(bounds.get(depth) ?? Infinity, depth + word));
-        }
-      }
-    }
-    return (depth: number) => bounds.get(depth) ?? Infinity;
-  })();
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
       throw new PpcUnsupportedError(
@@ -2546,8 +2569,10 @@ function liftOnce(
                   return;
                 }
                 // The same question decides where the local area starts: past the widest call's
-                // stack words, so a guess that cannot say whether this call takes any cannot draw it.
-                if (frame !== null) {
+                // stack words, so a guess that cannot say whether this call takes any cannot draw it
+                // — save where the loaded-word bound reaches the area's start, so that no word of the
+                // area is any call's stack argument (`measurePpcFrame`'s `outgoingEnd`).
+                if (frame !== null && (r1At.get(ins) !== -frame.size || frame.outgoingEnd > frame.area.from)) {
                   fail(
                     `cannot lift '${name}': outgoing stack arguments not modelled — nothing declares '${sym}', called at ` +
                       `0x${ins.addr.toString(16)} with ${argc} argument registers filled, so whether it takes stack words ` +

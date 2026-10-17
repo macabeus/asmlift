@@ -1475,12 +1475,45 @@ function liftOnce(
     }
   };
 
+  const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
+  // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 16 on all three O32
+  // toolchains): the lowest frame word this function LOADS at the frame's own depth from that
+  // offset up, or `Infinity`. The compiler loads no word of its outgoing area there — not after a
+  // call, and not before one — so a word it loads is a local's, and since the area is one region
+  // at the frame bottom every word at or above it is no call's stack argument. Below 16 a load
+  // proves nothing: the compilers stage a by-value aggregate's register words in the a1..a3 home
+  // and load them back. Every block here is entry-reachable, so every load counted can run; a load
+  // at another depth names other storage under the same raw offset and is not counted. Read once,
+  // before the frame is partitioned: it caps where the outgoing area of a call nothing sizes can
+  // end (`o32OutgoingArea`'s `widest`), and that one number is what the local area's partition, the
+  // owned range of an uninitialised read and the a0..a3 guess below each ask. The frame-object
+  // audit takes it too (`loadedWords`), and it counts what the IR does not show the audit — the
+  // slot reloads and the epilogue's `lw ra`.
+  const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+  const loadedWordBound = ((): number => {
+    if (loadedFrom === undefined || frameSize === undefined || depthAt === null) {
+      return Infinity;
+    }
+    let bound = Infinity;
+    for (const ins of code) {
+      const last = ins.ops[ins.ops.length - 1] ?? '';
+      if (!MIPS_FRAME_LOAD.test(ins.mnemonic) || !last.includes('(') || depthAt.get(ins) !== frameSize) {
+        continue;
+      }
+      const { base, off } = parseMem(last);
+      const word = off - (((off % 4) + 4) % 4);
+      if (isStackPtr(base) && word >= loadedFrom) {
+        bound = Math.min(bound, word);
+      }
+    }
+    return bound;
+  })();
+
   // THE LOCAL AREA, where a function takes a frame address (`measureO32Frame`): every `off(sp)`
   // access inside it is MEMORY, read and written through an `laddr` the frame-object audit then
   // proves, and every one outside it keeps the slot model below. Null where no frame address is
   // taken, or the frame is one this cannot partition, and then every capture keeps the
   // sp-as-data refusal.
-  const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
   /** The stack words a `jal`'s callee takes, by its declaration; null where nothing declares it. */
   const stackWordsOf = (callee: string | undefined): number | null => {
     const declared = callee === undefined ? null : calls.declaredCall(callee);
@@ -1496,6 +1529,7 @@ function liftOnce(
     stackWordsOf,
     savedByCallee,
     splat,
+    loadedWordBound,
   });
   /** Whether `off(sp)` at `ins` is an access inside the local area, refusing one that straddles its
    *  edge: half memory and half slot is neither. */
@@ -1519,36 +1553,6 @@ function liftOnce(
     }
     return true;
   };
-
-  // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 16 on all three O32
-  // toolchains): the lowest frame word this function LOADS at the frame's own depth from that
-  // offset up, or `Infinity`. The compiler loads no word of its outgoing area there — not after a
-  // call, and not before one — so a word it loads is a local's, and since the area is one region
-  // at the frame bottom every word at or above it is no call's stack argument. Below 16 a load
-  // proves nothing: the compilers stage a by-value aggregate's register words in the a1..a3 home
-  // and load them back. Every block here is entry-reachable, so every load counted can run; a load
-  // at another depth names other storage under the same raw offset and is not counted. Read once:
-  // the a0..a3 guess below and the frame-object audit (`loadedWords`) both take this number, and it
-  // counts what the IR does not show the audit — the slot reloads and the epilogue's `lw ra`.
-  const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
-  const loadedWordBound = ((): number => {
-    if (loadedFrom === undefined || frameSize === undefined || depthAt === null) {
-      return Infinity;
-    }
-    let bound = Infinity;
-    for (const ins of code) {
-      const last = ins.ops[ins.ops.length - 1] ?? '';
-      if (!MIPS_FRAME_LOAD.test(ins.mnemonic) || !last.includes('(') || depthAt.get(ins) !== frameSize) {
-        continue;
-      }
-      const { base, off } = parseMem(last);
-      const word = off - (((off % 4) + 4) % 4);
-      if (isStackPtr(base) && word >= loadedFrom) {
-        bound = Math.min(bound, word);
-      }
-    }
-    return bound;
-  })();
 
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
   // sp-relative access it keys is word-width. If a SUB-WORD sp access aliases a word slot
@@ -1580,8 +1584,10 @@ function liftOnce(
   //   • a CALLEE, which O32 lets write the bottom of this frame: it stores its a0..a3 into the
   //     home words `[0,16)` (IDO: `sw a2,40(sp)` in its own frame) and assigns a stack parameter in
   //     place (`compilerBehaviors.localsAboveOutgoingArea`'s probe). So a function that calls owns
-  //     only the words past its widest call's outgoing area, `[16 + 4·words, frameSize)`, and one
-  //     whose callee no declaration sizes claims nothing. A leaf owns the whole frame;
+  //     only the words past its widest call's outgoing area, `[16 + 4·words, frameSize)`. One whose
+  //     callee no declaration sizes owns the words from the loaded-word bound up, which no call's
+  //     stack argument reaches (`o32OutgoingArea`'s `widest`), and claims nothing where it loads
+  //     no frame word from 16 up. A leaf owns the whole frame;
   //   • the same raw offset at ANOTHER depth — the key is the raw offset, so a word reached before
   //     the push or after the pop names other storage under the same spelling. Every `sp` access
   //     must run at the frame's own depth, save the incoming stack words that are keyed `@sarg<k>`.
@@ -1610,16 +1616,14 @@ function liftOnce(
     // here first, it claims nothing rather than pre-empting that refusal with another.
     let outgoing: ReturnType<typeof o32OutgoingArea>;
     try {
-      outgoing = o32OutgoingArea(code, stackWordsOf, splat);
+      outgoing = o32OutgoingArea(code, stackWordsOf, splat, loadedWordBound);
     } catch (e) {
       if (e instanceof FrontendUnsupportedError) {
         return undefined;
       }
       throw e;
     }
-    return outgoing.unsized === undefined && outgoing.end < frameSize
-      ? { from: outgoing.end, to: frameSize }
-      : undefined;
+    return outgoing.widest < frameSize ? { from: outgoing.widest, to: frameSize } : undefined;
   };
   ownedFrameOf = ownedFrame;
 
@@ -2485,9 +2489,11 @@ function liftOnce(
             // …and with a local area a guess says less still. A word staged for the call above the
             // home area may be MEMORY there, which the slot test below cannot see; and a word
             // staged below it reaches the call whether or not a3 is set, since an 8-aligned
-            // argument (`long long`, a struct holding one) skips a3 for the stack.
+            // argument (`long long`, a struct holding one) skips a3 for the stack. Where the
+            // loaded-word bound reaches the local area, no word of it is a stack argument, and the
+            // slot test below sees every word that can be one.
             if (frame !== null) {
-              if (argc >= ARG_REGS.length) {
+              if (argc >= ARG_REGS.length && loadedWordBound > frame.area.from) {
                 throw new FrontendUnsupportedError(
                   `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${callee}' ` +
                     `at ${at} fills a0..a3 in a frame whose local area holds a captured address, so where its ` +
@@ -2827,20 +2833,24 @@ function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): 
 /** THE OUTGOING ARGUMENT AREA OF AN O32 FRAME, the part of it a callee may write: the a0..a3 home
  *  words `[0,16)` and the widest call's stack words past them, by each callee's declaration. `end`
  *  is where it stops, 0 in a leaf. `unsized` is the first call no declaration sizes (a `jal` nothing
- *  declares, or a call through a register), counted in `end` as taking no stack words: what that
- *  costs is each caller's to decide — `measureO32Frame` refuses where it could move the local area,
- *  and `ownedFrame` claims no frame at all. */
+ *  declares, or a call through a register), counted in `end` as taking no stack words. `widest`
+ *  is the most the area can reach: `end` where every call is sized, else no further than the
+ *  loaded-word bound (`compilerBehaviors.outgoingAreaNeverLoadedFrom`: the compiler loads no word
+ *  of its outgoing area from that offset up, so the lowest word there this function loads is a
+ *  local's, and so is every word above it), and `Infinity` where no load bounds it. Each caller
+ *  reads the one number: `measureO32Frame` refuses where it could move the local area, and
+ *  `ownedFrame` claims the frame only from it up. */
 function o32OutgoingArea(
   code: readonly Instr[],
   stackWordsOf: (callee: string | undefined) => number | null,
   splat: boolean,
-): { end: number; unsized: Instr | undefined } {
+  loadedWordBound: number,
+): { end: number; unsized: Instr | undefined; widest: number } {
   const calls = code.filter(isCallInstr);
   const words = calls.map((ins) => (ins.mnemonic === 'jal' ? stackWordsOf(jalCallee(ins, splat)) : null));
-  return {
-    end: calls.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0)),
-    unsized: calls.find((_, k) => words[k] === null),
-  };
+  const end = calls.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0));
+  const unsized = calls.find((_, k) => words[k] === null);
+  return { end, unsized, widest: unsized === undefined ? end : Math.max(end, loadedWordBound) };
 }
 
 export function measureO32Frame({
@@ -2853,6 +2863,7 @@ export function measureO32Frame({
   stackWordsOf,
   savedByCallee,
   splat,
+  loadedWordBound = Infinity,
 }: {
   name: string;
   code: readonly Instr[];
@@ -2864,6 +2875,9 @@ export function measureO32Frame({
   stackWordsOf: (callee: string | undefined) => number | null;
   savedByCallee: (r: string) => boolean;
   splat: boolean;
+  /** The lowest frame word from 16 up this function loads (`lift`'s loaded-word bound), which caps
+   *  how far an unsized call's stack words can reach; `Infinity` where nothing bounds it. */
+  loadedWordBound?: number;
 }): { area: FrameRange; size: number } | null {
   const captures = code.filter(takesFrameAddress);
   if (captures.length === 0 || depthAt === null || frameSize === undefined) {
@@ -2890,7 +2904,11 @@ export function measureO32Frame({
       written.add(writtenReg(ins)!);
     }
   }
-  const { end: outgoingEnd, unsized: undeclared } = o32OutgoingArea(code, stackWordsOf, splat);
+  const {
+    end: outgoingEnd,
+    unsized: undeclared,
+    widest: widestEnd,
+  } = o32OutgoingArea(code, stackWordsOf, splat, loadedWordBound);
   const area = o32LocalArea(rule, { frameSize, outgoingEnd, saves });
   if (area === null) {
     return null;
@@ -2898,7 +2916,7 @@ export function measureO32Frame({
   if (undeclared !== undefined) {
     const widest = o32LocalArea(rule, {
       frameSize,
-      outgoingEnd: Math.max(outgoingEnd, Math.min(frameSize, ...saves)),
+      outgoingEnd: Math.max(outgoingEnd, Math.min(frameSize, widestEnd, ...saves)),
       saves,
     });
     if (widest?.from !== area.from || widest.to !== area.to) {

@@ -300,6 +300,12 @@ describe('a frame word that is not a local refuses', () => {
   });
 
   test('an undeclared call that fills a0..a3 beside a local area: where its stack words end is unknown', () => {
+    // …unless a frame word it loads bounds them (`outgoingAreaNeverLoadedFrom`), which both shapes
+    // below do; without that premise the question stands
+    const unbound = (t: TargetDescription): TargetDescription => ({
+      ...t,
+      compilerBehaviors: { ...t.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    });
     const fills = [
       '0:\taddiu\tsp,sp,-40',
       '4:\tsw\tra,32(sp)',
@@ -314,8 +320,12 @@ describe('a frame word that is not a local refuses', () => {
       '28:\taddiu\tsp,sp,40',
     ];
     // gcc's area starts where the outgoing words end, so the frame measurement refuses first
-    expect(lift(fills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_GCC, {})).toThrow(
+    expect(lift(fills, [[0x14, 'R_MIPS_26', 'tb']], unbound(MIPS_GCC), {})).toThrow(
       /nothing declares the callee of the `jal` at 0x14, so how many stack words it takes is unknown/,
+    );
+    // with it, `lw v0,16(sp)` puts the area's end at 16, and what is left is the audit's own question
+    expect(lift(fills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_GCC, {})).toThrow(
+      /`tb` takes it at argument 0 and nothing says what that callee returns/,
     );
     // IDO's starts above the saves, so the area stands and the call's guess is what refuses
     const idoFills = [
@@ -331,8 +341,12 @@ describe('a frame word that is not a local refuses', () => {
       '24:\tjr\tra',
       '28:\taddiu\tsp,sp,40',
     ];
-    expect(lift(idoFills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_IDO, {})).toThrow(
+    expect(lift(idoFills, [[0x14, 'R_MIPS_26', 'tb']], unbound(MIPS_IDO), {})).toThrow(
       /fills a0\.\.a3 in a frame whose local area/,
+    );
+    // …and the `ra` restore at 20 puts it at 20, below the area at 24
+    expect(lift(idoFills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_IDO, {})).toThrow(
+      /`tb` takes it at argument 0 and nothing says what that callee returns/,
     );
   });
 
@@ -568,5 +582,165 @@ describe('a dead store above a frame word the function loads is a local', () => 
       compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
     };
     expect(lift(DEADB, g, weak, protos)).toThrow(/the 1-byte store at \[sp,#28\) .* no load after a call proves it/);
+  });
+});
+
+// THE BOUND CAPS AN UNSIZED CALL'S OUTGOING AREA (`o32OutgoingArea`'s `widest`). A call nothing
+// declares may take any number of stack words, but they lie below the lowest frame word from
+// 16(sp) up that the function loads — the compilers load no word of their outgoing area there — so
+// each reader of where the area ends reads that one number: the local area's partition, the a0..a3
+// guess's refusal, and the owned range of an uninitialised read.
+describe("an unsized call's outgoing area ends at the loaded-word bound", () => {
+  // `void f(int a){ int buf[4]; g(buf,1,2,a); h(buf[0]+buf[1]); }` at gcc2.7.2kmc -O2: buf at 16,
+  // loaded back at 16, so g takes no stack word
+  const KMC_UX = [
+    '0:\taddiu\tsp,sp,-40',
+    '4:\tmove\ta3,a0',
+    '8:\taddiu\ta0,sp,16',
+    'c:\tli\ta1,1',
+    '10:\tsw\tra,32(sp)',
+    '14:\tjal\t0 <f>',
+    '18:\tli\ta2,2',
+    '1c:\tlw\tv0,16(sp)',
+    '20:\tlw\ta0,20(sp)',
+    '24:\tjal\t0 <f>',
+    '28:\taddu\ta0,v0,a0',
+    '2c:\tlw\tra,32(sp)',
+    '30:\tjr\tra',
+    '34:\taddiu\tsp,sp,40',
+  ];
+  // …and at ido7.1 -O2: buf at 24, above the `ra` save at 20, whose restore bounds the area
+  const IDO_UX = [
+    '0:\taddiu\tsp,sp,-40',
+    '4:\tsw\tra,20(sp)',
+    '8:\tmove\ta3,a0',
+    'c:\taddiu\ta0,sp,24',
+    '10:\tli\ta1,1',
+    '14:\tjal\t0 <f>',
+    '18:\tli\ta2,2',
+    '1c:\tlw\tt6,28(sp)',
+    '20:\tlw\tt7,24(sp)',
+    '24:\tjal\t0 <f>',
+    '28:\taddu\ta0,t6,t7',
+    '2c:\tlw\tra,20(sp)',
+    '30:\taddiu\tsp,sp,40',
+    '34:\tjr\tra',
+    '38:\tnop',
+  ];
+  // `void f(int a){ int buf[4]; g(buf,1,2,3,4,5,6,a); h(buf[0]+buf[1]); }` at ido7.1 -O2: buf at
+  // 40, and g's four stack words staged at 16..28, below the `ra` restore at 36
+  const IDO_UW = [
+    '0:\taddiu\tsp,sp,-56',
+    '4:\tsw\ta0,56(sp)',
+    '8:\tlw\tt9,56(sp)',
+    'c:\tsw\tra,36(sp)',
+    '10:\tli\tt6,4',
+    '14:\tli\tt7,5',
+    '18:\tli\tt8,6',
+    '1c:\tsw\tt8,24(sp)',
+    '20:\tsw\tt7,20(sp)',
+    '24:\tsw\tt6,16(sp)',
+    '28:\taddiu\ta0,sp,40',
+    '2c:\tli\ta1,1',
+    '30:\tli\ta2,2',
+    '34:\tli\ta3,3',
+    '38:\tjal\t0 <f>',
+    '3c:\tsw\tt9,28(sp)',
+    '40:\tlw\tt0,44(sp)',
+    '44:\tlw\tt1,40(sp)',
+    '48:\tjal\t0 <f>',
+    '4c:\taddu\ta0,t0,t1',
+    '50:\tlw\tra,36(sp)',
+    '54:\taddiu\tsp,sp,56',
+    '58:\tjr\tra',
+    '5c:\tnop',
+  ];
+  const calls = (at: number[]): [number, string, string][] => [
+    [at[0], 'R_MIPS_26', 'g'],
+    [at[1], 'R_MIPS_26', 'h'],
+  ];
+  // g and h are declared for what they return, which the audit asks of a callee handed a capture;
+  // their parameters stay unsized
+  const returns: Prototypes = { g: { returnsVoid: true }, h: { returnsVoid: true } };
+  const weak = (t: TargetDescription): TargetDescription => ({
+    ...t,
+    compilerBehaviors: { ...t.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+  });
+
+  test('the partition draws the area above it (gcc2.7.2kmc)', () => {
+    expect(src(KMC_UX, calls([0x14, 0x24]), MIPS_GCC, returns)).toBe(
+      'void f(s32 a0) {\n    u8 sp16[16];\n    s32 *p0;\n    p0 = (s32 *)sp16;\n    g(sp16, 1, 2, a0);\n    h(*p0 + p0[1]);\n}\n',
+    );
+    expect(lift(KMC_UX, calls([0x14, 0x24]), weak(MIPS_GCC), returns)).toThrow(
+      /nothing declares the callee of the `jal` at 0x14, so how many stack words it takes is unknown/,
+    );
+  });
+
+  test('the a0..a3 guess takes no word of a local area above it as a stack argument (ido7.1)', () => {
+    expect(src(IDO_UX, calls([0x14, 0x24]), MIPS_IDO, returns)).toBe(
+      'void f(s32 a0) {\n    u8 sp24[16];\n    s32 *p0;\n    p0 = (s32 *)sp24;\n    g(sp24, 1, 2, a0);\n    h(p0[1] + *p0);\n}\n',
+    );
+    expect(lift(IDO_UX, calls([0x14, 0x24]), weak(MIPS_IDO), returns)).toThrow(
+      /fills a0..a3 in a frame whose local area holds a captured address/,
+    );
+  });
+
+  test('…but a word stored below the bound still reaches the guess as a stack argument', () => {
+    expect(lift(IDO_UW, calls([0x38, 0x48]), MIPS_IDO, returns)).toThrow(
+      /the word stored to 16\(sp\), below the local area, reaches the undeclared call to 'g'/,
+    );
+  });
+
+  // `int f(int a){ int x; g(a); return x + a; }` at ido7.1 -O2: `x` is never stored and read at 28,
+  // above the `ra` save at 20, so it is a local's whatever g takes — an uninitialised one
+  const IDO_UV = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tsw\tra,20(sp)',
+    '8:\tjal\t0 <f>',
+    'c:\tsw\ta0,32(sp)',
+    '10:\tlw\tra,20(sp)',
+    '14:\tlw\tt6,28(sp)',
+    '18:\tlw\tt7,32(sp)',
+    '1c:\taddiu\tsp,sp,32',
+    '20:\tjr\tra',
+    '24:\taddu\tv0,t6,t7',
+  ];
+
+  test('the owned range of an uninitialised read starts at it', () => {
+    expect(src(IDO_UV, [[0x8, 'R_MIPS_26', 'g']], MIPS_IDO, {})).toBe(
+      's32 f(s32 a0) {\n    s32 uninit_sp28;\n    g(a0);\n    return uninit_sp28 + a0;\n}\n',
+    );
+    expect(lift(IDO_UV, [[0x8, 'R_MIPS_26', 'g']], weak(MIPS_IDO), {})).toThrow(
+      /load from stack slot sp@28 that was never stored/,
+    );
+  });
+
+  test('measureO32Frame: an undeclared `jal` draws the area where the bound reaches it', () => {
+    const ins = (addr: number, text: string) => {
+      const [mnemonic, rest = ''] = text.split('\t');
+      return { addr, mnemonic, ops: rest === '' ? [] : rest.split(',') };
+    };
+    const code = [
+      ins(0x0, 'addiu\tsp,sp,-40'),
+      ins(0x4, 'sw\tra,36(sp)'),
+      ins(0x8, 'addiu\ta0,sp,16'),
+      ins(0xc, 'jal\t0'),
+    ];
+    const measure = (loadedWordBound?: number) =>
+      measureO32Frame({
+        name: 'f',
+        code,
+        entry: code.slice(0, 2),
+        depthAt: new Map(code.map((i, k) => [i, k === 0 ? 0 : 40])),
+        frameSize: 40,
+        rule: 'above-outgoing-area',
+        stackWordsOf: () => null,
+        savedByCallee: (r) => r === 'ra',
+        splat: false,
+        loadedWordBound,
+      });
+    expect(measure(16)?.area).toEqual({ from: 16, to: 36 });
+    expect(() => measure(24)).toThrow(/nothing declares the callee of the `jal` at 0xc/);
+    expect(() => measure()).toThrow(/nothing declares the callee of the `jal` at 0xc/);
   });
 });
