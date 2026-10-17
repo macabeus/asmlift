@@ -73,11 +73,12 @@ export interface StackArgsInput<C> {
   readonly argRegs: number;
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
-  /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
-   *  below every local, and never loads a word of it, before a call or after — `target.ts`
-   *  `outgoingAreaNeverLoaded`, the strong form of `localsAboveOutgoingArea`, stated on agbcc. Only
-   *  then does a word it loads prove itself a local — see `loadedWordBound`. */
-  readonly outgoingAreaNeverLoaded: boolean;
+  /** The lowest frame word this function loads where its compiler loads no word of the outgoing
+   *  area, before a call or after (`target.ts` `outgoingAreaNeverLoadedFrom`, the strong form of
+   *  `localsAboveOutgoingArea`, 0 on agbcc): `loadedWordBound` over these blocks, which the frontend
+   *  computes once and hands the frame-object audit too. Every word at or above it is a local's.
+   *  `Infinity` where the compiler claims no such offset. */
+  readonly loadedWordBound: number;
 }
 
 /** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
@@ -98,22 +99,32 @@ export interface OutgoingArgs<C> {
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
 
-/** THE LOWEST FRAME WORD THIS FUNCTION LOADS, or `Infinity` when it loads none. Under
- *  `outgoingAreaNeverLoaded` the caller never reads a word of its outgoing area — not after a call,
- *  where the callee may have assigned to it, and not before one either: the area holds only what
- *  the caller staged for a callee, every argument that contains a call is computed before any word
- *  is staged, and nothing is saved there around a nested call (agbcc-restage.s pins all three). So a
- *  word it loads is a local; and since the area is one region at the frame bottom that every call
- *  shares, every word at or above the bound is proven not to be an argument.
+/** THE LOWEST FRAME WORD THIS FUNCTION LOADS AT OR ABOVE `from`, or `Infinity` when it loads none
+ *  or nothing states `from`. The Thumb frontend calls it once per lift and hands the number to both
+ *  readers: `analyzeOutgoingArgs` and the frame-object audit (`FrameObjectAudit.loadedWords`).
+ *  Under `outgoingAreaNeverLoadedFrom` the caller never reads a word of its outgoing area from that
+ *  offset up — not after a call, where the callee may have assigned to it, and not before one
+ *  either: the area holds only what the caller staged for a callee, every argument that contains a
+ *  call is computed before any word is staged, and nothing is saved there around a nested call
+ *  (agbcc-restage.s pins all three). So a word it loads is a local; and since the area is one
+ *  region at the frame bottom that every call shares, every word at or above the bound is proven
+ *  not to be an argument.
  *
  *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
  *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen
  *  cannot supply. */
-function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySet<number>): number {
+export function loadedWordBound<C>(
+  blocks: readonly StackArgsBlock<C>[],
+  live: ReadonlySet<number>,
+  from: number | undefined,
+): number {
+  if (from === undefined) {
+    return Infinity;
+  }
   let bound = Infinity;
   for (const b of live) {
     for (const ev of blocks[b].events) {
-      if (ev.kind === 'load') {
+      if (ev.kind === 'load' && ev.off >= from) {
         bound = Math.min(bound, ev.off);
       }
     }
@@ -159,13 +170,13 @@ function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: Readonly
 //
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
 // keeps one outgoing area below every local and never loads a word of it
-// (`outgoingAreaNeverLoaded`), a word this function LOADS is a local, and so is every word above it
+// (`outgoingAreaNeverLoadedFrom`), a word this function LOADS is a local, and so is every word above it
 // (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA, (a) and (b) — then
 // weighs only the words beneath the bound, so an undeclared call lifts once no word there could
 // open an argument block, and takes no stack word. Hand-written asm that reads its own outgoing
 // argument defeats it, and lifts with that argument dropped — a producer assumption of the same
 // kind as CONTIGUITY below, which is why the premise is declared per compiler (`target.ts`
-// `outgoingAreaNeverLoaded`) and never inferred.
+// `outgoingAreaNeverLoadedFrom`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -207,7 +218,7 @@ export function analyzeOutgoingArgs<C>({
   localArea,
   argRegs,
   capturedWholeFrame,
-  outgoingAreaNeverLoaded,
+  loadedWordBound: bound,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
@@ -269,7 +280,6 @@ export function analyzeOutgoingArgs<C>({
   // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
   // that could be one, so the words they weigh are cut to those beneath the bound once, where
   // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
-  const bound = outgoingAreaNeverLoaded ? loadedWordBound(asmBlocks, live) : Infinity;
   const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];

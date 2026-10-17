@@ -7,7 +7,13 @@
 // emit. Every case below states which of the three SETS — may, must, stored — decides it.
 import { describe, expect, test } from 'vitest';
 
-import { type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from '../src/frontend/stackargs';
+import {
+  type StackArgsBlock,
+  type StackArgsEvent,
+  type StackArgsInput,
+  analyzeOutgoingArgs,
+  loadedWordBound,
+} from '../src/frontend/stackargs';
 
 type Ev = StackArgsEvent<string>;
 const st = (off: number): Ev => ({ kind: 'store', off });
@@ -22,22 +28,29 @@ const call = (name: string, n: number): Ev => ({
   declared: n === 0 ? null : Array.from({ length: n }, (_, i) => 4 * i),
 });
 const blk = (events: Ev[]): StackArgsBlock<string> => ({ events });
+/** The analysis as a frontend calls it: the loaded-word bound measured once over the same blocks,
+ *  from the offset the compiler claims (`outgoingAreaNeverLoadedFrom`), and handed in. */
+const analyze = ({
+  outgoingAreaNeverLoadedFrom: from,
+  ...input
+}: Omit<StackArgsInput<string>, 'loadedWordBound'> & { outgoingAreaNeverLoadedFrom: number | undefined }) =>
+  analyzeOutgoingArgs<string>({ ...input, loadedWordBound: loadedWordBound(input.blocks, input.live, from) });
 
 const run = (
   blocks: StackArgsBlock<string>[],
   preds: number[][],
   localArea: number,
   capturedWholeFrame = false,
-  outgoingAreaNeverLoaded = true,
+  neverLoadedFromZero = true,
 ) =>
-  analyzeOutgoingArgs<string>({
+  analyze({
     blocks,
     preds,
     live: new Set(blocks.map((_, i) => i)),
     localArea,
     argRegs: 4,
     capturedWholeFrame,
-    outgoingAreaNeverLoaded,
+    outgoingAreaNeverLoadedFrom: neverLoadedFromZero ? 0 : undefined,
   });
 /** A straight line of blocks, each falling through to the next; the last one ends the function. */
 const line = (...events: Ev[][]) => events.map(blk);
@@ -180,14 +193,14 @@ describe('a word this function LOADS is a local, and bounds every call’s area'
   });
 
   test('a reload in DEAD code proves nothing', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('g', 0)]), blk([ld(0)])],
       preds: [[], [0]],
       live: new Set([0]),
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
   });
@@ -248,6 +261,23 @@ describe('the licence’s NOTHING EXTRA reads the same bound', () => {
   test('…and without the compiler’s layout claim it is an extra word again', () => {
     const r = run(line([st(0), st(4), call('five', 1), ld(4)]), chain(1), 8, false, false);
     expect(r.blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
+  });
+
+  test('…and a load beneath the offset the compiler claims from proves nothing', () => {
+    // O32 compilers load the a0..a3 home words back (`outgoingAreaNeverLoadedFrom` is 16 there), so
+    // a load at [sp,#4] under a claim from [sp,#8] up bounds nothing
+    const claimedFrom = (from: number) =>
+      analyze({
+        blocks: line([st(0), st(4), call('five', 1), ld(4)]),
+        preds: chain(1),
+        live: new Set([0]),
+        localArea: 8,
+        argRegs: 4,
+        capturedWholeFrame: false,
+        outgoingAreaNeverLoadedFrom: from,
+      });
+    expect(claimedFrom(8).blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
+    expect(claimedFrom(4).blocker).toBeNull();
   });
 
   test('a declared block that reaches the bound contradicts it, and refuses', () => {
@@ -355,14 +385,14 @@ describe('an escaped frame address is read by its receiver, from that address up
   });
 
   test('an escape in a dead block reads nothing', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('five', 0)]), blk([esc(0)])],
       preds: [[], [0]],
       live: new Set([0]),
       localArea: 8,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
@@ -380,14 +410,14 @@ describe('the fixpoint terminates and does not depend on block order', () => {
   });
 
   test('a DEAD call refuses, naming the slot it never saw staged', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('five', 1)]), blk([call('five2', 1)])],
       preds: [[], []],
       live: new Set([0]),
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      outgoingAreaNeverLoaded: true,
+      outgoingAreaNeverLoadedFrom: 0,
     });
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });

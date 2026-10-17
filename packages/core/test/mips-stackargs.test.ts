@@ -140,3 +140,87 @@ describe('every other never-stored read keeps its refusal', () => {
     );
   });
 });
+
+// THE LOADED-WORD BOUND AT AN UNDECLARED CALL (`lowerJal` guess, `compilerBehaviors.
+// outgoingAreaNeverLoadedFrom`). A guess that fills a0..a3 cannot say where the list ends, so a word
+// of the outgoing area that reaches the call refuses — unless the function LOADS a frame word at
+// or below it, from 16(sp) up: ido and gcc 2.7.2 load no word of their outgoing area there, so that
+// word and every one above it is a local's. The shape is `bigdead` (`void bigdead(int k, int *p)`
+// at -O2: values spilled to the frame, reloaded only inside a loop the first test may skip, then
+// `done4(s, k, s + 1, s + 2)`), cut to one spill.
+describe('an undeclared call that fills a0..a3 past a frame word the function loads', () => {
+  /** One straight-line prologue, a loop the first test may skip, and the call — each line gets the
+   *  next address, and the `blez` lands on the `li a2,1` that sets the call up. */
+  const shape = (pre: string[], loop: string[]) => {
+    const body = [
+      'addiu\tsp,sp,-40',
+      'sw\tra,36(sp)',
+      ...pre,
+      'blez\ta0,@CALL',
+      'nop',
+      ...loop,
+      'li\ta2,1',
+      'jal\t0 <f>',
+      'li\ta3,2',
+      'lw\tra,36(sp)',
+      'jr\tra',
+      'addiu\tsp,sp,40',
+    ];
+    const call = body.indexOf('li\ta2,1') * 4;
+    const jal = body.indexOf('jal\t0 <f>') * 4;
+    const lines = body.map(
+      (l, i) => `${(i * 4).toString(16)}:\t${l.replace('@CALL', `${call.toString(16)} <f+0x${call.toString(16)}>`)}`,
+    );
+    return { lines, rs: [[jal, 'R_MIPS_26', 'done4']] as [number, string, string][] };
+  };
+  const spilled = shape(['sw\ta1,24(sp)'], ['lw\ta1,24(sp)', 'addu\ta0,a0,a1']);
+
+  test.each([MIPS_IDO, MIPS_GCC])('a spill reloaded on one path is a local, not argument 5 ($compiler)', (target) => {
+    const out = src(spilled.lines, spilled.rs, target);
+    expect(out).toContain('done4(');
+    expect(out).not.toMatch(/done4\([^)]*,[^)]*,[^)]*,[^)]*,/);
+  });
+
+  test('…and without the premise, the word may be argument 5', () => {
+    const weak = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(lift(spilled.lines, spilled.rs, weak)).toThrow(
+      /the word stored to 24\(sp\) reaches it where an argument past/,
+    );
+  });
+
+  test('a word staged beneath the bound still refuses: it may be argument 5 (`bigdead8`)', () => {
+    const staged = shape(['sw\ta1,24(sp)', 'sw\tt0,16(sp)'], ['lw\ta1,24(sp)', 'addu\ta0,a0,a1']);
+    expect(lift(staged.lines, staged.rs)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
+  });
+
+  test('a load at another sp depth names other storage: the word staged at 16(sp) may be argument 5', () => {
+    // `lw t0,16(sp)` runs before the push, so it reads the caller's frame, not this one's 16(sp)
+    const body = [
+      'lw\tt0,16(sp)',
+      'addiu\tsp,sp,-40',
+      'sw\tra,36(sp)',
+      'sw\tt0,16(sp)',
+      'li\ta0,5',
+      'li\ta1,7',
+      'li\ta2,1',
+      'jal\t0 <f>',
+      'li\ta3,2',
+      'lw\tra,36(sp)',
+      'jr\tra',
+      'addiu\tsp,sp,40',
+    ];
+    const lines = body.map((l, i) => `${(i * 4).toString(16)}:\t${l}`);
+    const rs: [number, string, string][] = [[body.indexOf('jal\t0 <f>') * 4, 'R_MIPS_26', 'g5']];
+    for (const target of [MIPS_IDO, MIPS_GCC]) {
+      expect(lift(lines, rs, target)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
+    }
+  });
+
+  test("a load in the a0..a3 home proves nothing: ido loads a by-value aggregate's words back there", () => {
+    const home = shape(['sw\tt0,16(sp)', 'sw\tt1,4(sp)'], ['lw\ta1,4(sp)', 'addu\ta0,a0,a1']);
+    expect(lift(home.lines, home.rs)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
+  });
+});

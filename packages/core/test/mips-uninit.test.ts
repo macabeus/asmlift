@@ -644,8 +644,20 @@ describe('the frame half: words of the frame the function pushed', () => {
     );
   });
 
-  test('a callee no declaration sizes leaves the outgoing area unknown, so nothing is claimed', () => {
-    expect(lift([...CALL, ...READ(28)], MIPS_IDO, G)).toThrow(NEVER);
+  // …and one nothing sizes reaches no further than the loaded-word bound: ido loads no word of its
+  // outgoing area from 16(sp) up, so the `lw ra,20(sp)` restore puts the area's end at 20 at most
+  test('a callee no declaration sizes leaves the words from the loaded-word bound up owned', () => {
+    expect(src([...CALL, ...READ(28)], MIPS_IDO, G)).toBe(
+      's32 f(void) {\n    s32 uninit_sp28;\n    return g() + uninit_sp28;\n}\n',
+    );
+    // without that premise where its stack words end is unknown, and nothing is claimed
+    const unbound = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(lift([...CALL, ...READ(28)], unbound, G)).toThrow(NEVER);
+    // and the a0..a3 home below 16 is in no range either way
+    expect(lift([...CALL, ...READ(4)], MIPS_IDO, G)).toThrow(NEVER);
   });
 
   test("the caller's home of a0..a3, above the frame, is in no range", () => {

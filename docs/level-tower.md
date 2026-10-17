@@ -236,15 +236,26 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the compiler NEVER emits, for any source, may be applied to an observed output without the three
   conditions above: an output that has the shape denies the universal's antecedent, and that
   contrapositive is exactly as sound as the universal. What reads the map backwards is the CONVERSE,
-  from "this output lacks the shape" to a claim about what produced it. `outgoingAreaNeverLoaded`
-  (`target.ts`) is the worked case: agbcc never reads a word of its outgoing area, so a word
-  it reads is a local (`frontend/stackargs.ts` `loadedWordBound`). Its weaker sibling
-  `localsAboveOutgoingArea` states only the after-call form, which is all the MIPS and mwcc probes
-  measured, and the strong form is never read off it. The converse,
+  from "this output lacks the shape" to a claim about what produced it. `outgoingAreaNeverLoadedFrom`
+  (`target.ts`) is the worked case: from a measured start offset up, the compiler never reads a
+  word of its outgoing area, so a word it reads there is a local, and so is every word above it
+  (`frontend/stackargs.ts` `loadedWordBound`). The offset is part of the universal: 0 on agbcc, 16
+  on the three O32 toolchains, whose compilers stage a by-value aggregate's words in the a1..a3
+  home and load them back, and 8 on mwcc, where the callee's parameter area starts. Each frontend
+  measures the bound once and hands the one number to every reader: on MIPS and PowerPC it caps
+  where the outgoing area of a call nothing declares can end (`o32OutgoingArea`'s `widest`,
+  `measurePpcFrame`'s `outgoingEnd`). On MIPS the local area's partition, the owned range of an
+  uninitialised read and the undeclared-call guess read that end; on PowerPC only the guess does,
+  and the partition starts at the parameter area whatever the bound. The frame-object audit takes
+  the bound itself on both (`loadedWords`). Its
+  weaker sibling
+  `localsAboveOutgoingArea` states only the after-call form, and the strong form is never read off
+  it. The converse,
   that a word never read back is an argument, is false, because a dead local is never read back
   either, and the stack-argument licence declines on it rather than infer it. The contrapositive still
   owes what every compiler behavior owes: the universal grounded in the compiler's source and
-  re-measurable from a committed probe (`corpus/agbcc-restage.s`), and its residue, every producer
+  re-measurable from a committed probe (`corpus/agbcc-restage.s`, and `corpus/*-outarea.txt` for the
+  start offsets), and its residue, every producer
   the universal does not cover, named where the field is set.
 
   A **third fork sits inside the ranked variations**, and the underdetermination criterion does not

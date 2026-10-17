@@ -37,10 +37,14 @@ export interface FrameObjectAudit {
    *  stack-argument block staged at its bottom, which is where an untyped object claims to start */
   declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
   usedSlotOffsets: ReadonlySet<number>;
-  /** per IR block index, the frame offsets the frontend read as SSA slots, not as memory — loads
-   *  the IR does not show this audit. Read only under `outgoingAreaNeverLoaded`, where any load
-   *  proves a word a local's (`storedNeverRead`). Absent where the frontend records none. */
-  slotLoads?: ReadonlyMap<number, ReadonlySet<number>>;
+  /** THE FRONTEND'S LOADED-WORD BOUND, present where the target states `outgoingAreaNeverLoadedFrom`:
+   *  `from` is that offset and `bound` the lowest frame word, in this audit's offsets, the frontend
+   *  saw the function load from `from` up, or `Infinity`. The frontend reads it ONCE off its
+   *  instructions — slot reloads, the epilogue's restores and plain loads alike, which the IR does
+   *  not all show — and its own stack-argument refusals take the same number, so one lift answers
+   *  the premise once (`storedNeverRead` adds only the loads it alone sees, through a captured
+   *  address). Absent where the target states no such offset. */
+  loadedWords?: { readonly from: number; readonly bound: number };
   capturedObjectIsTheWholeFrame: boolean;
   /** the frame offsets whose escape the frontend's outgoing-argument verdict leans on — each one
    *  re-proven here (`recheckEscapesReliedOn`). Absent or empty where it leans on none. */
@@ -322,7 +326,7 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  In either model, a store through a capture that reaches a call unread on every path, beneath
  *  every word a load proves a local's, declines: it may be that call's stack argument
  *  (`storedNeverRead`). Which load proves it is the compiler's premise: one after a call under
- *  `localsAboveOutgoingArea`, and any load at all under `outgoingAreaNeverLoaded` (agbcc).
+ *  `localsAboveOutgoingArea`, and any load from the offset up under `outgoingAreaNeverLoadedFrom`.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -348,7 +352,7 @@ export function auditFrameObjects({
   ownedLocals: owned,
   declaredLocals: declared,
   usedSlotOffsets,
-  slotLoads,
+  loadedWords,
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
@@ -388,7 +392,7 @@ export function auditFrameObjects({
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   recheckEscapesReliedOn(escapesReliedOn, uses, fail);
-  storedNeverRead(irBlocks, uses, slotLoads, target, fail);
+  storedNeverRead(irBlocks, uses, loadedWords, target, fail);
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
@@ -1586,20 +1590,23 @@ function chooseFrameModel({
  *  one outgoing area at the frame bottom, below every local, and never reads it back after a call;
  *  so a frame byte loaded after a call before anything re-stores it held a value across that call,
  *  its word is a local's, and so is every word above it. Under the strong form,
- *  `outgoingAreaNeverLoaded` (agbcc), any load at all bounds it, the bound stackargs'
- *  `loadedWordBound` takes; MIPS and mwcc state only the after-call form (`target.ts` says why).
+ *  `outgoingAreaNeverLoadedFrom`, any load in a word at or above that offset bounds it: from 0 on
+ *  agbcc, past the a0..a3 home on O32 (whose compilers load a by-value aggregate's home words back)
+ *  and from the parameter area on mwcc (`target.ts` says why). The frontend measures that bound
+ *  once, off its instructions, and hands it here (`loadedWords`) — the same number its own
+ *  stack-argument refusals take (stackargs' `loadedWordBound` on Thumb).
  *  Every compiled outgoing-argument shape sits beneath any such bound, and a local the source reads
  *  after a call does not: `g(); b[0] = x; b[1] = y; return b[0];` reaches no call, `b[0] = x; g();
  *  return b[0];` is above the bound. What this still refuses that is honest is a local the source
  *  stores, never reads back, and calls past — a dead local and an outgoing argument are the same
  *  machine code, and the lift cannot tell which. The after-call liveness weighs this audit's fixed
  *  accesses alone, so it sits at or above the bound the frontend's slot loads would give, which
- *  only asks more; the strong form adds those slot loads (`slotLoads`). Without either premise the
- *  bound proves nothing, and every pending store is asked. */
+ *  only asks more; the strong form adds the frontend's bound (`loadedWords`). Without either
+ *  premise the bound proves nothing, and every pending store is asked. */
 function storedNeverRead(
   irBlocks: readonly Block[],
   uses: FrameUses,
-  slotLoads: FrameObjectAudit['slotLoads'],
+  loadedWords: FrameObjectAudit['loadedWords'],
   target: TargetDescription,
   fail: Refuse,
 ): void {
@@ -1659,25 +1666,27 @@ function storedNeverRead(
       }
     }
   }
-  // …and under the STRONG form (`outgoingAreaNeverLoaded`) the caller loads no word of the area
-  // before a call either, so ANY frame byte loaded in a block the entry reaches bounds it: one this
-  // audit sees at a fixed offset, and one the frontend read as a slot, which the IR does not show
-  // (`slotLoads`). Without the slot loads, `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]`
-  // refuses the `strh` on a word the code itself proves a local's.
-  const neverLoaded = target.compilerBehaviors.outgoingAreaNeverLoaded === true;
-  if (neverLoaded) {
+  // …and under the STRONG form (`outgoingAreaNeverLoadedFrom`) the caller loads no word of the
+  // area from that offset up before a call either, so ANY frame byte loaded there bounds it. The
+  // frontend measured that bound off its instructions (`loadedWords`): the slot reloads the IR
+  // does not show, and the prologue's and epilogue's own loads — without them
+  // `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]` refuses the `strh` on a word the code
+  // itself proves a local's. What only this audit sees is a load through a captured address, in a
+  // block the entry reaches, and it bounds the same way. A load in a word below the offset proves
+  // nothing: O32 compilers load the a1..a3 home words they stage a by-value aggregate in.
+  if (loadedWords !== undefined) {
+    bound = Math.min(bound, loadedWords.bound);
     for (const b of live) {
       for (const op of irBlocks[b].ops) {
         const a = byOp.get(op);
-        if (a?.isLoad && a.frameOnly) {
-          bound = Math.min(bound, a.at - (a.at % 4));
+        const word = a === undefined ? -1 : a.at - (a.at % 4);
+        if (a?.isLoad && a.frameOnly && word >= loadedWords.from) {
+          bound = Math.min(bound, word);
         }
-      }
-      for (const off of slotLoads?.get(b) ?? []) {
-        bound = Math.min(bound, off - (off % 4));
       }
     }
   }
+  const from = loadedWords?.from;
 
   // THE PENDING STORES, two forward dataflows from the entry over the blocks it reaches. The MAY
   // set is the stores this asks that some path brings to a point unread: a load of any byte a
@@ -1768,7 +1777,7 @@ function storedNeverRead(
           fail(
             `the ${store.width}-byte store at [sp,#${store.at}) through a captured address reaches the call to ` +
               `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no ` +
-              `${neverLoaded ? 'load at or beneath it' : 'load after a call'} proves it a local's — it may be ` +
+              `${from === undefined ? 'load after a call' : from === 0 ? 'load at or beneath it' : `load at or beneath it, from [sp,#${from}) up,`} proves it a local's — it may be ` +
               "that call's stack argument, which the lift would drop",
           );
         }

@@ -988,7 +988,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // the after-call form alone carries it: agbcc's stronger never-loaded claim is not read here
     const weakOnly = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
     };
     for (const t of [ARMV4T_AGBCC, weakOnly]) {
       expect(decompile('f', unstored, t).source).toBe(
@@ -1003,7 +1003,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       compilerBehaviors: {
         ...ARMV4T_AGBCC.compilerBehaviors,
         localsAboveOutgoingArea: false,
-        outgoingAreaNeverLoaded: false,
+        outgoingAreaNeverLoadedFrom: undefined,
       },
     };
     expect(() => decompile('f', unstored, unclaimed)).toThrow(/stack pointer used as data/);
@@ -1157,7 +1157,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // the after-call form is the claim read here; the stronger never-loaded form is not needed
       const weakOnly = {
         ...ARMV4T_AGBCC,
-        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
       };
       expect(decompile('f', readFirst(''), weakOnly).source).toContain('s32 uninit_sp0;');
       const unclaimed = {
@@ -1214,9 +1214,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // A captured store's bytes that a `[sp,#k]` SLOT load reads are a local's, under agbcc's claim
-  // that it loads no word of its outgoing area (`outgoingAreaNeverLoaded`). The slot load is the
-  // slot model's and not in the IR the frame-object audit reads, so the frontend hands it over
-  // (`slotLoads`); without it `storedNeverRead` would refuse these as a possible stack argument.
+  // that it loads no word of its outgoing area (`outgoingAreaNeverLoadedFrom`). The slot load is the
+  // slot model's and not in the IR the frame-object audit reads, so the frontend's loaded-word
+  // bound, measured once off the instructions, carries it (`loadedWords`); without it
+  // `storedNeverRead` would refuse these as a possible stack argument.
   describe('a slot load of a captured store proves it no call’s stack argument', () => {
     // Compiled agbcc, canonical flags: `struct S { u16 lo, hi; u32 x, y; } s; s.lo = a; s.hi = b;
     // s.x = c; s.y = c + 1; r = sink(s.y); return *(u32 *)&s + r + s.x;` — the load after the call.
@@ -1255,7 +1256,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('v2', copy, ARMV4T_AGBCC, use)).toThrow(/no load at or beneath it proves it a local's/);
       const weakOnly = {
         ...ARMV4T_AGBCC,
-        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
       };
       expect(() => decompile('v2', copy, weakOnly, use)).toThrow(/no load after a call proves it a local's/);
     });
@@ -1263,7 +1264,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('…and without the claim neither lifts', () => {
       const unclaimed = {
         ...ARMV4T_AGBCC,
-        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
       };
       expect(() => decompile('u4', after, unclaimed, protos)).toThrow();
       expect(() => decompile('f', before, unclaimed, protos)).toThrow();
@@ -1911,7 +1912,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // (`loadedWordBound`), and both spellings lift alike.
     const unclaimed = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
     };
     const loadArmFirst =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbne\t.L3\n' +
@@ -1936,7 +1937,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // only without agbcc's never-loaded claim: under it, any reload proves the word a local.
     const unclaimed = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
     };
     const sameBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
@@ -1971,7 +1972,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // MIPS and mwcc do, keeps the refusal: the outgoing-area bound reads the never-loaded claim
     const unclaimed = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
     };
     expect(unclaimed.compilerBehaviors.stagesOutgoingArgsInFrame).toBe(true);
     expect(() => decompile('f', survives, unclaimed)).toThrow(/it may be that call's outgoing stack argument/);

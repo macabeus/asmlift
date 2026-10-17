@@ -484,7 +484,11 @@ describe('a word stored below the captured object and reaching a call unread', (
   test('may be the stack argument on a target that does not state the universal', () => {
     const unstated = {
       ...PPC_MWCC,
-      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, localsAboveOutgoingArea: undefined },
+      compilerBehaviors: {
+        ...PPC_MWCC.compilerBehaviors,
+        localsAboveOutgoingArea: undefined,
+        outgoingAreaNeverLoadedFrom: undefined,
+      },
     };
     expect(() => decompile('homecall', fn('homecall', HOMECALL), unstated, { prototypes: PROTOS })).toThrow(
       /the 4-byte store at \[sp,#8\) through a captured address reaches the call to `fill` unread/,
@@ -520,5 +524,157 @@ describe('an incoming stack argument is a parameter', () => {
         h: { params: ['s32', 's32', 's32', 's32', 's32', 's32', 's32', 's64'] },
       }),
     ).toThrow(/beside a parameter declared 's64'/);
+  });
+});
+
+// THE STRONG BOUND FROM THE PARAMETER AREA (`compilerBehaviors.outgoingAreaNeverLoadedFrom`,
+// frame-objects.ts `storedNeverRead`). `int fo1(int x, int y) { char b[8]; b[0] = x; b[4] = y;
+// x = b[0]; g(); return x; }` at mwcc_242_81 and Mario Party 4's -O0,p: `b[4]` (16(r1)) is a dead
+// store that reaches the call unread and no load after the call proves it a local's — but `y`'s
+// home at 8(r1) and `b[0]` at 12(r1) are LOADED before it, and mwcc loads no word of its
+// parameter area, so every word from 8 up is a local.
+describe('a dead store above a frame word the function loads is a local', () => {
+  const FO1 = [
+    'stwu    r1,-32(r1)',
+    'mflr    r0',
+    'stw     r0,36(r1)',
+    'stw     r31,28(r1)',
+    'mr      r31,r3',
+    'stw     r4,8(r1)',
+    'clrlwi  r0,r31,24',
+    'stb     r0,12(r1)',
+    'lwz     r0,8(r1)',
+    'clrlwi  r0,r0,24',
+    'stb     r0,16(r1)',
+    'lbz     r31,12(r1)',
+    'bl      g',
+    'mr      r3,r31',
+    'lwz     r31,28(r1)',
+    'lwz     r0,36(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,32',
+    'blr',
+  ];
+  const protos: Prototypes = { g: { params: 0 } };
+
+  test('lifts, the dead store dropped', () => {
+    expect(lift('fo1', FO1, protos)).toBe(
+      's32 fo1(s32 a0, s32 a1) {\n    s32 v0;\n    u8 sp12;\n    sp12 = a0 & 255;\n    v0 = sp12;\n    g();\n    return v0;\n}\n',
+    );
+  });
+
+  // The bound is the frontend's, measured once off the instructions: `y`'s home at 8(r1) is read
+  // back by the slot model, a load the IR does not show the audit, and it bounds the area at 8 all
+  // the same — so with `b[0]` never read back, both byte stores are a dead local's.
+  test('…and with only the slot reload of 8(r1), that load bounds it', () => {
+    const slotOnly = FO1.map((l) => (l.startsWith('lbz') ? 'clrlwi  r31,r31,24' : l));
+    expect(lift('fo1', slotOnly, protos)).toBe('s32 fo1(s32 a0, s32 a1) {\n    g();\n    return a0 & 255;\n}\n');
+  });
+
+  test('…and with no frame word loaded, the store may be the argument again', () => {
+    const unloaded = FO1.filter((l) => !/^(lwz     r0,8|stw     r4,8)/.test(l)).map((l) =>
+      l.startsWith('lbz') ? 'clrlwi  r31,r31,24' : l.startsWith('clrlwi  r0,r0') ? 'clrlwi  r0,r4,24' : l,
+    );
+    expect(() => lift('fo1', unloaded, protos)).toThrow(
+      /the 1-byte store at \[sp,#12\) .* no load at or beneath it, from \[sp,#8\) up, proves it a local's/,
+    );
+  });
+
+  test('…and on a target that states only the after-call form, it refuses as before', () => {
+    const weak = {
+      ...PPC_MWCC,
+      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(() => decompile('fo1', fn('fo1', FO1), weak, { prototypes: protos })).toThrow(
+      /the 1-byte store at \[sp,#16\) .* no load after a call proves it a local's/,
+    );
+  });
+});
+
+// THE BOUND CAPS AN UNSIZED CALL'S OUTGOING AREA (`measurePpcFrame`'s `outgoingEnd`). A call nothing
+// declares may take stack words in the callee's parameter area at 8(r1), but mwcc loads no word of
+// its outgoing area, so they lie below the lowest pushed-frame word this function loads: where that
+// is the area's first word, no word of the local area is any call's stack argument, and the guess
+// that fills every argument register says where its list ends.
+describe("an unsized call's outgoing area ends at the loaded-word bound", () => {
+  // `void uw(int a){ int buf[4]; g(buf,1,2,3,4,5,6,a); h(buf[0]+buf[1]); }` at mwcc_242_81 -O4,p:
+  // buf at 8, loaded back at 8
+  const UW = [
+    'stwu    r1,-32(r1)',
+    'mflr    r0',
+    'mr      r10,r3',
+    'li      r4,1',
+    'stw     r0,36(r1)',
+    'addi    r3,r1,8',
+    'li      r5,2',
+    'li      r6,3',
+    'li      r7,4',
+    'li      r8,5',
+    'li      r9,6',
+    'bl g',
+    'lwz     r3,8(r1)',
+    'lwz     r0,12(r1)',
+    'add     r3,r3,r0',
+    'bl h',
+    'lwz     r0,36(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,32',
+    'blr',
+  ];
+  // g and h are declared for what they return, which the audit asks of a callee handed a capture;
+  // their parameters stay unsized
+  const returns: Prototypes = { g: { returnsVoid: true }, h: { returnsVoid: true } };
+
+  test('the guess filling every argument register lifts beside the area', () => {
+    expect(lift('uw', UW, returns)).toContain('g(sp8, 1, 2, 3, 4, 5, 6, a0);');
+  });
+
+  test('…and refuses on a target that states no loaded-word bound', () => {
+    const weak = {
+      ...PPC_MWCC,
+      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, outgoingAreaNeverLoadedFrom: undefined },
+    };
+    expect(() => decompile('uw', fn('uw', UW), weak, { prototypes: returns })).toThrow(
+      /nothing declares 'g', called at 0x2c with 8 argument registers filled/,
+    );
+  });
+
+  test('…and where the lowest word loaded is past the area start, a word below it may be the ninth argument', () => {
+    // mwcc_233_163n's layout of the same function puts buf at 12: the area's word at 8 is loaded by
+    // nothing, and may be g's stack word
+    const at12 = UW.map((l) =>
+      l === 'addi    r3,r1,8'
+        ? 'addi    r3,r1,12'
+        : l === 'lwz     r3,8(r1)'
+          ? 'lwz     r3,12(r1)'
+          : l === 'lwz     r0,12(r1)'
+            ? 'lwz     r0,16(r1)'
+            : l,
+    );
+    expect(() => lift('uw', at12, returns)).toThrow(
+      /nothing declares 'g', called at 0x2c with 8 argument registers filled/,
+    );
+  });
+
+  test('the area records where the outgoing area is proven to end', () => {
+    expect(__testing.frameOf('uw', fn('uw', UW), PPC_MWCC, returns)).toMatchObject({
+      area: { from: 8 },
+      outgoingEnd: 8,
+    });
+    const declared: Prototypes = {
+      g: { params: ['s32 *', 's32', 's32', 's32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+      h: { params: ['s32'], returnsVoid: true },
+    };
+    expect(
+      __testing.frameOf(
+        'uw',
+        fn(
+          'uw',
+          UW.filter((l) => !l.startsWith('lwz     r3,8')),
+        ),
+        PPC_MWCC,
+        declared,
+      ),
+    ).toMatchObject({ outgoingEnd: 8 });
   });
 });
