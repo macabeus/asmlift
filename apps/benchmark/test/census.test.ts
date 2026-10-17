@@ -61,6 +61,10 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
     );
     expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([
       'pokeemerald:CreateBattleTowerMon:agbcc  unsigned/unreduce',
+      // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
+      'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
+      'synthetic:sw_h4:mwcc_242_81  signed/unreduce',
+      'synthetic:sw_h5:mwcc_242_81  signed/unreduce',
       // a jump-table loop whose case stores index `p` by the counter, as its source does
       'synthetic:sw_jtloop:mwcc_242_81  signed/unreduce',
       // the same loop with a call after the switch
