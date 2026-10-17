@@ -10575,6 +10575,19 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct P { int a, b, c; };\nstruct P ownar_sret(int, int, int);',
     proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
   },
+  // The same shape declared by a count whose stated return is a typedef this cannot show a scalar:
+  // `{params: 3}` may count the C parameters, so the bound keeps a word for the return pointer,
+  // and read as 3 registers, `z` would read as an uninitialised local.
+  {
+    sym: 'ownar_sretcnt',
+    src:
+      'typedef struct P { int a, b, c; } Pt;\n' +
+      'Pt ownar_sretcnt(int x, int y, int z){ Pt p; p.a = z; p.b = x; p.c = y + 1; return p; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'typedef struct P { int a, b, c; } Pt;\nPt ownar_sretcnt(int, int, int);',
+    proto: { ownar_sretcnt: { params: 3, returns: 'Pt' } },
+  },
   // The hidden return pointer comes FIRST, so O32's even-word rule counts it: `x` skips a1 and
   // takes a2:a3. Laid out after the declared words, the bound would be 3 and a3 (half of x) an
   // uninitialised local. agbcc aligns nothing and passes x in r1:r2.
