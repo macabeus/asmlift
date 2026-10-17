@@ -354,15 +354,12 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *
  *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
  *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
- *  copy of the declaration. A COUNT IS ARGUMENT REGISTERS, as `FnProto.params` defines it and as
- *  the call side reads it (`frontend/call-plan.ts`), so a C function's `{params: 2}` is two words
- *  whether it is called or decompiled; but a count may also be a count of C parameters, which
- *  leaves out a hidden word in argument 0, and the bound takes the larger reading wherever that
- *  word may be there (`ownArguments`): `this` on a symbol that may name a method, the return
- *  pointer where a stated return is not shown a scalar, and never fewer words than a mangled
- *  symbol records. Where the target puts a 64-bit parameter at an even word, a count is laid out
- *  as the registers that span the most words (`countedWordsAtMost`), because it does not say
- *  where its pairs fall. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
+ *  copy of the declaration. A COUNT IS LAID OUT AT ITS WIDEST (`ownArguments`), because it is
+ *  ambiguous: `FnProto.params` and the call side (`frontend/call-plan.ts`) read it as argument
+ *  registers, but a header's count is of C parameters, and a C parameter may be a pair. So each of
+ *  its N is a 64-bit pair, at an even word where the target aligns one, behind the hidden words a
+ *  typed list may need; 2N words cover N registers too, and never fewer words than a mangled
+ *  symbol records. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
  *  unsized spelling (which may be two words), a struct passed by value (sized by a layout this
  *  does not read), a `long double`; on a count for a name mangled in a form `demangle` does not
  *  read, whose parameters may be wider than the count; and on a constructor or destructor, which
@@ -382,41 +379,7 @@ export function ownArgumentWords(
   // passes the struct pointer in a0, skips a1 and passes `x` in a2:a3 — 4 words, where `1 +
   // wordsOf([64])` says 3 and turns a3 into `uninit_a3`. The call side counts the same way
   // (`frontend/call-plan.ts`, `[32, ...params]`).
-  const laid = wordsOf([...Array.from({ length: own.hidden }, () => 32), ...own.widths], target);
-  return own.count === undefined ? laid : Math.max(laid, countedWordsAtMost(own.hidden, own.count, target));
-}
-
-/** THE MOST WORDS `count` ARGUMENT REGISTERS CAN SPAN after `hidden` words, on a target that puts a
- *  64-bit parameter at an even word. A count says how many registers the parameters fill, not
- *  which of them are pairs, and each pair that lands on an odd word skips one first: O32's `int
- *  f(int a, long long b)` fills 3 registers, a0 and a2:a3, and spans 4; mwcc's `int f(int a, long
- *  long b, int c)` fills 4 and spans 5 (r3, r5:r6, r7). Laid out as 32-bit words, the count would
- *  turn the last register into `uninit_<reg>`. So the bound takes the layout that skips the most:
- *  every way of splitting the count into words and pairs, of which only the parity of the word
- *  reached decides what a later pair skips, so the furthest word per parity is all a step keeps.
- *  Where nothing is aligned, the count is the words. */
-function countedWordsAtMost(
-  hidden: number,
-  count: number,
-  target: Pick<TargetDescription, 'evenWordAlignedArgs'>,
-): number {
-  if (target.evenWordAlignedArgs !== true) {
-    return hidden + count;
-  }
-  // furthest[k][parity]: the furthest word k registers reach ending at that parity, -1 for none
-  const furthest: [number, number][] = [hidden % 2 === 0 ? [hidden, -1] : [-1, hidden]];
-  for (let k = 1; k <= count; k++) {
-    const row: [number, number] = [-1, -1];
-    const reach = (w: number) => {
-      row[w % 2] = Math.max(row[w % 2], w);
-    };
-    furthest[k - 1].filter((w) => w >= 0).forEach((w) => reach(w + 1));
-    if (k >= 2) {
-      furthest[k - 2].filter((w) => w >= 0).forEach((w) => reach(w + (w % 2) + 2));
-    }
-    furthest.push(row);
-  }
-  return Math.max(...furthest[count]);
+  return wordsOf([...Array.from({ length: own.hidden }, () => 32), ...own.widths], target);
 }
 
 /** WHETHER THE OWN DECLARATION SAYS THE CALLER FILLS ARGUMENT 0, asked of a function that RETURNS A
@@ -448,44 +411,40 @@ export function ownFirstArgumentPassed(
  *  constructor or destructor, `false` for a free function, `undefined` for a symbol that only may
  *  be a method).
  *
- *  A COUNT IS READ AS REGISTERS, but never below a reading that keeps more words, because a count
- *  too low is the error that costs wrong C: a count of a method's C parameters (`get__3Fooii`
- *  `{params: 2}`) or of a struct-returning function's (`Pt mk(int, int, int)` `{params: 3, returns:
- *  "Pt"}`) leaves out the hidden word in argument 0, and the last real parameter would become
- *  `uninit_<reg>`. The two readings cannot be told apart from the entry, so a count is bounded by
- *  the larger one: `this` is added where the symbol may name a method (and a constructor or
- *  destructor abstains, its flag unbounded), the return pointer where `returns` is STATED, or
- *  `returnsVoid: false` says there is one, and not shown a scalar or `void` (as a typed list reads
- *  it; a count that states nothing of its return is its registers, so `uninit_spill` `{params: 2}`
- *  stays two), and the parameters the mangled symbol records where they lay out to more words
- *  than the count. `count` is the count itself, which `ownArgumentWords` lays out at its widest. */
+ *  A COUNT IS LAID OUT AT ITS WIDEST, because a count too low is the error that costs wrong C and
+ *  a count does not say what it counts: argument registers (`FnProto.params`), or C parameters, of
+ *  which any may be a `long long` or `double` pair and none states the hidden word in argument 0.
+ *  So each counted parameter is a pair, `this` is added where the symbol may name a method (and a
+ *  constructor or destructor abstains, its flag unbounded), the return pointer wherever the return
+ *  is not shown a scalar or `void`, as a typed list reads it, and the parameters the mangled symbol
+ *  records where they lay out to more words still. `uninit_spill` `{params: 2}` is therefore 5
+ *  words on agbcc and 6 on O32, past every argument register: the bound a count gives up is the
+ *  price of reading it soundly. */
 function ownArguments(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
-): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined; count?: number } | undefined {
+): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
   const implicit = implicitArgumentWords(name);
   if (typeof p?.params === 'number') {
     if (!Number.isInteger(p.params) || p.params < 0 || implicit === undefined) {
       return undefined;
     }
-    // a declaration that says the function returns a value and not which keeps the possible
-    // struct pointer, as a typed list does: `{params: 3, returnsVoid: false}` on `Pt mk(int, int,
-    // int)` passes z in argument 3
-    const nonVoid = p.returns !== undefined || p.returnsVoid === false;
-    const hidden = (nonVoid && !showsScalarReturn(p) ? 1 : 0) + implicit;
+    // the struct pointer a return not shown scalar may take, as a typed list reads it: `{params:
+    // 3, returnsVoid: false}` on `Pt mk(int, int, int)` passes z in argument 3
+    const hidden = (showsScalarReturn(p) ? 0 : 1) + implicit;
     const passesThis = implicit === 0 ? false : undefined;
-    const counted = Array.from({ length: p.params }, () => 32);
-    const count = p.params;
+    // `int f(int a, long long b)` `{params: 2}` passes b in a2:a3 / r5:r6 / r1:r2
+    const counted = Array.from({ length: p.params }, () => 64);
     if (demangle(name) === null) {
       // A name mangled in a form `demangle` does not read — a CodeWarrior const method
       // (`get__3FooCFix`), a gcc 2 method (`get__3Fooix`), a reference parameter — records
-      // parameters this cannot lay out, and a count of them may leave out the 64-bit one's second
-      // word: `{params: 2}` on `int Foo::get(int, long long) const` takes r3..r6 on mwcc.
+      // parameters this cannot lay out, and a count of them may leave out a word (the parameter
+      // codes this does not read include by-value classes).
       if (implicit === 1 || demangledName(name) !== null || /__[CV]*F/.test(name)) {
         return undefined;
       }
-      return { widths: counted, hidden, passesThis, count };
+      return { widths: counted, hidden, passesThis };
     }
     // the compiler's own copy of the parameter list; one this cannot lay out may be the longer
     const recorded = ownParamWidths(name, undefined, target);
@@ -494,7 +453,7 @@ function ownArguments(
     }
     const lead = Array.from({ length: hidden }, () => 32);
     const longer = wordsOf([...lead, ...recorded], target) > wordsOf([...lead, ...counted], target);
-    return { widths: longer ? recorded : counted, hidden, passesThis, count };
+    return { widths: longer ? recorded : counted, hidden, passesThis };
   }
   const widths = ownParamWidths(name, p ?? undefined, target);
   if (widths === undefined) {

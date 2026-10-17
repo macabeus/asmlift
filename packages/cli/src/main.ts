@@ -144,15 +144,13 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    fill is read as an uninitialised local, and a stack
                    argument past them refuses. Both a count and a typed list
                    add a word for a hidden struct-return pointer unless
-                   "returns" shows a scalar or void (a count that states
-                   neither "returns" nor "returnsVoid":false adds none), and
-                   one for a C++ method's this, read off a mangled name; a
-                   count is never read as fewer words than the mangled name
-                   records, and bounds nothing on a mangled name it cannot
-                   read. A count is otherwise the argument registers, a
-                   double or long long as two, laid out where they skip the
-                   most words on a target that aligns a pair (MIPS O32,
-                   PowerPC EABI); a constructor or destructor bounds
+                   "returns" shows a scalar or void, and one for a C++
+                   method's this, read off a mangled name. A count may mean
+                   registers or C parameters, so each of its params is read
+                   as a possible long long or double pair, and never as fewer
+                   words than the mangled name records; it bounds nothing on
+                   a mangled name it cannot read. A typed list gives the
+                   tighter bound. A constructor or destructor bounds
                    nothing. A variadic function's entry must state its fixed
                    parameters as "variadicParams": a params list or count
                    bounds what the ... takes too. A callee returning a struct or union by value
