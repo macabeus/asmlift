@@ -120,7 +120,15 @@ export interface LoopHazards {
     gates?: readonly Gate<SinkCandidate>[],
     staleOnZeroTrip?: (slot: number) => boolean,
   ): Map<number, Op | null>;
-  sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
+  /** `through`: the values whose defining op may be read through (ir/entry.ts `EntryReading`);
+   *  every value when absent. */
+  sameAtEntry(
+    a: Value,
+    b: Value,
+    entry: Map<Value, Value>,
+    negated?: boolean,
+    through?: (v: Value) => boolean,
+  ): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
   loopWriteSetAhead(ahead: Iterable<Block>, incoming: (b: Block) => Value[][], header: Block): Set<string>;
 }
@@ -1011,7 +1019,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     testSkipsAnEffect,
     preUpdateCondFold,
     sinkablePreUpdateSlots,
-    sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, { entry }, negated),
+    sameAtEntry: (a, b, entry, negated = false, through = undefined) =>
+      sameAtEntry(defs, a, b, through ? { entry, through } : { entry }, negated),
     loopWriteSet,
     loopWriteSetAhead,
   };

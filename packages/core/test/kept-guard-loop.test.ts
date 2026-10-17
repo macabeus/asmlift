@@ -340,3 +340,38 @@ const AFTER_A_NESTED_GUARDED_LOOP = `fn nested {
 test('a zero-trip read after a nested guarded loop still declines', () => {
   expect(() => emit(AFTER_A_NESTED_GUARDED_LOOP)).toThrow(ZERO_TRIP);
 });
+
+// A CALL IN THE GUARD IS NOT THE LOOP'S TEST BECAUSE IT CALLS THE SAME FUNCTION. The loop tests
+// `v < v` over the result `%2` of a call the entry block made once; the guard tests `v < f0(a0)`, a
+// second call. Read through both calls, the two compares look alike, and fusion deleted the guard
+// and with it the call `f0(a0)` and the test. A call is read through only where it runs at its own
+// test, so the guard is kept, and so is the call.
+const CALL_IN_THE_GUARD = `fn callguard {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="f0"}
+  %3: s32 = sub %1, %2
+  %6: u32 = icmp_slt %3, %0
+  cond_br %6, ^bb1(), ^bb3()
+^bb1():
+  %7: s32 = call %0 {target="f0"}
+  %8: u32 = icmp_slt %2, %7
+  cond_br %8, ^bb2(), ^bb3()
+^bb2():
+  %11: u32 = icmp_slt %2, %2
+  cond_br %11, ^bb2(), ^bb3()
+^bb3():
+  %12: s32 = call %1 {target="f0"}
+  ret %1
+}
+`;
+
+test('a guard whose call only looks like the loop test keeps its `if` and its call', () => {
+  const fn = parse(CALL_IN_THE_GUARD);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn);
+  expect(cBackend.emit(tree)).toContain('if (v0 < (s32)f0(a0)) {');
+  const r = irAgreement(CALL_IN_THE_GUARD, tree, SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});

@@ -5948,6 +5948,18 @@ export function structure(
         li.header.params.forEach(
           (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
         );
+        // A CALL IS ONE EVALUATION. Read through, it equals another call of one callee on the same
+        // operands only where each runs at its own test: the guard's in the guard, the loop's in the
+        // header or its preheader, so that the `while`'s first test is the evaluation that replaces
+        // the guard's. Read through anywhere else — a call the function made once, ahead of both,
+        // whose result the loop's test names — a cached result would equal a fresh call, and fusion
+        // would delete the fresh one with the guard (`if (v < f(a)) do {} while (v < v)` lost the
+        // `f(a)`: the kept-guard do-while fuzz at depth 1, seed 2898).
+        const evaluatedAtTest = (v: Value): boolean => {
+          const d = defs.get(v);
+          const at = d === undefined ? undefined : opBlock.get(d);
+          return d === undefined || !effectful(d) || at === b || at === li.header || at === li.preheader;
+        };
         // (1) Is the guard PROVABLY the loop's own test? Fusing DELETES it and lets the `while`
         // re-test, so an unproven fuse would lose the `if` outright and run a loop the source
         // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
@@ -5962,7 +5974,13 @@ export function structure(
         // no row needs that yet, so it stays keyed on the proof.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
-        const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
+        const guardProven = sameAtEntry(
+          hterm.operands[0],
+          term.operands[0],
+          entryVals,
+          enterIsTaken !== contIsTaken,
+          evaluatedAtTest,
+        );
         // Fused `while` additionally requires a header free of MATERIALIZED defs: their temps are
         // assigned only inside the body (sideEffects), and an un-rotated `while` condition renders
         // BEFORE the body ever ran — reading a temp uninitialized on the first test. The kept-guard
@@ -5983,7 +6001,7 @@ export function structure(
               sub,
               updateWrites,
               hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
-              (j) => !sameAtEntry(hexitArgs[j], guardExit.args[j] as Value, entryVals),
+              (j) => !sameAtEntry(hexitArgs[j], guardExit.args[j] as Value, entryVals, false, evaluatedAtTest),
             )
           : new Map<number, Op | null>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
@@ -5991,7 +6009,7 @@ export function structure(
         // what the guard→exit edge carries, since that edge is dropped. A sunk slot is exempt: its
         // seed and its body copy cover the two paths separately.
         const staleExit = hexitArgs.findIndex(
-          (a, j) => !sunk.has(j) && !sameAtEntry(a, guardExit.args[j] as Value, entryVals),
+          (a, j) => !sunk.has(j) && !sameAtEntry(a, guardExit.args[j] as Value, entryVals, false, evaluatedAtTest),
         );
         if (staleExit >= 0) {
           throw new StructureError(
