@@ -11353,6 +11353,45 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void break_value(void);',
     proto: { break_value: { returnsVoid: true } },
   },
+  // A SWITCH IN A LOOP, WHOSE BREAK JOIN IS THE LOOP'S INCREMENT: the MIPS compilers fill a likely
+  // branch's slot with its target's first word, the `i++` (`bnezl at,T; addiu v0,v0,4`, the same
+  // `addiu` at T-4). ido's arm branch and KMC's bounds `beqzl` are both that shape, and they pin
+  // the retarget to T-4 that keeps the arm on the switch's join: without it ido's arms do not
+  // linearize, and KMC's bounds branch cannot annul its slot. GCC 2.7.2's likely skips only its own
+  // slot here, and agbcc and mwcc_242_81 have no likely branch: controls of the same source.
+  {
+    sym: 'sw_h3',
+    src:
+      's32 sw_h3(s32 x, s32 *p)\n{\n    s32 i;\n    s32 s = 0;\n    for (i = 0; i < x; i++) {\n' +
+      '        switch (p[i]) {\n        case 0: s += 1; break;\n        case 2: s += 5; break;\n' +
+      '        case 5: if (s > 9) { s = 0; } break;\n        case 6: s -= 4; break;\n' +
+      '        case 7: s *= 2; break;\n        }\n    }\n    return s;\n}',
+    features: ['array'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 's32 sw_h3(s32 x, s32 *p);',
+  },
+  {
+    sym: 'sw_h4',
+    src:
+      's32 sw_h4(s32 x, s32 *p)\n{\n    s32 i;\n    s32 s = 0;\n    for (i = 0; i < x; i++) {\n' +
+      '        switch (p[i]) {\n        case 0: s += 1; break;\n        case 2: s += 5; break;\n' +
+      '        case 5: s ^= 3; break;\n        case 6: s -= 4; break;\n' +
+      '        case 7: s *= 2; break;\n        }\n    }\n    return s;\n}',
+    features: ['array'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 's32 sw_h4(s32 x, s32 *p);',
+  },
+  {
+    sym: 'sw_h5',
+    src:
+      's32 sw_h5(s32 x, s32 *p)\n{\n    s32 i;\n    s32 s = 0;\n    for (i = 0; i < x; i++) {\n' +
+      '        switch (p[i]) {\n        case 0: s += 1; break;\n        case 2: s += 5; break;\n' +
+      '        case 5: if (s > 9) { s = 0; } break;\n        case 6: s -= 4; break;\n' +
+      '        case 7: s *= 2; if (s > 100) { s = 1; } break;\n        }\n    }\n    return s;\n}',
+    features: ['array'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 's32 sw_h5(s32 x, s32 *p);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
