@@ -164,6 +164,13 @@ test('a write to r1 refuses, by any instruction, rather than lifting as a droppe
   expect(one('lbz     r1,4(r3)')).toThrow(/writes the stack pointer r1/);
   expect(one('lwzx    r1,r3,r4')).toThrow(/writes the stack pointer r1/);
   expect(one('mr      r1,r3')).toThrow(/'mr r1,r3' at 0x0 writes the stack pointer r1/);
+  // only `addi r1,r1,N` is the frame teardown; an add into r1 from another register is a write
+  expect(one('addi    r1,r3,0')).toThrow(/'addi r1,r3,0' at 0x0 writes the stack pointer r1/);
+  expect(one('addi    r1,r3,16')).toThrow(/writes the stack pointer r1/);
+  expect(one('addic   r1,r3,0')).toThrow(/writes the stack pointer r1/);
+  expect(() =>
+    dis('walk', ['   0:\tstwu    r1,-16(r1)', '   4:\taddi    r1,r3,0', '   8:\tli      r3,7', '   c:\tblr']),
+  ).toThrow(/'addi r1,r3,0' at 0x4 writes the stack pointer r1/);
 });
 
 test('a write to a small-data base refuses, rather than leaving later small-data accesses unmoved', () => {

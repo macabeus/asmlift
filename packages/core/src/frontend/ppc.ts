@@ -2630,7 +2630,9 @@ function liftOnce(
           // The STACK POINTER first, before any fold looks at the operands. `addi r1,r1,N` is frame
           // teardown and is skipped; a relocation on it is no known compiler's output, and folding
           // one would write an address into r1 and let the function lift as if the teardown had
-          // happened — silent, and about the frame rather than the value.
+          // happened — silent, and about the frame rather than the value. Only `addi r1,r1,N` is the
+          // teardown: `addi r1,r3,N` sets r1 to another register's value, and falls through to
+          // `write`, which refuses it like any other write to the stack pointer.
           if (d === 'r1') {
             if (ins.reloc) {
               throw new PpcUnsupportedError(
@@ -2638,7 +2640,9 @@ function liftOnce(
                   `adjust — an address built in r1 is not a shape this frontend models`,
               );
             }
-            break;
+            if (s === 'r1') {
+              break;
+            }
           }
           // A capture, `addi rD,r1,k`, is the `laddr` of the local area's offset k, where the frame
           // has one (`measurePpcFrame`); without one it reaches `read`'s r1-as-data refusal. A capture
