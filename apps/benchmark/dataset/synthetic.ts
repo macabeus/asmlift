@@ -10502,11 +10502,10 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int ownar_spill(int, int *);',
     proto: { ownar_spill: { params: ['int', 'int *'], returns: 'int' } },
   },
-  // A BARE COUNT bounds nothing here, and this row is the witness that it costs no wrong C: a count
-  // may mean registers or C parameters, and either parameter may be a pair, so `{params: 2}` is
-  // laid out as two pairs behind a possible struct pointer, past every argument register on agbcc
-  // and O32. KMC's and gcc 2.7.2's a2 home stays a made-up parameter, as with no declaration; the
-  // typed `ownar_spill` above is the row the bound pins.
+  // A BARE COUNT BOUNDS NOTHING on the function's own entry: it may count argument registers or C
+  // parameters, and a C parameter may span any number of words. This row is the witness that a
+  // count lifts exactly as with no declaration: KMC's and gcc 2.7.2's a2 home stays a made-up
+  // parameter. The typed `ownar_spill` above is the row the bound pins.
   {
     sym: 'ownar_count',
     src:
@@ -10577,10 +10576,9 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct P { int a, b, c; };\nstruct P ownar_sret(int, int, int);',
     proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
   },
-  // The same shape declared by a count whose stated return is a typedef this cannot show a scalar:
-  // the bound keeps a word for the return pointer and reads each counted parameter as a possible
-  // pair, so `z` stays a parameter (read as 3 registers from argument 0, it was an uninitialised
-  // local).
+  // The same shape declared by a count with a typedef return: a witness that the count lifts as
+  // with no declaration, so `z` stays a parameter (a count read as 3 registers from argument 0 made
+  // it an uninitialised local).
   {
     sym: 'ownar_sretcnt',
     src:
@@ -10604,15 +10602,12 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct P { int a, b, c; };\nstruct P ownar_sretdbl(double);',
     proto: { ownar_sretdbl: { params: ['double'] } },
   },
-  // A COUNT DOES NOT SAY WHERE ITS PAIRS FALL, and O32 and the PowerPC EABI put a 64-bit
-  // parameter at an even word, skipping one: `(int, long long, int)` fills 4 registers and spans 5
-  // (a0, a2:a3 and stack word 4 on O32; r3, r5:r6 and r7 on mwcc), and O32's `(int, double)` fills
-  // 3 and spans 4. A count laid out as words is one short: mwcc's c in r7 and O32's low half of b
-  // in a3 become uninitialised locals, and O32's c refuses as a stack argument past the
-  // declaration. Each counted parameter is laid out as a possible pair, so these lift as with no
-  // declaration. A typed list of the same parameters refuses on the 64-bit split
-  // (raise/pairparams.ts), so a count is what these rows can state. agbcc aligns nothing and is
-  // the control.
+  // A COUNT DOES NOT SAY WHERE ITS PAIRS FALL: O32 and the PowerPC EABI put a 64-bit parameter at
+  // an even word, so `(int, long long, int)` fills 4 registers and spans 5 words, and O32's `(int,
+  // double)` fills 3 and spans 4. A bound read off the count turned mwcc's c in r7 and O32's low half
+  // of b in a3 into uninitialised locals. A count bounds nothing, and these rows are the witnesses
+  // that they lift exactly as with no declaration. A typed list of the same parameters refuses on the
+  // 64-bit split (raise/pairparams.ts). agbcc aligns nothing and is the control.
   {
     sym: 'ownar_cntll',
     src: 'int ownar_cntll(int a, long long b, int c){ return a * 3 + (int)b - c; }',
