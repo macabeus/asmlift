@@ -422,6 +422,26 @@ export function oracleFor(
         `none of this row's authored facts were checked (real tier: re-run \`bench vendor\`)`;
 }
 
+/** The argument registers a compiled parameter list fills, a `long long` or `double` as two, or
+ *  `undefined` where a parameter is one this cannot size (a struct by value). */
+function registerCount(params: readonly string[]): number | undefined {
+  const widthOf = (t: string) => (t === 'double' ? 64 : t === 'float' ? 32 : declaredWidth(t));
+  let n = 0;
+  for (const p of params) {
+    const t = normParam(p)
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // the compiled list carries its parameter names: `long long b`
+    const width = widthOf(t) ?? widthOf(t.replace(/\s+\w+$/, ''));
+    if (width === undefined) {
+      return undefined;
+    }
+    n += width > 32 ? 2 : 1;
+  }
+  return n;
+}
+
 /** Every way one row's `proto` — the table asmlift receives — contradicts the function the
  *  compiler actually saw. Tier-agnostic: `tu` is the compiled text, whatever produced it.
  *
@@ -470,7 +490,10 @@ export function protoFactProblems(
   }
   if (own?.params !== undefined) {
     const declared = typeof own.params === 'number' ? own.params : own.params.length;
-    if (declared !== oracle.params.length) {
+    // a count may also be the argument registers, as `FnProto.params` defines it: `(int, long
+    // long, int)` fills 4
+    const registers = typeof own.params === 'number' ? registerCount(oracle.params) : undefined;
+    if (declared !== oracle.params.length && declared !== registers) {
       problems.push(
         `${where}: proto declares ${declared} parameter(s), the compiled function takes ${oracle.params.length}`,
       );
