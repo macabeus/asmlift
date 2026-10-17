@@ -358,7 +358,7 @@ test('a zero-trip read after a nested guarded loop still declines', () => {
 // `v < v` over the result `%2` of a call the entry block made once; the guard tests `v < f0(a0)`, a
 // second call. Read through both calls, the two compares look alike, and fusion would delete the
 // guard and with it the call `f0(a0)` and the test. A call is read through only where it runs at
-// its own test, so the guard is kept, and so is the call.
+// its own test, with no effect between it and the test, so the guard is kept, and so is the call.
 const CALL_IN_THE_GUARD = `fn callguard {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = call %0 {target="f0"}
@@ -387,4 +387,65 @@ test('a guard whose call only looks like the loop test keeps its `if` and its ca
   const r = irAgreement(CALL_IN_THE_GUARD, tree, SEEDS);
   expect(r.judged).toBe(SEEDS.length);
   expect(r.disagree).toBe(0);
+});
+
+// THE BLOCK IS NOT THE POSITION. Both guards below sit in the block the loop's cached value was
+// computed in, so a check by block alone reads that value through. In the first, two calls of `f`
+// run back to back and the loop tests the first one's result; in the second, a load runs, then a
+// call that may change what it read, then the guard's reload (`v = *p; g(); if (i < *p) do {}
+// while (i < v)`, which ido7.1 compiles to this shape once the stolen slot is retargeted). Each
+// value is an evaluation at one point, read through only where no effect runs between it and the
+// test, so the guard is kept, with its call or its reload.
+const TWO_CALLS_IN_THE_GUARD = `fn call2 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="f"}
+  %3: s32 = call %0 {target="f"}
+  %4: u32 = icmp_slt %1, %3
+  cond_br %4, ^bb1(%1), ^bb2(%1)
+^bb1(%6: s32):
+  %7: s32 = call %6 {target="h"}
+  %8: s32 = const {value=1}
+  %9: s32 = add %6, %8
+  %10: u32 = icmp_slt %9, %2
+  cond_br %10, ^bb1(%9), ^bb2(%9)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+const A_LOAD_BEFORE_A_CALL = `fn ldcall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = load %0 {off=0, width=4, signed=1}
+  %3: s32 = call {target="f"}
+  %4: s32 = load %0 {off=0, width=4, signed=1}
+  %5: u32 = icmp_slt %1, %4
+  cond_br %5, ^bb1(%1), ^bb2(%1)
+^bb1(%6: s32):
+  %7: s32 = call %6 {target="h"}
+  %8: s32 = const {value=1}
+  %9: s32 = add %6, %8
+  %10: u32 = icmp_slt %9, %2
+  cond_br %10, ^bb1(%9), ^bb2(%9)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+test("a guard in the cached value's own block keeps its `if` and its second call", () => {
+  const fn = parse(TWO_CALLS_IN_THE_GUARD);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn);
+  expect(cBackend.emit(tree)).toContain('if (v1 < (s32)f(a0)) {');
+  const r = irAgreement(TWO_CALLS_IN_THE_GUARD, tree, SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});
+
+// The IR interpreter models no memory, so this one is pinned on its text: the reload stays in the
+// guard, and the loop tests the value read before the call.
+test("a guard in the cached value's own block keeps its `if` and its reload after a call", () => {
+  const c = emit(A_LOAD_BEFORE_A_CALL);
+  expect(c).toContain('if (v1 < *(s32 *)a0) {');
+  expect(c).toContain('} while (v1 < v0);');
 });
