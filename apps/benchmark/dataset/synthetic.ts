@@ -10947,10 +10947,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     (`upd_scopy`, `upd_gcopy` of 72 bytes; `upd_scopy0` of 80 at -O0,p). Into a LOCAL
   //     (`upd_lcopy`) the destination base is `addi r5,r1,4`, a word below the object, and the
   //     stores step it: the frame-object audit refuses that capture, and the row declines rather
-  //     than guess an object.
-  // No CodeWarrior row here matches yet, and that is not this capability's gap: an unrolled chain
-  // needs its loop RE-ROLLED (the flat `if (gTab[1] == 0x1C) …` spelling compiles to `lbz D(r3)`
-  // with no update form), a constant chain is spelled `(u32)&gTab + 2 + 1 + 1`, and a copy loop
+  //     than guess an object;
+  //   • a PRE-INCREMENT pointer walk, at -O4,p on every build: `*++p` is one `lbzu` in the loop body,
+  //     its base a loop-carried phi (`upd_skipsp`, `upd_slen`), and `*++d = *++s` an `lbzu` and an
+  //     `stbu` whose stored value the loop then tests (`upd_scpy`, MSL's `strcpy` shape). A
+  //     post-increment walk (`while (*p++)`) emits none.
+  // The pre-increment walks match on CodeWarrior and the rest do not yet, which is not this
+  // capability's gap: an unrolled chain needs its loop RE-ROLLED (the flat `if (gTab[1] == 0x1C) …`
+  // spelling compiles to `lbz D(r3)` with no update form), a constant chain is spelled `(u32)&gTab + 2 + 1 + 1`, and a copy loop
   // wants a struct assignment recovered from it. Before `withUpdate` every mwcc row here holding an
   // update form declined. The same sources on agbcc, ido7.1 and gcc2.7.2kmc are the controls,
   // which have no update form to emit.
@@ -10988,6 +10992,31 @@ export const SYNTHETIC: SynthSpec[] = [
           toolchains: [...toolchains],
           ...(cflags ? { cflags } : {}),
           ctx: 's32 upd_pscan(u8 *p, u8 x);',
+        },
+        {
+          sym: 'upd_skipsp',
+          src: "u8 *upd_skipsp(u8 *p)\n{\n    while (*++p == ' ') {\n    }\n    return p;\n}",
+          features: ['pointer', 'compare'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'u8 *upd_skipsp(u8 *p);',
+        },
+        {
+          sym: 'upd_slen',
+          src: 's32 upd_slen(u8 *s)\n{\n    u8 *p = s - 1;\n    while (*++p) {\n    }\n    return p - s;\n}',
+          features: ['pointer', 'arithmetic'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 's32 upd_slen(u8 *s);',
+        },
+        {
+          sym: 'upd_scpy',
+          src: 'void upd_scpy(u8 *d, u8 *s)\n{\n    d--;\n    s--;\n    while ((*++d = *++s) != 0) {\n    }\n}',
+          features: ['pointer', 'store'],
+          toolchains: [...toolchains],
+          ...(cflags ? { cflags } : {}),
+          ctx: 'void upd_scpy(u8 *d, u8 *s);',
+          proto: { upd_scpy: { returnsVoid: true } },
         },
         ...(
           [
