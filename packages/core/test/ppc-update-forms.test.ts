@@ -166,6 +166,17 @@ test('a write to r1 refuses, by any instruction, rather than lifting as a droppe
   expect(one('mr      r1,r3')).toThrow(/'mr r1,r3' at 0x0 writes the stack pointer r1/);
 });
 
+test('a write to a small-data base refuses, rather than leaving later small-data accesses unmoved', () => {
+  // An access through r13 or r2 is read off its relocation, so a write to the base would vanish and
+  // `gx` below would still read as `gx`.
+  const sda = (line: string) => () =>
+    dis('walk', [`   0:\t${line}`, '   4:\tlwz     r3,0(0)', '\t\t\t6: R_PPC_EMB_SDA21\tgx', '   8:\tblr']);
+  expect(sda('lwzu    r13,4(r3)')).toThrow(/'lwzu r13,4\(r3\)' at 0x0 writes the small-data base r13/);
+  expect(sda('lbzu    r2,1(r3)')).toThrow(/'lbzu r2,1\(r3\)' at 0x0 writes the small-data base r2/);
+  expect(sda('lwz     r13,4(r3)')).toThrow(/writes the small-data base r13/);
+  expect(sda('mr      r2,r4')).toThrow(/writes the small-data base r2/);
+});
+
 // What the ISA says, spelled out without the expansion `writtenOut` shares with the decode: the
 // access is at rA + D, and the base holds rA + D AFTER it, for the next access and as a value.
 test('an update form accesses rA + D and leaves rA + D in its base', () => {

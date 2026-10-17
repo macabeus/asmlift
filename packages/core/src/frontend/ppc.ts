@@ -1268,8 +1268,8 @@ function liftOnce(
   // waits on the fold. Saying which one a row hit is the whole value of the message.
   //
   // An update form is decoded as the `addi` that advances its base and then the plain access
-  // (`withUpdate` in `decode`); a refusal of that `addi`'s relocation names the instruction the
-  // listing holds, not the `addi` it was decoded through.
+  // (`withUpdate` in `decode`); a refusal of that `addi`'s relocation, or of either one's write
+  // (`write`), names the instruction the listing holds, not the one it was decoded through.
   const decodedFrom = new WeakMap<Instr, Instr>();
   const relocSite = (at: Instr) => {
     const ins = decodedFrom.get(at) ?? at;
@@ -1969,15 +1969,28 @@ function liftOnce(
     // (`lwz r1,4(r3)` in a longjmp, `mr r1,r10` in a context switch, `lwzu r1,4(r3)`) would land in
     // an SSA variable nothing reads, since a read of r1 is refused as data (`read`), and the lift
     // would drop the write: a load into r1 would become a discarded volatile read. So it refuses.
+    // THE SMALL-DATA BASES ARE NONE EITHER, for the same reason one step removed: an access through
+    // r13 or r2 is read off its `R_PPC_EMB_SDA21` relocation (`sdaAccess`), never off the register,
+    // so a write to either (`lwzu r13,4(r3)`, `mr r2,r4`) would be dropped and every later small-data
+    // access would still name its symbol as if the base had not moved.
     const write = (r: string, v: Value) => {
+      // the instruction the listing holds, not the plain access an update form is decoded through
+      const by = () => {
+        const listed = decoding === null ? null : (decodedFrom.get(decoding) ?? decoding);
+        return listed === null
+          ? 'an instruction'
+          : `'${listed.mnemonic} ${listed.ops.join(',')}' at 0x${listed.addr.toString(16)}`;
+      };
       if (r === 'r1') {
-        const by =
-          decoding === null
-            ? 'an instruction'
-            : `'${decoding.mnemonic} ${decoding.ops.join(',')}' at 0x${decoding.addr.toString(16)}`;
         throw new PpcUnsupportedError(
-          `cannot lift '${name}': ${by} writes the stack pointer r1 — only the frame push, 'addi r1,r1,N' ` +
+          `cannot lift '${name}': ${by()} writes the stack pointer r1 — only the frame push, 'addi r1,r1,N' ` +
             `and the back-chain reload move r1 here, and the value it would take is not one this lift tracks`,
+        );
+      }
+      if (SMALL_DATA_BASES.includes(r)) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${by()} writes the small-data base ${r} — a small-data access is read ` +
+            `off its relocation, not off the register, so a moved base is not one this lift tracks`,
         );
       }
       writeVar(r, bi, v);
@@ -2380,7 +2393,9 @@ function liftOnce(
         const advance: Instr = { ...ins, mnemonic: 'addi', ops: [base, base, String(off)] };
         decodedFrom.set(advance, ins);
         decode(advance);
-        decode({ addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] });
+        const access: Instr = { addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] };
+        decodedFrom.set(access, ins);
+        decode(access);
         // The `addi` took the relocation or threw, at its own choke point.
         relocTaken = true;
       };

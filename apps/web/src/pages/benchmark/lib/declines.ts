@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 251 distinct decline messages (the texts reached by
+// `packages/core/src` throws 252 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -282,7 +282,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // placeholder are the same capability. Its one corpus inhabitant is `synthetic:tax_gprel`,
     // because every MIPS toolchain's canonical set turns small data off (`TOOLCHAIN_TARGETS` in
     // `packages/core/src/target.ts`: `-non_shared -G 0`, `-mno-abicalls -fno-PIC -G 0`) — a flag
-    // choice rather than a shape the toolchain cannot emit. That row sets `-G 8`.
+    // choice rather than a shape the toolchain cannot emit. That row sets `-G 8`. A WRITE to r13 or
+    // r2 (`ppc.ts` `writes the small-data base`) is the same gap from the other side: a moved base
+    // no relocation-read access would follow.
     key: 'pic-globals',
     label: 'Small-data globals (gp-relative / GPREL / an SDA base with no relocation)',
     // One alternative per producer, each the whole phrase that site emits. Bare `PIC` and bare
@@ -292,7 +294,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
     // pushes it past the 200-character cap this file opens with.
     pattern:
-      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
+      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation|writes the small-data base/,
   },
   {
     key: 'float',
