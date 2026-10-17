@@ -1050,13 +1050,17 @@ function ppcLoadedWordBound(
  *  source declares, whose address the lift would pass where the callee takes the struct — and one
  *  nothing sizes (`unsized`), which may be that, a pair or a stack word.
  *
- *  A CALL NOTHING DECLARES IS NOT PROVEN CLEAR OF THE AREA HERE, and neither does its lowering's
- *  guess prove it: the guess refuses a call whose guessed arity reaches seven argument registers
- *  (`lift`, the guess's `refuse`), but it counts only the registers this function sets, none it
- *  passes straight through, so `g9(a, …, h, 77)` with r3..r10 untouched passes it and the word at
- *  r1+8 is g9's ninth argument, inside the area. What refuses that call is the shared audit
- *  (frame-objects.ts `storedNeverRead`): the store to r1+8 reaches the call unread, below every
- *  area word a load after a call proves a local's (`compilerBehaviors.localsAboveOutgoingArea`).
+ *  A CALL NOTHING DECLARES IS PROVEN CLEAR OF THE AREA ONLY BY THE LOADED-WORD BOUND
+ *  (`ppcLoadedWordBound`): mwcc loads no word of its outgoing area from the parameter area up, so
+ *  the call's stack words, if any, lie below the lowest pushed-frame word this function loads.
+ *  `outgoingEnd` is that word, or the parameter area's start where every call is declared: where it
+ *  is past the area's start, the area may hold such a word. Its lowering's guess reads it, refusing
+ *  a call whose guessed arity reaches seven argument registers unless `outgoingEnd` reaches the
+ *  area (`lift`, the guess's `refuse`) — but the guess counts only the registers this function
+ *  sets, none it passes straight through, so `g9(a, …, h, 77)` with r3..r10 untouched passes it
+ *  and the word at r1+8 is g9's ninth argument, inside the area. What refuses that call is the
+ *  shared audit (frame-objects.ts `storedNeverRead`): the store to r1+8 reaches the call unread,
+ *  below the bound it takes (`loadedWords`, this same number), so no load proves it a local's.
  *  That audit is the backstop this partition rests on for an undeclared callee; a change to the
  *  guess or to the audit's survivor rule moves it.
  *
