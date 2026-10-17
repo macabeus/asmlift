@@ -274,7 +274,7 @@ export interface LiveInModel {
    *  them is refused, because no local lives in the caller's frame and the read says the
    *  declaration is wrong. Taken as a parameter it would be named by position, one slot below the
    *  registers the declaration left out: `int st2(int a,int b,int c,int d,int e){ return g(a)+e; }`
-   *  declared with two parameters lifted `st2(a0, a1, a2)` returning the fifth argument as `a2`. */
+   *  declared with two parameters would lift `st2(a0, a1, a2)`, returning the fifth argument as `a2`. */
   ownArgWords?: number;
 }
 
@@ -334,8 +334,8 @@ export function assertScratchRegsPartitioned(target: {
  *  words it can fill (`proto.ts` `ownArgumentWords`, an upper bound), and an argument register at
  *  or past it is one no caller fills for THIS function, so it moves from `argRegs` to `uninitRegs`.
  *  It needs no save: every argument register is one a callee may use unsaved (`clobberedByCall`
- *  checks they are caller-saved). KMC homes a local in `a2` past `uninit_spill(int k, int *p)`, and
- *  without the edge the read was a third parameter. Absent (no declaration, or one that bounds
+ *  checks they are caller-saved). KMC homes a local in `a2` past `uninit_spill(int k, int *p)`, which
+ *  without the edge reads as a third parameter. Absent (no declaration, or one that bounds
  *  nothing), the ABI's whole list stays arguments. */
 export function registerLiveIns(
   target: {

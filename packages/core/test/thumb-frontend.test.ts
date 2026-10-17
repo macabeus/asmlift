@@ -1060,7 +1060,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // THE FUNCTION'S OWN DECLARATION BOUNDS ITS ARGUMENT REGISTERS (`ownArgumentWords`). agbcc,
   // canonical flags: `extern int gOut; int ufirst(int k, int *p){ int x; if (k > 5) gOut = x;
   // return *p + k; }` homes `x` in r3, which no caller of a two-parameter function fills. Without
-  // the declaration the read is a made-up fourth parameter, and with it `gOut = a3` is wrong C.
+  // the declaration the read is a made-up fourth parameter, and `gOut = a3` wrong C.
   describe('an argument register past the own declaration is an uninitialised local', () => {
     const UFIRST =
       'ufirst:\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x5\n\tble\t.L6\n\tldr\tr0, .L7\n\tstr\tr3, [r0]\n' +
@@ -1091,7 +1091,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     // `int st2(int a, int b, int c, int d, int e){ return g(a) + e; }` declared with two
     // parameters: the stack word is the fifth argument, which no uninitialised local can be, and
-    // named by position it took the third parameter's slot (`st2(a0, a1, a2)` returning `a2`).
+    // named by position it would take the third parameter's slot (`st2(a0, a1, a2)` returning
+    // `a2`).
     test('an incoming stack argument past the own declaration refuses', () => {
       const ST2 =
         'st2:\n\tpush\t{r4, lr}\n\tldr\tr4, [sp, #0x8]\n\tbl\tg\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';

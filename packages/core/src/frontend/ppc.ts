@@ -1806,14 +1806,13 @@ function liftOnce(
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
    *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
-   *  non-void return and a parameter word or `this` first, or a nonzero register count — and a
-   *  free function of none (`g__Fv`) or a count of 0 is passed nothing, which no body
-   *  evidence overrides. A hand-written body (`ownDeclared` false) is read as having none. Without
-   *  one, only the body can show it: r3 is already an entry parameter,
-   *  or a higher argument register is live in, which puts an argument in r3 by position (the
-   *  obligation `mintArgSlotHoles` discharges), or every word return hands back a value computed
-   *  only to be returned (`r3WrittenToReturn`) — then the function returns a word, and a bare
-   *  return of it hands back what the caller left in r3. */
+   *  non-void return and a parameter word or `this` first, or a nonzero register count — and a free
+   *  function of none (`g__Fv`) or a count of 0 is passed nothing, which no body evidence
+   *  overrides. A hand-written body (`ownDeclared` false) is read as having none. Without one, only
+   *  the body can show it: r3 is already an entry parameter, or a higher argument register is live
+   *  in, which puts an argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or
+   *  every word return hands back a value computed only to be returned (`r3WrittenToReturn`) — then
+   *  the function returns a word, and a bare return of it hands back what the caller left in r3. */
   const r3IsAnArgument = (): boolean => {
     const own = prototypes[name];
     if (declaresVoidReturn(own)) {

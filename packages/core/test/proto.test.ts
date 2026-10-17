@@ -300,7 +300,7 @@ describe('ownArgumentWords', () => {
   });
 
   // `struct P mk(int, int, int)` takes its hidden pointer in argument 0 and z one register up, in
-  // r3 / a3 / r6: bounded from argument 0, z was `uninit_<reg>`.
+  // r3 / a3 / r6: bounded from argument 0, z would be `uninit_<reg>`.
   test('a return not shown to be a scalar may take a hidden pointer in argument 0', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
       expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'] }, t)).toBe(4);
@@ -366,8 +366,8 @@ describe('ownArgumentWords', () => {
 
   // The hidden word comes FIRST, so the even-word rule counts it: O32's `struct P sd2(double x)`
   // passes the pointer in a0, skips a1 and passes x in a2:a3, and `Foo::get(s64)` takes `this` in
-  // a0 / r3 and the s64 in a2:a3 / r5:r6. Added after the layout, the bound was 3 and a3 / r6
-  // became `uninit_<reg>`.
+  // a0 / r3 and the s64 in a2:a3 / r5:r6. Added after the layout, the bound would be 3 and a3 /
+  // r6 `uninit_<reg>`.
   test('a hidden word is laid out with the declared ones, before the even-word rule', () => {
     for (const t of [MIPS_IDO, MIPS_GCC]) {
       expect(ownArgumentWords('sd2', { params: ['double'] }, t)).toBe(4);

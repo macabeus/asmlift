@@ -680,7 +680,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
   // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
   // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
-  // no register interface, and read as one it turned r7 into `uninit_r7`. A callee-saved register
+  // no register interface, and read as one it would turn r7 into `uninit_r7`. A callee-saved register
   // named with no save marks the body hand-written, and no declaration bounds it.
   test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
     const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';

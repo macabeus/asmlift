@@ -142,10 +142,10 @@ const GCC2_CLASS = String.raw`(?:\d|Q(?:\d|_\d+_)|t\d)`;
  *  puts the class right after the `__`, length-prefixed or `Q<n>`-nested: CodeWarrior's
  *  `pick__3FooFiPi` (`__ct__3FooFv`, `__dt__3FooFv`), and gcc 2's `pick__3FooiPi` (a const method
  *  `pick__C3FooiPi`, a volatile one `pick__V3FooiPi`, a constructor `__3Foo`, a destructor `_$_3Foo`
- *  or `_._3Foo`, of a nested class `_._Q21A1B`, which this abstains on whatever follows), where a TEMPLATE
- *  class is spelled `t<n><name><args>` in the class's place (`get__t3Vec1Zii`, a constructor
- *  `__t3Vec1Zii`, `operator=` `__as__t3Vec1ZiRCt3Vec1Zi`). A free function
- *  (`f__Fii`) and a plain C name answer 0. A STATIC member mangles as a method does and takes no
+ *  or `_._3Foo`, every one of which this abstains on, nested `_._Q21A1B` included), where a
+ *  TEMPLATE class is spelled `t<n><name><args>` in the class's place (`get__t3Vec1Zii`, a
+ *  constructor `__t3Vec1Zii`, `operator=` `__as__t3Vec1ZiRCt3Vec1Zi`). A free function (`f__Fii`)
+ *  and a plain C name answer 0. A STATIC member mangles as a method does and takes no
  *  `this`, so 1 is "may", and a reader that needs the exact count must not take it as one.
  *
  *  THE PATTERNS ERR TOWARDS A MEMBER, because the errors cost differently: a method read as free

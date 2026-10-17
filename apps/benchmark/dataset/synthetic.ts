@@ -4030,9 +4030,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // asm rather than to this row — that probe was run without a `ctx` at all, so
   // its candidates score against a differently-lifted call — best 23 where this row's best is 12.
   // The enumeration itself is the same either way: 12 candidates under the same variations, and
-  // a two-parameter `void offhi_split(u32 a0, u32 a1)` with the row's `ctx` and `proto` as without
-  // (asmlift does not read a function's OWN `params` as its arity). In it, of 12 candidates 6
-  // spell `v0 = getbuf(a0) + 4;`
+  // a `void offhi_split(u32 a0)` whose row `proto` bounds its argument registers (without it the
+  // signature carries a second, unread parameter). Of the 12 candidates 6 spell
+  // `v0 = getbuf(a0) + 4;`
   // and 6 spell `v0 = getbuf(a0);` with the bias re-derived at every use (`*(u8 *)(v0 + 4 + v6)`,
   // `putbuf(v0 + 4 - 4)`). Those are the two points of the `/expr-home` lattice `offhome` and
   // `offuse` bracket, and neither of them is the split — a home that receives the RAW call result
@@ -10486,7 +10486,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // are uninitialised locals. IDO homes the locals in frame words and mwcc 2.4.2 in saved or
   // scratch registers, so those cells pin that nothing else moves. mwcc 2.3.3, which homes them in
   // r5..r10, has no canonical flags to carry a row; packages/core/test/ppc-frontend.test.ts pins it.
-  // `ownar_read` and `ownar_join` are agbcc's r3 and r1 homes (`gOut = a3` was wrong C). The
+  // `ownar_read` and `ownar_join` are agbcc's r3 and r1 homes (read as parameters: `gOut = a3`). The
   // controls keep what the declaration fills: `ownar_hole` a declared register the body never
   // reads, which still holds a2 in its slot, and `ownar_dbl` O32's `(int, double)`, whose double
   // takes a2:a3 past an empty a1.
@@ -10504,7 +10504,7 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A BARE COUNT is the registers the call fills (`FnProto.params`), and the own bound reads it as
   // the call side does: `{params: 2}` is two words, with no slack for a struct return it does not
-  // state. Read as three, it left KMC's and gcc 2.7.2's a2 home a made-up parameter.
+  // state. Read as three, it would leave KMC's and gcc 2.7.2's a2 home a made-up parameter.
   {
     sym: 'ownar_count',
     src:
@@ -10566,7 +10566,7 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A declaration that lists the parameters and not the return leaves room for a struct's hidden
   // return pointer in argument 0, which pushes every parameter one register up: bounded from
-  // argument 0, `z` (r3, a3, r6) was read as an uninitialised local.
+  // argument 0, `z` (r3, a3, r6) would read as an uninitialised local.
   {
     sym: 'ownar_sret',
     src: 'struct P { int a, b, c; };\nstruct P ownar_sret(int x, int y, int z){ struct P p; p.a = z; p.b = x; p.c = y + 1; return p; }',
@@ -10576,8 +10576,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
   },
   // The hidden return pointer comes FIRST, so O32's even-word rule counts it: `x` skips a1 and
-  // takes a2:a3. Laid out after the declared words, the bound was 3 and a3 (x's low word) was read
-  // as an uninitialised local. agbcc aligns nothing and passes x in r1:r2.
+  // takes a2:a3. Laid out after the declared words, the bound would be 3 and a3 (half of x) an
+  // uninitialised local. agbcc aligns nothing and passes x in r1:r2.
   {
     sym: 'ownar_sretdbl',
     src:

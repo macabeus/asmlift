@@ -32,9 +32,9 @@ export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
    *  for how many argument REGISTERS the call occupies — read so at a call and in the function's
-   *  own bound alike (`ownArgumentWords`), a stated struct return's pointer aside. The two are the same number only while
-   *  every parameter fits in a register, and `declaredCallArgs` is what converts the first into
-   *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
+   *  own bound alike (`ownArgumentWords`), a stated struct return's pointer aside. The two are the
+   *  same number only while every parameter fits in a register, and `declaredCallArgs` is what
+   *  converts the first into the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
   /** The parameters, by index into a typed `params`, whose spelling `declaredWidth` cannot size and
@@ -335,18 +335,18 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *  at or past this many words is one no caller fills, so a read of it before any write is an
  *  uninitialised local the compiler homed there, never a parameter. KMC and gcc 2.7.2 home a local
  *  in `a2`/`a3` past a two-parameter declaration, agbcc in `r3` and mwcc 2.3.3 in `r5`..`r10`, and
- *  without this each such read became a made-up parameter (`uninitfirst(a0, *a1, a2, a3)`).
+ *  unbounded, each such read is a made-up parameter (`uninitfirst(a0, *a1, a2, a3)`).
  *
  *  AN UPPER BOUND, because the direction of every error decides what it costs. A bound too HIGH
- *  leaves a register a parameter, which is what every function got before this existed. A bound
+ *  leaves a register a parameter, as no bound at all does. A bound
  *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So:
  *   - the declared words are laid out by {@link wordsOf}, the call's own rule: a floating parameter
  *     takes no general word where floats count on their own (`fpu.slots: 'separate'`, the PowerPC
  *     EABI), and everywhere else a `float` takes one and a `double` two, as a `long long` does
  *     (O32's leading floats still take their integer slots, and agbcc passes both in general
  *     words).
- *   - TWO HIDDEN WORDS ARE ADDED to a typed list where they may come first, because no parameter
- *     list states them and each pushes every declared parameter one register up. A return the
+ *   - UP TO TWO HIDDEN WORDS ARE ADDED to a typed list where they may come first, because no
+ *     parameter list states them and each pushes every declared parameter one register up. A return the
  *     declaration does not show is a scalar or `void` may be a struct handed back through a
  *     pointer in argument 0, and a symbol that may name a C++ member function is handed `this`
  *     there (`mangle.ts` `implicitArgumentWords`). Both are "may": a static member or a struct
