@@ -42,7 +42,9 @@ export interface Frontend {
 export interface LiftOptions {
   /** MIPS: keep the slot of a `b`/`j` whose slot is the last word of a common tail its two arms
    *  both spell (`sll; b T; sra` against `sll; sra; T:`), rather than retarget it to the copy at
-   *  T-4 and merge the arms. The default retargets (frontend/mips.ts `normaliseBranchLikely`). */
+   *  T-4 and merge the arms. The default retargets (frontend/mips.ts `normaliseBranchLikely`). An
+   *  IDO question: GCC 2.7.2 and KMC cross-jump such a tail into one copy before filling a slot, so
+   *  on their output the slot is never a tail written twice. */
   keepTailSlots?: boolean;
   /** Called when the lift met such a slot, whichever way it answered: what rank.ts asks before
    *  enumerating `/kept-slot` at all. */

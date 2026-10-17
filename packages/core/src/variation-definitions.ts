@@ -456,10 +456,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'own arm, so each arm keeps the whole tail it spells.',
     compilerBehavior:
       'The two readings are one object: the slot runs before the target on its one edge either way. ' +
-      'Which arms the source wrote out is something only the differ can tell.',
+      'Which arms the source wrote out is something only the differ can tell. The question arises on IDO ' +
+      'alone: GCC 2.7.2 and KMC cross-jump a tail both arms spell into one copy at the join before they ' +
+      'fill any slot, so their output has no tail written twice (`mergenarrow` builds with no `b` on either).',
     offeredWhen: {
-      when: 'A `b`/`j` whose slot ends a common tail of two or more words was read as landing one word earlier.',
-      decidedBy: { symbol: 'liftStamped', file: 'packages/core/src/pipeline.ts' },
+      when: 'The MIPS lift reported a `b`/`j` whose slot ends a common tail of two or more words, and retargeted it.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
     },
     example: {
       compiler: 'ido',

@@ -2034,7 +2034,8 @@ export function enumerateCandidates(
       // arms (frontend/mips.ts `normaliseBranchLikely`: the two are one object, and which the source
       // wrote is the differ's to say). A LIFT variation because the rewrite is the CFG every later
       // stage reads. Enumerated only where this setting's default lift reports such a slot; crossed
-      // with the others, and the dedup collapses what agrees.
+      // with the others, and the dedup collapses what agrees. An IDO reading: GCC 2.7.2 and KMC
+      // cross-jump a tail both arms spell before they fill a slot, so they leave no such tail.
       const tailSettings: { variations: readonly Variation[]; keepTailSlots: boolean }[] = tailSlot
         ? [
             { variations: [], keepTailSlots: false },
