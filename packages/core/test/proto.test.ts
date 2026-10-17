@@ -417,11 +417,29 @@ describe('ownArgumentWords', () => {
   test('a floating parameter takes general words except where floats count on their own', () => {
     expect(ownArgumentWords('f', { params: ['s32', 'float'], ...S32 }, PPC_MWCC)).toBe(1);
     expect(ownArgumentWords('f', { params: ['double', 's32'], ...S32 }, PPC_MWCC)).toBe(1);
-    expect(ownArgumentWords('f', { params: ['float', 'float'], ...S32 }, MIPS_IDO)).toBe(2);
     expect(ownArgumentWords('f', { params: ['s32', 'double'], ...S32 }, MIPS_GCC)).toBe(4);
-    expect(ownArgumentWords('f', { params: ['f32', 's32'], ...S32 }, ARMV4T_AGBCC)).toBe(2);
     expect(ownArgumentWords('f', { params: ['s32', 'double'], ...S32 }, ARMV4T_AGBCC)).toBe(3);
     expect(ownArgumentWords('f', { params: ['long double'], ...S32 }, MIPS_IDO)).toBeUndefined();
+  });
+
+  // A list cannot say whether the definition is prototyped, and an old-style one is handed a
+  // `float` promoted to `double`: `int k1(a, b) float a; int b;` reads b in r2 (agbcc) / a2 (O32),
+  // `int k2(a, b, c) float a; short b; int c;` reads c in r3 / a3. Laid out as one word, the
+  // bound turned them into `uninit_<reg>`.
+  test('a float is laid out as the double an old-style definition is handed', () => {
+    for (const fl of ['float', 'f32', 'const float', 'volatile float', 'const f32']) {
+      expect(ownArgumentWords('k1', { params: [fl, 'int'], ...S32 }, ARMV4T_AGBCC), fl).toBe(3);
+      expect(ownArgumentWords('k2', { params: [fl, 'short', 'int'], ...S32 }, ARMV4T_AGBCC), fl).toBe(4);
+      for (const t of [MIPS_IDO, MIPS_GCC]) {
+        expect(ownArgumentWords('k1', { params: [fl, 'int'], ...S32 }, t), fl).toBe(3);
+        expect(ownArgumentWords('k2', { params: [fl, 'short', 'int'], ...S32 }, t), fl).toBe(4);
+        // after an int the pair is put at an even word, as a double's is
+        expect(ownArgumentWords('f', { params: ['int', fl], ...S32 }, t), fl).toBe(4);
+      }
+      // PowerPC passes it in an FPR whichever it is
+      expect(ownArgumentWords('k1', { params: [fl, 'int'], ...S32 }, PPC_MWCC), fl).toBe(1);
+    }
+    expect(ownArgumentWords('f', { params: ['float', 'float'], ...S32 }, MIPS_IDO)).toBe(4);
   });
 
   test('it abstains wherever the declaration bounds nothing', () => {

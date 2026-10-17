@@ -343,9 +343,11 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So:
  *   - the declared words are laid out by {@link wordsOf}, the call's own rule: a floating parameter
  *     takes no general word where floats count on their own (`fpu.slots: 'separate'`, the PowerPC
- *     EABI), and everywhere else a `float` takes one and a `double` two, as a `long long` does
- *     (O32's leading floats still take their integer slots, and agbcc passes both in general
- *     words).
+ *     EABI), and everywhere else a floating parameter takes two, as a `long long` does (O32's
+ *     leading floats still take their integer slots, and agbcc passes both in general words).
+ *     A `float` takes two as well: a list cannot say whether the definition is prototyped, and an
+ *     old-style one (`int k(a, b) float a; int b;`) is handed `a` promoted to `double`, so `b`
+ *     sits in r2 / a2. Two words are an upper bound for a prototyped `float` too.
  *   - UP TO TWO HIDDEN WORDS ARE ADDED to a typed list where they may come first, because no
  *     parameter list states them and each pushes every declared parameter one register up. A return the
  *     declaration does not show is a scalar or `void` may be a struct handed back through a
@@ -474,8 +476,9 @@ function ownParamWidths(
       if (spelled === 'long double') {
         return undefined;
       }
+      // a `float` may be an old-style definition's, promoted to `double`
       if (target.fpu?.slots !== 'separate') {
-        widths.push(spelled === 'float' ? 32 : 64);
+        widths.push(64);
       }
     } else {
       return undefined;

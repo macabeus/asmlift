@@ -85,7 +85,8 @@ describe('an argument register past the own declaration', () => {
     ['ido', MIPS_IDO],
   ])('is an uninitialised local, and a declared one stays a parameter (%s)', (_c, target) => {
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 's32' } })).toBe(local);
-    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'], returns: 's32' } })).toBe(local);
+    // a float may be an old-style definition's, handed as a double: `(float, float)` may fill a0..a3
+    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'], returns: 's32' } })).toBe(param);
     expect(src(READ_A2, target)).toBe(param);
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32', 's32'], returns: 's32' } })).toBe(param);
     // a list whose return is not shown to be a scalar may follow a struct's hidden pointer in a0
