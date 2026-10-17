@@ -138,9 +138,15 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    gives its widths, and "returns" gives the type it hands
                    back (a 64-bit one comes home in a register pair) and gets
                    the callee declared in the candidate's own source.
-                   "returnsVoid":true is the same fact as "returns":"void";
-                   on the decompiled function's OWN entry either spells its
-                   void-ness. A callee returning a struct or union by value
+                   "returnsVoid":true is the same fact as "returns":"void".
+                   The decompiled function's OWN entry also bounds its
+                   argument registers: one at or past the words its params
+                   fill (plus a word for a hidden struct-return pointer unless
+                   "returns" shows a scalar or void, and for a C++ method's
+                   this, read off a mangled name) is read as an uninitialised
+                   local, and a stack argument past them refuses — so a count
+                   there must cover every parameter word (a double or long
+                   long is two). A callee returning a struct or union by value
                    needs its members, which say whether the target hands it
                    back through a hidden pointer in argument 0:
                    "returns":"struct S","returnLayout":{"kind":"struct",
