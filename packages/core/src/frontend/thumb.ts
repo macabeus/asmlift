@@ -64,7 +64,13 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
+import {
+  type OutgoingArgs,
+  type StackArgsBlock,
+  type StackArgsEvent,
+  analyzeOutgoingArgs,
+  loadedWordBound,
+} from './stackargs';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -2512,7 +2518,7 @@ function liftOnce(
     irBlocks,
     ...frame.partition,
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
-    slotLoads: fill.frameUses.slotLoads,
+    loadedWords: frame.loadedWords,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
@@ -3099,6 +3105,9 @@ interface ThumbFrame {
   /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
   readonly frameAddressesAtCall: ReadonlyMap<Instr, FrameAddressesAtCall>;
   readonly outgoingArgs: OutgoingArgs<Instr>;
+  /** the loaded-word bound both `outgoingArgs` and the frame-object audit take
+   *  (`FrameObjectAudit.loadedWords`); absent where the target states no start offset */
+  readonly loadedWords: FrameObjectAudit['loadedWords'];
   /** why the word-slot model is off, or null when it is on (`slotModelBlocker`) */
   readonly slotsOffReason: string | null;
   readonly slotsOk: boolean;
@@ -3541,6 +3550,10 @@ function measureThumbFrame({
       return [];
     }),
   }));
+  // THE LOADED-WORD BOUND, read once (`outgoingAreaNeverLoadedFrom`, 0 on agbcc): the outgoing
+  // argument analysis and the frame-object audit both take this number.
+  const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
+  const loadedBound = loadedWordBound(eventBlocks, entryReachable, loadedFrom);
   const outgoingArgsOver = (blocks: readonly StackArgsBlock<Instr>[]): OutgoingArgs<Instr> =>
     analyzeOutgoingArgs<Instr>({
       blocks,
@@ -3549,7 +3562,7 @@ function measureThumbFrame({
       localArea,
       argRegs: target.argRegs.length,
       capturedWholeFrame: capturedObjectIsTheWholeFrame,
-      outgoingAreaNeverLoadedFrom: target.compilerBehaviors.outgoingAreaNeverLoadedFrom,
+      loadedWordBound: loadedBound,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
@@ -3696,6 +3709,7 @@ function measureThumbFrame({
     captureOffsetOf,
     frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
     outgoingArgs,
+    loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedBound },
     slotsOffReason,
     slotsOk,
     settledDepth,
@@ -4642,10 +4656,6 @@ interface ThumbFrameUses {
   /** the blocks other than the entry that read an incoming stack argument
    *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `withholdsSetupArgs` reads */
   readonly offEntryArgReads: Set<number>;
-  /** per block, the own-frame words the body reads as SSA slots rather than memory — loads the
-   *  frame-object audit cannot see in the IR, which bound its pending stores
-   *  (`FrameObjectAudit.slotLoads`) */
-  readonly slotLoads: Map<number, Set<number>>;
 }
 
 /** WHAT THE FILL OF A BLOCK READS: the records of the stages before it, the SSA builder it writes
@@ -4737,7 +4747,6 @@ function thumbFillOf(
       usedSlotOffsets: new Set(),
       movedCaptures: new Set(),
       offEntryArgReads: new Set(),
-      slotLoads: new Map(),
     },
   };
 }
@@ -5590,7 +5599,6 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
   ) {
     usedSlotOffsets.add(off);
-    fill.frameUses.slotLoads.set(bi, (fill.frameUses.slotLoads.get(bi) ?? new Set()).add(off));
     writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
     return;
   }

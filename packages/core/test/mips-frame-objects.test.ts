@@ -541,15 +541,25 @@ describe('a dead store above a frame word the function loads is a local', () => 
     );
   });
 
-  test('…and with no load of the array, the store may be the argument again', () => {
+  // The bound is the frontend's, measured once off the instructions: the epilogue's `lw ra,20(sp)`
+  // is a load the IR does not show the audit, and it bounds the area at 20 all the same.
+  test('…and with no load of the array, the epilogue restore of ra bounds it', () => {
     expect(
-      lift(
+      src(
         DEADB.filter((l) => !l.startsWith('14:')),
         g,
         MIPS_IDO,
         protos,
       ),
-    ).toThrow(/the 1-byte store at \[sp,#24\) .* no load at or beneath it, from \[sp,#16\) up, proves it a local's/);
+    ).toBe('void f(s32 a0, s32 a1) {\n    g(a0);\n}\n');
+  });
+
+  test('…and with no load from 16(sp) up at all, the store may be the argument again', () => {
+    // a function that never returns restores nothing
+    const noReturn = [...DEADB.filter((l) => !/^(14|20|24|28):/.test(l)), '20:\tb\t20 <f+0x20>', '24:\tnop'];
+    expect(lift(noReturn, g, MIPS_IDO, protos)).toThrow(
+      /the 1-byte store at \[sp,#24\) .* no load at or beneath it, from \[sp,#16\) up, proves it a local's/,
+    );
   });
 
   test('…and on a target that states only the after-call form, it refuses as before', () => {

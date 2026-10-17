@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { MIPS_FRAME_LOAD } from '../src/frontend/mips';
+import { PPC_FRAME_LOAD } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
@@ -141,8 +143,13 @@ const AREA: Record<string, { o32: number; ppc: number }> = {
   j5: { o32: 14, ppc: 2 },
 };
 
-const MIPS_LOAD = /^(lb|lbu|lh|lhu|lw|lwl|lwr|lwu|ll|ld|ldl|ldr|lwc1|ldc1)$/;
-const PPC_LOAD = /^(lbz|lhz|lha|lwz|lfs|lfd|lmw|lbzu|lhzu|lhau|lwzu|lfsu|lfdu|psq_l|psq_lu)$/;
+// The loads are the PRODUCTION lists the frontends' loaded-word bounds scan, not copies of them; a
+// load mnemonic missing from one is caught by the classification test below, which asks every
+// memory mnemonic the probes compiled to be one of these or a store.
+const MIPS_LOAD = MIPS_FRAME_LOAD;
+const PPC_LOAD = PPC_FRAME_LOAD;
+const MIPS_STORE = /^(sb|sh|sw|swl|swr|sd|sdl|sdr|sc|swc1|sdc1)$/;
+const PPC_STORE = /^(stb|sth|stw|stmw|stbu|sthu|stwu|stfs|stfd|stfsu|stfdu|stfiwx|psq_st|psq_stu)$/;
 const width = (mnemonic: string, dest: string): number =>
   mnemonic === 'lmw'
     ? 4 * (32 - Number(dest.slice(1)))
@@ -196,6 +203,16 @@ const frameLoads = (fixture: string): Map<string, { at: number; end: number; tex
   return out;
 };
 
+/** Every mnemonic each fixture uses with an `off(rA)` memory operand. */
+const memoryMnemonics = (fixture: string): Set<string> => {
+  const text = readFileSync(join(import.meta.dirname, 'corpus', fixture), 'utf8');
+  return new Set(
+    [...text.matchAll(/^[ \t]*[0-9a-f]+:\t(\S+)[ \t]*(.*)$/gm)].flatMap(([, mnemonic, rest]) =>
+      /(^|,)\s*-?\d+\(\$?\w+\)\s*$/.test(rest) ? [mnemonic] : [],
+    ),
+  );
+};
+
 const O32_FIXTURES = ['ido71', 'ido71-O0', 'gcc272kmc', 'gcc272kmc-O0', 'gcc272', 'gcc272-O0'];
 const MWCC_FIXTURES = ['mwcc242', 'mwcc242mp4', 'mwcc242acd', 'mwcc247mp4', 'mwcc233', 'mwcc233-O0'];
 
@@ -206,6 +223,12 @@ describe.each([
   const fns = frameLoads(`${fixture}-outarea.txt`);
   test('every probe is compiled and sized', () => {
     expect([...fns.keys()].sort()).toEqual(Object.keys(AREA).sort());
+  });
+  test('every memory mnemonic is a load the frontend bound scans, or a store', () => {
+    const [load, store] = from === 16 ? [MIPS_LOAD, MIPS_STORE] : [PPC_LOAD, PPC_STORE];
+    const seen = [...memoryMnemonics(`${fixture}-outarea.txt`)];
+    expect(seen.filter((m) => !load.test(m) && !store.test(m))).toEqual([]);
+    expect(seen.some((m) => load.test(m))).toBe(true);
   });
   test('no load reaches [from, area end)', () => {
     const inArea = [...fns].flatMap(([fn, loads]) =>

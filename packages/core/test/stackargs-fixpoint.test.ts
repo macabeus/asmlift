@@ -7,7 +7,13 @@
 // emit. Every case below states which of the three SETS — may, must, stored — decides it.
 import { describe, expect, test } from 'vitest';
 
-import { type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from '../src/frontend/stackargs';
+import {
+  type StackArgsBlock,
+  type StackArgsEvent,
+  type StackArgsInput,
+  analyzeOutgoingArgs,
+  loadedWordBound,
+} from '../src/frontend/stackargs';
 
 type Ev = StackArgsEvent<string>;
 const st = (off: number): Ev => ({ kind: 'store', off });
@@ -22,6 +28,13 @@ const call = (name: string, n: number): Ev => ({
   declared: n === 0 ? null : Array.from({ length: n }, (_, i) => 4 * i),
 });
 const blk = (events: Ev[]): StackArgsBlock<string> => ({ events });
+/** The analysis as a frontend calls it: the loaded-word bound measured once over the same blocks,
+ *  from the offset the compiler claims (`outgoingAreaNeverLoadedFrom`), and handed in. */
+const analyze = ({
+  outgoingAreaNeverLoadedFrom: from,
+  ...input
+}: Omit<StackArgsInput<string>, 'loadedWordBound'> & { outgoingAreaNeverLoadedFrom: number | undefined }) =>
+  analyzeOutgoingArgs<string>({ ...input, loadedWordBound: loadedWordBound(input.blocks, input.live, from) });
 
 const run = (
   blocks: StackArgsBlock<string>[],
@@ -30,7 +43,7 @@ const run = (
   capturedWholeFrame = false,
   neverLoadedFromZero = true,
 ) =>
-  analyzeOutgoingArgs<string>({
+  analyze({
     blocks,
     preds,
     live: new Set(blocks.map((_, i) => i)),
@@ -180,7 +193,7 @@ describe('a word this function LOADS is a local, and bounds every call’s area'
   });
 
   test('a reload in DEAD code proves nothing', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('g', 0)]), blk([ld(0)])],
       preds: [[], [0]],
       live: new Set([0]),
@@ -254,7 +267,7 @@ describe('the licence’s NOTHING EXTRA reads the same bound', () => {
     // O32 compilers load the a0..a3 home words back (`outgoingAreaNeverLoadedFrom` is 16 there), so
     // a load at [sp,#4] under a claim from [sp,#8] up bounds nothing
     const claimedFrom = (from: number) =>
-      analyzeOutgoingArgs<string>({
+      analyze({
         blocks: line([st(0), st(4), call('five', 1), ld(4)]),
         preds: chain(1),
         live: new Set([0]),
@@ -372,7 +385,7 @@ describe('an escaped frame address is read by its receiver, from that address up
   });
 
   test('an escape in a dead block reads nothing', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('five', 0)]), blk([esc(0)])],
       preds: [[], [0]],
       live: new Set([0]),
@@ -397,7 +410,7 @@ describe('the fixpoint terminates and does not depend on block order', () => {
   });
 
   test('a DEAD call refuses, naming the slot it never saw staged', () => {
-    const r = analyzeOutgoingArgs<string>({
+    const r = analyze({
       blocks: [blk([st(0), call('five', 1)]), blk([call('five2', 1)])],
       preds: [[], []],
       live: new Set([0]),

@@ -563,6 +563,14 @@ describe('a dead store above a frame word the function loads is a local', () => 
     );
   });
 
+  // The bound is the frontend's, measured once off the instructions: `y`'s home at 8(r1) is read
+  // back by the slot model, a load the IR does not show the audit, and it bounds the area at 8 all
+  // the same — so with `b[0]` never read back, both byte stores are a dead local's.
+  test('…and with only the slot reload of 8(r1), that load bounds it', () => {
+    const slotOnly = FO1.map((l) => (l.startsWith('lbz') ? 'clrlwi  r31,r31,24' : l));
+    expect(lift('fo1', slotOnly, protos)).toBe('s32 fo1(s32 a0, s32 a1) {\n    g();\n    return a0 & 255;\n}\n');
+  });
+
   test('…and with no frame word loaded, the store may be the argument again', () => {
     const unloaded = FO1.filter((l) => !/^(lwz     r0,8|stw     r4,8)/.test(l)).map((l) =>
       l.startsWith('lbz') ? 'clrlwi  r31,r31,24' : l.startsWith('clrlwi  r0,r0') ? 'clrlwi  r0,r4,24' : l,

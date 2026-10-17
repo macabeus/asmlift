@@ -1215,8 +1215,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
   // A captured store's bytes that a `[sp,#k]` SLOT load reads are a local's, under agbcc's claim
   // that it loads no word of its outgoing area (`outgoingAreaNeverLoadedFrom`). The slot load is the
-  // slot model's and not in the IR the frame-object audit reads, so the frontend hands it over
-  // (`slotLoads`); without it `storedNeverRead` would refuse these as a possible stack argument.
+  // slot model's and not in the IR the frame-object audit reads, so the frontend's loaded-word
+  // bound, measured once off the instructions, carries it (`loadedWords`); without it
+  // `storedNeverRead` would refuse these as a possible stack argument.
   describe('a slot load of a captured store proves it no call’s stack argument', () => {
     // Compiled agbcc, canonical flags: `struct S { u16 lo, hi; u32 x, y; } s; s.lo = a; s.hi = b;
     // s.x = c; s.y = c + 1; r = sink(s.y); return *(u32 *)&s + r + s.x;` — the load after the call.

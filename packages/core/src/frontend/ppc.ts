@@ -581,8 +581,9 @@ const LR_SAVE_WORD = 4;
 /** The caller's parameter area, as an offset from the entry r1: past the back chain and the link
  *  register's save word, the words a call takes past its eight argument registers. */
 const PARAM_AREA_AT = 8;
-/** Every load an `off(rA)` operand addresses: integer, multiple, update and floating-point. */
-const FRAME_LOAD = /^(lbz|lhz|lha|lwz|lmw|lbzu|lhzu|lhau|lwzu|lfs|lfd|lfsu|lfdu|psq_l|psq_lu)$/;
+/** Every load an `off(rA)` operand addresses: integer, multiple, update and floating-point
+ *  (`outgoing-area-probes.test.ts` classifies every memory mnemonic of the committed probes against it). */
+export const PPC_FRAME_LOAD = /^(lbz|lhz|lha|lwz|lmw|lbzu|lhzu|lhau|lwzu|lfs|lfd|lfsu|lfdu|psq_l|psq_lu)$/;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
@@ -1619,23 +1620,25 @@ function liftOnce(
   // loads no word of its outgoing area, before a call or after, so a word it loads is a local's,
   // and since the area is one region at the frame bottom every word at or above it is no call's
   // stack argument. Only an instruction the entry reaches has a depth, so every load counted can
-  // run; one at another depth names another frame's words.
+  // run; one at another depth names another frame's words. Read once: the undeclared-call guess,
+  // the unread-store decline and the frame-object audit (`loadedWords`) all take this number, and
+  // it counts what the IR does not show the audit — the slot reloads and the epilogue's restores.
+  const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
   const loadedWordBound = (() => {
-    const from = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
     const bounds = new Map<number, number>();
-    if (from === undefined) {
+    if (loadedFrom === undefined) {
       return () => Infinity;
     }
     for (const b of blocks) {
       for (const ins of b.body) {
         const depth = r1At.get(ins);
         const mem = ins.ops.find((o) => /^-?\d+\(r1\)$/.test(o));
-        if (typeof depth !== 'number' || mem === undefined || !FRAME_LOAD.test(ins.mnemonic)) {
+        if (typeof depth !== 'number' || mem === undefined || !PPC_FRAME_LOAD.test(ins.mnemonic)) {
           continue;
         }
         const off = parseMem(mem).off;
         const word = off - (((off % 4) + 4) % 4);
-        if (word >= from) {
+        if (word >= loadedFrom) {
           bounds.set(depth, Math.min(bounds.get(depth) ?? Infinity, depth + word));
         }
       }
@@ -3440,6 +3443,9 @@ function liftOnce(
       usedSlotOffsets: new Set(
         [...valueSlots.keys()].map((o) => o + frame.size).filter((o) => o >= 0 && o < frame.size),
       ),
+      // the bound of the pushed frame, named from the pushed r1 as every offset here is
+      loadedWords:
+        loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound(-frame.size) + frame.size },
       capturedObjectIsTheWholeFrame: false,
       movedCaptures,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
