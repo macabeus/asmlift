@@ -668,8 +668,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(lifted({ params: ['s32', 'float', 's32 *'], returns: 's32' })).toBe(local);
     expect(lifted({ params: ['s32', 's32', 's32'], returns: 's32' })).toBe(param);
     // a list whose return is not shown to be a scalar may follow a struct's hidden pointer, in r3;
-    // a count may count C parameters, any of them a pair: `{params: 2}` may be `(s32, s64)`, r3 and
-    // r5:r6
+    // a bare count bounds nothing: `{params: 2}` may be `(s32, s64)`, r3 and r5:r6
     expect(lifted({ params: ['s32', 's32'] })).toBe(param);
     expect(lifted({ params: 2, returns: 's32' })).toBe(param);
     // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),

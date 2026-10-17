@@ -1,6 +1,6 @@
 import { parseTypeName } from './cdecl/parse';
 import type { IrType } from './ir/types';
-import { demangle, demangledName, implicitArgumentWords, spellType } from './mangle';
+import { demangle, implicitArgumentWords, spellType } from './mangle';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
 
@@ -31,8 +31,9 @@ export type ParamType = string;
 export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
-   *  for how many argument REGISTERS the call occupies — read so at a call and in the function's
-   *  own bound alike (`ownArgumentWords`), a stated struct return's pointer aside. The two are the
+   *  for how many argument REGISTERS the call occupies — read so at a call. On the function's OWN
+   *  entry a count bounds no argument register (`ownArgumentWords` abstains): a header's count may
+   *  be of C parameters, and one of those may span any number of words. The two are the
    *  same number only while every parameter fits in a register, and `declaredCallArgs` is what
    *  converts the first into the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
@@ -354,15 +355,11 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *
  *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
  *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
- *  copy of the declaration. A COUNT IS LAID OUT AT ITS WIDEST (`ownArguments`), because it is
- *  ambiguous: `FnProto.params` and the call side (`frontend/call-plan.ts`) read it as argument
- *  registers, but a header's count is of C parameters, and a C parameter may be a pair. So each of
- *  its N is a 64-bit pair, at an even word where the target aligns one, behind the hidden words a
- *  typed list may need; 2N words cover N registers too, and never fewer words than a mangled
- *  symbol records. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
+ *  copy of the declaration. A BARE COUNT BOUNDS NOTHING: it may count argument registers
+ *  (`FnProto.params`) or C parameters, any of which may be a pair or a struct passed by value of
+ *  any size. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
  *  unsized spelling (which may be two words), a struct passed by value (sized by a layout this
- *  does not read), a `long double`; on a count for a name mangled in a form `demangle` does not
- *  read, whose parameters may be wider than the count; and on a constructor or destructor, which
+ *  does not read), a `long double`; and on a constructor or destructor, which
  *  may be handed a flag beside `this`. A variadic declaration states no `params` and so
  *  abstains: its arity is each caller's. */
 export function ownArgumentWords(
@@ -411,50 +408,19 @@ export function ownFirstArgumentPassed(
  *  constructor or destructor, `false` for a free function, `undefined` for a symbol that only may
  *  be a method).
  *
- *  A COUNT IS LAID OUT AT ITS WIDEST, because a count too low is the error that costs wrong C and
- *  a count does not say what it counts: argument registers (`FnProto.params`), or C parameters, of
- *  which any may be a `long long` or `double` pair and none states the hidden word in argument 0.
- *  So each counted parameter is a pair, `this` is added where the symbol may name a method (and a
- *  constructor or destructor abstains, its flag unbounded), the return pointer wherever the return
- *  is not shown a scalar or `void`, as a typed list reads it, and the parameters the mangled symbol
- *  records where they lay out to more words still. `uninit_spill` `{params: 2}` is therefore 5
- *  words on agbcc and 6 on O32, past every argument register: the bound a count gives up is the
- *  price of reading it soundly. */
+ *  A bare count is no declaration this can lay out, so it reads as none. */
 function ownArguments(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
 ): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
-  const implicit = implicitArgumentWords(name);
+  // A COUNT BOUNDS NOTHING: it may mean argument registers or C parameters, and a C parameter
+  // may be a pair or a struct passed by value of any size (`f(struct S12 s)` {params: 1} fills 3
+  // words), so no layout of it is an upper bound.
   if (typeof p?.params === 'number') {
-    if (!Number.isInteger(p.params) || p.params < 0 || implicit === undefined) {
-      return undefined;
-    }
-    // the struct pointer a return not shown scalar may take, as a typed list reads it: `{params:
-    // 3, returnsVoid: false}` on `Pt mk(int, int, int)` passes z in argument 3
-    const hidden = (showsScalarReturn(p) ? 0 : 1) + implicit;
-    const passesThis = implicit === 0 ? false : undefined;
-    // `int f(int a, long long b)` `{params: 2}` passes b in a2:a3 / r5:r6 / r1:r2
-    const counted = Array.from({ length: p.params }, () => 64);
-    if (demangle(name) === null) {
-      // A name mangled in a form `demangle` does not read — a CodeWarrior const method
-      // (`get__3FooCFix`), a gcc 2 method (`get__3Fooix`), a reference parameter — records
-      // parameters this cannot lay out, and a count of them may leave out a word (the parameter
-      // codes this does not read include by-value classes).
-      if (implicit === 1 || demangledName(name) !== null || /__[CV]*F/.test(name)) {
-        return undefined;
-      }
-      return { widths: counted, hidden, passesThis };
-    }
-    // the compiler's own copy of the parameter list; one this cannot lay out may be the longer
-    const recorded = ownParamWidths(name, undefined, target);
-    if (recorded === undefined) {
-      return undefined;
-    }
-    const lead = Array.from({ length: hidden }, () => 32);
-    const longer = wordsOf([...lead, ...recorded], target) > wordsOf([...lead, ...counted], target);
-    return { widths: longer ? recorded : counted, hidden, passesThis };
+    return undefined;
   }
+  const implicit = implicitArgumentWords(name);
   const widths = ownParamWidths(name, p ?? undefined, target);
   if (widths === undefined) {
     return undefined;

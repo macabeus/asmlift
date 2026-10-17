@@ -142,15 +142,12 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    The decompiled function's OWN entry also bounds its
                    argument registers: one at or past the words its params
                    fill is read as an uninitialised local, and a stack
-                   argument past them refuses. Both a count and a typed list
-                   add a word for a hidden struct-return pointer unless
-                   "returns" shows a scalar or void, and one for a C++
-                   method's this, read off a mangled name. A count may mean
-                   registers or C parameters, so each of its params is read
-                   as a possible long long or double pair, and never as fewer
-                   words than the mangled name records; it bounds nothing on
-                   a mangled name it cannot read. A typed list gives the
-                   tighter bound. A constructor or destructor bounds
+                   argument past them refuses. A typed list adds a word for a
+                   hidden struct-return pointer unless "returns" shows a
+                   scalar or void, and one for a C++ method's this, read off
+                   a mangled name. A bare count bounds nothing on the own
+                   entry: it may count C parameters, and one of those may
+                   span any number of words. A constructor or destructor bounds
                    nothing. A variadic function's entry must state its fixed
                    parameters as "variadicParams": a params list or count
                    bounds what the ... takes too. A callee returning a struct or union by value

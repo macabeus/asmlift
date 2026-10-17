@@ -491,9 +491,9 @@ export function protoFactProblems(
   if (own?.params !== undefined) {
     const declared = typeof own.params === 'number' ? own.params : own.params.length;
     // A count is the argument registers, as `FnProto.params` defines it: `(int, long long, int)`
-    // fills 4. Where they differ from the C parameters, a count of those (3) is the ambiguous form
-    // the own bound must give up reading tightly, so no row carries it; where a parameter cannot
-    // be sized, the C parameters are all a count can be checked against.
+    // fills 4. Where they differ from the C parameters, a count of those (3) is the ambiguous form,
+    // so no row carries it; where a parameter cannot be sized, the C parameters are all a count can
+    // be checked against.
     const registers = typeof own.params === 'number' ? registerCount(oracle.params) : undefined;
     if (declared !== (registers ?? oracle.params.length)) {
       problems.push(

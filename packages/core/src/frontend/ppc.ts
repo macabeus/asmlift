@@ -1818,6 +1818,10 @@ function liftOnce(
     if (declaresVoidReturn(own)) {
       return false;
     }
+    // a count bounds no register, but says whether any argument is passed at all
+    if (typeof own?.params === 'number') {
+      return own.params > 0;
+    }
     const declared = ownDeclared ? ownFirstArgumentPassed(name, own, target) : undefined;
     if (declared !== undefined) {
       return declared;

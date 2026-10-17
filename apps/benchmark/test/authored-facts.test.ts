@@ -417,8 +417,7 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
   });
 
   // An own count states the argument registers (`FnProto.params`): `(int, long long, int)` is 4.
-  // Its C parameter count, 3, is caught where the two differ, since the own bound cannot tell
-  // which a count means.
+  // Its C parameter count, 3, is caught where the two differ, so no row states the ambiguous form.
   test('an own count is caught unless it is the registers its parameters fill', () => {
     const spec = SYNTHETIC.find((x) => x.sym === 'ownar_cntll')!;
     const count = (n: number) =>

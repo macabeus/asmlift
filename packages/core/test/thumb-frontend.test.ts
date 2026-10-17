@@ -1071,12 +1071,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const param =
       's32 ufirst(s32 a0, s32 *a1, s32 a2, s32 a3) {\n    if (a0 > 5) gOut = a3;\n    return *a1 + a0;\n}\n';
 
-    // a count may count C parameters, any of them a pair (`(s32, long long)` passes r0 and r1:r2),
-    // so `{params: 2}` is laid out as 4 words and leaves r3 a parameter
-    test('a typed list bounds it, and a count only as far as two pairs reach', () => {
+    // a bare count bounds nothing: it may count C parameters, and `(s32, long long)` passes r0 and
+    // r1:r2
+    test('a typed list bounds it, and a count lifts as with no declaration', () => {
       expect(lifted({ ufirst: { params: ['s32', 's32 *'], returns: 's32' } })).toBe(local);
       expect(lifted({ ufirst: { params: 2, returns: 's32' } })).toBe(param);
-      expect(lifted({ ufirst: { params: 1, returns: 's32' } })).toBe(local);
+      expect(lifted({ ufirst: { params: 1, returns: 's32' } })).toBe(param);
     });
 
     // `struct P mk(int x, int y, int z)` takes its hidden return pointer in r0 and z in r3.
@@ -1105,9 +1105,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
       expect(() => st2({ params: words(4), returns: 's32' })).toThrow(/incoming stack argument 4/);
       expect(st2({ params: words(5), returns: 's32' })).toMatch(/return g\(a0\) \+ a4;/);
-      // a count is laid out as pairs: 2 reach stack word 3, 3 reach past word 4
-      expect(() => st2({ params: 2, returns: 's32' })).toThrow(/incoming stack argument 4, past the 4 argument words/);
-      expect(st2({ params: 3, returns: 's32' })).toMatch(/return g\(a0\) \+ a4;/);
+      // a count bounds nothing, so it refuses nothing
+      expect(st2({ params: 2, returns: 's32' })).toMatch(/return g\(a0\) \+ a4;/);
       expect(st2()).toMatch(/return g\(a0\) \+ a4;/);
     });
 
@@ -1121,10 +1120,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // the parameter that keeps r2 in its slot.
     test('a declared register the body never reads is still a parameter', () => {
       const hole = 'f:\n\tadd\tr0, r0, r2\n\tbx\tlr\n';
-      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: { params: 3, returns: 's32' } } }).source).toBe(
+      const typed = (n: number) => ({ params: Array.from({ length: n }, () => 's32'), returns: 's32' });
+      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: typed(3) } }).source).toBe(
         's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n',
       );
-      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: { params: 1, returns: 's32' } } }).source).toBe(
+      expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: typed(1) } }).source).toBe(
         's32 f(s32 a0) {\n    s32 uninit_r2;\n    return a0 + uninit_r2;\n}\n',
       );
     });

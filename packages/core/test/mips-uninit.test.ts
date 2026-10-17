@@ -91,8 +91,7 @@ describe('an argument register past the own declaration', () => {
     // a list whose return is not shown to be a scalar may follow a struct's hidden pointer in a0
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'] } })).toBe(param);
     expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 'Pt' } })).toBe(param);
-    // a count does not say whether it counts registers or C parameters, either of which may be a
-    // pair: `{params: 2}` may be `(s32, long long)`, which passes a2:a3
+    // a bare count bounds nothing: `{params: 2}` may be `(s32, long long)`, which passes a2:a3
     expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 's32' } })).toBe(param);
     expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(param);
     // O32 passes `(s32, double)`'s double in a2:a3, skipping a1
