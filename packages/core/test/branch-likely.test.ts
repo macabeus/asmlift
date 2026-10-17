@@ -458,6 +458,40 @@ test('an unconditional `b`/`j` whose slot is the target-4 word, stolen, retarget
   ).toThrow(/branch to 0xc is not a block boundary/);
 });
 
+test('a `b` whose slot is one of two arms written out twice keeps it, so each arm keeps its own copy', () => {
+  // ido `mergenarrow`: `sll; b T; sra` against `sll; sra; T:` — a two-word common tail, the slot
+  // filled from its own arm. Retargeted, the `<< 16` stays in each arm and the `>> 16` moves past
+  // the join; kept, each arm reads as the one `(s16)` it is.
+  expect(
+    src(
+      '0:\tbeqz\ta3,18 <f+0x18>',
+      '4:\tsubu\tv0,a1,a2',
+      '8:\taddu\tv0,a1,a2',
+      'c:\tsll\tv0,v0,0x10',
+      '10:\tb\t20 <f+0x20>',
+      '14:\tsra\tv0,v0,0x10',
+      '18:\tsll\tv0,v0,0x10',
+      '1c:\tsra\tv0,v0,0x10',
+      '20:\tjr\tra',
+      '24:\tsw\tv0,0(a0)',
+    ),
+  ).toContain('v0 = (s16)(a1 + a2);');
+  // ido `mergeu16`: `b T; S; S; T:` jumps over exactly the one copy, so retargeted it would jump to
+  // its own next word and merge the two arms.
+  expect(
+    src(
+      '0:\tbeqz\ta3,14 <f+0x14>',
+      '4:\tsubu\tv0,a1,a2',
+      '8:\taddu\tv0,a1,a2',
+      'c:\tb\t18 <f+0x18>',
+      '10:\tandi\tv0,v0,0xffff',
+      '14:\tandi\tv0,v0,0xffff',
+      '18:\tjr\tra',
+      '1c:\tsw\tv0,0(a0)',
+    ),
+  ).toContain('v0 = a1 + a2 & 65535;');
+});
+
 /** A two-case dispatch on `a0` whose bounds branch is `bounds at,4c` with `slot` in its delay slot,
  *  and whose default at 0x48 starts with `li v0,9`. */
 const boundsDispatch = (bounds: string, slot: string) =>

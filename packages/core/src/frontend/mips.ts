@@ -642,6 +642,8 @@ function normaliseBranchLikely(
   const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
   const freed = new Set<number>();
+  // The words as listed, before any slot below is emptied.
+  const listed = new Map(at);
   // `br T; S` → `br T-4; nop` when S is the word at T-4, stolen; true when it did.
   const unsteal = (br: Instr, slot: Instr): boolean => {
     const target = br.target!;
@@ -724,6 +726,20 @@ function normaliseBranchLikely(
       targets.has(slot.addr) ||
       (prev === undefined ? br.addr !== startAddr : isControlTransfer(prev)) ||
       (reloc !== null && !reloc.sym.startsWith('.'))
+    ) {
+      continue;
+    }
+    // TWO ARMS THE COMPILER WROTE OUT TWICE are not a stolen word, and the rewrite — exact either
+    // way — then merges what the source kept apart, which scores worse. The `b` jumps over exactly
+    // the one copy (`b T; S; S; T:`, KMC `sw_void`, ido `mergeu16`), so retargeted it would jump to
+    // its own next word; or the copy is the last of a longer common tail (`sll; b T; sra` against
+    // `sll; sra; T:`, ido `mergenarrow`), so retargeted it would split one extension across the
+    // join. A likely slot emptied above the `b` is no common tail; one emptied before T still
+    // counts, as the word it was.
+    const before = listed.get(br.target - 8);
+    if (
+      br.target - 4 === br.addr + 8 ||
+      (prev !== undefined && prev.mnemonic !== 'nop' && before !== undefined && sameWord(prev, before, relocOf))
     ) {
       continue;
     }
