@@ -196,6 +196,29 @@ describe('an undeclared call that fills a0..a3 past a frame word the function lo
     expect(lift(staged.lines, staged.rs)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
   });
 
+  test('a load at another sp depth names other storage: the word staged at 16(sp) may be argument 5', () => {
+    // `lw t0,16(sp)` runs before the push, so it reads the caller's frame, not this one's 16(sp)
+    const body = [
+      'lw\tt0,16(sp)',
+      'addiu\tsp,sp,-40',
+      'sw\tra,36(sp)',
+      'sw\tt0,16(sp)',
+      'li\ta0,5',
+      'li\ta1,7',
+      'li\ta2,1',
+      'jal\t0 <f>',
+      'li\ta3,2',
+      'lw\tra,36(sp)',
+      'jr\tra',
+      'addiu\tsp,sp,40',
+    ];
+    const lines = body.map((l, i) => `${(i * 4).toString(16)}:\t${l}`);
+    const rs: [number, string, string][] = [[body.indexOf('jal\t0 <f>') * 4, 'R_MIPS_26', 'g5']];
+    for (const target of [MIPS_IDO, MIPS_GCC]) {
+      expect(lift(lines, rs, target)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
+    }
+  });
+
   test("a load in the a0..a3 home proves nothing: ido loads a by-value aggregate's words back there", () => {
     const home = shape(['sw\tt0,16(sp)', 'sw\tt1,4(sp)'], ['lw\ta1,4(sp)', 'addu\ta0,a0,a1']);
     expect(lift(home.lines, home.rs)).toThrow(/the word stored to 16\(sp\) reaches it where an argument past/);
