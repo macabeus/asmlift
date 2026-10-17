@@ -326,6 +326,79 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
   return undefined;
 }
 
+/** HOW MANY GENERAL ARGUMENT WORDS THE FUNCTION UNDER DECOMPILATION'S OWN DECLARATION FILLS — an
+ *  UPPER BOUND, never an exact layout — or `undefined` where the declaration bounds nothing.
+ *
+ *  Its one reader is the live-in model (`frontend/ssa.ts` `registerLiveIns`): an argument register
+ *  at or past this many words is one no caller fills, so a read of it before any write is an
+ *  uninitialised local the compiler homed there, never a parameter. KMC and gcc 2.7.2 home a local
+ *  in `a2`/`a3` past a two-parameter declaration, agbcc in `r3` and mwcc 2.3.3 in `r5`..`r10`, and
+ *  without this each such read became a made-up parameter (`uninitfirst(a0, *a1, a2, a3)`).
+ *
+ *  AN UPPER BOUND, because the direction of every error decides what it costs. A bound too HIGH
+ *  leaves a register a parameter, which is what every function got before this existed. A bound
+ *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So where the ABI's exact
+ *  count is not stated here the larger one is taken:
+ *   - a value wider than a word starts at an even word on O32 (`evenWordAlignedArgs`) and on the
+ *     PowerPC EABI (mwcc 2.4.2 and 2.3.3 pass `void f(s32 k, s64 v)`'s `v` in r5:r6, measured),
+ *     and not on agbcc (the note at `wordsOf`). It is aligned everywhere here: on agbcc that only
+ *     leaves one register a parameter.
+ *   - a floating parameter takes no general word where floats count on their own
+ *     (`fpu.slots: 'separate'`, the PowerPC EABI). Everywhere else a `float` takes one word and a
+ *     `double` two, aligned: O32's leading floats still take their integer slots (`fpu.slots:
+ *     'leading'`), and agbcc passes both in general words.
+ *
+ *  IT ABSTAINS on a declaration that states no parameter list, or one it cannot bound: an unsized
+ *  spelling (which may be two words), a struct passed by value (sized by a layout this does not
+ *  read), a `long double`, and a struct or union RETURN, whose hidden pointer may take argument 0
+ *  (a pipeline refusal answers the through-memory one before any frontend runs). A variadic
+ *  declaration states no `params` and so abstains: its arity is each caller's. A COUNT is the
+ *  user's word for argument registers (`FnProto.params`), so it is the bound itself. */
+export function ownArgumentWords(p: FnProto | undefined, target: Pick<TargetDescription, 'fpu'>): number | undefined {
+  if (p === undefined || p === null || declaresAggregateReturn(p)) {
+    return undefined;
+  }
+  if (typeof p.params === 'number') {
+    return Number.isInteger(p.params) && p.params >= 0 ? p.params : undefined;
+  }
+  if (!Array.isArray(p.params)) {
+    return undefined;
+  }
+  const params = p.params;
+  let n = 0;
+  const pair = () => {
+    n += (n % 2) + 2;
+  };
+  for (const k of params.keys()) {
+    const cls = paramClassOf(p, params, k);
+    if (cls === 'word') {
+      n += 1;
+    } else if (cls === 'wide') {
+      pair();
+    } else if (cls === 'float') {
+      const bare = params[k]
+        .replace(/\b(?:const|volatile)\b/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+      const spelled = FLOAT_TYPEDEFS.get(bare) ?? bare;
+      if (spelled === 'long double') {
+        return undefined;
+      }
+      if (target.fpu?.slots === 'separate') {
+        continue;
+      }
+      if (spelled === 'float') {
+        n += 1;
+      } else {
+        pair();
+      }
+    } else {
+      return undefined;
+    }
+  }
+  return n;
+}
+
 /** Whether a declared type is `double`, qualifiers aside. */
 const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
 
