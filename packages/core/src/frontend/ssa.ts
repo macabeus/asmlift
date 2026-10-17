@@ -87,7 +87,9 @@ export interface SsaBuilder {
    *  Never touches the block's definitions: the parameter is added and left unused, so any local
    *  value already flowing keeps flowing. Only meaningful on a block with no predecessors —
    *  elsewhere a parameter is a phi whose position is aligned with its predecessors' terminator
-   *  args, and appending an unpaired one would corrupt that. */
+   *  args, and appending an unpaired one would corrupt that. Nor on a register the live-in model
+   *  calls an uninitialised local's home (`LiveInModel.uninitRegs`): no caller fills it, so no
+   *  convention proves an argument there, and {@link entryValue} answers `undefined` for it. */
   ensureParam(key: string, b: number): void;
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic).
    *
@@ -319,7 +321,15 @@ export function assertScratchRegsPartitioned(target: {
  *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
  *  of its own prologue. A target stating no `nonArgRegs` claims no partition and gets an empty
- *  model, so every def-less read stays a parameter. */
+ *  model, so every def-less read stays a parameter.
+ *
+ *  THE FUNCTION'S OWN DECLARATION MOVES THE PARTITION'S EDGE. `ownWords` is how many argument
+ *  words it can fill (`proto.ts` `ownArgumentWords`, an upper bound), and an argument register at
+ *  or past it is one no caller fills for THIS function, so it moves from `argRegs` to `uninitRegs`.
+ *  It needs no save: every argument register is one a callee may use unsaved (`clobberedByCall`
+ *  checks they are caller-saved). KMC homes a local in `a2` past `uninit_spill(int k, int *p)`, and
+ *  without the edge the read was a third parameter. Absent (no declaration, or one that bounds
+ *  nothing), the ABI's whole list stays arguments. */
 export function registerLiveIns(
   target: {
     id: string;
@@ -329,6 +339,7 @@ export function registerLiveIns(
     hiddenInputRegs?: readonly string[];
   },
   savedRegs: ReadonlySet<string>,
+  ownWords?: number,
 ): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs'> {
   const scratchRegs = assertScratchRegsPartitioned(target);
   for (const r of target.hiddenInputRegs ?? []) {
@@ -339,9 +350,13 @@ export function registerLiveIns(
   if (target.nonArgRegs === undefined) {
     return {};
   }
+  const filled = ownWords === undefined ? target.argRegs.length : Math.min(ownWords, target.argRegs.length);
   return {
-    uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
-    argRegs: target.argRegs,
+    uninitRegs: [
+      ...target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+      ...target.argRegs.slice(filled),
+    ],
+    argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
   };
 }
@@ -818,6 +833,9 @@ export function makeSsaBuilder(
   const ensureParam = (key: string, b: number): void => {
     if (preds[b].length > 0) {
       return; // a parameter here is a phi; see the precondition on the interface
+    }
+    if (slotKeyOffset(key) === null && model().uninitRegs?.includes(key)) {
+      return; // no caller fills it (an argument register past the own declaration's words)
     }
     for (const p of irBlocks[b].params) {
       if (paramReg.get(p) === key) {

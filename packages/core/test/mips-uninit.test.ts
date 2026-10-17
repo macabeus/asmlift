@@ -51,6 +51,26 @@ describe('the O32 register partition', () => {
     expect(registerLiveIns(target, new Set()).uninitRegs).not.toContain('s0');
     expect(registerLiveIns(target, new Set(['s0'])).uninitRegs).toContain('s0');
   });
+
+  // The function's own declaration moves the edge: an argument register at or past the words it
+  // fills is one no caller fills, so it is an uninitialised local's home and no argument — with no
+  // save, since every argument register is caller-saved. The two lists stay disjoint.
+  test.each([
+    ['ido', MIPS_IDO],
+    ['gcc', MIPS_GCC],
+  ])('argument registers past the own declaration move to the uninitialised side (%s)', (_c, target) => {
+    const two = registerLiveIns(target, new Set(), 2);
+    expect(two.argRegs).toEqual(['a0', 'a1']);
+    expect(two.uninitRegs).toEqual(expect.arrayContaining(['a2', 'a3']));
+    expect(two.uninitRegs!.filter((r) => two.argRegs!.includes(r))).toEqual([]);
+    expect(registerLiveIns(target, new Set(), 0).argRegs).toEqual([]);
+    // no declaration, or one filling every argument register, leaves the ABI's list whole
+    for (const words of [undefined, 4, 6]) {
+      const m = registerLiveIns(target, new Set(), words);
+      expect(m.argRegs).toEqual(target.argRegs);
+      expect(m.uninitRegs).toEqual(registerLiveIns(target, new Set()).uninitRegs);
+    }
+  });
 });
 
 describe('the register half: scratch and saved registers', () => {
