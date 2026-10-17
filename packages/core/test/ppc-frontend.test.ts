@@ -1147,11 +1147,18 @@ test('a reloc on a frame adjust (`addi r1`) is loud whether or not an `@ha` is p
   // straight through the fold into r1 and lifted as an ordinary teardown.
   const lone = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
   expect(() => dis('fradj', lone)).toThrow(/on a stack-pointer adjust/);
+  // The high half in another register, so the pair reaches the guard rather than the refusal of
+  // `lis r1` itself (`write`).
   const pair =
+    '0:\tlis     r3,0\n\t\t\t2: R_PPC_ADDR16_HA gFrame\n' +
+    '4:\taddi    r1,r3,0\n\t\t\t6: R_PPC_ADDR16_LO gFrame\n8:\tblr\n';
+  expect(() => dis('fradjpair', pair)).toThrow(
+    /'addi' at 0x4 carries a relocation \('gFrame'\) on a stack-pointer adjust/,
+  );
+  const pairR1 =
     '0:\tlis     r1,0\n\t\t\t2: R_PPC_ADDR16_HA gFrame\n' +
     '4:\taddi    r1,r1,0\n\t\t\t6: R_PPC_ADDR16_LO gFrame\n8:\tblr\n';
-  // the `lis r1` half already writes r1, which refuses on its own (`write`)
-  expect(() => dis('fradjpair', pair)).toThrow(/'lis r1,0' at 0x0 writes the stack pointer r1/);
+  expect(() => dis('fradjpairr1', pairR1)).toThrow(/'lis r1,0' at 0x0 writes the stack pointer r1/);
 });
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads
