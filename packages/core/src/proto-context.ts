@@ -16,6 +16,7 @@ import {
   parseDeclarations,
 } from './cdecl/parse';
 import { asParameter, spellType } from './cdecl/spell';
+import { demangledName, implicitArgumentWords } from './mangle';
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
   declaredCallArgs,
@@ -23,6 +24,7 @@ import {
   declaresAggregateReturn,
   declaresVoidReturn,
   isFloatingSpelling,
+  paramClassOf,
   statesNoReturn,
   symbolPrototype,
   validatePrototypes,
@@ -1407,6 +1409,37 @@ export function withContextPrototypes(
     }
   }
   return out;
+}
+
+/** THE CONTEXT'S OWN ENTRY FOR `own`, where it is a TYPED LIST a lift may bound its argument
+ *  registers by — the entry `withContextPrototypes` leaves out — and `undefined` everywhere else.
+ *
+ *  Its reader is the context bound (pipeline.ts `liftStamped`), which is SOFT: a register past it
+ *  that the lift goes on to read stays a parameter, so a header entry too short costs a diagnostic,
+ *  never `uninit_<reg>`. Only an entry whose every parameter the bound can lay out is handed over,
+ *  and every other shape ABSTAINS:
+ *   - no entry, or one the context dropped (two declarations that conflict: C++ overloads);
+ *   - a variadic declaration (`variadicParams`, no `params`): its arity is each caller's;
+ *   - `()` (no `params` at all): it states none, and a K&R definition may take any;
+ *   - a struct passed by value, or a spelling nothing here sizes: either may fill any number of
+ *     words;
+ *   - a symbol that names a C++ member function or a mangled free function, whose declaration the
+ *     context does not key by the symbol; a context naming one the same is not its declaration.
+ *  A bare count is no context entry (`prototypesFromContext` reads lists), and abstains as well. */
+export function ownContextEntry(context: Prototypes, own: string): FnProto | undefined {
+  const p = Object.hasOwn(context, own) ? context[own] : undefined;
+  if (p === undefined || p === null || !Array.isArray(p.params) || p.variadicParams !== undefined) {
+    return undefined;
+  }
+  if (demangledName(own) !== null || implicitArgumentWords(own) !== 0) {
+    return undefined;
+  }
+  const params = p.params;
+  const laidOut = params.every((_, k) => {
+    const cls = paramClassOf(p, params, k);
+    return cls === 'word' || cls === 'wide' || cls === 'float';
+  });
+  return laidOut ? p : undefined;
 }
 
 /** The caller's stated entry for `own`, with the struct or union its stated `returns` names laid out
