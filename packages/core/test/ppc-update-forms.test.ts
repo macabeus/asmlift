@@ -184,6 +184,41 @@ test('a write to a small-data base refuses, rather than leaving later small-data
   expect(sda('mr      r2,r4')).toThrow(/writes the small-data base r2/);
 });
 
+test('a load that writes a second register refuses in annotate mode too, rather than leaving it stale', () => {
+  // An opaque stands for its first operand only. Before this refused, annotate mode (the CLI and
+  // bench default) lifted `lwzux r0,r3,r4; lbz r3,0(r3)` as `*a0 + ASMLIFT_ERROR(...)`: the byte
+  // read through the unmoved base, where it is at `a0 + a1`.
+  const both = (lines: string[]) =>
+    (['strict', 'annotate'] as const).map((onGap) => {
+      const asm = `0 <g>:\n${lines.map((l, k) => `  ${(4 * k).toString(16)}:\t${l}`).join('\n')}\n`;
+      try {
+        return decompile('g', asm, PPC_MWCC, { onGap }).source;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    });
+  const tail = ['lbz     r3,0(r3)', 'add     r3,r3,r0', 'blr'];
+  for (const mn of ['lbzux', 'lhzux', 'lhaux', 'lwzux']) {
+    for (const out of both([`${mn}   r0,r3,r4`, ...tail])) {
+      expect(out).toContain(`unmodelled instruction '${mn}' writes its base r3 as well as r0`);
+    }
+  }
+  // `lmw` below r31 writes up to r31, and a string load the registers after its first
+  for (const out of both(['lmw     r30,0(r3)', 'mr      r3,r31', 'blr'])) {
+    expect(out).toContain(`unmodelled instruction 'lmw' writes r31 as well as r30`);
+  }
+  for (const out of both(['lswi    r5,r3,8', 'mr      r3,r6', 'blr'])) {
+    expect(out).toContain(`unmodelled instruction 'lswi' writes the registers after it as well as r5`);
+  }
+  // one destination still degrades to an honest opaque, and the plain indexed load still lifts
+  expect(both(['lmw     r31,0(r3)', 'mr      r3,r31', 'blr'])[1]).toContain(
+    `ASMLIFT_ERROR("unmodelled instruction 'lmw'")`,
+  );
+  expect(both(['lwzx    r0,r3,r4', ...tail])[1]).toContain('return *(s32 *)(a0 + a1) + *a0;');
+  // the FP update forms keep the floating-point refusal
+  expect(both(['lfdux   f1,r3,r4', 'blr'])[0]).toContain(`unmodelled floating-point instruction 'lfdux'`);
+});
+
 // What the ISA says, spelled out without the expansion `writtenOut` shares with the decode: the
 // access is at rA + D, and the base holds rA + D AFTER it, for the next access and as a value.
 test('an update form accesses rA + D and leaves rA + D in its base', () => {

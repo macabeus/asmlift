@@ -2057,6 +2057,28 @@ function liftOnce(
     // emit an honest `opaque` instead, which fails LOUD at assertResolved whether or not anything
     // reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
+      // AN OPAQUE STANDS FOR ONE DESTINATION, `ops[0]`. An unmodelled load that writes a second
+      // GPR would leave that one holding its old value with nothing marking it, which annotate mode
+      // (the CLI and bench default) then prints as ordinary C: `lwzux r0,r3,r4; lbz r3,0(r3)` read
+      // `*a0` where the byte is at `a0 + a1`. So refuse, as a store refuses, every load that writes
+      // more than its first operand: an indexed update load (`lbzux`, `lhzux`, `lhaux`, `lwzux`,
+      // which also write rA, as `mayWriteGpr` knows), `lmw` below r31 and the string loads. The FP
+      // update forms keep the floating-point refusal `opaqueDest` gives them.
+      const mn = ins.mnemonic;
+      const lmwFirst = mn === 'lmw' ? Number(ins.ops[0]?.slice(1)) : NaN;
+      const second = /^l(?!f)\w*ux$/.test(mn)
+        ? `its base ${ins.ops[1]}`
+        : lmwFirst < 31
+          ? `r${lmwFirst + 1}${lmwFirst + 1 < 31 ? '..r31' : ''}`
+          : /^lsw[ix]$/.test(mn)
+            ? 'the registers after it'
+            : null;
+      if (second !== null) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name} @0x${ins.addr.toString(16)}': unmodelled instruction '${mn}' writes ${second} ` +
+            `as well as ${ins.ops[0]}, and an opaque stands for one destination`,
+        );
+      }
       // storeClass: every PPC store mnemonic is st* — an unmodelled one (`stwbrx`, `sthbrx`, …)
       // must throw, never skip (its first token is the SOURCE register).
       const od = opaqueDest(ins.mnemonic, ins.ops, {
@@ -2363,7 +2385,8 @@ function liftOnce(
       //   • a base of r1 moves the stack pointer, which `r1Displacements` tracks only for the frame
       //     push (`case 'stwu'`) and `addi r1,r1,N`, and a load into r1 writes it (`write`);
       //   • a relocation other than `R_PPC_ADDR16_LO` (no compiler emits one).
-      // Not decoded, and refused by the opaque policy as unmodelled: the INDEXED update forms
+      // Not decoded, and refused as unmodelled (`emitOpaqueDest` refuses the loads, which write a
+      // second register an opaque cannot stand for; `opaqueDest` the stores): the INDEXED update forms
       // (`lwzux`, `stbux`, …), which in 2004 functions with an update form across pikmin,
       // ac-decomp and marioparty4 appear only in hand-written asm, and the floating-point ones
       // (`lfsu`, `stfdu`, …), whose plain forms this frontend does not lift either.
