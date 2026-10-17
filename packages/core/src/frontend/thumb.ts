@@ -4700,7 +4700,7 @@ function thumbFillOf(
   // argument registers (`ownArgumentWords`): agbcc homes a local in r3 past a two-parameter one.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, ownArgumentWords(prototypes[name], target)),
+    ...registerLiveIns(target, frame.savedRegs, ownArgumentWords(name, prototypes[name], target)),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({

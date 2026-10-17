@@ -1347,7 +1347,7 @@ function liftOnce(
     () => {
       const owned = ownedFrameOf?.();
       return {
-        ...registerLiveIns(target, savedRegs, ownArgumentWords(prototypes[name], target)),
+        ...registerLiveIns(target, savedRegs, ownArgumentWords(name, prototypes[name], target)),
         ...(owned === undefined ? {} : { ownedLocals: owned }),
       };
     },

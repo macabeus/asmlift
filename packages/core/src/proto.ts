@@ -1,5 +1,6 @@
 import { parseTypeName } from './cdecl/parse';
 import type { IrType } from './ir/types';
+import { demangle, implicitArgumentWords, spellType } from './mangle';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
 
@@ -337,44 +338,69 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *
  *  AN UPPER BOUND, because the direction of every error decides what it costs. A bound too HIGH
  *  leaves a register a parameter, which is what every function got before this existed. A bound
- *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So where the ABI's exact
- *  count is not stated here the larger one is taken:
- *   - a value wider than a word starts at an even word on O32 (`evenWordAlignedArgs`) and on the
- *     PowerPC EABI (mwcc 2.4.2 and 2.3.3 pass `void f(s32 k, s64 v)`'s `v` in r5:r6, measured),
- *     and not on agbcc (the note at `wordsOf`). It is aligned everywhere here: on agbcc that only
+ *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So:
+ *   - the declared words are laid out by {@link wordsOf}, the call's own rule: a floating parameter
+ *     takes no general word where floats count on their own (`fpu.slots: 'separate'`, the PowerPC
+ *     EABI), and everywhere else a `float` takes one and a `double` two, as a `long long` does
+ *     (O32's leading floats still take their integer slots, and agbcc passes both in general
+ *     words).
+ *   - TWO HIDDEN WORDS ARE ADDED where they may come first, because no parameter list states them
+ *     and each pushes every declared parameter one register up. A return the declaration does not
+ *     show is a scalar or `void` may be a struct handed back through a pointer in argument 0, and
+ *     a symbol that may name a C++ member function is handed `this` there (`mangle.ts`
+ *     `implicitArgumentWords`). Both are "may": a static member or a struct returned in registers
  *     leaves one register a parameter.
- *   - a floating parameter takes no general word where floats count on their own
- *     (`fpu.slots: 'separate'`, the PowerPC EABI). Everywhere else a `float` takes one word and a
- *     `double` two, aligned: O32's leading floats still take their integer slots (`fpu.slots:
- *     'leading'`), and agbcc passes both in general words.
  *
- *  IT ABSTAINS on a declaration that states no parameter list, or one it cannot bound: an unsized
- *  spelling (which may be two words), a struct passed by value (sized by a layout this does not
- *  read), a `long double`, and a struct or union RETURN, whose hidden pointer may take argument 0
- *  (a pipeline refusal answers the through-memory one before any frontend runs). A variadic
- *  declaration states no `params` and so abstains: its arity is each caller's. A COUNT is the
- *  user's word for argument registers (`FnProto.params`), so it is the bound itself. */
-export function ownArgumentWords(p: FnProto | undefined, target: Pick<TargetDescription, 'fpu'>): number | undefined {
-  if (p === undefined || p === null || declaresAggregateReturn(p)) {
+ *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
+ *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
+ *  copy of the declaration. A COUNT is the user's word for the declared argument registers
+ *  (`FnProto.params`), the hidden ones aside. IT ABSTAINS where neither states a list, or on one it
+ *  cannot lay out: an unsized spelling (which may be two words), a struct passed by value (sized
+ *  by a layout this does not read), a `long double`; and on a constructor or destructor, which may
+ *  be handed a flag beside `this`. A variadic declaration states no `params` and
+ *  so abstains: its arity is each caller's. */
+export function ownArgumentWords(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+): number | undefined {
+  const widths = ownParamWidths(name, p ?? undefined, target);
+  const implicit = implicitArgumentWords(name);
+  if (widths === undefined || implicit === undefined) {
     return undefined;
   }
-  if (typeof p.params === 'number') {
-    return Number.isInteger(p.params) && p.params >= 0 ? p.params : undefined;
+  const scalarReturn =
+    declaresVoidReturn(p) ||
+    (p?.returns !== undefined &&
+      !declaresAggregateReturn(p) &&
+      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)));
+  return (scalarReturn ? 0 : 1) + implicit + wordsOf(widths, target);
+}
+
+/** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
+function ownParamWidths(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu'>,
+): number[] | undefined {
+  if (typeof p?.params === 'number') {
+    return Number.isInteger(p.params) && p.params >= 0 ? Array.from({ length: p.params }, () => 32) : undefined;
   }
-  if (!Array.isArray(p.params)) {
+  const mangled = Array.isArray(p?.params) ? null : demangle(name);
+  const decl: FnProto | undefined = Array.isArray(p?.params)
+    ? p
+    : mangled === null
+      ? undefined
+      : { params: mangled.params.map(spellType) };
+  if (!Array.isArray(decl?.params)) {
     return undefined;
   }
-  const params = p.params;
-  let n = 0;
-  const pair = () => {
-    n += (n % 2) + 2;
-  };
+  const params = decl.params;
+  const widths: number[] = [];
   for (const k of params.keys()) {
-    const cls = paramClassOf(p, params, k);
-    if (cls === 'word') {
-      n += 1;
-    } else if (cls === 'wide') {
-      pair();
+    const cls = paramClassOf(decl, params, k);
+    if (cls === 'word' || cls === 'wide') {
+      widths.push(cls === 'word' ? 32 : (declaredWidth(params[k]) ?? 64));
     } else if (cls === 'float') {
       const bare = params[k]
         .replace(/\b(?:const|volatile)\b/g, ' ')
@@ -384,19 +410,14 @@ export function ownArgumentWords(p: FnProto | undefined, target: Pick<TargetDesc
       if (spelled === 'long double') {
         return undefined;
       }
-      if (target.fpu?.slots === 'separate') {
-        continue;
-      }
-      if (spelled === 'float') {
-        n += 1;
-      } else {
-        pair();
+      if (target.fpu?.slots !== 'separate') {
+        widths.push(spelled === 'float' ? 32 : 64);
       }
     } else {
       return undefined;
     }
   }
-  return n;
+  return widths;
 }
 
 /** Whether a declared type is `double`, qualifiers aside. */

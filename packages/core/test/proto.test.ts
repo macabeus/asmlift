@@ -287,52 +287,88 @@ describe('declaredCallArgs', () => {
 // a register at or past it is an uninitialised local (frontend/ssa.ts `registerLiveIns`), so a bound
 // too low would turn an argument into `uninit_<reg>` and a bound too high only keeps a parameter.
 describe('ownArgumentWords', () => {
-  test('a count is the bound itself, and a typed list counts its words', () => {
+  const S32 = { returns: 's32' };
+  test('a count is the declared registers, and a typed list counts its words', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-      expect(ownArgumentWords({ params: 2 }, t)).toBe(2);
-      expect(ownArgumentWords({ params: 0 }, t)).toBe(0);
-      expect(ownArgumentWords({ params: [] }, t)).toBe(0);
-      expect(ownArgumentWords({ params: ['s32', 's32 *'] }, t)).toBe(2);
+      expect(ownArgumentWords('f', { params: 2, ...S32 }, t)).toBe(2);
+      expect(ownArgumentWords('f', { params: 0, returnsVoid: true }, t)).toBe(0);
+      expect(ownArgumentWords('f', { params: [], ...S32 }, t)).toBe(0);
+      expect(ownArgumentWords('f', { params: ['s32', 's32 *'], returns: 'void' }, t)).toBe(2);
+      expect(ownArgumentWords('f', { params: ['s32'], returns: 'float' }, t)).toBe(1);
     }
   });
 
-  // mwcc 2.4.2 and 2.3.3 pass `void f(s32 k, s64 v)`'s v in r5:r6, O32 in a2:a3; agbcc in r1:r2,
-  // where the aligned bound is one word loose — the direction that only keeps a parameter.
-  test('a 64-bit parameter is two words at an even word, on every target', () => {
+  // `struct P mk(int, int, int)` takes its hidden pointer in argument 0 and z one register up, in
+  // r3 / a3 / r6: bounded from argument 0, z was `uninit_<reg>`.
+  test('a return not shown to be a scalar may take a hidden pointer in argument 0', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-      expect(ownArgumentWords({ params: ['s32', 'long long'] }, t)).toBe(4);
-      expect(ownArgumentWords({ params: ['long long', 's32'] }, t)).toBe(3);
+      expect(ownArgumentWords('mk', { params: 3 }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'] }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'], returns: 'Pt' }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: ['int', 'int', 'int'], returns: 'struct P' }, t)).toBe(4);
+      expect(ownArgumentWords('mk', { params: ['int'], returns: 'struct P *' }, t)).toBe(1);
     }
+  });
+
+  // A member function is handed `this` in argument 0, which its parameter list leaves out:
+  // `int Foo::pick(int k, int *p)` reads p in r5 on mwcc.
+  test('a symbol that may name a member function takes `this` first', () => {
+    const pick = { params: ['int', 'int *'], ...S32 };
+    expect(ownArgumentWords('pick__3FooFiPi', pick, PPC_MWCC)).toBe(3);
+    expect(ownArgumentWords('pick__3FooiPi', pick, MIPS_GCC)).toBe(3);
+    expect(ownArgumentWords('pick__FiPi', pick, PPC_MWCC)).toBe(2);
+    // a constructor or destructor may be handed a flag beside `this`
+    expect(ownArgumentWords('__dt__3FooFv', { params: [], returnsVoid: true }, PPC_MWCC)).toBeUndefined();
+  });
+
+  // `uninitfirst(int, int *)` compiled as C++ is `uninitfirst__FiPi`: the compiler's own record
+  // of the parameters, which mwcc 2.3.3 homes locals past in r5..r10.
+  test('with no stated parameters, a mangled symbol states them', () => {
+    expect(ownArgumentWords('uninitfirst__FiPi', S32, PPC_MWCC)).toBe(2);
+    expect(ownArgumentWords('uninitfirst__FiPi', undefined, PPC_MWCC)).toBe(3);
+    expect(ownArgumentWords('get__3FooFv', S32, PPC_MWCC)).toBe(1);
+    expect(ownArgumentWords('take__F3Vec', S32, PPC_MWCC)).toBeUndefined();
+    // a stated list wins
+    expect(ownArgumentWords('uninitfirst__FiPi', { params: 3, ...S32 }, PPC_MWCC)).toBe(3);
+  });
+
+  // `wordsOf` lays them out: mwcc 2.4.2, 2.3.3 and 2.4.7 pass `void f(s32 k, s64 v)`'s v in r5:r6
+  // and O32 in a2:a3, where agbcc passes it in r1:r2.
+  test('a 64-bit parameter is two words, at an even word where the target aligns one', () => {
+    for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+      expect(ownArgumentWords('f', { params: ['s32', 'long long'], ...S32 }, t)).toBe(4);
+      expect(ownArgumentWords('f', { params: ['long long', 's32'], ...S32 }, t)).toBe(3);
+    }
+    expect(ownArgumentWords('f', { params: ['s32', 'long long'], ...S32 }, ARMV4T_AGBCC)).toBe(3);
   });
 
   // PowerPC EABI floats take no general word; O32's leading floats still take their integer slots
   // (`fpu.slots`), and agbcc passes floats in general words.
   test('a floating parameter takes general words except where floats count on their own', () => {
-    expect(ownArgumentWords({ params: ['s32', 'float'] }, PPC_MWCC)).toBe(1);
-    expect(ownArgumentWords({ params: ['double', 's32'] }, PPC_MWCC)).toBe(1);
-    expect(ownArgumentWords({ params: ['float', 'float'] }, MIPS_IDO)).toBe(2);
-    expect(ownArgumentWords({ params: ['s32', 'double'] }, MIPS_GCC)).toBe(4);
-    expect(ownArgumentWords({ params: ['f32', 's32'] }, ARMV4T_AGBCC)).toBe(2);
-    expect(ownArgumentWords({ params: ['long double'] }, MIPS_IDO)).toBeUndefined();
+    expect(ownArgumentWords('f', { params: ['s32', 'float'], ...S32 }, PPC_MWCC)).toBe(1);
+    expect(ownArgumentWords('f', { params: ['double', 's32'], ...S32 }, PPC_MWCC)).toBe(1);
+    expect(ownArgumentWords('f', { params: ['float', 'float'], ...S32 }, MIPS_IDO)).toBe(2);
+    expect(ownArgumentWords('f', { params: ['s32', 'double'], ...S32 }, MIPS_GCC)).toBe(4);
+    expect(ownArgumentWords('f', { params: ['f32', 's32'], ...S32 }, ARMV4T_AGBCC)).toBe(2);
+    expect(ownArgumentWords('f', { params: ['s32', 'double'], ...S32 }, ARMV4T_AGBCC)).toBe(3);
+    expect(ownArgumentWords('f', { params: ['long double'], ...S32 }, MIPS_IDO)).toBeUndefined();
   });
 
   test('it abstains wherever the declaration bounds nothing', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC]) {
-      expect(ownArgumentWords(undefined, t)).toBeUndefined();
-      expect(ownArgumentWords({ returnsVoid: true }, t)).toBeUndefined();
-      expect(ownArgumentWords({ params: 'u8' as unknown as string[] }, t)).toBeUndefined();
-      expect(ownArgumentWords({ params: 1.5 }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', undefined, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { returnsVoid: true }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { params: 'u8' as unknown as string[] }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { params: 1.5 }, t)).toBeUndefined();
       // an unsized spelling may be two words
-      expect(ownArgumentWords({ params: ['s32', 'Direction'] }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { params: ['s32', 'Direction'], ...S32 }, t)).toBeUndefined();
       // a struct by value is sized by a layout this does not read
-      expect(ownArgumentWords({ params: ['struct Foo'] }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { params: ['struct Foo'], ...S32 }, t)).toBeUndefined();
       // a variadic declaration states no `params`: its arity is each caller's
-      expect(ownArgumentWords({ variadicParams: ['const char *'] }, t)).toBeUndefined();
-      // a struct return's hidden pointer may take argument 0
-      expect(ownArgumentWords({ params: ['s32'], returns: 'struct S' }, t)).toBeUndefined();
+      expect(ownArgumentWords('f', { variadicParams: ['const char *'], ...S32 }, t)).toBeUndefined();
     }
     // a typedef'd enum the context resolved to one word is a word
-    expect(ownArgumentWords({ params: ['s32', 'Direction'], wordParams: [1] }, ARMV4T_AGBCC)).toBe(2);
+    expect(ownArgumentWords('f', { params: ['s32', 'Direction'], wordParams: [1], ...S32 }, ARMV4T_AGBCC)).toBe(2);
   });
 });
 

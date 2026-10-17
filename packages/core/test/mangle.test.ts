@@ -5,7 +5,15 @@
 // will align to the target.
 import { describe, expect, test } from 'vitest';
 
-import { type CppSig, declareCpp, demangle, demangledName, mangle, spellType } from '../src/mangle';
+import {
+  type CppSig,
+  declareCpp,
+  demangle,
+  demangledName,
+  implicitArgumentWords,
+  mangle,
+  spellType,
+} from '../src/mangle';
 
 // sym ↔ signature, golden from real mwcceppc output where noted.
 const CASES: { sym: string; sig: CppSig; note: string }[] = [
@@ -116,4 +124,41 @@ test('demangledName reads the source name of a real CodeWarrior symbol, includin
   // a plain C name with a double underscore in it, and an operator
   expect(demangledName('sa2__sub_808558C')).toBeNull();
   expect(demangledName('__as__8Vector3fFR8Vector3f')).toBeNull();
+});
+
+// A member function is handed `this` in argument 0, which its declared parameters leave out, so the
+// own-declaration bound (`proto.ts` `ownArgumentWords`) asks how many words a symbol may be handed
+// ahead of them.
+describe('implicitArgumentWords', () => {
+  test('a class after the `__`, in either scheme, may be a member taking `this`', () => {
+    for (const sym of [
+      'pick__3FooFiPi',
+      'getStartHour__11PlayerStateCFv',
+      'RotAxisX__Q23zen17particleGeneratorFf',
+      '__as__3FooFRC3Foo',
+      'pick__3FooiPi',
+      'pick__C3FooiPi',
+    ]) {
+      expect(implicitArgumentWords(sym)).toBe(1);
+    }
+  });
+
+  test('a constructor or destructor may take a flag too, so it answers nothing', () => {
+    for (const sym of ['__ct__12RefCountableFv', '__dt__6SystemFv', '__3Foo', '__Q23zen3Foo', '_$_3Foo', '_._3Foo']) {
+      expect(implicitArgumentWords(sym)).toBeUndefined();
+    }
+  });
+
+  test('a free function and a plain C name take none', () => {
+    for (const sym of [
+      'uninitfirst__FiPi',
+      'ksNesInit13__Fv',
+      'map__Fill16',
+      'uninit_spill',
+      '__divsi3',
+      'func_80012345',
+    ]) {
+      expect(implicitArgumentWords(sym)).toBe(0);
+    }
+  });
 });

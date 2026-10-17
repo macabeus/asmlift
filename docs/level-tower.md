@@ -1486,8 +1486,11 @@ happening for the frame. The function's OWN declaration moves the same partition
 register at or past the words it fills (`proto.ts` `ownArgumentWords`, an upper bound that abstains
 on anything it cannot bound) is one no caller fills, so `registerLiveIns` moves it to the
 uninitialised side — KMC's `a2` past `uninit_spill(int, int *)`, agbcc's `r3`, mwcc 2.3.3's
-`r5`..`r10`. Only a stated declaration (`--proto`, a row's `proto`) is read there, never the
-context's entry for the function itself.
+`r5`..`r10`. The words it may be handed ahead of its parameters count too: a struct's hidden
+return pointer wherever the return is not shown to be a scalar, and a C++ method's `this`. Only a
+stated declaration (`--proto`, a row's `proto`) or a mangled symbol's parameter codes is read there,
+never the context's entry for the function itself, and an incoming stack argument past the bound
+refuses, since no local lives in the caller's frame.
 
 With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
 argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`

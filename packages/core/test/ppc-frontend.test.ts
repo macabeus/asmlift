@@ -664,13 +664,32 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const lifted = (f: object) => decompile('f', body, PPC_MWCC, { prototypes: { f } }).source;
     const local = 's32 f(s32 a0) {\n    s32 uninit_r5;\n    return a0 + uninit_r5;\n}\n';
     const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
-    expect(lifted({ params: 2 })).toBe(local);
-    expect(lifted({ params: ['s32', 'float', 's32 *'] })).toBe(local);
-    expect(lifted({ params: 3 })).toBe(param);
+    expect(lifted({ params: 2, returns: 's32' })).toBe(local);
+    expect(lifted({ params: ['s32', 'float', 's32 *'], returns: 's32' })).toBe(local);
+    expect(lifted({ params: 3, returns: 's32' })).toBe(param);
+    // a return not shown to be a scalar may be a struct's hidden pointer, in r3
+    expect(lifted({ params: 2 })).toBe(param);
     // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),
     // so r5 stays a parameter, which the split-pair refusal then names (raise/pairparams.ts)
-    expect(() => lifted({ params: ['s32', 'long long'] })).toThrow(/reads the two halves of a 64-bit value/);
-    expect(lifted({ variadicParams: ['s32'] })).toBe(param);
+    expect(() => lifted({ params: ['s32', 'long long'], returns: 's32' })).toThrow(
+      /reads the two halves of a 64-bit value/,
+    );
+    expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
+  });
+  // `int Foo::pick(int k, int *p){ return base + k + p[1]; }` (-lang=c++): `this` takes r3, which
+  // the declared parameters leave out, so p is in r5.
+  test('a member function is handed `this` ahead of its declared parameters (ownArgumentWords)', () => {
+    const body =
+      '0 <pick__3FooFiPi>:\n0:\tlwz     r0,0(r3)\n4:\tlwz     r5,4(r5)\n8:\tadd     r0,r0,r4\nc:\tadd     r3,r0,r5\n10:\tblr\n';
+    const pick = { params: ['int', 'int *'], returns: 'int' };
+    expect(decompile('pick__3FooFiPi', body, PPC_MWCC, { prototypes: { pick__3FooFiPi: pick } }).source).not.toMatch(
+      /uninit/,
+    );
+    expect(
+      decompile('pick__FiPi', body.replace(/pick__3FooFiPi/g, 'pick__FiPi'), PPC_MWCC, {
+        prototypes: { pick__FiPi: pick },
+      }).source,
+    ).toMatch(/uninit_r5/);
   });
   test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
     // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and

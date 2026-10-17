@@ -1355,7 +1355,7 @@ function liftOnce(
     name,
     blocks.length,
     preds,
-    () => registerLiveIns(target, savedRegs, ownArgumentWords(prototypes[name], target)),
+    () => registerLiveIns(target, savedRegs, ownArgumentWords(name, prototypes[name], target)),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;

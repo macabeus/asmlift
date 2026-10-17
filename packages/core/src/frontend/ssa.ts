@@ -269,6 +269,13 @@ export interface LiveInModel {
    *  `readRecursive` cannot catch that on its own — it never sees the argument registers, because
    *  a read of one takes the parameter path by falling through every other case. */
   argRegs?: readonly string[];
+  /** The argument words the function's own declaration fills (`proto.ts` `ownArgumentWords`), where
+   *  it states them. A register past them is in `uninitRegs`; an INCOMING STACK ARGUMENT at or past
+   *  them is refused, because no local lives in the caller's frame and the read says the
+   *  declaration is wrong. Taken as a parameter it would be named by position, one slot below the
+   *  registers the declaration left out: `int st2(int a,int b,int c,int d,int e){ return g(a)+e; }`
+   *  declared with two parameters lifted `st2(a0, a1, a2)` returning the fifth argument as `a2`. */
+  ownArgWords?: number;
 }
 
 /** The register partition's postcondition, checked at the point of USE. `uninitRegs` asserts "no
@@ -340,7 +347,7 @@ export function registerLiveIns(
   },
   savedRegs: ReadonlySet<string>,
   ownWords?: number,
-): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs'> {
+): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords'> {
   const scratchRegs = assertScratchRegsPartitioned(target);
   for (const r of target.hiddenInputRegs ?? []) {
     if (!scratchRegs.has(r)) {
@@ -358,6 +365,7 @@ export function registerLiveIns(
     ],
     argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
+    ...(ownWords === undefined ? {} : { ownArgWords: ownWords }),
   };
 }
 
@@ -720,6 +728,14 @@ export function makeSsaBuilder(
           hiddenEntryValues.set(op.results[0], reg);
         }
         return op.results[0];
+      }
+      const rank = stackArgIndex(reg);
+      const declared = model().ownArgWords;
+      if (rank !== null && declared !== undefined && rank >= declared) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': it reads incoming stack argument ${rank}, past the ${declared} argument ` +
+            `words its own declaration fills — the declaration and the body disagree`,
+        );
       }
       // an incoming argument register → function parameter.
       // If one was already asserted for this key (ensureParam), adopt it — minting a second

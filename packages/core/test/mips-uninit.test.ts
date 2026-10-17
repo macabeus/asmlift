@@ -84,13 +84,16 @@ describe('an argument register past the own declaration', () => {
     ['gcc', MIPS_GCC],
     ['ido', MIPS_IDO],
   ])('is an uninitialised local, and a declared one stays a parameter (%s)', (_c, target) => {
-    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(local);
-    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'] } })).toBe(local);
+    expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 's32' } })).toBe(local);
+    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'], returns: 's32' } })).toBe(local);
     expect(src(READ_A2, target)).toBe(param);
-    expect(src(READ_A2, target, undefined, { f: { params: 3 } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: 3, returns: 's32' } })).toBe(param);
+    // a return the declaration does not show is a scalar may be a struct's hidden pointer in a0
+    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 'Pt' } })).toBe(param);
     // O32 passes `(s32, double)`'s double in a2:a3, skipping a1
-    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'double'] } })).toBe(param);
-    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'Unsized'] } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'double'], returns: 's32' } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'Unsized'], returns: 's32' } })).toBe(param);
   });
 });
 
