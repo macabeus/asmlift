@@ -51,6 +51,53 @@ describe('the O32 register partition', () => {
     expect(registerLiveIns(target, new Set()).uninitRegs).not.toContain('s0');
     expect(registerLiveIns(target, new Set(['s0'])).uninitRegs).toContain('s0');
   });
+
+  // The function's own declaration moves the edge: an argument register at or past the words it
+  // fills is one no caller fills, so it is an uninitialised local's home and no argument — with no
+  // save, since every argument register is caller-saved. The two lists stay disjoint.
+  test.each([
+    ['ido', MIPS_IDO],
+    ['gcc', MIPS_GCC],
+  ])('argument registers past the own declaration move to the uninitialised side (%s)', (_c, target) => {
+    const two = registerLiveIns(target, new Set(), 2);
+    expect(two.argRegs).toEqual(['a0', 'a1']);
+    expect(two.uninitRegs).toEqual(expect.arrayContaining(['a2', 'a3']));
+    expect(two.uninitRegs!.filter((r) => two.argRegs!.includes(r))).toEqual([]);
+    expect(registerLiveIns(target, new Set(), 0).argRegs).toEqual([]);
+    // no declaration, or one filling every argument register, leaves the ABI's list whole
+    for (const words of [undefined, 4, 6]) {
+      const m = registerLiveIns(target, new Set(), words);
+      expect(m.argRegs).toEqual(target.argRegs);
+      expect(m.uninitRegs).toEqual(registerLiveIns(target, new Set()).uninitRegs);
+    }
+  });
+});
+
+// KMC and gcc 2.7.2 home a local in a2/a3 past a two-parameter declaration (`uninit_spill`,
+// `uninitfirst`); only the function's own declaration tells that read from an argument
+// (`ownArgumentWords`). IDO homes the same locals in frame words, so it never reaches this.
+describe('an argument register past the own declaration', () => {
+  const READ_A2 = ['0:\taddu\tv0,a0,a2', '4:\tjr\tra', '8:\tnop'];
+  const local = 's32 f(s32 a0) {\n    s32 uninit_a2;\n    return a0 + uninit_a2;\n}\n';
+  const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('is an uninitialised local, and a declared one stays a parameter (%s)', (_c, target) => {
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 's32' } })).toBe(local);
+    expect(src(READ_A2, target, undefined, { f: { params: ['float', 'float'], returns: 's32' } })).toBe(local);
+    expect(src(READ_A2, target)).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32', 's32'], returns: 's32' } })).toBe(param);
+    // a list whose return is not shown to be a scalar may follow a struct's hidden pointer in a0
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'] } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 's32'], returns: 'Pt' } })).toBe(param);
+    // a bare count bounds nothing: `{params: 2}` may be `(s32, long long)`, which passes a2:a3
+    expect(src(READ_A2, target, undefined, { f: { params: 2, returns: 's32' } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: 2 } })).toBe(param);
+    // O32 passes `(s32, double)`'s double in a2:a3, skipping a1
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'double'], returns: 's32' } })).toBe(param);
+    expect(src(READ_A2, target, undefined, { f: { params: ['s32', 'Unsized'], returns: 's32' } })).toBe(param);
+  });
 });
 
 describe('the register half: scratch and saved registers', () => {

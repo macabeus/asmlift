@@ -1605,8 +1605,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // calls) when no frame address is taken (`ownedFrame`), so a def-less read there is an `undef`
   // whether or not anything stores the word — uninit_spill:ido7.1 reads 36(sp) and 0(sp), which
   // nothing does. uninit_spill and uninitfirst on gcc2.7.2kmc keep a2 (and a3) as parameters: KMC
-  // homes a local in an argument register past the declared arity, which only an own-arity rule
-  // can tell from an argument.
+  // homes a local in an argument register past the declared arity, which only the function's own
+  // declaration tells from an argument, and these rows state none: `ownar_spill` and `ownar_first`
+  // (below `uninitfirst`) are the same functions handed theirs.
   // uninit_join and uninit_sw also run on stock gcc2.7.2 — the tier's first rows on that compiler —
   // because it homes the local exactly where KMC does, so the register half is pinned on both.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
@@ -4029,9 +4030,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // asm rather than to this row — that probe was run without a `ctx` at all, so
   // its candidates score against a differently-lifted call — best 23 where this row's best is 12.
   // The enumeration itself is the same either way: 12 candidates under the same variations, and
-  // a two-parameter `void offhi_split(u32 a0, u32 a1)` with the row's `ctx` and `proto` as without
-  // (asmlift does not read a function's OWN `params` as its arity). In it, of 12 candidates 6
-  // spell `v0 = getbuf(a0) + 4;`
+  // a `void offhi_split(u32 a0)` whose row `proto` bounds its argument registers (without it the
+  // signature carries a second, unread parameter). Of the 12 candidates 6 spell
+  // `v0 = getbuf(a0) + 4;`
   // and 6 spell `v0 = getbuf(a0);` with the bias re-derived at every use (`*(u8 *)(v0 + 4 + v6)`,
   // `putbuf(v0 + 4 - 4)`). Those are the two points of the `/expr-home` lattice `offhome` and
   // `offuse` bracket, and neither of them is the split — a home that receives the RAW call result
@@ -10475,6 +10476,153 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n    for (i = 0; i < 8; i++)\n        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9;\n    return s;\n}',
     features: ['uninit-local', 'array'],
     toolchains: ALL,
+  },
+  // THE FUNCTION'S OWN DECLARATION BOUNDS ITS ARGUMENT REGISTERS (proto.ts `ownArgumentWords`, read
+  // by frontend/ssa.ts `registerLiveIns`). `uninit_spill` and `uninitfirst` above state no
+  // prototype, so nothing can tell a local KMC and gcc 2.7.2 home in a2/a3 — agbcc in r3, mwcc
+  // 2.3.3 in r5..r10 — from an argument, and each such read lifts as a made-up parameter. These
+  // rows are the same shapes handed their own declaration, as a project's header hands it (a loop
+  // bound or a constant changed, so no row is another alpha-renamed): the registers past its words
+  // are uninitialised locals. IDO homes the locals in frame words and mwcc 2.4.2 in saved or
+  // scratch registers, so those cells pin that nothing else moves. mwcc 2.3.3, which homes them in
+  // r5..r10, has no canonical flags to carry a row; packages/core/test/ppc-frontend.test.ts pins it.
+  // `ownar_read` and `ownar_join` are agbcc's r3 and r1 homes (read as parameters: `gOut = a3`). The
+  // controls keep what the declaration fills: `ownar_hole` a declared register the body never
+  // reads, which still holds a2 in its slot, and `ownar_dbl` O32's `(int, double)`, whose double
+  // takes a2:a3 past an empty a1.
+  {
+    sym: 'ownar_spill',
+    src:
+      'int ownar_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' for(i=0;i<6;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_spill(int, int *);',
+    proto: { ownar_spill: { params: ['int', 'int *'], returns: 'int' } },
+  },
+  // A BARE COUNT BOUNDS NOTHING on the function's own entry: it may count argument registers or C
+  // parameters, and a C parameter may span any number of words. This row is the witness that a
+  // count lifts exactly as with no declaration: KMC's and gcc 2.7.2's a2 home stays a made-up
+  // parameter. The typed `ownar_spill` above is the row the bound pins.
+  {
+    sym: 'ownar_count',
+    src:
+      'int ownar_count(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' for(i=0;i<5;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_count(int, int *);',
+    proto: { ownar_count: { params: 2 } },
+  },
+  {
+    sym: 'ownar_first',
+    src:
+      'extern s32 gOut;\n' +
+      's32 ownar_first(s32 k, s32 *p)\n{\n    s32 v0, v1, v2, v3, v4, v5, v6, v7, v8, v9;\n    s32 i, s = 0;\n' +
+      '    if (k > 4)\n        gOut = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9;\n' +
+      '    switch (k) {\n' +
+      '    case 0: v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9]; break;\n' +
+      '    case 1: v0 = p[10]; v1 = p[11]; v2 = p[12]; v3 = p[13]; v4 = p[14]; v5 = p[15]; v6 = p[16]; v7 = p[17]; v8 = p[18]; v9 = p[19]; break;\n' +
+      '    }\n    for (i = 0; i < 6; i++)\n        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9;\n    return s;\n}',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern s32 gOut;\ns32 ownar_first(s32, s32 *);',
+    proto: { ownar_first: { params: ['s32', 's32 *'], returns: 's32' } },
+  },
+  {
+    sym: 'ownar_read',
+    src: 'extern int gOut;\nint ownar_read(int k, int *p){ int v; if (k > 5) gOut = v; v = p[0]; return v + k; }',
+    features: ['uninit-local'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gOut;\nint ownar_read(int, int *);',
+    proto: { ownar_read: { params: ['int', 'int *'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_join',
+    src: 'int ownar_join(int a){ int r; if (a > 0) r = a * 3; return r + 1; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ownar_join(int);',
+    proto: { ownar_join: { params: ['int'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_hole',
+    src: 'int ownar_hole(int a, int b, int c){ return a + c; }',
+    features: ['arithmetic'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int ownar_hole(int, int, int);',
+    proto: { ownar_hole: { params: ['int', 'int', 'int'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_dbl',
+    src: 'extern double gD;\nextern int gK;\nvoid ownar_dbl(int k, double d){ gK = k; gD = d; }',
+    features: ['float'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern double gD;\nextern int gK;\nvoid ownar_dbl(int, double);',
+    proto: { ownar_dbl: { params: ['int', 'double'], returnsVoid: true } },
+  },
+  // A declaration that lists the parameters and not the return leaves room for a struct's hidden
+  // return pointer in argument 0, which pushes every parameter one register up: bounded from
+  // argument 0, `z` (r3, a3, r6) would read as an uninitialised local.
+  {
+    sym: 'ownar_sret',
+    src: 'struct P { int a, b, c; };\nstruct P ownar_sret(int x, int y, int z){ struct P p; p.a = z; p.b = x; p.c = y + 1; return p; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct P { int a, b, c; };\nstruct P ownar_sret(int, int, int);',
+    proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
+  },
+  // The same shape declared by a count with a typedef return: a witness that the count lifts as
+  // with no declaration, so `z` stays a parameter (a count read as 3 registers from argument 0 made
+  // it an uninitialised local).
+  {
+    sym: 'ownar_sretcnt',
+    src:
+      'typedef struct P { int a, b, c; } Pt;\n' +
+      'Pt ownar_sretcnt(int x, int y, int z){ Pt p; p.a = z; p.b = x; p.c = y + 1; return p; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'typedef struct P { int a, b, c; } Pt;\nPt ownar_sretcnt(int, int, int);',
+    proto: { ownar_sretcnt: { params: 3, returns: 'Pt' } },
+  },
+  // The hidden return pointer comes FIRST, so O32's even-word rule counts it: `x` skips a1 and
+  // takes a2:a3. Laid out after the declared words, the bound would be 3 and a3 (half of x) an
+  // uninitialised local. agbcc aligns nothing and passes x in r1:r2.
+  {
+    sym: 'ownar_sretdbl',
+    src:
+      'struct P { int a, b, c; };\n' +
+      'struct P ownar_sretdbl(double x){ struct P p; int *q = (int *)&x; p.a = q[0]; p.b = q[1]; p.c = 7; return p; }',
+    features: ['struct-return', 'float'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct P { int a, b, c; };\nstruct P ownar_sretdbl(double);',
+    proto: { ownar_sretdbl: { params: ['double'] } },
+  },
+  // A COUNT DOES NOT SAY WHERE ITS PAIRS FALL: O32 and the PowerPC EABI put a 64-bit parameter at
+  // an even word, so `(int, long long, int)` fills 4 registers and spans 5 words, and O32's `(int,
+  // double)` fills 3 and spans 4. A bound read off the count turned mwcc's c in r7 and O32's low half
+  // of b in a3 into uninitialised locals. A count bounds nothing, and these rows are the witnesses
+  // that they lift exactly as with no declaration. A typed list of the same parameters refuses on the
+  // 64-bit split (raise/pairparams.ts). agbcc aligns nothing and is the control.
+  {
+    sym: 'ownar_cntll',
+    src: 'int ownar_cntll(int a, long long b, int c){ return a * 3 + (int)b - c; }',
+    features: ['int64', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_cntll(int, long long, int);',
+    proto: { ownar_cntll: { params: 4, returns: 'int' } },
+  },
+  {
+    sym: 'ownar_cntdbl',
+    src: 'int ownar_cntdbl(int a, double b){ return ((int *)&b)[1] + a * 5; }',
+    features: ['float', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int ownar_cntdbl(int, double);',
+    proto: { ownar_cntdbl: { params: 3, returns: 'int' } },
   },
   {
     sym: 'byvalregs',

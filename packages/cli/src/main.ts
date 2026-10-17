@@ -138,9 +138,19 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    gives its widths, and "returns" gives the type it hands
                    back (a 64-bit one comes home in a register pair) and gets
                    the callee declared in the candidate's own source.
-                   "returnsVoid":true is the same fact as "returns":"void";
-                   on the decompiled function's OWN entry either spells its
-                   void-ness. A callee returning a struct or union by value
+                   "returnsVoid":true is the same fact as "returns":"void".
+                   The decompiled function's OWN entry also bounds its
+                   argument registers: one at or past the words its params
+                   fill is read as an uninitialised local, and a stack
+                   argument past them refuses. A typed list adds a word for a
+                   hidden struct-return pointer unless "returns" shows a
+                   scalar or void, and one for a C++ method's this, read off
+                   a mangled name. A bare count bounds nothing on the own
+                   entry: it may count C parameters, and one of those may
+                   span any number of words. A constructor or destructor bounds
+                   nothing. A variadic function's entry must state its fixed
+                   parameters as "variadicParams": a params list or count
+                   bounds what the ... takes too. A callee returning a struct or union by value
                    needs its members, which say whether the target hands it
                    back through a hidden pointer in argument 0:
                    "returns":"struct S","returnLayout":{"kind":"struct",
