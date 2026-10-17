@@ -249,7 +249,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // retargeted there with an empty slot. What still refuses is what that model left over —
     // `normaliseBranchLikely` in `packages/core/src/frontend/mips.ts` on the shapes the ISA leaves
     // undefined, and the three recovered-switch interactions in `lift` ("cannot annul its delay
-    // slot", "lands on its delay slot", "which the branch-likely rewrite emptied"). No compiled row
+    // slot", "lands on its delay slot", "which the stolen-slot rewrite of a branch-likely or `b`/`j` emptied"). No compiled row
     // in the corpus reaches any of them, so the class reads 0; deleting it would assert that
     // nothing is left, which is the opposite falsehood.
     //

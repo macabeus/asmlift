@@ -424,6 +424,40 @@ test('the stolen-slot rewrite leaves alone a target-4 that is a delay slot or ou
   );
 });
 
+test('an unconditional `b`/`j` whose slot is the target-4 word, stolen, retargets the same way', () => {
+  // `b T; S` runs S then T on its one edge, as `b T-4; nop` does, so the `if` joins at T-4 and the
+  // `+ 1` is spelled once — not `v0 = a1 + 1` on one arm and `v0 = 6` on the other.
+  const want = 's32 f(s32 a0, s32 a1) {\n    if (a0 == 0) a1 = 5;\n    return a1 + 1;\n}\n';
+  for (const jump of ['b', 'j']) {
+    expect(
+      src(
+        '0:\tbeqz\ta0,10 <f+0x10>',
+        '4:\tnop',
+        `8:\t${jump}\t18 <f+0x18>`,
+        'c:\taddiu\ta1,a1,1',
+        '10:\tli\ta1,5',
+        '14:\taddiu\ta1,a1,1',
+        '18:\tjr\tra',
+        '1c:\tmove\tv0,a1',
+      ),
+    ).toBe(want);
+  }
+  // A branch landing on the `b`'s slot runs it and falls on to 0x10, not to T: the slot keeps its
+  // word, and that landing still refuses as it did.
+  expect(
+    lift(
+      '0:\tbeqz\ta0,c <f+0xc>',
+      '4:\tnop',
+      '8:\tb\t18 <f+0x18>',
+      'c:\taddiu\ta1,a1,1',
+      '10:\tli\ta2,5',
+      '14:\taddiu\ta1,a1,1',
+      '18:\tjr\tra',
+      '1c:\tmove\tv0,a1',
+    ),
+  ).toThrow(/branch to 0xc is not a block boundary/);
+});
+
 /** A two-case dispatch on `a0` whose bounds branch is `bounds at,4c` with `slot` in its delay slot,
  *  and whose default at 0x48 starts with `li v0,9`. */
 const boundsDispatch = (bounds: string, slot: string) =>
@@ -504,7 +538,11 @@ test('a recovered switch arm landing on a slot the rewrite emptied refuses', () 
     '4c:\tjr\tra',
     '50:\tli\tv0,1',
   );
-  expect(() => decompile('f', asm, MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) })).toThrow(
-    /a recovered switch arm lands on the delay slot at 0x34, which the branch-likely rewrite emptied/,
-  );
+  const want =
+    /a recovered switch arm lands on the delay slot at 0x34, which the stolen-slot rewrite of a branch-likely or `b`\/`j` emptied/;
+  expect(() => decompile('f', asm, MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) })).toThrow(want);
+  // the same arm on a `b`'s emptied slot: entered there, the hardware runs `li v0,9` and falls on
+  expect(() =>
+    decompile('f', asm.replace('bnezl\ta1,44', 'b\t44'), MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) }),
+  ).toThrow(want);
 });

@@ -10,7 +10,8 @@
 // first, then the value is read. A call's (`jal`) delay slot runs before the call, so it can set
 // an argument up. A branch-likely (`beql`/`bnel`…) annuls its slot when not taken, so the slot is
 // a block of its own on the taken edge (`toBlocks`) — unless it is a copy of the word before the
-// target, when the branch is retargeted there with an empty slot (`normaliseBranchLikely`).
+// target, when the branch is retargeted there with an empty slot (`normaliseBranchLikely`, which
+// does the same for a `b`/`j` whose slot is that copy).
 //
 // Comparison model: MIPS fuses compare-and-branch, so a branch lowers directly to an icmp
 // (the branch mnemonics are signed/equality only). `bltz/bgez/blez/bgtz` compare against zero; `beq/bne`
@@ -620,7 +621,8 @@ function normaliseBranchLikely(
   relocOf: (ins: Instr) => DisasmReloc | null,
 ): { likely: Set<number>; freed: Set<number> } {
   const likely = instrs.filter((ins) => ins.mnemonic in LIKELY_BASE);
-  if (likely.length === 0) {
+  const uncond = instrs.filter(isUncond);
+  if (likely.length === 0 && uncond.length === 0) {
     return { likely: new Set(), freed: new Set() };
   }
   const refusal = (ins: Instr, why: string) =>
@@ -640,6 +642,28 @@ function normaliseBranchLikely(
   const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
   const freed = new Set<number>();
+  // `br T; S` → `br T-4; nop` when S is the word at T-4, stolen; true when it did.
+  const unsteal = (br: Instr, slot: Instr): boolean => {
+    const target = br.target!;
+    const stolen = at.get(target - 4);
+    const beforeStolen = at.get(target - 8);
+    if (
+      target === br.addr + 8 ||
+      stolen === undefined ||
+      !at.has(target) ||
+      (beforeStolen !== undefined && isControlTransfer(beforeStolen)) ||
+      !sameWord(slot, stolen, relocOf)
+    ) {
+      return false;
+    }
+    br.target = target - 4;
+    // The emptied slot is a fresh `nop`: the old word's relocation must not ride along with it.
+    const nop: Instr = { addr: slot.addr, mnemonic: 'nop', ops: [] };
+    instrs[instrs.indexOf(slot)] = nop;
+    at.set(slot.addr, nop);
+    freed.add(slot.addr);
+    return true;
+  };
   for (const br of likely) {
     const slot = at.get(br.addr + 4);
     const fallThrough = at.get(br.addr + 8);
@@ -676,24 +700,34 @@ function normaliseBranchLikely(
       throw refusal(br, 'another branch targets the delay slot, which would run it unconditioned');
     }
     br.mnemonic = LIKELY_BASE[br.mnemonic];
-    const stolen = at.get(br.target - 4);
-    const beforeStolen = at.get(br.target - 8);
-    if (
-      br.target !== br.addr + 8 &&
-      stolen !== undefined &&
-      at.has(br.target) &&
-      !(beforeStolen !== undefined && isControlTransfer(beforeStolen)) &&
-      sameWord(slot, stolen, relocOf)
-    ) {
-      br.target -= 4;
-      // The emptied slot is a fresh `nop`: the old word's relocation must not ride along with it.
-      const nop: Instr = { addr: slot.addr, mnemonic: 'nop', ops: [] };
-      instrs[instrs.indexOf(slot)] = nop;
-      at.set(slot.addr, nop);
-      freed.add(slot.addr);
-    } else {
+    if (!unsteal(br, slot)) {
       rewritten.add(br.addr);
     }
+  }
+  // AN UNCONDITIONAL `b`/`j` RUNS ITS SLOT ON ITS ONE EDGE ALONE, which is all the proof above asks
+  // of the slot, and the same fill steals the target's first word into it (`b T; S` with S at T-4:
+  // ido 1234, gcc 2.7.2 1075, KMC 51 in the splat corpus). Unretargeted, the copy is the `b`'s own
+  // body and T-4 a separate block reaching T, so a join that the two share is split into one arm
+  // per copy. Asked here only where nothing else depends on the slot: not a slot already empty, not
+  // a `b` in some transfer's own delay slot, not a slot another branch lands on (entered there, the
+  // word runs and the flow falls on to the `b`'s next word, not to T), and not a `j` relocated
+  // against a symbol, whose printed target is a field rather than an address (it refuses below).
+  for (const br of uncond) {
+    const slot = at.get(br.addr + 4);
+    const prev = at.get(br.addr - 4);
+    const reloc = br.mnemonic === 'j' ? relocOf(br) : null;
+    if (
+      br.target === undefined ||
+      slot === undefined ||
+      slot.mnemonic === 'nop' ||
+      isControlTransfer(slot) ||
+      targets.has(slot.addr) ||
+      (prev === undefined ? br.addr !== startAddr : isControlTransfer(prev)) ||
+      (reloc !== null && !reloc.sym.startsWith('.'))
+    ) {
+      continue;
+    }
+    unsteal(br, slot);
   }
   return { likely: rewritten, freed };
 }
@@ -1292,15 +1326,15 @@ function liftOnce(
   // stolen word still refuses. (2) An arm of the table lands ON a nullified slot, which would run
   // the slot with no branch conditioning it and then jump to that branch's target: `case 1:` would
   // take the taken arm's value where the hardware runs the slot and falls on through. (3) An arm
-  // lands on a slot the rewrite EMPTIED, which would run the `nop` where the hardware runs the
-  // word it replaced. (2) and (3) have never been seen in the corpus; refuse rather than answer
-  // any of them wrong.
+  // lands on a slot the rewrite EMPTIED, a likely branch's or a `b`/`j`'s, which would run the
+  // `nop` where the hardware runs the word it replaced. (2) and (3) have never been seen in the
+  // corpus; refuse rather than answer any of them wrong.
   const jtArms = new Set([...jts.values()].flatMap((jt) => [...jt.caseAddrs, jt.defaultAddr]));
   for (const addr of freedSlots) {
     if (jtArms.has(addr)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': a recovered switch arm lands on the delay slot at 0x${addr.toString(16)}, ` +
-          'which the branch-likely rewrite emptied',
+          'which the stolen-slot rewrite of a branch-likely or `b`/`j` emptied',
       );
     }
   }
