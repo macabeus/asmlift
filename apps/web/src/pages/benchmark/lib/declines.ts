@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 253 distinct decline messages (the texts reached by
+// `packages/core/src` throws 254 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 103 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -91,9 +91,10 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
-//                               and a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument
+//   frontend/ssa.ts          3  a register read round a cycle through the entry block with no join,
+//                               a struct one call hands back in the return register passed on
+//                               as the next guessed call's first argument, and an incoming stack
+//                               argument past the words the function's own declaration fills
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -333,7 +334,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 60 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 61 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision

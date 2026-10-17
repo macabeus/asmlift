@@ -1,5 +1,6 @@
 import { parseTypeName } from './cdecl/parse';
 import type { IrType } from './ir/types';
+import { demangle, implicitArgumentWords, spellType } from './mangle';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
 
@@ -30,9 +31,11 @@ export type ParamType = string;
 export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
-   *  for how many argument REGISTERS the call occupies. The two are the same number only while
-   *  every parameter fits in a register, and `declaredCallArgs` is what converts the first into
-   *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
+   *  for how many argument REGISTERS the call occupies — read so at a call. On the function's OWN
+   *  entry a count bounds no argument register (`ownArgumentWords` abstains): a header's count may
+   *  be of C parameters, and one of those may span any number of words. The two are the
+   *  same number only while every parameter fits in a register, and `declaredCallArgs` is what
+   *  converts the first into the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
   /** The parameters, by index into a typed `params`, whose spelling `declaredWidth` cannot size and
@@ -324,6 +327,164 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
     }
   }
   return undefined;
+}
+
+/** HOW MANY GENERAL ARGUMENT WORDS THE FUNCTION UNDER DECOMPILATION'S OWN DECLARATION FILLS — an
+ *  UPPER BOUND, never an exact layout — or `undefined` where the declaration bounds nothing.
+ *
+ *  Its one reader is the live-in model (`frontend/ssa.ts` `registerLiveIns`): an argument register
+ *  at or past this many words is one no caller fills, so a read of it before any write is an
+ *  uninitialised local the compiler homed there, never a parameter. KMC and gcc 2.7.2 home a local
+ *  in `a2`/`a3` past a two-parameter declaration, agbcc in `r3` and mwcc 2.3.3 in `r5`..`r10`, and
+ *  unbounded, each such read is a made-up parameter (`uninitfirst(a0, *a1, a2, a3)`).
+ *
+ *  AN UPPER BOUND, because the direction of every error decides what it costs. A bound too HIGH
+ *  leaves a register a parameter, as no bound at all does. A bound
+ *  too LOW turns a real argument into `uninit_<reg>`, which is wrong C. So:
+ *   - the declared words are laid out by {@link wordsOf}, the call's own rule: a floating parameter
+ *     takes no general word where floats count on their own (`fpu.slots: 'separate'`, the PowerPC
+ *     EABI), and everywhere else a floating parameter takes two, as a `long long` does (O32's
+ *     leading floats still take their integer slots, and agbcc passes both in general words).
+ *     A `float` takes two as well: a list cannot say whether the definition is prototyped, and an
+ *     old-style one (`int k(a, b) float a; int b;`) is handed `a` promoted to `double`, so `b`
+ *     sits in r2 / a2. Two words are an upper bound for a prototyped `float` too.
+ *   - UP TO TWO HIDDEN WORDS ARE ADDED to a typed list where they may come first, because no
+ *     parameter list states them and each pushes every declared parameter one register up. A return the
+ *     declaration does not show is a scalar or `void` may be a struct handed back through a
+ *     pointer in argument 0, and a symbol that may name a C++ member function is handed `this`
+ *     there (`mangle.ts` `implicitArgumentWords`). Both are "may": a static member or a struct
+ *     returned in registers leaves one register a parameter.
+ *
+ *  THE PARAMETERS ARE THE STATED ONES, or where the declaration states none, the ones a mangled
+ *  symbol records (`demangle`: `uninitfirst__FiPi` is `(int, int *)`), which is the compiler's own
+ *  copy of the declaration. A BARE COUNT BOUNDS NOTHING: it may count argument registers
+ *  (`FnProto.params`) or C parameters, any of which may be a pair or a struct passed by value of
+ *  any size. IT ABSTAINS where neither states a list, or on one it cannot lay out: an
+ *  unsized spelling (which may be two words), a struct passed by value (sized by a layout this
+ *  does not read), a `long double`; and on a constructor or destructor, which
+ *  may be handed a flag beside `this`. A variadic declaration states no `params` and so
+ *  abstains: its arity is each caller's. */
+export function ownArgumentWords(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+): number | undefined {
+  const own = ownArguments(name, p, target);
+  if (own === undefined || own.hidden === undefined) {
+    return undefined;
+  }
+  // The hidden words are laid out WITH the declared ones, not added after them: they come first,
+  // so they move where the even-word rule puts a 64-bit parameter. O32's `struct P f(double x)`
+  // passes the struct pointer in a0, skips a1 and passes `x` in a2:a3 — 4 words, where `1 +
+  // wordsOf([64])` says 3 and turns a3 into `uninit_a3`. The call side counts the same way
+  // (`frontend/call-plan.ts`, `[32, ...params]`).
+  return wordsOf([...Array.from({ length: own.hidden }, () => 32), ...own.widths], target);
+}
+
+/** WHETHER THE OWN DECLARATION SAYS THE CALLER FILLS ARGUMENT 0, asked of a function that RETURNS A
+ *  WORD — so no hidden struct pointer is in question: `true` where a declared parameter word or
+ *  `this` comes first, `false` where it states no argument word at all (`g__Fv`, a free
+ *  function of none), and `undefined` where it does not say (no declaration, one {@link
+ *  ownArgumentWords} cannot lay out, or no parameters on a symbol that only MAY be a method, which a
+ *  static member is not). The PowerPC frontend asks it before a bare return hands back r3's entry
+ *  value (`frontend/ppc.ts` `r3IsAnArgument`), and it reads the declaration the bound reads, so the
+ *  two cannot give one declaration two answers. */
+export function ownFirstArgumentPassed(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+): boolean | undefined {
+  const own = ownArguments(name, p, target);
+  if (own === undefined) {
+    return undefined;
+  }
+  if (own.widths.length > 0 || own.passesThis === true) {
+    return true;
+  }
+  return own.passesThis === false ? false : undefined;
+}
+
+/** The own declaration as both readers above read it: the declared parameter words' widths, the
+ *  hidden words that may come ahead of them (`undefined` where they cannot be bounded: a
+ *  constructor's or destructor's flag), and whether `this` is surely passed (`true` for a
+ *  constructor or destructor, `false` for a free function, `undefined` for a symbol that only may
+ *  be a method).
+ *
+ *  A bare count is no declaration this can lay out, so it reads as none. */
+function ownArguments(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
+  // A COUNT BOUNDS NOTHING: it may mean argument registers or C parameters, and a C parameter
+  // may be a pair or a struct passed by value of any size (`f(struct S12 s)` {params: 1} fills 3
+  // words), so no layout of it is an upper bound.
+  if (typeof p?.params === 'number') {
+    return undefined;
+  }
+  const implicit = implicitArgumentWords(name);
+  const widths = ownParamWidths(name, p ?? undefined, target);
+  if (widths === undefined) {
+    return undefined;
+  }
+  return {
+    widths,
+    hidden: implicit === undefined ? undefined : (showsScalarReturn(p) ? 0 : 1) + implicit,
+    passesThis: implicit === undefined ? true : implicit === 0 ? false : undefined,
+  };
+}
+
+/** Whether a declaration shows its return is a scalar or `void`, so no struct pointer is handed
+ *  in ahead of its parameters: a `void`, or a stated return that is no aggregate and whose width
+ *  or floating type this can read. A project typedef (`Pt`) shows nothing. */
+function showsScalarReturn(p: FnProto | undefined): boolean {
+  return (
+    declaresVoidReturn(p) ||
+    (p?.returns !== undefined &&
+      !declaresAggregateReturn(p) &&
+      (declaredWidth(p.returns) !== undefined || isFloatingSpelling(p.returns)))
+  );
+}
+
+/** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
+function ownParamWidths(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu'>,
+): number[] | undefined {
+  const mangled = Array.isArray(p?.params) ? null : demangle(name);
+  const decl: FnProto | undefined = Array.isArray(p?.params)
+    ? p
+    : mangled === null
+      ? undefined
+      : { params: mangled.params.map(spellType) };
+  if (!Array.isArray(decl?.params)) {
+    return undefined;
+  }
+  const params = decl.params;
+  const widths: number[] = [];
+  for (const k of params.keys()) {
+    const cls = paramClassOf(decl, params, k);
+    if (cls === 'word' || cls === 'wide') {
+      widths.push(cls === 'word' ? 32 : (declaredWidth(params[k]) ?? 64));
+    } else if (cls === 'float') {
+      const bare = params[k]
+        .replace(/\b(?:const|volatile)\b/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+      const spelled = FLOAT_TYPEDEFS.get(bare) ?? bare;
+      if (spelled === 'long double') {
+        return undefined;
+      }
+      // a `float` may be an old-style definition's, promoted to `double`
+      if (target.fpu?.slots !== 'separate') {
+        widths.push(64);
+      }
+    } else {
+      return undefined;
+    }
+  }
+  return widths;
 }
 
 /** Whether a declared type is `double`, qualifiers aside. */

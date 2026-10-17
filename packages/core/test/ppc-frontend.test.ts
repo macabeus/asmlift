@@ -656,6 +656,60 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       ),
     ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
   });
+  // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
+  // two-parameter function fills; without its own declaration each read is a made-up parameter
+  // (a0..a7). A float takes no general word on this ABI (`fpu.slots: 'separate'`).
+  test('an argument register past the own declaration is an uninitialised local (ownArgumentWords)', () => {
+    const body = '0 <f>:\n0:\tadd     r3,r3,r5\n4:\tblr\n';
+    const lifted = (f: object) => decompile('f', body, PPC_MWCC, { prototypes: { f } }).source;
+    const local = 's32 f(s32 a0) {\n    s32 uninit_r5;\n    return a0 + uninit_r5;\n}\n';
+    const param = 's32 f(s32 a0, s32 a1, s32 a2) {\n    return a0 + a2;\n}\n';
+    expect(lifted({ params: ['s32', 's32'], returns: 's32' })).toBe(local);
+    expect(lifted({ params: ['s32', 'float', 's32 *'], returns: 's32' })).toBe(local);
+    expect(lifted({ params: ['s32', 's32', 's32'], returns: 's32' })).toBe(param);
+    // a list whose return is not shown to be a scalar may follow a struct's hidden pointer, in r3;
+    // a bare count bounds nothing: `{params: 2}` may be `(s32, s64)`, r3 and r5:r6
+    expect(lifted({ params: ['s32', 's32'] })).toBe(param);
+    expect(lifted({ params: 2, returns: 's32' })).toBe(param);
+    // a 64-bit value starts at an even word: `(s32, s64)` fills r3 and r5:r6 (measured, 2.4.2/2.3.3),
+    // so r5 stays a parameter, which the split-pair refusal then names (raise/pairparams.ts)
+    expect(() => lifted({ params: ['s32', 'long long'], returns: 's32' })).toThrow(
+      /reads the two halves of a 64-bit value/,
+    );
+    expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
+  });
+  // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
+  // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
+  // no register interface, and read as one it would turn r7 into `uninit_r7`. A callee-saved register
+  // named with no save marks the body hand-written, and no declaration bounds it.
+  test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
+    const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
+    expect(decompile('ksNesInit03__Fv', asm, PPC_MWCC).source).not.toContain('uninit_');
+    expect(
+      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }).source,
+    ).not.toContain('uninit_');
+    // compiled code saves r31 before it touches it, and keeps the bound
+    const saved =
+      '0 <f>:\n0:\tstw     r31,-4(r1)\n4:\tmr      r31,r5\n8:\tadd     r3,r3,r31\nc:\tlwz     r31,-4(r1)\n10:\tblr\n';
+    expect(
+      decompile('f', saved, PPC_MWCC, { prototypes: { f: { params: ['s32', 's32'], returns: 's32' } } }).source,
+    ).toContain('uninit_r5');
+  });
+  // `int Foo::pick(int k, int *p){ return base + k + p[1]; }` (-lang=c++): `this` takes r3, which
+  // the declared parameters leave out, so p is in r5.
+  test('a member function is handed `this` ahead of its declared parameters (ownArgumentWords)', () => {
+    const body =
+      '0 <pick__3FooFiPi>:\n0:\tlwz     r0,0(r3)\n4:\tlwz     r5,4(r5)\n8:\tadd     r0,r0,r4\nc:\tadd     r3,r0,r5\n10:\tblr\n';
+    const pick = { params: ['int', 'int *'], returns: 'int' };
+    expect(decompile('pick__3FooFiPi', body, PPC_MWCC, { prototypes: { pick__3FooFiPi: pick } }).source).not.toMatch(
+      /uninit/,
+    );
+    expect(
+      decompile('pick__FiPi', body.replace(/pick__3FooFiPi/g, 'pick__FiPi'), PPC_MWCC, {
+        prototypes: { pick__FiPi: pick },
+      }).source,
+    ).toMatch(/uninit_r5/);
+  });
   test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
     // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
     // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,

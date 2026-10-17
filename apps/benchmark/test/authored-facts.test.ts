@@ -416,6 +416,19 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     expect(problems[0]).toMatch(/`returnLayout` for `makeblob` is not the layout its declaration reads to/);
   });
 
+  // An own count states the argument registers (`FnProto.params`): `(int, long long, int)` is 4.
+  // Its C parameter count, 3, is caught where the two differ, so no row states the ambiguous form.
+  test('an own count is caught unless it is the registers its parameters fill', () => {
+    const spec = SYNTHETIC.find((x) => x.sym === 'ownar_cntll')!;
+    const count = (n: number) =>
+      protoFactProblems('synthetic:ownar_cntll', 'ownar_cntll', { ownar_cntll: { params: n } }, spec.src);
+    expect(count(4)).toEqual([]);
+    for (const n of [2, 3, 5]) {
+      expect(count(n)).toHaveLength(1);
+      expect(count(n)[0]).toMatch(/takes 3, in 4 argument registers/);
+    }
+  });
+
   test('every synthetic src yields exactly one definition of its symbol', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);

@@ -217,8 +217,10 @@ export interface TargetDescription {
    *  alike. `proto.ts` `wordsOf` counts the skipped word, and `aggregate.ts` `byValueCallArgs` reads
    *  the same count to place a struct. O32, compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2:
    *  `takeLL(1, 0x200000003LL)` and `takeD(1, 2.5)` set `a0` and `a2:a3` with `a1` unset, and so does
-   *  `takeL(s32 k, struct L { long long v; } l)`; at word 0 each is `a0:a1`. ABSENT ⇒ every argument
-   *  takes the next free word: agbcc (the note at `wordsOf`). */
+   *  `takeL(s32 k, struct L { long long v; } l)`; at word 0 each is `a0:a1`. mwcc's PowerPC EABI aligns
+   *  a `long long` the same way (its doubles take no general word, and a struct passed by value is
+   *  passed by address). ABSENT ⇒ every argument takes the next free word: agbcc (the note at
+   *  `wordsOf`). */
   evenWordAlignedArgs?: true;
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
@@ -1518,6 +1520,9 @@ export const PPC_MWCC: TargetDescription = {
   // PPC EABI: r3–r10 pass integer/pointer arguments; r3 also returns.
   argRegs: ['r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'],
   returnReg: 'r3',
+  // MEASURED on 2.4.2 at the synthetic tier's flags and on 2.3.3 and 2.4.7 at -O4,p:
+  // `takeLL(1, gL)` sets r3 and r5:r6 with r4 unset.
+  evenWordAlignedArgs: true,
   // PPC EABI: r0 and r3-r12 are volatile, and lr carries the return address `bl` overwrites. r11
   // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
   // callee-saved.

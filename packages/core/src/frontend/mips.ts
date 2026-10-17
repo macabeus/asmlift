@@ -21,7 +21,7 @@
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
+import { type Prototypes, declaresVoidReturn, ownArgumentWords, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -1332,7 +1332,9 @@ function liftOnce(
   // argument in, and that is scratch or the prologue saved (`prologueSavedRegs`), is an
   // uninitialised local (`registerLiveIns`, frontend/ssa.ts, as on Thumb and PPC). The saves are
   // measured HERE, before any block is lowered, because the builder evaluates the model once, at
-  // its first use, while `saveSlots` below fills progressively.
+  // its first use, while `saveSlots` below fills progressively. The function's own declaration
+  // bounds the argument registers (`ownArgumentWords`): KMC and gcc 2.7.2 home a local in a2/a3
+  // past a two-parameter one.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
   const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
   // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
@@ -1344,7 +1346,10 @@ function liftOnce(
     preds,
     () => {
       const owned = ownedFrameOf?.();
-      return { ...registerLiveIns(target, savedRegs), ...(owned === undefined ? {} : { ownedLocals: owned }) };
+      return {
+        ...registerLiveIns(target, savedRegs, ownArgumentWords(name, prototypes[name], target)),
+        ...(owned === undefined ? {} : { ownedLocals: owned }),
+      };
     },
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );

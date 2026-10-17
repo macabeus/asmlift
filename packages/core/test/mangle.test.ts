@@ -5,7 +5,15 @@
 // will align to the target.
 import { describe, expect, test } from 'vitest';
 
-import { type CppSig, declareCpp, demangle, demangledName, mangle, spellType } from '../src/mangle';
+import {
+  type CppSig,
+  declareCpp,
+  demangle,
+  demangledName,
+  implicitArgumentWords,
+  mangle,
+  spellType,
+} from '../src/mangle';
 
 // sym ↔ signature, golden from real mwcceppc output where noted.
 const CASES: { sym: string; sig: CppSig; note: string }[] = [
@@ -116,4 +124,64 @@ test('demangledName reads the source name of a real CodeWarrior symbol, includin
   // a plain C name with a double underscore in it, and an operator
   expect(demangledName('sa2__sub_808558C')).toBeNull();
   expect(demangledName('__as__8Vector3fFR8Vector3f')).toBeNull();
+});
+
+// A member function is handed `this` in argument 0, which its declared parameters leave out, so the
+// own-declaration bound (`proto.ts` `ownArgumentWords`) asks how many words a symbol may be handed
+// ahead of them.
+describe('implicitArgumentWords', () => {
+  test('a class after the `__`, in either scheme, may be a member taking `this`', () => {
+    for (const sym of [
+      'pick__3FooFiPi',
+      'getStartHour__11PlayerStateCFv',
+      'RotAxisX__Q23zen17particleGeneratorFf',
+      '__as__3FooFRC3Foo',
+      'pick__3FooiPi',
+      'pick__C3FooiPi',
+      // gcc 2 spells a template class `t<n><name><args>` (`Vec<int>`)
+      'get__t3Vec1Zii',
+      'get__Ct3Vec1Zii',
+      '__as__t3Vec1ZiRCt3Vec1Zi',
+      // gcc 2 puts a const or volatile mark before a nested or template class, and spells volatile V
+      'get__CQ21A1Bi',
+      'get__V3Fooi',
+      'get__CV3Fooi',
+      'get__CQ2t1V1Zi2Ini',
+      'get__Q_12_1A1B1C1D1E1F1G1H1I1J1K1Li',
+    ]) {
+      expect(implicitArgumentWords(sym)).toBe(1);
+    }
+  });
+
+  test('a constructor or destructor may take a flag too, so it answers nothing', () => {
+    for (const sym of [
+      '__ct__12RefCountableFv',
+      '__dt__6SystemFv',
+      '__3Foo',
+      '__Q23zen3Foo',
+      '_$_3Foo',
+      '_._3Foo',
+      '__t3Vec1Zii',
+      '_$_t3Vec1Zi',
+      // a nested class's destructor is handed `this` and the in-charge flag all the same
+      '_._Q21A1B',
+      '_$_Q21A1B',
+      '__Q_12_1A1B1C1D1E1F1G1H1I1J1K1L',
+    ]) {
+      expect(implicitArgumentWords(sym)).toBeUndefined();
+    }
+  });
+
+  test('a free function and a plain C name take none', () => {
+    for (const sym of [
+      'uninitfirst__FiPi',
+      'ksNesInit13__Fv',
+      'map__Fill16',
+      'uninit_spill',
+      '__divsi3',
+      'func_80012345',
+    ]) {
+      expect(implicitArgumentWords(sym)).toBe(0);
+    }
+  });
 });

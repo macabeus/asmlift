@@ -1482,7 +1482,23 @@ the `prologueSavedRegs` of PPC and MIPS; `registerLiveIns` composes it for all t
 `scratchRegs`, which need no save, less the `hiddenInputRegs` a runtime passes a value in, whose
 entry value may reach the body only through a join) —
 and it is not the elision the sentence feared, only a read of the prologue that was already
-happening for the frame.
+happening for the frame. The function's OWN declaration moves the same partition's edge: an argument
+register at or past the words it fills (`proto.ts` `ownArgumentWords`, an upper bound that abstains
+on anything it cannot bound) is one no caller fills, so `registerLiveIns` moves it to the
+uninitialised side — KMC's `a2` past `uninit_spill(int, int *)`, agbcc's `r3`, mwcc 2.3.3's
+`r5`..`r10`. The words a typed list may be handed ahead of its parameters count too: a struct's
+hidden return pointer wherever the return is not shown to be a scalar, and a C++ method's `this`;
+a bare count is the argument registers, read as a call reads it. Only a
+stated declaration (`--proto`, a row's `proto`) or a mangled symbol's parameter codes is read there,
+never the context's entry for the function itself, and an incoming stack argument past the bound
+refuses, since no local lives in the caller's frame. The context's own entry is left out on a
+measured trade (`proto-context.ts` `withContextPrototypes`): on kleod, whose headers its compiler
+checked, honouring it takes the lifts with more parameters than their header from 52 of 377 to 1 of
+373 and corrects 5 wrong-C reads, but the entry of a function still `INCLUDE_ASM` was never checked
+against a definition, one too short turns a real argument into `uninit_<reg>`, and no corpus
+measures how often that happens — every real bench row restates its own entry as `proto`. Nor is
+any declaration read for a hand-written body (PowerPC: one naming a callee-saved register it never
+saved), whose declared type is no register interface.
 
 With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
 argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`

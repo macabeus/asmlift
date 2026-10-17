@@ -43,8 +43,15 @@ import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } fr
 import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { demangle } from '../mangle';
-import { type FnProto, type Prototypes, declaredWidth, declaresVoidReturn, isFloatingSpelling } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  declaredWidth,
+  declaresVoidReturn,
+  isFloatingSpelling,
+  ownArgumentWords,
+  ownFirstArgumentPassed,
+} from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { SymbolMap } from '../symbols';
@@ -593,6 +600,22 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
   !SMALL_DATA_BASES.includes(r) &&
   !target.argRegs.includes(r) &&
   !target.callerSaved.includes(r);
+
+/** Whether any of `body` names a callee-saved general register (`isCalleeSaved`), as an operand or
+ *  a memory base, that the prologue did not save — the mark of hand-written asm, since compiled
+ *  code saves such a register before it touches it. A save routine or `stmw` names only its first
+ *  register, and saves it, so either is in `saved`. */
+const namesUnsavedCalleeSaved = (
+  body: readonly Instr[],
+  target: TargetDescription,
+  saved: ReadonlySet<string>,
+): boolean =>
+  body.some((ins) =>
+    ins.ops.some((op) => {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      return isCalleeSaved(target, reg) && !saved.has(reg);
+    }),
+  );
 
 /** WHAT THE PROLOGUE SAVED, AND WHERE. `regs` is the save half of the register partition
  *  (frontend/ssa.ts, `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an
@@ -1341,12 +1364,24 @@ function liftOnce(
   // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
   // ABI lets a callee use unsaved, is an uninitialised local. `registerLiveIns` (frontend/ssa.ts)
   // composes it, as it does for Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
-  // the treatment a target claiming no partition gets.
+  // the treatment a target claiming no partition gets. The function's own declaration bounds the
+  // general argument registers (`ownArgumentWords`): mwcc 2.3.3 homes locals in r5..r10 past a
+  // two-parameter one. The FPRs are not bounded here.
+  //
+  // NOT WHERE THE BODY IS HAND-WRITTEN. A declaration states a compiled function's register
+  // interface, and only a compiled one's: a CodeWarrior `asm` function's type — `ksNesInit03__Fv`,
+  // declared `void ()` — says nothing of the registers it really takes (r4..r8 there, set by the
+  // emulator core that calls it), and bounding by it turns each into `uninit_<reg>`. The cheap
+  // tell is a callee-saved register the body names without the prologue having saved it
+  // (`stw r7,5612(r31)` with no save of r31), which compiled code never does: it saves before it
+  // touches one. Such a body keeps every argument register a parameter, as with no declaration.
+  const ownDeclared = !namesUnsavedCalleeSaved(reached, target, savedRegs);
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () => registerLiveIns(target, savedRegs),
+    () =>
+      registerLiveIns(target, savedRegs, ownDeclared ? ownArgumentWords(name, prototypes[name], target) : undefined),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
@@ -1770,31 +1805,29 @@ function liftOnce(
     return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
-   *  decides when there is one: a non-void return and at least one integer-class parameter (the
-   *  first such takes r3) or a nonzero register count. Without one, only the body can show it: r3
-   *  is already an entry parameter, or a higher argument register is live in, which puts an
-   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or every word
-   *  return hands back a value computed only to be returned (`r3WrittenToReturn`) — then the
-   *  function returns a word, and a bare return of it hands back what the caller left in r3. */
+   *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
+   *  non-void return and a parameter word or `this` first, or a nonzero register count — and a free
+   *  function of none (`g__Fv`) or a count of 0 is passed nothing, which no body evidence
+   *  overrides. A hand-written body (`ownDeclared` false) is read as having none. Without one, only
+   *  the body can show it: r3 is already an entry parameter, or a higher argument register is live
+   *  in, which puts an argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or
+   *  every word return hands back a value computed only to be returned (`r3WrittenToReturn`) — then
+   *  the function returns a word, and a bare return of it hands back what the caller left in r3. */
   const r3IsAnArgument = (): boolean => {
     const own = prototypes[name];
     if (declaresVoidReturn(own)) {
       return false;
     }
+    // a count bounds no register, but says whether any argument is passed at all
     if (typeof own?.params === 'number') {
       return own.params > 0;
     }
-    if (Array.isArray(own?.params)) {
-      return own.params.some((t) => declaredWidth(t) !== undefined);
+    const declared = ownDeclared ? ownFirstArgumentPassed(name, own, target) : undefined;
+    if (declared !== undefined) {
+      return declared;
     }
     const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
-    if (ARG_REGS.some((r) => live.has(r))) {
-      return true;
-    }
-    // A CodeWarrior C++ symbol is a declaration of its own parameters: `ksNesInit13__Fv` is a free
-    // function of none, which no body evidence overrides.
-    const mangled = demangle(name);
-    return !(mangled !== null && mangled.cls === undefined && mangled.params.length === 0) && r3WrittenToReturn();
+    return ARG_REGS.some((r) => live.has(r)) || r3WrittenToReturn();
   };
   const returnUntouchedArg = () => {
     if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {
