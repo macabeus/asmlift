@@ -17,11 +17,12 @@ import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { type OnGap, decompile } from '@asmlift/core/pipeline';
-import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
+import { type OnGap, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
   globalsFromContext,
+  ownContextEntry,
   prototypesFromContext,
   withContextPrototypes,
   withOwnReturnLayout,
@@ -725,6 +726,11 @@ export async function runCli(
   // the symbol map's signatures (`withContextPrototypes`).
   const contextFlag = flags.get('context') as string | undefined;
   let contextGlobals: ContextGlobals | undefined;
+  // …and the context's OWN entry for the function, which `withContextPrototypes` leaves out: it
+  // bounds the argument registers softly (core pipeline.ts `liftWithinContextBound`), where no
+  // `--proto` entry states the function — a register the body reads past it stays a parameter, and
+  // `[own-arity]` says so.
+  let ownContextProto: FnProto | undefined;
   if (contextFlag !== undefined) {
     let text: string;
     try {
@@ -736,9 +742,12 @@ export async function runCli(
         stderr: `asmlift: cannot read --context file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
+    const fromContext = prototypesFromContext(text, unitTarget.dialect ?? 'c');
+    ownContextProto =
+      prototypes !== undefined && Object.hasOwn(prototypes, name) ? undefined : ownContextEntry(fromContext, name);
     prototypes = withContextPrototypes(
       withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
-      prototypesFromContext(text, unitTarget.dialect ?? 'c'),
+      fromContext,
       name,
       symbols,
       unitTarget,
@@ -750,6 +759,7 @@ export async function runCli(
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
   const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
+  const ownArityNote = (notes: readonly string[]) => notes.map((n) => `asmlift: [own-arity] ${n}\n`).join('');
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
@@ -836,6 +846,7 @@ export async function runCli(
         prototypes,
         symbols,
         contextGlobals,
+        ...(ownContextProto ? { ownContextProto } : {}),
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -865,7 +876,11 @@ export async function runCli(
           selfDeclared: compilers.selfDeclared() === true,
           phaseReport,
           stamp,
-          protoNote,
+          protoNote:
+            protoNote +
+            ownArityNote(
+              ownArityNotesOf(name, asm, unitTarget, { prototypes, asmData, symbols, contextGlobals, ownContextProto }),
+            ),
         }),
       };
     } catch (e) {
@@ -875,7 +890,15 @@ export async function runCli(
 
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
-    const result = decompile(name, asm, unitTarget, { backend, onGap, asmData, prototypes, symbols, contextGlobals });
+    const result = decompile(name, asm, unitTarget, {
+      backend,
+      onGap,
+      asmData,
+      prototypes,
+      symbols,
+      contextGlobals,
+      ...(ownContextProto ? { ownContextProto } : {}),
+    });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's
     // bytes under ANY declaration of that name, so the source alone is the whole answer. A bare
@@ -908,7 +931,8 @@ export async function runCli(
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       walkedNote +
-      protoNote;
+      protoNote +
+      ownArityNote(result.ownArityNotes);
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {
     return failureResult(e, runTrace, warn, EXIT.gaps);

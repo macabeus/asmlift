@@ -266,6 +266,38 @@ function runTower(
   };
 }
 
+/** The `[own-arity]` notes (`DecompileResult.ownArityNotes`) of one lift under `opts`, for a caller
+ *  whose result carries none — the ranked path, whose every candidate lifts as this one does. Empty
+ *  where the lift fails: the run reports that failure itself. */
+export function ownArityNotesOf(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
+): string[] {
+  if (opts.ownContextProto === undefined) {
+    return [];
+  }
+  const notes: string[] = [];
+  try {
+    liftStamped(
+      name,
+      asm,
+      target,
+      prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
+      opts.asmData,
+      opts.symbols,
+      opts.contextGlobals,
+      undefined,
+      opts.ownContextProto,
+      notes,
+    );
+  } catch {
+    return [];
+  }
+  return notes;
+}
+
 /** What the declared-volatile stamp reads besides the IR and the map: the compiler's fact and the
  *  declaration context's globals. Every stamp a driver puts reads the same two. */
 export function stampBehaviorsFor(

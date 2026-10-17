@@ -166,6 +166,42 @@ test('--context: a header declaration decides a call as the same --proto entry d
   expect((await f('--context', join(tmpdir(), 'nope-asmlift.h'))).code).toBe(66);
 });
 
+// The header's OWN entry for the function bounds its argument registers softly: a register the
+// lift never reads past it is no parameter, and one it reads stays a parameter, said on stderr.
+test("--context: the function's own entry keeps a register the body reads past it, and says so", async () => {
+  // `f` hands r0 to `callee` and reads r2: (int) leaves r1..r3 to no caller, and the body reads r2
+  const asm =
+    '\t.text\n\t.align\t2\n\t.globl\tf\n\t.type\t f,function\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tr0, r0, r2\n' +
+    '\tbl\tcallee\n\tpop\t{r1}\n\tbx\tr1\n';
+  const f = (...flags: string[]) => runCli(['f.s', '--target', 'agbcc', ...flags], () => asm);
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-ctx-'));
+  const ctx = (own: string) => {
+    const path = join(dir, `${own.length}.h`);
+    writeFileSync(path, `# 1 "ctx.h"\nint callee(int v);\n${own}\n`);
+    return path;
+  };
+  const read = await f('--context', ctx('int f(int);'));
+  expect(read.code).toBe(0);
+  expect(read.stdout).toMatch(/^s32 f\(s32 a0, s32 a1, s32 a2\) \{/m);
+  expect(read.stderr).toContain(
+    'asmlift: [own-arity] f: its context declaration `int f(int)` fills 1 argument word, and the body reads r2 past ' +
+      'it — kept as a parameter, which the header contradicts',
+  );
+  // a three-parameter header covers r2, and the bound drops nothing the body reads
+  const covered = await f('--context', ctx('int f(int, int, int);'));
+  expect(covered.stdout).toBe(read.stdout);
+  expect(covered.stderr).not.toContain('[own-arity]');
+  // stated, the same entry is the caller's word, and r2 is an uninitialised local
+  const stated = await f(
+    '--context',
+    ctx('int f(int);'),
+    '--proto',
+    JSON.stringify({ f: { params: ['int'], returns: 'int' } }),
+  );
+  expect(stated.stdout).toContain('uninit_r2');
+  expect(stated.stderr).not.toContain('[own-arity]');
+});
+
 // docs/ranked-repro.md's project-checkout command passes the table INLINE, and so does the
 // `[proto]` note's own printed remedy — but the flag used to resolve every value as a path, so
 // following either exited 66 on a missing file literally named `{"thunk_HeapFree":{"params":1}}`.
