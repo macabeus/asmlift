@@ -601,6 +601,22 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
   !target.argRegs.includes(r) &&
   !target.callerSaved.includes(r);
 
+/** Whether any of `body` names a callee-saved general register (`isCalleeSaved`), as an operand or
+ *  a memory base, that the prologue did not save — the mark of hand-written asm, since compiled
+ *  code saves such a register before it touches it. A save routine or `stmw` names only its first
+ *  register, and saves it, so either is in `saved`. */
+const namesUnsavedCalleeSaved = (
+  body: readonly Instr[],
+  target: TargetDescription,
+  saved: ReadonlySet<string>,
+): boolean =>
+  body.some((ins) =>
+    ins.ops.some((op) => {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      return isCalleeSaved(target, reg) && !saved.has(reg);
+    }),
+  );
+
 /** WHAT THE PROLOGUE SAVED, AND WHERE. `regs` is the save half of the register partition
  *  (frontend/ssa.ts, `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an
  *  uninitialised local only where the compiler could home a local there, which it may do only after
@@ -1351,11 +1367,21 @@ function liftOnce(
   // the treatment a target claiming no partition gets. The function's own declaration bounds the
   // general argument registers (`ownArgumentWords`): mwcc 2.3.3 homes locals in r5..r10 past a
   // two-parameter one. The FPRs are not bounded here.
+  //
+  // NOT WHERE THE BODY IS HAND-WRITTEN. A declaration states a compiled function's register
+  // interface, and only a compiled one's: a CodeWarrior `asm` function's type — `ksNesInit03__Fv`,
+  // declared `void ()` — says nothing of the registers it really takes (r4..r8 there, set by the
+  // emulator core that calls it), and bounding by it turns each into `uninit_<reg>`. The cheap
+  // tell is a callee-saved register the body names without the prologue having saved it
+  // (`stw r7,5612(r31)` with no save of r31), which compiled code never does: it saves before it
+  // touches one. Such a body keeps every argument register a parameter, as with no declaration.
+  const ownDeclared = !namesUnsavedCalleeSaved(reached, target, savedRegs);
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () => registerLiveIns(target, savedRegs, ownArgumentWords(name, prototypes[name], target)),
+    () =>
+      registerLiveIns(target, savedRegs, ownDeclared ? ownArgumentWords(name, prototypes[name], target) : undefined),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
@@ -1781,8 +1807,9 @@ function liftOnce(
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
    *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
    *  non-void return and a parameter word or `this` first, or a nonzero register count — and a
-   *  free function of none (`ksNesInit13__Fv`) or a count of 0 is passed nothing, which no body
-   *  evidence overrides. Without one, only the body can show it: r3 is already an entry parameter,
+   *  free function of none (`g__Fv`) or a count of 0 is passed nothing, which no body
+   *  evidence overrides. A hand-written body (`ownDeclared` false) is read as having none. Without
+   *  one, only the body can show it: r3 is already an entry parameter,
    *  or a higher argument register is live in, which puts an argument in r3 by position (the
    *  obligation `mintArgSlotHoles` discharges), or every word return hands back a value computed
    *  only to be returned (`r3WrittenToReturn`) — then the function returns a word, and a bare
@@ -1792,7 +1819,7 @@ function liftOnce(
     if (declaresVoidReturn(own)) {
       return false;
     }
-    const declared = ownFirstArgumentPassed(name, own, target);
+    const declared = ownDeclared ? ownFirstArgumentPassed(name, own, target) : undefined;
     if (declared !== undefined) {
       return declared;
     }

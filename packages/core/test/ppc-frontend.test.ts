@@ -678,6 +678,23 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
     expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
   });
+  // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
+  // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
+  // no register interface, and read as one it turned r7 into `uninit_r7`. A callee-saved register
+  // named with no save marks the body hand-written, and no declaration bounds it.
+  test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
+    const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
+    expect(decompile('ksNesInit03__Fv', asm, PPC_MWCC).source).not.toContain('uninit_');
+    expect(
+      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }).source,
+    ).not.toContain('uninit_');
+    // compiled code saves r31 before it touches it, and keeps the bound
+    const saved =
+      '0 <f>:\n0:\tstw     r31,-4(r1)\n4:\tmr      r31,r5\n8:\tadd     r3,r3,r31\nc:\tlwz     r31,-4(r1)\n10:\tblr\n';
+    expect(decompile('f', saved, PPC_MWCC, { prototypes: { f: { params: 2, returns: 's32' } } }).source).toContain(
+      'uninit_r5',
+    );
+  });
   // `int Foo::pick(int k, int *p){ return base + k + p[1]; }` (-lang=c++): `this` takes r3, which
   // the declared parameters leave out, so p is in r5.
   test('a member function is handed `this` ahead of its declared parameters (ownArgumentWords)', () => {

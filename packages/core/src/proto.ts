@@ -382,7 +382,7 @@ export function ownArgumentWords(
 
 /** WHETHER THE OWN DECLARATION SAYS THE CALLER FILLS ARGUMENT 0, asked of a function that RETURNS A
  *  WORD — so no hidden struct pointer is in question: `true` where a declared parameter word or
- *  `this` comes first, `false` where it states no argument word at all (`ksNesInit13__Fv`, a free
+ *  `this` comes first, `false` where it states no argument word at all (`g__Fv`, a free
  *  function of none), and `undefined` where it does not say (no declaration, one {@link
  *  ownArgumentWords} cannot lay out, or no parameters on a symbol that only MAY be a method, which a
  *  static member is not). The PowerPC frontend asks it before a bare return hands back r3's entry
