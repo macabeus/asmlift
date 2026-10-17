@@ -1605,8 +1605,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // calls) when no frame address is taken (`ownedFrame`), so a def-less read there is an `undef`
   // whether or not anything stores the word — uninit_spill:ido7.1 reads 36(sp) and 0(sp), which
   // nothing does. uninit_spill and uninitfirst on gcc2.7.2kmc keep a2 (and a3) as parameters: KMC
-  // homes a local in an argument register past the declared arity, which only an own-arity rule
-  // can tell from an argument.
+  // homes a local in an argument register past the declared arity, which only the function's own
+  // declaration tells from an argument, and these rows state none: `ownar_spill` and `ownar_first`
+  // (below `uninitfirst`) are the same functions handed theirs.
   // uninit_join and uninit_sw also run on stock gcc2.7.2 — the tier's first rows on that compiler —
   // because it homes the local exactly where KMC does, so the register half is pinned on both.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
@@ -10475,6 +10476,78 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n    for (i = 0; i < 8; i++)\n        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9;\n    return s;\n}',
     features: ['uninit-local', 'array'],
     toolchains: ALL,
+  },
+  // THE FUNCTION'S OWN DECLARATION BOUNDS ITS ARGUMENT REGISTERS (proto.ts `ownArgumentWords`, read
+  // by frontend/ssa.ts `registerLiveIns`). `uninit_spill` and `uninitfirst` above state no
+  // prototype, so nothing can tell a local KMC and gcc 2.7.2 home in a2/a3 — agbcc in r3, mwcc
+  // 2.3.3 in r5..r10 — from an argument, and each such read lifts as a made-up parameter. These
+  // rows are the same shapes handed their own declaration, as a project's header hands it (a loop
+  // bound or a constant changed, so no row is another alpha-renamed): the registers past its words
+  // are uninitialised locals. IDO homes the locals in frame words and mwcc 2.4.2 in saved or
+  // scratch registers, so those cells pin that nothing else moves. mwcc 2.3.3, which homes them in
+  // r5..r10, has no canonical flags to carry a row; packages/core/test/ppc-frontend.test.ts pins it.
+  // `ownar_read` and `ownar_join` are agbcc's r3 and r1 homes (`gOut = a3` was wrong C). The
+  // controls keep what the declaration fills: `ownar_hole` a declared register the body never
+  // reads, which still holds a2 in its slot, and `ownar_dbl` O32's `(int, double)`, whose double
+  // takes a2:a3 past an empty a1.
+  {
+    sym: 'ownar_spill',
+    src:
+      'int ownar_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' for(i=0;i<6;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_spill(int, int *);',
+    proto: { ownar_spill: { params: ['int', 'int *'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_first',
+    src:
+      'extern s32 gOut;\n' +
+      's32 ownar_first(s32 k, s32 *p)\n{\n    s32 v0, v1, v2, v3, v4, v5, v6, v7, v8, v9;\n    s32 i, s = 0;\n' +
+      '    if (k > 4)\n        gOut = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9;\n' +
+      '    switch (k) {\n' +
+      '    case 0: v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9]; break;\n' +
+      '    case 1: v0 = p[10]; v1 = p[11]; v2 = p[12]; v3 = p[13]; v4 = p[14]; v5 = p[15]; v6 = p[16]; v7 = p[17]; v8 = p[18]; v9 = p[19]; break;\n' +
+      '    }\n    for (i = 0; i < 6; i++)\n        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9;\n    return s;\n}',
+    features: ['uninit-local', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern s32 gOut;\ns32 ownar_first(s32, s32 *);',
+    proto: { ownar_first: { params: ['s32', 's32 *'], returns: 's32' } },
+  },
+  {
+    sym: 'ownar_read',
+    src: 'extern int gOut;\nint ownar_read(int k, int *p){ int v; if (k > 5) gOut = v; v = p[0]; return v + k; }',
+    features: ['uninit-local'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gOut;\nint ownar_read(int, int *);',
+    proto: { ownar_read: { params: ['int', 'int *'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_join',
+    src: 'int ownar_join(int a){ int r; if (a > 0) r = a * 3; return r + 1; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ownar_join(int);',
+    proto: { ownar_join: { params: ['int'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_hole',
+    src: 'int ownar_hole(int a, int b, int c){ return a + c; }',
+    features: ['arithmetic'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int ownar_hole(int, int, int);',
+    proto: { ownar_hole: { params: ['int', 'int', 'int'], returns: 'int' } },
+  },
+  {
+    sym: 'ownar_dbl',
+    src: 'extern double gD;\nextern int gK;\nvoid ownar_dbl(int k, double d){ gK = k; gD = d; }',
+    features: ['float'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern double gD;\nextern int gK;\nvoid ownar_dbl(int, double);',
+    proto: { ownar_dbl: { params: ['int', 'double'], returnsVoid: true } },
   },
   {
     sym: 'byvalregs',
