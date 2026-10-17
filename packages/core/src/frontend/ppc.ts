@@ -39,8 +39,8 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
-import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
-import { spelledWhenDead } from '../ir/discipline';
+import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
@@ -97,6 +97,10 @@ import {
 import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
+
+/** The instructions that READ the carry bit (each also writes it), and every other writer of it. */
+const CARRY_READERS = /^(adde|addme|addze|subfe|subfme|subfze)o?$/;
+const CARRY_WRITERS = /^(addc|addco|addic|subfc|subfco|subfic|srawi|sraw|mtxer|mcrxr)$/;
 
 // Branch-condition mnemonic → the icmp for its TAKEN edge, split by compare signedness. PowerPC's
 // branch already names the relation (no negation fold needed). `signed` picks the row.
@@ -1635,10 +1639,23 @@ function liftOnce(
   // What r4, the second register of an r3:r4 return, may hold at each word return where no
   // declaration pins the width (frontend/dead-reads.ts `unreadPairHalf`).
   const unreadHigh = new Set<Value>();
+  // Each of those word returns: what r3 returns there and what r4 may hold (`computedPairHalf`).
+  const pairReturns: PairReturn[] = [];
   // Every value a compare consumed, whether or not a branch reads the field it set: a compare
   // nothing reads leaves no op, so this is the only record that the value was used
   // (frontend/dead-reads.ts `compared`).
   const compared = new Set<Value>();
+  // Every value a carry reader consumed by folding it away: the constant a `subfze` reads, and the
+  // `rB - 1` a `subfe rD,rA,rB` cancels. The machine read them, and no op says so (`computedPairHalf`).
+  const readWithoutOp = new Set<Value>();
+  // Every `subfc`/`subfic` difference whose carry a reader turned into a 0/1 truth value: the
+  // difference may be the by-product of a 32-bit compare, not the low word of a 64-bit result,
+  // which `computedPairHalf` settles (`TruthDifference`). `carrySource` maps each carry compare to
+  // the difference its writer computed, and `truthPending` each reader result one step short of
+  // the truth value to it.
+  const truthDifferences: TruthDifference[] = [];
+  const carrySource = new Map<Value, Value>();
+  const truthPending = new Map<Value, { diff: Value; via: 'neg' | 'and1' }>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
   const discarded = new Set<Value>();
@@ -1646,6 +1663,9 @@ function liftOnce(
   // Every value written to a register other than the discard register: `leftInDiscardRegister`
   // takes out of `discarded` each load one of them derives from, which mwcc put in a home.
   const writtenElsewhere: Value[] = [];
+  // A `subfze` over a register this block takes in from another block: modelled as `~rA + CA`, and
+  // kept only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
+  const joinedCarryConsts: { ins: Instr; not: Op; add: Op; ca: Value }[] = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -1656,7 +1676,10 @@ function liftOnce(
     if (op.operands.length > 0) {
       wordReturn = true;
       wordReturns.push(bi);
-      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, unreadHigh);
+      const high = new Set<Value>();
+      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, high);
+      high.forEach((v) => unreadHigh.add(v));
+      pairReturns.push({ word: op.operands[0], high });
     } else {
       bareReturns.push({ op, bi });
     }
@@ -2222,6 +2245,48 @@ function liftOnce(
       compared.add(lhs).add(rhs);
     };
 
+    // The carry bit, XER[CA], as a 0/1 value. mwcc computes a materialised compare branch-free
+    // through it (`subfc` then `subfe`/`subfze`/`adde`/`addze`), so a reader needs the comparison
+    // the writer left there. Three writers are modelled, each as the compare its carry IS:
+    //   subfc rD,rA,rB   rD = rB - rA          CA = rB >=u rA
+    //   subfic rD,rA,K   rD = K - rA           CA = K >=u rA   (K == 0: rA == 0)
+    //   addic rD,rA,K    rD = rA + K           CA = carry of the unsigned add (K == -1: rA != 0)
+    // The compare is built at its reader, so a carry nothing reads adds no op. A carry is
+    // UNKNOWN, and its reader refuses naming why, when no instruction of this block set it (a carry
+    // across a block edge is not modelled), a call clobbered it, or a writer this frontend does not
+    // model set it: `srawi`/`sraw` (the signed `/2^k` round-up), `addc` (the low half of a 64-bit
+    // add), and the extended forms, whose own carry-out is a high word's. An `addic` carry is
+    // read only as a compare (`subfe`, `subfze`): `adde`/`addze` over it is the high word of
+    // mwcc 2.4.x's 64-bit add of a constant, which is not built, so they refuse it as they refuse
+    // an `addc` carry.
+    type Carry = { make: () => Value; addic: boolean } | { why: string };
+    let carry: Carry = { why: 'nothing in its own block set it (a carry across a block edge is not modelled)' };
+    const setCarry = (make: () => Value, addic = false) => {
+      carry = { make, addic };
+    };
+    /** The carry, as the compare that set it. `wide` marks an extended add (`adde`/`addze`), which
+     *  over an `addic` carry is the high word of a 64-bit add. */
+    const readCarry = (ins: Instr, wide = false): Value => {
+      const why =
+        'why' in carry
+          ? carry.why
+          : wide && carry.addic
+            ? 'an addic set it: an extended add over that carry is the high word of a 64-bit add, which is not modelled'
+            : undefined;
+      if (why !== undefined) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+            `reads the carry bit (XER[CA]), and ${why}`,
+        );
+      }
+      return (carry as { make: () => Value }).make();
+    };
+    /** The value of `v` when this block defines it as a `const`. */
+    const constIn = (v: Value): number | undefined => {
+      const def = ops.find((o) => o.results[0] === v);
+      return def?.opcode === 'const' ? (def.attrs.value as number) : undefined;
+    };
+
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       // Record form: a trailing `.` (the Rc bit) means the op ALSO sets cr0 from a signed compare
@@ -2232,6 +2297,15 @@ function liftOnce(
       const mnem = rc ? ins.mnemonic.slice(0, -1) : ins.mnemonic;
       lastDef = null;
       relocTaken = false;
+      // Every carry writer and every call leaves the carry unknown unless its case below models it.
+      const clobberCarry = (how: string) => {
+        carry = { why: `the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ${how}` };
+      };
+      if (CARRY_WRITERS.test(mnem)) {
+        clobberCarry('set it, a carry this frontend does not model');
+      } else if (/^b.*l$/.test(mnem)) {
+        clobberCarry('is a call, which clobbers it');
+      }
       switch (mnem) {
         case 'nop':
           break;
@@ -2544,7 +2618,23 @@ function liftOnce(
             write(d, read(s));
             break;
           }
-          emitBin('add', d, read(s), constVal(parseImm(t)));
+          {
+            const a = read(s);
+            const k = parseImm(t);
+            emitBin('add', d, a, constVal(k));
+            if (mnem === 'addic') {
+              // a + K carries out exactly when a >=u 2^32 - K; K == 0 never carries.
+              setCarry(
+                () =>
+                  k === 0
+                    ? constVal(0)
+                    : k === -1
+                      ? kit.tmp('icmp_ne', [a, constVal(0)])
+                      : kit.tmp('icmp_uge', [a, constVal((2 ** 32 - (k >>> 0)) | 0)]),
+                true,
+              );
+            }
+          }
           break;
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
         // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
@@ -2559,16 +2649,107 @@ function liftOnce(
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':
-        case 'subfc':
         case 'subfo':
-          emitBin('sub', d, read(t), read(s));
+        case 'subfc':
+        case 'subfco': {
+          const b = read(t);
+          const a = read(s);
+          const diff = emitBin('sub', d, b, a);
+          if (mnem.startsWith('subfc')) {
+            setCarry(() => {
+              const c = kit.tmp('icmp_uge', [b, a]);
+              carrySource.set(c, diff);
+              return c;
+            });
+          }
           break; // rD = rB - rA (reversed)
-        case 'subfic':
-          emitBin('sub', d, constVal(parseImm(t)), read(s));
+        }
+        case 'subfic': {
+          const k = constVal(parseImm(t));
+          const a = read(s);
+          const diff = emitBin('sub', d, k, a);
+          setCarry(() => {
+            const c = parseImm(t) === 0 ? kit.tmp('icmp_eq', [a, constVal(0)]) : kit.tmp('icmp_uge', [k, a]);
+            carrySource.set(c, diff);
+            return c;
+          });
           break; // rD = imm - rA
-        case 'neg':
-          emitUn('neg', d, read(s));
+        }
+        // The carry READERS, each over the carry its block's writer left (`readCarry`):
+        //   subfe rD,rA,rB = ~rA + rB + CA      adde rD,rA,rB = rA + rB + CA
+        //   subfze rD,rA   = ~rA + CA           addze rD,rA   = rA + CA
+        // Two `subfe` shapes are modelled, both of whose register halves cancel: `subfe rD,rY,rY`
+        // (~y + y = -1, so CA - 1, reading no rY — mwcc writes it over a register holding anything,
+        // the return address included) and `subfe rD,rA,rB` with rA = rB - 1 (~(x-1) + x = 0, so
+        // CA). Any other `subfe` is the high half of a 64-bit subtract, and `subfze` over a register
+        // that is no constant is a 64-bit negate: both stay unmodelled, as do `addme`/`subfme`.
+        case 'subfe': {
+          if (s === t) {
+            const c = readCarry(ins);
+            const r = emitBin('add', d, c, constVal(-1));
+            const diff = carrySource.get(c);
+            if (diff !== undefined) {
+              truthPending.set(r, { diff, via: 'neg' }); // CA - 1; its negation is the 0/1 `rA <u rB`
+            }
+            break;
+          }
+          const b = read(t);
+          const def = ops.find((o) => o.results[0] === read(s));
+          if (def?.opcode === 'add' && def.operands[0] === b && constIn(def.operands[1]) === -1) {
+            readWithoutOp.add(def.results[0]);
+            write(d, readCarry(ins));
+            break;
+          }
+          emitOpaqueDest(ins);
           break;
+        }
+        case 'subfze': {
+          const x = read(s);
+          const k = constIn(x);
+          if (k !== undefined) {
+            readWithoutOp.add(x);
+            const ca = readCarry(ins);
+            ~k === 0 ? write(d, ca) : emitBin('add', d, constVal(~k), ca);
+            break;
+          }
+          // mwcc hoists the constant out of a loop (`li r3,-1` ahead of the loop, `subfze r0,r3` in
+          // its body), so the register comes in through a join. Whether every path brings the same
+          // constant is known only once every block is filled; the exact `~rA + CA` stands until then.
+          // The value may also come down through blocks with one predecessor from the block that set
+          // it, so only a value this block computes is settled here; an entry parameter is the
+          // caller's value, never a constant, and the settling refuses it.
+          if (bi === 0 || ops.some((o) => o.results.includes(x))) {
+            emitOpaqueDest(ins);
+            break;
+          }
+          const ca = readCarry(ins);
+          const inv = mkValue(T.unk(32));
+          const not = mkOp('not', { operands: [x], results: [inv] });
+          ops.push(not);
+          emitBin('add', d, inv, ca);
+          joinedCarryConsts.push({ ins, not, add: ops[ops.length - 1], ca });
+          break;
+        }
+        case 'adde':
+          emitBin('add', d, binTmp('add', read(s), read(t)), readCarry(ins, true));
+          break;
+        case 'addze': {
+          const c = readCarry(ins, true);
+          const r = emitBin('add', d, read(s), c);
+          const diff = carrySource.get(c);
+          if (diff !== undefined) {
+            truthPending.set(r, { diff, via: 'and1' }); // mwcc's signed compare keeps bit 0 of this
+          }
+          break;
+        }
+        case 'neg': {
+          const x = read(s);
+          const n = emitUn('neg', d, x);
+          if (truthPending.get(x)?.via === 'neg') {
+            truthDifferences.push({ diff: truthPending.get(x)!.diff, carry: x, truth: n });
+          }
+          break;
+        }
         case 'mullw':
         case 'mullwo':
           emitBin('mul', d, read(s), read(t));
@@ -2681,9 +2862,14 @@ function liftOnce(
           break;
         }
         // rotate-and-mask, rotate 0 only: `clrlwi rD,rS,n` = rS & (~0>>>n); `clrrwi` = rS & (~0<<n).
-        case 'clrlwi':
-          emitBin('and', d, read(s), constVal((0xffffffff >>> parseImm(t)) >>> 0));
+        case 'clrlwi': {
+          const x = read(s);
+          const m = emitBin('and', d, x, constVal((0xffffffff >>> parseImm(t)) >>> 0));
+          if (parseImm(t) === 31 && truthPending.get(x)?.via === 'and1') {
+            truthDifferences.push({ diff: truthPending.get(x)!.diff, carry: x, truth: m });
+          }
           break;
+        }
         case 'clrrwi':
           emitBin('and', d, read(s), constVal((0xffffffff << parseImm(t)) >>> 0));
           break;
@@ -2691,18 +2877,38 @@ function liftOnce(
           const [sh, mb, me] = [parseImm(ins.ops[2]), parseImm(ins.ops[3]), parseImm(ins.ops[4])];
           // `rlwinm rD,rS,SH,MB,ME` = rotl(rS,SH) & mask(MB,ME). Three cases we can lower exactly:
           //  • SH==0            — a pure masked AND.
-          //  • right-shift EXTRACT `(x>>n)&m` — ME==31 and the field does not wrap (SH+MB>=32): the
-          //    compiler's form for `(x>>n)&mask`, with n=32-SH and mask=mask(MB,31). Emit the shift
-          //    then the AND — the faithful, idiomatic C that recompiles to this exact rlwinm.
+          //  • right-shift EXTRACT `(x>>n)&m` — the field lies in the SH bits the rotate brings round
+          //    from the top (MB >= 32-SH, MB <= ME): the compiler's form for `(x>>n)&mask`, with
+          //    n=32-SH and mask=mask(MB,ME). Emit the shift then the AND — the faithful, idiomatic C
+          //    that recompiles to this exact rlwinm. Where that field is the one bit x's sign bit
+          //    lands on (MB == ME == 32-SH) it is `(x >>u 31) << (SH-1)`: mwcc merges a shift of a
+          //    0/1 value into its extract (`(a < b) << 3` ends `rlwinm r3,r0,4,28,28` on 2.4.x), and
+          //    the `srwi 31` the branch-free compare folds read is then whole (pattern/engine.ts
+          //    MWCC_COMPARE_PATTERNS).
+          //  • left-shift INSERT `(x&m)<<SH` — the field lies wholly in the bits the shift fills
+          //    (MB <= ME <= 31-SH): `(x & (mask >> SH)) << SH`, mwcc's form for a masked value moved
+          //    up (`(a < b) << 5` over 2.3.3's `& 1` ends `rlwinm r3,r0,5,26,26`).
           //  • anything else (a genuine rotate / bitfield insert) stays an opaque — loud, not dropped.
           if (sh === 0) {
             emitBin('and', d, read(s), constVal(rlwinmMask(mb, me)));
             break;
           }
-          if (me === 31 && sh + mb >= 32) {
+          if (mb === me && mb === 32 - sh && sh > 1) {
+            const sign = mkValue(T.unk(32));
+            ops.push(mkOp('shr_u', { operands: [read(s)], results: [sign], attrs: { imm: 31 } }));
+            emitShImm('shl', d, sign, sh - 1);
+            break;
+          }
+          if (mb <= me && me <= 31 - sh) {
+            const masked = mkValue(T.unk(32));
+            ops.push(mkOp('and', { operands: [read(s), constVal(rlwinmMask(mb, me) >>> sh)], results: [masked] }));
+            emitShImm('shl', d, masked, sh);
+            break;
+          }
+          if (mb <= me && sh + mb >= 32) {
             const shifted = mkValue(T.unk(32));
             ops.push(mkOp('shr_u', { operands: [read(s)], results: [shifted], attrs: { imm: (32 - sh) & 31 } }));
-            emitBin('and', d, shifted, constVal(rlwinmMask(mb, 31)));
+            emitBin('and', d, shifted, constVal(rlwinmMask(mb, me)));
             break;
           }
           emitOpaqueDest(ins);
@@ -2824,6 +3030,9 @@ function liftOnce(
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
+      }
+      if (CARRY_READERS.test(mnem)) {
+        clobberCarry('set it as the carry out of an extended add or subtract, which is not modelled');
       }
       // A record-form op sets cr0 from a signed compare of its result against 0. Wire that so the
       // next branch reading cr0 fuses (`andi. r0,r3,1; beq …` → `if ((a0 & 1) == 0)`).
@@ -2988,7 +3197,23 @@ function liftOnce(
   }
   const argSlots = ppcArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS, prototypes[name]);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
+  const droppedPairHalf = computedPairHalf(
+    irBlocks,
+    pairReturns,
+    target.compilerBehaviors.keepsUnusedReads === true
+      ? (v) => paramReg.get(v) === RET && irBlocks[0].params.includes(v)
+      : undefined,
+    truthDifferences,
+    (v) => compared.has(v) || readWithoutOp.has(v) || ssa.frameWrites.has(v),
+  );
   ssa.finish();
+  resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
+  if (droppedPairHalf) {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': at a word return no declaration sizes, r4 holds a value this function computed ` +
+        'and nothing reads, which is the other word of a 64-bit return (r3:r4); returning r3 alone would drop it',
+    );
+  }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
@@ -3035,6 +3260,229 @@ function liftOnce(
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();
   return ssa.fn;
+}
+
+/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `returns` holds,
+ *  for each word return no declaration pins the width of, the word r3 returns and what r4, the
+ *  second register of an r3:r4 return, may hold there (frontend/dead-reads.ts `unreadPairHalf`).
+ *  Where one of those values is the result of an op that nothing reads — directly, or through joins
+ *  nothing reads — the compiler computed it for the caller: an optimizing compiler deletes a pure
+ *  computation nobody reads, so a value that survives in r4 with no reader is the other word of a
+ *  64-bit return, and returning r3 alone drops it. mwcc's `(unsigned long long)a - b` is `subfc
+ *  r4,r4,r3; subfe r3,r4,r4`, whose high word is the very `subfe` a 32-bit `-(a < b)` is, and `long
+ *  long x = a; if (c) x = -x; return x;` joins `0 - a` into r4 below the branch; both would lift as
+ *  their high word.
+ *
+ *  AT A LEVEL THAT KEEPS DEAD CODE (`entryWord` given, where `keepsUnusedReads` holds) that premise
+ *  fails for a parameter: mwcc -O0 keeps `b = a + 1;` in b's register r4. There a return whose r3
+ *  is still the entry value (`entryWord`, directly or through joins of only it) is not asked, since
+ *  -O0 spells a 64-bit op as both words' ops and writes r3 even where its word is unchanged (`x |
+ *  0xff` is `or r4,r4,r5; or r3,r3,r0` with r0 = 0), in every 64-bit shape measured on 2.4.2, 2.4.7
+ *  and 2.3.3. At -O4 an untouched r3 is evidence of nothing: `((u64)a << 32) | (b + 1)` is `addi
+ *  r4,r4,1`. A dead parameter store beside a computed r3 (`b = a * 3; return a + 1;`) still
+ *  refuses.
+ *
+ *  Asked BEFORE `ssa.finish`, while every join is still a parameter with its incoming values wired,
+ *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an
+ *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exemptValue` names a
+ *  value the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
+ *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns `(x
+ *  >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`), a `subfc`/`subfic` difference whose
+ *  carry a reader turned into a 0/1 truth value (`truthDifferences`, kept only where that reader is
+ *  the carry's sole consumer in its block and neither is r3's word: 2.3.3's `a + (a < b)` is
+ *  `subfc r4,r4,r3; subfe r0,r0,r0; neg r0,r0; add r3,r3,r0` over the dead `b`, and the signed one
+ *  keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1`, which r3 returns),
+ *  and one stored to the frame (`frameWrites`). A function that holds an
+ *  unmodelled instruction is not asked: the `opaque` may read r4 without naming it, and it declines
+ *  under its own name. A value r4 holds that the function did not compute — its entry value, the
+ *  caller's `a` that `long long z(unsigned a) { return a; }` moves there — is not seen, and that
+ *  word return still drops the low word. */
+type PairReturn = { word: Value; high: ReadonlySet<Value> };
+/** A `subfc`/`subfic` difference (`diff`) whose carry a reader made a 0/1 truth value: `carry` is
+ *  the `subfe rX,rY,rY` (CA - 1) or `addze` result, `truth` the `neg` or `clrlwi 31` over it. */
+type TruthDifference = { diff: Value; carry: Value; truth: Value };
+function computedPairHalf(
+  blocks: readonly Block[],
+  returns: readonly PairReturn[],
+  entryWord: ((v: Value) => boolean) | undefined,
+  truthDifferences: readonly TruthDifference[],
+  exemptValue: (v: Value) => boolean,
+): boolean {
+  if (returns.every((r) => r.high.size === 0) || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
+    return false;
+  }
+  const defOf = new Map<Value, Op>();
+  const blockOf = new Map<Op, Block>();
+  const incoming = new Map<Value, Value[]>();
+  // Every reader of each value: the ops that take it as an operand, a join argument counting as one.
+  const readers = new Map<Value, number>();
+  const readBy = (v: Value) => readers.set(v, (readers.get(v) ?? 0) + 1);
+  for (const b of blocks) {
+    for (const o of b.ops) {
+      blockOf.set(o, b);
+      o.results.forEach((r) => defOf.set(r, o));
+      o.operands.forEach(readBy);
+      for (const succ of o.successors) {
+        succ.args.forEach((a, i) => {
+          readBy(a);
+          const p = succ.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  // What r3 may hold at a word return: the word itself, and every value a join of it carries in.
+  const returned = new Set<Value>();
+  const toReturn = returns.map((r) => r.word);
+  while (toReturn.length > 0) {
+    const v = toReturn.pop()!;
+    if (!returned.has(v)) {
+      returned.add(v);
+      toReturn.push(...(incoming.get(v) ?? []));
+    }
+  }
+  // A truth value's difference is the compare's by-product only where nothing else saw the carry:
+  // the reader is its sole consumer and runs in its block, so on every path the difference takes,
+  // and neither the carry nor the truth value is what r3 returns. mwcc's `u64 d = (u64)a - b; *p =
+  // -(int)(d >> 32); return d;` is `subfc r4,r4,r3; subfe r3,r4,r4; neg r0,r3`: that `subfe` is
+  // the high word, the `neg` beside it is a second reader, and r4 is the low word.
+  const comparedDifference = new Set<Value>();
+  for (const { diff, carry, truth } of truthDifferences) {
+    const reader = defOf.get(truth);
+    const writer = defOf.get(carry);
+    if (
+      reader !== undefined &&
+      writer !== undefined &&
+      reader.operands.filter((x) => x === carry).length === 1 &&
+      readers.get(carry) === 1 &&
+      !exemptValue(carry) &&
+      blockOf.get(reader) === blockOf.get(writer) &&
+      !returned.has(carry) &&
+      !returned.has(truth)
+    ) {
+      comparedDifference.add(diff);
+    }
+  }
+  const exempt = (v: Value) => exemptValue(v) || comparedDifference.has(v);
+  // What some kept op reads, through the joins that carry it there.
+  const read = new Set<Value>();
+  const work: Value[] = [];
+  const mark = (v: Value) => {
+    if (!read.has(v)) {
+      read.add(v);
+      work.push(v);
+    }
+  };
+  for (const b of blocks) {
+    for (const o of b.ops) {
+      if (!deletableWhenDead(o)) {
+        o.operands.forEach(mark);
+      }
+    }
+  }
+  while (work.length > 0) {
+    const v = work.pop()!;
+    defOf.get(v)?.operands.forEach(mark);
+    incoming.get(v)?.forEach(mark);
+  }
+  const seen = new Set<Value>();
+  const computedForNothing = (v: Value): boolean => {
+    if (seen.has(v) || read.has(v) || exempt(v)) {
+      return false;
+    }
+    seen.add(v);
+    const def = defOf.get(v);
+    if (def !== undefined) {
+      return def.opcode !== 'undef';
+    }
+    return (incoming.get(v) ?? []).some(computedForNothing);
+  };
+  // Whether `v` is r3's entry value on every path: directly, or through joins of nothing else.
+  const entry = (v: Value, on: Set<Value>): boolean => {
+    if (entryWord!(v)) {
+      return true;
+    }
+    const ins = incoming.get(v);
+    if (ins === undefined || on.has(v)) {
+      return ins !== undefined;
+    }
+    on.add(v);
+    return ins.every((x) => entry(x, on));
+  };
+  return returns.some(
+    (r) => !(entryWord !== undefined && entry(r.word, new Set())) && [...r.high].some(computedForNothing),
+  );
+}
+
+/** Settle each `subfze rD,rA` whose rA came in through a join (the `subfze` decode): where every
+ *  path brings the same constant K — the join's incoming values followed back, each a `const` or a
+ *  join of its own, a cycle adding nothing — the `~rA + CA` becomes `~K + CA`, which is CA itself
+ *  for mwcc's `li -1`. Anything else refuses, as an unmodelled `subfze` does in its own block: over
+ *  a register that is no constant it is the high half of a 64-bit negate. */
+function resolveJoinedCarryConsts(
+  name: string,
+  fn: Fn,
+  pending: readonly { ins: Instr; not: Op; add: Op; ca: Value }[],
+): void {
+  if (pending.length === 0) {
+    return;
+  }
+  const defs = new Map<Value, Op>();
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      o.results.forEach((r) => defs.set(r, o));
+      for (const succ of o.successors) {
+        succ.args.forEach((a, i) => {
+          const p = succ.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  // The one constant `v` is on every path, `null` where it is none, `undefined` where only a cycle
+  // brings it (which says nothing).
+  const constantOf = (v: Value, seen: Set<Value>): number | null | undefined => {
+    const def = defs.get(v);
+    if (def !== undefined) {
+      return def.opcode === 'const' && typeof def.attrs.value === 'number' ? def.attrs.value | 0 : null;
+    }
+    const ins = incoming.get(v);
+    if (ins === undefined) {
+      return null; // an entry parameter
+    }
+    if (seen.has(v)) {
+      return undefined;
+    }
+    seen.add(v);
+    let k: number | undefined;
+    for (const a of ins) {
+      const c = constantOf(a, seen);
+      if (c === null || (c !== undefined && k !== undefined && c !== k)) {
+        return null;
+      }
+      k ??= c;
+    }
+    return k ?? null;
+  };
+  for (const { ins, not, add, ca } of pending) {
+    const k = constantOf(not.operands[0], new Set());
+    if (k === null || k === undefined) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': unmodelled instruction '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — it reads ` +
+          `${ins.ops[1]}, which is not one constant on every path into its block, and a subfze over a register is the ` +
+          'upper word of a 64-bit negate',
+      );
+    }
+    const home = fn.blocks.find((b) => b.ops.includes(add))!;
+    if (~k === 0) {
+      replaceAllUsesWith(fn, add.results[0], ca);
+      home.ops.splice(home.ops.indexOf(add), 1);
+      home.ops.splice(home.ops.indexOf(not), 1);
+    } else {
+      Object.assign(not, { opcode: 'const', operands: [], attrs: { value: ~k } });
+    }
+  }
 }
 
 function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {

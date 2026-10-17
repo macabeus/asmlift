@@ -587,3 +587,117 @@ export function irAgreement(ir: string, sfn: SFn, seeds: readonly number[]): { j
   }
   return { judged, disagree };
 }
+
+/** A straight-line function's result over 32-bit WORDS, its entry params bound to `args` in order:
+ *  the oracle for a branch-free idiom and the compare it folds to. Shifts take PowerPC's register
+ *  semantics (an amount of 32 to 63 shifts every bit out), which is what the frontend that emits a
+ *  register-amount shift means by it. One block only, and only the opcodes it models; anything else
+ *  throws rather than guess. */
+export function evalWords(fn: Fn, args: readonly number[]): number {
+  if (fn.blocks.length !== 1) {
+    throw new Error(`evalWords: ${fn.blocks.length} blocks, not one`);
+  }
+  const env = new Map<Value, number>();
+  fn.blocks[0].params.forEach((p, i) => env.set(p, args[i] >>> 0));
+  const read = (x: Value): number => {
+    const n = env.get(x);
+    if (n === undefined) {
+      throw new Error('evalWords: read of an undefined value');
+    }
+    return n;
+  };
+  for (const op of fn.blocks[0].ops) {
+    const [x, y] = op.operands.map(read);
+    const by = op.operands.length === 2 ? y & 63 : (op.attrs.imm as number);
+    const [sx, sy] = [x | 0, y | 0];
+    const cmp: Record<string, boolean> = {
+      icmp_eq: x === y,
+      icmp_ne: x !== y,
+      icmp_ult: x < y,
+      icmp_ule: x <= y,
+      icmp_ugt: x > y,
+      icmp_uge: x >= y,
+      icmp_slt: sx < sy,
+      icmp_sle: sx <= sy,
+      icmp_sgt: sx > sy,
+      icmp_sge: sx >= sy,
+    };
+    let r: number;
+    if (op.opcode in cmp) {
+      r = cmp[op.opcode] ? 1 : 0;
+    } else {
+      switch (op.opcode) {
+        case 'const':
+          r = op.attrs.value as number;
+          break;
+        case 'add':
+          r = x + y;
+          break;
+        case 'sub':
+          r = x - y;
+          break;
+        case 'neg':
+          r = -x;
+          break;
+        case 'not':
+          r = ~x;
+          break;
+        case 'and':
+          r = x & y;
+          break;
+        case 'or':
+          r = x | y;
+          break;
+        case 'xor':
+          r = x ^ y;
+          break;
+        case 'shl':
+          r = by >= 32 ? 0 : x << by;
+          break;
+        case 'shr_u':
+          r = by >= 32 ? 0 : x >>> by;
+          break;
+        case 'shr_s':
+          r = sx >> Math.min(by, 31);
+          break;
+        case 'clz':
+          r = Math.clz32(x);
+          break;
+        case 'ret':
+          return x;
+        default:
+          throw new Error(`evalWords: no model for '${op.opcode}'`);
+      }
+    }
+    env.set(op.results[0], r >>> 0);
+  }
+  throw new Error('evalWords: no ret');
+}
+
+/** The words a 32-bit identity is checked over: both ends of both signed and unsigned ranges, their
+ *  neighbours, small values, and a seeded spread. */
+export function edgeWords(extra = 64): number[] {
+  const rand = mulberry32(0x5eed);
+  const edges = [0, 1, 2, 3, 10, 0x7ffe, 0x7fff, 0x8000, 0xffff, 0x7ffffffe, 0x7fffffff];
+  const words = [...edges, ...edges.map((w) => (0x100000000 - w) >>> 0), 0x80000001];
+  for (let i = 0; i < extra; i++) {
+    words.push(Math.floor(rand() * 0x100000000) >>> 0);
+  }
+  return [...new Set(words.map((w) => w >>> 0))];
+}
+
+/** An objdump body for the PPC frontend: one instruction per line from address 0, then `blr`. */
+export const ppcFixture = (sym: string, body: readonly string[]): string =>
+  `0 <${sym}>:\n` + [...body, 'blr'].map((ins, i) => `   ${(4 * i).toString(16)}:\t${ins}\n`).join('');
+
+/** Throw at the first pair of `words` on which the two-parameter `fn` is not `want`. */
+export function agreesOverWords(fn: Fn, want: (a: number, b: number) => number, words: readonly number[]): void {
+  for (const x of words) {
+    for (const y of words) {
+      const got = evalWords(fn, [x, y]);
+      if (got !== want(x, y) >>> 0) {
+        throw new Error(`f(${x}, ${y}) = ${got}, want ${want(x, y) >>> 0}`);
+      }
+    }
+  }
+}

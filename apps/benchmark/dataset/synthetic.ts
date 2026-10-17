@@ -10761,6 +10761,71 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
 
+  // ── CodeWarrior's branch-free compares, on all three builds at -O4,p ──
+  // mwcc materialises a 0/1 compare with no branch: 2.4.2/2.4.7 with bit tricks (`xor; cntlzw; slw`
+  // for `<u`, `subf; orc; srwi; subf` for `>=u`, `xor; srawi; and; subf` for `<s`), and through the
+  // carry bit (`subfc` then `subfe`/`subfze`/`addze`/`adde`) for `>=s` and `-(a <u b)` there and
+  // for every relation on 2.3.3. Each relation is a row, `>`/`<=` being the swapped code; the `k`
+  // rows put the constant where the code distinguishes it (`ulek` subtracts it with `subfic`,
+  // `ugek` with `addi -K`). `nbceq`/`nbcne` are the controls spelled by neither trick but by
+  // `cntlzw; srwi 5`, `subf; subf; or` and 2.3.3's `addic -1; subfe`. `nbcaddult`, `nbcnegult`,
+  // `nbcselult` and `nbcstult` use the boolean as a value: `nbcselult`'s `(a < b) ? 5 : 0` is `subfe; and` on 2.4.x, which lifts as
+  // `5 & -(a < b)` and recompiles to `andi.`. `nbcne0` is 2.3.3's `neg; addic -1; subfe`, whose
+  // carry tests the NEGATION, and `nbcshlult` the 2.4.x extract merged with its shift into one
+  // `rlwinm r3,r0,4,28,28`. Folded in pattern/engine.ts MWCC_COMPARE_PATTERNS, over
+  // frontend/ppc.ts `readCarry`.
+  ...(
+    [
+      ['nbcult', 'unsigned a, unsigned b', 'a < b'],
+      ['nbcule', 'unsigned a, unsigned b', 'a <= b'],
+      ['nbcugt', 'unsigned a, unsigned b', 'a > b'],
+      ['nbcuge', 'unsigned a, unsigned b', 'a >= b'],
+      ['nbcultk', 'unsigned a', 'a < 10'],
+      ['nbculek', 'unsigned a', 'a <= 10'],
+      ['nbcugek', 'unsigned a', 'a >= 10'],
+      ['nbcslt', 'int a, int b', 'a < b'],
+      ['nbcsle', 'int a, int b', 'a <= b'],
+      ['nbcsgt', 'int a, int b', 'a > b'],
+      ['nbcsge', 'int a, int b', 'a >= b'],
+      ['nbcsltk', 'int a', 'a < 10'],
+      ['nbcsgek', 'int a', 'a >= 10'],
+      ['nbceq', 'unsigned a, unsigned b', 'a == b'],
+      ['nbcne', 'unsigned a, unsigned b', 'a != b'],
+      ['nbcaddult', 'unsigned a, unsigned b, int c', 'c + (a < b)'],
+      ['nbcnegult', 'unsigned a, unsigned b', '-(a < b)'],
+      ['nbcselult', 'unsigned a, unsigned b', '(a < b) ? 5 : 0'],
+      ['nbcne0', 'int a', 'a != 0'],
+      ['nbcshlult', 'unsigned a, unsigned b', '(a < b) << 3'],
+    ] as const
+  ).map(([sym, params, expr]): SynthSpec => ({
+    sym,
+    src: `int ${sym}(${params}) { return ${expr}; }`,
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: params.startsWith('unsigned') ? ['compare', 'unsigned'] : ['compare'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    ctx: `int ${sym}(${params});`,
+  })),
+  {
+    sym: 'nbcstult',
+    src: 'void nbcstult(unsigned a, unsigned b, int *p) { *p = a < b; }',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['compare', 'unsigned', 'store'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    ctx: 'void nbcstult(unsigned a, unsigned b, int *p);',
+    proto: { nbcstult: { returnsVoid: true } },
+  },
+  {
+    // 2.3.3 loads the `li r6,-1` its `>=u` subfzes read once, in the entry block, and reads it in
+    // the blocks below the branches (frontend/ppc.ts `resolveJoinedCarryConsts`). 2.4.x spells the
+    // same compares with `orc`, which this row pins as well.
+    sym: 'nbcbruge',
+    src: 'unsigned nbcbruge(unsigned a, unsigned b, unsigned c) { unsigned r = a >= b; if (c) r += b >= c; if (c > 5) r += a >= c; return r; }',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['compare', 'unsigned', 'branch'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    ctx: 'unsigned nbcbruge(unsigned a, unsigned b, unsigned c);',
+  },
+
   // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
   // `retmtlr` and `retjr` exist to be DECLINED, as `tax_gprel` does. `blr` and `jr ra` are returns by
   // their name alone, so a function that first puts something else in the link register or in `ra`

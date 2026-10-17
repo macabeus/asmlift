@@ -105,12 +105,16 @@ describe('PPC frontend robustness', () => {
     expect(() => dis('mulused', '0:\taddi    r3,r3,1\n4:\tmulhw   r3,r3,r4\n8:\tblr\n')).toThrow();
   });
 
-  test('a genuine rotate/insert rlwinm (mask not ending at bit 31) still FAILS LOUD (not `return;`)', () => {
-    // `rlwinm r3,r3,4,0,27` is a real rotate-and-mask (ME≠31 ⇒ not a right-shift extract), which
-    // this frontend does not model. It routes through the opaque guard: reaching the output trips
-    // the boundary contract rather than decoding to `s32 f(void){ return; }`. (The right-shift
-    // EXTRACT shape `(x>>n)&m`, ME=31, IS modelled — see the PPC-WIDEN test below.)
-    expect(() => dis('rot', '0:\trlwinm  r3,r3,4,0,27\n4:\tblr\n')).toThrow();
+  test('a genuine rotate/insert rlwinm (mask over both halves of the rotate) still FAILS LOUD (not `return;`)', () => {
+    // `rlwinm r3,r3,4,24,31` keeps bits from both the shifted-up word and the 4 bits the rotate
+    // brings round from the top — a real rotate-and-mask, which this frontend does not model. It
+    // routes through the opaque guard: reaching the output trips the boundary contract rather than
+    // decoding to `s32 f(void){ return; }`. (A field wholly in either half, `(x>>n)&m` or
+    // `(x&m)<<n`, IS modelled — see the PPC-WIDEN tests below.)
+    expect(() => dis('rot', '0:\trlwinm  r3,r3,4,24,31\n4:\tblr\n')).toThrow();
+    // a whole-word rotate, and a mask that wraps round bit 0
+    expect(() => dis('rot', '0:\trlwinm  r3,r3,4,0,31\n4:\tblr\n')).toThrow();
+    expect(() => dis('rot', '0:\trlwinm  r3,r3,0x1c,28,3\n4:\tblr\n')).toThrow();
   });
 
   test('branch-prediction hint suffixes (blt+/bltlr-) do not drop the branch', () => {
@@ -328,6 +332,25 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('rlwinm right-shift extract decodes to a shift + mask', () => {
     expect(dis('ext', '0:\trlwinm  r3,r3,27,24,31\n4:\tblr\n')).toBe(
       's32 ext(s32 a0) {\n    return (u32)a0 >> 5 & 255;\n}\n',
+    );
+    // a field that stops short of bit 31, still wholly in the bits the rotate brings round
+    expect(dis('ext', '0:\trlwinm  r3,r3,12,24,27\n4:\tblr\n')).toBe(
+      's32 ext(s32 a0) {\n    return (u32)a0 >> 20 & 240;\n}\n',
+    );
+    // the one bit the sign bit lands on: the sign moved up (mwcc's `(x >> 31) << 3`)
+    expect(dis('ext', '0:\trlwinm  r3,r3,4,28,28\n4:\tblr\n')).toBe(
+      's32 ext(s32 a0) {\n    return (u32)a0 >> 31 << 3;\n}\n',
+    );
+  });
+
+  // The other half of the rotate: a field wholly in the bits the shift fills is a masked value
+  // moved up, `(x & m) << n` — `slwi` itself where the mask keeps every such bit.
+  test('rlwinm left-shift insert decodes to a mask + shift', () => {
+    expect(dis('ins', '0:\trlwinm  r3,r3,4,24,27\n4:\tblr\n')).toBe(
+      's32 ins(s32 a0) {\n    return (a0 & 15) << 4;\n}\n',
+    );
+    expect(dis('ins', '0:\trlwinm  r3,r3,5,26,26\n4:\tblr\n')).toBe(
+      's32 ins(s32 a0) {\n    return (a0 & 1) << 5;\n}\n',
     );
   });
 

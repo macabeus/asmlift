@@ -23,8 +23,11 @@ export type MatchNode =
       args: MatchNode[];
     }
   | { bind: string } // bind this operand's VALUE to a name
-  | { same: string } // this operand must equal a previously-bound value
-  | { constImm: string }; // this operand must be a `const`; bind its numeric VALUE to an imm name
+  // this operand must equal a previously-bound value — or, when both are `const`, have its value:
+  // two `li rN,10` are one operand to C, as they are to the compiler that materialised both
+  | { same: string }
+  | { constImm: string } // this operand must be a `const`; bind its numeric VALUE to an imm name
+  | { constEq: ImmExpr }; // this operand must be a `const` whose value is this, modulo 2^32
 
 // A tiny declarative arithmetic over bound immediate names. It keeps a *computed* replacement
 // attribute DATA rather than a JS closure, so a strength-reduced idiom whose replacement is a
@@ -61,7 +64,16 @@ function evalImm(e: ImmExpr, imms: Map<string, number>): number {
 // A replacement operand is either a previously-BOUND value (by name) or a SYNTHESIZED constant
 // computed from the bound immediates (e.g. the derived multiplier `2^k+1`). A synthesized const
 // is materialized as its own `const` op spliced in before the rewrite site.
-export type ReplaceArg = string | { constImm: ImmExpr };
+// A NESTED replacement — an op of its own, spliced in before the root — lets an idiom fold to a
+// two-op expression (`-(a < b)`) without a pattern per intermediate.
+export type ReplaceArg = string | { constImm: ImmExpr } | Replacement;
+
+export interface Replacement {
+  op: string;
+  args: ReplaceArg[];
+  attrs?: Record<string, number | ImmExpr>;
+  resultType?: IrType;
+}
 
 export interface RewritePattern {
   id: string;
@@ -76,7 +88,7 @@ export interface RewritePattern {
   // a computed divisor proof and lives as the bespoke raise/magicdiv.ts pass instead. The
   // COMPUTED-attr half of the envelope (ImmExpr, above) IS built — earned by the
   // multiply-by-constant idioms.
-  replaceWith: { op: string; args: ReplaceArg[]; attrs?: Record<string, number | ImmExpr>; resultType?: IrType };
+  replaceWith: Replacement;
   /** Two REPLACEMENT operand names, in the order the replacement RENDERS them, whose defs C leaves
    *  UNSEQUENCED against each other. A fold that collapses a multi-op idiom into one op drops its
    *  operands from several uses to one, which lets the structurer inline both at that one use — and
@@ -93,12 +105,18 @@ export interface RewritePattern {
    *  declaring pattern's compiler gate to that set; widening it fails loud. */
   unsequencedRightFirst?: [string, string];
   /** The compilers measured to RECOMPUTE this idiom instead of CSEing it back, when an interior op
-   *  of the match survives the fold because something outside still reads it. On one of these the
+   *  of the match survives the fold because something outside still reads it (a read by an op `dce`
+   *  will delete does not count, as for `foldsOnlyDyingInterior`). On one of these the
    *  fold refuses that shape (`sharesInterior`, which carries the disassemblies); everywhere else
    *  it is byte-neutral and refusing it costs matches, so the list is opt-in and per-compiler. A
    *  compiler absent from it was either measured neutral or not measured — `validatePattern`
    *  refuses a name that is not in `applies.compilers`, where the fold cannot fire anyway. */
   recomputesSharedInterior?: string[];
+  /** The fold fires only where its interior DIES with it, on every compiler: an interior op some
+   *  live op outside the match still reads refuses it (a read by an op `dce` will delete does not
+   *  count). For an idiom whose interior means something of its own to a later pass — a `bdnz`'s
+   *  decremented counter is the loop's, not a subtraction to fold away. */
+  foldsOnlyDyingInterior?: true;
 }
 
 /** What the pattern layer reads off a target. STRUCTURAL on purpose: the pattern set is
@@ -144,6 +162,242 @@ export const CNTLZW_EQ0: RewritePattern = {
   },
   replaceWith: { op: 'icmp_eq', args: ['X', { constImm: 0 }], resultType: T.u(32) },
 };
+
+// ── mwcc's branch-free compares ─────────────────────────────────────────────────────────────
+// CodeWarrior materialises a 0/1 compare with no branch and no set-on-compare instruction: either
+// through the carry bit (the frontend reads each carry as the compare it is — frontend/ppc.ts
+// `readCarry`), or with a bit trick on the operands. Each fold is an IDENTITY over every pair of
+// 32-bit words (PPC `slw` by 32 is 0; mwcc-compare.test.ts and ppc-carry.test.ts evaluate both
+// sides over the edge words).
+// The compiled forms, at -O4,p (2.4.2 and 2.4.7 identical), a and b in r3 and r4:
+//
+//   a <u b     2.4.x  xor r0,b,a; cntlzw r0,r0; slw r0,b,r0; srwi r3,r0,31
+//              2.3.3  subfc r3,b,a; subfe r0,r0,r0; neg r3,r0          -(CA - 1), CA = a >=u b
+//   a >=u b    2.4.x  subf r0,b,a; orc r3,a,b; srwi r0,r0,1; subf r0,r0,r3; srwi r3,r0,31
+//              2.3.3  subfc r0,b,a; li r0,-1; subfze r3,r0              CA itself
+//   a <s b     2.4.x  xor r0,b,a; srawi r3,r0,1; and r0,r0,b; subf r0,r0,r3; srwi r3,r0,31
+//              2.3.3  eqv r0,b,a; subfc r3,b,a; srwi r0,r0,31; addze r3,r0; clrlwi r3,r3,31
+//   a >=s b    all    srawi r6,a,31; srwi r5,b,31; subfc r0,b,a; adde r3,r6,r5
+//   -(a <u b)  2.4.x  subfc r0,b,a; subfe r3,r0,r0                     CA - 1
+//
+// `>` and `<=` are the same code with the operands swapped, and fold to `b < a` / `b >= a`. A
+// constant operand is materialised once, into a register the trick reads twice — except in the
+// `orc` form, which subtracts it as `addi rD,a,-K`, hence that form's second pattern. The signed
+// and unsigned forms share no shape, so no fold reads one as the other.
+const mwccOnly = { compilers: ['mwcc'] };
+const C31 = { imm: 31 };
+
+/** `shr_u(shl(b, clz(a ^ b)), 31)`: b's bit at the highest bit where a and b differ, set exactly
+ *  when b is the larger. */
+export const MWCC_CLZ_ULT: RewritePattern = {
+  id: 'mwcc-clz-ult',
+  applies: mwccOnly,
+  match: {
+    op: 'shr_u',
+    attrEquals: C31,
+    args: [
+      {
+        op: 'shl',
+        args: [{ bind: 'B' }, { op: 'clz', args: [{ op: 'xor', args: [{ bind: 'A' }, { same: 'B' }] }] }],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_ult', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** `shr_u((a | ~b) - ((a - b) >>u 1), 31)`, and its constant-b twin over `a + -K`. */
+export const MWCC_ORC_UGE: RewritePattern[] = [
+  {
+    id: 'mwcc-orc-uge',
+    applies: mwccOnly,
+    match: {
+      op: 'shr_u',
+      attrEquals: C31,
+      args: [
+        {
+          op: 'sub',
+          args: [
+            { op: 'or', args: [{ bind: 'A' }, { op: 'not', args: [{ bind: 'B' }] }] },
+            { op: 'shr_u', attrEquals: { imm: 1 }, args: [{ op: 'sub', args: [{ same: 'A' }, { same: 'B' }] }] },
+          ],
+        },
+      ],
+    },
+    replaceWith: { op: 'icmp_uge', args: ['A', 'B'], resultType: T.u(32) },
+  },
+  {
+    id: 'mwcc-orc-uge-k',
+    applies: mwccOnly,
+    match: {
+      op: 'shr_u',
+      attrEquals: C31,
+      args: [
+        {
+          op: 'sub',
+          args: [
+            { op: 'or', args: [{ bind: 'A' }, { op: 'not', args: [{ constImm: 'k' }] }] },
+            {
+              op: 'shr_u',
+              attrEquals: { imm: 1 },
+              args: [{ op: 'add', args: [{ same: 'A' }, { constEq: { op: '-', args: [0, { imm: 'k' }] } }] }],
+            },
+          ],
+        },
+      ],
+    },
+    replaceWith: { op: 'icmp_uge', args: ['A', { constImm: { imm: 'k' } }], resultType: T.u(32) },
+  },
+];
+
+/** `shr_u(((a ^ b) >>s 1) - ((a ^ b) & b), 31)`. The `and` names b, so the two xor operand orders
+ *  are two patterns: a commutative match commits to the first order that binds. */
+const xorSlt = (first: string, second: string): RewritePattern => ({
+  id: `mwcc-xor-slt/${first}${second}`,
+  applies: mwccOnly,
+  match: {
+    op: 'shr_u',
+    attrEquals: C31,
+    args: [
+      {
+        op: 'sub',
+        args: [
+          {
+            op: 'shr_s',
+            attrEquals: { imm: 1 },
+            args: [{ op: 'xor', ordered: true, args: [{ bind: first }, { bind: second }] }],
+          },
+          {
+            op: 'and',
+            args: [{ op: 'xor', ordered: true, args: [{ same: first }, { same: second }] }, { same: 'B' }],
+          },
+        ],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_slt', args: ['A', 'B'], resultType: T.u(32) },
+});
+export const MWCC_XOR_SLT: RewritePattern[] = [xorSlt('A', 'B'), xorSlt('B', 'A')];
+
+/** `(a >>s 31) + (b >>u 31) + (a >=u b)`, `adde` over the `subfc` carry: the sign words cancel
+ *  when the signs agree, and decide the compare when they differ. */
+export const MWCC_ADDE_SGE: RewritePattern = {
+  id: 'mwcc-adde-sge',
+  applies: mwccOnly,
+  match: {
+    op: 'add',
+    args: [
+      { op: 'icmp_uge', args: [{ bind: 'A' }, { bind: 'B' }] },
+      {
+        op: 'add',
+        args: [
+          { op: 'shr_s', attrEquals: C31, args: [{ same: 'A' }] },
+          { op: 'shr_u', attrEquals: C31, args: [{ same: 'B' }] },
+        ],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_sge', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** 2.3.3's `((~(a ^ b) >>u 31) + (a >=u b)) & 1`, `addze` over the `subfc` carry: one plus the
+ *  carry when the signs agree, the carry alone when they differ. */
+export const MWCC_EQV_SLT: RewritePattern = {
+  id: 'mwcc-eqv-slt',
+  applies: mwccOnly,
+  match: {
+    op: 'and',
+    args: [
+      {
+        op: 'add',
+        args: [
+          { op: 'icmp_uge', args: [{ bind: 'A' }, { bind: 'B' }] },
+          {
+            op: 'shr_u',
+            attrEquals: C31,
+            args: [{ op: 'not', args: [{ op: 'xor', args: [{ same: 'A' }, { same: 'B' }] }] }],
+          },
+        ],
+      },
+      { op: 'const', attrEquals: { value: 1 }, args: [] },
+    ],
+  },
+  replaceWith: { op: 'icmp_slt', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** A carry less one (`subfe rD,rY,rY`): `cmp - 1` is `-(!cmp)`, and negated again (2.3.3's `neg`)
+ *  `!cmp`. One of each per comparison of NEGATED_ICMP, since a carry is any of them (`addic -1`
+ *  makes `!=`, `subfic 0` makes `==`); the negated form runs first, while the `- 1` is whole. */
+const carryLessOne = (cmp: string): MatchNode => ({
+  op: 'add',
+  args: [
+    { op: cmp, args: [{ bind: 'A' }, { bind: 'B' }] },
+    { op: 'const', attrEquals: { value: -1 }, args: [] },
+  ],
+});
+const carryNot = (cmp: string): RewritePattern => ({
+  id: `mwcc-carry-not/${cmp}`,
+  applies: mwccOnly,
+  match: { op: 'neg', args: [carryLessOne(cmp)] },
+  replaceWith: { op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) },
+});
+const carryMask = (cmp: string): RewritePattern => ({
+  id: `mwcc-carry-mask/${cmp}`,
+  applies: mwccOnly,
+  match: carryLessOne(cmp),
+  replaceWith: { op: 'neg', args: [{ op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) }] },
+});
+
+/** `(b - a) == 0` / `!= 0` is `a == b` / `a != b`: the form 2.3.3's `!=` takes through the carry
+ *  (`subf r3,a,b; addic r0,r3,-1; subfe r3,r0,r3`), and every build's `==` (`subf; cntlzw; srwi`),
+ *  measured byte-exact in this operand order for both on 2.3.3 and for `==` on 2.4.2. Only where
+ *  the difference dies: a `bdnz` tests its decremented counter this way, and a record-form `subf.`
+ *  its result. */
+const subZeroTest = (test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
+  id: `mwcc-sub-zerotest/${test}`,
+  applies: mwccOnly,
+  foldsOnlyDyingInterior: true,
+  match: {
+    op: test,
+    args: [
+      { op: 'sub', args: [{ bind: 'B' }, { bind: 'A' }] },
+      { op: 'const', attrEquals: { value: 0 }, args: [] },
+    ],
+  },
+  replaceWith: { op: test, args: ['A', 'B'], resultType: T.u(32) },
+});
+
+/** `-x == 0` / `-x != 0` is `x == 0` / `x != 0`: 2.3.3 materialises every `x != 0` as `neg; addic
+ *  -1; subfe` (`a != 0`, `a > 0u`, `(a - b) != 0`), so the carry reads the negation. AFTER
+ *  `subZeroTest`, which must not see the difference this exposes: 2.3.3's `a != b` is `subf; addic;
+ *  subfe` with no `neg`, so `(a - b) != 0` keeps its subtraction. No dying gate: a `bdnz` counts down
+ *  with a `sub`, never a `neg`. */
+const negZeroTest = (test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
+  id: `mwcc-neg-zerotest/${test}`,
+  applies: mwccOnly,
+  match: {
+    op: test,
+    args: [
+      { op: 'neg', args: [{ bind: 'X' }] },
+      { op: 'const', attrEquals: { value: 0 }, args: [] },
+    ],
+  },
+  replaceWith: { op: test, args: ['X', { constImm: 0 }], resultType: T.u(32) },
+});
+
+/** The branch-free compare bundle. */
+export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [
+  MWCC_CLZ_ULT,
+  ...MWCC_ORC_UGE,
+  ...MWCC_XOR_SLT,
+  MWCC_ADDE_SGE,
+  MWCC_EQV_SLT,
+  ...Object.keys(NEGATED_ICMP).map(carryNot),
+  ...Object.keys(NEGATED_ICMP).map(carryMask),
+  subZeroTest('icmp_eq'),
+  subZeroTest('icmp_ne'),
+  negZeroTest('icmp_eq'),
+  negZeroTest('icmp_ne'),
+];
 
 // The PPC rotate mirror, as pure data: hardware only rotates LEFT, so mwcc spells `rotr(x, n)`
 // as `rotlw(x, 32 - n)`. Lowering that literally emits `x << (32 - n) | x >> (32 - (32 - n))`,
@@ -425,6 +679,7 @@ export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
   SDIV_POW2_2,
   ...HWMOD_PATTERNS,
   CNTLZW_EQ0,
+  ...MWCC_COMPARE_PATTERNS,
   // AFTER cntlzw-eq0, which is what turns mwcc's `clz(x) >> 5` into the `icmp_eq` this fold then
   // negates — `!(x == 0)` composes only in that order (each pattern runs to fixpoint in turn).
   ...NOT_CMP_PATTERNS,
@@ -450,13 +705,27 @@ interface Binds {
   interior: Set<Value>;
 }
 
+/** Two constants that are the same 32-bit word (`-1` and `0xffffffff` are one register value). */
+function sameWord(x: unknown, y: unknown): boolean {
+  return typeof x === 'number' && typeof y === 'number' && x >>> 0 === y >>> 0;
+}
+
 function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): boolean {
   if ('bind' in node) {
     b.values.set(node.bind, v);
     return true;
   }
   if ('same' in node) {
-    return b.values.get(node.same) === v;
+    const bound = b.values.get(node.same);
+    if (bound === v) {
+      return true;
+    }
+    const [x, y] = [bound && defs.get(bound), defs.get(v)];
+    return x?.opcode === 'const' && y?.opcode === 'const' && sameWord(x.attrs.value, y.attrs.value);
+  }
+  if ('constEq' in node) {
+    const d = defs.get(v);
+    return d?.opcode === 'const' && sameWord(d.attrs.value, evalImm(node.constEq, b.imms));
   }
   if ('constImm' in node) {
     const d = defs.get(v);
@@ -711,11 +980,11 @@ function reordersUnsequenced(
  *
  *  Refusing leaves the raw ops standing, which is the spelling that was byte-exact before any fold
  *  existed — a worse-READING answer, never a worse-scoring one. */
-function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value, Op>): boolean {
+function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value, Op>, dead?: Set<Op>): boolean {
   const matched = new Set([...interior].map((v) => defs.get(v)));
   for (const b of fn.blocks) {
     for (const o of b.ops) {
-      if (matched.has(o)) {
+      if (matched.has(o) || dead?.has(o)) {
         continue; // a read from INSIDE the idiom is one this rewrite is replacing
       }
       for (const v of [...o.operands, ...o.successors.flatMap((x) => x.args)]) {
@@ -751,38 +1020,49 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
         if (!tryMatch(pat.match, op.results[0], defs, binds)) {
           continue;
         }
-        if (pat.recomputesSharedInterior?.includes(target.compiler) && sharesInterior(fn, op, binds.interior, defs)) {
+        // Both interior gates ask one question — does an interior op outlive the fold? — and both
+        // skip a reader `dce` will delete: the stage DCEs only after every pattern ran, so an op an
+        // earlier fold orphaned still reads the interior here and keeps nothing alive.
+        const askInterior = pat.foldsOnlyDyingInterior || pat.recomputesSharedInterior?.includes(target.compiler);
+        if (askInterior && sharesInterior(fn, op, binds.interior, defs, deadOps(fn.blocks))) {
           continue;
         }
         if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {
           continue;
         }
-        // Materialize any synthesized-constant replacement operands as their own `const` ops,
+        // Materialize the replacement: synthesized constants and nested ops become their own ops,
         // spliced in before the rewrite; bound-value operands resolve from the value binds.
-        const rw = pat.replaceWith;
-        const newRes = mkValue(rw.resultType ?? op.results[0].type);
-        const consts: Op[] = [];
-        const operands: Value[] = rw.args.map((a) => {
-          if (typeof a === 'string') {
-            // Attribute a malformed pattern HERE with its id — an unbound value would otherwise
-            // become `undefined` and detonate stages later; patterns are meant to become
-            // AI-generated data, so diagnosability is first-class.
-            const bound = binds.values.get(a);
-            if (!bound) {
-              throw new Error(`pattern '${pat.id}' replaceWith references unbound value '${a}'`);
+        const spliced: Op[] = [];
+        const build = (rw: Replacement, type: IrType): Op => {
+          const operands: Value[] = rw.args.map((a) => {
+            if (typeof a === 'string') {
+              // Attribute a malformed pattern HERE with its id — an unbound value would otherwise
+              // become `undefined` and detonate stages later; patterns are meant to become
+              // AI-generated data, so diagnosability is first-class.
+              const bound = binds.values.get(a);
+              if (!bound) {
+                throw new Error(`pattern '${pat.id}' replaceWith references unbound value '${a}'`);
+              }
+              return bound;
             }
-            return bound;
+            if ('constImm' in a) {
+              const cv = mkValue(T.s());
+              spliced.push(mkOp('const', { results: [cv], attrs: { value: evalImm(a.constImm, binds.imms) } }));
+              return cv;
+            }
+            const inner = build(a, a.resultType ?? T.unk(32));
+            spliced.push(inner);
+            return inner.results[0];
+          });
+          const attrs: Record<string, number> = {};
+          for (const [k, v] of Object.entries(rw.attrs ?? {})) {
+            attrs[k] = typeof v === 'number' ? v : evalImm(v, binds.imms);
           }
-          const cv = mkValue(T.s());
-          consts.push(mkOp('const', { results: [cv], attrs: { value: evalImm(a.constImm, binds.imms) } }));
-          return cv;
-        });
-        const attrs: Record<string, number> = {};
-        for (const [k, v] of Object.entries(rw.attrs ?? {})) {
-          attrs[k] = typeof v === 'number' ? v : evalImm(v, binds.imms);
-        }
-        const newOp = mkOp(rw.op as Opcode, { operands, results: [newRes], attrs }); // pattern data boundary: verify() rejects unknowns
-        b.ops.splice(i, 1, ...consts, newOp);
+          return mkOp(rw.op as Opcode, { operands, results: [mkValue(type)], attrs }); // pattern data boundary: verify() rejects unknowns
+        };
+        const newOp = build(pat.replaceWith, pat.replaceWith.resultType ?? op.results[0].type);
+        const newRes = newOp.results[0];
+        b.ops.splice(i, 1, ...spliced, newOp);
         replaceAllUsesWith(fn, op.results[0], newRes);
         count++;
         changed = true;

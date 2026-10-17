@@ -14,6 +14,9 @@
 // 64-bit value; it is a word this function uses as a word, which is what a 64-bit argument passed
 // to a helper and separately tested would look like. Fusing it would delete a use.
 import { Fn, Op, Value } from '../ir/core';
+import { intWidth } from '../ir/types';
+import { type FnProto, declaredWidth } from '../proto';
+import { RaiseUnsupportedError } from './errors';
 
 /** Count every operand and edge-argument occurrence of each value. Occurrences, not sites: a value
  *  passed to `f(x, x)` is used twice, and a rule that said "used once" about it would be wrong. */
@@ -78,4 +81,34 @@ export function fuseParamPairs(fn: Fn): boolean {
     }
   }
   return changed;
+}
+
+/** A FUNCTION DECLARED WITH AN INTEGER PARAMETER WIDER THAN A REGISTER, whose lift reads that
+ *  parameter's words apart, refuses — on every frontend, since this reads only the entry block
+ *  `fuseParamPairs` leaves. The return's twin is pipeline.ts `refuseNarrowReturnsOfWideDeclaration`.
+ *
+ *  The pair is fused only where the lift built its `concat` (a helper call, a carry chain); a body
+ *  that tests or combines the two words itself (`return a != 0;` is `or` of the halves on every
+ *  compiler) leaves two word parameters, and the lift prints `s32 f(s32 a0, s32 a1)` against the
+ *  caller's own `int f(long long a)` — a candidate the compiler rejects as a redeclaration. It is
+ *  correct C under the ABI, and the wrong function for the declaration in hand. Counting is
+ *  enough: every fused parameter is wider than a register and only `fuseParamPairs` makes one, so
+ *  fewer of them than the declaration names means a declared one was left in halves. A
+ *  declaration the caller does not state (a context's own entry is left out,
+ *  proto-context.ts `withContextPrototypes`) asks nothing here. */
+export function refuseSplitWideParams(fn: Fn, self: FnProto | undefined): void {
+  const declared = Array.isArray(self?.params) ? self.params : [];
+  const wide = declared.filter((t) => (declaredWidth(t) ?? 0) > 32);
+  if (wide.length === 0) {
+    return;
+  }
+  const fused = fn.blocks[0].params.filter((p) => (intWidth(p.type) ?? 0) > 32).length;
+  if (fused < wide.length) {
+    const at = declared.findIndex((t) => (declaredWidth(t) ?? 0) > 32);
+    throw new RaiseUnsupportedError(
+      `cannot lift '${fn.name}': its declaration takes parameter ${at + 1} as '${declared[at]}', and this lift ` +
+        'reads the two halves of a 64-bit value as two word parameters (a 64-bit parameter is one only where the ' +
+        'lift pairs its halves)',
+    );
+  }
 }
