@@ -461,10 +461,10 @@ describe('an undefined value another local copied is assigned on that arm', () =
         MIPS_IDO,
       ),
     ).toBe(
-      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 uninit_sp4;\n' +
-        '    s32 uninit_sp0;\n    if (a0 != 0) {\n        v1 = uninit_sp0;\n        v0 = uninit_sp0;\n' +
-        '        v2 = uninit_sp0;\n    } else {\n        v0 = uninit_sp4;\n        v2 = 7;\n        v1 = uninit_sp4;\n' +
-        '    }\n    if (a1 != 0) {\n        v3 = v0 - v2;\n    } else {\n        v3 = v0 - v1;\n    }\n    return v3;\n}\n',
+      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 uninit_sp4;\n' +
+        '    s32 uninit_sp0;\n    if (a0 != 0) {\n        v2 = uninit_sp0;\n        v1 = uninit_sp0;\n' +
+        '        v0 = uninit_sp0;\n    } else {\n        v1 = uninit_sp4;\n        v0 = 7;\n        v2 = uninit_sp4;\n' +
+        '    }\n    if (a1 != 0) v2 = v0;\n    return v1 - v2;\n}\n',
     );
   });
 
@@ -497,7 +497,7 @@ describe('an undefined value another local copied is assigned on that arm', () =
         MIPS_IDO,
       ),
     ).toBe(
-      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 uninit_sp0;\n    s32 uninit_sp4;\n' +
+      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n' +
         '    if (a0 != 0) {\n        v0 = uninit_sp4;\n    } else {\n        v0 = uninit_sp0;\n    }\n' +
         '    if (a1 != 0) {\n        v2 = uninit_sp0;\n        v1 = 1;\n    } else {\n        v1 = uninit_sp4;\n' +
         '        v2 = 2;\n    }\n    return v0 + v1 + v2;\n}\n',
