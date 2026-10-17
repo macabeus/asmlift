@@ -2824,10 +2824,12 @@ function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): 
  *  sp+16 and puts the local at sp+24, so an extent read without that call would draw the area over
  *  the staged word. A call through a register (`jalr`) or a linking branch always refuses. A `jal`
  *  to an undeclared callee refuses where the area depends on its extent — where drawing the
- *  outgoing area up to the lowest save would move it. That is gcc's layout, whose locals start
- *  where the outgoing area ends: `tl(1, 2, 3, (long long)x)` to an unprototyped `tl` skips a3 and
- *  stages x at sp+16..24, which no guess of a0..a3 sees. IDO's area starts above the saves, which
- *  the outgoing area lies below whatever its extent, so there the undeclared call costs nothing.
+ *  outgoing area as far as it can reach would move it: up to the lowest save, or to the
+ *  loaded-word bound (`o32OutgoingArea`'s `widest`) where that is lower. That is gcc's layout,
+ *  whose locals start where the outgoing area ends: `tl(1, 2, 3, (long long)x)` to an
+ *  unprototyped `tl` skips a3 and stages x at sp+16..24, which no guess of a0..a3 sees. IDO's area
+ *  starts above the saves, which the outgoing area lies below whatever its extent, so there the
+ *  undeclared call costs nothing.
  *  The saves are the prologue's: a store of `ra` or a callee-saved register in the entry block
  *  before anything writes it. */
 /** THE OUTGOING ARGUMENT AREA OF AN O32 FRAME, the part of it a callee may write: the a0..a3 home

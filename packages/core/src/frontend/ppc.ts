@@ -999,9 +999,10 @@ const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
  *  and since the area is one region at the frame bottom every word at or above it is no call's
  *  stack argument. Only an instruction the entry reaches has a depth, so every load counted can
  *  run; one at another depth names another frame's words. Measured once, in `liftPrelude`: the
- *  local area's partition (`measurePpcFrame`'s `outgoingEnd`), the undeclared-call guess, the
- *  unread-store decline and the frame-object audit (`loadedWords`) all take this number, and it
- *  counts what the IR does not show the audit — the slot reloads and the epilogue's restores.
+ *  undeclared-call guess (through `measurePpcFrame`'s `outgoingEnd`), the unread-store decline and
+ *  the frame-object audit (`loadedWords`) take this number, and it counts what the IR does not
+ *  show the audit — the slot reloads and the epilogue's restores. The local area's partition does
+ *  not: it starts at the parameter area whatever the bound, and rests on the guess and the audit.
  *  `Infinity` at every depth where the target states no such offset. */
 function ppcLoadedWordBound(
   blocks: readonly PpcBlock[],

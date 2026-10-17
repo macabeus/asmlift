@@ -244,8 +244,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   home and load them back, and 8 on mwcc, where the callee's parameter area starts. Each frontend
   measures the bound once and hands the one number to every reader: on MIPS and PowerPC it caps
   where the outgoing area of a call nothing declares can end (`o32OutgoingArea`'s `widest`,
-  `measurePpcFrame`'s `outgoingEnd`), and the local area's partition, the owned range of an
-  uninitialised read, the undeclared-call guess and the frame-object audit all read that end. Its
+  `measurePpcFrame`'s `outgoingEnd`). On MIPS the local area's partition, the owned range of an
+  uninitialised read and the undeclared-call guess read that end; on PowerPC only the guess does,
+  and the partition starts at the parameter area whatever the bound. The frame-object audit takes
+  the bound itself on both (`loadedWords`). Its
   weaker sibling
   `localsAboveOutgoingArea` states only the after-call form, and the strong form is never read off
   it. The converse,

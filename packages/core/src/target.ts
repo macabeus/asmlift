@@ -592,7 +592,10 @@ export interface TargetDescription {
     // `loadedWordBound` bounds the area at the lowest such word the function loads,
     // `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores the same way, and the
     // MIPS and PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`)
-    // and PPC's unread-slot decline weigh only the stores beneath it. A load BELOW the offset proves
+    // and PPC's unread-slot decline weigh only the stores beneath it. On MIPS it also caps how far
+    // an undeclared call's area can reach (`o32OutgoingArea`'s `widest`), which the local area's
+    // partition (`measureO32Frame`) and the owned range of an uninitialised read
+    // (`measureOwnedFrame`) both read. A load BELOW the offset proves
     // nothing, and the readers do not count it. A word no store reaches on any path needs only the
     // after-call form (see `localsAboveOutgoingArea`).
     // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
