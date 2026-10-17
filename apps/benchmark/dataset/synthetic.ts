@@ -10636,6 +10636,32 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int ownar_cntdbl(int, double);',
     proto: { ownar_cntdbl: { params: 3, returns: 'int' } },
   },
+  // A FUNCTION'S OWN CONTEXT ENTRY BOUNDS ITS ARGUMENT REGISTERS SOFTLY (core pipeline.ts
+  // `liftWithinContextBound`). These rows state no own `proto`: the harness hands the lift the ctx's
+  // own entry as a `--context` lift reads it (`withOwnContextMark`). `ownctx_phantom`'s a2/a3 reach
+  // only the arity guesses of `zq` and `sl`, which trim them, so `(short, int)` drops them as
+  // parameters. `ownctx_cb` is sbk2's task-callback shape: a `(void)` header ahead of a definition
+  // that reads a0, which stays the parameter it is (with an `[own-arity]` note), never `uninit_a0`.
+  {
+    sym: 'ownctx_phantom',
+    src:
+      'extern int gOcY;\nextern void k4(int, int, int, int);\nextern int zq();\nextern void sl();\n' +
+      'int ownctx_phantom(short a, int b){ if (gOcY) k4(b, a, 3, 1); while (zq(a) != 7) sl(); return gOcY + 1; }',
+    features: ['branch', 'global'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern int gOcY;\nextern void k4(int, int, int, int);\nint ownctx_phantom(short, int);',
+    proto: { k4: { params: ['int', 'int', 'int', 'int'], returnsVoid: true } },
+  },
+  {
+    sym: 'ownctx_cb',
+    src:
+      'struct OcT { int a; int b; int c; };\nextern void g2(int *, int);\n' +
+      'void ownctx_cb(struct OcT *t){ g2(&t->c, t->a - 3); }',
+    features: ['struct', 'field', 'pointer'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct OcT { int a; int b; int c; };\nextern void g2(int *, int);\nvoid ownctx_cb(void);',
+    proto: { g2: { params: ['int *', 'int'], returnsVoid: true } },
+  },
   {
     sym: 'byvalregs',
     src:
