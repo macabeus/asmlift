@@ -61,11 +61,13 @@
 //                               merge), five refusals about a disassembly the reader cannot account
 //                               for, a `jal` relocated against a section, one in a delay slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
-//   frontend/ppc.ts         15  `stwu` with update, a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), the
-//                               return address `mflr` copies out stored anywhere but the link
-//                               register's save word, the reaching-compare throw whose reason is
-//                               interpolated (as Thumb's), the two-armed branch denylist, whose
+//   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
+//                               r1, its own base loaded or stored, a relocation other than `@l`),
+//                               a relocation on a stack-pointer adjust, a branch testing a cr
+//                               field a call destroyed (no compiler emits it), the return address
+//                               `mflr` copies out stored anywhere but the link register's save word,
+//                               the reaching-compare throw whose reason is interpolated (as Thumb's),
+//                               the two-armed branch denylist, whose
 //                               template is interpolation end to end, the caller's value a restore
 //                               puts back read as a value, a `stmw` or save routine saving a register
 //                               this function already wrote or read, and four ways a `bl` into a register

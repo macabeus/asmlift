@@ -1266,7 +1266,15 @@ function liftOnce(
   // the address perfectly would still leave a name no C source can write, so no amount of lifting
   // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
   // waits on the fold. Saying which one a row hit is the whole value of the message.
-  const relocSite = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  //
+  // An update form is decoded as the `addi` that advances its base and then the plain access
+  // (`withUpdate` in `decode`); a refusal of that `addi`'s relocation names the instruction the
+  // listing holds, not the `addi` it was decoded through.
+  const decodedFrom = new WeakMap<Instr, Instr>();
+  const relocSite = (at: Instr) => {
+    const ins = decodedFrom.get(at) ?? at;
+    return `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  };
   /** Whether the decode of the instruction in hand has TAKEN its relocation. `decode` asks once, of
    *  every modelled instruction, so a relocation no case consumed refuses instead of being dropped.
    *  A per-case guard would only cover the cases that remember to carry one, and every other
@@ -2306,6 +2314,56 @@ function liftOnce(
       } else if (/^b.*l$/.test(mnem)) {
         clobberCarry('is a call, which clobbers it');
       }
+      // A LOAD OR STORE WITH UPDATE (`lbzu`/`lhzu`/`lhau`/`lwzu`, `stbu`/`sthu`/`stwu`) addresses
+      // `rA + D` and leaves that address in rA: `lbzu rD,1(r3)` is `r3 += 1; rD = *(u8 *)r3`, and
+      // `stbu rS,1(r3)` is `r3 += 1; *(u8 *)r3 = rS`. mwcc emits them for a fully unrolled scan of a
+      // table, a run of stores to a global array, and the word loop of a struct copy (at -O4,p; the
+      // copy at every level). Decoded as exactly that: the `addi rA,rA,D` this frontend already
+      // lifts, then the plain access at `0(rA)`. So an `@l` displacement (`lhzu r0,gH@l(r4)`, the
+      // FIRST access of a run over a `u16`/`u32` table or a store run) completes its `lis` the way
+      // `addi rD,rHi,gH@l` does, and leaves `&gH` in rA; a base holding a frame address moves as a
+      // capture moved by `addi` does, and the frame-object audit judges what it then reaches.
+      //
+      // It refuses where that reading is not the instruction's:
+      //   • a base field of 0 (`r0`) is the literal 0, which the ISA makes an invalid form for every
+      //     update form, and so is a load into its own base (rD == rA): neither has one meaning;
+      //   • a store of its own base (rS == rA) stores the value BEFORE the update, which an
+      //     `addi`-first decode would not;
+      //   • a base of r1 moves the stack pointer, which `r1Displacements` tracks only for the frame
+      //     push (`case 'stwu'`) and `addi r1,r1,N`;
+      //   • a relocation other than `R_PPC_ADDR16_LO` (no compiler emits one).
+      // Not decoded, and refused by the opaque policy as unmodelled: the INDEXED update forms
+      // (`lwzux`, `stbux`, …), which in 2004 functions with an update form across pikmin,
+      // ac-decomp and marioparty4 appear only in hand-written asm, and the floating-point ones
+      // (`lfsu`, `stfdu`, …), whose plain forms this frontend does not lift either.
+      const withUpdate = (plain: string, store: boolean) => {
+        const [r, mem] = ins.ops;
+        const { off, base } = parseMem(mem ?? '');
+        const why =
+          !isReg(base) || base === 'r0'
+            ? `its base is ${base === 'r0' ? 'r0' : `'${mem}'`}, which the ISA makes an invalid form of an update`
+            : base === 'r1'
+              ? 'it moves the stack pointer, which only the frame push may do here'
+              : r === base
+                ? store
+                  ? `it stores its own base ${r}, whose stored value is the one before the update`
+                  : `it loads into its own base ${r}, which the ISA makes an invalid form`
+                : ins.reloc !== undefined && ins.reloc.type !== 'R_PPC_ADDR16_LO'
+                  ? `it carries a '${ins.reloc.type}' relocation, which no update form is decoded under`
+                  : undefined;
+        if (why !== undefined) {
+          throw new PpcUnsupportedError(
+            `cannot lift '${name}': '${ins.mnemonic} ${ins.ops.join(',')}' at 0x${ins.addr.toString(16)} is a ` +
+              `${store ? 'store' : 'load'} with update not modelled — ${why}`,
+          );
+        }
+        const advance: Instr = { ...ins, mnemonic: 'addi', ops: [base, base, String(off)] };
+        decodedFrom.set(advance, ins);
+        decode(advance);
+        decode({ addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] });
+        // The `addi` took the relocation or threw, at its own choke point.
+        relocTaken = true;
+      };
       switch (mnem) {
         case 'nop':
           break;
@@ -2402,8 +2460,7 @@ function liftOnce(
         // puts it back.
         // A word store or load on r1 is a save or a value slot (`frameStore`/`frameLoad`); `stmw`
         // records save slots.
-        // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a real store-with-BASE-UPDATE
-        // (`*(rA+D)=rS; rA+=D`) — neither effect is modelled here, so loud-fail rather than drop both.
+        // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a store with update (`withUpdate`).
         // The push itself must be the only one, taken from the entry r1: every slot is named by its
         // offset from there (`r1Displacements`), and a push from anywhere else moves that origin.
         case 'stwu':
@@ -2422,9 +2479,8 @@ function liftOnce(
             saveSlots.set(parseMem(s).off, 'r1');
             break;
           }
-          throw new PpcUnsupportedError(
-            `cannot lift '${name}': stwu with update on ${parseMem(s).base} (store-with-base-update) not modelled`,
-          );
+          withUpdate('stw', true);
+          break;
         case 'mflr': {
           refuseOverwrittenLink(ins);
           const lr = mkValue(T.unk(32));
@@ -2585,11 +2641,13 @@ function liftOnce(
             break;
           }
           // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
-          // addend). It is the only `@l` consumer modelled here. The others — `ori`, `addic`, and
-          // the `@l`-in-a-displacement form (1,935 integer load/store sites across the three
-          // checkouts, plus the float loads) — are left unbuilt per docs/level-tower.md's "earn the
-          // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
-          // high half none of them consumed is caught by `readReg` or by the dangling-`@ha` check.
+          // addend). It is the only `@l` consumer modelled here, and an update form's `@l`
+          // displacement reaches it as the `addi` that advances its base (`withUpdate`). The others —
+          // `ori`, `addic`, and the `@l`-in-a-displacement form of a PLAIN load or store (1,935
+          // integer load/store sites across the three checkouts, plus the float loads) — are left
+          // unbuilt per docs/level-tower.md's "earn the level": no row in this benchmark reaches
+          // them. Each refuses at its own guard, and a high half none of them consumed is caught
+          // by `readReg` or by the dangling-`@ha` check.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
             const base = parseImm(t) === 0 ? foldTableBase(ins, s) : null;
             if (base !== null) {
@@ -2942,6 +3000,17 @@ function liftOnce(
           break;
         case 'stb':
           emitStore(ins, d, s, 1);
+          break;
+        // The update forms (`withUpdate`); `stwu` is decoded with the frame push above.
+        case 'lwzu':
+        case 'lhzu':
+        case 'lhau':
+        case 'lbzu':
+          withUpdate(mnem.slice(0, -1), false);
+          break;
+        case 'sthu':
+        case 'stbu':
+          withUpdate(mnem.slice(0, -1), true);
           break;
         // Register+register indexed forms (variable-index array access). Widths/signedness mirror the
         // displacement loads/stores above; `lhax` is the sign-extending halfword (algebraic).
