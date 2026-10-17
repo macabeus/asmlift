@@ -50,15 +50,13 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
 /** Ordered so stacked bars always read best -> worst, left to right. */
 export const OUTCOME_ORDER: Outcome[] = ['match', 'nonmatch', 'noncompile', 'declined', 'failed'];
 
-/** One-sentence definition of each outcome — shown when hovering the legend labels. */
+/** Short definition of each of asmlift's outcomes, printed on its Overview tile. */
 export const OUTCOME_GLOSS: Record<Outcome, string> = {
-  match: 'compiled and byte-exact (objdiff score 0)',
-  nonmatch: 'compiled but not byte-exact (score > 0)',
-  noncompile:
-    'marker-free source that claims completeness but fails to compile (the source and compiler diagnostics are kept)',
-  declined:
-    "output bearing explicit incompleteness markers (ASMLIFT_ERROR / M2C_ERROR / M2C_UNK / '?' placeholders) — deliberately uncompilable, never scored. Functions that decline only for missing context receive it (see Methodology); remaining declines are genuine modeling gaps on both sides",
-  failed: 'no usable output at all (crash, function not found, empty)',
+  match: 'compiles to the exact same bytes',
+  nonmatch: 'compiles, but the bytes differ',
+  noncompile: 'claims to be complete, but fails to compile',
+  declined: 'marks a part it cannot lift yet (ASMLIFT_ERROR)',
+  failed: 'no usable output: a crash or an empty result',
 };
 
 /** Gap-size buckets for the Explorer's GapBadge (measured absolute objdiff diff of the best
@@ -114,21 +112,6 @@ export const ISA_LABEL: Record<string, string> = {
 };
 
 export const ISA_ORDER: string[] = ['arm', 'mips', 'ppc'];
-
-/** Head-to-head verdict colors (both-match / asmlift-only / m2c-only / neither). */
-export const H2H_COLOR = {
-  both: '#22c55e', // emerald — both byte-exact
-  asmliftOnly: '#2dd4bf', // teal-400 — asmlift matches, m2c does not
-  m2cOnly: '#a855f7', // purple — m2c matches, asmlift does not
-  neither: '#475569', // slate — neither matched
-} as const;
-
-export const H2H_LABEL = {
-  both: 'both match',
-  asmliftOnly: 'asmlift only',
-  m2cOnly: 'm2c only',
-  neither: 'neither',
-} as const;
 
 /** Shared chart chrome. */
 export const CHART = {

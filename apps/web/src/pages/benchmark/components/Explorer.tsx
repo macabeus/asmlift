@@ -12,6 +12,7 @@ import { type ExplorerFlags, explorerFlags, peerProfile, projectProfiles } from 
 import { canOpenInPlayground, playgroundShare } from '../lib/playground';
 import { distinct, tally } from '../lib/stats';
 import { DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
+import { Disclaimer } from './Disclaimer';
 import { DeclinePicker, FeaturePicker } from './FeaturePicker';
 import { FunctionDetail } from './FunctionDetail';
 import { FeatureChip, GapBadge, OutcomeBadge } from './ui/Badge';
@@ -261,6 +262,8 @@ export function Explorer({
 
   return (
     <div className="space-y-4">
+      <Disclaimer />
+
       {/* Filter row */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl bg-slate-800/40 p-4">
         <label className="flex flex-col gap-1 text-xs">
