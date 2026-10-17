@@ -1962,7 +1962,24 @@ function liftOnce(
       write(dstReg, readVar(stackSlotKey(off), bi));
       return true;
     };
+    /** The instruction `decode` is lifting, for a refusal raised below it. */
+    let decoding: Instr | null = null;
+    // THE STACK POINTER IS NO VALUE A LIFT WRITES. The frame push, `addi r1,r1,N` and the reload of
+    // the back chain move r1, and `r1Displacements` follows them; none reaches here. Any other write
+    // (`lwz r1,4(r3)` in a longjmp, `mr r1,r10` in a context switch, `lwzu r1,4(r3)`) would land in
+    // an SSA variable nothing reads, since a read of r1 is refused as data (`read`), and the lift
+    // would drop the write: a load into r1 would become a discarded volatile read. So it refuses.
     const write = (r: string, v: Value) => {
+      if (r === 'r1') {
+        const by =
+          decoding === null
+            ? 'an instruction'
+            : `'${decoding.mnemonic} ${decoding.ops.join(',')}' at 0x${decoding.addr.toString(16)}`;
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${by} writes the stack pointer r1 — only the frame push, 'addi r1,r1,N' ` +
+            `and the back-chain reload move r1 here, and the value it would take is not one this lift tracks`,
+        );
+      }
       writeVar(r, bi, v);
       lastDef = v;
       if (discardReg !== undefined && r !== discardReg) {
@@ -2296,6 +2313,7 @@ function liftOnce(
     };
 
     const decode = (ins: Instr) => {
+      decoding = ins;
       const [d, s, t] = ins.ops;
       // Record form: a trailing `.` (the Rc bit) means the op ALSO sets cr0 from a signed compare
       // of its result against 0 (e.g. `andi.`, `addic.`). Decode the base op, then record that
@@ -2330,7 +2348,7 @@ function liftOnce(
       //   • a store of its own base (rS == rA) stores the value BEFORE the update, which an
       //     `addi`-first decode would not;
       //   • a base of r1 moves the stack pointer, which `r1Displacements` tracks only for the frame
-      //     push (`case 'stwu'`) and `addi r1,r1,N`;
+      //     push (`case 'stwu'`) and `addi r1,r1,N`, and a load into r1 writes it (`write`);
       //   • a relocation other than `R_PPC_ADDR16_LO` (no compiler emits one).
       // Not decoded, and refused by the opaque policy as unmodelled: the INDEXED update forms
       // (`lwzux`, `stbux`, …), which in 2004 functions with an update form across pikmin,
@@ -2344,13 +2362,15 @@ function liftOnce(
             ? `its base is ${base === 'r0' ? 'r0' : `'${mem}'`}, which the ISA makes an invalid form of an update`
             : base === 'r1'
               ? 'it moves the stack pointer, which only the frame push may do here'
-              : r === base
-                ? store
-                  ? `it stores its own base ${r}, whose stored value is the one before the update`
-                  : `it loads into its own base ${r}, which the ISA makes an invalid form`
-                : ins.reloc !== undefined && ins.reloc.type !== 'R_PPC_ADDR16_LO'
-                  ? `it carries a '${ins.reloc.type}' relocation, which no update form is decoded under`
-                  : undefined;
+              : !store && r === 'r1'
+                ? 'it loads into the stack pointer, a value this lift does not track'
+                : r === base
+                  ? store
+                    ? `it stores its own base ${r}, whose stored value is the one before the update`
+                    : `it loads into its own base ${r}, which the ISA makes an invalid form`
+                  : ins.reloc !== undefined && ins.reloc.type !== 'R_PPC_ADDR16_LO'
+                    ? `it carries a '${ins.reloc.type}' relocation, which no update form is decoded under`
+                    : undefined;
         if (why !== undefined) {
           throw new PpcUnsupportedError(
             `cannot lift '${name}': '${ins.mnemonic} ${ins.ops.join(',')}' at 0x${ins.addr.toString(16)} is a ` +

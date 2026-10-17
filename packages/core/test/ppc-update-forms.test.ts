@@ -6,7 +6,8 @@
 //
 // The test of the decode is an EQUIVALENCE, so it does not depend on how the lift is spelled: each
 // listing must lift to exactly the C of the same listing with every update form written out as
-// the two instructions the ISA defines it as.
+// the two instructions the ISA defines it as. That expansion is the decode's own definition, so a
+// separate test pins the ISA's order (access at rA + D, then rA = rA + D) against the C itself.
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -145,12 +146,48 @@ test('an update form with no single meaning, or one that moves r1, refuses', () 
   expect(one('stbu    r0,1(r0)')).toThrow(/store with update not modelled — its base is r0/);
   // a store of its own base stores the value BEFORE the update
   expect(one('stwu    r4,4(r4)')).toThrow(/stores its own base r4, whose stored value is the one before/);
-  // r1 is moved only by the frame push and `addi r1,r1,N`
+  // r1 is moved only by the frame push and `addi r1,r1,N`, and a load into it would be dropped
   expect(one('lwzu    r0,8(r1)')).toThrow(/moves the stack pointer/);
+  expect(one('lwzu    r1,4(r3)')).toThrow(/loads into the stack pointer/);
+  expect(one('lbzu    r1,1(r3)')).toThrow(/loads into the stack pointer/);
   // a relocation no compiler puts on an update form
   expect(() =>
     dis('walk', ['   0:\tlbzu    r0,0(r4)', '\t\t\t2: R_PPC_EMB_SDA21\tgB', '   4:\tmr      r3,r0', '   8:\tblr']),
   ).toThrow(/carries a 'R_PPC_EMB_SDA21' relocation/);
+});
+
+test('a write to r1 refuses, by any instruction, rather than lifting as a dropped read', () => {
+  // A longjmp's `lwz r1,4(r3)`, a context switch's `mr r1,r10`: nothing reads r1 as a value, so the
+  // write would vanish and the load would lift as a discarded volatile read.
+  const one = (line: string) => () => dis('walk', [`   0:\t${line}`, '   4:\tblr']);
+  expect(one('lwz     r1,4(r3)')).toThrow(/'lwz r1,4\(r3\)' at 0x0 writes the stack pointer r1/);
+  expect(one('lbz     r1,4(r3)')).toThrow(/writes the stack pointer r1/);
+  expect(one('lwzx    r1,r3,r4')).toThrow(/writes the stack pointer r1/);
+  expect(one('mr      r1,r3')).toThrow(/'mr r1,r3' at 0x0 writes the stack pointer r1/);
+});
+
+// What the ISA says, spelled out without the expansion `writtenOut` shares with the decode: the
+// access is at rA + D, and the base holds rA + D AFTER it, for the next access and as a value.
+test('an update form accesses rA + D and leaves rA + D in its base', () => {
+  const lift = (sym: string, lines: string[], returnsVoid: boolean) =>
+    decompile(sym, `0 <${sym}>:\n${lines.join('\n')}\n`, PPC_MWCC, { prototypes: { [sym]: { returnsVoid } } }).source;
+  // `lbzu r0,1(r3)` reads byte 1; the plain `lbz r4,1(r3)` after it reads byte 2, not byte 1
+  const load = lift(
+    'ld',
+    ['   0:\tlbzu    r0,1(r3)', '   4:\tlbz     r4,1(r3)', '   8:\tsubf    r3,r4,r0', '   c:\tblr'],
+    false,
+  );
+  expect(load).toContain('return *(a0 + 1) - (a0 + 1)[1];');
+  // a store with update stores at byte 1, and the next store's 1(r3) is byte 2
+  const store = lift('st', ['   0:\tstbu    r4,1(r3)', '   4:\tstb     r5,1(r3)', '   8:\tblr'], true);
+  expect(store).toMatch(/\*\(a0 \+ 1\) = a1;\s+\(a0 \+ 1\)\[1\] = a2;/);
+  // the base, read as a value after a word load with update, is the advanced address
+  const base = lift(
+    'bv',
+    ['   0:\tlwzu    r0,4(r3)', '   4:\tstw     r0,0(r4)', '   8:\tstw     r3,4(r4)', '   c:\tblr'],
+    true,
+  );
+  expect(base).toMatch(/\*a1 = \*\(a0 \+ 1\);\s+a1\[1\] = \(s32\)\(a0 \+ 1\);/);
 });
 
 test("'stwu' on r1 keeps the frame push's rule: a second push or another source refuses", () => {

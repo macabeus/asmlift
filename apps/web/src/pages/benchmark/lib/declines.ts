@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 250 distinct decline messages (the texts reached by
+// `packages/core/src` throws 251 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -62,7 +62,8 @@
 //                               for, a `jal` relocated against a section, one in a delay slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
 //   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
-//                               r1, its own base loaded or stored, a relocation other than `@l`),
+//                               r1, a load into r1, its own base loaded or stored, a relocation
+//                               other than `@l`),
 //                               a relocation on a stack-pointer adjust, a branch testing a cr
 //                               field a call destroyed (no compiler emits it), the return address
 //                               `mflr` copies out stored anywhere but the link register's save word,
@@ -200,11 +201,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // (`r1Displacements` in `frontend/ppc.ts`), so no slot can be named there: this class's gap seen
     // one step earlier. `not the one frame push` refuses a push that is not `stwu r1,-N(r1)` from the
     // entry r1 — a second push, or `stwu` storing another register, whose store and r1 move are both
-    // unmodelled.
+    // unmodelled. `writes the stack pointer` refuses any other write to r1 (a longjmp's
+    // `lwz r1,4(r3)`, a context switch's `mr r1,r10`), which the lift would otherwise drop.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
+      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push|writes the stack pointer/,
   },
   {
     // A branch whose block has NO predecessor reads flags nothing in this function set: at the

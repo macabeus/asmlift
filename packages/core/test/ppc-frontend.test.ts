@@ -935,12 +935,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('notchain', '0:\tstwu    r31,-16(r1)\n4:\taddi    r1,r1,16\n8:\tblr\n')).toThrow(
       /it stores r31, not the back chain/,
     );
+    // the write itself refuses, before the frame access after it is reached
     expect(() =>
       dis(
         'mrr1',
         '0:\tstw     r31,-4(r1)\n4:\tstwu    r1,-16(r1)\n8:\tmr      r1,r11\nc:\tlwz     r31,-4(r1)\n10:\tblr\n',
       ),
-    ).toThrow(/'-4\(r1\)' at 0xc — .* 'mr r1,r11' at 0x8 sets r1 to a value this frontend does not track/);
+    ).toThrow(/'mr r1,r11' at 0x8 writes the stack pointer r1/);
     // Two paths meet at 0x10, one through the push and one around it.
     const depths =
       '0:\tstw     r31,-4(r1)\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <depths+0x10>\nc:\tstwu    r1,-16(r1)\n' +
@@ -1149,7 +1150,8 @@ test('a reloc on a frame adjust (`addi r1`) is loud whether or not an `@ha` is p
   const pair =
     '0:\tlis     r1,0\n\t\t\t2: R_PPC_ADDR16_HA gFrame\n' +
     '4:\taddi    r1,r1,0\n\t\t\t6: R_PPC_ADDR16_LO gFrame\n8:\tblr\n';
-  expect(() => dis('fradjpair', pair)).toThrow(/on a stack-pointer adjust/);
+  // the `lis r1` half already writes r1, which refuses on its own (`write`)
+  expect(() => dis('fradjpair', pair)).toThrow(/'lis r1,0' at 0x0 writes the stack pointer r1/);
 });
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads
