@@ -123,6 +123,14 @@ export interface FnProto {
    *  this key also says it of a typedef name, which spells no keyword, and carries the members
    *  whose layout decides whether the target returns it through memory at all (`aggregate.ts`). */
   returnLayout?: AggregateLayout;
+  /** ON THE FUNCTION'S OWN ENTRY, `true` says the entry is its declaration context's header entry
+   *  (proto-context.ts `ownContextEntry`) and not the caller's word: it bounds the argument
+   *  registers SOFTLY (pipeline.ts `liftWithinContextBound`) and is read as nothing else — not as
+   *  the return, not by any reader of a stated own entry. Each entry path takes it out of the table
+   *  before anything reads it (proto-context.ts `splitOwnContext`). It is how a table carries the
+   *  entry a `--context` lift was handed: a benchmark row publishes it so its `--proto` replay
+   *  lifts as the harness did. On a callee's entry it is ignored. */
+  fromContext?: boolean;
 }
 
 /** A struct or union a declaration spells: what it is, and its members as the header lists them.
@@ -922,13 +930,17 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'wordParams' &&
         key !== 'byValueParams' &&
         key !== 'byValueLayouts' &&
-        key !== 'variadicParams'
+        key !== 'variadicParams' &&
+        key !== 'fromContext'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams", "byValueLayouts" or "variadicParams")',
+            '"byValueParams", "byValueLayouts", "variadicParams" or "fromContext")',
         );
       }
+    }
+    if ('fromContext' in proto && typeof (proto as { fromContext?: unknown }).fromContext !== 'boolean') {
+      problems.push(`${sym}: "fromContext" must be a boolean`);
     }
     const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =
       proto as {

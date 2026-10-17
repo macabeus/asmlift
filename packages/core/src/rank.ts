@@ -64,7 +64,7 @@ import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import type { ContextGlobals } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
@@ -513,7 +513,8 @@ export function enumerateCandidates(
   let lastEmitError: unknown = null;
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
-  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
+  const ownContext = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const prototypes = prototypesFromSymbols(opts.symbols, ownContext.prototypes ?? {});
   const baseOpts = {
     ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
     // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
@@ -657,7 +658,7 @@ export function enumerateCandidates(
     opts.symbols,
     opts.contextGlobals,
     undefined,
-    opts.ownContextProto,
+    ownContext.ownContextProto,
   );
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
   // half. Read off the shared lift's LIFTED form — before the fold below and the tower rewrite it —
@@ -718,7 +719,7 @@ export function enumerateCandidates(
       symbols,
       opts.contextGlobals,
       undefined,
-      opts.ownContextProto,
+      ownContext.ownContextProto,
     );
     applyIdiomPatterns(p, target, opts.patterns);
     const seen = { treeOwned: false, extendedReaders: false };
@@ -1974,7 +1975,7 @@ export function enumerateCandidates(
             tailSlot = true;
           },
         },
-        opts.ownContextProto,
+        ownContext.ownContextProto,
       );
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
@@ -2099,7 +2100,7 @@ export function enumerateCandidates(
                   symbolSetting.symbols,
                   opts.contextGlobals,
                   { keepTailSlots: liftSetting.keepTailSlots },
-                  opts.ownContextProto,
+                  ownContext.ownContextProto,
                 );
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it

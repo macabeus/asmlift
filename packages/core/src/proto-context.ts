@@ -1442,6 +1442,44 @@ export function ownContextEntry(context: Prototypes, own: string): FnProto | und
   return laidOut ? p : undefined;
 }
 
+/** A TABLE'S OWN CONTEXT ENTRY, TAKEN OUT OF IT: where `prototypes`' entry for `own` carries the
+ *  mark (`FnProto.fromContext`), the table without it, and the entry as the soft bound reads it
+ *  ({@link ownContextEntry}, which abstains on any shape it cannot lay out); otherwise the table as
+ *  it is. `given` — an entry the caller hands over beside the table — wins over a marked one.
+ *
+ *  Every entry path asks this before any reader looks at the table, so a marked entry is never
+ *  read as a stated one: a stated entry bounds hard, and a context entry a body reads past would
+ *  turn a real argument into `uninit_<reg>`. */
+export function splitOwnContext(
+  prototypes: Prototypes | undefined,
+  own: string,
+  given?: FnProto,
+): { prototypes: Prototypes | undefined; ownContextProto: FnProto | undefined } {
+  const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  if (p?.fromContext !== true) {
+    return { prototypes, ownContextProto: given };
+  }
+  const { [own]: _marked, ...rest } = prototypes!;
+  const { fromContext: _mark, ...entry } = p;
+  return { prototypes: rest, ownContextProto: given ?? ownContextEntry({ [own]: entry }, own) };
+}
+
+/** `prototypes` with the context's own entry for `own` carried in it under the mark
+ *  ({@link splitOwnContext} reads it back), where the context has one {@link ownContextEntry}
+ *  hands over and the table states none: how a benchmark row publishes the entry its lift read, so
+ *  that its `--proto` replay lifts as it did. */
+export function withOwnContextMark(
+  prototypes: Prototypes | undefined,
+  own: string,
+  context: Prototypes,
+): Prototypes | undefined {
+  if (prototypes !== undefined && Object.hasOwn(prototypes, own)) {
+    return prototypes;
+  }
+  const entry = ownContextEntry(context, own);
+  return entry === undefined ? prototypes : { ...prototypes, [own]: { ...entry, fromContext: true } };
+}
+
 /** The caller's stated entry for `own`, with the struct or union its stated `returns` names laid out
  *  by the context — `struct S`, or a typedef of one, `T8` over `typedef struct {u32 a, b;} T8;` —
  *  read as the context reads a declaration's return (`readSignature`, through a declaration of that

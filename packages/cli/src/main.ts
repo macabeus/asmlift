@@ -156,12 +156,18 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    back through a hidden pointer in argument 0:
                    "returns":"struct S","returnLayout":{"kind":"struct",
                    "members":[{"name":"w","type":"u32","dims":[16]}]} (a
-                   --context that defines the struct states them too)
+                   --context that defines the struct states them too).
+                   "fromContext":true on the own entry reads it as a
+                   --context header entry instead (below)
   --context        a preprocessed header (a decomp project's ctx.h): every
                    function it declares is a callee prototype, under --proto
                    and the symbol map, so a call is lifted at the arity the
                    compiler checks it against; a global it declares as a
-                   struct, union or array is never read by its bare name
+                   struct, union or array is never read by its bare name.
+                   Its typed list for the decompiled function itself, where
+                   --proto states none, drops an argument register past it
+                   that the lift never reads; one the body reads stays a
+                   parameter, and [own-arity] names it
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged

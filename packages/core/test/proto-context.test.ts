@@ -5,7 +5,13 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import { declaredCallArgs, declaredWidth } from '../src/proto';
-import { ownContextEntry, prototypesFromContext, withContextPrototypes } from '../src/proto-context';
+import {
+  ownContextEntry,
+  prototypesFromContext,
+  splitOwnContext,
+  withContextPrototypes,
+  withOwnContextMark,
+} from '../src/proto-context';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 // the shape of the CARD block in Pikmin's context: its typedefs and an `extern "C"` block
@@ -1102,5 +1108,41 @@ describe("the context's own entry", () => {
 
   test('a bare count abstains', () => {
     expect(ownContextEntry({ f: { params: 2 } }, 'f')).toBeUndefined();
+  });
+});
+
+// The mark a table carries the own context entry under (`withOwnContextMark`), and the split every
+// entry path reads it back with (`splitOwnContext`): never a stated entry, and nothing else reads it.
+describe("the own context entry's mark", () => {
+  const ctx = prototypesFromContext('int f(short, int);\nint g(int);', 'c');
+
+  test('is carried where nothing states the function, and read back out of the table', () => {
+    const marked = withOwnContextMark({ g: { params: 1 } }, 'f', ctx);
+    expect(marked).toEqual({ g: { params: 1 }, f: { params: ['short', 'int'], returns: 'int', fromContext: true } });
+    expect(splitOwnContext(marked, 'f')).toEqual({
+      prototypes: { g: { params: 1 } },
+      ownContextProto: { params: ['short', 'int'], returns: 'int' },
+    });
+  });
+
+  test('a stated entry wins, and is left in the table as it is', () => {
+    const stated = { f: { params: ['int'], returns: 'int' } };
+    expect(withOwnContextMark(stated, 'f', ctx)).toBe(stated);
+    expect(splitOwnContext(stated, 'f')).toEqual({ prototypes: stated, ownContextProto: undefined });
+    // `fromContext: false` is a stated entry
+    const unmarked = { f: { params: ['int'], fromContext: false } };
+    expect(splitOwnContext(unmarked, 'f').prototypes).toBe(unmarked);
+  });
+
+  test('a marked entry the bound cannot lay out is taken out and bounds nothing', () => {
+    expect(splitOwnContext({ f: { variadicParams: ['int'], fromContext: true } }, 'f')).toEqual({
+      prototypes: {},
+      ownContextProto: undefined,
+    });
+  });
+
+  test("an entry handed over beside the table wins over the table's mark", () => {
+    const given = { params: ['int'], returns: 'int' };
+    expect(splitOwnContext(withOwnContextMark(undefined, 'f', ctx), 'f', given).ownContextProto).toBe(given);
   });
 });

@@ -14,7 +14,7 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked, stubResult } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import type { ContextGlobals } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
@@ -192,7 +192,8 @@ function traceTower(
   // Merged exactly as pipeline.ts does: the project's own DWARF signatures fill in what the caller
   // did not state. A trace that lifted from a different table would explain a run that never
   // happened.
-  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
+  const ownContext = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const prototypes = prototypesFromSymbols(opts.symbols, ownContext.prototypes ?? {});
   const returnsVoid = declaresVoidReturn(prototypes[name]);
   const trace: StageTrace[] = [];
   const patternEvents: PatternEvent[] = [];
@@ -207,7 +208,7 @@ function traceTower(
     opts.symbols,
     opts.contextGlobals,
     undefined,
-    opts.ownContextProto,
+    ownContext.ownContextProto,
   );
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
   // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as

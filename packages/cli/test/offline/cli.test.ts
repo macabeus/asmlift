@@ -200,6 +200,16 @@ test("--context: the function's own entry keeps a register the body reads past i
   );
   expect(stated.stdout).toContain('uninit_r2');
   expect(stated.stderr).not.toContain('[own-arity]');
+  // marked `fromContext`, a --proto own entry is the header's, which is how a benchmark row's
+  // replay hands the CLI the entry its lift read
+  const marked = await f(
+    '--context',
+    ctx(''),
+    '--proto',
+    JSON.stringify({ f: { params: ['int'], returns: 'int', fromContext: true } }),
+  );
+  expect(marked.stdout).toBe(read.stdout);
+  expect(marked.stderr).toContain('asmlift: [own-arity] f: its context declaration `int f(int)`');
 });
 
 // docs/ranked-repro.md's project-checkout command passes the table INLINE, and so does the

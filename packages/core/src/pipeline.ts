@@ -37,7 +37,7 @@ import {
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
-import type { ContextGlobals } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -93,7 +93,9 @@ export interface DecompileOptions {
   contextGlobals?: ContextGlobals;
   /** the declaration context's own entry for `name` (proto-context.ts `ownContextEntry`), which
    *  bounds the argument registers SOFTLY where `prototypes` states no entry for it
-   *  (`liftStamped`); absent ⇒ byte-identical to today. */
+   *  (`liftStamped`); absent ⇒ byte-identical to today. A `prototypes` entry for `name` marked
+   *  `fromContext` is read as this, and taken out of the table (proto-context.ts
+   *  `splitOwnContext`). */
   ownContextProto?: FnProto;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
@@ -181,7 +183,8 @@ function runTower(
   const backend = opts.backend ?? cBackend;
   // The project's own DWARF signatures fill in what the caller did not state — in practice the
   // CALLEES (a function still in assembly has none), which is what makes this transferable.
-  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const prototypes = prototypesFromSymbols(opts.symbols, own.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const ownArityNotes: string[] = [];
   const fn = liftStamped(
@@ -193,7 +196,7 @@ function runTower(
     opts.symbols,
     opts.contextGlobals,
     undefined,
-    opts.ownContextProto,
+    own.ownContextProto,
     ownArityNotes,
   );
   // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
@@ -275,7 +278,8 @@ export function ownArityNotesOf(
   target: TargetDescription,
   opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
 ): string[] {
-  if (opts.ownContextProto === undefined) {
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  if (own.ownContextProto === undefined) {
     return [];
   }
   const notes: string[] = [];
@@ -284,12 +288,12 @@ export function ownArityNotesOf(
       name,
       asm,
       target,
-      prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
+      prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
       undefined,
-      opts.ownContextProto,
+      own.ownContextProto,
       notes,
     );
   } catch {
