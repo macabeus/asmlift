@@ -10549,6 +10549,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern double gD;\nextern int gK;\nvoid ownar_dbl(int, double);',
     proto: { ownar_dbl: { params: ['int', 'double'], returnsVoid: true } },
   },
+  // A declaration that lists the parameters and not the return leaves room for a struct's hidden
+  // return pointer in argument 0, which pushes every parameter one register up: bounded from
+  // argument 0, `z` (r3, a3, r6) was read as an uninitialised local.
+  {
+    sym: 'ownar_sret',
+    src: 'struct P { int a, b, c; };\nstruct P ownar_sret(int x, int y, int z){ struct P p; p.a = z; p.b = x; p.c = y + 1; return p; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct P { int a, b, c; };\nstruct P ownar_sret(int, int, int);',
+    proto: { ownar_sret: { params: ['int', 'int', 'int'] } },
+  },
   {
     sym: 'byvalregs',
     src:
