@@ -89,6 +89,18 @@ const MWCC_O0P = [
 ];
 // The same set at -O4,p, which the update-form rows (`upd_*`) build at.
 const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
+/** The body the `oa_bigdead*` rows share (the outgoing-area family): twenty-eight values spilled to the
+ *  frame, reloaded only inside a loop the first test may skip. */
+const BIGDEAD_BODY =
+  '    int v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, w0, w1, w2, w3, w4, w5, w6, w7, w8, w9, x0, x1, x2, x3, x4, x5, x6, x7;\n' +
+  '    int i, s = 0;\n' +
+  '    v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9];\n' +
+  '    w0 = p[10]; w1 = p[11]; w2 = p[12]; w3 = p[13]; w4 = p[14]; w5 = p[15]; w6 = p[16]; w7 = p[17]; w8 = p[18]; w9 = p[19];\n' +
+  '    x0 = p[20]; x1 = p[21]; x2 = p[22]; x3 = p[23]; x4 = p[24]; x5 = p[25]; x6 = p[26]; x7 = p[27];\n' +
+  '    for (i = 0; i < k; i++) {\n' +
+  '        s += p[i] * v0 ^ v1 * i ^ v2 * s ^ v3 * k ^ v4 * v5 ^ v6 * v7 ^ v8 * v9 ^ (w0 + i) * w1 ^ w2 * w3 ^ w4 * w5 ^ w6 * w7 ^ w8 * w9\n' +
+  '           ^ x0 * x1 ^ x2 * x3 ^ x4 * x5 ^ x6 * x7 ^ x0 * i ^ x7 * s;\n' +
+  '    }\n';
 const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // see the header for ido7.1
 
 // The map the `/no-ptr-elem` row below is fed: a struct global with a SIZED pointer member
@@ -10975,6 +10987,97 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['compare', 'unsigned', 'branch'],
     toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
     ctx: 'unsigned nbcbruge(unsigned a, unsigned b, unsigned c);',
+  },
+
+  // ── THE OUTGOING-AREA LOADED-WORD BOUND on O32 and mwcc (`compilerBehaviors.outgoingAreaNeverLoadedFrom`) ──
+  // From a start offset up — 16(sp) on ido7.1, gcc2.7.2kmc and gcc2.7.2, past the a0..a3 home their
+  // compilers load by-value staging words back from; 8(r1) on mwcc, the parameter area — a caller
+  // never loads a word of its outgoing area, so a frame word it loads there is a local's and so is
+  // every word above it (`packages/core/test/outgoing-area-probes.test.ts` reads the compiled
+  // probes). The rows are `bigdead`: twenty-eight values spilled to the frame, reloaded only inside
+  // a loop the first test may skip, then one call, so a spill's store reaches the call unread on the
+  // zero-trip path. Each row names its first blocker on main, measured with the CLI from source:
+  //   1. oa_bigdead: `done4` UNDECLARED. A guess that fills a0..a3 cannot say where the list ends,
+  //      so a spill reaching the jal declined as a possible argument 5 ("the word stored to 20(sp)
+  //      reaches it", 68(sp) on ido7.1); the bound (24 on ido7.1, 20 on the gcc builds) clears it
+  //      (frontend/mips.ts `lowerJal`). Not on mwcc: there the guess counts r7..r10, which the loop
+  //      leaves written, and lifts a call of eight (the guessed-arity gap, as mwcc_233_163n on main).
+  //   2. oa_bigdead8 / oa_bigdead8p: `done8` UNDECLARED, eight arguments. On O32 (oa_bigdead8) the
+  //      words at 16..28(sp) ARE arguments 5..8, beneath the bound, and the row stays declined
+  //      naming 16(sp) — the witness that the bound clears only locals. On mwcc (oa_bigdead8p, at
+  //      mwcc_242_81's canonical flags on all three builds) the eight fill r3..r10, and on
+  //      mwcc_242_81 and mwcc_247_107 the spill at 8(r1) declined at the guess ("reaches it in the
+  //      callee's parameter area"); the bound (8) clears it (frontend/ppc.ts `bl`). mwcc_233_163n
+  //      keeps nothing there and lifts on main (a control).
+  //   3. oa_bigdeadd: `done4` DECLARED. mwcc_242_81 and mwcc_247_107 declined at the end-of-lift
+  //      check for a store nobody reloads ("'20(r1)' is stored ... and never read back"); 20 is above
+  //      the lowest word they load, so it is a dead spill (frontend/ppc.ts). mwcc_233_163n lifts on
+  //      main (a control).
+  //   4. oa_deadb: `char b[8]; b[0] = x; b[4] = y; x = b[0]; g(); return x;` at -O0,p, where the
+  //      array is memory: `b[4]` reaches `g` unread on every path through a captured address, and no
+  //      load after a call proves it a local's, so it declined (frame-objects.ts `storedNeverRead`).
+  //      `b[0]` and `y`'s home at 8(r1) are LOADED before the call, which bounds it under the strong
+  //      form. All three builds declined so on main.
+  // The rows all declare their own `returnsVoid` and declare (or withhold) the callee the same way in
+  // `ctx` and `proto`, so m2c is told exactly what asmlift is.
+  {
+    sym: 'oa_bigdead',
+    src:
+      'void done4(int s, int a, int b, int c);\n' +
+      'void oa_bigdead(int k, int *p)\n{\n' +
+      BIGDEAD_BODY +
+      '    done4(s, k, s + 1, s + 2);\n}',
+    features: ['value-home', 'array'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void oa_bigdead(int k, int *p);',
+    proto: { oa_bigdead: { returnsVoid: true } },
+  },
+  {
+    sym: 'oa_bigdead8',
+    src:
+      'void done8(int s, int a, int b, int c, int d, int e, int f, int g);\n' +
+      'void oa_bigdead8(int k, int *p)\n{\n' +
+      BIGDEAD_BODY +
+      '    done8(s, k, s + 1, s + 2, s + 3, s + 4, s + 5, s + 6);\n}',
+    features: ['value-home', 'array'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void oa_bigdead8(int k, int *p);',
+    proto: { oa_bigdead8: { returnsVoid: true } },
+  },
+  {
+    sym: 'oa_bigdead8p',
+    src:
+      'void done8(int s, int a, int b, int c, int d, int e, int f, int g);\n' +
+      'void oa_bigdead8p(int k, int *p)\n{\n' +
+      BIGDEAD_BODY +
+      '    done8(s, k, s + 1, s + 2, s + 3, s + 4, s + 5, s + 6);\n}',
+    cflags: MWCC_O4P,
+    features: ['value-home', 'array'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'void oa_bigdead8p(int k, int *p);',
+    proto: { oa_bigdead8p: { returnsVoid: true } },
+  },
+  {
+    sym: 'oa_bigdeadd',
+    src:
+      'void done4(int s, int a, int b, int c);\n' +
+      'void oa_bigdeadd(int k, int *p)\n{\n' +
+      BIGDEAD_BODY +
+      '    done4(s, k, s + 1, s + 2);\n}',
+    cflags: MWCC_O4P,
+    features: ['value-home', 'array'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'void done4(int s, int a, int b, int c); void oa_bigdeadd(int k, int *p);',
+    proto: { done4: { params: 4, returnsVoid: true }, oa_bigdeadd: { returnsVoid: true } },
+  },
+  {
+    sym: 'oa_deadb',
+    src: 'int g(void);\nint oa_deadb(int x, int y)\n{\n    char b[8];\n    b[0] = x;\n    b[4] = y;\n    x = b[0];\n    g();\n    return x;\n}',
+    cflags: MWCC_O0P,
+    features: ['array'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'int g(void); int oa_deadb(int x, int y);',
+    proto: { g: { params: 0 } },
   },
 
   // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
