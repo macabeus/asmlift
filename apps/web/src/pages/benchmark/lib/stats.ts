@@ -50,33 +50,28 @@ export function groupBy<K extends string>(
   return keys.map((key) => ({ key, rows: map.get(key)! }));
 }
 
-export interface MatchRateRow<K extends string> {
+export interface OutcomeRow<K extends string> {
   key: K;
   total: number;
-  rate: number; // asmlift match rate 0..1
+  counts: OutcomeCounts; // asmlift's outcomes
 }
 
-/** asmlift's match rate per group. */
-export function matchRateBy<K extends string>(
+/** asmlift's outcomes per group. */
+export function outcomesBy<K extends string>(
   rows: FunctionResult[],
   keyOf: (r: FunctionResult) => K,
   order?: K[],
-): MatchRateRow<K>[] {
+): OutcomeRow<K>[] {
   return groupBy(rows, keyOf, order).map(({ key, rows: g }) => ({
     key,
     total: g.length,
-    rate: matchRate(g, 'asmlift'),
+    counts: outcomeCounts(g, 'asmlift'),
   }));
 }
 
-export interface FeatureStat {
-  feature: string;
-  count: number;
-  rate: number; // asmlift match rate 0..1
-}
-
-/** Per-feature asmlift match rate. A function contributes to every feature tag it carries. */
-export function featureStats(rows: FunctionResult[]): FeatureStat[] {
+/** asmlift's outcomes per feature tag, most frequent tag first. A function counts toward every tag
+ *  it carries. */
+export function featureOutcomes(rows: FunctionResult[]): OutcomeRow<string>[] {
   const byFeature = new Map<string, FunctionResult[]>();
   for (const r of rows) {
     for (const f of r.features) {
@@ -89,12 +84,8 @@ export function featureStats(rows: FunctionResult[]): FeatureStat[] {
     }
   }
   return Array.from(byFeature.entries())
-    .map(([feature, g]) => ({
-      feature,
-      count: g.length,
-      rate: matchRate(g, 'asmlift'),
-    }))
-    .sort((a, b) => b.count - a.count);
+    .map(([key, g]) => ({ key, total: g.length, counts: outcomeCounts(g, 'asmlift') }))
+    .sort((a, b) => b.total - a.total);
 }
 
 /** Distinct sorted values of a string field, for filter dropdowns. */
@@ -104,7 +95,7 @@ export function distinct(rows: FunctionResult[], keyOf: (r: FunctionResult) => s
 
 /** Distinct feature tags across all rows, sorted by frequency (desc). */
 export function distinctFeatures(rows: FunctionResult[]): string[] {
-  return featureStats(rows).map((f) => f.feature);
+  return featureOutcomes(rows).map((f) => f.key);
 }
 
 /** How many of these rows carry each key — the per-option counts a multi-select facet needs. */

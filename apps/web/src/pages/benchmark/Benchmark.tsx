@@ -1,13 +1,12 @@
-// The Benchmark view — the m2c-vs-asmlift report, lazy-loaded as its own chunk (ECharts + the
+// The Benchmark view — the asmlift-vs-m2c report, lazy-loaded as its own chunk (ECharts + the
 // committed results.json are heavy, so a plain playground visit never pays for them). Rendered by
 // the shell (../App.tsx), which owns the shared header + primary nav, so this view only renders its
-// own context row, sub-tabs, and content — the page frame stays put when toggling. `onOpenInPlayground`
+// own sub-tabs and content — the page frame stays put when toggling. `onOpenInPlayground`
 // hands a row's input back to the editor. Syntax highlighting uses the global VS Code `.pl-*` palette
 // in index.css (shared with the playground and the rest of the family), so no per-view stylesheet.
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useCallback } from 'react';
 
-import summary from '../../data/summary.json';
 import { useCurrentHash } from '../../shared/utils/hash-adapter';
 import type { ShareState } from '../../shared/utils/permalink';
 import { Explorer, type ExplorerPreset } from './components/Explorer';
@@ -17,7 +16,7 @@ import { GapAnalysis } from './components/GapAnalysis';
 import { Methodology } from './components/Methodology';
 import { Overview } from './components/Overview';
 import { VariationDetail } from './components/VariationDetail';
-import { meta, results } from './lib/data';
+import { results } from './lib/data';
 import {
   FEATURE_TERM_KEY,
   FEATURE_TERM_PARSER,
@@ -67,39 +66,21 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <p className="text-xs text-slate-500">
-          {meta.counts.total} functions · {meta.toolchains.length} toolchains · generated{' '}
-          {meta.generatedAt.slice(0, 10)}
-          {meta.asmlift && (
-            <>
-              {' '}
-              · asmlift{' '}
-              <span className="font-mono">
-                {meta.asmlift.commit.slice(0, 7)}
-                {meta.asmlift.dirty ? '+dirty' : ''}
-              </span>
-            </>
-          )}{' '}
-          · m2c <span className="font-mono">{summary.m2cCommit.slice(0, 7)}</span>
-        </p>
-
-        <nav className="mt-4 flex flex-wrap gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                tab === t.id
-                  ? 'bg-teal-500/15 text-teal-300'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <nav className="flex flex-wrap gap-1">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              tab === t.id
+                ? 'bg-teal-500/15 text-teal-300'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
 
       <main>
         {tab === 'overview' && <Overview rows={results} onExplore={openExplorer} />}

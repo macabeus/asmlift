@@ -32,7 +32,7 @@ const NAV: { id: View; label: string }[] = [
 
 const SUBTITLE: Record<View, string> = {
   playground: 'a matching decompiler — assembly in, C out, in your browser',
-  benchmark: 'asmlift vs m2c — the byte-exactness benchmark',
+  benchmark: "asmlift's byte-exactness benchmark",
 };
 
 export function App() {
