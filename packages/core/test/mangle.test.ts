@@ -138,13 +138,26 @@ describe('implicitArgumentWords', () => {
       '__as__3FooFRC3Foo',
       'pick__3FooiPi',
       'pick__C3FooiPi',
+      // gcc 2 spells a template class `t<n><name><args>` (`Vec<int>`)
+      'get__t3Vec1Zii',
+      'get__Ct3Vec1Zii',
+      '__as__t3Vec1ZiRCt3Vec1Zi',
     ]) {
       expect(implicitArgumentWords(sym)).toBe(1);
     }
   });
 
   test('a constructor or destructor may take a flag too, so it answers nothing', () => {
-    for (const sym of ['__ct__12RefCountableFv', '__dt__6SystemFv', '__3Foo', '__Q23zen3Foo', '_$_3Foo', '_._3Foo']) {
+    for (const sym of [
+      '__ct__12RefCountableFv',
+      '__dt__6SystemFv',
+      '__3Foo',
+      '__Q23zen3Foo',
+      '_$_3Foo',
+      '_._3Foo',
+      '__t3Vec1Zii',
+      '_$_t3Vec1Zi',
+    ]) {
       expect(implicitArgumentWords(sym)).toBeUndefined();
     }
   });

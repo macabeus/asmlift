@@ -135,14 +135,16 @@ export function demangle(sym: string): CppSig | null {
  *  (an in-charge or delete flag, beside `this`). Either mangling scheme a target here compiles with
  *  puts the class right after the `__`, length-prefixed or `Q<n>`-nested: CodeWarrior's
  *  `pick__3FooFiPi` (`__ct__3FooFv`, `__dt__3FooFv`), and gcc 2's `pick__3FooiPi` (a const method
- *  `pick__C3FooiPi`, a constructor `__3Foo`, a destructor `_$_3Foo` or `_._3Foo`). A free function
+ *  `pick__C3FooiPi`, a constructor `__3Foo`, a destructor `_$_3Foo` or `_._3Foo`), where a TEMPLATE
+ *  class is spelled `t<n><name><args>` in the class's place (`get__t3Vec1Zii`, a constructor
+ *  `__t3Vec1Zii`, `operator=` `__as__t3Vec1ZiRCt3Vec1Zi`). A free function
  *  (`f__Fii`) and a plain C name answer 0. A STATIC member mangles as a method does and takes no
  *  `this`, so 1 is "may", and a reader that needs the exact count must not take it as one. */
 export function implicitArgumentWords(sym: string): 0 | 1 | undefined {
-  if (/^__(?:ct|dt)__/.test(sym) || /^__(?:\d|Q\d)/.test(sym) || /^_[$.]_\d/.test(sym)) {
+  if (/^__(?:ct|dt)__/.test(sym) || /^__(?:\d|Q\d|t\d)/.test(sym) || /^_[$.]_(?:\d|t\d)/.test(sym)) {
     return undefined;
   }
-  return /__(?:C?\d|Q\d)/.test(sym) ? 1 : 0;
+  return /__(?:C?\d|Q\d|C?t\d)/.test(sym) ? 1 : 0;
 }
 
 /** A class qualifier off the front of `s` — `12RefCountable`, or `Q23zen17particleGenerator` for a
