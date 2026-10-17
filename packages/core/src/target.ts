@@ -609,8 +609,8 @@ export interface TargetDescription {
     //     store_one_arg (calls.c:3420-3470) saves an argument word only when a nested call overlaps
     //     it, which the precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word
     //     of the area around calls in stack arguments.
-    //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels and
-    //     at -O0. NOT 0 — ido stages a by-value aggregate's register words in the a1..a3 home and
+    //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels
+    //     (ido -O1, -O2 and -O2 -g3; gcc 2.7.2 -O1 and -O2) and at -O0. NOT 0 — ido stages a by-value aggregate's register words in the a1..a3 home and
     //     loads them back before the call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for
     //     a char-array struct (`d3`, `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's
     //     save_fixed_argument_area (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No

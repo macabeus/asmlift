@@ -7,7 +7,9 @@
 // some producer costs an ANSWER, an argument dropped from a call. So it owes the compiled objects
 // it rests on, re-measurable and not only re-readable (`docs/level-tower.md`, RE-READABLE IS NOT
 // RE-MEASURABLE). Each compiler is compiled at the level its rows use and at -O0, the level that
-// spills the most; mwcc_242_81 also at Animal Crossing's -O4,s.
+// spills the most; mwcc_242_81 also at Animal Crossing's -O4,s. The other levels rows build at are
+// compiled too: ido at -O1 and at the af rows' -O2 -g3, gcc 2.7.2 at -O2, and mwcc_247_107 and
+// mwcc_233_163n at the -O4,p the synthetic rows use.
 //
 //   ASMLIFT_IDO_CC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… ASMLIFT_MWCC_ROOT=… \
 //     npx tsx scripts/regen-outgoing-area-o32-mwcc-probes.ts
@@ -100,6 +102,20 @@ const PROBES: Probe[] = [
     compileMipsTarget,
   ),
   mips(
+    'ido71-g3',
+    'MIPS_IDO (ido7.1) at -O2 -g3, binary from $ASMLIFT_IDO_CC',
+    IDO_TOOLCHAIN,
+    [...ido, '-g3'],
+    compileMipsTarget,
+  ),
+  mips(
+    'ido71-O1',
+    'MIPS_IDO (ido7.1) at -O1, binary from $ASMLIFT_IDO_CC',
+    IDO_TOOLCHAIN,
+    ido.map((f) => (f === '-O2' ? '-O1' : f)),
+    compileMipsTarget,
+  ),
+  mips(
     'gcc272kmc',
     'MIPS_GCC (gcc2.7.2kmc), binary from $ASMLIFT_KMC_DIR',
     GCC_KMC_TOOLCHAIN,
@@ -127,11 +143,30 @@ const PROBES: Probe[] = [
     atO0(gcc272, '-O1'),
     compileMipsGcc272Target,
   ),
+  mips(
+    'gcc272-O2',
+    'MIPS_GCC (gcc2.7.2) at -O2, binary from $ASMLIFT_GCC272_DIR',
+    GCC272_TOOLCHAIN,
+    gcc272.map((f) => (f === '-O1' ? '-O2' : f)),
+    compileMipsGcc272Target,
+  ),
   mwcc('mwcc242', 'mwcc_242_81', 'canonical flags', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
   mwcc('mwcc242mp4', 'mwcc_242_81', "Mario Party 4's flags (-O0,p)", MP4),
   mwcc('mwcc242acd', 'mwcc_242_81', "Animal Crossing's flags (-O4,s)", ACD),
   mwcc('mwcc247mp4', 'mwcc_247_107', "Mario Party 4's flags (-O0,p)", MP4),
+  mwcc(
+    'mwcc247',
+    'mwcc_247_107',
+    "mwcc_242_81's canonical flags (-O4,p)",
+    TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
+  ),
   mwcc('mwcc233', 'mwcc_233_163n', "Pikmin's flags, in C", PIKMIN_C),
+  mwcc(
+    'mwcc233-O4p',
+    'mwcc_233_163n',
+    "mwcc_242_81's canonical flags (-O4,p)",
+    TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
+  ),
   mwcc(
     'mwcc233-O0',
     'mwcc_233_163n',

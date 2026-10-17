@@ -93,7 +93,7 @@ test('no function loads a word of its outgoing area, whatever its arguments call
 });
 
 // THE SAME UNIVERSAL ON THE O32 AND mwcc COMPILERS, FROM A START OFFSET. `corpus/probe-outgoing-area.c`
-// compiled at the rows' levels and at -O0 (`scripts/regen-outgoing-area-o32-mwcc-probes.ts`). The
+// compiled at every level the rows use and at -O0 (`scripts/regen-outgoing-area-o32-mwcc-probes.ts`). The
 // area is the frame bottom: on O32 the a0..a3 home `[0,16)` and the stack words from 16(sp), on
 // PowerPC the callee's parameter area from 8(r1). Its extent per function is the widest call the
 // declarations make, written out below in argument words: O32 counts every word (a double or a
@@ -213,8 +213,14 @@ const memoryMnemonics = (fixture: string): Set<string> => {
   );
 };
 
-const O32_FIXTURES = ['ido71', 'ido71-O0', 'gcc272kmc', 'gcc272kmc-O0', 'gcc272', 'gcc272-O0'];
-const MWCC_FIXTURES = ['mwcc242', 'mwcc242mp4', 'mwcc242acd', 'mwcc247mp4', 'mwcc233', 'mwcc233-O0'];
+const O32_FIXTURES = [
+  ...['ido71', 'ido71-O0', 'ido71-O1', 'ido71-g3'],
+  ...['gcc272kmc', 'gcc272kmc-O0', 'gcc272', 'gcc272-O0', 'gcc272-O2'],
+];
+const MWCC_FIXTURES = [
+  ...['mwcc242', 'mwcc242mp4', 'mwcc242acd'],
+  ...['mwcc247', 'mwcc247mp4', 'mwcc233', 'mwcc233-O4p', 'mwcc233-O0'],
+];
 
 describe.each([
   ...O32_FIXTURES.map((f) => ({ fixture: f, from: 16, areaEnd: (w: { o32: number }) => 4 * Math.max(4, w.o32) })),
