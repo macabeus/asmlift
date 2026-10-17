@@ -880,6 +880,14 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // a saved register on all three builds — the premise's residue, as on agbcc.
     expect(dis('s9a', after)).toBe('s32 s9a(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
     expect(dis('s9b', before)).toBe('s32 s9b(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
+    // A load beneath the parameter area does not count: 4(r1) is the callee's link-register word,
+    // so a slot kept there does not make the ninth argument's word a local.
+    const low = s9(
+      's9c',
+      '10:\tstw     r4,4(r1)\n',
+      (at) => `${at.toString(16)}:\tlwz     r3,4(r1)\n` + epi(at + 4, 24),
+    );
+    expect(() => dis('s9c', low)).toThrow(ninth);
     // A declaration says where the list ends: eight parameters, and the word is a local.
     expect(
       decompile('s9a', `0 <s9a>:\n${after}`, PPC_MWCC, { prototypes: { g9: { params: Array(8).fill('int') } } }).source,
