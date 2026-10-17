@@ -588,16 +588,17 @@ export interface TargetDescription {
     // is computed before any word is staged, and nothing is saved there around a nested call. So
     // ANY frame word this function loads at or above the offset is a local, and so is every word
     // above it, since the area is one region at the frame bottom. Its readers apply that
-    // contrapositive, at exactly the soundness of the universal: `frontend/stackargs.ts`
-    // `loadedWordBound` bounds the area at the lowest such word the function loads,
-    // `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores the same way, and the
-    // MIPS and PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`)
-    // and PPC's unread-slot decline weigh only the stores beneath it. On MIPS it also caps how far
-    // an undeclared call's area can reach (`o32OutgoingArea`'s `widest`), which the local area's
+    // contrapositive, at exactly the soundness of the universal. Each frontend measures the lowest
+    // such word once (Thumb through `frontend/stackargs.ts` `loadedWordBound`, MIPS in `liftOnce`,
+    // PPC `ppcLoadedWordBound`), and every reader takes that number: Thumb's outgoing-argument
+    // analysis, `frontend/frame-objects.ts` `storedNeverRead` for its pending stores, the MIPS and
+    // PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`), and PPC's
+    // unread-slot decline, each weighing only the words beneath it. On MIPS it also caps how far an
+    // undeclared call's area can reach (`o32OutgoingArea`'s `widest`), which the local area's
     // partition (`measureO32Frame`) and the owned range of an uninitialised read
-    // (`measureOwnedFrame`) both read. A load BELOW the offset proves
-    // nothing, and the readers do not count it. A word no store reaches on any path needs only the
-    // after-call form (see `localsAboveOutgoingArea`).
+    // (`measureOwnedFrame`) both read. A load BELOW the offset proves nothing, and no reader counts
+    // it. A word no store reaches on any path needs only the after-call form (see
+    // `localsAboveOutgoingArea`).
     // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
     //
     // Its residue is the universal's: hand-written asm that loads a word it staged, then stages it
@@ -610,14 +611,16 @@ export interface TargetDescription {
     //     it, which the precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word
     //     of the area around calls in stack arguments.
     //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels
-    //     (ido -O1, -O2 and -O2 -g3; gcc 2.7.2 -O1 and -O2) and at -O0. NOT 0 — ido stages a by-value aggregate's register words in the a1..a3 home and
-    //     loads them back before the call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for
-    //     a char-array struct (`d3`, `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's
-    //     save_fixed_argument_area (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No
-    //     probe loads a word from 16(sp) up the area.
-    //   • mwcc, 8, on all three builds at the rows' flags, at -O0,p and at -O4,s: no probe loads a
-    //     word of the parameter area; a struct-return temp or a by-value copy sits at 8(r1) only
-    //     where no call takes a stack word, and above the area beside one that does.
+    //     (ido -O1, -O2 and -O2 -g3; gcc 2.7.2 -O1 and -O2) and at -O0. NOT 0 — ido stages a
+    //     by-value aggregate's register words in the a1..a3 home and loads them back before the
+    //     call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for a char-array struct (`d3`,
+    //     `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's save_fixed_argument_area
+    //     (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No probe loads a word from
+    //     16(sp) up the area.
+    //   • mwcc, 8, on all three builds at the rows' flags and at -O0,p, and on mwcc_242_81 at -O4,s
+    //     too: no probe loads a word of the parameter area; a struct-return temp or a by-value copy
+    //     sits at 8(r1) only where no call takes a stack word, and above the area beside one that
+    //     does.
     // Like `stagesOutgoingArgsInFrame`, a second compiler of the same ISA must state this premise
     // rather than inherit it.
     outgoingAreaNeverLoadedFrom?: number;
@@ -1388,8 +1391,8 @@ export const MIPS_IDO: TargetDescription = {
     // unchanged argument is staged again before each call, and a callee assigns to its stack
     // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
     localsAboveOutgoingArea: true,
-    // MEASURED at -O2 and -O0 (`test/corpus/ido71*-outarea.txt`): no load from 16(sp) up the area,
-    // but the a1..a3 home words a by-value aggregate is staged in are loaded back (see the field).
+    // MEASURED at -O1, -O2, -O2 -g3 and -O0 (`test/corpus/ido71*-outarea.txt`): no load from 16(sp)
+    // up, but the a1..a3 home words a by-value aggregate is staged in are loaded back (see the field).
     outgoingAreaNeverLoadedFrom: 16,
     // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
     // and a frame store for a plain dead local, `lw a2` for a `register` one.
@@ -1628,8 +1631,8 @@ export const PPC_MWCC: TargetDescription = {
     // word below the area unread): Mario Party 4's -O0,p homes a parameter in the area and reloads
     // it after a call, which proves the word a local's (`ee`, `synthetic:homecall:mwcc_242_81`).
     localsAboveOutgoingArea: true,
-    // MEASURED on all three builds, at the rows' flags, -O0,p and -O4,s (`test/corpus/mwcc*-outarea.txt`):
-    // no load of the parameter area, which starts at 8(r1) (see the field).
+    // MEASURED on all three builds at the rows' flags and -O0,p, and on mwcc_242_81 at -O4,s
+    // (`test/corpus/mwcc*-outarea.txt`): no load of the parameter area, which starts at 8(r1).
     outgoingAreaNeverLoadedFrom: 8,
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user

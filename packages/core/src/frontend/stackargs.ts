@@ -100,15 +100,15 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
 
 /** THE LOWEST FRAME WORD THIS FUNCTION LOADS AT OR ABOVE `from`, or `Infinity` when it loads none
- *  or nothing states `from`. The frontend calls it once per lift and hands the number to both
+ *  or nothing states `from`. The Thumb frontend calls it once per lift and hands the number to both
  *  readers: `analyzeOutgoingArgs` and the frame-object audit (`FrameObjectAudit.loadedWords`).
  *  Under `outgoingAreaNeverLoadedFrom` the caller never reads a word of its outgoing area from that
  *  offset up — not after a call, where the callee may have assigned to it, and not before one
- *  either: the area holds only what
- *  the caller staged for a callee, every argument that contains a call is computed before any word
- *  is staged, and nothing is saved there around a nested call (agbcc-restage.s pins all three). So a
- *  word it loads is a local; and since the area is one region at the frame bottom that every call
- *  shares, every word at or above the bound is proven not to be an argument.
+ *  either: the area holds only what the caller staged for a callee, every argument that contains a
+ *  call is computed before any word is staged, and nothing is saved there around a nested call
+ *  (agbcc-restage.s pins all three). So a word it loads is a local; and since the area is one
+ *  region at the frame bottom that every call shares, every word at or above the bound is proven
+ *  not to be an argument.
  *
  *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
  *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen

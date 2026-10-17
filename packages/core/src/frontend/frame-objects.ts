@@ -1601,8 +1601,8 @@ function chooseFrameModel({
  *  stores, never reads back, and calls past — a dead local and an outgoing argument are the same
  *  machine code, and the lift cannot tell which. The after-call liveness weighs this audit's fixed
  *  accesses alone, so it sits at or above the bound the frontend's slot loads would give, which
- *  only asks more; the strong form adds the frontend's bound (`loadedWords`). Without either premise the
- *  bound proves nothing, and every pending store is asked. */
+ *  only asks more; the strong form adds the frontend's bound (`loadedWords`). Without either
+ *  premise the bound proves nothing, and every pending store is asked. */
 function storedNeverRead(
   irBlocks: readonly Block[],
   uses: FrameUses,

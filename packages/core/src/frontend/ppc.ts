@@ -581,7 +581,7 @@ const LR_SAVE_WORD = 4;
 /** The caller's parameter area, as an offset from the entry r1: past the back chain and the link
  *  register's save word, the words a call takes past its eight argument registers. */
 const PARAM_AREA_AT = 8;
-/** Every load an `off(rA)` operand addresses: integer, multiple, update and floating-point
+/** Every load that takes an `off(rA)` operand: integer, multiple, update and floating-point
  *  (`outgoing-area-probes.test.ts` classifies every memory mnemonic of the committed probes against it). */
 export const PPC_FRAME_LOAD = /^(lbz|lhz|lha|lwz|lmw|lbzu|lhzu|lhau|lwzu|lfs|lfd|lfsu|lfdu|psq_l|psq_lu)$/;
 
@@ -1056,12 +1056,12 @@ function ppcLoadedWordBound(
  *  the call's stack words, if any, lie below the lowest pushed-frame word this function loads.
  *  `outgoingEnd` is that word, or the parameter area's start where every call is declared: where it
  *  is past the area's start, the area may hold such a word. Its lowering's guess reads it, refusing
- *  a call whose guessed arity reaches seven argument registers unless `outgoingEnd` reaches the
- *  area (`lift`, the guess's `refuse`) — but the guess counts only the registers this function
+ *  a call whose guessed arity reaches seven argument registers unless `outgoingEnd` is at or below
+ *  the area's start (`lift`, the guess's `refuse`) — but the guess counts only the registers this function
  *  sets, none it passes straight through, so `g9(a, …, h, 77)` with r3..r10 untouched passes it
  *  and the word at r1+8 is g9's ninth argument, inside the area. What refuses that call is the
  *  shared audit (frame-objects.ts `storedNeverRead`): the store to r1+8 reaches the call unread,
- *  below the bound it takes (`loadedWords`, this same number), so no load proves it a local's.
+ *  below the bound it takes (`loadedWords`, the same measurement), so no load proves it a local's.
  *  That audit is the backstop this partition rests on for an undeclared callee; a change to the
  *  guess or to the audit's survivor rule moves it.
  *

@@ -10996,28 +10996,29 @@ export const SYNTHETIC: SynthSpec[] = [
   // every word above it (`packages/core/test/outgoing-area-probes.test.ts` reads the compiled
   // probes). The rows are `bigdead`: twenty-eight values spilled to the frame, reloaded only inside
   // a loop the first test may skip, then one call, so a spill's store reaches the call unread on the
-  // zero-trip path. Each row names its first blocker on main, measured with the CLI from source:
+  // zero-trip path. Each row names the refusal it reaches without the bound, measured with the CLI
+  // from source:
   //   1. oa_bigdead: `done4` UNDECLARED. A guess that fills a0..a3 cannot say where the list ends,
-  //      so a spill reaching the jal declined as a possible argument 5 ("the word stored to 20(sp)
+  //      so a spill reaching the jal refuses as a possible argument 5 ("the word stored to 20(sp)
   //      reaches it", 68(sp) on ido7.1); the bound (24 on ido7.1, 20 on the gcc builds) clears it
   //      (frontend/mips.ts `lowerJal`). Not on mwcc: there the guess counts r7..r10, which the loop
-  //      leaves written, and lifts a call of eight (the guessed-arity gap, as mwcc_233_163n on main).
+  //      leaves written, and lifts a call of eight whatever the bound (the guessed-arity gap).
   //   2. oa_bigdead8 / oa_bigdead8p: `done8` UNDECLARED, eight arguments. On O32 (oa_bigdead8) the
   //      words at 16..28(sp) ARE arguments 5..8, beneath the bound, and the row stays declined
   //      naming 16(sp) — the witness that the bound clears only locals. On mwcc (oa_bigdead8p, at
   //      mwcc_242_81's canonical flags on all three builds) the eight fill r3..r10, and on
-  //      mwcc_242_81 and mwcc_247_107 the spill at 8(r1) declined at the guess ("reaches it in the
+  //      mwcc_242_81 and mwcc_247_107 the spill at 8(r1) refuses at the guess ("reaches it in the
   //      callee's parameter area"); the bound (8) clears it (frontend/ppc.ts `bl`). mwcc_233_163n
-  //      keeps nothing there and lifts on main (a control).
-  //   3. oa_bigdeadd: `done4` DECLARED. mwcc_242_81 and mwcc_247_107 declined at the end-of-lift
+  //      keeps nothing there and lifts without the bound (a control).
+  //   3. oa_bigdeadd: `done4` DECLARED. mwcc_242_81 and mwcc_247_107 refuse at the end-of-lift
   //      check for a store nobody reloads ("'20(r1)' is stored ... and never read back"); 20 is above
-  //      the lowest word they load, so it is a dead spill (frontend/ppc.ts). mwcc_233_163n lifts on
-  //      main (a control).
+  //      the lowest word they load, so it is a dead spill (frontend/ppc.ts). mwcc_233_163n lifts
+  //      without the bound (a control).
   //   4. oa_deadb: `char b[8]; b[0] = x; b[4] = y; x = b[0]; g(); return x;` at -O0,p, where the
   //      array is memory: `b[4]` reaches `g` unread on every path through a captured address, and no
-  //      load after a call proves it a local's, so it declined (frame-objects.ts `storedNeverRead`).
-  //      `b[0]` and `y`'s home at 8(r1) are LOADED before the call, which bounds it under the strong
-  //      form. All three builds declined so on main.
+  //      load after a call proves it a local's, so it refuses on all three builds (frame-objects.ts
+  //      `storedNeverRead`). `b[0]` and `y`'s home at 8(r1) are LOADED before the call, which bounds
+  //      it under the strong form.
   // The rows all declare their own `returnsVoid` and declare (or withhold) the callee the same way in
   // `ctx` and `proto`, so m2c is told exactly what asmlift is.
   {

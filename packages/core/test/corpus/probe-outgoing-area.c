@@ -13,9 +13,9 @@
  * (`spills`, `pspills`: the positive controls, whose loads exist and land above the area).
  *
  * Compiled by `scripts/regen-outgoing-area-o32-mwcc-probes.ts` on ido7.1, gcc2.7.2kmc and gcc2.7.2
- * at their rows' level and at -O0, and on mwcc_242_81, mwcc_247_107 and mwcc_233_163n at the flags
- * their rows use and at -O0,p — flags and objdump command are in each generated
- * `*-outarea.txt` header. Read by `packages/core/test/outgoing-area-probes.test.ts`.
+ * at every level their rows build at and at -O0, and on mwcc_242_81, mwcc_247_107 and
+ * mwcc_233_163n at the flags their rows use and at -O0,p — flags and objdump command are in each
+ * generated `*-outarea.txt` header. Read by `packages/core/test/outgoing-area-probes.test.ts`.
  */
 struct S3 { int a, b, c; };
 struct S5 { int a, b, c, d, e; };

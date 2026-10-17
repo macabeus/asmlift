@@ -137,8 +137,8 @@ const isStackPtr = (r: string) => r === 'sp' || r === '$sp' || r === '$29';
 // a0..a3, and argument k is the word at `16 + 4(k − 4)` above the `sp` the call is made at.
 // Compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2: `g(a, b, 1, 2, 3)` stores the 3 to `16(sp)`.
 const STACK_ARGS_AT = 16;
-/** Every load an `off(base)` operand ends: integer, unaligned and FPU (`outgoing-area-probes.test.ts`
- *  classifies every memory mnemonic of the committed probes against it). */
+/** Every load whose last operand is `off(base)`: integer, unaligned and FPU
+ *  (`outgoing-area-probes.test.ts` classifies every memory mnemonic of the committed probes against it). */
 export const MIPS_FRAME_LOAD = /^(lb|lbu|lh|lhu|lw|lwl|lwr|lwu|ll|ld|ldl|ldr|lwc1|ldc1)$/;
 // SSA-variable name for the stack slot at a constant `sp`-offset. Distinct namespace from the
 // register names (which are alphabetic / `$N`), so it never collides with a real register var.
@@ -1478,17 +1478,15 @@ function liftOnce(
   const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
   // THE LOADED-WORD BOUND (`compilerBehaviors.outgoingAreaNeverLoadedFrom`, 16 on all three O32
   // toolchains): the lowest frame word this function LOADS at the frame's own depth from that
-  // offset up, or `Infinity`. The compiler loads no word of its outgoing area there — not after a
-  // call, and not before one — so a word it loads is a local's, and since the area is one region
-  // at the frame bottom every word at or above it is no call's stack argument. Below 16 a load
-  // proves nothing: the compilers stage a by-value aggregate's register words in the a1..a3 home
-  // and load them back. Every block here is entry-reachable, so every load counted can run; a load
-  // at another depth names other storage under the same raw offset and is not counted. Read once,
-  // before the frame is partitioned: it caps where the outgoing area of a call nothing sizes can
-  // end (`o32OutgoingArea`'s `widest`), and that one number is what the local area's partition, the
-  // owned range of an uninitialised read and the a0..a3 guess below each ask. The frame-object
-  // audit takes it too (`loadedWords`), and it counts what the IR does not show the audit — the
-  // slot reloads and the epilogue's `lw ra`.
+  // offset up, or `Infinity`. No word at or above it is any call's stack argument (the field says
+  // why); below 16 a load proves nothing, since the compilers load back the a1..a3 home words they
+  // stage a by-value aggregate in. Every block here is entry-reachable, so every load counted can
+  // run; a load at another depth names other storage under the same raw offset and is not counted.
+  // Read once, before the frame is partitioned: it caps where an unsized call's outgoing area can
+  // end (`o32OutgoingArea`'s `widest`, which the local area's partition and the owned range of an
+  // uninitialised read take), the a0..a3 guess below weighs only the words beneath it, and the
+  // frame-object audit takes it too (`loadedWords`), counting what the IR does not show the audit:
+  // the slot reloads and the epilogue's `lw ra`.
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
   const loadedWordBound = ((): number => {
     if (loadedFrom === undefined || frameSize === undefined || depthAt === null) {

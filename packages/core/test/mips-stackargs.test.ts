@@ -144,7 +144,7 @@ describe('every other never-stored read keeps its refusal', () => {
 // THE LOADED-WORD BOUND AT AN UNDECLARED CALL (`lowerJal` guess, `compilerBehaviors.
 // outgoingAreaNeverLoadedFrom`). A guess that fills a0..a3 cannot say where the list ends, so a word
 // of the outgoing area that reaches the call refuses — unless the function LOADS a frame word at
-// or below it, from 16(sp) up: no O32 compiler loads a word of its outgoing area there, so that
+// or below it, from 16(sp) up: ido and gcc 2.7.2 load no word of their outgoing area there, so that
 // word and every one above it is a local's. The shape is `bigdead` (`void bigdead(int k, int *p)`
 // at -O2: values spilled to the frame, reloaded only inside a loop the first test may skip, then
 // `done4(s, k, s + 1, s + 2)`), cut to one spill.
