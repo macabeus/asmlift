@@ -1,7 +1,7 @@
 import type { Outcome } from '@asmlift/bench-schema';
 
 import type { OutcomeRow } from '../../lib/stats';
-import { CHART, OUTCOME_COLOR, OUTCOME_GLOSS, OUTCOME_LABEL, OUTCOME_ORDER } from '../../theme';
+import { CHART, OUTCOME_COLOR, OUTCOME_LABEL, OUTCOME_ORDER } from '../../theme';
 import { EChart } from './EChart';
 import { axisCommon, tooltipDefaults } from './echarts';
 import type { EChartsOption } from './echarts';
@@ -96,12 +96,12 @@ export function OutcomeBars<K extends string>({
   );
 }
 
-/** The outcome key shared by every outcome chart on a panel; hover a label for its definition. */
+/** The outcome key shared by every outcome chart on a panel. */
 export function OutcomeLegend() {
   return (
     <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
       {OUTCOME_ORDER.map((o) => (
-        <span key={o} title={OUTCOME_GLOSS[o]} className="flex cursor-help items-center gap-1.5">
+        <span key={o} className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: OUTCOME_COLOR[o] }} />
           {OUTCOME_LABEL[o]}
         </span>

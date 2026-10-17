@@ -5,7 +5,7 @@ import { LOC_BUCKETS, locBucketOf, readabilityStats } from '../lib/stats';
 import { OUTCOME_COLOR, OUTCOME_GLOSS, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL, TOOLCHAIN_ORDER } from '../theme';
 import type { ExplorerPreset } from './Explorer';
 import { OutcomeBars, OutcomeLegend } from './charts/OutcomeBars';
-import { Card, Panel } from './ui/Section';
+import { Panel } from './ui/Section';
 import { Stat } from './ui/Stat';
 
 const TIER_LABEL = (k: string) => (k === 'synthetic' ? 'Synthetic' : 'Real');
@@ -44,7 +44,7 @@ export function Overview({
 
       <Panel
         title="Outcomes"
-        subtitle="Every function lands in one of five outcomes. Hover a tile for its definition; click it to list its functions."
+        subtitle="Every function lands in one of five outcomes. Click a tile to list its functions."
       >
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {OUTCOME_ORDER.map((o) => (
@@ -126,6 +126,12 @@ export function Overview({
   );
 }
 
+/** A share as a whole percent; a non-zero count that rounds to 0 reads as `<1%`, not `0%`. */
+function sharePct(count: number, total: number): string {
+  const pct = total === 0 ? 0 : Math.round((100 * count) / total);
+  return count > 0 && pct === 0 ? '<1%' : `${pct}%`;
+}
+
 function OutcomeTile({
   outcome,
   count,
@@ -141,21 +147,22 @@ function OutcomeTile({
     <button
       type="button"
       onClick={onClick}
-      title={`${OUTCOME_LABEL[outcome]} — ${OUTCOME_GLOSS[outcome]}. Click to open in the Function Explorer.`}
-      className="text-left transition-opacity hover:opacity-80"
+      className="group flex flex-col gap-1 rounded-xl bg-slate-800/60 p-5 text-left ring-1 ring-transparent transition hover:bg-slate-800 hover:ring-slate-600"
     >
-      <Card className="flex flex-col gap-1">
-        <span className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-slate-400">
+      <span className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
+        <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-xs" style={{ backgroundColor: OUTCOME_COLOR[outcome] }} />
           {OUTCOME_LABEL[outcome]}
         </span>
-        <span className="text-3xl font-bold font-mono" style={{ color: OUTCOME_COLOR[outcome] }}>
-          {count}
-        </span>
-        <span className="text-xs text-slate-500">
-          {total === 0 ? 0 : Math.round((100 * count) / total)}% of functions
-        </span>
-      </Card>
+        <span className="font-mono normal-case text-slate-300">{sharePct(count, total)}</span>
+      </span>
+      <span className="text-3xl font-bold font-mono" style={{ color: OUTCOME_COLOR[outcome] }}>
+        {count}
+      </span>
+      <span className="text-xs text-slate-400">{OUTCOME_GLOSS[outcome]}</span>
+      <span className="mt-auto pt-1 text-xs text-slate-500 transition-colors group-hover:text-teal-300">
+        List functions →
+      </span>
     </button>
   );
 }

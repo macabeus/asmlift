@@ -50,15 +50,13 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
 /** Ordered so stacked bars always read best -> worst, left to right. */
 export const OUTCOME_ORDER: Outcome[] = ['match', 'nonmatch', 'noncompile', 'declined', 'failed'];
 
-/** One-sentence definition of each of asmlift's outcomes — shown when hovering an outcome tile or legend label. */
+/** Short definition of each of asmlift's outcomes, printed on its Overview tile. */
 export const OUTCOME_GLOSS: Record<Outcome, string> = {
-  match: 'compiled and byte-exact (objdiff score 0)',
-  nonmatch: 'compiled but not byte-exact (score > 0)',
-  noncompile:
-    'marker-free source that claims completeness but fails to compile (the source and compiler diagnostics are kept)',
-  declined:
-    'output bearing explicit ASMLIFT_ERROR incompleteness markers — deliberately uncompilable, never scored. Functions that decline only for missing context receive it (see Methodology); remaining declines are genuine modeling gaps',
-  failed: 'no usable output at all (crash, function not found, empty)',
+  match: 'compiles to the exact same bytes',
+  nonmatch: 'compiles, but the bytes differ',
+  noncompile: 'claims to be complete, but fails to compile',
+  declined: 'marks a part it cannot lift yet (ASMLIFT_ERROR)',
+  failed: 'no usable output: a crash or an empty result',
 };
 
 /** Gap-size buckets for the Explorer's GapBadge (measured absolute objdiff diff of the best
