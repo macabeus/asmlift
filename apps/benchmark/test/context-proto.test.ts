@@ -18,9 +18,23 @@ const at = (ctxI: string, ctxFile = 'test/ctx.i') => ({ ctxI, ctxFile });
 const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b); void self(s32 x);';
 
 describe('a real row prototype table', () => {
-  test('context declarations under the manifest, which wins per symbol, and never the row itself', () => {
+  // the row's own entry is no callee prototype: it rides under its mark, which the lift reads as the
+  // soft bound a `--context` lift reads it as (core proto-context.ts `splitOwnContext`)
+  test('context declarations under the manifest, which wins per symbol, and the row itself under its mark', () => {
     const p = rowPrototypes({ other: { params: 3 } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC);
-    expect(p).toEqual({ callee: { returns: 's32', params: ['s32'] }, other: { params: 3 } });
+    expect(p).toEqual({
+      callee: { returns: 's32', params: ['s32'] },
+      other: { params: 3 },
+      self: { returnsVoid: true, params: ['s32'], fromContext: true },
+    });
+    expect(validatePrototypes(p)).toEqual([]);
+    // a manifest entry for the row states it, and the context's is not carried
+    expect(rowPrototypes({ self: { params: 2 } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC)?.self).toEqual({
+      params: 2,
+    });
+    // nor is one the bound cannot lay out
+    const variadic = 'typedef signed long s32; void self(s32 x, ...);';
+    expect(rowPrototypes(undefined, at(variadic, 'v.i'), 'c', 'self', undefined, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   test('per name: a sized context entry over the map, a spellable map signature over an unsized entry', () => {
