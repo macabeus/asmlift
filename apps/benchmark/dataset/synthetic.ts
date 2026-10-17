@@ -10601,6 +10601,28 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct P { int a, b, c; };\nstruct P ownar_sretdbl(double);',
     proto: { ownar_sretdbl: { params: ['double'] } },
   },
+  // A COUNT DOES NOT SAY WHERE ITS PAIRS FALL, and O32 and the PowerPC EABI put a 64-bit
+  // parameter at an even word, skipping one: `(int, long long, int)` fills 4 registers and spans 5
+  // (a0, a2:a3 and the stack word 4 on O32; r3, r5:r6 and r7 on mwcc), and O32's `(int, double)`
+  // fills 3 and spans 4. Laid out as words, the bound is one short: mwcc's c in r7 and O32's low
+  // half of b in a3 become uninitialised locals, and O32's c refuses as a stack argument past the
+  // declaration. agbcc aligns nothing and is the control.
+  {
+    sym: 'ownar_cntll',
+    src: 'int ownar_cntll(int a, long long b, int c){ return a * 3 + (int)b - c; }',
+    features: ['int64', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'int ownar_cntll(int, long long, int);',
+    proto: { ownar_cntll: { params: 4, returns: 'int' } },
+  },
+  {
+    sym: 'ownar_cntdbl',
+    src: 'int ownar_cntdbl(int a, double b){ return ((int *)&b)[1] + a * 5; }',
+    features: ['float', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int ownar_cntdbl(int, double);',
+    proto: { ownar_cntdbl: { params: 3, returns: 'int' } },
+  },
   {
     sym: 'byvalregs',
     src:
