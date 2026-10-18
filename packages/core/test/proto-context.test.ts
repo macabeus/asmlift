@@ -1069,9 +1069,9 @@ describe('declaredWidth', () => {
   });
 });
 
-// The context's own entry for the function being lifted (`ownContextEntry`): handed over only where
-// it is a typed list every parameter of which a bound can lay out, and abstaining on every other
-// shape, one case each.
+// The context's own entry for the function being lifted (`ownContextEntry`): handed over where it is
+// a typed list every parameter of which a bound can lay out, or where it returns a struct by value,
+// and abstaining on every other shape, one case each.
 describe("the context's own entry", () => {
   const own = (decl: string, name = 'f', language: 'c' | 'c++' = 'c') =>
     ownContextEntry(prototypesFromContext(`struct S { int a, b, c; };\n${decl}`, language), name);
@@ -1098,6 +1098,22 @@ describe("the context's own entry", () => {
   test('a struct passed by value abstains, and so does a spelling nothing sizes', () => {
     expect(own('int f(int, struct S);')).toBeUndefined();
     expect(own('int f(int, Unknown);')).toBeUndefined();
+  });
+
+  // the return comes first, ahead of whatever the parameters say, and the bound lays none of these
+  // out (`ownArgumentWordsOn`), so it reads the return alone
+  test('an entry returning a struct by value is handed over whatever its parameters', () => {
+    for (const decl of [
+      'struct S f(int, ...);',
+      'struct S f();',
+      'struct S f(int, struct S);',
+      'struct S f(Unknown);',
+    ]) {
+      expect(own(decl)?.returns).toBe('struct S');
+    }
+    expect(own('struct S *f(int, ...);')).toBeUndefined();
+    const ctx = prototypesFromContext('struct S { int a; int b; int c; };\nstruct S f__Fi(int);', 'c');
+    expect(ownContextEntry(ctx, 'f__Fi')).toBeUndefined();
   });
 
   test('a mangled symbol or a member function abstains', () => {

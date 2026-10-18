@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import { type DecompileOptions, decompile } from '../src/pipeline';
 import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
-import { withOwnReturnLayout } from '../src/proto-context';
+import { ownContextEntry, prototypesFromContext, withOwnReturnLayout } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
@@ -688,6 +688,28 @@ describe('a function that itself returns a struct', () => {
     });
     expect(unsized.source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
     expect(unsized.ownArityNotes).toEqual([expect.stringMatching(/\[own-return\] rmk8: [^]*nothing here lays it out/)]);
+  });
+
+  // kleod's `struct Unk_0800BEF0_2 sub_0800BEF0(struct Unk_0800BEF0 arg0);`: a parameter list the
+  // arity bound cannot lay out — a struct by value, `...`, `()` — still says the return, which comes
+  // first, so the context's entry carries it and the bound abstains
+  test("a context's own declaration whose parameters bound nothing still lifts the struct it returns", () => {
+    const struct = 'typedef int s32; struct S8 { unsigned a, b; }; struct P1 { s32 x; };\n';
+    for (const decl of ['struct S8 rmk8(struct P1 p);', 'struct S8 rmk8(s32 n, ...);', 'struct S8 rmk8();']) {
+      const entry = ownContextEntry(prototypesFromContext(struct + decl, 'c'), 'rmk8');
+      expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { ownContextProto: entry }).source).toMatch(
+        /struct S8 rmk8\(s32 a0\) \{\n\s+struct S8 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+return ret;/,
+      );
+    }
+    // …and where the proof fails, the pointer function says so, spelling the declaration it read
+    const entry = ownContextEntry(prototypesFromContext(struct + 'struct S8 rb(s32 n, ...);', 'c'), 'rb');
+    const kept = decompile('rb', rb, ARMV4T_AGBCC, { ownContextProto: entry });
+    expect(kept.source).toMatch(/s32 \* rb\(s32 \*a0, s32 a1\)/);
+    expect(kept.ownArityNotes).toEqual([
+      expect.stringMatching(
+        /^\[own-return\] rb: its context declaration `struct S8 rb\(s32, \.\.\.\)` returns struct S8/,
+      ),
+    ]);
   });
 
   // agbcc and mwcc hand a one-word struct back in r0/r3, which holds its one member

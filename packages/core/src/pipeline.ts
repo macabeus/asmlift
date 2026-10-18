@@ -493,10 +493,18 @@ function forgetAbsorbedKeys(fn: Fn): Fn {
   return fn;
 }
 
-/** A declaration as a note spells it: `int f(short, int)`, `void f(void)`. */
+/** A declaration as a note spells it: `int f(short, int)`, `void f(void)`, `int f(int, ...)`, and
+ *  `int f()` for one that states no parameters. */
 function spelledDeclaration(name: string, p: FnProto): string {
   const ret = p.returns ?? (p.returnsVoid === true ? 'void' : 'int');
-  const params = Array.isArray(p.params) && p.params.length > 0 ? p.params.join(', ') : 'void';
+  const params =
+    p.variadicParams !== undefined
+      ? [...p.variadicParams, '...'].join(', ')
+      : Array.isArray(p.params)
+        ? p.params.length > 0
+          ? p.params.join(', ')
+          : 'void'
+        : '';
   return `${ret} ${name}(${params})`;
 }
 
