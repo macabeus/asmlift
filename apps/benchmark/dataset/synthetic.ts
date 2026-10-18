@@ -10711,6 +10711,30 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'struct T2 { int a, b; };\nstruct T2 ownsret_pair(int x);',
   },
+  // A call between the member stores. mwcc does not hand the hidden pointer back: at the blr r3
+  // holds what the last call left there (core target.ts `structReturnHandsBackPointer`), so only
+  // the declaration says the stores are the result; agbcc restores r0 and O32 `move v0,a0`.
+  {
+    sym: 'ownsret_call',
+    src:
+      'struct T3 { int a, b, c; };\nextern int gOsc(int);\n' +
+      'struct T3 ownsret_call(int x, int y){ struct T3 t; t.a = gOsc(x); t.b = gOsc(y); t.c = 0; return t; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T3 { int a, b, c; };\nextern int gOsc(int);\nstruct T3 ownsret_call(int x, int y);',
+  },
+  // Eight bytes again, in a function that makes a call: agbcc gives the struct DImode, so its
+  // epilogue is `pop {r2}; bx r2`, the one a `long long` return takes, which the declaration
+  // explains (core frontend/thumb.ts `refuseWordReturns`). mwcc's r3:r4 pair is ownsret_pair's.
+  {
+    sym: 'ownsret_pairnl',
+    src:
+      'struct T2 { int a, b; };\nextern int gOsp(int);\n' +
+      'struct T2 ownsret_pairnl(int x){ struct T2 p; p.a = gOsp(x); p.b = x; return p; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct T2 { int a, b; };\nextern int gOsp(int);\nstruct T2 ownsret_pairnl(int x);',
+  },
   // One word of one member: agbcc and mwcc hand it back in r0/r3, which holds the member, and the
   // O32 toolchains through memory, as any struct.
   {
