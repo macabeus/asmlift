@@ -267,6 +267,31 @@ describe('the fold reads its target facts', () => {
   test('array-shaped is what refuses it elsewhere', () => {
     expect(foldUniform({}, without(DISPLACED_ROOT_GATES, 'array-shaped'))).toBe(1);
   });
+
+  // A value an EARLIER statement computed — `u8 v = *q; *r = 0; p[38] = v;` and `*r = v; p[38] = v;`
+  // — is loaded before the address by the member and the cast spelling alike: no evidence.
+  const earlier = (between: string) => `fn f {
+^bb0(%0: unk32, %1: unk32, %9: unk32):
+  %4: unk32 = load %1 {off=0, width=1, signed=false}
+  ${between}
+  %2: unk32 = const {value=38}
+  %3: unk32 = add %0, %2
+  store %3, %4 {off=0, width=1}
+  %5: unk32 = const {value=0}
+  store %0, %5 {off=0, width=1}
+  ret
+}
+`;
+  test('a value an earlier statement computed is no member order', () => {
+    const run = (between: string) => {
+      const fn = parse(earlier(between));
+      verify(fn);
+      return foldDisplacedAccesses(fn, {}, { farMemberStoreOrder: true }, true);
+    };
+    expect(run('')).toBe(1);
+    expect(run('%7: unk32 = const {value=0}\n  store %9, %7 {off=0, width=1}')).toBe(0);
+    expect(run('store %9, %4 {off=0, width=1}')).toBe(0);
+  });
 });
 
 describe('foldDisplacedAccesses refusals', () => {

@@ -583,14 +583,32 @@ export function foldDisplacedAccesses(
             : op.results[0] === next && op.opcode !== 'load' && op.opcode !== 'store',
     );
   // THE MEMBER'S ORDER (target.ts `farMemberStoreOrder`): the stored value is computed by a
-  // non-constant op in the same block before the chain's first link. A constant or a parameter on
-  // the right leaves no order to read, so it is no evidence either way.
+  // non-constant op in the same block before the chain's first link, AS THIS STORE'S RIGHT-HAND
+  // SIDE: this store is its only reader, and no memory access or call stands between it and the
+  // chain. A constant or a parameter on the right leaves no order to read, so it is no evidence
+  // either way; neither is a value an earlier statement computed (`u8 v = *q; *r = 0; p[38] = v;`),
+  // which the member and the cast spellings both load before the address, byte for byte.
+  const effect = (op: Op): boolean =>
+    op.opcode === 'store' ||
+    op.opcode === 'astore' ||
+    op.opcode === 'load' ||
+    op.opcode === 'aload' ||
+    op.opcode === 'call' ||
+    op.opcode === 'opaque';
   const memberOrdered = (a: Access, chain: Value[]): boolean => {
-    const vdef = defs.get(a.op.operands[1]);
+    const value = a.op.operands[1];
+    const vdef = defs.get(value);
     const first = defs.get(chain[chain.length - 1]);
     const v = vdef && vdef.opcode !== 'const' ? position.get(vdef) : undefined;
     const f = first ? position.get(first) : undefined;
-    return v !== undefined && f !== undefined && v.block === f.block && v.at < f.at;
+    return (
+      v !== undefined &&
+      f !== undefined &&
+      v.block === f.block &&
+      v.at < f.at &&
+      (uses.get(value) ?? []).length === 1 &&
+      !(fn.blocks[v.block].ops as Op[]).slice(v.at + 1, f.at).some(effect)
+    );
   };
   const byRoot = new Map<Value, { access: Access; k: number; memberOrder: boolean }[]>();
   const refused = new Set<Value>();
