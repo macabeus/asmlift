@@ -10713,14 +10713,18 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A call between the member stores. mwcc does not hand the hidden pointer back: at the blr r3
   // holds what the last call left there (core target.ts `structReturnHandsBackPointer`), so only
-  // the declaration says the stores are the result; agbcc restores r0 and O32 `move v0,a0`.
+  // the declaration says the stores are the result; O32 `move v0,a0`. Not on agbcc, which builds
+  // the struct in a frame temp across the calls and copies it out with ldmia/stmia: the frame
+  // audit declines that (`stack pointer used as data`), a gap of its own; agbcc's hand-back is
+  // ownsret_pairnl's.
   {
     sym: 'ownsret_call',
     src:
       'struct T3 { int a, b, c; };\nextern int gOsc(int);\n' +
       'struct T3 ownsret_call(int x, int y){ struct T3 t; t.a = gOsc(x); t.b = gOsc(y); t.c = 0; return t; }',
     features: ['struct-return', 'multi-arg'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    proto: { gOsc: { params: ['int'], returns: 'int' } },
     ctx: 'struct T3 { int a, b, c; };\nextern int gOsc(int);\nstruct T3 ownsret_call(int x, int y);',
   },
   // Eight bytes again, in a function that makes a call: agbcc gives the struct DImode, so its
@@ -10733,6 +10737,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'struct T2 ownsret_pairnl(int x){ struct T2 p; p.a = gOsp(x); p.b = x; return p; }',
     features: ['struct-return'],
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    proto: { gOsp: { params: ['int'], returns: 'int' } },
     ctx: 'struct T2 { int a, b; };\nextern int gOsp(int);\nstruct T2 ownsret_pairnl(int x);',
   },
   // One word of one member: agbcc and mwcc hand it back in r0/r3, which holds the member, and the
