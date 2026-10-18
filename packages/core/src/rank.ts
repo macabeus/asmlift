@@ -297,6 +297,10 @@ export interface Candidate {
    *  (compareScored): a tie refutes neither declaration, and the narrow one changes the bytes of
    *  every prototyped caller, which this function's score cannot see. */
   guessesParamWidth?: true;
+  /** This candidate's lift is `/far-cast` and spells a far member store through a cast of its
+   *  base. It loses every score tie (compareScored): a tie means the compiler built the member's
+   *  object too, and the member is the spelling that names the field. */
+  farStoreCast?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -2511,6 +2515,9 @@ export function enumerateCandidates(
                 if (!guessesParamWidth) {
                   delete dup.guessesParamWidth;
                 }
+                if (!liftSetting.keepStores) {
+                  delete dup.farStoreCast;
+                }
                 continue;
               }
               const variations: readonly Variation[] = [
@@ -2536,6 +2543,7 @@ export function enumerateCandidates(
                 ...(sp.signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
+                ...(liftSetting.keepStores ? { farStoreCast: true as const } : {}),
               };
               seen.set(source, made);
               out.push(made);
@@ -2699,6 +2707,11 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  below does the same for `/narrow-decl`, which drops one cast per local it narrows and so wins
  *  every tie against the candidate it is derived onto.
  *
+ *  A FAR STORE SPELLED THROUGH A CAST (`Candidate.farStoreCast`) next: where `/far-cast` ties the
+ *  member spelling, the compiler built the member's object too, and the member names the field. Its
+ *  `(u8 *)` base is no scalar cast and its line count is no higher, so neither term below would
+ *  prefer the member on its own.
+ *
  *  CAST COUNT next, and only WITHIN a preference. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
  *  pinning `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }`
@@ -2731,6 +2744,7 @@ export function compareScored<S extends { score: number }>(
     (a.guessesParamWidth ? 1 : 0) - (b.guessesParamWidth ? 1 : 0) ||
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
+    (a.farStoreCast ? 1 : 0) - (b.farStoreCast ? 1 : 0) ||
     castCount(a.source) - castCount(b.source) ||
     lineCount(a.source) - lineCount(b.source) ||
     a.order - b.order

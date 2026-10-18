@@ -14,6 +14,7 @@ import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { type DisplacedOptions, foldDisplacedAccesses, recognizeStructs } from '../src/raise/structs';
+import { compareScored } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, type ToolchainId, canonicalFlagsOf, structureOptionsFor, targetFor } from '../src/target';
 
@@ -213,5 +214,29 @@ describe('foldDisplacedAccesses refusals', () => {
 }
 `);
     expect(folded).toBe(0);
+  });
+});
+
+describe('/far-cast loses a score tie to the member spelling', () => {
+  const cand = (variations: string[], source: string, order: number, farStoreCast?: true) => ({
+    variations,
+    source,
+    preference: 0,
+    order,
+    score: { score: 0 },
+    ...(farStoreCast ? { farStoreCast } : {}),
+  });
+  test('a shorter cast spelling enumerated first still ranks behind the member', () => {
+    const cast = cand(['unsigned', 'far-cast'], 'void f(s32 *a0) {\n    *((u8 *)a0 + 38) = 1;\n}\n', 0, true);
+    const member = cand(
+      ['unsigned'],
+      'struct Struct0 { s32 field_0; u8 _pad0[34]; u8 field_38; };\nvoid f(struct Struct0 *a0) {\n    a0->field_38 = 1;\n}\n',
+      1,
+    );
+    expect([cast, member].sort(compareScored)[0]).toBe(member);
+    expect([member, { ...cast, score: { score: -1 } }].sort(compareScored)[0].variations).toEqual([
+      'unsigned',
+      'far-cast',
+    ]);
   });
 });
