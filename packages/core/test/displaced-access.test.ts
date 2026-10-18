@@ -343,6 +343,29 @@ describe('foldDisplacedAccesses refusals', () => {
     expect(emit(ir.replace('{value=100663296}', '{value=16777215}')).folded).toBe(1);
   });
 
+  // `u16 *d = &p->f68; p->f38 = *q; return d[0] + d[1];` on agbcc: the held `d` stays on its
+  // address and the member store beside it still folds.
+  test('a refused base leaves the other bases of its root to fold', () => {
+    const fn = parse(`fn f {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = const {value=68}
+  %3: unk32 = add %0, %2
+  %4: unk32 = load %1 {off=0, width=1, signed=false}
+  %5: unk32 = const {value=38}
+  %6: unk32 = add %0, %5
+  store %6, %4 {off=0, width=1}
+  %7: unk32 = load %3 {off=0, width=2, signed=false}
+  %8: unk32 = load %3 {off=2, width=2, signed=false}
+  %9: unk32 = load %0 {off=0, width=4, signed=false}
+  %10: unk32 = add %7, %8
+  %11: unk32 = add %10, %9
+  ret %11
+}
+`);
+    verify(fn);
+    expect(foldDisplacedAccesses(fn, {}, { farMemberBasePerAccess: { past: 0 } })).toBe(1);
+  });
+
   test('a volatile access stays on its materialised address', () => {
     const { folded, c } = emit(twoAccesses('store %3, %1 {off=0, width=1, volatile=true}'));
     expect(folded).toBe(0);

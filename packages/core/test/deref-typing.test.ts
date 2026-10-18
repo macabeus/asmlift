@@ -620,12 +620,13 @@ test('a negative access offset stays exact — no struct member at a negative of
 describe('byte offsets on a rendered pointer', () => {
   // `ldr r2,[r0,#4]` / `str r2,[r0,#8]` type a0 as `s32 *`; then two byte stores through it, one
   // at an offset the element size divides (60) and one at an offset it does not (62). The function
-  // RETURNS the second address, so the source held it as a pointer: without that use the two stores
-  // are members of a recovered struct instead (raise/structs.ts `foldDisplacedAccesses`), and this
-  // rendering is never reached.
+  // stores the first address and RETURNS the second, so the source held both as pointers: without
+  // those uses each store is a member of a recovered struct instead (raise/structs.ts
+  // `foldDisplacedAccesses`, which asks every materialised base on its own), and this rendering is
+  // never reached.
   const bytesOnWordPtr =
     'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
-    '\tadd\tr3, r0, #0x3e\n\tmov\tr4, #0x7\n\tstrb\tr4, [r3]\n' +
+    '\tadd\tr3, r0, #0x3e\n\tmov\tr4, #0x7\n\tstrb\tr4, [r3]\n\tstr\tr3, [r0, #0xc]\n' +
     '\tadd\tr3, r0, #0x3c\n\tstrb\tr4, [r3]\n\tadd\tr0, r3, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
 
   test('an offset the element size does not divide casts the BASE, not the sum', () => {

@@ -407,11 +407,12 @@ function fieldSize(t: IrType): number {
  *
  *  THE REFUSALS ARE TWO GATE TABLES, so `pnpm bench gates --pass displaced` can count which one
  *  keeps a row on the cast spelling: `DISPLACED_BASE_GATES`, asked once per materialised base, and
- *  `DISPLACED_ROOT_GATES`, asked once per root whose bases all passed. A base the first refuses
- *  leaves EVERY access off its root on its materialised address, as before; so does a root the
- *  second refuses. Every gate is a spelling choice, not a soundness rule: the fold rewrites address
- *  arithmetic into the same address, so no candidate it admits reads different memory, and the
- *  differ referees. NOT TABLED: `/far-cast`'s `keepStores` skip, which is the variation itself
+ *  `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. A base the first
+ *  refuses keeps its own accesses on its materialised address while the root's other bases are
+ *  still asked; a root the second refuses keeps every access off it on its address, as before.
+ *  Every gate is a spelling choice, not a soundness rule: the fold rewrites address arithmetic
+ *  into the same address, so no candidate it admits reads different memory, and the differ
+ *  referees. NOT TABLED: `/far-cast`'s `keepStores` skip, which is the variation itself
  *  rather than a refusal. Runs right before `recognizeStructs`, after raise/truncload.ts, which
  *  therefore never sees a folded access. Returns the number of accesses folded. */
 export interface DisplacedOptions {
@@ -611,10 +612,9 @@ export function foldDisplacedAccesses(
     );
   };
   const byRoot = new Map<Value, { access: Access; k: number; memberOrder: boolean }[]>();
-  const refused = new Set<Value>();
   for (const [base, accesses] of accessesOf) {
     const disp = constDisplacementOf(defs, base);
-    if (!disp || refused.has(disp.root)) {
+    if (!disp) {
       continue;
     }
     // `/far-cast`: a store kept on its address keeps the chain's value used by something other
@@ -622,9 +622,9 @@ export function foldDisplacedAccesses(
     if (opts.keepStores === true && accesses.some((a) => a.op.opcode === 'store')) {
       continue;
     }
+    // A refused base stays on its address and its root's other bases are still asked: a held
+    // `u16 *d = &p->f68` beside a member store `p->f38 = *q` keeps `d` and folds the store.
     if (firstRejection(baseGates, { base, accesses, disp, defs, arrayBases, onlyFeeds, behaviors }) !== null) {
-      refused.add(disp.root);
-      byRoot.delete(disp.root);
       continue;
     }
     const list = byRoot.get(disp.root) ?? [];
