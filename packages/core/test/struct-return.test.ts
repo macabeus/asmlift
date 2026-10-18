@@ -674,10 +674,20 @@ describe('a function that itself returns a struct', () => {
     expect(unsized.ownArityNotes).toEqual([expect.stringMatching(/\[own-return\] rmk8: [^]*nothing here lays it out/)]);
   });
 
-  test('in the return register, it lifts', () => {
+  // agbcc and mwcc hand a one-word struct back in r0/r3, which holds its one member
+  test('in the return register, it is that register, and a one-word struct of one member is the struct', () => {
     const rmk1 = 'rmk1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
-    const prototypes = { rmk1: { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') } };
-    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+    const S1 = { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') };
+    const one = /struct S1 rmk1\(s32 a0\) \{\n\s+struct S1 ret;\n\s+ret\.x = a0 \+ 1;\n\s+return ret;\n\}/;
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: { rmk1: S1 } }).source).toMatch(one);
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { ownContextProto: S1 }).source).toMatch(one);
+    // a halfword struct is not all of the word agbcc rounds it to, so the word is the return
+    const S2 = {
+      params: ['s32'],
+      returns: 'struct S2',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'h', type: 'u16' }] },
+    };
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: { rmk1: S2 } }).source).toMatch(/return a0 \+ 1;/);
   });
 
   // A `--proto` table spells the return and lays nothing out; the context it is lifted beside does
@@ -689,7 +699,7 @@ describe('a function that itself returns a struct', () => {
     const stated = { rmk1: { params: ['s32'], returns: 'struct S1' } };
     const prototypes = withOwnReturnLayout(stated, 'rmk1', CTX, 'c');
     expect(prototypes?.rmk1?.returnLayout).toEqual(u32s('x'));
-    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/ret\.x = a0 \+ 1;\n\s+return ret;/);
     expect(() => decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: stated })).toThrow(
       /it is declared to return struct S1 by value, and nothing here lays it out, and this target's rule needs its layout/,
     );

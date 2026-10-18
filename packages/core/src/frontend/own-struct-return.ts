@@ -33,6 +33,10 @@
 // become the return object's, and the copy goes. It folds only a copy it can prove is that one —
 // see its own note — and otherwise leaves the stores of the copied words, which is the same
 // function spelled with one copy too many.
+//
+// A STRUCT RETURNED IN THE RETURN REGISTER is the other half of the target's rule, and only its
+// simplest case is spelled as the struct (`liftOwnRegisterStruct`): one word that is all one
+// integer member.
 import {
   type Block,
   type Fn,
@@ -89,6 +93,42 @@ export function liftOwnStructReturn(fn: Fn, type: StructType, target: TargetDesc
   entry.params = entry.params.slice(1);
   entry.ops.unshift(object);
   foldFrameCopy(fn, local, size, dead);
+  return undefined;
+}
+
+/** THE ONE-WORD STRUCT A TARGET RETURNS IN ITS RETURN REGISTER (agbcc's and mwcc's `struct W {
+ *  u32 x; }` in r0/r3): the register holds the struct's one member, so each `ret`'s word is stored
+ *  to that member of a local of `type` and the local is returned by value, `ret.x = a0 + 5; return
+ *  ret;`. Only a struct of exactly one word whose member at byte 0 is an integer of that word fills
+ *  the register with nothing else; any other struct, or a `ret` that hands back no word, leaves `fn`
+ *  as it is (its word the lift's return), and answers why. */
+export function liftOwnRegisterStruct(fn: Fn, type: StructType): string | undefined {
+  const member = type.fields.find((f) => f.off === 0 && f.type.kind === 'int' && f.type.width === 32);
+  if (type.size !== 4 || type.fields.length !== 1 || member === undefined) {
+    return 'it is not one word that is all one integer member';
+  }
+  const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
+  if (rets.some((op) => op.operands.length !== 1)) {
+    return 'a return hands back no word';
+  }
+  const object = mkOp('laddr', {
+    results: [mkValue(T.ptr(type))],
+    attrs: { off: 0, width: 1, signed: false, count: 4, aggregate: true, [OWN_RETURN_OBJECT]: true },
+  });
+  const local = object.results[0];
+  for (const b of fn.blocks) {
+    const ret = b.ops[b.ops.length - 1];
+    if (ret?.opcode === 'ret') {
+      b.ops.splice(
+        b.ops.length - 1,
+        0,
+        mkOp('store', { operands: [local, ret.operands[0]], attrs: { off: 0, width: 4 } }),
+      );
+      ret.operands = [local];
+      ret.attrs = { ...ret.attrs, [RETURNS_OBJECT]: true };
+    }
+  }
+  fn.blocks[0].ops.unshift(object);
   return undefined;
 }
 

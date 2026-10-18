@@ -13,10 +13,10 @@ import {
   assertTypesRecovered,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
-import { returnedStruct } from './frontend/call-plan';
+import { returnedStruct, structLocalType } from './frontend/call-plan';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
-import { liftOwnStructReturn } from './frontend/own-struct-return';
+import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
 import { frontendFor } from './frontend/registry';
 import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
@@ -512,8 +512,10 @@ function spelledDeclaration(name: string, p: FnProto): string {
  *     or nothing lays the struct out, or that names no type a local can be declared with. A context
  *     entry that cannot be placed keeps the pointer lift, with a note in `notes`: what it costs is
  *     a signature the header contradicts, which the compiler rejects.
- *  A struct the rule hands back in one register (agbcc's one-word struct in r0) is the lift's own
- *  return, and nothing here is asked. */
+ *  A struct the rule hands back in one register (agbcc's and mwcc's one-word struct in r0/r3) is
+ *  that register's word: the plan says so (`register`), and a struct that is all one word-wide
+ *  integer member is spelled as that member (frontend/own-struct-return.ts
+ *  `liftOwnRegisterStruct`), where any other one stays the word the lift returns. */
 function ownStructReturnThroughMemory(
   name: string,
   target: TargetDescription,
@@ -530,9 +532,15 @@ function ownStructReturnThroughMemory(
   const read = returnedStruct(declared!, target);
   if (read === 'register') {
     // A struct wider than a word that comes back in registers is a pair the lift returns one word
-    // of, dropping the second register
+    // of, dropping the second register; one of a word or less is that word
     const size = aggregateSize(returnedAggregate(declared!), target)?.size;
-    if (size !== undefined && size > 4) {
+    if (size !== undefined && size <= 4) {
+      const type = structLocalType(declared!, target);
+      return 'refused' in type
+        ? undefined
+        : { type, stated, declaration: spelledDeclaration(name, declared!), register: true };
+    }
+    if (size !== undefined) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': ${stated ? 'it is declared' : `its context declaration \`${spelledDeclaration(name, declared!)}\` says it`} ` +
           `${stated ? 'to return' : 'returns'} ${spelled} by value, and this target hands its ${size} bytes back in two registers — a function ` +
@@ -568,6 +576,8 @@ interface OwnStructReturn {
   type: Extract<IrType, { kind: 'struct' }>;
   stated: boolean;
   declaration: string;
+  /** the target hands it back in the return register, not through a hidden pointer */
+  register?: true;
 }
 
 /** Lifts `fn`'s struct return (frontend/own-struct-return.ts `liftOwnStructReturn`), where the
@@ -582,6 +592,11 @@ function returnOwnStruct(
   own: OwnStructReturn,
   notes: string[] | undefined,
 ): void {
+  if (own.register) {
+    // a word the struct may not be all of stays the lift's own return, as the machine has it
+    liftOwnRegisterStruct(fn, own.type);
+    return;
+  }
   const why = liftOwnStructReturn(fn, own.type, target);
   if (why === undefined) {
     return;

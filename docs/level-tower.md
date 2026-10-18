@@ -987,7 +987,8 @@ into the copy, ahead of it.
 Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
 an `[own-return]` note, the soft policy of its arity bound. A stated return the context lays out —
 `struct S`, or a typedef of one — is read with that layout (`proto-context.ts`
-`withOwnReturnLayout`), so a one-word struct the rule returns in a register lifts as its word, and
+`withOwnReturnLayout`), so a one-word struct the rule returns in a register lifts as its word — as
+the struct where it is all one word-wide integer member (`liftOwnRegisterStruct`) — and
 one it returns in a register pair (mwcc's svr4 eight bytes in r3:r4) refuses, stated or from the
 context, since the lift returns one word.
 A symbol map states a
