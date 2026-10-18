@@ -14,7 +14,7 @@ import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@as
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
-import type { ContextGlobals } from '@asmlift/core/proto-context';
+import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type PatternEvent, type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
@@ -61,7 +61,10 @@ export async function decompileWithReport(
   const { target } = resolved;
   const { targetObj, compile, ...traceOpts } = opts;
   const backend = opts.backend ?? cBackend;
-  const returnsVoid = declaresVoidReturn(opts.prototypes?.[name]);
+  // the context's own entry out of the table first, as every core entry path takes it, so the
+  // probe reads the table the main path reads
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const returnsVoid = declaresVoidReturn(own.prototypes?.[name]);
   // THE PROJECT'S OWN MAP GOES TO THE PROBE TOO, and it is not an optional refinement: the
   // main path structures with it, and a probe that structures without it measures its deltas on
   // a program asmlift does not emit. Built once here rather than per probe — `symbolsByName`
@@ -74,8 +77,8 @@ export async function decompileWithReport(
           fn,
           target,
           returnsVoid,
-          opts.prototypes?.[name],
-          prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
+          own.prototypes?.[name],
+          prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
           inferredSymbols,
           mapSymbols,
           opts.contextGlobals,
@@ -119,7 +122,8 @@ export async function decompileWithReport(
       const ranked = await decompileRanked(name, asm, target, targetObj, {
         patterns: opts.patterns,
         backend,
-        prototypes: opts.prototypes,
+        prototypes: own.prototypes,
+        ...(own.ownContextProto ? { ownContextProto: own.ownContextProto } : {}),
         asmData: opts.asmData,
         symbols: opts.symbols,
         compile,

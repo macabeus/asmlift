@@ -16,7 +16,9 @@ import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { frontendFor } from './frontend/registry';
+import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
+import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
 import { firstTrivialPhi } from './ir/simplify';
 import { T, intWidth } from './ir/types';
@@ -32,10 +34,11 @@ import {
   type Prototypes,
   declaresAggregateReturn,
   declaresVoidReturn,
+  ownArgumentWords,
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
-import type { ContextGlobals } from './proto-context';
+import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -89,6 +92,12 @@ export interface DecompileOptions {
    *  volatile object the map does not lay out, or through a pointer to one, is stamped
    *  (raise/declared-volatile.ts), so the cast it is read through carries the qualifier. */
   contextGlobals?: ContextGlobals;
+  /** the declaration context's own entry for `name` (proto-context.ts `ownContextEntry`), which
+   *  bounds the argument registers SOFTLY where `prototypes` states no entry for it
+   *  (`liftStamped`); absent ⇒ nothing bounds them softly. A `prototypes` entry for `name` marked
+   *  `fromContext` is read as this, and taken out of the table (proto-context.ts
+   *  `splitOwnContext`). */
+  ownContextProto?: FnProto;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -136,6 +145,13 @@ export interface DecompileResult {
    *  `stage:offsetnames`), and it is also the only thing in a result that says a walk spelling
    *  stopped being enumerable here. Empty on every run with no symbol map. */
   walkedNames: string[];
+  /** WHERE THE LIFT WENT PAST ITS CONTEXT DECLARATION (`liftStamped`'s `[own-arity]` notes): each
+   *  names the declaration and either the argument registers the body reads past it, kept as
+   *  parameters, or the refusal that made the lift drop the bound. A note is no gap, but the
+   *  parameter list printed contradicts the header, which every compiler here rejects as
+   *  conflicting types. Empty where no context entry was handed over, or where the lift stayed
+   *  within it. */
+  ownArityNotes: string[];
 }
 
 export function decompile(
@@ -169,9 +185,22 @@ function runTower(
   const backend = opts.backend ?? cBackend;
   // The project's own DWARF signatures fill in what the caller did not state — in practice the
   // CALLEES (a function still in assembly has none), which is what makes this transferable.
-  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const prototypes = prototypesFromSymbols(opts.symbols, own.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
-  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
+  const ownArityNotes: string[] = [];
+  const fn = liftStamped(
+    name,
+    asm,
+    target,
+    prototypes,
+    opts.asmData,
+    opts.symbols,
+    opts.contextGlobals,
+    undefined,
+    own.ownContextProto,
+    ownArityNotes,
+  );
   // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
   // edge-copy order and the raising folds mutate it, so two dumps compare whole program states.
   const raw = print(fn, { writeOrder: true });
@@ -238,7 +267,41 @@ function runTower(
     // does not have (raise/globalshape.ts `assumedShapes`).
     assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     walkedNames,
+    ownArityNotes,
   };
+}
+
+/** The `[own-arity]` notes (`DecompileResult.ownArityNotes`) of one lift under `opts`, for a caller
+ *  whose result carries none — the ranked path, whose every candidate lifts as this one does. Empty
+ *  where the lift fails: the run reports that failure itself. */
+export function ownArityNotesOf(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
+): string[] {
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  if (own.ownContextProto === undefined) {
+    return [];
+  }
+  const notes: string[] = [];
+  try {
+    liftStamped(
+      name,
+      asm,
+      target,
+      prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
+      opts.asmData,
+      opts.symbols,
+      opts.contextGlobals,
+      undefined,
+      own.ownContextProto,
+      notes,
+    );
+  } catch {
+    return [];
+  }
+  return notes;
 }
 
 /** What the declared-volatile stamp reads besides the IR and the map: the compiler's fact and the
@@ -256,7 +319,9 @@ export function stampBehaviorsFor(
 /** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
  *  `symbols` or `contextGlobals` declares volatile stamped `declared` (raise/declared-volatile.ts)
  *  before any pass asks whether it may be deleted. Every entry path lifts through here, each lift
- *  under the map its structuring will be handed. */
+ *  under the map its structuring will be handed, and each bounded by the context's own entry
+ *  (`ownContext`) the same way (`liftWithinContextBound`); `notes` collects that bound's
+ *  `[own-arity]` notes. */
 export function liftStamped(
   name: string,
   asm: string,
@@ -266,14 +331,162 @@ export function liftStamped(
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
   liftOptions?: LiftOptions,
+  ownContext?: FnProto,
+  notes?: string[],
 ): Fn {
-  const own = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
+  // Its callers split the table already; split again here, where every lift passes, so that no
+  // frontend is handed a marked context entry to read as a stated, hard bound.
+  const split = splitOwnContext(prototypes, name, ownContext);
+  const table = split.prototypes ?? {};
+  const own = Object.hasOwn(table, name) ? table[name] : undefined;
   refuseOwnStructReturnThroughMemory(name, target, own);
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions);
+  const fn = liftWithinContextBound(
+    name,
+    asm,
+    target,
+    table,
+    asmData,
+    symbols,
+    contextGlobals,
+    liftOptions,
+    split.ownContextProto,
+    notes,
+  );
   verify(fn);
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));
   return fn;
+}
+
+/** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
+ *  words it fills (`ownArgumentWords`, the layout a stated entry gets) is lifted as an uninitialised
+ *  local's home, and where the finished lift still READS one, the function is lifted again with
+ *  the bound raised past it, so that register stays the parameter a context-less lift makes it,
+ *  with an `[own-arity]` note naming the declaration and the register.
+ *
+ *  WHY SOFT, where a stated entry is hard. A header entry for a function still in assembly was
+ *  written with no compiler checking it against a definition, and the two directions of its error
+ *  cost differently. Too long, it only keeps a parameter. Too short, a hard bound turns a real
+ *  argument into `uninit_<reg>`, which compiles silently: sbk2's task callbacks are declared
+ *  `void f(void);` ahead of a definition that reads `a0`, 407 of 525 such headers were short when
+ *  their functions were decompiled, and a hard bound lifted 16 of 33 sampled ones as `s32
+ *  uninit_a0; … memcpy(uninit_a0 + 28, …)`. Kept as a parameter instead, the lift is the right
+ *  function and contradicts the header, which every compiler here rejects as conflicting types —
+ *  loud — and the note says which register. What the bound buys is the other direction: a
+ *  register nothing in the lift reads is no parameter (sa3's `void Task_802F698(void)` lifted
+ *  `(s32 a0, s32 a1, s32 a2, s32 a3)`).
+ *
+ *  "READS" MEANS THE FINISHED LIFT, not the SSA builder. A register is read as the argument of a
+ *  call whose arity was guessed, and the guess then trims it (`k4(a, b, 2, 0); zq(a); sl();` reads
+ *  a2/a3 as `zq`'s and `sl`'s possible arguments); so the test is that an undefined value of a
+ *  dropped register survives into the lift — an `undef` keyed by it, or by a join that took it,
+ *  that `dce` would not delete, or one the machine homes to a slot nothing reads
+ *  (`readDroppedArgRegs`). A read the raising tower would delete later still counts: that only
+ *  keeps the parameter.
+ *
+ *  A LIFT THAT REFUSES WITHIN THE BOUND IS LIFTED WITHOUT IT, with a note, so the bound turns no
+ *  lift into a decline. The one refusal it adds is a stated entry's (frontend/ssa.ts
+ *  `LiveInModel.ownArgWords`): an incoming stack argument past it, which no local can be, and which,
+ *  named by position past the registers the bound dropped, would be one slot low. A stated entry for
+ *  `name` — `prototypes`, which includes what the symbol map derives — wins, and the context's is
+ *  not read. */
+function liftWithinContextBound(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  asmData: AsmData | undefined,
+  symbols: SymbolMap | undefined,
+  contextGlobals: ContextGlobals | undefined,
+  liftOptions: LiftOptions | undefined,
+  ownContext: FnProto | undefined,
+  notes: string[] | undefined,
+): Fn {
+  const frontend = frontendFor(target);
+  const unbounded = () =>
+    forgetAbsorbedKeys(frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions));
+  let words =
+    ownContext === undefined || Object.hasOwn(prototypes, name)
+      ? undefined
+      : ownArgumentWords(name, ownContext, target);
+  if (words === undefined || words >= target.argRegs.length) {
+    return unbounded();
+  }
+  const declared = spelledDeclaration(name, ownContext!);
+  for (;;) {
+    let fn: Fn;
+    try {
+      fn = frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
+        ...liftOptions,
+        contextOwnWords: words,
+      });
+    } catch (e) {
+      if (!(e instanceof FrontendUnsupportedError)) {
+        throw e;
+      }
+      const lifted = unbounded();
+      notes?.push(
+        `${name}: lifted without its context declaration \`${declared}\`, which it could not be lifted within ` +
+          `(${e.message.split('\n')[0]})`,
+      );
+      return lifted;
+    }
+    const read = readDroppedArgRegs(fn, target.argRegs.slice(words));
+    if (read.length === 0) {
+      return forgetAbsorbedKeys(fn);
+    }
+    notes?.push(
+      `${name}: its context declaration \`${declared}\` fills ${words} argument word${words === 1 ? '' : 's'}, ` +
+        `and the body reads ${read.join(', ')} past ${words === 1 ? 'it' : 'them'} — kept as ` +
+        `${read.length === 1 ? 'a parameter' : 'parameters'}, which the header contradicts`,
+    );
+    words = Math.max(...read.map((r) => target.argRegs.indexOf(r))) + 1;
+    if (words >= target.argRegs.length) {
+      return unbounded();
+    }
+  }
+}
+
+/** The dropped argument registers whose undefined value the lift still reads: an `undef` keyed by
+ *  one, or that absorbed one when its join collapsed (frontend/ssa.ts `ABSORBED_KEYS`), which is
+ *  not dead (`deadOps`, the definition `dce` deletes by) or which the machine stored to a slot
+ *  nothing reads back (`HOMED_UNDEF`). That store reaches no op, and it is still a read: IDO -g3 and
+ *  -O0 home every argument register the definition declares, so a header naming fewer contradicts
+ *  the asm, and the main lift's `(a0, a1)` is the one that recompiles to the same words. */
+function readDroppedArgRegs(fn: Fn, dropped: readonly string[]): string[] {
+  const dead = deadOps(fn.blocks);
+  const read = new Set<string>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'undef' && (!dead.has(op) || op.attrs[HOMED_UNDEF] === true)) {
+        for (const k of [String(op.attrs.key), ...String(op.attrs[ABSORBED_KEYS] ?? '').split(',')]) {
+          read.add(k);
+        }
+      }
+    }
+  }
+  return dropped.filter((r) => read.has(r));
+}
+
+/** `fn` with no `undef` carrying `ABSORBED_KEYS` or `HOMED_UNDEF`, which nothing past the own-entry
+ *  bound reads. */
+function forgetAbsorbedKeys(fn: Fn): Fn {
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'undef') {
+        delete op.attrs[ABSORBED_KEYS];
+        delete op.attrs[HOMED_UNDEF];
+      }
+    }
+  }
+  return fn;
+}
+
+/** A declaration as a note spells it: `int f(short, int)`, `void f(void)`. */
+function spelledDeclaration(name: string, p: FnProto): string {
+  const ret = p.returns ?? (p.returnsVoid === true ? 'void' : 'int');
+  const params = Array.isArray(p.params) && p.params.length > 0 ? p.params.join(', ') : 'void';
+  return `${ret} ${name}(${params})`;
 }
 
 /** THE CALLEE HALF OF A STRUCT RETURNED THROUGH MEMORY IS NOT MODELLED, on any frontend. A function
@@ -287,8 +500,9 @@ export function liftStamped(
  *  hands back in one register (agbcc's one-word struct in r0) is the lift's own return; one it hands
  *  back in two (mwcc's svr4 eight-byte struct in r3:r4) refuses, since the lift returns one word.
  *
- *  A context's own entry for the function is left out (`withContextPrototypes`), so there the
- *  pointer function is all the lift is told; a stated return naming a struct the context lays out
+ *  A context's own entry for the function is left out of the prototypes (`withContextPrototypes`)
+ *  and bounds only the argument registers (`liftWithinContextBound`), so there the pointer
+ *  function is all the lift is told; a stated return naming a struct the context lays out
  *  reaches here with that layout (`withOwnReturnLayout`). Asked of the declaration alone, before
  *  any frontend runs. */
 function refuseOwnStructReturnThroughMemory(name: string, target: TargetDescription, own: FnProto | undefined): void {
@@ -608,6 +822,7 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     // A stub spells no global, so it assumes nothing about one and walked to none.
     assumedSymbols: [],
     walkedNames: [],
+    ownArityNotes: [],
   };
 }
 

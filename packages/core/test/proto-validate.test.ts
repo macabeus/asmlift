@@ -51,7 +51,14 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
       'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ' +
-        '"byValueParams", "byValueLayouts" or "variadicParams")',
+        '"byValueParams", "byValueLayouts", "variadicParams" or "fromContext")',
+    ]);
+  });
+
+  test('the own context mark, which is a boolean', () => {
+    expect(validatePrototypes({ f: { params: ['s32'], fromContext: true } })).toEqual([]);
+    expect(validatePrototypes({ f: { params: ['s32'], fromContext: 1 } })).toEqual([
+      'f: "fromContext" must be a boolean',
     ]);
   });
 

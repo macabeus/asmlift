@@ -16,6 +16,7 @@ import {
   parseDeclarations,
 } from './cdecl/parse';
 import { asParameter, spellType } from './cdecl/spell';
+import { demangledName, implicitArgumentWords } from './mangle';
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
   declaredCallArgs,
@@ -23,6 +24,7 @@ import {
   declaresAggregateReturn,
   declaresVoidReturn,
   isFloatingSpelling,
+  paramClassOf,
   statesNoReturn,
   symbolPrototype,
   validatePrototypes,
@@ -1362,22 +1364,27 @@ function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<strin
 
 /** The prototypes a lift of `own` reads when a context is in hand: `stated` — a caller's own
  *  prototypes, which win per name — over the context's declarations less those the symbol map
- *  states better (`contextPrototypesUnder`). `own`'s declaration is left out, as the map's is
- *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
- *  fact, and only what the caller states about it is kept.
+ *  states better (`contextPrototypesUnder`). `own`'s declaration is left out of the table, as the
+ *  map's is (`asIfUndecompiled`): a header's signature for the function being decompiled was written
+ *  with no compiler checking it against a definition while the function was still `INCLUDE_ASM`, so
+ *  it is not stated, and only what the caller states about it bounds the lift HARD.
  *
- *  SO THE OWN ENTRY BOUNDS NO ARGUMENT REGISTER (`proto.ts` `ownArgumentWords`), and that was
- *  measured, not assumed. On kleod, whose every header its compiler checked, handing each agbcc
- *  function its own context entry as a stated proto takes the lifts with more parameters than
- *  their header from 52 of 377 to 1 of 373, and corrects 5 that read agbcc's uninitialised r0..r3
- *  as parameters (`PuzzleStageScrollUpdate`, declared `void (void)`), with no new wrong C. It stays
- *  out because the risk sits on the very functions a user decompiles: the header entry of one still
- *  `INCLUDE_ASM` was written with no compiler checking it against a definition, and an entry too
- *  short turns a real argument into `uninit_<reg>` — wrong C, where every other error of the bound
- *  only keeps a parameter. No corpus measures that risk: kleod's headers were all checked, and every
- *  real bench row restates its own header entry as `proto`, from a header its matching source
- *  compiled against, so the bench measures the stated path and not this one. A user who trusts the
- *  entry restates it with `--proto`.
+ *  IT BOUNDS THE ARGUMENT REGISTERS SOFTLY INSTEAD ({@link ownContextEntry}, pipeline.ts
+ *  `liftWithinContextBound`). A hard bound puts the risk on the very functions a user decompiles:
+ *  an entry too short turns a real argument into `uninit_<reg>` — wrong C, where every other error
+ *  of the bound only keeps a parameter — and sbk2 has 16 `void f(void);` task callbacks whose
+ *  bodies read a0. The soft bound drops only the registers past the entry that the finished lift
+ *  never reads; one it reads (or one the machine homes to a slot, as IDO -g3 does) stays a
+ *  parameter, with an `[own-arity]` note naming the declaration and the register. (On kleod, whose
+ *  every header its compiler checked, the entry stated as a hard bound takes the lifts with more
+ *  parameters than their header from 52 of 377 to 1 of 373.) Only a typed list the bound can lay
+ *  out is handed over; every other shape abstains.
+ *
+ *  The benchmark hands each row the same entry (`withOwnContextMark`, apps/benchmark
+ *  context-proto.ts `rowPrototypes`) where its manifest `proto` states none for the row's own
+ *  function, as m2c's vendored context already carries it; not every real row restates its own
+ *  header entry as `proto`. A user who trusts the entry outright restates it with `--proto`, which
+ *  bounds hard.
  *
  *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
  *  false` as nothing) keeps the context's return by `contextReturnUnder`'s rule: a struct return
@@ -1407,6 +1414,75 @@ export function withContextPrototypes(
     }
   }
   return out;
+}
+
+/** THE CONTEXT'S OWN ENTRY FOR `own`, where it is a TYPED LIST a lift may bound its argument
+ *  registers by — the entry `withContextPrototypes` leaves out — and `undefined` everywhere else.
+ *
+ *  Its reader is the context bound (pipeline.ts `liftWithinContextBound`), which is SOFT: a register past it
+ *  that the lift goes on to read stays a parameter, so a header entry too short costs a diagnostic,
+ *  never `uninit_<reg>`. Only an entry whose every parameter the bound can lay out is handed over,
+ *  and every other shape ABSTAINS:
+ *   - no entry, or one the context dropped (two declarations that conflict: C++ overloads);
+ *   - a variadic declaration (`variadicParams`, no `params`): its arity is each caller's;
+ *   - `()` (no `params` at all): it states none, and a K&R definition may take any;
+ *   - a struct passed by value, or a spelling nothing here sizes: either may fill any number of
+ *     words;
+ *   - a symbol that names a C++ member function or a mangled free function, whose declaration the
+ *     context does not key by the symbol; a context naming one the same is not its declaration.
+ *  A bare count is no context entry (`prototypesFromContext` reads lists), and abstains as well. */
+export function ownContextEntry(context: Prototypes, own: string): FnProto | undefined {
+  const p = Object.hasOwn(context, own) ? context[own] : undefined;
+  if (p === undefined || p === null || !Array.isArray(p.params) || p.variadicParams !== undefined) {
+    return undefined;
+  }
+  if (demangledName(own) !== null || implicitArgumentWords(own) !== 0) {
+    return undefined;
+  }
+  const params = p.params;
+  const laidOut = params.every((_, k) => {
+    const cls = paramClassOf(p, params, k);
+    return cls === 'word' || cls === 'wide' || cls === 'float';
+  });
+  return laidOut ? p : undefined;
+}
+
+/** A TABLE'S OWN CONTEXT ENTRY, TAKEN OUT OF IT: where `prototypes`' entry for `own` carries the
+ *  mark (`FnProto.fromContext`), the table without it, and the entry as the soft bound reads it
+ *  ({@link ownContextEntry}, which abstains on any shape it cannot lay out); otherwise the table as
+ *  it is. `given` — an entry the caller hands over beside the table — wins over a marked one.
+ *
+ *  Every entry path asks this before any reader looks at the table, so a marked entry is never
+ *  read as a stated one: a stated entry bounds hard, and a context entry a body reads past would
+ *  turn a real argument into `uninit_<reg>`. */
+export function splitOwnContext(
+  prototypes: Prototypes | undefined,
+  own: string,
+  given?: FnProto,
+): { prototypes: Prototypes | undefined; ownContextProto: FnProto | undefined } {
+  const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  if (p?.fromContext !== true) {
+    return { prototypes, ownContextProto: given };
+  }
+  const { [own]: _marked, ...rest } = prototypes!;
+  const { fromContext: _mark, ...entry } = p;
+  return { prototypes: rest, ownContextProto: given ?? ownContextEntry({ [own]: entry }, own) };
+}
+
+/** `prototypes` with the context's own entry for `own` carried in it under the mark
+ *  ({@link splitOwnContext} reads it back), where the context has one {@link ownContextEntry}
+ *  hands over and the table states none: how a benchmark row publishes the entry its lift read, so
+ *  that its `--proto` replay lifts as it did. */
+export function withOwnContextMark(
+  prototypes: Prototypes | undefined,
+  own: string,
+  context: Prototypes,
+): Prototypes | undefined {
+  if (prototypes !== undefined && Object.hasOwn(prototypes, own)) {
+    return prototypes;
+  }
+  const entry = ownContextEntry(context, own);
+  return entry === undefined ? prototypes : { ...prototypes, [own]: { ...entry, fromContext: true } };
 }
 
 /** The caller's stated entry for `own`, with the struct or union its stated `returns` names laid out

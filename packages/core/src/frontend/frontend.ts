@@ -38,8 +38,15 @@ export interface Frontend {
 
 /** A question the asm leaves open that a frontend answers one way by default and, asked, the other
  *  way: the LIFT variations of rank.ts that live in the frontend. A frontend with no such question
- *  ignores the whole bag. */
+ *  ignores the whole bag. One input rides beside them that no variation sets, the context's
+ *  own-entry bound (`contextOwnWords`). */
 export interface LiftOptions {
+  /** The argument words the declaration context's own entry for the function fills, where no
+   *  stated entry does (pipeline.ts `liftWithinContextBound`, which raises it past a register the
+   *  lift reads, and lifts without it where it refuses), so a frontend given it reads it in place
+   *  of the stated entry's words (frontend/ssa.ts `registerLiveIns`). Every frontend reads it; PowerPC,
+   *  as with a stated entry, only for a body a compiler wrote. */
+  contextOwnWords?: number;
   /** MIPS: keep the slot of a `b`/`j` whose slot is the last word of a common tail its two arms
    *  both spell (`sll; b T; sra` against `sll; sra; T:`), rather than retarget it to the copy at
    *  T-4 and merge the arms. The default retargets (frontend/mips.ts `normaliseBranchLikely`). An

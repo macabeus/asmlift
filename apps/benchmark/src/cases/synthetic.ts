@@ -2,6 +2,7 @@
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
+import { prototypesFromContext, withOwnContextMark } from '@asmlift/core/proto-context';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
@@ -81,6 +82,13 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       const codegen = codegenFor(tcId, cflags);
       const ctx = spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx;
       const contextGlobals = contextGlobalsOf(ctx, spec.lang ?? 'c');
+      // The row's ctx declares its own function as a header does, and a `--context` lift reads that
+      // entry as a soft bound on the argument registers where `proto` states none: carried here
+      // under its mark (core `withOwnContextMark`), as the real tier carries a vendored context's.
+      const proto =
+        spec.ctx === undefined
+          ? spec.proto
+          : withOwnContextMark(spec.proto, spec.sym, prototypesFromContext(spec.ctx, spec.lang ?? 'c'));
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',
@@ -91,7 +99,7 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         loc: spec.src.split('\n').length,
         refSource: spec.src,
         ctx,
-        proto: spec.proto,
+        proto,
         ...(contextGlobals ? { contextGlobals } : {}),
         ...(spec.symbols ? { symbols: spec.symbols } : {}),
         note: spec.note,

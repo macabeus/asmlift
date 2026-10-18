@@ -101,6 +101,119 @@ describe('an argument register past the own declaration', () => {
   });
 });
 
+// The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
+// `liftWithinContextBound`): one the lift never reads is no parameter, one it reads stays a
+// parameter, with a note. KMC's `int f(short a, int b){ if (gX) k4(a, b, 2, 0); while (zq(a) != 5)
+// sl(); return gX; }` at its canonical flags: a2/a3 reach only the guessed calls `zq` and `sl`.
+describe("the context's own entry", () => {
+  const OC_PH = [
+    '0:\tlui\tv0,0x0',
+    '4:\tlw\tv0,0(v0)',
+    '8:\taddiu\tsp,sp,-32',
+    'c:\tsw\ts0,16(sp)',
+    '10:\tmove\ts0,a0',
+    '14:\tsw\tra,24(sp)',
+    '18:\tbeqz\tv0,34 <f+0x34>',
+    '1c:\tsw\ts1,20(sp)',
+    '20:\tsll\ta0,s0,0x10',
+    '24:\tsra\ta0,a0,0x10',
+    '28:\tli\ta2,2',
+    '2c:\tjal\t0 <f>',
+    '30:\tmove\ta3,zero',
+    '34:\tsll\ts0,s0,0x10',
+    '38:\tli\ts1,5',
+    '3c:\tjal\t0 <f>',
+    '40:\tsra\ta0,s0,0x10',
+    '44:\tbeq\tv0,s1,5c <f+0x5c>',
+    '48:\tnop',
+    '4c:\tjal\t0 <f>',
+    '50:\tnop',
+    '54:\tj\t3c <f+0x3c>',
+    '58:\tnop',
+    '5c:\tlui\tv0,0x0',
+    '60:\tlw\tv0,0(v0)',
+    '64:\tlw\tra,24(sp)',
+    '68:\tlw\ts1,20(sp)',
+    '6c:\tlw\ts0,16(sp)',
+    '70:\tjr\tra',
+    '74:\taddiu\tsp,sp,32',
+  ];
+  const relocs: [number, string, string][] = [
+    [0x0, 'R_MIPS_HI16', 'gX'],
+    [0x4, 'R_MIPS_LO16', 'gX'],
+    [0x2c, 'R_MIPS_26', 'k4'],
+    [0x3c, 'R_MIPS_26', 'zq'],
+    [0x4c, 'R_MIPS_26', 'sl'],
+    [0x54, 'R_MIPS_26', '.text'],
+    [0x5c, 'R_MIPS_HI16', 'gX'],
+    [0x60, 'R_MIPS_LO16', 'gX'],
+  ];
+  const asmData: AsmData = {
+    ...callsTo('k4', []),
+    relocs: relocs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+  };
+  const k4 = { k4: { params: ['int', 'int', 'int', 'int'], returnsVoid: true } };
+  const own = { params: ['short', 'int'], returns: 'int' };
+
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('drops an argument register past it that nothing reads (%s)', (_c, target) => {
+    const plain = decompile('f', obj(OC_PH), target, { asmData, prototypes: k4 });
+    expect(plain.source).toMatch(/^s32 f\(s32 a0, s32 a1, s32 a2, s32 a3\) \{/m);
+    const r = decompile('f', obj(OC_PH), target, { asmData, prototypes: k4, ownContextProto: own });
+    expect(r.source).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/m);
+    expect(r.source).not.toMatch(/uninit_/);
+    expect(r.ownArityNotes).toEqual([]);
+    expect(r.source).toBe(decompile('f', obj(OC_PH), target, { asmData, prototypes: { ...k4, f: own } }).source);
+  });
+
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('keeps a register past it that the body reads a parameter, with a note (%s)', (_c, target) => {
+    const READ_A2 = ['0:\taddu\tv0,a0,a2', '4:\tjr\tra', '8:\tnop'];
+    const r = decompile('f', obj(READ_A2), target, { ownContextProto: { params: ['s32', 's32'], returns: 's32' } });
+    expect(r.source).toBe(src(READ_A2, target));
+    expect(r.ownArityNotes).toEqual([
+      'f: its context declaration `s32 f(s32, s32)` fills 2 argument words, and the body reads a2 past them — ' +
+        'kept as a parameter, which the header contradicts',
+    ]);
+  });
+
+  // `int t2(int a, int b, int c){ return a ? b : c; }` under `int t2(int);` at KMC -O2: a1's and
+  // a2's undefined values meet in v0's join, which collapses into one keyed v0
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('keeps two registers past it read through one join, with a note (%s)', (_c, target) => {
+    const T2 = ['0:\tbeqz\ta0,c <f+0xc>', '4:\tmove\tv0,a2', '8:\tmove\tv0,a1', 'c:\tjr\tra', '10:\tnop'];
+    const r = decompile('f', obj(T2), target, { ownContextProto: { params: ['int'], returns: 'int' } });
+    expect(r.source).toBe(src(T2, target));
+    expect(r.source).toMatch(/^s32 f\(s32 a0, s32 a1, s32 a2\) \{/m);
+    expect(r.ownArityNotes).toEqual([
+      'f: its context declaration `int f(int)` fills 1 argument word, and the body reads a1, a2 past it — ' +
+        'kept as parameters, which the header contradicts',
+    ]);
+  });
+
+  // `void f(int a, int b){ }` under `void f(void);` at IDO -O2 -g3: the prologue homes both argument
+  // registers to slots nothing reads back, and those stores are the asm reading a0 and a1
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('keeps a register past it that the body only homes, with a note (%s)', (_c, target) => {
+    const HOMES = ['0:\tsw\ta0,0(sp)', '4:\tsw\ta1,4(sp)', '8:\tjr\tra', 'c:\tnop'];
+    const r = decompile('f', obj(HOMES), target, { ownContextProto: { params: [], returnsVoid: true } });
+    expect(r.source).toBe(src(HOMES, target));
+    expect(r.source).toMatch(/^void f\(s32 a0, s32 a1\) \{/m);
+    expect(r.ownArityNotes).toEqual([
+      'f: its context declaration `void f(void)` fills 0 argument words, and the body reads a0, a1 past them — ' +
+        'kept as parameters, which the header contradicts',
+    ]);
+  });
+});
+
 describe('the register half: scratch and saved registers', () => {
   // `int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }`, gcc2.7.2kmc -O2 (and gcc2.7.2
   // -O1, byte-identical): r lives in v0, set only in the branch-likely slot. Without the model it

@@ -14,6 +14,7 @@ import {
   globalsFromContext,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnContextMark,
   withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
@@ -23,7 +24,10 @@ import type { TargetDescription } from '@asmlift/core/target';
 const parsed = new Map<string, Prototypes>();
 
 /** The row's prototype table: the manifest's `proto` over its vendored context
- *  (`withContextPrototypes`, which says whose entry wins and why the row's own is left out). */
+ *  (`withContextPrototypes`, which says whose entry wins and why the row's own is left out) — and,
+ *  where the manifest states no entry for the row's own function, the context's own entry under
+ *  its mark (`withOwnContextMark`), which bounds the lift's argument registers softly as a
+ *  `--context` lift's does, and which the row publishes so its `--proto` replay lifts the same. */
 export function rowPrototypes(
   manifest: Prototypes | undefined,
   { ctxI, ctxFile }: { ctxI: string; ctxFile: string },
@@ -41,14 +45,12 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language);
     parsed.set(key, derived);
   }
-  const merged = withContextPrototypes(
-    withOwnReturnLayout(manifest, sym, ctxI, language),
-    derived,
+  const merged = withOwnContextMark(
+    withContextPrototypes(withOwnReturnLayout(manifest, sym, ctxI, language), derived, sym, symbols, target),
     sym,
-    symbols,
-    target,
+    derived,
   );
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  return merged !== undefined && Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /** contexts' globals, keyed by the language and the context's name */

@@ -1225,7 +1225,10 @@ export function makeSsaBuilder(
    *  Such a join is replaced by one fresh undefined value at the entry, keyed as the join was,
    *  which dominates every use the join had. The greatest such set, so a loop that only carries an
    *  undefined value round (`phi(undef, phi(…))`) collapses with it. Run after the hidden-input
-   *  check, which refuses the joins whose undefined arguments are a hand-written routine's inputs. */
+   *  check, which refuses the joins whose undefined arguments are a hand-written routine's inputs.
+   *  The fresh value lists the other keys whose undefined values it absorbed (`ABSORBED_KEYS`):
+   *  `x = a ? b : c` past a one-word declaration joins r1's and r2's into r4's, and a reader asking
+   *  whether the lift still reads r1 must find it there. */
   const collapseUndefinedJoins = () => {
     const incoming = joinArgs();
     const undefs = new Set<Value>();
@@ -1277,10 +1280,25 @@ export function makeSsaBuilder(
       return;
     }
     const orphans = new Set([...doomed].flatMap((p) => incoming.get(p)!.filter((a) => undefs.has(a))));
+    const defOf = defOpMap(fn);
+    // The keys of the undefined values a join absorbs, through the doomed joins it takes.
+    const absorbed = (p: Value, seen = new Set<Value>()): string[] =>
+      seen.has(p)
+        ? []
+        : (seen.add(p),
+          incoming
+            .get(p)!
+            .flatMap((a) =>
+              undefs.has(a) ? [String(defOf.get(a)!.attrs.key)] : doomed.has(a) ? absorbed(a, seen) : [],
+            ));
     for (const p of doomed) {
       const firstUndef = incoming.get(p)!.find((a) => undefs.has(a));
-      const key = phiKey.get(p) ?? (firstUndef && defOpMap(fn).get(firstUndef)?.attrs.key) ?? '';
-      const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
+      const key = phiKey.get(p) ?? (firstUndef && defOf.get(firstUndef)?.attrs.key) ?? '';
+      const from = [...new Set(absorbed(p))].filter((k) => k !== key).sort();
+      const op = mkOp('undef', {
+        results: [mkValue(T.unk(32))],
+        attrs: from.length === 0 ? { key } : { key, [ABSORBED_KEYS]: from.join(',') },
+      });
       irBlocks[0].ops.unshift(op);
       replaceAllUsesWith(fn, p, op.results[0]);
     }
@@ -1543,6 +1561,12 @@ export function makeSsaBuilder(
         }
       }
       const defs0 = defOpMap(fn);
+      for (const v of deadHomed) {
+        const d = defs0.get(v);
+        if (d?.opcode === 'undef') {
+          d.attrs[HOMED_UNDEF] = true;
+        }
+      }
       for (const p of irBlocks[0].params) {
         const reg = paramReg.get(p);
         const first = reg === undefined ? undefined : firstEntryWrite.get(reg);
@@ -2273,6 +2297,18 @@ export function narrowToSetupArgs(fn: Fn): boolean {
 }
 
 // ── shared frontend tail helpers ──
+
+/** The `undef` attribute naming the other keys whose undefined values a collapsed join absorbed
+ *  (`collapseUndefinedJoins`), comma-separated. Read once, by the own-entry bound (pipeline.ts `readDroppedArgRegs`),
+ *  and removed before anything else sees the lift. */
+export const ABSORBED_KEYS = 'absorbed';
+
+/** The `undef` attribute marking an undefined value the machine stored to a stack slot nothing reads
+ *  back (`finish`, the same test as an entry parameter's `deadHome`). The store reaches no op, so the
+ *  value looks dead, yet the asm read the register: IDO at -g3 and -O0 homes every argument register
+ *  its definition declares (`sw a1,4(sp)`) whether or not the body uses it. Read once, by the
+ *  own-entry bound (pipeline.ts `readDroppedArgRegs`), and removed with `ABSORBED_KEYS`. */
+export const HOMED_UNDEF = 'homed';
 
 /** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
  *  function's own frame. Shared so they spell it identically and the frame-partition rule can

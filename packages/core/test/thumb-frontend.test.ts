@@ -3,7 +3,7 @@
 // Thumb degrades it to a loud `opaque`. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
-import { decompile } from '../src/pipeline';
+import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -1127,6 +1127,140 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', hole, ARMV4T_AGBCC, { prototypes: { f: typed(1) } }).source).toBe(
         's32 f(s32 a0) {\n    s32 uninit_r2;\n    return a0 + uninit_r2;\n}\n',
       );
+    });
+  });
+
+  // The declaration context's OWN entry (`ownContextProto`, pipeline.ts `liftWithinContextBound`)
+  // bounds the same registers SOFTLY: a register past it the lift never reads is no parameter, and
+  // one it reads stays the parameter a context-less lift makes it, with a note — never
+  // `uninit_<reg>`, since a header entry for a function still in assembly was checked by no
+  // compiler. `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0); while (zq(a) != 5) sl(); return
+  // gX; }` at agbcc's canonical flags: r2/r3 reach only the guessed calls `zq` and `sl`.
+  describe("the context's own entry bounds them softly", () => {
+    const OC_PH =
+      'oc_ph:\n\tpush\t{r4, lr}\n\tlsl\tr0, r0, #0x10\n\tlsr\tr4, r0, #0x10\n\tldr\tr0, .L8\n\tldr\tr0, [r0]\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.L3\n\tlsl\tr0, r4, #0x10\n\tasr\tr0, r0, #0x10\n\tmov\tr2, #0x2\n\tmov\tr3, #0x0\n' +
+      '\tbl\tk4\n.L3:\n\tlsl\tr4, r4, #0x10\n\tb\t.L4\n.L8:\n\t.word\tgX\n.L6:\n\tbl\tsl\n.L4:\n\tasr\tr0, r4, #0x10\n' +
+      '\tbl\tzq\n\tcmp\tr0, #0x5\n\tbne\t.L6\n\tldr\tr0, .L10\n\tldr\tr0, [r0]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L10:\n\t.word\tgX\n';
+    const k4 = { k4: { params: ['int', 'int', 'int', 'int'], returnsVoid: true } };
+    const ocPh = (ownContextProto?: Prototypes[string]) =>
+      decompile('oc_ph', OC_PH, ARMV4T_AGBCC, { prototypes: k4, ...(ownContextProto ? { ownContextProto } : {}) });
+
+    test('an argument register past it that nothing reads is no parameter', () => {
+      expect(ocPh().source).toMatch(/^s32 oc_ph\(u16 a0, s32 a1, s32 a2, s32 a3\) \{/m);
+      const r = ocPh({ params: ['short', 'int'], returns: 'int' });
+      expect(r.source).toMatch(/^s32 oc_ph\(u16 a0, s32 a1\) \{/m);
+      expect(r.source).not.toMatch(/uninit_/);
+      expect(r.ownArityNotes).toEqual([]);
+      // the body is the stated entry's, byte for byte
+      expect(r.source).toBe(
+        decompile('oc_ph', OC_PH, ARMV4T_AGBCC, {
+          prototypes: { ...k4, oc_ph: { params: ['short', 'int'], returns: 'int' } },
+        }).source,
+      );
+    });
+
+    // `void oc_cb(void);` ahead of `void oc_cb(struct T *t){ g(&t->b, t->c + 1); }`: the shape of
+    // sbk2's task callbacks, whose `(void)` forward declarations were short when they were decompiled
+    test('a register past it that the body reads stays a parameter, with a note', () => {
+      const OC_CB =
+        'oc_cb:\n\tpush\t{lr}\n\tadd\tr2, r0, #0x4\n\tldr\tr1, [r0, #0x8]\n\tadd\tr1, r1, #0x1\n\tadd\tr0, r2, #0\n' +
+        '\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';
+      const g = { g: { params: ['int *', 'int'], returnsVoid: true } };
+      const plain = decompile('oc_cb', OC_CB, ARMV4T_AGBCC, { prototypes: g });
+      const r = decompile('oc_cb', OC_CB, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: [], returnsVoid: true },
+      });
+      expect(r.source).toBe(plain.source);
+      expect(r.source).toMatch(/^void oc_cb\(s32 \*a0\) \{/m);
+      expect(r.ownArityNotes).toEqual([
+        'oc_cb: its context declaration `void oc_cb(void)` fills 0 argument words, and the body reads r0 past ' +
+          'them — kept as a parameter, which the header contradicts',
+      ]);
+      // stated, the same entry is the caller's word: r0 is an uninitialised local
+      expect(
+        decompile('oc_cb', OC_CB, ARMV4T_AGBCC, { prototypes: { ...g, oc_cb: { params: [], returnsVoid: true } } })
+          .source,
+      ).toMatch(/uninit_r0/);
+    });
+
+    // `int t3(int a, int b, int c){ int x = a ? b : c; g(0); return g(x); }` under `int t3(int);`:
+    // r1's and r2's undefined values meet in r4's join, which collapses into one keyed r4
+    // (frontend/ssa.ts `collapseUndefinedJoins`), and the read of r1/r2 must survive that
+    test('a read of two registers past it through one join keeps both, with a note', () => {
+      const T3 =
+        't3:\n\tpush\t{r4, lr}\n\tadd\tr4, r2, #0\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr4, r1, #0\n.L3:\n' +
+        '\tmov\tr0, #0x0\n\tbl\tg\n\tadd\tr0, r4, #0\n\tbl\tg\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { g: { params: ['int'], returns: 'int' } };
+      const r = decompile('t3', T3, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: ['int'], returns: 'int' },
+      });
+      expect(r.source).toBe(decompile('t3', T3, ARMV4T_AGBCC, { prototypes: g }).source);
+      expect(r.source).toMatch(/^s32 t3\(s32 a0, s32 a1, s32 a2\) \{/m);
+      expect(r.ownArityNotes).toEqual([
+        't3: its context declaration `int t3(int)` fills 1 argument word, and the body reads r1, r2 past it — ' +
+          'kept as parameters, which the header contradicts',
+      ]);
+    });
+
+    // a table carrying the context's entry under its mark is split where every lift passes, so a
+    // path that hands the lift such a table unsplit still bounds softly, never hard
+    test('a marked entry in the table bounds the lift softly', () => {
+      const OC_CB =
+        'oc_cb:\n\tpush\t{lr}\n\tadd\tr2, r0, #0x4\n\tldr\tr1, [r0, #0x8]\n\tadd\tr1, r1, #0x1\n\tadd\tr0, r2, #0\n' +
+        '\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';
+      const g = { g: { params: ['int *', 'int'], returnsVoid: true } };
+      const notes: string[] = [];
+      const fn = liftStamped(
+        'oc_cb',
+        OC_CB,
+        ARMV4T_AGBCC,
+        { ...g, oc_cb: { params: [], returnsVoid: true, fromContext: true } },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        notes,
+      );
+      expect(fn.blocks[0].params).toHaveLength(1);
+      expect(fn.blocks.some((b) => b.ops.some((op) => op.opcode === 'undef'))).toBe(false);
+      expect(notes).toHaveLength(1);
+    });
+
+    test('a read of the last argument register lifts as without it, and a stated entry wins', () => {
+      const UFIRST =
+        'ufirst:\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x5\n\tble\t.L6\n\tldr\tr0, .L7\n\tstr\tr3, [r0]\n' +
+        '.L6:\n\tldr\tr3, [r1]\n\tadd\tr0, r3, r2\n\tbx\tlr\n.L7:\n\t.word\tgOut\n';
+      const own = { params: ['s32', 's32 *'], returns: 's32' };
+      const soft = decompile('ufirst', UFIRST, ARMV4T_AGBCC, { ownContextProto: own });
+      expect(soft.source).toBe(decompile('ufirst', UFIRST, ARMV4T_AGBCC).source);
+      expect(soft.ownArityNotes).toHaveLength(1);
+      expect(soft.ownArityNotes[0]).toMatch(/reads r3 past them/);
+      const stated = decompile('ufirst', UFIRST, ARMV4T_AGBCC, { prototypes: { ufirst: own }, ownContextProto: own });
+      expect(stated.source).toBe(decompile('ufirst', UFIRST, ARMV4T_AGBCC, { prototypes: { ufirst: own } }).source);
+      expect(stated.ownArityNotes).toEqual([]);
+    });
+
+    // the stack refusal a stated entry has is no decline here: the lift goes back to its
+    // context-less self, and says why
+    test('an incoming stack argument past it lifts as without it, with a note', () => {
+      const ST2 =
+        'st2:\n\tpush\t{r4, lr}\n\tldr\tr4, [sp, #0x8]\n\tbl\tg\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { g: { params: 1 } };
+      const r = decompile('st2', ST2, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: ['s32', 's32'], returns: 's32' },
+      });
+      expect(r.source).toBe(decompile('st2', ST2, ARMV4T_AGBCC, { prototypes: g }).source);
+      expect(r.ownArityNotes).toEqual([
+        'st2: lifted without its context declaration `s32 st2(s32, s32)`, which it could not be lifted within ' +
+          "(cannot lift 'st2': it reads incoming stack argument 4, past the 2 argument words its own declaration " +
+          'fills — the declaration and the body disagree)',
+      ]);
     });
   });
 
