@@ -1,8 +1,7 @@
 // A MEMBER PAST THE DISPLACEMENT RANGE (raise/structs.ts `foldDisplacedAccesses`). The machine
-// reaches it through an address it materialises first, and the lift keyed the access on that
-// address, so the member never joined its struct and was spelled as a cast. On agbcc a member
-// store and a cast store build two objects (gcc/expr.c expand_assignment :2535 vs :2689): the
-// member is what kept `sa3:sub_800F0E8` from matching, and the cast (or a hoisted pointer) is the
+// reaches it through an address it materialises first; folded, the access joins its struct as a
+// member. On agbcc a member store and a cast store build two objects (gcc/expr.c expand_assignment
+// :2535 vs :2689): `sa3:sub_800F0E8` needs the member, and the cast (or a hoisted pointer) is the
 // `/far-cast` lift, which keeps the store on its address. Every agbcc fixture is agbcc's own output at
 // the corpus flags (`-mthumb-interwork -O2 -fhex-asm -fprologue-bugfix`), every MIPS/PPC one the
 // toolchain's own disassembly at its canonical flags.

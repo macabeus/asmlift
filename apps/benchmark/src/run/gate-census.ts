@@ -200,10 +200,10 @@ export const PASSES: Record<string, CensusablePass> = {
   },
   displaced: {
     // raise/structs.ts's two tables for the displaced-access fold: `DISPLACED_BASE_GATES`, asked
-    // once per materialised base `add(p, K)` that carries a constant-offset access (a base on a
-    // root an earlier base already refused is not asked again), and `DISPLACED_ROOT_GATES`, asked
-    // once per root whose bases all passed. On every lift that reaches the pass, `/far-cast`'s
-    // included, which skips a base carrying a store before either table sees it.
+    // once per materialised base `add(p, K)` that carries a constant-offset access, and
+    // `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. On every lift that
+    // reaches the pass, `/far-cast`'s included, which skips a base carrying a store before either
+    // table sees it.
     tables: [
       ['base', DISPLACED_BASE_GATES as readonly Gate<never>[]],
       ['root', DISPLACED_ROOT_GATES as readonly Gate<never>[]],

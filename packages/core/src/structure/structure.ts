@@ -460,7 +460,7 @@ function ptrMemberElement(
 // and in-a-loop shapes. It is one load whose member offset becomes the same immediate the cast
 // form used, and unlike the indexed form it composes.
 //
-// ONE SHAPE THAT MEASUREMENT MISSED IS NOT IDENTICAL: on agbcc, a STORE to an offset past Thumb's
+// ONE SHAPE IS NOT IDENTICAL: on agbcc, a STORE to an offset past Thumb's
 // immediate range. expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target
 // (:2535) and evaluates the right-hand side first in store_field (:2624), while it expands a cast
 // (INDIRECT_REF) target whole (:2689) before the right-hand side (:2747). So the member form loads

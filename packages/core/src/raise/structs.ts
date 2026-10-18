@@ -375,46 +375,6 @@ function fieldSize(t: IrType): number {
   }
 }
 
-/** FOLD A MATERIALISED DISPLACEMENT INTO THE ACCESS: a load/store whose base is `add(p, K)` (or a
- *  chain of constant adds/subs off `p`) becomes an access of `p` at `off + K`, so `recognizeStructs`
- *  sees it in `p`'s access set and spells it as the member it is.
- *
- *  WHY. Every ISA has a displacement range, and a member past it is reached through an address the
- *  machine materialises first: Thumb's `adds rX, #38; strb [rX]` (a byte past 31, a half past 62,
- *  a word past 124), ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and GCC 2.7.2's
- *  `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1; stb r4, -25537(r5)`.
- *  The lift keys such an access on the materialised address, so it never joined its struct and was
- *  spelled as a cast `*((u8 *)p + 38)`. On agbcc that spelling is a different program: for a
- *  COMPONENT_REF target expand_assignment (gcc/expr.c :2535) expands only the base and store_field
- *  (:2624) evaluates the right-hand side first, while a cast (INDIRECT_REF) target is expanded whole
- *  (:2689) before the right-hand side (:2747). A member store of a loaded value therefore loads it
- *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store), and
- *  with a constant or a parameter on the right the two still allocate registers differently. The
- *  cast is a source spelling too: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object. So
- *  the fold is the default and `opts.keepStores` (the `/far-cast` lift) keeps every such store on
- *  its address for the differ to referee.
- *  A LOAD through a cast and through a member compile alike, and fold in both lifts — but a load
- *  through a HELD pointer does not: agbcc materialises one `add` per member access, even for
- *  adjacent members (`p->f38 + p->f39` is `add #0x26` and `add #0x27`), so one materialised base
- *  read or written at two distinct offsets (`add r1, #0x26; ldrb [r1]; ldrb [r1, #1]`) is the
- *  pointer the source held, and the member spelling cannot rebuild it (`held-pointer-offsets`).
- *  ido does the same past its `addiu` reach, where the assembler gives each member access its own
- *  `lui`/`addu` (target.ts `farMemberBasePerAccess` states the reach per compiler). On ido, KMC,
- *  GCC 2.7.2 and mwcc one access through a member and through a cast compile alike, a store of a
- *  loaded value included, and there the fold buys the type; what it can cost is the neighbours'
- *  spelling — a folded store no longer aliases the loads beside it, and a held mwcc pointer is
- *  respelled as members — which is why `/far-cast` is offered there too.
- *
- *  THE REFUSALS ARE TWO GATE TABLES, so `pnpm bench gates --pass displaced` can count which one
- *  keeps a row on the cast spelling: `DISPLACED_BASE_GATES`, asked once per materialised base, and
- *  `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. A base the first
- *  refuses keeps its own accesses on its materialised address while the root's other bases are
- *  still asked; a root the second refuses keeps every access off it on its address, as before.
- *  Every gate is a spelling choice, not a soundness rule: the fold rewrites address arithmetic
- *  into the same address, so no candidate it admits reads different memory, and the differ
- *  referees. NOT TABLED: `/far-cast`'s `keepStores` skip, which is the variation itself
- *  rather than a refusal. Runs right before `recognizeStructs`, after raise/truncload.ts, which
- *  therefore never sees a folded access. Returns the number of accesses folded. */
 export interface DisplacedOptions {
   /** leave every STORE on its materialised address, folding only the loads (`/far-cast`) */
   keepStores?: boolean;
@@ -538,6 +498,46 @@ export const DISPLACED_ROOT_GATES: readonly Gate<DisplacedRoot>[] = [
   },
 ];
 
+/** FOLD A MATERIALISED DISPLACEMENT INTO THE ACCESS: a load/store whose base is `add(p, K)` (or a
+ *  chain of constant adds/subs off `p`) becomes an access of `p` at `off + K`, so `recognizeStructs`
+ *  sees it in `p`'s access set and spells it as the member it is.
+ *
+ *  WHY. Every ISA has a displacement range, and a member past it is reached through an address the
+ *  machine materialises first: Thumb's `adds rX, #38; strb [rX]` (a byte past 31, a half past 62,
+ *  a word past 124), ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and GCC 2.7.2's
+ *  `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1; stb r4, -25537(r5)`.
+ *  Unfolded, such an access is keyed on the materialised address, never joins its struct, and is
+ *  spelled as a cast `*((u8 *)p + 38)`. On agbcc that spelling is a different program: for a
+ *  COMPONENT_REF target expand_assignment (gcc/expr.c :2535) expands only the base and store_field
+ *  (:2624) evaluates the right-hand side first, while a cast (INDIRECT_REF) target is expanded whole
+ *  (:2689) before the right-hand side (:2747). A member store of a loaded value therefore loads it
+ *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store), and
+ *  with a constant or a parameter on the right the two still allocate registers differently. The
+ *  cast is a source spelling too: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object. So
+ *  the fold is the default and `opts.keepStores` (the `/far-cast` lift) keeps every such store on
+ *  its address for the differ to referee.
+ *  A LOAD through a cast and through a member compile alike, and fold in both lifts — but a load
+ *  through a HELD pointer does not: agbcc materialises one `add` per member access, even for
+ *  adjacent members (`p->f38 + p->f39` is `add #0x26` and `add #0x27`), so one materialised base
+ *  read or written at two distinct offsets (`add r1, #0x26; ldrb [r1]; ldrb [r1, #1]`) is the
+ *  pointer the source held, and the member spelling cannot rebuild it (`held-pointer-offsets`).
+ *  ido does the same past its `addiu` reach, where the assembler gives each member access its own
+ *  `lui`/`addu` (target.ts `farMemberBasePerAccess` states the reach per compiler). On ido, KMC,
+ *  GCC 2.7.2 and mwcc one access through a member and through a cast compile alike, a store of a
+ *  loaded value included, and there the fold buys the type; what it can cost is the neighbours'
+ *  spelling — a folded store no longer aliases the loads beside it, and a held mwcc pointer is
+ *  respelled as members — which is why `/far-cast` is offered there too.
+ *
+ *  THE REFUSALS ARE TWO GATE TABLES, so `pnpm bench gates --pass displaced` can count which one
+ *  keeps a row on the cast spelling: `DISPLACED_BASE_GATES`, asked once per materialised base, and
+ *  `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. A base the first
+ *  refuses keeps its own accesses on its materialised address while the root's other bases are
+ *  still asked; a root the second refuses keeps every access off it on its address.
+ *  Every gate is a spelling choice, not a soundness rule: the fold rewrites address arithmetic
+ *  into the same address, so no candidate it admits reads different memory, and the differ
+ *  referees. NOT TABLED: `/far-cast`'s `keepStores` skip, which is the variation itself
+ *  rather than a refusal. Runs right before `recognizeStructs`, after raise/truncload.ts, which
+ *  therefore never sees a folded access. Returns the number of accesses folded. */
 export function foldDisplacedAccesses(
   fn: Fn,
   opts: DisplacedOptions = {},

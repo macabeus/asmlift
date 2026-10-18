@@ -985,8 +985,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `ldrb [r1, #1]`, where the member spelling `p->c + p->d` gives each access its own `adds`. So
   // the pointer is the source's and the fold leaves it alone (raise/structs.ts
   // `held-pointer-offsets`). Inside the `addiu` reach ido and mwcc share one base across members
-  // too, and KMC lifts the held pair as members at the same bytes, so this pins agbcc only; ido past
-  // that reach is `sfar_msg`'s.
+  // as they do for a held pointer, and KMC lifts the held pair as members at the same bytes, so
+  // this pins agbcc only; ido past that reach is `sfar_msg`'s.
   {
     sym: 'sfar_held',
     src: 'struct S{s32 a;u16 b;u8 pad[32];u8 c;u8 d;};\nu32 sfar_held(struct S*p){ u8*d=&p->c; return d[0]+d[1]+p->a; }',
