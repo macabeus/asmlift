@@ -974,16 +974,22 @@ would. THE CALLEE HALF, on every frontend: a function
 that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
 returns it, so with nothing declared it lifts as `s32 *f(s32 *a0, …)` — which is also what `void
 f(S *)` compiles to, so only a declaration can say which the source wrote. Where its own
-declaration — stated, or the context's own entry — returns the struct, the lift is checked after
-the frontend runs (`frontend/own-struct-return.ts`, L1, from `pipeline.ts` `liftStamped`): every
-return hands back the incoming pointer, and the pointer and the constants added to it are read
-only as the bases of unqualified stores inside the struct. Then the pointer is the function's own
+declaration — stated, or the context's own entry, whatever its parameter list — returns the
+struct, the lift is checked after the frontend runs (`frontend/own-struct-return.ts`, L1, from
+`pipeline.ts` `liftStamped`): where the compiler hands the pointer back (agbcc and O32, `target.ts`
+`structReturnHandsBackPointer`) every return hands back the incoming pointer, and where it does not
+(the three mwcc builds, which leave in r3 whatever was last there) no return hands back a value
+computed for the return alone; the pointer and the constants added to it are read only as the
+bases of unqualified stores inside the struct, and at least one store goes through it. Then the pointer is the function's own
 return object — an `laddr` marked `returned`, which names the caller's storage and no frame offset
 — its stores are that local's members, and each `ret` returns it by value: `struct S f(s32 a0) {
 struct S ret; ret.a = a0; return ret; }`. A frame object the struct was built in and copied out of
 whole (IDO's word copy, agbcc's `ldmia`/`stmia`) is that local, and the copy is `return ret;`'s
-own lowering, so it folds where nothing else reads the object and every write to it is on a path
-into the copy, ahead of it.
+own lowering, so it folds where nothing else reads the object, something stores to it, and every
+write to it is on a path into the copy, ahead of it. It folds one copy, in one block, of an object
+that holds the struct alone: IDO's copy repeated at each of several `return r;`s, and an object
+the frontend shares with another address-taken local, keep the copy as member stores — the same
+function, one copy too many.
 Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
 an `[own-return]` note, the soft policy of its arity bound. A stated return the context lays out —
 `struct S`, or a typedef of one — is read with that layout (`proto-context.ts`
