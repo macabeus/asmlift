@@ -939,3 +939,14 @@ test('an arm into an exit that takes copies keeps the loop `while (1)`', () => {
   expect(src).toContain('while (1) {');
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
 });
+
+test('an arm into an exit that only returns is a `break`, not a copy of the return', () => {
+  // the exit holds no effect, so `earlyReturnArm` would also take the arm and copy `return 5` into it
+  const pure = CODE_ARM_TOP_TESTED.replace('%10: s32 = call {target="out"}', '%10: s32 = const {value=5}');
+  const { src, agreement, shipped } = judged(pure);
+  expect(src).toContain('for (v0 = 0; v0 < a0; v0 = v0 + 1) {');
+  expect(src).toMatch(/\{\n {12}hit\(v\d\);\n {12}break;\n {8}\}/);
+  expect(src.match(/return 5;/g)).toHaveLength(1);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});

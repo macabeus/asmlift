@@ -2891,6 +2891,16 @@ export function structure(
     [...forest.byHeader.values()].every(
       (l2) => l2.header === nl.header || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
     ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
+  // An edge out of `nl` that does not land on `exit` itself, read the one way both the `while` and the
+  // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return that
+  // `owned` the loop emits. The break arm is asked first: where the exit ends in a `return`,
+  // `earlyReturnArm` would also take the arm and copy that tail into it, where the asm holds one copy.
+  // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
+  const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
+    const region = codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
+    const owned = region === null ? earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit) : null;
+    return { region, owned };
+  };
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
@@ -2982,16 +2992,12 @@ export function structure(
       if (e.from === exitFrom && e.to === exit) {
         continue;
       }
-      const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
+      // a `while` takes a code-running break only into an exit that takes no copies: the header's exit
+      // copies are what `breakRule` shares with a break, and an arm's edge into the exit is not one
+      const { region, owned } = exitArmOf(nl, e, exit, kind === 'while' && exit.params.length === 0);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
       }
-      // A `break` whose arm runs code first, into an exit that takes no copies: the header's exit
-      // copies are what `breakRule` shares with a break, and an arm's edge into the exit is not one.
-      const region =
-        kind === 'while' && owned === null && exit.params.length === 0 && !innerBodyHas(nl, e.from)
-          ? codeBreakArm(preds, e.from, e.to, nl.body, exit)
-          : null;
       if (kind === 'while' && e.to === exit && !innerBodyHas(nl, e.from)) {
         breaks.add(e.from);
       } else if (region !== null) {
@@ -3069,15 +3075,14 @@ export function structure(
           breaks.add(e.from);
           return !innerBodyHas(nl, e.from);
         }
-        const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
+        const { region, owned } = exitArmOf(nl, e, exit, true);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
-        const region = owned === null ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
         if (region !== null) {
           breaks.add(e.from);
           breakArms.push({ from: e.from, to: e.to, region });
-          return !innerBodyHas(nl, e.from);
+          return true;
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
