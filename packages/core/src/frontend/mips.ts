@@ -55,7 +55,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import type { Frontend, LiftOptions } from './frontend';
+import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -1550,7 +1550,7 @@ function liftOnce(
     prototypes,
     { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
-    () => (Object.hasOwn(prototypes, name) ? prototypes[name] : options.contextOwnProto),
+    () => ownDeclarationOf(name, prototypes, options.contextOwnProto),
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
   // in a function that has one refuses: which floating-point registers a callee reads, returns in

@@ -140,6 +140,31 @@ describe('on O32 (gcc2.7.2kmc), a gap is decided where the own declaration rules
   });
 });
 
+describe('on O32 (gcc2.7.2kmc), a decided gap refuses where the call may take more than it counts', () => {
+  // `int g(); int f(int a, int b, int c, int d){ return g(a, 2, c, d, 5) + 1; }`: c and d stay in
+  // a2/a3, and the fifth argument goes to 16(sp)
+  const ll6 = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tli\tv0,5',
+    '8:\tli\ta1,2',
+    'c:\tsw\tra,24(sp)',
+    '10:\tjal\t0 <f>',
+    '14:\tsw\tv0,16(sp)',
+    '18:\tlw\tra,24(sp)',
+    '1c:\taddiu\tv0,v0,1',
+    '20:\tjr\tra',
+    '24:\taddiu\tsp,sp,32',
+  ];
+  const lift = (prototypes: Prototypes) =>
+    decompile('f', mips(ll6), MIPS_GCC, { asmData: jalTo(0x10, 'g'), prototypes }).source;
+  test('an own parameter that may sit past the count refuses', () => {
+    expect(() => lift(own(['s32', 's32', 's32', 's32']))).toThrow(/a1 holds a value and a0 holds none/);
+  });
+  test('an outgoing stack word that reaches the call refuses', () => {
+    expect(() => lift(own(['s32', 's32']))).toThrow(/a1 holds a value and a0 holds none/);
+  });
+});
+
 describe('on PowerPC (mwcc_242_81), a gap is decided where no 8-byte argument can own it', () => {
   const ppc = (body: string) => `0 <f>:\n${body}`;
   const call = (at: number, sym: string) =>
@@ -154,15 +179,25 @@ describe('on PowerPC (mwcc_242_81), a gap is decided where no 8-byte argument ca
     );
 
   // `int logv(); int f(const char *s){ return logv(s, 1) + 1; }`: r3 is even, and PowerPC's floats
-  // take no general word, so nothing can leave it empty
-  test('r3 below a set r4 is passed on, with or without an own declaration', () => {
+  // take no general word, so no 8-byte argument can leave it empty. But a float passed on in f1
+  // is invisible: `int g(); int f(int b, float x){ return g(b, x, 3) + 1; }` is this very object
+  // (`li r4,3; bl g`), so only an own declaration with no floating parameter decides it.
+  test('r3 below a set r4 is passed on where the own declaration rules out a float in f1', () => {
     const passgap = frame('8:\tli      r4,1\nc:\tstw     r0,20(r1)\n', 0x10, 'logv');
-    expect(decompile('f', passgap, PPC_MWCC).source).toContain('return logv(a0, 1) + 1;');
     expect(decompile('f', passgap, PPC_MWCC, { prototypes: own(['const char *']) }).source).toContain(
       'return logv(a0, 1) + 1;',
     );
-    // …but not where the own declaration gives r3 no parameter
+    expect(() => decompile('f', passgap, PPC_MWCC)).toThrow(/r4 holds a value and r3 holds none/);
+    expect(() => decompile('f', passgap, PPC_MWCC, { prototypes: own(['s32', 'float']) })).toThrow(
+      /r4 holds a value and r3 holds none/,
+    );
+    // …nor where the own declaration gives r3 no parameter
     expect(() => decompile('f', passgap, PPC_MWCC, { prototypes: own([]) })).toThrow(
+      /r4 holds a value and r3 holds none/,
+    );
+    // …nor at flags that keep a computation nothing uses (mwcc -O0 keeps a dead `li r31,5`)
+    const keeping = { ...PPC_MWCC, compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, keepsUnusedReads: true } };
+    expect(() => decompile('f', passgap, keeping, { prototypes: own(['const char *']) })).toThrow(
       /r4 holds a value and r3 holds none/,
     );
   });
@@ -181,6 +216,40 @@ describe('on PowerPC (mwcc_242_81), a gap is decided where no 8-byte argument ca
     const fb = frame('8:\tli      r3,1\nc:\tli      r6,3\n10:\tstw     r0,20(r1)\n14:\tli      r5,0\n', 0x18, 'g');
     expect(() => decompile('f', fb, PPC_MWCC, { prototypes: own(['s32', 's32']) })).toThrow(
       /r5 holds a value and r4 holds none/,
+    );
+  });
+});
+
+describe('on Thumb (agbcc), a decided gap proves only the register above it', () => {
+  const thumb = (name: string, body: string) =>
+    `${name}:\n\tpush\t{lr}\n${body}\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n`;
+  // `int g(); int f(int a, int b, int c){ return g(a, 1, 2) + 1; }`
+  test('every register counted past it that is proven the same way is an argument', () => {
+    const ok3 = thumb('f', '\tmov\tr1, #0x1\n\tmov\tr2, #0x2\n\tbl\tg\n');
+    expect(decompile('f', ok3, ARMV4T_AGBCC).source).toContain('return g(a0, 1, 2) + 1;');
+  });
+  // `int g(); int gp[4]; int gy; int f(int a, int b, int c){ gp[1] = 3; return g(a, -gy) + 1; }`:
+  // r2 holds the store's address, which lifted `g(a0, -gy, &gp)`
+  test('a store address above it refuses', () => {
+    const fa =
+      'f:\n\tpush\t{lr}\n\tldr\tr2, .L3\n\tmov\tr1, #0x3\n\tstr\tr1, [r2, #0x4]\n\tldr\tr1, .L3+0x4\n' +
+      '\tldr\tr1, [r1]\n\tneg\tr1, r1\n\tbl\tg\n\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L4:\n.L3:\n\t.word\tgp\n\t.word\tgy\n';
+    expect(() => decompile('f', fa, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+  });
+  // `int g(); int f(int a, int b, int c){ return g(a, c + 1) + 1; }`: r2 still holds c, read for
+  // `c + 1`, which lifted `g(a0, a2 + 1, a2)`
+  test('an incoming value read elsewhere above it refuses', () => {
+    const fd = thumb('f', '\tadd\tr1, r2, #0x1\n\tbl\tg\n');
+    expect(() => decompile('f', fd, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+  });
+  // `int logv(); int f(const char *s){ return logv(s, 1) + 1; }` with `int f(void);` in the context.
+  // The entry refuses the gap, and the relift without the bound refuses on it too.
+  test('a context entry that gives the gap no parameter refuses through the unbounded relift', () => {
+    const pr = thumb('f', '\tmov\tr1, #0x1\n\tbl\tlogv\n');
+    expect(decompile('f', pr, ARMV4T_AGBCC).source).toContain('return logv(a0, 1) + 1;');
+    expect(() => decompile('f', pr, ARMV4T_AGBCC, { ownContextProto: { params: [], returns: 's32' } })).toThrow(
+      /r1 holds a value and r0 holds none/,
     );
   });
 });

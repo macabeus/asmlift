@@ -4585,9 +4585,13 @@ describe('a gap in the argument registers of an undeclared call', () => {
 
   // `int logv(); int gx; int fst2(const char *s){ gx = 1; return logv(s, 1) + 1; }` is one object with
   // `gx = 1; return logv(s) + 1;`: the stored constant stays in r1, so a value something else reads
-  // decides nothing. Nor does one a later read shares: `int fkeep(const char *s, int c){ int t = c *
-  // 3; int r = logv(s, t); return r + t; }` keeps `t` in r4 and copies it to r1 — the deferred
-  // question (`requireSoleReader`) refuses with the gap's own message.
+  // decides nothing. `int fkeep(const char *s, int c){ int t = c * 3; int r = logv(s, t); return r
+  // + t; }` refuses too, but it is NO counterexample. It keeps `t` in r4 and copies it to r1, and
+  // `logv(s)` compiles without that `add r1, r4, #0` (likewise `mr r4,r31` on mwcc and `move a1,s0`
+  // on KMC), so the copy has no reader but the call and the bytes do decide it. The proof object is
+  // the SSA value (`requireSoleReader`), which the later read shares, and a register copy is folded
+  // away. A KNOWN GAP: a copy into the register above never decides, at the cost of a decline, not
+  // wrong C.
   test('a value something besides the call reads does not decide the gap', () => {
     const fst2 =
       'fst2:\n\tpush\t{lr}\n\tldr\tr2, .L4\n\tmov\tr1, #0x1\n\tstr\tr1, [r2]\n\tbl\tlogv\n' +
@@ -4873,15 +4877,15 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   // for `extern void g3(); extern unsigned char gb[]; void r5(int a, int b, int i, int j) {
   // unsigned char buf[8]; g3(a, b, &buf[i]); gb[0] = buf[j]; }` builds `&buf[i]` as
   // `add r2, r2, sp`, which would lift as `g3(); gb = sp0[a3];`. The address decides the gap below it
-  // (`decideGap`), so the call takes it, and the audit refuses an indexed address a call is handed.
+  // (`decideGap`), but r3 above it still holds `j`, read for the copy to r4, and a register the count
+  // takes past a decided gap must be proven too, so the gap refuses first (before the audit, which
+  // refuses an indexed address a call is handed).
   test('an indexed frame address above a decided gap declines', () => {
     const r5 =
       'r5:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r3, #0\n\tadd\tr2, r2, sp\n\tbl\tg3\n' +
       '\tldr\tr1, .L3\n\tmov\tr2, sp\n\tadd\tr0, r2, r4\n\tldrb\tr0, [r0]\n\tstrb\tr0, [r1]\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgb\n';
-    expect(() => decompile('r5', r5, ARMV4T_AGBCC)).toThrow(
-      /address-taken stack local — a runtime index into the object at \[sp,#0\) flows into `call`/,
-    );
+    expect(() => decompile('r5', r5, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r0 holds none/);
   });
 
   // CONTROLS for the trim's question: it asks only of the registers it cuts that are FRESH. The
@@ -4903,11 +4907,12 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   });
 
   // …and two indexed addresses are not the same one: a pass of `&buf[j]` in r0 does not excuse
-  // leaving `&buf[i]` out in r2.
+  // leaving `&buf[i]` out in r2. (r3, read for `&buf[j]`, sits past the decided gap at r1 unproven,
+  // so the gap refuses before the audit asks.)
   test('an indexed frame address passed does not excuse another, passed or left out', () => {
     const two =
       'two:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r2, sp\n\tadd\tr0, r3, sp\n\tbl\tg3\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n';
-    expect(() => decompile('two', two, ARMV4T_AGBCC)).toThrow(/address-taken stack local/);
+    expect(() => decompile('two', two, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r1 holds none/);
   });
 });

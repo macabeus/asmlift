@@ -80,7 +80,7 @@ import {
   landsOnArea,
   liftWithRelift,
 } from './frame-objects';
-import type { Frontend, LiftOptions } from './frontend';
+import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -1223,7 +1223,7 @@ function liftPrelude(
   target: TargetDescription,
   prototypes: Prototypes,
   jts: Map<number, PpcJT>,
-  ownDeclaration?: () => FnProto | undefined,
+  ownDeclaration?: () => OwnDeclaration | undefined,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -1404,7 +1404,7 @@ function liftOnce(
     target,
     prototypes,
     jts,
-    () => (!ownDeclared ? undefined : Object.hasOwn(prototypes, name) ? prototypes[name] : contextOwnProto),
+    () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 

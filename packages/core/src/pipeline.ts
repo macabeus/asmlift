@@ -414,8 +414,24 @@ function liftWithinContextBound(
   notes: string[] | undefined,
 ): Fn {
   const frontend = frontendFor(target);
+  // THE CONTEXT'S OWN ENTRY RIDES ON EVERY LIFT IT MAY BIND, the stated entry's absence permitting.
+  // A lift bounded by exactly its words, or one it fills every register of, may take it as proof
+  // (`LiftOptions.contextOwnProto.proves`). Any other lift may only refuse on it: the unbounded
+  // relift below, and a bound raised past a register the body reads. Otherwise a decided arity gap
+  // (frontend/call-plan.ts `decideGap`) that the entry refuses would come back from the relift as a
+  // lift without it. With `int pr(void)` in the context, `logv(s, 1)` lifted `logv(a0, 1)`, the
+  // same as with no declaration.
+  const context = (proves: boolean): LiftOptions =>
+    ownContext === undefined || Object.hasOwn(prototypes, name)
+      ? {}
+      : { contextOwnProto: { proto: ownContext, proves } };
   const unbounded = () =>
-    forgetAbsorbedKeys(frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions));
+    forgetAbsorbedKeys(
+      frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
+        ...liftOptions,
+        ...context(false),
+      }),
+    );
   let words =
     ownContext === undefined || Object.hasOwn(prototypes, name)
       ? undefined
@@ -426,7 +442,7 @@ function liftWithinContextBound(
       : forgetAbsorbedKeys(
           frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
             ...liftOptions,
-            contextOwnProto: ownContext!,
+            ...context(true),
           }),
         );
   }
@@ -438,7 +454,7 @@ function liftWithinContextBound(
       fn = frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
         ...liftOptions,
         contextOwnWords: words,
-        ...(words === declaredWords ? { contextOwnProto: ownContext! } : {}),
+        ...context(words === declaredWords),
       });
     } catch (e) {
       if (!(e instanceof FrontendUnsupportedError)) {

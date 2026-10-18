@@ -1688,7 +1688,9 @@ export function fallbackArgc(
     /** whether the gap `gap` — argument registers nothing reaches, in order — below `set`, the next
      *  one a value reaches, is decided: the frontend shows `set` holds an argument, so `gap` holds
      *  arguments passed on unchanged (`CallDeclarations.lower`'s `decideGap`). Handed the gap's
-     *  refusal, owed should a proof it defers fail. Absent, or false, the gap refuses. */
+     *  refusal, owed should a proof it defers fail. Absent, or false, the gap refuses. It is asked
+     *  again with an empty `gap` for every register the count takes past a decided gap. Each must be
+     *  proven an argument the same way, or the gap refuses. */
     decide?: (gap: readonly string[], set: string, refuse: () => void) => boolean;
   },
 ): number {
@@ -1733,6 +1735,15 @@ export function fallbackArgc(
   let n = run(floor);
   // A GAP BELOW A REGISTER THAT HOLDS A VALUE refuses, unless the frontend decides it: then the run
   // goes on through the gap and the register above it, and the next gap is asked the same.
+  //
+  // PAST A DECIDED GAP, EVERY REGISTER THE RUN COUNTS MUST BE PROVEN TOO (asked of `decide` with an
+  // empty gap), or the gap refuses. The decision says the register above the gap is an argument and
+  // nothing about the ones above that. Without the gap's refusal the run would count whatever reaches
+  // them: a store's address or value, a discarded volatile read, a temp, an incoming value read
+  // elsewhere. Measured 2026-10-18 at canonical flags: `gp[1] = 3; return g(a, -gy) + 1;` lifted
+  // `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` lifted `g(a0, a2 + 1, a2)` on all seven
+  // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
+  // argument.
   for (let k = n + 1; k < argRegs.length; k++) {
     if (setUp(k)) {
       const [gapAt, setAt] = [n, k];
@@ -1750,6 +1761,11 @@ export function fallbackArgc(
         refuse();
       }
       n = run(k);
+      for (let above = k + 1; above < n; above++) {
+        if (!opts.decide?.([], argRegs[above], refuse)) {
+          refuse();
+        }
+      }
       k = n;
     }
   }

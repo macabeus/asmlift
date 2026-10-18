@@ -43,7 +43,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import type { Frontend, LiftOptions } from './frontend';
+import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
 import {
   type LocalStatics,
   gasPoolReferrers,
@@ -4726,7 +4726,7 @@ function thumbFillOf(
     (message) => {
       throw new FrontendUnsupportedError(message);
     },
-    () => (Object.hasOwn(prototypes, name) ? prototypes[name] : contextOwnProto),
+    () => ownDeclarationOf(name, prototypes, contextOwnProto),
   );
   const frame = measureThumbFrame({ target, cfg, calls, oneObject });
 
@@ -5797,8 +5797,11 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
     // same bytes), as it does with four parameters.
     withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
-    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`): `logv(s, 1)` sets r1 alone and
-    // leaves `s` in r0, so a count that stops at r0 would lift `logv()`. A run of incoming arguments
+    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`) UNLESS IT IS DECIDED: `logv(s, 1)`
+    // sets r1 alone and leaves `s` in r0, so a count that stops at r0 would lift `logv()`. The gap is
+    // decided where r1 surely is an argument (frontend/call-plan.ts `decideGap`: a value nothing but
+    // the call reads and no memory read produced). agbcc fills argument words in order, so `s` is
+    // then passed on and the call lifts `logv(a0, 1)`. A run of incoming arguments
     // passed on with no register set up past it (`g2(a, b)`) leaves no gap, is the same machine code
     // as `g2()`, and is lifted as the shorter call. The instruction carries no address, so the
     // refusal names the call by where the .s puts it (`thumbCallLocator`).

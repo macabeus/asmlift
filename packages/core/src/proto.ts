@@ -508,6 +508,14 @@ export function ownLeadingWordParams(
   return n;
 }
 
+/** Whether the own declaration (or the parameter list a mangled symbol records) states a floating
+ *  parameter, or `undefined` where it states no list. Its reader is the guessed-arity gap
+ *  (`frontend/call-plan.ts` `decidedCallRefusal`): a float may travel in an FPU register that no
+ *  guess counts. */
+export function ownDeclaresFloatingParam(name: string, p: FnProto | undefined): boolean | undefined {
+  return ownParamList(name, p)?.params.some((t) => isFloatingSpelling(t));
+}
+
 /** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
 function ownParamWidths(
   name: string,

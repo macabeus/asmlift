@@ -1162,7 +1162,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // function's own arguments passed on. On O32 the own declaration (`ctx`) must put an integer word
   // in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC the second
   // word of an 8-byte argument that could skip the gap must hold nothing — `passmid`'s a3/r6 is no
-  // parameter of `(int, int)`. `ctx` declares neither callee, so neither decompiler is told the
+  // parameter of `(int, int)`. On PowerPC the own declaration must also show no floating parameter,
+  // since a float passed on in f1 is invisible. And the call must show nothing past its count: no own
+  // parameter, no outgoing stack word, and no register the count takes past the decided one
+  // without the same proof (`decidedCallRefusal`). `ctx` declares neither callee, so neither decompiler is told the
   // arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
   // machine code as `g2()`, so no row expects a decline for it.
   ...(

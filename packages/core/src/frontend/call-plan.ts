@@ -38,6 +38,7 @@ import {
   declaresParams,
   declaresVoidReturn,
   isFloatingSpelling,
+  ownDeclaresFloatingParam,
   paramClassOf,
   spellableProto,
   variadicRefusal,
@@ -48,6 +49,7 @@ import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
+import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
 import { unspellableReason } from './reloc-symbol';
 import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
@@ -218,7 +220,7 @@ export function callDeclarations(
   lowering: CallLowering,
   fail: FrontendRefusal,
   /** the function's own declaration, where one binds its body — asked as a call is lowered */
-  ownDeclaration: () => FnProto | undefined = () => (Object.hasOwn(prototypes, name) ? prototypes[name] : undefined),
+  ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -678,11 +680,23 @@ export function callDeclarations(
   //     the gap may be that hole. An argument aligned to 8 skips an odd word (O32 a1, PowerPC
   //     r4/r6/r8), and the hole is ruled out only where that argument's second word holds nothing:
   //     no value reaches it and the own declaration fills fewer words. A leading float shadows the
-  //     first general words on O32, ruled out where the own declaration surely puts an integer word
-  //     in each gap register and no floating argument register holds a value.
+  //     first general words on O32. It is ruled out only where the own declaration surely puts an
+  //     integer word in each gap register. No register value can rule it out: the MIPS frontend
+  //     refuses every instruction naming the FPU's file in a function that calls
+  //     (frontend/mips.ts), so a float here is one passed on untouched in $f12, which nothing
+  //     reads. A gap that starts at a1 under an a0 that only a read set up (`gx = a; gp(d, 5)`) is
+  //     the 8-byte skip's case and refuses through it: a1 is odd, so it needs the own declaration's
+  //     word bound, and `ownLeadingWordParamsOn` stops at the double.
   //   - where the own declaration binds the body, each gap register must surely hold one of its
   //     integer word parameters (`ownLeadingWordParamsOn`): no hidden struct pointer, no float.
-  // The proven register's value is returned, for the sole-reader obligation the call then takes on.
+  //   - at flags that keep a read nothing uses (`compilerBehaviors.keepsUnusedReads`, the -O0
+  //     levels) the premise is suspended, as frontend/ppc.ts `computedPairHalf` suspends it. mwcc -O0
+  //     keeps a dead `li r31,5`. The gap was measured never to arise there (mwcc -O0,p on all three
+  //     builds, IDO -O1 and agbcc -O0 reload every argument from its home first), so this costs no
+  //     lift.
+  // What the decision leaves open above the proven register is the call's own check
+  // (`decidedCallRefusal`). The proven register's value is returned, for the sole-reader
+  // obligation the call then takes on.
   const decideGap = (
     ssa: SsaBuilder,
     bi: number,
@@ -691,7 +705,7 @@ export function callDeclarations(
     accept: (v: Value) => boolean,
   ): Value | undefined => {
     const regs = target.argRegs;
-    if (!ssa.writtenSinceCall(set, bi)) {
+    if (target.compilerBehaviors.keepsUnusedReads === true || !ssa.writtenSinceCall(set, bi)) {
       return undefined;
     }
     const v = ssa.readVar(set, bi);
@@ -704,19 +718,15 @@ export function callDeclarations(
       return undefined;
     }
     const own = ownDeclaration();
-    const surelyOwn = own === undefined ? undefined : ownLeadingWordParamsOn(name, own, target);
+    const surelyOwn = own === undefined ? undefined : ownLeadingWordParamsOn(name, own.proto, target);
     if (surelyOwn !== undefined && gap.some((g) => regs.indexOf(g) >= surelyOwn)) {
       return undefined;
     }
     const holes = argRegisterHoles(target);
-    if (
-      holes.leadingFloatShadow &&
-      regs.indexOf(gap[0]) === 0 &&
-      (surelyOwn === undefined || (target.fpu?.argRegs ?? []).some((r) => ssa.hasReachingDef(r, bi)))
-    ) {
+    if (holes.leadingFloatShadow && regs.indexOf(gap[0]) === 0 && own?.proves !== true) {
       return undefined;
     }
-    const ownWords = own === undefined ? undefined : ownArgumentWordsOn(name, own, target);
+    const ownWords = own?.proves !== true ? undefined : ownArgumentWordsOn(name, own.proto, target);
     for (const g of gap.filter((r) => holes.skippable.has(r))) {
       const j = regs.indexOf(g);
       const second = regs[j + 2];
@@ -731,6 +741,51 @@ export function callDeclarations(
       }
     }
     return v;
+  };
+  // WHAT A DECIDED GAP LEAVES OPEN ABOVE THE COUNT: whether the call takes more than the `argc`
+  // words counted. The decision proves that the gap registers are this function's own arguments
+  // passed on. Past the count, the guess reads an unwritten register as no argument, as it does at
+  // every gapless call, and three things say otherwise. Each refuses (returns true):
+  //   - an own parameter that may sit past the count (`ownArgumentWordsOn`, an upper bound). It is
+  //     just as likely passed on as the gap below it was. On gcc2.7.2kmc and ido7.1, `int ll6(int a,
+  //     int b, int c, int d){ return g(a, 2, c, d, 5) + 1; }` leaves c and d in a2/a3 and lifted
+  //     `g(a0, 2)`.
+  //   - a word of the outgoing area that reaches the call (`guess.refuse`, asked as if the count
+  //     filled every argument register). It is a fifth argument, so every register below it is an
+  //     argument too: the same `ll6`'s `sw v0,16(sp)`.
+  //   - a floating argument this ABI passes apart from the general words (`fpu.slots: 'separate'`,
+  //     PowerPC), which no guess counts. `int fl2(int b, float x){ return g(b, x, 3) + 1; }` leaves
+  //     x in f1 on all three mwcc builds and lifted `g(a0, 3)`. A float in f1 that nothing reads is
+  //     invisible, so on such an ABI only an own declaration whose parameters are all integers rules
+  //     it out. Without a declaration this refuses. A value reaching an FPU argument register refuses
+  //     on every ABI.
+  const decidedCallRefusal = (ssa: SsaBuilder, bi: number, argc: number, site: CallSite): boolean => {
+    const own = ownDeclaration();
+    if (own !== undefined) {
+      const words = ownArgumentWordsOn(name, own.proto, target);
+      if (words === undefined || words > argc) {
+        return true;
+      }
+    }
+    const fpu = target.fpu;
+    if (fpu !== undefined) {
+      if (fpu.argRegs.some((r) => ssa.hasReachingDef(r, bi, (v) => !site.placeholders?.has(v)))) {
+        return true;
+      }
+      const floats = own === undefined ? undefined : ownDeclaresFloatingParam(name, own.proto);
+      if (floats === true || (fpu.slots === 'separate' && !(own?.proves === true && floats === false))) {
+        return true;
+      }
+    }
+    try {
+      site.guess.refuse?.(target.argRegs.length);
+    } catch (e) {
+      if (e instanceof FrontendUnsupportedError) {
+        return true;
+      }
+      throw e;
+    }
+    return false;
   };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
@@ -806,6 +861,9 @@ export function callDeclarations(
     if (widths === null) {
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
+      if (decided.length > 0 && decidedCallRefusal(ssa, bi, argc, site)) {
+        decided[0].refuse();
+      }
     }
     // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
     // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read
