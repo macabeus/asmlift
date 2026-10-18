@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
-import { decompile } from '../src/pipeline';
+import { type DecompileOptions, decompile } from '../src/pipeline';
 import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
 import { withOwnReturnLayout } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
@@ -732,6 +732,33 @@ describe('a function that itself returns a struct', () => {
       /its context declaration says it returns struct S8 by value, and this target hands its 8 bytes back in two registers [^]*\(`struct S8 rmk8\(s32\)`\)/,
     );
   });
+  // agbcc -O2 `struct S8 f(int unused, int y){ struct S8 s; s.a = y; s.b = 1; return s; }`: a
+  // non-leaf whose 8-byte struct takes DImode, so its epilogue pops the return address into r2 as a
+  // `long long`'s does. The declaration explains that epilogue only where the proof holds.
+  const wide =
+    'wide:\n\tpush\t{r4, lr}\n\tadd\tr3, r2, #0\n\tmov\tr4, #0x1\n\tstr\tr3, [r0]\n\tstr\tr4, [r0, #0x4]\n' +
+    '\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+  const S8two = { params: ['s32', 's32'], returns: 'struct S8', returnLayout: u32s('a', 'b') };
+  const eightBytes = /the epilogue of 'wide' says the return type is 5 to 8 bytes/;
+
+  test('an 8-byte struct whose epilogue says 8 bytes is the struct, on agbcc, where the proof holds', () => {
+    const struct =
+      /struct S8 wide\(s32 a0, s32 a1\) \{\n\s+struct S8 ret;\n\s+ret\.a = a1;\n\s+ret\.b = 1;\n\s+return ret;/;
+    expect(decompile('wide', wide, ARMV4T_AGBCC, { prototypes: { wide: S8two } }).source).toMatch(struct);
+    expect(decompile('wide', wide, ARMV4T_AGBCC, { ownContextProto: S8two }).source).toMatch(struct);
+    // nothing declared, the epilogue is all there is to read
+    expect(() => decompile('wide', wide, ARMV4T_AGBCC, {})).toThrow(eightBytes);
+    // the pointer handed to a callee: no proof, so the epilogue's refusal stands on both declarations
+    const passed = wide.replace('\tpop\t{r4}\n', '\tbl\tuse\n\tpop\t{r4}\n');
+    const both: DecompileOptions[] = [
+      { prototypes: { wide: S8two, use } },
+      { prototypes: { use }, ownContextProto: S8two },
+    ];
+    for (const opts of both) {
+      expect(() => decompile('wide', passed, ARMV4T_AGBCC, opts)).toThrow(eightBytes);
+    }
+  });
+
   // mwcc does not hand the pointer back: its callee leaves in r3 whatever was last there (a call's
   // result, a reloaded frame word; target.ts `structReturnHandsBackPointer`). Hand-written, the
   // shape of rmk12 with r3 reused before the blr.

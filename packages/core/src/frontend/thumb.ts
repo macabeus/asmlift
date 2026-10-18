@@ -2461,7 +2461,7 @@ export function lift(
   options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options.contextOwnWords),
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options),
   );
 }
 
@@ -2483,9 +2483,9 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
-  contextOwnWords: number | undefined,
+  options: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'>,
 ): Fn | FrameObjectRelift {
-  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, contextOwnWords);
+  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
   const { cfg, frame, ssa, pairs, statics } = fill;
   const { fn, irBlocks, paramReg } = ssa;
 
@@ -4416,6 +4416,7 @@ function thumbPairs({
   name,
   target,
   own,
+  ownMemoryReturn,
   ssa,
   asmBlocks,
   callClobbers,
@@ -4423,6 +4424,7 @@ function thumbPairs({
   name: string;
   target: TargetDescription;
   own: FnProto | undefined;
+  ownMemoryReturn: LiftOptions['ownMemoryReturn'];
   ssa: SsaBuilder;
   asmBlocks: readonly AsmBlock[];
   callClobbers: readonly string[];
@@ -4503,7 +4505,10 @@ function thumbPairs({
    *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
    *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
    *  the same way. A word return drops r1 in the first two, and the third is a false decline the
-   *  epilogue cannot tell apart from them. */
+   *  epilogue cannot tell apart from them — save where the function's own declaration says it
+   *  returns a struct of 5 to 8 bytes through memory (`ownMemoryReturn`): the refusal is then
+   *  deferred to the pipeline, which throws it unless the lift proves r0 is only that struct's
+   *  storage (frontend/own-struct-return.ts), and that proof is what tells the third case apart. */
   const refuseWordReturns = () => {
     const classes = halfOf.size ? mergeClasses({ blocks: ssa.irBlocks }) : new Map<Value, readonly Value[]>();
     const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
@@ -4520,10 +4525,18 @@ function thumbPairs({
         );
       }
       if (widerEpilogue) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the epilogue of '${asmBlocks[bi].label}' says the return type is 5 to 8 bytes ` +
-            '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
-        );
+        const label = asmBlocks[bi].label;
+        const refuse = (): never => {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': the epilogue of '${label}' says the return type is 5 to 8 bytes ` +
+              '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
+          );
+        };
+        if (ownMemoryReturn !== undefined && ownMemoryReturn.bytes > 4 && ownMemoryReturn.bytes <= 8) {
+          ownMemoryReturn.defer(refuse);
+          continue;
+        }
+        refuse();
       }
     }
   };
@@ -4690,7 +4703,7 @@ function thumbFillOf(
   prototypes: Prototypes,
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
-  contextOwnWords?: number,
+  { contextOwnWords, ownMemoryReturn }: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'> = {},
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -4728,6 +4741,7 @@ function thumbFillOf(
     name,
     target,
     own: prototypes[name],
+    ownMemoryReturn,
     ssa,
     asmBlocks: cfg.asmBlocks,
     callClobbers: calls.callClobbers,

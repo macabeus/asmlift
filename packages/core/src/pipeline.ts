@@ -343,6 +343,9 @@ export function liftStamped(
   const table = split.prototypes ?? {};
   const own = Object.hasOwn(table, name) ? table[name] : undefined;
   const ownReturn = ownStructReturnThroughMemory(name, target, own, split.ownContextProto, notes);
+  // a refusal about the return's width that the declared struct explains waits for the proof
+  let deferred: (() => never) | undefined;
+  const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   const fn = liftWithinContextBound(
     name,
     asm,
@@ -351,13 +354,15 @@ export function liftStamped(
     asmData,
     symbols,
     contextGlobals,
-    liftOptions,
+    bytes === undefined
+      ? liftOptions
+      : { ...liftOptions, ownMemoryReturn: { bytes, defer: (refuse) => void (deferred ??= refuse) } },
     split.ownContextProto,
     notes,
   );
   verify(fn);
   if (ownReturn !== undefined) {
-    returnOwnStruct(fn, name, target, ownReturn, notes);
+    returnOwnStruct(fn, name, target, ownReturn, notes, deferred);
     verify(fn);
   }
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
@@ -591,13 +596,16 @@ interface OwnStructReturn {
  *  lift proves the hidden pointer is the struct's storage. Where it does not, a STATED declaration
  *  refuses — the pointer function contradicts it — and a context's keeps the pointer lift, as the
  *  machine code's function, with a note in `notes`: the context's own entry is a header nothing
- *  checked against a definition (`liftWithinContextBound` says why that makes it soft). */
+ *  checked against a definition (`liftWithinContextBound` says why that makes it soft). Either way, a
+ *  refusal the frontend `deferred` because this struct would explain it (agbcc's 8-byte epilogue,
+ *  `LiftOptions.ownMemoryReturn`) is thrown where the proof fails, since nothing else explains it. */
 function returnOwnStruct(
   fn: Fn,
   name: string,
   target: TargetDescription,
   own: OwnStructReturn,
   notes: string[] | undefined,
+  deferred: (() => never) | undefined,
 ): void {
   if (own.register) {
     // a word the struct may not be all of stays the lift's own return, as the machine has it
@@ -608,6 +616,8 @@ function returnOwnStruct(
   if (why === undefined) {
     return;
   }
+  // a refusal the frontend deferred because this struct would explain it stands where it does not
+  deferred?.();
   const declared = `${own.type.declared ?? 'a struct'} by value, which this target returns through a hidden pointer in ${target.argRegs[0]}`;
   if (own.stated) {
     throw new FrontendUnsupportedError(
