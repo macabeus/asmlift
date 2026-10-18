@@ -14,6 +14,7 @@ import {
   declaresAggregateReturn,
   declaresVoidReturn,
   ownArgumentWords,
+  ownLeadingWordParams,
   paramClassOf,
   wordsOf,
 } from './proto';
@@ -167,6 +168,14 @@ export function ownArgumentWordsOn(
 ): number | undefined {
   const registerReturn = declaresAggregateReturn(p) && returnsInMemory(returnedAggregate(p!), target) === false;
   return ownArgumentWords(name, p, target, registerReturn);
+}
+
+/** The first argument registers that surely hold one of the function's own word parameters
+ *  (`proto.ts` `ownLeadingWordParams`), with the hidden pointer decided by this target's rule as
+ *  {@link ownArgumentWordsOn} decides it. */
+export function ownLeadingWordParamsOn(name: string, p: FnProto | undefined, target: TargetDescription): number {
+  const registerReturn = declaresAggregateReturn(p) && returnsInMemory(returnedAggregate(p!), target) === false;
+  return ownLeadingWordParams(name, p, target, registerReturn);
 }
 
 /** Whether a function declared to return `layout` by value hands it back through memory — so its

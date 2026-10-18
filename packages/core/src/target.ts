@@ -96,6 +96,29 @@ export interface SourceRead {
   bytes?: number;
 }
 
+/** WHERE THIS ABI CAN LEAVE A GENERAL ARGUMENT REGISTER EMPTY BELOW ONE A CALL FILLS — the two ways
+ *  argument words stop filling in order, read off the facts that already place them:
+ *   - `skippable`: the registers an argument aligned to 8 can skip, every odd argument word where
+ *     `evenWordAlignedArgs` holds (O32 `a1`/`a3`, PowerPC `r4`/`r6`/`r8`/`r10`). Compiled on
+ *     2026-10-18: `g(1, b, 3LL)` and `g(1, 3LL)` are one object on gcc2.7.2kmc, gcc2.7.2 and the
+ *     three mwcc builds, `a1`/`r4` untouched under a set pair. agbcc fills every word in order
+ *     (`g(1, 3LL)` is r0, r1:r2), so it has none.
+ *   - `leadingFloatShadow`: a leading floating argument travels in the FPU's registers and leaves
+ *     the general words it counts against holding nothing (`fpu.slots: 'leading'`, O32): with `gp`
+ *     unprototyped, `gp(x, 5)` of a `float x` parameter and of an `int x` one compile alike on
+ *     ido7.1, gcc2.7.2kmc and gcc2.7.2 (`li a1,5`, `a0` untouched). PowerPC's floats take no general
+ *     word (`'separate'`), so they leave no hole there.
+ *  Its reader is the guessed-arity gap (frontend/call-plan.ts `decideGap`). */
+export function argRegisterHoles(target: Pick<TargetDescription, 'argRegs' | 'evenWordAlignedArgs' | 'fpu'>): {
+  skippable: ReadonlySet<string>;
+  leadingFloatShadow: boolean;
+} {
+  return {
+    skippable: new Set(target.evenWordAlignedArgs ? target.argRegs.filter((_, k) => k % 2 === 1) : []),
+    leadingFloatShadow: target.fpu?.slots === 'leading',
+  };
+}
+
 /** The bytes a source read reaches from an address `off` bytes into the frame, as `[lo, hi)`
  *  relative to that address. The machine may force the address down to a unit boundary — the
  *  GBA's DMA and BIOS both do — so a 32-bit read of the halfword at [sp,#2] reads from [sp,#0],
