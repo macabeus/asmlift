@@ -1447,11 +1447,7 @@ function liftOnce(
       registerLiveIns(
         target,
         savedRegs,
-        !ownDeclared
-          ? undefined
-          : Object.hasOwn(prototypes, name) || contextOwnWords === undefined
-            ? ownArgumentWords(name, prototypes[name], target)
-            : contextOwnWords,
+        !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWords(name, prototypes[name], target)),
       ),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );

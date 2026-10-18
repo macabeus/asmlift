@@ -1492,9 +1492,7 @@ function liftOnce(
         ...registerLiveIns(
           target,
           savedRegs,
-          Object.hasOwn(prototypes, name) || options.contextOwnWords === undefined
-            ? ownArgumentWords(name, prototypes[name], target)
-            : options.contextOwnWords,
+          options.contextOwnWords ?? ownArgumentWords(name, prototypes[name], target),
         ),
         ...(owned === undefined ? {} : { ownedLocals: owned }),
       };
