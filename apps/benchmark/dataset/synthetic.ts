@@ -1085,6 +1085,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sfar_buf(u8*,u8*,u8*);',
     proto: { sfar_buf: { returnsVoid: true } },
   },
+  // A byte buffer whose far store takes a call's result: agbcc expands the call before the address
+  // under the member and the cast spelling alike, so the order is no struct evidence and the
+  // buffer stays one.
+  {
+    sym: 'sfar_call',
+    src: 'int sfar_k(int);\nvoid sfar_call(u8*p,u8*q,s32 n){ p[60]=sfar_k(n); p[q[0]]=0; }',
+    features: ['pointer', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'int sfar_k(int); void sfar_call(u8*,u8*,s32);',
+    proto: { sfar_k: { params: 1 }, sfar_call: { returnsVoid: true } },
+  },
   // A held far pointer beside a far member store on one root: the pointer stays on its address and
   // the store still joins the struct.
   {
