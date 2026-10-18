@@ -10674,6 +10674,61 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['ido7.1'],
     ctx: 'extern int gOcH;\nvoid ownctx_home(void);',
   },
+  // A FUNCTION WHOSE OWN CONTEXT DECLARATION RETURNS A STRUCT (core frontend/own-struct-return.ts).
+  // No row states its own `proto`: the harness hands the lift the ctx's own entry, as a `--context`
+  // lift reads it. Through memory, the caller's storage arrives in argument 0 and comes back in the
+  // return register, so with nothing declared each lifts as `s32 *f(s32 *a0, …)`; the declaration
+  // makes it the struct return, with the hidden pointer the returned local. `ownsret_ctx` is 12
+  // bytes, which every toolchain returns through memory — IDO copies it out of a frame object word
+  // by word, agbcc with `ldmia`/`stmia`, kmc and gcc 2.7.2 through a frame temp the lift forwards,
+  // and mwcc builds it in place. `ownsret_cond` builds it on two arms before one copy.
+  {
+    sym: 'ownsret_ctx',
+    src:
+      'struct T3 { int a, b, c; };\n' +
+      'struct T3 ownsret_ctx(int x, int y){ struct T3 t; t.a = y; t.b = x * 3; t.c = x + y; return t; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T3 { int a, b, c; };\nstruct T3 ownsret_ctx(int x, int y);',
+  },
+  {
+    sym: 'ownsret_cond',
+    src:
+      'struct T3 { int a, b, c; };\n' +
+      'struct T3 ownsret_cond(int x, int y){ struct T3 t; if (x > y) { t.a = x; t.b = 1; } else { t.a = y; t.b = 2; }' +
+      ' t.c = x - y; return t; }',
+    features: ['struct-return', 'branch'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T3 { int a, b, c; };\nstruct T3 ownsret_cond(int x, int y);',
+  },
+  // Eight bytes: agbcc returns any struct whose second member is not a bitfield through memory
+  // (thumb.c:1423-1493), so it lifts as the struct return; mwcc's svr4 rule hands it back in
+  // r3:r4, a register pair the lift returns one word of, so the declaration refuses it there.
+  {
+    sym: 'ownsret_pair',
+    src: 'struct T2 { int a, b; };\nstruct T2 ownsret_pair(int x){ struct T2 p; p.a = x - 1; p.b = x << 2; return p; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T2 { int a, b; };\nstruct T2 ownsret_pair(int x);',
+  },
+  // One word of one member: agbcc and mwcc hand it back in r0/r3, which holds the member, and the
+  // O32 toolchains through memory, as any struct.
+  {
+    sym: 'ownsret_r0',
+    src: 'struct W1 { unsigned int x; };\nstruct W1 ownsret_r0(int a){ struct W1 w; w.x = a + 5; return w; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct W1 { unsigned int x; };\nstruct W1 ownsret_r0(int a);',
+  },
+  // mwcc_242_81 compiles `int f(int a){ return a; }` to a bare `blr`: no path writes r3, and the
+  // stated `int` return is what says the function returns the argument it was handed there.
+  {
+    sym: 'ownsret_bare',
+    src: 'int ownsret_bare(int a){ return a; }',
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81'],
+    proto: { ownsret_bare: { params: ['int'], returns: 'int' } },
+  },
   {
     sym: 'byvalregs',
     src:
