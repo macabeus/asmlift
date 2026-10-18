@@ -13,7 +13,7 @@
 import { Block, Fn } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
-import type { FnProto } from '../proto';
+import { type FnProto, declaresVoidReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { readDeclaredMembers } from './aggmembers';
 import { recognizeArrays } from './arrays';
@@ -255,7 +255,12 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // joins `p`'s access set at `off + K`. After `truncload`, `struct-arrays` and `member-arrays`, so
   // none of them sees a folded access, and a displacement either of the last two typed is refused.
   // `dce: true` — the `add` chain a fold leaves readerless. `opts.displaced` is `/far-cast`.
-  { id: 'displaced', run: (fn, _self, opts) => foldDisplacedAccesses(fn, opts.displaced), dce: true },
+  {
+    id: 'displaced',
+    run: (fn, self, opts, target) =>
+      foldDisplacedAccesses(fn, opts.displaced, target.compilerBehaviors, declaresVoidReturn(self)),
+    dce: true,
+  },
   {
     id: 'structs',
     run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary),

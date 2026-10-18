@@ -869,6 +869,16 @@ export interface TargetDescription {
     // two spellings in one object, a loaded right-hand side included, so they leave it absent.
     // Absent ⇒ the variation is never offered.
     farMemberStoreOrder?: boolean;
+    // Does a member past the displacement range get its OWN materialised base at every access, so
+    // that one base read or written at two distinct offsets is a pointer the source held? agbcc's
+    // does: `p->f38 + p->f39` compiles to `add r0, #0x26; ldrb [r0]` and `add r1, #0x27; ldrb [r1]`,
+    // while `u8 *d = &p->f38; d[0] + d[1]` shares one `add r1, #0x26` between `ldrb [r1]` and
+    // `ldrb [r1, #1]`, and only the pointer spelling rebuilds those bytes. True refuses
+    // raise/structs.ts's displaced-access fold for such a base (`held-pointer-offsets`). ido and the
+    // three mwcc builds share one base across adjacent far members (`addiu at, a0, 32767; sb a1,
+    // 7232(at); sb a2, 7233(at)`), and KMC and GCC 2.7.2 lift the held pair as members at the same
+    // bytes, so they leave it absent. Absent ⇒ the fold reads a shared base as members.
+    farMemberBasePerAccess?: boolean;
     // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
     // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
     // spelling emits the indexed one's stores wherever the pointee is not volatile? agbcc does, on
@@ -1250,6 +1260,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
     farMemberStoreOrder: true,
+    farMemberBasePerAccess: true,
     foldsPointerAdvance: true,
     pointerIntConversionIsFree: true,
     keepsPointerSumAddend: true,

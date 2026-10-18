@@ -54,6 +54,7 @@ import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '../src/raise/paramw
 import { REROLL_GATES } from '../src/raise/reroll';
 import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
 import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
+import { DISPLACED_BASE_GATES, DISPLACED_ROOT_GATES } from '../src/raise/structs';
 import { TRUNC_LOAD_GATES } from '../src/raise/truncload';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
@@ -94,6 +95,9 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
   ARM_REREAD_GATES: ARM_REREAD_GATES as readonly Gate<never>[],
   TRUNC_LOAD_GATES: TRUNC_LOAD_GATES as readonly Gate<never>[],
+  // raise/structs.ts's displaced-access fold: one table per materialised base, one per root
+  DISPLACED_BASE_GATES: DISPLACED_BASE_GATES as readonly Gate<never>[],
+  DISPLACED_ROOT_GATES: DISPLACED_ROOT_GATES as readonly Gate<never>[],
   ADDRESS_GATES: ADDRESS_GATES as readonly Gate<never>[],
   SHAPE_GATES: SHAPE_GATES as readonly Gate<never>[],
   // the two halves `ORDER_LICENCE_GATES` ships — an address table minus the declaration rule, and

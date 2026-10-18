@@ -11,9 +11,17 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { type DisplacedOptions, foldDisplacedAccesses, recognizeStructs } from '../src/raise/structs';
+import {
+  DISPLACED_BASE_GATES,
+  DISPLACED_ROOT_GATES,
+  type DisplacedBehaviors,
+  type DisplacedOptions,
+  foldDisplacedAccesses,
+  recognizeStructs,
+} from '../src/raise/structs';
 import { compareScored } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, type ToolchainId, canonicalFlagsOf, structureOptionsFor, targetFor } from '../src/target';
@@ -77,6 +85,54 @@ describe('a member past Thumb displacement range is a member', () => {
   });
 });
 
+// `struct S { s32 a; u16 b; u8 pad[32]; u8 f38; u8 f39; };
+//  u32 l1(struct S *p) { u8 *d = &p->f38; return d[0] + d[1] + p->a; }`
+// One `add #0x26` read at two offsets: the pointer the source held. The member spelling
+// `p->f38 + p->f39` gives every access its own add (`add #0x26`, `add #0x27`).
+const HELD_PAIR =
+  'l1:\n\tadd\tr2, r0, #0\n\tadd\tr1, r2, #0\n\tadd\tr1, r1, #0x26\n\tldrb\tr0, [r1]\n' +
+  '\tldrb\tr1, [r1, #0x1]\n\tadd\tr0, r0, r1\n\tldr\tr1, [r2]\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
+// `struct B { u8 a; u8 pad[37]; u8 c; }; void ub(struct B *p, u8 *q) { p->c = *q; p->a = 0; }`
+// Every access one byte wide, so the access set alone is array-shaped; `*q` is loaded before the
+// `add #0x26`, which is the member's order and no cast's or held pointer's.
+const UNIFORM_MEMBER =
+  'ub:\n\tldrb\tr2, [r1]\n\tadd\tr3, r0, #0\n\tadd\tr3, r3, #0x26\n\tmov\tr1, #0x0\n' +
+  '\tstrb\tr2, [r3]\n\tstrb\tr1, [r0]\n\tbx\tlr\n';
+// The same bytes through a cast, `*((u8 *)p + 38) = *q; p->a = 0;`: address first.
+const UNIFORM_CAST =
+  'uc:\n\tadd\tr2, r0, #0\n\tadd\tr2, r2, #0x26\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r2]\n' +
+  '\tmov\tr1, #0x0\n\tstrb\tr1, [r0]\n\tbx\tlr\n';
+// `struct B { u8 a; u8 pad[37]; u8 c; u8 d; }; void s3(struct B *p) { p->d = p->c; }` — the second
+// address lands in r0 and stays there at `bx lr`.
+const IN_RETURN_REG =
+  's3:\n\tadd\tr1, r0, #0\n\tadd\tr1, r1, #0x26\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, #0x27\n' +
+  '\tstrb\tr1, [r0]\n\tbx\tlr\n';
+
+describe('what agbcc says about a far base beyond the access set', () => {
+  test('REFUSES: one materialised base at two offsets is a held pointer', () => {
+    const c = lift('l1', HELD_PAIR, 'agbcc', false);
+    expect(c).not.toContain('struct Struct');
+    expect(c).toContain('(u8 *)a0 + 38');
+  });
+
+  test('a uniform-width root whose far store shows the member order is a struct', () => {
+    const c = lift('ub', UNIFORM_MEMBER);
+    expect(c).toContain('struct Struct0 { u8 field_0; u8 _pad0[37]; u8 field_38; };');
+    expect(c).toContain('a0->field_38 = *a1;');
+  });
+
+  test('the same root stored address-first stays on its address', () => {
+    const c = lift('uc', UNIFORM_CAST);
+    expect(c).not.toContain('struct Struct');
+    expect(c).toContain('*(a0 + 38) = *a1;');
+  });
+
+  test('an address left in the return register of a void function is not held', () => {
+    const c = lift('s3', IN_RETURN_REG);
+    expect(c).toContain('a0->field_39 = a0->field_38;');
+  });
+});
+
 // `struct S { s32 a; u8 pad[39995]; u8 big; }; void f(struct S *p, u32 x) { p->a = 1; p->big = x; }`
 const FAR: [ToolchainId, string][] = [
   [
@@ -118,6 +174,63 @@ function emit(ir: string, opts: DisplacedOptions = {}): { folded: number; c: str
   verify(fn);
   return { folded, c: cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, true))) };
 }
+
+describe('the fold reads its target facts', () => {
+  // `%3 = add %0, 38` read at offsets 0 and 1.
+  const shared = `fn f {
+^bb0(%0: unk32):
+  %2: unk32 = const {value=38}
+  %3: unk32 = add %0, %2
+  %4: unk32 = load %3 {off=0, width=1, signed=false}
+  %5: unk32 = load %3 {off=1, width=1, signed=false}
+  %6: unk32 = load %0 {off=0, width=4, signed=false}
+  %7: unk32 = add %4, %5
+  %8: unk32 = add %7, %6
+  ret %8
+}
+`;
+  const fold = (behaviors: DisplacedBehaviors, base = DISPLACED_BASE_GATES, root = DISPLACED_ROOT_GATES) => {
+    const fn = parse(shared);
+    verify(fn);
+    return foldDisplacedAccesses(fn, {}, behaviors, false, base, root);
+  };
+
+  test('a shared base at two offsets folds where members share one base (ido, mwcc)', () => {
+    expect(fold({})).toBe(2);
+  });
+
+  test('and is refused where every member access gets its own base (agbcc)', () => {
+    expect(fold({ farMemberBasePerAccess: true })).toBe(0);
+    expect(fold({ farMemberBasePerAccess: true }, without(DISPLACED_BASE_GATES, 'held-pointer-offsets'))).toBe(2);
+  });
+
+  // `store %3, %v` with `%v` loaded before the add: the member's order on agbcc.
+  const uniform = `fn f {
+^bb0(%0: unk32, %1: unk32):
+  %4: unk32 = load %1 {off=0, width=1, signed=false}
+  %2: unk32 = const {value=38}
+  %3: unk32 = add %0, %2
+  store %3, %4 {off=0, width=1}
+  %5: unk32 = const {value=0}
+  store %0, %5 {off=0, width=1}
+  ret
+}
+`;
+  const foldUniform = (behaviors: DisplacedBehaviors, root = DISPLACED_ROOT_GATES) => {
+    const fn = parse(uniform);
+    verify(fn);
+    return foldDisplacedAccesses(fn, {}, behaviors, true, DISPLACED_BASE_GATES, root);
+  };
+
+  test('a uniform-width root folds on the store order only where that order names the member', () => {
+    expect(foldUniform({})).toBe(0);
+    expect(foldUniform({ farMemberStoreOrder: true })).toBe(1);
+  });
+
+  test('array-shaped is what refuses it elsewhere', () => {
+    expect(foldUniform({}, without(DISPLACED_ROOT_GATES, 'array-shaped'))).toBe(1);
+  });
+});
 
 describe('foldDisplacedAccesses refusals', () => {
   const twoAccesses = (store: string) => `fn f {

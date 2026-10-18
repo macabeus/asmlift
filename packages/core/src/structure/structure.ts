@@ -470,8 +470,11 @@ function ptrMemberElement(
 // order in which the address and the value are computed is the evidence between them. The member
 // is emitted here; raise/structs.ts `foldDisplacedAccesses` folds such a store into its struct by
 // default and the `/far-cast` lift keeps it on its address, so the differ referees the two
-// (`synthetic:sfar_b` pins the member). On ido, KMC, GCC 2.7.2 and mwcc the two compile alike past
-// a 16-bit displacement, a loaded value included.
+// (`synthetic:sfar_b` pins the member). A LOAD's member and cast forms compile alike, but agbcc
+// gives each member access its own `base + K`, so one materialised base read at two offsets is a
+// held pointer, and the fold leaves it on its address (`held-pointer-offsets`, `synthetic:sfar_held`
+// pins it). On ido, KMC, GCC 2.7.2 and mwcc the two compile alike past a 16-bit displacement, a
+// loaded value included.
 
 /** The pointee a global's value may be spelled through: the members the declaration synthesis
  *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts
