@@ -308,6 +308,8 @@ interface FrameAccess {
  *   - the frame object is reached only through `laddr`s of its offset, as the base of unqualified
  *     loads and stores — never passed, stored or added to — and every access lies in the copied
  *     range `[shift, shift + size)`, so the struct is all the object holds;
+ *   - at least one store reaches the frame object: one nothing stores to is a struct returned
+ *     wholly unset, whose copy is all that writes `ret`;
  *   - every copy is in ONE block, and no store to the frame object follows a copied load: not later
  *     in that block, and not in any block reachable from it — so the copy reads what was stored —
  *     and every store to the object is on a path into that block, so it is one the returned struct
@@ -393,7 +395,9 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
     }
   }
   const stores = accesses.filter((a) => a.op.opcode === 'store');
-  if (storeFollowsCopy(fn, blockOf.get(copies[0])!, copiedLoads, stores, blockOf)) {
+  // a frame object nothing stores to is a struct returned wholly unset (`struct S12 r; return r;`):
+  // folding it would leave `ret` read and never written, so the copy of its unset words stays
+  if (stores.length === 0 || storeFollowsCopy(fn, blockOf.get(copies[0])!, copiedLoads, stores, blockOf)) {
     return;
   }
   for (const { op, at } of stores) {

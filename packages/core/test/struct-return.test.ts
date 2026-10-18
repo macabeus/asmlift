@@ -630,6 +630,22 @@ describe('a function that itself returns a struct', () => {
     expect(source).toMatch(/struct S12 ret;[^]*ret\.a = \*\(s32 \*\)sp0;[^]*return ret;/);
   });
 
+  // agbcc -O2 `struct S12 u1(s32 *p) { struct S12 r; *p = 1; return r; }`: the frame object copied
+  // out is stored to by nothing, so it is no struct the body built, and the copy of its unset words
+  // stays as what writes `ret` — folded, `ret` would be read and never written
+  test('a frame object nothing stores to is not folded', () => {
+    const u1 =
+      'u1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, #0x1\n\tstr\tr2, [r1]\n\tadd\tr2, r0, #0\n' +
+      '\tmov\tr1, sp\n\tldmia\tr1!, {r3, r4, r5}\n\tstmia\tr2!, {r3, r4, r5}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    const proto = { params: ['s32 *'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    for (const opts of [{ prototypes: { u1: proto } }, { ownContextProto: proto }]) {
+      expect(decompile('u1', u1, ARMV4T_AGBCC, opts).source).toMatch(
+        /struct S12 u1\(s32 \*a0\) \{[^]*\*a0 = 1;[^]*ret\.a = [^;]+;[^]*ret\.b = [^;]+;[^]*ret\.c = [^;]+;[^]*return ret;/,
+      );
+    }
+  });
+
   // a candidate's own unit has no header, so the struct its signature spells is defined among its
   // declarations, and the function itself is declared by its definition alone
   test('the struct it returns is defined in the declarations block, stated or from the context', () => {
