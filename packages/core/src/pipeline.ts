@@ -1,6 +1,6 @@
 // asmlift — the library entry point. `decompile(name, asm, target)` runs the raising tower and
 // returns structured results: the source, the per-level IR dumps, and diagnostics.
-import { aggregateSize, returnedAggregate, returnsInMemory } from './aggregate';
+import { aggregateSize, ownArgumentWordsOn, returnedAggregate, returnsInMemory } from './aggregate';
 import { cBackend } from './backend/c';
 import {
   ContractError,
@@ -36,7 +36,6 @@ import {
   type Prototypes,
   declaresAggregateReturn,
   declaresVoidReturn,
-  ownArgumentWords,
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
@@ -371,7 +370,7 @@ export function liftStamped(
 }
 
 /** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
- *  words it fills (`ownArgumentWords`, the layout a stated entry gets) is lifted as an uninitialised
+ *  words it fills (`ownArgumentWordsOn`, the layout a stated entry gets) is lifted as an uninitialised
  *  local's home, and where the finished lift still READS one, the function is lifted again with
  *  the bound raised past it, so that register stays the parameter a context-less lift makes it,
  *  with an `[own-arity]` note naming the declaration and the register.
@@ -420,7 +419,7 @@ function liftWithinContextBound(
   let words =
     ownContext === undefined || Object.hasOwn(prototypes, name)
       ? undefined
-      : ownArgumentWords(name, ownContext, target);
+      : ownArgumentWordsOn(name, ownContext, target);
   if (words === undefined || words >= target.argRegs.length) {
     return unbounded();
   }

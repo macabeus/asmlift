@@ -13,6 +13,7 @@ import {
   declaredWidth,
   declaresAggregateReturn,
   declaresVoidReturn,
+  ownArgumentWords,
   paramClassOf,
   wordsOf,
 } from './proto';
@@ -152,6 +153,20 @@ const roundUp = (n: number, to: number): number => Math.ceil(n / to) * to;
  *  layout, or the bare kind its `returns` spells. */
 export function returnedAggregate(p: FnProto): AggregateLayout {
   return p.returnLayout ?? { kind: /\bunion\b/.test(p.returns ?? '') ? 'union' : 'struct' };
+}
+
+/** THE ARGUMENT WORDS A FUNCTION'S OWN DECLARATION FILLS (`proto.ts` `ownArgumentWords`), with the
+ *  hidden pointer a struct return may put ahead of them decided by this target's rule: a struct
+ *  `returnsInMemory` answers `false` for comes back in registers and takes no argument word, as a
+ *  call to it does (frontend/call-plan.ts `returnedStruct`). One the rule cannot place still counts
+ *  the word, since the bound must not fall short. */
+export function ownArgumentWordsOn(
+  name: string,
+  p: FnProto | undefined,
+  target: TargetDescription,
+): number | undefined {
+  const registerReturn = declaresAggregateReturn(p) && returnsInMemory(returnedAggregate(p!), target) === false;
+  return ownArgumentWords(name, p, target, registerReturn);
 }
 
 /** Whether a function declared to return `layout` by value hands it back through memory — so its

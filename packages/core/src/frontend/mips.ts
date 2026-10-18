@@ -20,10 +20,11 @@
 // with no consuming branch (e.g. `return a>b` → `slt v0,a1,a0`) stays an icmp value. Unsigned
 // compares (`sltu`/`sltiu`) lower to `icmp_ult`; recover types their operands u32 so the backend
 // re-emits `sltu` (the operator is the same `<` — the signedness lives in the operand types).
+import { ownArgumentWordsOn } from '../aggregate';
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaresVoidReturn, ownArgumentWords, ownReturnWidth, wordsOf } from '../proto';
+import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -1475,7 +1476,7 @@ function liftOnce(
   // uninitialised local (`registerLiveIns`, frontend/ssa.ts, as on Thumb and PPC). The saves are
   // measured HERE, before any block is lowered, because the builder evaluates the model once, at
   // its first use, while `saveSlots` below fills progressively. The function's own declaration
-  // bounds the argument registers (`ownArgumentWords`): KMC and gcc 2.7.2 home a local in a2/a3
+  // bounds the argument registers (`ownArgumentWordsOn`): KMC and gcc 2.7.2 home a local in a2/a3
   // past a two-parameter one.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
   const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
@@ -1492,7 +1493,7 @@ function liftOnce(
         ...registerLiveIns(
           target,
           savedRegs,
-          options.contextOwnWords ?? ownArgumentWords(name, prototypes[name], target),
+          options.contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
         ),
         ...(owned === undefined ? {} : { ownedLocals: owned }),
       };

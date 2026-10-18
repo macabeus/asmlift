@@ -779,7 +779,7 @@ describe('a function that itself returns a struct', () => {
   });
 
   // a register struct that is not one word of one member stays the word, and says why
-  test('a register struct kept as the word carries a note', () => {
+  test('a register struct kept as the word carries a note, and takes no hidden argument word', () => {
     const rmk2 = 'rmk2:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tbx\tlr\n';
     const S2 = {
       params: ['s32'],
@@ -795,5 +795,10 @@ describe('a function that itself returns a struct', () => {
           'word that is all one integer member — lifted as the word the machine code returns, which the header contradicts',
       ]);
     }
+    // the bound reads the target's rule: a struct in r0 puts no pointer ahead of the one parameter
+    const past = rmk2.replace('\tbx\tlr', '\torr\tr0, r1\n\tbx\tlr');
+    expect(decompile('rmk2', past, ARMV4T_AGBCC, { ownContextProto: S2 }).ownArityNotes[0]).toMatch(
+      /fills 1 argument word, and the body reads r1 past it/,
+    );
   });
 });

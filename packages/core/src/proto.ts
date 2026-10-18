@@ -373,13 +373,19 @@ export function variadicRefusal(p: FnProto | undefined): { refused: string; para
  *  unsized spelling (which may be two words), a struct passed by value (sized by a layout this
  *  does not read), a `long double`; and on a constructor or destructor, which
  *  may be handed a flag beside `this`. A variadic declaration states no `params` and so
- *  abstains: its arity is each caller's. */
+ *  abstains: its arity is each caller's.
+ *
+ *  `registerReturn` says the declared struct return is one the target hands back in registers, so
+ *  no hidden pointer comes ahead of the parameters: the target's rule, which this module cannot
+ *  read, so every reader asks through `aggregate.ts` `ownArgumentWordsOn`, which reads it as the call
+ *  lowering does. */
 export function ownArgumentWords(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+  registerReturn = false,
 ): number | undefined {
-  const own = ownArguments(name, p, target);
+  const own = ownArguments(name, p, target, registerReturn);
   if (own === undefined || own.hidden === undefined) {
     return undefined;
   }
@@ -425,6 +431,7 @@ function ownArguments(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+  registerReturn = false,
 ): { widths: number[]; hidden: number | undefined; passesThis: boolean | undefined } | undefined {
   // A COUNT BOUNDS NOTHING: it may mean argument registers or C parameters, and a C parameter
   // may be a pair or a struct passed by value of any size (`f(struct S12 s)` {params: 1} fills 3
@@ -439,7 +446,7 @@ function ownArguments(
   }
   return {
     widths,
-    hidden: implicit === undefined ? undefined : (showsScalarReturn(p) ? 0 : 1) + implicit,
+    hidden: implicit === undefined ? undefined : (registerReturn || showsScalarReturn(p) ? 0 : 1) + implicit,
     passesThis: implicit === undefined ? true : implicit === 0 ? false : undefined,
   };
 }

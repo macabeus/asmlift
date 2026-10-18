@@ -18,10 +18,11 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
+import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, ownArgumentWords, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -4723,10 +4724,10 @@ function thumbFillOf(
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
   // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
-  // argument registers (`ownArgumentWords`): agbcc homes a local in r3 past a two-parameter one.
+  // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWords(name, prototypes[name], target)),
+    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({
