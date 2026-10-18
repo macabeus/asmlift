@@ -165,6 +165,13 @@ export interface SsaBuilder {
    *  leaves alone, so the question is asked in `finish`, of the finished function. Its asker is the
    *  guessed-arity gap (frontend/call-plan.ts `decideGap`). */
   requireSoleReader(v: Value, op: Op, refuse: () => void): void;
+  /** Require that something other than a `ret` reads `v` once the function is lifted — an op, a
+   *  frame store or an op-less use, of `v` or of a join it reaches — or call `refuse`. Asked in
+   *  `finish`, as `requireSoleReader` is, and by the same asker: a decided gap at the first argument
+   *  register, where the call's result being read is what says the callee returns a word
+   *  (frontend/call-plan.ts `decideGap`). A `ret` does not count, since a frontend returns the
+   *  return register at every `ret` whatever the declared type. */
+  requireReader(v: Value, refuse: () => void): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -498,6 +505,8 @@ export function makeSsaBuilder(
   const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
   /** The sole-reader obligations `requireSoleReader` recorded, checked in `finish`. */
   const soleReaders: Array<{ value: Value; op: Op; refuse: () => void }> = [];
+  /** The reader obligations `requireReader` recorded, checked in `finish`. */
+  const readObligations: Array<{ value: Value; refuse: () => void }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
   // proportional to what a block READS rather than to how many times it reads it. The value a key
   // holds only changes at a write, and the verdict only flips at a call, so a run of identical
@@ -1362,6 +1371,9 @@ export function makeSsaBuilder(
     requireSoleReader: (value: Value, op: Op, refuse: () => void) => {
       soleReaders.push({ value, op, refuse });
     },
+    requireReader: (value: Value, refuse: () => void) => {
+      readObligations.push({ value, refuse });
+    },
     useOutsideOps: (v: Value, b: number) => {
       usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
     },
@@ -1461,6 +1473,36 @@ export function makeSsaBuilder(
           usesOutsideOps.some((u) => u.value === value) ||
           irBlocks.some((blk) => blk.ops.some(reads))
         ) {
+          refuse();
+        }
+      }
+      // …AND A READER OBLIGATION (`requireReader`), over the same finished function. A join the
+      // value reaches is followed to its own readers, and a `ret` is no reader: a frontend returns
+      // the return register at every `ret` whatever the function's declared type.
+      for (const { value, refuse } of readObligations) {
+        const reached = new Set<Value>([value]);
+        for (let grew = true; grew;) {
+          grew = false;
+          for (const blk of irBlocks) {
+            for (const op of blk.ops) {
+              for (const e of op.successors) {
+                e.block.params.forEach((p, i) => {
+                  if (reached.has(e.args[i]) && !reached.has(p)) {
+                    reached.add(p);
+                    grew = true;
+                  }
+                });
+              }
+            }
+          }
+        }
+        const read = [...reached].some(
+          (v) =>
+            frameWrites.has(v) ||
+            usesOutsideOps.some((u) => u.value === v) ||
+            irBlocks.some((blk) => blk.ops.some((o) => o.opcode !== 'ret' && o.operands.includes(v))),
+        );
+        if (!read) {
           refuse();
         }
       }

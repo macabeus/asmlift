@@ -1005,6 +1005,19 @@ export interface TargetDescription {
     // return register holds is no part of the function, save a value computed for the return alone
     // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
     structReturnHandsBackPointer?: boolean;
+    // WHETHER A CALLER HANDS ITS OWN DESTINATION POINTER STRAIGHT ON as a callee's hidden
+    // struct-return pointer, leaving the first argument register at its incoming value below the
+    // arguments it sets up. `true` for ido7.1: `int b3(struct S *p){ *p = sg(1); return 0; }` is
+    // `jal sg; li a1,1` with a0 never touched, the bytes of `sg(p, 1)` with its result unused.
+    // `false` for gcc2.7.2kmc, gcc2.7.2, agbcc and mwcc_242_81, mwcc_233_163n and mwcc_247_107,
+    // which copy through a frame temporary (a0/r0/r3 set to a frame address ahead of the call).
+    // Compiled at the canonical flags, `b3` and `void b6(struct S *p, int k){ *p = sg(k, 5); }`.
+    // Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`): where it holds, a gap at
+    // the first argument register is decided only where the call's result is read, which no
+    // forwarded struct return's is (IDO reloads `p` from its home after the call in all five shapes
+    // compiled: `return (*p = sg(1)).b`, `return p` and three more). ABSENT ⇒ unmeasured, and read
+    // as `true`, which only refuses more.
+    forwardsStructReturnDestination?: boolean;
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
     // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
     // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
@@ -1107,6 +1120,18 @@ export interface TargetDescription {
     // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
     // two apart there and refuses rather than drop the read.
     discardsUnusedReadsInto?: string;
+    // MAY A DISCARDED READ LAND IN AN ARGUMENT REGISTER, at flags that delete a plain read nobody
+    // uses? Where it may, a value a load left in an argument register is no proof that the next
+    // call takes it. `true` for agbcc, which loads a discarded `volatile` read into the lowest free
+    // argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
+    // `g(s, *(int *)K)`). `false` for ido7.1 (`lw zero`, `lbu zero`, `lh zero`, and `lw zero` +
+    // `lw at` for a doubleword), gcc2.7.2kmc and gcc2.7.2 (`lw v0`, `lw v1`, `lbu v0`, `lhu v0`), and
+    // mwcc_242_81, mwcc_233_163n and mwcc_247_107 (`lwz r0`, `lbz r0`, `lha r0`, and no load at all
+    // for a doubleword). Compiled at the canonical flags: a discarded read of a global, through a
+    // parameter, of each width, and under the pressure of three values live across the call. Read
+    // by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a load decides only where
+    // this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
+    discardedReadMayFillArgRegister?: boolean;
   };
 }
 
@@ -1228,6 +1253,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     largestAlignment: 4,
     aggregateReturn: 'apcs',
     structReturnHandsBackPointer: true,
+    // MEASURED: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: true,
     byValueAggregateArgWords: true,
     enumBytes: 4,
     bitfieldPacking: 'contiguous',
@@ -1435,6 +1463,9 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
     // and a frame store for a plain dead local, `lw a2` for a `register` one.
     discardsUnusedReadsInto: 'zero',
+    // MEASURED: the probes at the fields.
+    forwardsStructReturnDestination: true,
+    discardedReadMayFillArgRegister: false,
   },
 };
 
@@ -1573,6 +1604,9 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains at their rows' levels and at -O0 (`test/corpus/gcc272*-outarea.txt`):
     // no load from 16(sp) up the area; a char-array struct's home words are loaded (see the field).
     outgoingAreaNeverLoadedFrom: 16,
+    // MEASURED on BOTH toolchains this description serves: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: false,
   },
 };
 
@@ -1687,6 +1721,9 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds at -O0,p: the note at the field — `lwz r0` for a volatile read,
     // an `r31` home for a plain or `register` dead local.
     discardsUnusedReadsInto: 'r0',
+    // MEASURED on all three builds: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: false,
   },
 };
 

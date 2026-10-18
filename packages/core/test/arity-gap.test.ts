@@ -220,6 +220,120 @@ describe('on PowerPC (mwcc_242_81), a gap is decided where no 8-byte argument ca
   });
 });
 
+describe('the compiler facts a decided gap reads, stated for every toolchain', () => {
+  test('where a discarded read may land, and who forwards a struct destination', () => {
+    const facts = Object.fromEntries(
+      Object.entries(TOOLCHAIN_TARGETS).map(([id, r]) => {
+        const b = r.description.compilerBehaviors;
+        return [id, [b.discardedReadMayFillArgRegister, b.forwardsStructReturnDestination]];
+      }),
+    );
+    expect(facts).toMatchObject({
+      agbcc: [true, false],
+      'ido7.1': [false, true],
+      'gcc2.7.2kmc': [false, false],
+      'gcc2.7.2': [false, false],
+      mwcc_242_81: [false, false],
+      mwcc_233_163n: [false, false],
+      mwcc_247_107: [false, false],
+    });
+  });
+});
+
+// A LOAD ONLY THE CALL READS IS AN ARGUMENT where no discarded read lands in an argument register
+// (`compilerBehaviors.discardedReadMayFillArgRegister`): KMC discards into v0, mwcc into r0, so
+// `int logv(); int f(const char *s, int *q){ return logv(s, *q) + 1; }` decides its gap there.
+// agbcc's discarded read in r1 refuses (thumb-frontend.test.ts, `fvol`).
+describe('a value a load left above the gap', () => {
+  test('decides it on O32 (gcc2.7.2kmc), where a discarded read goes to v0', () => {
+    const pld2 = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,16(sp)',
+      '8:\tjal\t0 <f>',
+      'c:\tlw\ta1,0(a1)',
+      '10:\tlw\tra,16(sp)',
+      '14:\taddiu\tv0,v0,1',
+      '18:\tjr\tra',
+      '1c:\taddiu\tsp,sp,24',
+    ];
+    const lift = (target: typeof MIPS_GCC) =>
+      decompile('f', mips(pld2), target, {
+        asmData: jalTo(8, 'logv'),
+        prototypes: own(['const char *', 's32 *']),
+      }).source;
+    expect(lift(MIPS_GCC)).toContain('return logv(a0, *a1) + 1;');
+    // where the fact is unmeasured, a load decides nothing
+    const unmeasured = {
+      ...MIPS_GCC,
+      compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, discardedReadMayFillArgRegister: undefined },
+    };
+    expect(() => lift(unmeasured)).toThrow(/a1 holds a value and a0 holds none/);
+  });
+  test('decides it on PowerPC (mwcc_242_81), where a discarded read goes to r0', () => {
+    const pld2 =
+      '0 <f>:\n0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tlwz     r4,0(r4)\n' +
+      '10:\tbl      10 <f+0x10>\n\t\t\t10: R_PPC_REL24\tlogv\n14:\tlwz     r0,20(r1)\n18:\taddi    r3,r3,1\n' +
+      '1c:\tmtlr    r0\n20:\taddi    r1,r1,16\n24:\tblr\n';
+    expect(decompile('f', pld2, PPC_MWCC, { prototypes: own(['const char *', 's32 *']) }).source).toContain(
+      'return logv(a0, *a1) + 1;',
+    );
+  });
+});
+
+// IDO HANDS ITS OWN DESTINATION ON AS A CALLEE'S HIDDEN POINTER
+// (`compilerBehaviors.forwardsStructReturnDestination`): `struct S sg(); int f(struct S *p){ *p =
+// sg(1); return 0; }` is `jal sg; li a1,1` with a0 never touched, so a gap at a0 is decided only
+// where something other than a `ret` reads the call's result. ido7.1's own output for each source.
+describe("on O32 (ido7.1), a gap at a0 needs the call's result read", () => {
+  const body = (tail: string[]) => [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,20(sp)',
+    '8:\tjal\t0 <f>',
+    'c:\tli\ta1,1',
+    '10:\tlw\tra,20(sp)',
+    '14:\taddiu\tsp,sp,24',
+    ...tail,
+  ];
+  const lift = (lines: string[], sym: string, prototypes: Prototypes) =>
+    decompile('f', mips(lines), MIPS_IDO, { asmData: jalTo(8, sym), prototypes }).source;
+  // `int logv(); int f(const char *s){ return logv(s, 1) + 1; }`
+  test('a result the function computes with is a word, and the gap is passed on', () => {
+    const passgap = body(['18:\taddiu\tv0,v0,1', '1c:\tjr\tra', '20:\tnop']);
+    expect(lift(passgap, 'logv', own(['const char *']))).toContain('return logv(a0, 1) + 1;');
+  });
+  test('a forwarded struct return refuses, with the own declaration or without a result', () => {
+    // `int f(struct S *p){ *p = sg(1); return 0; }`
+    const b3 = body(['18:\tmove\tv0,zero', '1c:\tjr\tra', '20:\tnop']);
+    expect(() => lift(b3, 'sg', own(['struct S *']))).toThrow(/a1 holds a value and a0 holds none/);
+    // `void f(struct S *p){ *p = sg(1); }`: the `ret` reads v0, which is no reader
+    const b7 = body(['18:\tjr\tra', '1c:\tnop']);
+    expect(() =>
+      decompile('f', mips(b7), MIPS_IDO, {
+        asmData: jalTo(8, 'sg'),
+        prototypes: { f: { params: ['struct S *'], returnsVoid: true } },
+      }),
+    ).toThrow(/a1 holds a value and a0 holds none/);
+    // `int f(const char *s){ return logv(s, 1); }` is the same object, and declines with it
+    expect(() => lift(b7, 'logv', own(['const char *']))).toThrow(/a1 holds a value and a0 holds none/);
+  });
+  // gcc2.7.2kmc copies a struct return through a frame temporary (`addiu a0,sp,16`), so there a
+  // returned value only a `ret` reads still decides the gap
+  test('…where the compiler copies through a temporary instead, a returned result decides it', () => {
+    const pt = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,16(sp)',
+      '8:\tjal\t0 <f>',
+      'c:\tli\ta1,1',
+      '10:\tlw\tra,16(sp)',
+      '14:\tjr\tra',
+      '18:\taddiu\tsp,sp,24',
+    ];
+    expect(
+      decompile('f', mips(pt), MIPS_GCC, { asmData: jalTo(8, 'logv'), prototypes: own(['const char *']) }).source,
+    ).toContain('return logv(a0, 1);');
+  });
+});
+
 describe('on Thumb (agbcc), a decided gap proves only the register above it', () => {
   const thumb = (name: string, body: string) =>
     `${name}:\n\tpush\t{lr}\n${body}\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n`;

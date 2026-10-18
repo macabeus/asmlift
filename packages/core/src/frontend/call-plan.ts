@@ -669,11 +669,22 @@ export function callDeclarations(
   // and at -O0 no gap arises at all (every argument is reloaded from its home first).
   //
   // EACH CLAUSE IS A MEASURED COUNTEREXAMPLE, so each refuses:
-  //   - the value must be the call's own block's, and something no memory read produced: agbcc puts a
-  //     DISCARDED volatile read in the lowest free argument register (`*(volatile int *)K; g(s)` is
-  //     `ldr r1,[r1]; bl g`, at -O0 too), the passgap shape exactly. Nothing else may read it either
+  //   - the value must be the call's own block's. Where a discarded read may land in an argument
+  //     register (`compilerBehaviors.discardedReadMayFillArgRegister`), it must also be something no
+  //     memory read produced: agbcc puts a DISCARDED volatile read in the lowest free argument
+  //     register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, at -O0 too), the passgap shape
+  //     exactly. The other compilers discard into $zero, v0/v1 or r0, so there a load only the call
+  //     reads is an argument: `logv(s, gx)` lifts. Nothing else may read the value either
   //     (`SsaBuilder.requireSoleReader`, asked of the finished function): `gx = 1; logv(s)` and
   //     `gx = 1; logv(s, 1)` are one agbcc object, the stored constant left in r1.
+  //   - where a caller forwards its own destination as a callee's hidden pointer
+  //     (`compilerBehaviors.forwardsStructReturnDestination`, ido7.1), a gap at the first argument
+  //     register is decided only where the call's result is read (`SsaBuilder.requireReader`,
+  //     owed by `lower`), by anything but a `ret`. `int b3(struct S *p){ *p = sg(1); return 0; }` is
+  //     `jal sg; li a1,1` with a0 untouched, and lifted `sg(a0, 1)` even with `int b3(struct S *)`
+  //     declared: the hidden pointer stated as a C argument, and the `*p =` store dropped. IDO reads
+  //     no forwarded struct return's result register (five shapes, at the target.ts field), but a
+  //     `ret` reads it in a function ending in the call, `void b7(struct S *p){ *p = sg(1); }`.
   //   - each gap register must hold the function's own incoming value on every path
   //     (`holdsEntryValue`): one a call destroyed is the trim's, and holds nothing.
   //   - where the ABI can leave a register empty below a filled one (target.ts `argRegisterHoles`)
@@ -711,7 +722,15 @@ export function callDeclarations(
     const v = ssa.readVar(set, bi);
     const def = ssa.irBlocks[bi].ops.find((op) => op.results.includes(v));
     const sig = def === undefined ? undefined : (OPCODES[def.opcode as keyof typeof OPCODES] as OpSig | undefined);
-    if (!accept(v) || sig === undefined || sig.effects || sig.reads || sig.terminator || def!.opcode === 'undef') {
+    const readsRefuse = target.compilerBehaviors.discardedReadMayFillArgRegister !== false;
+    if (
+      !accept(v) ||
+      sig === undefined ||
+      sig.effects ||
+      (sig.reads && readsRefuse) ||
+      sig.terminator ||
+      def!.opcode === 'undef'
+    ) {
       return undefined;
     }
     if (gap.some((g) => ssa.writtenSinceCall(g, bi) || !ssa.holdsEntryValue(g, bi))) {
@@ -833,6 +852,9 @@ export function callDeclarations(
     // the gaps `decideGap` decided: the value that proved each, the gap's own refusal, owed if that
     // proof fails once the function is lifted, and how many argument words they put beyond doubt
     const decided: Array<{ value: Value; refuse: () => void }> = [];
+    // the refusals of the decided gaps at the first argument register that the call's result must
+    // be read to keep (`compilerBehaviors.forwardsStructReturnDestination`, at `decideGap`)
+    const resultOwed: Array<() => void> = [];
     let decidedWords = 0;
     const argc =
       widths === null
@@ -846,6 +868,9 @@ export function callDeclarations(
                 return false;
               }
               decided.push({ value, refuse });
+              if (gap[0] === target.argRegs[0] && target.compilerBehaviors.forwardsStructReturnDestination !== false) {
+                resultOwed.push(refuse);
+              }
               decidedWords = target.argRegs.indexOf(set) + 1;
               return true;
             },
@@ -993,6 +1018,13 @@ export function callDeclarations(
     ssa.irBlocks[bi].ops.push(call);
     for (const d of decided) {
       ssa.requireSoleReader(d.value, call, d.refuse);
+    }
+    for (const refuse of resultOwed) {
+      if (returns.kind === 'word') {
+        ssa.requireReader(res, refuse);
+      } else {
+        refuse();
+      }
     }
     // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
     // known whether every path to here passes through another call, which would have clobbered
