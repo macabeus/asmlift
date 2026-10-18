@@ -44,6 +44,12 @@ const noop = () => {};
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
 const kindIndex = (name: string) => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
 
+// THE DETAIL TEST IS CORPUS-SIZED, as fan-explorer-render.test.tsx's drawer test is: it renders
+// every row of the committed artifact. At 1,929 rows it is ~3.7 s alone on a developer machine and
+// 4.8-5.3 s on a hosted runner, so the 5 s default fails as `Test timed out in 5000ms` on whichever
+// branch adds the next rows. A real hang is still loud, 30 s later.
+vi.setConfig({ testTimeout: 30_000 });
+
 describe.each([
   ['the sample', FAN_SAMPLE],
   ['the committed artifact', artifact],
