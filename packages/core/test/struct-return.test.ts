@@ -603,6 +603,33 @@ describe('a function that itself returns a struct', () => {
     );
   });
 
+  // agbcc -O2 `struct S12 rmk12(s32 x){ struct S12 s; s.a = x; s.b = 0; s.c = x + 3; return s; }`
+  // builds the struct at sp and copies it out with ldmia/stmia, whose write-back nothing reads
+  const rmk12 =
+    'rmk12:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr1, [sp]\n\tmov\tr2, #0x0\n\tstr\tr2, [sp, #0x4]\n' +
+    '\tadd\tr1, r1, #0x3\n\tstr\tr1, [sp, #0x8]\n\tadd\tr2, r0, #0\n\tmov\tr1, sp\n\tldmia\tr1!, {r3, r4, r5}\n' +
+    '\tstmia\tr2!, {r3, r4, r5}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a struct built in a frame object and copied out whole is the returned struct', () => {
+    const { source } = decompile('rmk12', rmk12, ARMV4T_AGBCC, { prototypes: { rmk12: S12 } });
+    expect(source).toMatch(
+      /struct S12 rmk12\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = 0;\n\s+ret\.c = a0 \+ 3;\n\s+return ret;/,
+    );
+    expect(source).not.toMatch(/sp0/);
+  });
+
+  // hand-written: the frame object is read again past the copy, so it is not only the returned
+  // struct, and the copy stays — the same function, spelled with the copy as member stores
+  test('a frame object read besides its copy is not folded', () => {
+    const reread =
+      rmk12.replace(
+        '\tadd\tsp, sp, #0xc\n',
+        '\tldr\tr3, [sp]\n\tldr\tr4, .L4\n\tstr\tr3, [r4]\n\tadd\tsp, sp, #0xc\n',
+      ) + '\t.align\t2, 0\n.L4:\n\t.word\tgW\n';
+    const { source } = decompile('rmk12', reread, ARMV4T_AGBCC, { prototypes: { rmk12: S12 } });
+    expect(source).toMatch(/struct S12 ret;[^]*ret\.a = \*\(s32 \*\)sp0;[^]*return ret;/);
+  });
+
   // a candidate's own unit has no header, so the struct its signature spells is defined among its
   // declarations, and the function itself is declared by its definition alone
   test('the struct it returns is defined in the declarations block, stated or from the context', () => {

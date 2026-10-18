@@ -980,7 +980,11 @@ return hands back the incoming pointer, and the pointer and the constants added 
 only as the bases of unqualified stores inside the struct. Then the pointer is the function's own
 return object — an `laddr` marked `returned`, which names the caller's storage and no frame offset
 — its stores are that local's members, and each `ret` returns it by value: `struct S f(s32 a0) {
-struct S ret; ret.a = a0; return ret; }`. Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
+struct S ret; ret.a = a0; return ret; }`. A frame object the struct was built in and copied out of
+whole (IDO's word copy, agbcc's `ldmia`/`stmia`) is that local, and the copy is `return ret;`'s
+own lowering, so it folds where nothing else reads the object and every write to it is on a path
+into the copy, ahead of it.
+Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
 an `[own-return]` note, the soft policy of its arity bound. A stated return the context lays out —
 `struct S`, or a typedef of one — is read with that layout (`proto-context.ts`
 `withOwnReturnLayout`), so a one-word struct the rule returns in a register lifts as its word, and

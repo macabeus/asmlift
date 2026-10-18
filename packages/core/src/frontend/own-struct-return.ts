@@ -25,7 +25,26 @@
 // A refusal leaves the function as lifted. What the caller does with it is the caller's rule
 // (pipeline.ts `liftStamped`): a stated declaration refuses, a context one keeps the pointer lift
 // with a note.
-import { type Fn, OWN_RETURN_OBJECT, type Op, RETURNS_OBJECT, type Value, mkOp, mkValue } from '../ir/core';
+//
+// THE FRAME COPY. Where the compiler built the struct in a frame object and copied it out word by
+// word (IDO's `addiu t7,sp,4; lw t9,0(t7); sw t9,0(a0)`, agbcc's `ldmia`/`stmia` pair), that frame
+// object IS the returned local and the copy is `return ret;`'s lowering, so lifting the copy as
+// member stores would compile to a second copy. `foldFrameCopy` folds it: the object's stores
+// become the return object's, and the copy goes. It folds only a copy it can prove is that one —
+// see its own note — and otherwise leaves the stores of the copied words, which is the same
+// function spelled with one copy too many.
+import {
+  type Block,
+  type Fn,
+  OWN_RETURN_OBJECT,
+  type Op,
+  RETURNS_OBJECT,
+  type Value,
+  mkOp,
+  mkValue,
+  predecessors,
+  successorsOf,
+} from '../ir/core';
 import { deadOps, qualified } from '../ir/discipline';
 import { type IrType, T } from '../ir/types';
 import type { TargetDescription } from '../target';
@@ -69,6 +88,7 @@ export function liftOwnStructReturn(fn: Fn, type: StructType, target: TargetDesc
   }
   entry.params = entry.params.slice(1);
   entry.ops.unshift(object);
+  foldFrameCopy(fn, local, size, dead);
   return undefined;
 }
 
@@ -166,4 +186,161 @@ function storeThrough(op: Op, at: readonly number[], k: number, size: number): s
     return `is stored through at bytes ${off}..${off + width}, outside the ${size} the struct takes`;
   }
   return undefined;
+}
+
+/** One access through a frame object: the op, and the byte it reaches from the object's start. */
+interface FrameAccess {
+  op: Op;
+  at: number;
+}
+
+/** FOLDS A FRAME OBJECT COPIED WHOLE INTO THE RETURN OBJECT, where every store to the return object
+ *  (`ret`, the hidden pointer's local) is a COPY: an unqualified store of a load of the same width,
+ *  read through one frame object (`laddr`) at one fixed shift from the stored byte. Then the frame
+ *  object's stores are the return object's, the copy is deleted, and the frame object goes with it.
+ *
+ *  It folds only where that is the same function, which needs every one of:
+ *   - the copies tile the struct, `[0, size)`, each byte once: the compiler copies the whole of it;
+ *   - each copied load is read by its copy alone, and is a load of the frame object at
+ *     `shift + off` for the copy at `off`;
+ *   - the frame object is reached only through `laddr`s of its offset, as the base of unqualified
+ *     loads and stores — never passed, stored or added to — and every access lies in the copied
+ *     range `[shift, shift + size)`, so the struct is all the object holds;
+ *   - every copy is in ONE block, and no store to the frame object follows a copied load: not later
+ *     in that block, and not in any block reachable from it — so the copy reads what was stored —
+ *     and every store to the object is on a path into that block, so it is one the returned struct
+ *     holds and not a write to storage a path that returns without the copy leaves alone.
+ *  Anything else leaves `fn` as it is. */
+function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>): void {
+  const defs = new Map<Value, Op>();
+  const blockOf = new Map<Op, Block>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.results.forEach((r) => defs.set(r, op));
+      blockOf.set(op, b);
+    }
+  }
+  const uses = new Map<Value, Op[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (dead.has(op)) {
+        continue;
+      }
+      for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+        (uses.get(v) ?? uses.set(v, []).get(v)!).push(op);
+      }
+    }
+  }
+  const copies = (uses.get(ret) ?? []).filter((op) => op.opcode === 'store');
+  if (copies.length === 0) {
+    return;
+  }
+  // each copy: the load it stores, its frame object's offset, and the shift from the stored byte
+  let frame: number | undefined;
+  let shift: number | undefined;
+  const copiedLoads = new Set<Op>();
+  const tiles: [number, number][] = [];
+  for (const c of copies) {
+    const load = defs.get(c.operands[1]);
+    const base = load?.opcode === 'load' ? defs.get(load.operands[0]) : undefined;
+    if (
+      load === undefined ||
+      base?.opcode !== 'laddr' ||
+      base.attrs[OWN_RETURN_OBJECT] === true ||
+      qualified(c) ||
+      qualified(load) ||
+      load.attrs.width !== c.attrs.width ||
+      (uses.get(load.results[0]) ?? []).length !== 1 ||
+      blockOf.get(c) !== blockOf.get(copies[0])
+    ) {
+      return;
+    }
+    const s = (load.attrs.off as number) - (c.attrs.off as number);
+    if ((frame ?? base.attrs.off) !== base.attrs.off || (shift ?? s) !== s) {
+      return;
+    }
+    frame = base.attrs.off as number;
+    shift = s;
+    copiedLoads.add(load);
+    tiles.push([c.attrs.off as number, c.attrs.width as number]);
+  }
+  tiles.sort((a, b) => a[0] - b[0]);
+  if (tiles.reduce((end, [off, w]) => (end === off ? off + w : -1), 0) !== size) {
+    return;
+  }
+  // every access to the frame object, and nothing else that reaches it
+  const accesses: FrameAccess[] = [];
+  const laddrs = fn.blocks
+    .flatMap((b) => b.ops)
+    .filter((op) => op.opcode === 'laddr' && op.attrs.off === frame && op.attrs[OWN_RETURN_OBJECT] !== true);
+  for (const l of laddrs) {
+    for (const u of uses.get(l.results[0]) ?? []) {
+      const access = (u.opcode === 'load' || u.opcode === 'store') && u.operands[0] === l.results[0];
+      const stored = u.opcode === 'store' && u.operands[1] === l.results[0];
+      if (!access || stored || qualified(u) || u.operands.filter((v) => v === l.results[0]).length !== 1) {
+        return;
+      }
+      const at = u.attrs.off as number;
+      if (at < shift! || at + (u.attrs.width as number) > shift! + size) {
+        return;
+      }
+      if (u.opcode === 'load' && !copiedLoads.has(u)) {
+        return;
+      }
+      accesses.push({ op: u, at });
+    }
+  }
+  const stores = accesses.filter((a) => a.op.opcode === 'store');
+  if (storeFollowsCopy(fn, blockOf.get(copies[0])!, copiedLoads, stores, blockOf)) {
+    return;
+  }
+  for (const { op, at } of stores) {
+    op.operands = [ret, ...op.operands.slice(1)];
+    op.attrs = { ...op.attrs, off: at - shift! };
+  }
+  const gone = new Set<Op>([...copies, ...copiedLoads]);
+  for (const b of fn.blocks) {
+    b.ops = b.ops.filter((op) => !gone.has(op));
+  }
+  // …and the frame object's addresses, where nothing still reads them (an op `dce` deletes may)
+  const read = new Set(fn.blocks.flatMap((b) => b.ops.flatMap((op) => op.operands)));
+  for (const b of fn.blocks) {
+    b.ops = b.ops.filter((op) => !laddrs.includes(op) || read.has(op.results[0]));
+  }
+}
+
+/** Whether a store in `stores` is not one the copy reads: it can run after a copied load — later in
+ *  the copy's block `at`, or in any block reachable from it (which includes `at` itself, where it
+ *  heads a loop) — or it runs on a path that never reaches the copy at all, where the caller's
+ *  storage was left unwritten and folding would write it. */
+function storeFollowsCopy(
+  fn: Fn,
+  at: Block,
+  loads: ReadonlySet<Op>,
+  stores: readonly FrameAccess[],
+  blockOf: ReadonlyMap<Op, Block>,
+): boolean {
+  const first = at.ops.findIndex((op) => loads.has(op));
+  if (first < 0 || [...loads].some((l) => blockOf.get(l) !== at)) {
+    return true;
+  }
+  const walk = (from: Block[], next: (b: Block) => Block[]): Set<Block> => {
+    const seen = new Set<Block>();
+    const work = [...from];
+    while (work.length > 0) {
+      const b = work.pop()!;
+      if (!seen.has(b)) {
+        seen.add(b);
+        work.push(...next(b));
+      }
+    }
+    return seen;
+  };
+  const after = walk(successorsOf(at), successorsOf);
+  const preds = predecessors(fn);
+  const before = walk(preds.get(at) ?? [], (b) => preds.get(b) ?? []);
+  return stores.some(({ op }) => {
+    const b = blockOf.get(op)!;
+    return after.has(b) || (b === at ? at.ops.indexOf(op) > first : !before.has(b));
+  });
 }
