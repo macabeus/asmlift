@@ -1156,24 +1156,84 @@ export const SYNTHETIC: SynthSpec[] = [
   // states the callee's arity, so it is guessed from the argument registers a value reaches, and a
   // register this function never wrote may still hold its own incoming argument: `s` stays in the
   // first argument register while `1` goes into the second, and a count that stops at the first
-  // lifts `logv() + 1`. Every frontend refuses the gap (frontend/ssa.ts `fallbackArgc`), so both
-  // rows are declined witnesses. `ctx` declares neither callee, so neither decompiler is told the
+  // lifts `logv() + 1`. The gap is DECIDED where the register above it surely is an argument
+  // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value no memory read
+  // produced and nothing else reads, and where argument words fill in order the gap below it is the
+  // function's own arguments passed on. On O32 the own declaration (`ctx`) must put an integer word
+  // in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC the second
+  // word of an 8-byte argument that could skip the gap must hold nothing — `passmid`'s a3/r6 is no
+  // parameter of `(int, int)`. `ctx` declares neither callee, so neither decompiler is told the
   // arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
   // machine code as `g2()`, so no row expects a decline for it.
+  ...(
+    [
+      [[...ALL, 'gcc2.7.2'], undefined],
+      [
+        ['mwcc_233_163n', 'mwcc_247_107'],
+        ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+      ],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] => [
+    {
+      sym: 'passgap',
+      src: 'int logv();\nint passgap(const char *s){ return logv(s, 1) + 1; }',
+      features: [],
+      toolchains: [...toolchains],
+      ...(cflags === undefined ? {} : { cflags: [...cflags] }),
+      ctx: 'int passgap(const char *);',
+    },
+    {
+      sym: 'passmid',
+      src: 'int g3();\nint passmid(int a, int b){ return g3(1, b, 3) + 1; }',
+      features: [],
+      toolchains: [...toolchains],
+      ...(cflags === undefined ? {} : { cflags: [...cflags] }),
+      ctx: 'int passmid(int, int);',
+    },
+    // A CONSTANT SOMETHING ELSE READS decides nothing: agbcc keeps the `1` it stores to `gx` in r1,
+    // so this is one object with `gx = 1; return logv(s) + 1;`, and its cell is a declined
+    // witness. Every other compiler sets the argument register apart from the store, so the gap is
+    // decided there.
+    {
+      sym: 'passst',
+      src: 'int logv();\nint gx;\nint passst(const char *s){ gx = 1; return logv(s, 1) + 1; }',
+      features: ['store'],
+      toolchains: [...toolchains],
+      ...(cflags === undefined ? {} : { cflags: [...cflags] }),
+      ctx: 'extern int gx;\nint passst(const char *);',
+    },
+  ]),
+  // A VALUE A MEMORY READ LEFT IN THE REGISTER ABOVE decides nothing: agbcc puts a discarded
+  // volatile read in the lowest free argument register (`ldr r1,[r1]; bl g`), the `passgap` shape,
+  // while the source passes `s` alone. agbcc's alone, a declined witness: the other compilers
+  // discard into $zero, v0 or r0.
   {
-    sym: 'passgap',
-    src: 'int logv();\nint passgap(const char *s){ return logv(s, 1) + 1; }',
+    sym: 'passvol',
+    src: 'int g();\nint passvol(int s){ *(volatile int *)0x4000000; return g(s) + 1; }',
     features: [],
-    toolchains: [...ALL, 'gcc2.7.2'],
-    ctx: 'int passgap(const char *);',
+    toolchains: ['agbcc'],
+    ctx: 'int passvol(int);',
   },
-  {
-    sym: 'passmid',
-    src: 'int g3();\nint passmid(int a, int b){ return g3(1, b, 3) + 1; }',
+  // THE HOLE AN 8-BYTE ARGUMENT SKIPS: `g(1, 3LL)` and `g(1, b, 0, 3)` are one object on O32 and
+  // PowerPC (a1/r4 untouched under the set a2:a3/r5:r6 pair), so the gap is not decidable and these
+  // cells are declined witnesses. Not on agbcc, which fills r1:r2 in order, nor ido7.1, whose home
+  // store of the unused `b` sets a1 up, so neither leaves a gap.
+  ...(
+    [
+      [['gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [
+        ['mwcc_233_163n', 'mwcc_247_107'],
+        ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+      ],
+    ] as const
+  ).map(([toolchains, cflags]): SynthSpec => ({
+    sym: 'passll',
+    src: 'int g();\nint passll(int a, int b){ return g(1, 3LL) + 1; }',
     features: [],
-    toolchains: [...ALL, 'gcc2.7.2'],
-    ctx: 'int passmid(int, int);',
-  },
+    toolchains: [...toolchains],
+    ...(cflags === undefined ? {} : { cflags: [...cflags] }),
+    ctx: 'int passll(int, int);',
+  })),
   // …AND THE SAME PASS-THROUGH TO A CALLEE THAT IS DECLARED, where the declaration states no
   // layout for all of its arguments and a guess stands in for the rest. There a TRAILING argument
   // passed on unchanged leaves no gap: `logv(s + 1, c)` sets the first argument register and leaves
