@@ -781,11 +781,11 @@ guess, which would drop the struct or split it into separate arguments. A variad
 fixed parameters (`variadicParams`) are its only layout. Where each is one word they are the first
 that many argument words, read as stated, so one this function passes through untouched is its own
 argument and one a call destroyed refuses; only what the `...` takes is guessed, above them, and a
-gap there refuses as for an undeclared callee (frontend/call-plan.ts `variadicFloor`), and so does a
+gap there is treated as for an undeclared callee (frontend/call-plan.ts `variadicFloor`), and so is a
 register there that still holds this function's own incoming value, which a read of it leaves behind
-as a definition (frontend/ssa.ts `fallbackArgc`) — one a call destroyed holds nothing and one the
-call's block re-set since its last call is set up, so neither refuses. Where one is
-a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
+as a definition (frontend/ssa.ts `fallbackArgc`), which refuses — one a call destroyed holds
+nothing and one the call's block re-set since its last call is set up, so neither refuses. Where a
+fixed parameter is a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
 unsized spelling, which may be two words, the guess places the call from the first register. Every
 parameter is at least one word, so a guess that counts fewer registers than that declaration's fixed
 parameters, or than an unsized plain list's parameters (`void h(int, Foo)` with `Foo` unresolved),
@@ -809,6 +809,32 @@ store there, and a union would be the wrong declaration for its inhabitants (agb
 compares into one `ldrh`; a device register, whose reads are `volatile`). Nor does
 raise/struct-arrays.ts read the boundary yet: it sizes an element struct naturally, which agbcc
 does not.
+
+A gap in a guessed arity, an argument register nothing reaches below one a value reaches, refuses
+unless it is decided (frontend/call-plan.ts `decideGap`). It is decided when the register above it is
+surely an argument. The call's own block wrote that register with a value nothing but the call
+reads, at flags that delete a dead computation. Argument words fill in order, so every register
+below an argument is the function's own argument passed on. So `logv(s, 1)` lifts `logv(a0, 1)` and
+`g3(1, b, 3)` lifts `g3(1, a1, 3)`. A value an instruction wrote as a side effect decides nothing
+(frontend/ssa.ts `noteIncidentalWrite`): agbcc's `ldmia`/`stmia` block copy leaves its advanced bases
+dead in r2/r3, and a PowerPC update form's advanced base is marked the same way. Two compiler facts
+narrow it. Where a discarded read may land in an argument register
+(`discardedReadMayFillArgRegister`: agbcc, gcc2.7.2kmc, gcc2.7.2 and the three mwcc builds, whose
+discard register is the first free one once v0/v1 or r0 are busy), a value a memory read produced
+decides nothing; on ido7.1, which discards into $zero every time, `logv(s, gx)` lifts. Where a
+caller hands its own destination on as a callee's hidden struct-return pointer
+(`forwardsStructReturnDestination`, ido7.1), a gap at the first argument register is decided only
+where something other than a `ret` reads the call's result.
+The decision covers the gap and that register only. Every register the count takes past it must be
+proven the same way. The call refuses where its arity could still run past the count
+(`decidedCallRefusal`): an own parameter that may sit there, an outgoing stack word that reaches it,
+a floating own parameter on any target with an FPU, or, where floats travel apart from the general
+words (PowerPC), no own declaration that proves there is none. Where the ABI can leave a register
+empty below a filled one (target.ts `argRegisterHoles`: O32's and PowerPC's 8-byte skip, O32's
+leading float), the gap may be that hole, and only an own declaration that `proves` rules it out: a
+stated entry, or the context's entry while the lift is bounded by exactly its words. The context's
+entry, in any other lift, only refuses. A register copy never decides, since its SSA value is the
+copied one (a known gap, which costs declines).
 
 ## A float, across the tower
 

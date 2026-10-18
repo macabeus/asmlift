@@ -3198,16 +3198,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() =>
         decompile('f', captureAndCall + FIVE_ARG_CALL + EPILOGUE, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
       ).toThrow(/the store to \[sp,#0\] is never reloaded/);
-      // …and where NOTHING declares the callee the licence reads every argument register, while
-      // the guessed arity passes `use` only what it infers — not `r3`. The licence claimed `use`
-      // receives the frame base, the emitted call would take nothing, and `five`'s fifth outgoing
-      // argument would be lost with it. The call lowering refuses that: r3 holds a value past r0,
-      // which holds none, and a guessed arity refuses a gap (`fallbackArgc`) ahead of asking whether
-      // a register it leaves out may hold a frame address (`lowerCall`'s `leftOut`); the audit's
-      // re-check is the backstop.
-      expect(() =>
-        decompile('f', `${PROLOGUE}\tmov\tr3, sp\n\tbl\tuse\n${FIVE_ARG_CALL}${EPILOGUE}`, ARMV4T_AGBCC),
-      ).toThrow(/the call 'bl use' in block 'f' has no prototype, r3 holds a value and r0 holds none/);
+      // …and where NOTHING declares the callee the licence reads every argument register, and so
+      // does the guessed arity: the frame base in r3 is a value nothing but the call reads, so `use`
+      // takes it and the incoming r0..r2 below it (`decideGap`), and the licence's claim is the
+      // call the lift emits. A gap the guess could not decide would refuse (`fallbackArgc`) ahead
+      // of asking whether a register it leaves out may hold a frame address (`lowerCall`'s
+      // `leftOut`); the audit's re-check is the backstop.
+      expect(
+        decompile('f', `${PROLOGUE}\tmov\tr3, sp\n\tbl\tuse\n${FIVE_ARG_CALL}${EPILOGUE}`, ARMV4T_AGBCC).source,
+      ).toContain('use(a0, a1, a2, &sp0);\n    five(1, 2, 3, 4);');
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
       expect(
@@ -4536,22 +4535,28 @@ describe('an incoming stack argument re-read in a loop is the parameter', () => 
 // sets r1 alone and leaves `s` in r0, so a count that stops at r0 lifts it as `logv() + 1`. A later
 // register holding a value says the call takes arguments past the gap, and which ones is not
 // decidable, so the guess refuses (frontend/ssa.ts `fallbackArgc`), naming the call by its block.
-describe('a gap in the argument registers of an undeclared call refuses', () => {
+// A GAP IN THE ARGUMENT REGISTERS OF AN UNDECLARED CALL is decided where the register above it is
+// surely an argument (frontend/call-plan.ts `decideGap`): the call's own block set it to a value no
+// memory read produced, which nothing else reads, and agbcc fills argument words in order — so the
+// gap holds this function's incoming arguments, passed on. agbcc's own output for each source.
+describe('a gap in the argument registers of an undeclared call', () => {
+  // `int logv(); int passgap(const char *s){ return logv(s, 1) + 1; }`
   const PR = 'pr:\n\tpush\t{lr}\n\tmov\tr1, #0x1\n\tbl\tlogv\n\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n';
-  const GAP = /cannot lift 'pr': the call 'bl logv' in block 'pr' has no prototype, r1 holds a value and r0 holds none/;
+  const GAP =
+    /cannot lift '(\w+)': the call 'bl \w+' in block '\w+' has no prototype, r(\d) holds a value and r0 holds none/;
 
-  test('a pass-through first argument before a set-up second one declines', () => {
-    expect(() => decompile('pr', PR, ARMV4T_AGBCC)).toThrow(GAP);
+  test('a pass-through first argument before a set-up second one is passed', () => {
+    expect(decompile('pr', PR, ARMV4T_AGBCC).source).toContain('return logv(a0, 1) + 1;');
   });
 
-  // `int logv(const char *fmt, ...)`: a variadic declaration states its fixed word, so r0 is passed
-  // as stated and only what the `...` takes is guessed — `1`, in r1. An unsized fixed parameter
-  // states no word, and the guess from r0 refuses the gap as for an undeclared callee.
+  // `int logv(fmt, ...)`: a variadic declaration states its fixed word, so r0 is passed as stated
+  // and only what the `...` takes is guessed — `1`, in r1. An unsized fixed parameter states no
+  // word, and the guess from r0 decides the gap as for an undeclared callee.
   test('…and the same call to a callee declared variadic passes its stated fixed word', () => {
     const variadic = (fixed: string) =>
       decompile('pr', PR, ARMV4T_AGBCC, { prototypes: { logv: { returns: 's32', variadicParams: [fixed] } } }).source;
     expect(variadic('const char *')).toContain('logv(a0, 1) + 1');
-    expect(() => variadic('Fmt')).toThrow(GAP);
+    expect(variadic('Fmt')).toContain('logv(a0, 1) + 1');
   });
 
   // CONTROL: a declaration that states the arity passes both
@@ -4562,12 +4567,69 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
   });
 
   // `int g3(); int mid(int a, int b){ return g3(1, b, 3) + 1; }`: r0 and r2 set, `b` left in r1
-  test('a pass-through argument between set-up ones declines', () => {
+  test('a pass-through argument between set-up ones is passed', () => {
     const mid =
       'mid:\n\tpush\t{lr}\n\tmov\tr0, #0x1\n\tmov\tr2, #0x3\n\tbl\tg3\n\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('mid', mid, ARMV4T_AGBCC)).toThrow(
-      /the call 'bl g3' in block 'mid' has no prototype, r2 holds a value and r1 holds none/,
+    expect(decompile('mid', mid, ARMV4T_AGBCC).source).toContain('return g3(1, a1, 3) + 1;');
+  });
+
+  // `int g(); int fvol(int s){ *(volatile int *)0x4000000; return g(s) + 1; }`: agbcc puts a
+  // DISCARDED volatile read in the lowest free argument register, so r1 holds a value only the call
+  // reads and `g(s)` is the source. A memory read proves nothing.
+  test('a value a memory read left in the register above does not decide the gap', () => {
+    const fvol =
+      'fvol:\n\tpush\t{lr}\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x13\n\tldr\tr1, [r1]\n\tbl\tg\n' +
+      '\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('fvol', fvol, ARMV4T_AGBCC)).toThrow(GAP);
+  });
+
+  // `struct T { int x, y, z; }; int logv(); int fwb(const char *s, int n, struct T *p, struct T *q){
+  // *p = *q; return logv(s, n) + 1; }`: agbcc's block copy leaves both advanced bases dead in r2/r3,
+  // pure adds only the call reads. A writeback is no evidence that anything wanted the value
+  // (`SsaBuilder.noteIncidentalWrite`); read as arguments it would lift `logv(a0, a1, a2 + 3, a3 + 3)`.
+  test('a base writeback left in the register above does not decide the gap', () => {
+    const fwb =
+      'fwb:\n\tpush\t{r4, r5, r6, lr}\n\tldmia\tr3!, {r4, r5, r6}\n\tstmia\tr2!, {r4, r5, r6}\n\tbl\tlogv\n' +
+      '\tadd\tr0, r0, #0x1\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('fwb', fwb, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r0 holds none/);
+  });
+
+  // `int logv(); int gx; int fst2(const char *s){ gx = 1; return logv(s, 1) + 1; }` is one object with
+  // `gx = 1; return logv(s) + 1;`: the stored constant stays in r1, so a value something else reads
+  // decides nothing. `int fkeep(const char *s, int c){ int t = c * 3; int r = logv(s, t); return r
+  // + t; }` refuses too, but it is NO counterexample. It keeps `t` in r4 and copies it to r1, and
+  // `logv(s)` compiles without that `add r1, r4, #0` (likewise `mr r4,r31` on mwcc and `move a1,s0`
+  // on KMC), so the copy has no reader but the call and the bytes do decide it. The proof object is
+  // the SSA value (`requireSoleReader`), which the later read shares, and a register copy is folded
+  // away. A KNOWN GAP: a copy into the register above never decides, at the cost of a decline, not
+  // wrong C.
+  test('a value something besides the call reads does not decide the gap', () => {
+    const fst2 =
+      'fst2:\n\tpush\t{lr}\n\tldr\tr2, .L4\n\tmov\tr1, #0x1\n\tstr\tr1, [r2]\n\tbl\tlogv\n' +
+      '\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n.L5:\n.L4:\n\t.word\tgx\n';
+    expect(() => decompile('fst2', fst2, ARMV4T_AGBCC)).toThrow(GAP);
+    const fkeep =
+      'fkeep:\n\tpush\t{r4, lr}\n\tlsl\tr4, r1, #0x1\n\tadd\tr4, r4, r1\n\tadd\tr1, r4, #0\n\tbl\tlogv\n' +
+      '\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('fkeep', fkeep, ARMV4T_AGBCC)).toThrow(GAP);
+  });
+
+  // A gap register a call destroyed holds nothing: `bl h` leaves r0 holding h's result, which is
+  // set up, so no gap; one it leaves holding nothing past the return register — r1 here, read by
+  // nothing — is no incoming argument, and the gap below r2 refuses.
+  test('a gap register an earlier call destroyed does not hold the incoming value', () => {
+    const after = 'after:\n\tpush\t{lr}\n\tbl\th\n\tmov\tr2, #0x3\n\tbl\tg3\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('after', after, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r1 holds none/);
+  });
+
+  // where the own declaration binds the body, the gap register must be one of its parameters
+  test('a gap register the own declaration does not give a parameter refuses', () => {
+    expect(() => decompile('pr', PR, ARMV4T_AGBCC, { prototypes: { pr: { params: [], returns: 's32' } } })).toThrow(
+      GAP,
     );
+    expect(
+      decompile('pr', PR, ARMV4T_AGBCC, { prototypes: { pr: { params: ['const char *'], returns: 's32' } } }).source,
+    ).toContain('return logv(a0, 1) + 1;');
   });
 
   // THE BOUNDARY. `int g2(); int allp(int a, int b){ return g2(a, b) + 1; }` passes both arguments
@@ -4581,15 +4643,19 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
   // A Thumb instruction has no address, so the refusal names the call where the .s puts it. A block
   // the splitter opened after a branch has a made-up label no .s spells, so a call there is named
   // within the function — by its ordinal where the function calls the same callee more than once.
-  // `int logv(); int loc(const char *s, int c){ if (c == 0) return 0; return logv(s, 1); }`
+  // `int logv(); int loc(const char *s, int c){ if (c == 0) return 0; return logv(s, 1); }` decides
+  // its gap (the entry value of r0 reaches the call on its one path); the loaded `1` does not.
   test('a call in a block the .s does not label is named within its function', () => {
-    const loc = (other: string) =>
-      'loc:\n\tpush\t{lr}\n\tcmp\tr1, #0x0\n\tbeq\t.L2\n\tmov\tr1, #0x1\n\tbl\tlogv\n\tb\t.L3\n' +
+    const loc = (set: string, other: string) =>
+      `loc:\n\tpush\t{lr}\n\tcmp\tr1, #0x0\n\tbeq\t.L2\n${set}\tbl\tlogv\n\tb\t.L3\n` +
       `.L2:\n${other}.L3:\n\tpop\t{r1}\n\tbx\tr1\n`;
-    expect(() => decompile('loc', loc('\tmov\tr0, #0x0\n'), ARMV4T_AGBCC)).toThrow(
+    expect(decompile('loc', loc('\tmov\tr1, #0x1\n', '\tmov\tr0, #0x0\n'), ARMV4T_AGBCC).source).toContain(
+      'logv(a0, 1)',
+    );
+    expect(() => decompile('loc', loc('\tldr\tr1, [r2]\n', '\tmov\tr0, #0x0\n'), ARMV4T_AGBCC)).toThrow(
       /the call 'bl logv' in 'loc' has no prototype, r1 holds a value/,
     );
-    expect(() => decompile('loc', loc('\tmov\tr1, #0x2\n\tbl\tlogv\n'), ARMV4T_AGBCC)).toThrow(
+    expect(() => decompile('loc', loc('\tldr\tr1, [r2]\n', '\tmov\tr1, #0x2\n\tbl\tlogv\n'), ARMV4T_AGBCC)).toThrow(
       /the call 'bl logv' in 'loc' \(the 1st of its 2 calls there\) has no prototype/,
     );
   });
@@ -4697,13 +4763,17 @@ describe('a declared callee whose parameters are not laid out does not lose its 
   // stands in only for what the `...` takes, above them
   test('a variadic declaration`s one-word fixed parameters are read as stated, and only the rest is guessed', () => {
     expect(lift({ g: { returns: 's32', variadicParams: ['const char *', 's32'] } })).toContain('g(a0 + 1, a1)');
-    // past the fixed words the guess still refuses a gap: r3 set up above an r2 left at its incoming value
-    const gap = 'fj:\n\tpush\t{lr}\n\tadd\tr3, #0x1\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() =>
-      decompile('fj', gap, ARMV4T_AGBCC, {
+    // past the fixed words the guess decides a gap as it does from r0: r3 set up above an r2 left at
+    // its incoming value passes r2 on (`decideGap`), and one a memory read set refuses
+    const gap = (set: string) => `fj:\n\tpush\t{lr}\n${set}\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const variadic = (set: string) =>
+      decompile('fj', gap(set), ARMV4T_AGBCC, {
         prototypes: { g: { returns: 's32', variadicParams: ['const char *', 's32'] } },
-      }),
-    ).toThrow(/has a prototype stating only its first 2 arguments, r3 holds a value and r2 holds none/);
+      }).source;
+    expect(variadic('\tadd\tr3, #0x1\n')).toContain('g(a0, a1, a2, a3 + 1)');
+    expect(() => variadic('\tldr\tr3, [r3]\n')).toThrow(
+      /has a prototype stating only its first 2 arguments, r3 holds a value and r2 holds none/,
+    );
     // a stated fixed word a call destroyed names nothing, and refuses rather than pass the callee's leftover
     const destroyed = 'fj:\n\tpush\t{lr}\n\tadd\tr0, #0x1\n\tbl\th\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() =>
@@ -4756,15 +4826,14 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   });
 
   // pokeemerald's `GetMonNickname2`: `GetMonData3(mon, MON_DATA_NICKNAME, nickname)` with `mon`
-  // still in r0, which would lift as `GetMonData3()`. A declaration states the arity.
+  // still in r0, which would lift as `GetMonData3()`. The constant in r1 decides the gap below it
+  // (`decideGap`), and a declaration states the arity outright.
   const gn =
     'gn:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x2\n\tmov\tr2, sp\n' +
     '\tbl\tGetMonData3\n\tadd\tr0, r4, #0\n\tmov\tr1, sp\n\tbl\tStringCopy_Nickname\n\tadd\tsp, sp, #0x14\n' +
     '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-  test('a capture in the calling block left out declines, and a declaration passes it', () => {
-    expect(() => decompile('gn', gn, ARMV4T_AGBCC)).toThrow(
-      /the call 'bl GetMonData3' in block 'gn' has no prototype, r1 holds a value and r0 holds none/,
-    );
+  test('a capture in the calling block above a decided gap is passed, as a declaration passes it', () => {
+    expect(decompile('gn', gn, ARMV4T_AGBCC).source).toContain('    GetMonData3(a0, 2, sp0);\n');
     const declared = { GetMonData3: { params: ['void *', 's32', 'u8 *'], returns: 'u32' } };
     expect(decompile('gn', gn, ARMV4T_AGBCC, { prototypes: declared }).source).toContain(
       '    GetMonData3(a0, 2, sp0);\n',
@@ -4818,15 +4887,16 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   // A FRAME ADDRESS MOVED BY A REGISTER is one too, at an offset nothing knows. agbcc's own output
   // for `extern void g3(); extern unsigned char gb[]; void r5(int a, int b, int i, int j) {
   // unsigned char buf[8]; g3(a, b, &buf[i]); gb[0] = buf[j]; }` builds `&buf[i]` as
-  // `add r2, r2, sp`, which would lift as `g3(); gb = sp0[a3];`.
-  test('an indexed frame address left out of a guessed arity declines', () => {
+  // `add r2, r2, sp`, which would lift as `g3(); gb = sp0[a3];`. The address decides the gap below it
+  // (`decideGap`), but r3 above it still holds `j`, read for the copy to r4, and a register the count
+  // takes past a decided gap must be proven too, so the gap refuses first (before the audit, which
+  // refuses an indexed address a call is handed).
+  test('an indexed frame address above a decided gap declines', () => {
     const r5 =
       'r5:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r3, #0\n\tadd\tr2, r2, sp\n\tbl\tg3\n' +
       '\tldr\tr1, .L3\n\tmov\tr2, sp\n\tadd\tr0, r2, r4\n\tldrb\tr0, [r0]\n\tstrb\tr0, [r1]\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgb\n';
-    expect(() => decompile('r5', r5, ARMV4T_AGBCC)).toThrow(
-      /the call 'bl g3' in block 'r5' has no prototype, r2 holds a value and r0 holds none/,
-    );
+    expect(() => decompile('r5', r5, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r0 holds none/);
   });
 
   // CONTROLS for the trim's question: it asks only of the registers it cuts that are FRESH. The
@@ -4848,13 +4918,12 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   });
 
   // …and two indexed addresses are not the same one: a pass of `&buf[j]` in r0 does not excuse
-  // leaving `&buf[i]` out in r2.
-  test('an indexed frame address passed does not excuse another left out', () => {
+  // leaving `&buf[i]` out in r2. (r3, read for `&buf[j]`, sits past the decided gap at r1 unproven,
+  // so the gap refuses before the audit asks.)
+  test('an indexed frame address passed does not excuse another, passed or left out', () => {
     const two =
       'two:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r2, sp\n\tadd\tr0, r3, sp\n\tbl\tg3\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n';
-    expect(() => decompile('two', two, ARMV4T_AGBCC)).toThrow(
-      /the call 'bl g3' in block 'two' has no prototype, r2 holds a value and r1 holds none/,
-    );
+    expect(() => decompile('two', two, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r1 holds none/);
   });
 });

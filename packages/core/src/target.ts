@@ -96,6 +96,29 @@ export interface SourceRead {
   bytes?: number;
 }
 
+/** WHERE THIS ABI CAN LEAVE A GENERAL ARGUMENT REGISTER EMPTY BELOW ONE A CALL FILLS — the two ways
+ *  argument words stop filling in order, read off the facts that already place them:
+ *   - `skippable`: the registers an argument aligned to 8 can skip, every odd argument word where
+ *     `evenWordAlignedArgs` holds (O32 `a1`/`a3`, PowerPC `r4`/`r6`/`r8`/`r10`). Compiled on
+ *     2026-10-18: `g(1, b, 3LL)` and `g(1, 3LL)` are one object on gcc2.7.2kmc, gcc2.7.2 and the
+ *     three mwcc builds, `a1`/`r4` untouched under a set pair. agbcc fills every word in order
+ *     (`g(1, 3LL)` is r0, r1:r2), so it has none.
+ *   - `leadingFloatShadow`: a leading floating argument travels in the FPU's registers and leaves
+ *     the general words it counts against holding nothing (`fpu.slots: 'leading'`, O32): with `gp`
+ *     unprototyped, `gp(x, 5)` of a `float x` parameter and of an `int x` one compile alike on
+ *     ido7.1, gcc2.7.2kmc and gcc2.7.2 (`li a1,5`, `a0` untouched). PowerPC's floats take no general
+ *     word (`'separate'`), so they leave no hole there.
+ *  Its reader is the guessed-arity gap (frontend/call-plan.ts `decideGap`). */
+export function argRegisterHoles(target: Pick<TargetDescription, 'argRegs' | 'evenWordAlignedArgs' | 'fpu'>): {
+  skippable: ReadonlySet<string>;
+  leadingFloatShadow: boolean;
+} {
+  return {
+    skippable: new Set(target.evenWordAlignedArgs ? target.argRegs.filter((_, k) => k % 2 === 1) : []),
+    leadingFloatShadow: target.fpu?.slots === 'leading',
+  };
+}
+
 /** The bytes a source read reaches from an address `off` bytes into the frame, as `[lo, hi)`
  *  relative to that address. The machine may force the address down to a unit boundary — the
  *  GBA's DMA and BIOS both do — so a 32-bit read of the halfword at [sp,#2] reads from [sp,#0],
@@ -982,6 +1005,19 @@ export interface TargetDescription {
     // return register holds is no part of the function, save a value computed for the return alone
     // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
     structReturnHandsBackPointer?: boolean;
+    // WHETHER A CALLER HANDS ITS OWN DESTINATION POINTER STRAIGHT ON as a callee's hidden
+    // struct-return pointer, leaving the first argument register at its incoming value below the
+    // arguments it sets up. `true` for ido7.1: `int b3(struct S *p){ *p = sg(1); return 0; }` is
+    // `jal sg; li a1,1` with a0 never touched, the bytes of `sg(p, 1)` with its result unused.
+    // `false` for gcc2.7.2kmc, gcc2.7.2, agbcc and mwcc_242_81, mwcc_233_163n and mwcc_247_107,
+    // which copy through a frame temporary (a0/r0/r3 set to a frame address ahead of the call).
+    // Compiled at the canonical flags, `b3` and `void b6(struct S *p, int k){ *p = sg(k, 5); }`.
+    // Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`): where it holds, a gap at
+    // the first argument register is decided only where the call's result is read, which no
+    // forwarded struct return's is (IDO reloads `p` from its home after the call in all five shapes
+    // compiled: `return (*p = sg(1)).b`, `return p` and three more). ABSENT ⇒ unmeasured, and read
+    // as `true`, which only refuses more.
+    forwardsStructReturnDestination?: boolean;
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
     // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
     // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
@@ -1084,6 +1120,25 @@ export interface TargetDescription {
     // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
     // two apart there and refuses rather than drop the read.
     discardsUnusedReadsInto?: string;
+    // MAY A DISCARDED READ LAND IN AN ARGUMENT REGISTER, at flags that delete a plain read nobody
+    // uses? Where it may, a value a load left in an argument register is no proof that the next
+    // call takes it. The discard register is the allocator's first free one, not a fixed register,
+    // so a single read on its own says nothing: the probe that decides is one where the usual
+    // discard register is busy. `true` for agbcc, which loads a discarded `volatile` read into the
+    // lowest free argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
+    // `g(s, *(int *)K)`). `true` for gcc2.7.2kmc and gcc2.7.2, which discard into v0/v1 until those
+    // are busy and then into a1: `int a = ga * 3; *(volatile int *)&gx; *(volatile int *)&gx;
+    // ga = a + 1; return logv(s) + 1;` is `lw a1,0(v0); lw v0,0(v0); ... jal logv` (`lw a1,0(v1)` on
+    // gcc2.7.2), the bytes of the twin that passes the first read. `true` for mwcc_242_81,
+    // mwcc_233_163n and mwcc_247_107, which discard into r0 until it is busy and then into r4: the
+    // same function's first read is `lwz r4,gx` on all three, and with three reads mwcc_233_163n's
+    // last one is `lwz r4,gx` right before `bl logv`, byte-identical to the twin that passes it.
+    // `false` for ido7.1 alone: `lw zero`, `lbu zero`, `lh zero`, and `lw zero` + `lw at` for a
+    // doubleword, with four discarded reads stacked under the same pressure too. Compiled at the
+    // canonical flags. Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a
+    // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
+    // refuses more.
+    discardedReadMayFillArgRegister?: boolean;
   };
 }
 
@@ -1205,6 +1260,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     largestAlignment: 4,
     aggregateReturn: 'apcs',
     structReturnHandsBackPointer: true,
+    // MEASURED: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: true,
     byValueAggregateArgWords: true,
     enumBytes: 4,
     bitfieldPacking: 'contiguous',
@@ -1412,6 +1470,9 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
     // and a frame store for a plain dead local, `lw a2` for a `register` one.
     discardsUnusedReadsInto: 'zero',
+    // MEASURED: the probes at the fields.
+    forwardsStructReturnDestination: true,
+    discardedReadMayFillArgRegister: false,
   },
 };
 
@@ -1550,6 +1611,9 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains at their rows' levels and at -O0 (`test/corpus/gcc272*-outarea.txt`):
     // no load from 16(sp) up the area; a char-array struct's home words are loaded (see the field).
     outgoingAreaNeverLoadedFrom: 16,
+    // MEASURED on BOTH toolchains this description serves: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: true,
   },
 };
 
@@ -1664,6 +1728,9 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds at -O0,p: the note at the field — `lwz r0` for a volatile read,
     // an `r31` home for a plain or `register` dead local.
     discardsUnusedReadsInto: 'r0',
+    // MEASURED on all three builds: the probes at the fields.
+    forwardsStructReturnDestination: false,
+    discardedReadMayFillArgRegister: true,
   },
 };
 

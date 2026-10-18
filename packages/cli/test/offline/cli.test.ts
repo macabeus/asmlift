@@ -156,9 +156,9 @@ test('--context: a header declaration decides a call as the same --proto entry d
   expect(viaContext.stdout).toBe(
     (await f('--proto', JSON.stringify({ callee: { params: ['int'], returns: 'int' } }))).stdout,
   );
-  // …and with neither, r1 holds a value past the a0 nothing set: a gap the guess refuses rather
-  // than drop the argument
-  expect((await f()).stdout).toContain("the call 'bl callee' in block 'f' has no prototype");
+  // …and with neither, r1 holds a constant only the call reads, past the a0 nothing set: the guess
+  // passes both (frontend/call-plan.ts `decideGap`) rather than drop the argument
+  expect((await f()).stdout).toContain('return callee(a0, 3);');
   // --proto wins over the header per symbol
   expect((await f('--context', ctx, '--proto', JSON.stringify({ callee: { params: 0 } }))).stdout).toContain(
     'return callee();',

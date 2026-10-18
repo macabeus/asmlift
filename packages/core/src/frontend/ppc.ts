@@ -80,7 +80,7 @@ import {
   landsOnArea,
   liftWithRelift,
 } from './frame-objects';
-import type { Frontend, LiftOptions } from './frontend';
+import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -1223,6 +1223,7 @@ function liftPrelude(
   target: TargetDescription,
   prototypes: Prototypes,
   jts: Map<number, PpcJT>,
+  ownDeclaration?: () => OwnDeclaration | undefined,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -1271,7 +1272,7 @@ function liftPrelude(
   }
   const r1At = r1Displacements(blocks, succIdx);
   const saves = prologueSavedRegs(entryBody, target, r1At);
-  const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal);
+  const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal, ownDeclaration);
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
   // access inside it, any width, is MEMORY through an `laddr` the shared frame-object audit then
@@ -1311,7 +1312,7 @@ export function lift(
   options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject, options.contextOwnWords),
+    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject, options),
   );
 }
 
@@ -1323,7 +1324,7 @@ function liftOnce(
   asmData: AsmData | undefined,
   declarations: Declarations,
   oneObject: FrameRange | undefined,
-  contextOwnWords: number | undefined,
+  { contextOwnWords, contextOwnProto }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto'>,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1395,12 +1396,15 @@ function liftOnce(
     );
   };
   const fail = ppcRefusal;
+  // the own declaration binds only a body a compiler wrote (`ownDeclared`, measured below, before
+  // any call is lowered)
   const { blocks, succIdx, r1At, savedRegs, calls, frame, loadedWordBound } = liftPrelude(
     name,
     instrs,
     target,
     prototypes,
     jts,
+    () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 
@@ -2529,6 +2533,11 @@ function liftOnce(
         const advance: Instr = { ...ins, mnemonic: 'addi', ops: [base, base, String(off)] };
         decodedFrom.set(advance, ins);
         decode(advance);
+        // The advanced base is the update's side effect, and proves no argument (`ssa.ts`
+        // `noteIncidentalWrite`).
+        if (lastDef !== null) {
+          ssa.noteIncidentalWrite(lastDef);
+        }
         const access: Instr = { addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] };
         decodedFrom.set(access, ins);
         decode(access);

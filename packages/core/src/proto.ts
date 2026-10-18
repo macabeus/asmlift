@@ -463,19 +463,67 @@ function showsScalarReturn(p: FnProto | undefined): boolean {
   );
 }
 
-/** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
-function ownParamWidths(
-  name: string,
-  p: FnProto | undefined,
-  target: Pick<TargetDescription, 'fpu'>,
-): number[] | undefined {
+/** The parameter list the own declaration states, or where it states none the one a mangled symbol
+ *  records (`demangle`), as {@link ownArgumentWords} reads it. */
+function ownParamList(name: string, p: FnProto | undefined): (FnProto & { params: ParamType[] }) | undefined {
   const mangled = Array.isArray(p?.params) ? null : demangle(name);
   const decl: FnProto | undefined = Array.isArray(p?.params)
     ? p
     : mangled === null
       ? undefined
       : { params: mangled.params.map(spellType) };
-  if (!Array.isArray(decl?.params)) {
+  return Array.isArray(decl?.params) ? (decl as FnProto & { params: ParamType[] }) : undefined;
+}
+
+/** HOW MANY OF THE FIRST ARGUMENT REGISTERS SURELY HOLD ONE OF THE FUNCTION'S OWN PARAMETERS, each a
+ *  single integer-class word — a LOWER bound, where {@link ownArgumentWords} is an upper one, and 0
+ *  where the declaration says nothing surely.
+ *
+ *  Its reader is the guessed-arity gap (`frontend/call-plan.ts` `decideGap`), which may read an
+ *  argument register left at its incoming value as an argument passed on only where that register
+ *  surely holds a parameter. So every "may" counts against it: a hidden word that may come first (a
+ *  return the declaration does not show is a scalar, a symbol that may be a method) makes it 0,
+ *  and the count stops at the first parameter that is not one integer word — a floating one may
+ *  travel in the FPU's registers and leave its general words holding nothing (O32's leading
+ *  float), a wide or unsized one takes words this does not place. */
+export function ownLeadingWordParams(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
+  registerReturn = false,
+): number {
+  const own = ownArguments(name, p, target, registerReturn);
+  const decl = ownParamList(name, p);
+  if (own === undefined || own.hidden !== 0 || decl === undefined) {
+    return 0;
+  }
+  let n = 0;
+  while (
+    n < decl.params.length &&
+    !isFloatingSpelling(decl.params[n]) &&
+    paramClassOf(decl, decl.params, n) === 'word'
+  ) {
+    n++;
+  }
+  return n;
+}
+
+/** Whether the own declaration (or the parameter list a mangled symbol records) states a floating
+ *  parameter, or `undefined` where it states no list. Its reader is the guessed-arity gap
+ *  (`frontend/call-plan.ts` `decidedCallRefusal`): a float may travel in an FPU register that no
+ *  guess counts. */
+export function ownDeclaresFloatingParam(name: string, p: FnProto | undefined): boolean | undefined {
+  return ownParamList(name, p)?.params.some((t) => isFloatingSpelling(t));
+}
+
+/** The widths `ownArgumentWords` lays out: one per declared parameter that takes general words. */
+function ownParamWidths(
+  name: string,
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'fpu'>,
+): number[] | undefined {
+  const decl = ownParamList(name, p);
+  if (decl === undefined) {
     return undefined;
   }
   const params = decl.params;

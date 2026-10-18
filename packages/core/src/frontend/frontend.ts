@@ -3,7 +3,7 @@
 // neutral and consumes the Fn without knowing which frontend produced it. See registry.ts
 // for target→frontend dispatch.
 import type { Fn } from '../ir/core';
-import type { Prototypes } from '../proto';
+import type { FnProto, Prototypes } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -36,10 +36,29 @@ export interface Frontend {
   ): Fn;
 }
 
+/** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts
+ *  `callDeclarations`): a stated entry, which `proves`, or the declaration context's
+ *  (`LiftOptions.contextOwnProto`). */
+export interface OwnDeclaration {
+  readonly proto: FnProto;
+  /** whether it may rule a reading OUT (a hole, a shadow, a float) as well as refuse one */
+  readonly proves: boolean;
+}
+
+/** The own declaration of `name`: the stated entry in `prototypes`, else the context's. */
+export function ownDeclarationOf(
+  name: string,
+  prototypes: Prototypes,
+  context: OwnDeclaration | undefined,
+): OwnDeclaration | undefined {
+  return Object.hasOwn(prototypes, name) ? { proto: prototypes[name], proves: true } : context;
+}
+
 /** A question the asm leaves open that a frontend answers one way by default and, asked, the other
  *  way: the LIFT variations of rank.ts that live in the frontend. A frontend with no such question
- *  ignores the whole bag. One input rides beside them that no variation sets, the context's
- *  own-entry bound (`contextOwnWords`). */
+ *  ignores the whole bag. Two inputs ride beside them that no variation sets, both from the
+ *  declaration context's own entry: its bound (`contextOwnWords`) and the entry itself
+ *  (`contextOwnProto`). */
 export interface LiftOptions {
   /** The argument words the declaration context's own entry for the function fills, where no
    *  stated entry does (pipeline.ts `liftWithinContextBound`, which raises it past a register the
@@ -47,6 +66,13 @@ export interface LiftOptions {
    *  of the stated entry's words (frontend/ssa.ts `registerLiveIns`). Every frontend reads it; PowerPC,
    *  as with a stated entry, only for a body a compiler wrote. */
   contextOwnWords?: number;
+  /** The declaration context's own entry itself, where no stated entry binds the body. Read where
+   *  the TYPES of the own parameters decide something the word count cannot (frontend/call-plan.ts
+   *  `decideGap`). `proves` says whether it may serve as positive proof as well. It holds only where
+   *  the lift is bounded by exactly the entry's words, or the entry fills every argument register,
+   *  and never once the bound was raised past a register the body reads or the lift fell back to
+   *  no bound, which says the entry is wrong. Without `proves`, it only refuses. */
+  contextOwnProto?: OwnDeclaration;
   /** The size in bytes of a struct the function's own declaration returns through a hidden pointer
    *  (pipeline.ts `liftStamped`), and where to hand a refusal that declaration may answer: one about
    *  the RETURN's width that such a struct explains, which the frontend then defers instead of

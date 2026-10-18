@@ -17,12 +17,15 @@ import {
   aggregateType,
   byValueCallArgs,
   byValueRefusal,
+  ownArgumentWordsOn,
+  ownLeadingWordParamsOn,
   returnedAggregate,
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
 import { type Block, type Op, type Value, calleeName, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
+import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
 import {
   type FnProto,
@@ -35,6 +38,7 @@ import {
   declaresParams,
   declaresVoidReturn,
   isFloatingSpelling,
+  ownDeclaresFloatingParam,
   paramClassOf,
   spellableProto,
   variadicRefusal,
@@ -43,8 +47,9 @@ import {
 import { type ContextGlobals, structNamed } from '../proto-context';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
-import type { TargetDescription } from '../target';
+import { type TargetDescription, argRegisterHoles } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
+import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
 import { unspellableReason } from './reloc-symbol';
 import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
@@ -214,6 +219,8 @@ export function callDeclarations(
   prototypes: Prototypes,
   lowering: CallLowering,
   fail: FrontendRefusal,
+  /** the function's own declaration, where one binds its body — asked as a call is lowered */
+  ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -651,6 +658,162 @@ export function callDeclarations(
       );
     }
   };
+  // A GAP IN A GUESSED ARITY IS DECIDED WHERE THE REGISTER ABOVE IT IS SURELY AN ARGUMENT
+  // (`fallbackArgc`'s `decide`). The gap refuses because an argument register left at its incoming
+  // value and one the call does not pass look the same — but only while nothing says the call takes
+  // an argument above it. A register the call's own block wrote with a value that no memory read
+  // produced and that nothing but the call reads says exactly that: an optimising compiler deletes a
+  // dead computation, so the value exists only to be passed. And where argument words fill in order,
+  // every word below an argument is an argument too, so the gap's registers are passed on unchanged.
+  // Measured on 2026-10-18 at every toolchain's canonical flags: `logv(s, 1)` sets r1/a1/r4 alone,
+  // and at -O0 no gap arises at all (every argument is reloaded from its home first).
+  //
+  // EACH CLAUSE IS A MEASURED COUNTEREXAMPLE, so each refuses:
+  //   - the value must be the call's own block's. Where a discarded read may land in an argument
+  //     register (`compilerBehaviors.discardedReadMayFillArgRegister`), it must also be something no
+  //     memory read produced: agbcc puts a DISCARDED volatile read in the lowest free argument
+  //     register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, at -O0 too), the passgap shape
+  //     exactly. gcc2.7.2kmc, gcc2.7.2 and the three mwcc builds do the same once their usual
+  //     discard register (v0/v1, r0) is busy: `int a = ga * 3; *(volatile int *)&gx; ...; logv(s)`
+  //     is `lw a1,0(v0); ... jal logv` on KMC and `lwz r4,gx` on mwcc, the bytes of the twin that
+  //     passes the read. Only ido7.1 discards into $zero every time, so only there a load only the
+  //     call reads is an argument: `logv(s, gx)` lifts. Nothing else may read the value either
+  //     (`SsaBuilder.requireSoleReader`, asked of the finished function): `gx = 1; logv(s)` and
+  //     `gx = 1; logv(s, 1)` are one agbcc object, the stored constant left in r1.
+  //   - the value must be no instruction's side effect (`SsaBuilder.noteIncidentalWrite`): a base
+  //     writeback is left in its register whether anything wants it or not. agbcc copies a struct of
+  //     3+ words as `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both writebacks
+  //     dead, so `*p = *q; return logv(s, n) + 1;` would lift `logv(a0, a1, a2 + 3, a3 + 3)`.
+  //   - where a caller forwards its own destination as a callee's hidden pointer
+  //     (`compilerBehaviors.forwardsStructReturnDestination`, ido7.1), a gap at the first argument
+  //     register is decided only where the call's result is read (`SsaBuilder.requireReader`,
+  //     owed by `lower`), by anything but a `ret`. `int b3(struct S *p){ *p = sg(1); return 0; }` is
+  //     `jal sg; li a1,1` with a0 untouched, and would lift `sg(a0, 1)` even with `int b3(struct S *)`
+  //     declared: the hidden pointer stated as a C argument, and the `*p =` store dropped. IDO reads
+  //     no forwarded struct return's result register (five shapes, at the target.ts field), but a
+  //     `ret` reads it in a function ending in the call, `void b7(struct S *p){ *p = sg(1); }`.
+  //   - each gap register must hold the function's own incoming value on every path
+  //     (`holdsEntryValue`): one a call destroyed is the trim's, and holds nothing.
+  //   - where the ABI can leave a register empty below a filled one (target.ts `argRegisterHoles`)
+  //     the gap may be that hole. An argument aligned to 8 skips an odd word (O32 a1, PowerPC
+  //     r4/r6/r8), and the hole is ruled out only where that argument's second word holds nothing:
+  //     no value reaches it and the own declaration fills fewer words. A leading float shadows the
+  //     first general words on O32. It is ruled out only where the own declaration surely puts an
+  //     integer word in each gap register. No register value can rule it out: the MIPS frontend
+  //     refuses every instruction naming the FPU's file in a function that calls
+  //     (frontend/mips.ts), so a float here is one passed on untouched in $f12, which nothing
+  //     reads. A gap that starts at a1 under an a0 that only a read set up (`gx = a; gp(d, 5)`) is
+  //     the 8-byte skip's case and refuses through it: a1 is odd, so it needs the own declaration's
+  //     word bound, and `ownLeadingWordParamsOn` stops at the double.
+  //   - where the own declaration binds the body, each gap register must surely hold one of its
+  //     integer word parameters (`ownLeadingWordParamsOn`): no hidden struct pointer, no float.
+  //   - at flags that keep a read nothing uses (`compilerBehaviors.keepsUnusedReads`, the -O0
+  //     levels) the premise is suspended, as frontend/ppc.ts `computedPairHalf` suspends it. mwcc -O0
+  //     keeps a dead `li r31,5`. The gap was measured never to arise there (mwcc -O0,p on all three
+  //     builds, IDO -O1 and agbcc -O0 reload every argument from its home first), so this costs no
+  //     lift.
+  // What the decision leaves open above the proven register is the call's own check
+  // (`decidedCallRefusal`). The proven register's value is returned, for the sole-reader
+  // obligation the call then takes on.
+  const decideGap = (
+    ssa: SsaBuilder,
+    bi: number,
+    gap: readonly string[],
+    set: string,
+    accept: (v: Value) => boolean,
+  ): Value | undefined => {
+    const regs = target.argRegs;
+    if (target.compilerBehaviors.keepsUnusedReads === true || !ssa.writtenSinceCall(set, bi)) {
+      return undefined;
+    }
+    const v = ssa.readVar(set, bi);
+    const def = ssa.irBlocks[bi].ops.find((op) => op.results.includes(v));
+    const sig = def === undefined ? undefined : (OPCODES[def.opcode as keyof typeof OPCODES] as OpSig | undefined);
+    const readsRefuse = target.compilerBehaviors.discardedReadMayFillArgRegister !== false;
+    if (
+      !accept(v) ||
+      ssa.isIncidentalWrite(v) ||
+      sig === undefined ||
+      sig.effects ||
+      (sig.reads && readsRefuse) ||
+      sig.terminator ||
+      def!.opcode === 'undef'
+    ) {
+      return undefined;
+    }
+    if (gap.some((g) => ssa.writtenSinceCall(g, bi) || !ssa.holdsEntryValue(g, bi))) {
+      return undefined;
+    }
+    const own = ownDeclaration();
+    const surelyOwn = own === undefined ? undefined : ownLeadingWordParamsOn(name, own.proto, target);
+    if (surelyOwn !== undefined && gap.some((g) => regs.indexOf(g) >= surelyOwn)) {
+      return undefined;
+    }
+    const holes = argRegisterHoles(target);
+    if (holes.leadingFloatShadow && regs.indexOf(gap[0]) === 0 && own?.proves !== true) {
+      return undefined;
+    }
+    const ownWords = own?.proves !== true ? undefined : ownArgumentWordsOn(name, own.proto, target);
+    for (const g of gap.filter((r) => holes.skippable.has(r))) {
+      const j = regs.indexOf(g);
+      const second = regs[j + 2];
+      if (
+        regs[j + 1] !== set ||
+        second === undefined ||
+        ssa.hasReachingDef(second, bi, accept) ||
+        ownWords === undefined ||
+        j + 2 < ownWords
+      ) {
+        return undefined;
+      }
+    }
+    return v;
+  };
+  // WHAT A DECIDED GAP LEAVES OPEN ABOVE THE COUNT: whether the call takes more than the `argc`
+  // words counted. The decision proves that the gap registers are this function's own arguments
+  // passed on. Past the count, the guess reads an unwritten register as no argument, as it does at
+  // every gapless call, and three things say otherwise. Each refuses (returns true):
+  //   - an own parameter that may sit past the count (`ownArgumentWordsOn`, an upper bound). It is
+  //     just as likely passed on as the gap below it was. On gcc2.7.2kmc and ido7.1, `int ll6(int a,
+  //     int b, int c, int d){ return g(a, 2, c, d, 5) + 1; }` leaves c and d in a2/a3 and would lift
+  //     `g(a0, 2)`.
+  //   - a word of the outgoing area that reaches the call (`guess.refuse`, asked as if the count
+  //     filled every argument register). It is a fifth argument, so every register below it is an
+  //     argument too: the same `ll6`'s `sw v0,16(sp)`.
+  //   - a floating argument this ABI passes apart from the general words (`fpu.slots: 'separate'`,
+  //     PowerPC), which no guess counts. `int fl2(int b, float x){ return g(b, x, 3) + 1; }` leaves
+  //     x in f1 on all three mwcc builds and would lift `g(a0, 3)`. A float in f1 that nothing reads is
+  //     invisible, so on such an ABI only an own declaration whose parameters are all integers rules
+  //     it out. Without a declaration this refuses. A value reaching an FPU argument register refuses
+  //     on every ABI.
+  const decidedCallRefusal = (ssa: SsaBuilder, bi: number, argc: number, site: CallSite): boolean => {
+    const own = ownDeclaration();
+    if (own !== undefined) {
+      const words = ownArgumentWordsOn(name, own.proto, target);
+      if (words === undefined || words > argc) {
+        return true;
+      }
+    }
+    const fpu = target.fpu;
+    if (fpu !== undefined) {
+      if (fpu.argRegs.some((r) => ssa.hasReachingDef(r, bi, (v) => !site.placeholders?.has(v)))) {
+        return true;
+      }
+      const floats = own === undefined ? undefined : ownDeclaresFloatingParam(name, own.proto);
+      if (floats === true || (fpu.slots === 'separate' && !(own?.proves === true && floats === false))) {
+        return true;
+      }
+    }
+    try {
+      site.guess.refuse?.(target.argRegs.length);
+    } catch (e) {
+      if (e instanceof FrontendUnsupportedError) {
+        return true;
+      }
+      throw e;
+    }
+    return false;
+  };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
@@ -694,12 +857,32 @@ export function callDeclarations(
     const { widths, returns } = p;
     // the leading arguments a variadic declaration states, where the rest is guessed
     const floor = widths === null ? variadicFloor(callee) : 0;
+    // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
+    // that proof fails once the function is lifted
+    const decided: Array<{ value: Value; refuse: () => void }> = [];
+    // the refusals of the decided gaps at the first argument register that the call's result must
+    // be read to keep (`compilerBehaviors.forwardsStructReturnDestination`, at `decideGap`)
+    const resultOwed: Array<() => void> = [];
+    // how many argument words the decided gaps put beyond doubt
+    let decidedWords = 0;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !placeholders?.has(v),
             gap: { name, at: guess.at, fail },
             floor,
+            decide: (gap, set, refuse) => {
+              const value = decideGap(ssa, bi, gap, set, (v) => !placeholders?.has(v));
+              if (value === undefined) {
+                return false;
+              }
+              decided.push({ value, refuse });
+              if (gap[0] === target.argRegs[0] && target.compilerBehaviors.forwardsStructReturnDestination !== false) {
+                resultOwed.push(refuse);
+              }
+              decidedWords = target.argRegs.indexOf(set) + 1;
+              return true;
+            },
             entry: (reg) =>
               !ssa.writtenSinceCall(reg, bi) &&
               ssa.holdsValue(
@@ -712,6 +895,9 @@ export function callDeclarations(
     if (widths === null) {
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
+      if (decided.length > 0 && decidedCallRefusal(ssa, bi, argc, site)) {
+        decided[0].refuse();
+      }
     }
     // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
     // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read
@@ -839,6 +1025,16 @@ export function callDeclarations(
       },
     });
     ssa.irBlocks[bi].ops.push(call);
+    for (const d of decided) {
+      ssa.requireSoleReader(d.value, call, d.refuse);
+    }
+    for (const refuse of resultOwed) {
+      if (returns.kind === 'word') {
+        ssa.requireReader(res, refuse);
+      } else {
+        refuse();
+      }
+    }
     // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
     // known whether every path to here passes through another call, which would have clobbered
     // the argument registers this guess just read.
@@ -869,7 +1065,8 @@ export function callDeclarations(
               ),
         site.withholdsSetupArgs,
         site.asksEveryCut,
-        floor,
+        // a decided gap puts its words beyond doubt, so neither reading cuts below them
+        Math.max(floor, decidedWords),
       );
     }
     if (p.declaredVoid) {
