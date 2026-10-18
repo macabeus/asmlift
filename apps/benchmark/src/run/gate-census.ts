@@ -80,7 +80,13 @@ import {
 import { type NarrowParamCandidate, PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '@asmlift/core/raise/paramwidth';
 import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-recovery';
 import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
-import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '@asmlift/core/raise/reroll';
+import {
+  type FoldedTopTest,
+  type PeeledTest,
+  REROLL_GATES,
+  TOP_TEST_GATES,
+  rerollPeeledTests,
+} from '@asmlift/core/raise/reroll';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import {
   DISPLACED_BASE_GATES,
@@ -280,9 +286,17 @@ export const PASSES: Record<string, CensusablePass> = {
   },
   reroll: {
     // raise/reroll.ts's `REROLL_GATES` — which loops with a peeled entry test rotate back. Asked once per
-    // loop whose SHAPE admits a re-roll (the untabled residue its header names), per round.
-    tables: [['loop', REROLL_GATES as readonly Gate<never>[]]],
-    install: (w) => installFold('reroll', (fn) => rerollPeeledTests(fn, w[0] as readonly Gate<PeeledTest>[])),
+    // loop whose SHAPE admits a re-roll (the untabled residue its header names), per round. Then
+    // `TOP_TEST_GATES`, once per rotated loop whose shape `restoreTopTest` reads: does its top test
+    // come back.
+    tables: [
+      ['loop', REROLL_GATES as readonly Gate<never>[]],
+      ['top', TOP_TEST_GATES as readonly Gate<never>[]],
+    ],
+    install: (w) =>
+      installFold('reroll', (fn) =>
+        rerollPeeledTests(fn, w[0] as readonly Gate<PeeledTest>[], w[1] as readonly Gate<FoldedTopTest>[]),
+      ),
   },
   'frame-objects': {
     // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.
