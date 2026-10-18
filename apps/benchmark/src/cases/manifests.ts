@@ -80,8 +80,10 @@ export interface RealFunction {
    *             const-ness, address-cast macro bodies, and — where the vendoring found them —
    *             callee signatures and struct tags with full field tables. The row's OWN
    *             definition-derived facts are redacted first (core's `asIfUndecompiled`). And the
-   *             callee declarations of the vendored context its candidates compile in
-   *             (context-proto.ts `rowPrototypes`).
+   *             callee declarations of the vendored context its candidates compile in, plus the
+   *             context's own typed-list entry for the row's function where `proto` states none,
+   *             which bounds its argument registers only softly, as a `--context` lift's does
+   *             (context-proto.ts `rowPrototypes`, core's `withOwnContextMark`).
    *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
    *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`); on a row with
    *             no project context for it (every C++ row), the callee declarations asmlift reads,
