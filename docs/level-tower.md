@@ -1507,7 +1507,8 @@ list (`proto-context.ts` `ownContextEntry`, `pipeline.ts` `liftWithinContextBoun
 function still `INCLUDE_ASM` was never checked against a definition, and one too short — sbk2's
 `void f(void);` task callbacks, 407 of 525 short when their functions were decompiled — would turn
 a real argument into `uninit_<reg>`. So a dropped register the finished lift still reads (an
-`undef` of it, or of a join that absorbed it, that `dce` keeps) is lifted again as the parameter a
+`undef` of it, or of a join that absorbed it, that `dce` keeps, or one IDO -g3 homes to a slot
+nothing reads) is lifted again as the parameter a
 context-less lift makes it, with an `[own-arity]` note naming the declaration and the register; one
 nothing reads is no parameter (sa3's `void Task_802F698(void)` lifted with four), and a lift that
 refuses within the bound is lifted without it, with a note. The bench hands each row its own

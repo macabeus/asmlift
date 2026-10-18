@@ -94,7 +94,7 @@ export interface DecompileOptions {
   contextGlobals?: ContextGlobals;
   /** the declaration context's own entry for `name` (proto-context.ts `ownContextEntry`), which
    *  bounds the argument registers SOFTLY where `prototypes` states no entry for it
-   *  (`liftStamped`); absent ⇒ byte-identical to today. A `prototypes` entry for `name` marked
+   *  (`liftStamped`); absent ⇒ nothing bounds them softly. A `prototypes` entry for `name` marked
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
@@ -145,11 +145,12 @@ export interface DecompileResult {
    *  `stage:offsetnames`), and it is also the only thing in a result that says a walk spelling
    *  stopped being enumerable here. Empty on every run with no symbol map. */
   walkedNames: string[];
-  /** WHERE THE BODY READ PAST ITS CONTEXT DECLARATION (`liftStamped`'s `[own-arity]` notes): each
-   *  names the declaration and the argument register the lift kept as a parameter past it. A note
-   *  is no gap — the source is the lift a context-less run gives — but the parameter list it prints
-   *  contradicts the header, which every compiler here rejects as conflicting types. Empty where no
-   *  context entry was handed over, or where the body read nothing past it. */
+  /** WHERE THE LIFT WENT PAST ITS CONTEXT DECLARATION (`liftStamped`'s `[own-arity]` notes): each
+   *  names the declaration and either the argument registers the body reads past it, kept as
+   *  parameters, or the refusal that made the lift drop the bound. A note is no gap, but the
+   *  parameter list printed contradicts the header, which every compiler here rejects as
+   *  conflicting types. Empty where no context entry was handed over, or where the lift stayed
+   *  within it. */
   ownArityNotes: string[];
 }
 
@@ -379,8 +380,9 @@ export function liftStamped(
  *  call whose arity was guessed, and the guess then trims it (`k4(a, b, 2, 0); zq(a); sl();` reads
  *  a2/a3 as `zq`'s and `sl`'s possible arguments); so the test is that an undefined value of a
  *  dropped register survives into the lift — an `undef` keyed by it, or by a join that took it,
- *  that `dce` would not delete (`readDroppedArgRegs`). A read the raising tower would delete later
- *  still counts: that only keeps the parameter.
+ *  that `dce` would not delete, or one the machine homes to a slot nothing reads
+ *  (`readDroppedArgRegs`). A read the raising tower would delete later still counts: that only
+ *  keeps the parameter.
  *
  *  A LIFT THAT REFUSES WITHIN THE BOUND IS LIFTED WITHOUT IT, with a note, so the bound turns no
  *  lift into a decline. The one refusal it adds is a stated entry's (frontend/ssa.ts

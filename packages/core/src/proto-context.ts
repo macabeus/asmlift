@@ -1375,9 +1375,9 @@ function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<strin
  *  of the bound only keeps a parameter — and sbk2 has 16 `void f(void);` task callbacks whose
  *  bodies read a0. The soft bound drops only the registers past the entry that the finished lift
  *  never reads; one it reads (or one the machine homes to a slot, as IDO -g3 does) stays a
- *  parameter, with an `[own-arity]` note naming the declaration and the register. On kleod, whose
- *  every header its compiler checked, the entry as a stated proto takes the lifts with more
- *  parameters than their header from 52 of 377 to 1 of 373. Only a typed list the bound can lay
+ *  parameter, with an `[own-arity]` note naming the declaration and the register. (On kleod, whose
+ *  every header its compiler checked, the entry stated as a hard bound takes the lifts with more
+ *  parameters than their header from 52 of 377 to 1 of 373.) Only a typed list the bound can lay
  *  out is handed over; every other shape abstains.
  *
  *  The benchmark hands each row the same entry (`withOwnContextMark`, apps/benchmark
@@ -1419,7 +1419,7 @@ export function withContextPrototypes(
 /** THE CONTEXT'S OWN ENTRY FOR `own`, where it is a TYPED LIST a lift may bound its argument
  *  registers by — the entry `withContextPrototypes` leaves out — and `undefined` everywhere else.
  *
- *  Its reader is the context bound (pipeline.ts `liftStamped`), which is SOFT: a register past it
+ *  Its reader is the context bound (pipeline.ts `liftWithinContextBound`), which is SOFT: a register past it
  *  that the lift goes on to read stays a parameter, so a header entry too short costs a diagnostic,
  *  never `uninit_<reg>`. Only an entry whose every parameter the bound can lay out is handed over,
  *  and every other shape ABSTAINS:
