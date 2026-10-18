@@ -37,6 +37,11 @@
 // An effect in E's compared slice needs no rule of its own: the comparison matches it only with an
 // op of T of the same opcode, which the third rule refuses, or with itself, which stays.
 // Every check that fails leaves the function as it was.
+//
+// The rotation is ISA-neutral; the top test it then restores (`restoreTopTest`) is not. That rule
+// reads the peel as a top-tested source, a GCC fact measured on agbcc alone: the re-roll fires
+// there and nowhere else in the corpus, and no other profile has been probed for a peeled do-while.
+// Where one peels it, the cost is a `for` spelled where the source was a do-while, never wrong C.
 import { Block, Fn, Op, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
 import { effectful, spelledWhenDead } from '../ir/discipline';
 import { type EntryReading, sameAtEntry } from '../ir/entry';
@@ -250,9 +255,12 @@ function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[], topGates: readonl
 
 /** One re-rolled loop whose exit test could head it again, and the facts its admission reads. */
 export interface FoldedTopTest {
-  /** does the exit edge carry a value? */
-  exitCarriesValue: boolean;
-  /** does the exit test read a value of the loop's blocks other than those H hands round? */
+  /** does the exit edge hand the exit block a value that another edge into it does not hand the
+   *  same parameter? The loop's own value, which the head and an arm out of the test both hand,
+   *  does not count. */
+  exitValueDiffers: boolean;
+  /** does the exit test or its edge read a value of the loop's blocks other than those H hands
+   *  round, or does a block after the exit read one at all? */
   readsLoopValue: boolean;
   /** the exit test on the entry values: `stays` (provably not taken), `leaves`, or `unknown` (not a
    *  constant: a memory read, a call, a parameter, an opcode `EVAL` does not fold) */
@@ -261,10 +269,10 @@ export interface FoldedTopTest {
 
 export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
   {
-    id: 'exit-carries-value',
-    why: 'a value on the exit edge becomes a second copy of the exit after the loop, a spelling measured worse',
+    id: 'exit-value-differs',
+    why: 'an exit whose edges hand it different values becomes a second copy of it after the loop, a spelling measured worse',
     sound: false,
-    rejects: (c) => c.exitCarriesValue,
+    rejects: (c) => c.exitValueDiffers,
   },
   {
     id: 'reads-loop-value',
@@ -381,11 +389,35 @@ function restoreTopTest(
     return x === null || y === null ? null : f(x, y);
   };
   const cond = evalConst(hTerm.operands[0]);
+  // a value the exit edge hands, or another edge into the exit: the loop's own `k`th value is one
+  // value however it is named, as H hands it round (B) or as T receives it
+  const own = (v: Value): Value | number => {
+    const k = Math.max(B.indexOf(v), T.params.indexOf(v));
+    return k < 0 ? v : k;
+  };
+  const intoExit = fn.blocks
+    .flatMap((b) => b.ops[b.ops.length - 1]?.successors ?? [])
+    .filter((s) => s.block === exit.block && s !== exit);
+  // the blocks after the exit, which C enters now and T no longer dominates: an arm out of T and the
+  // exit both read T's values there before the move, the exit's edge then reading them one
+  // iteration on
+  const after = new Set<Block>();
+  for (const stack = [exit.block]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (x !== T && x !== H && !after.has(x)) {
+      after.add(x);
+      stack.push(...successorsOf(x));
+    }
+  }
+  const readAfter = [...after].flatMap((b) =>
+    b.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)]),
+  );
   const site: FoldedTopTest = {
-    exitCarriesValue: exit.args.length > 0,
-    readsLoopValue: [...[...moved].flatMap((op) => op.operands), hTerm.operands[0]].some(
-      (v) => inLoop.has(v) && !movedResults.has(v) && !B.includes(v),
-    ),
+    exitValueDiffers: exit.args.some((v, k) => intoExit.some((s) => own(s.args[k]) !== own(v))),
+    readsLoopValue:
+      [...[...moved].flatMap((op) => op.operands), hTerm.operands[0], ...exit.args].some(
+        (v) => inLoop.has(v) && !movedResults.has(v) && !B.includes(v),
+      ) || readAfter.some((v) => inLoop.has(v) && !movedResults.has(v)),
     atEntry: cond === null ? 'unknown' : (cond !== 0) === (back === 0) ? 'stays' : 'leaves',
   };
   if (firstRejection(gates, site) !== null) {

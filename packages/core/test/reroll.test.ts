@@ -332,16 +332,37 @@ test('an exit test reading a constant the increment shares keeps the bottom test
   expect(emitted(SHARES_INCREMENT(PEELED)).src).toContain('while (1) {');
 });
 
-test('an exit that carries a value keeps the bottom test', () => {
+test('an exit that its edges hand different values keeps the bottom test', () => {
   const carries = TOP.replace('cond_br %9, ^bb2(), ^bb4()', 'cond_br %9, ^bb2(), ^bb4(%8)')
     .replace('  br ^bb4()\n^bb4():', '  br ^bb4(%2)\n^bb4(%50: s32):')
     .replace('%14: s32 = call {target="out"}', '%14: s32 = call %50 {target="out"}');
   const kept = emitted(carries);
   expect(kept.src).toContain('while (1) {');
   // a heuristic: without it the head is restored all the same
-  expect(emitted(carries, without(TOP_TEST_GATES, 'exit-carries-value')).fn.blocks).toHaveLength(
+  expect(emitted(carries, without(TOP_TEST_GATES, 'exit-value-differs')).fn.blocks).toHaveLength(
     kept.fn.blocks.length + 1,
   );
+});
+
+/** `gOut = i` after the loop: the latch hands the exit `exitArg`, the arm the counter it tested. */
+const OWN_VALUE_EXIT = (exitArg: string) =>
+  TOP_ARITH.replace('cond_br %9, ^bb2(), ^bb4()', 'cond_br %9, ^bb2(), ^bb4(' + exitArg + ')')
+    .replace('cond_br %5, ^bb3(), ^bb1(%2)', 'cond_br %5, ^bb3(%2), ^bb1(%2)')
+    .replace('cond_br %12, ^bb3(), ^bb1(%8)', 'cond_br %12, ^bb3(%8), ^bb1(%8)')
+    .replace(
+      '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
+      '^bb3(%51: s32):\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4(%51)',
+    )
+    .replace('^bb4():', '^bb4(%50: s32):')
+    .replace('%14: s32 = call {target="out"}', '%14: s32 = call %50 {target="out"}');
+
+test('an exit that takes the loop’s own value from every edge is tested at the top', () => {
+  // the counter the latch hands round and the one the arm tested are one value after the rotation
+  const own = OWN_VALUE_EXIT('%8');
+  const { fn, src } = emitted(own);
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  expect(irAgreement(own, structure(fn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** The body tests `a1 < 2i` rather than `2i == a1`, so that skipping its first iteration shows on
@@ -355,6 +376,8 @@ test('each top-test refusal above is its rule’s alone', () => {
     ['reads-loop-value', SHARES_INCREMENT(PEELED_ARITH)],
     ['not-staying-at-entry', lessThan(LEAVES_ARITH)],
     ['not-staying-at-entry', lessThan(PEELED_ARITH)],
+    // the exit reads the counter before its increment, which the new head has not got
+    ['reads-loop-value', OWN_VALUE_EXIT('%6')],
   ];
   for (const [id, ir] of cases) {
     expect(emitted(ir).src, id).toContain('while (1) {');
