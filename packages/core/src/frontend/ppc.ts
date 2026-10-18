@@ -1897,8 +1897,17 @@ function liftOnce(
     const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
     return ARG_REGS.some((r) => live.has(r)) || r3WrittenToReturn();
   };
+  /** Whether the function's own STATED declaration returns a word: then it returns one even where
+   *  no path writes r3, and a bare return hands back what the caller left there — `int f(int a) {
+   *  return a; }` is a bare `blr`. A context's own entry is not read for this (its return is a
+   *  header nothing checked), and neither is a hand-written body's (`ownDeclared` false). */
+  const statesWordReturn = (): boolean => {
+    const r = prototypes[name]?.returns;
+    const width = r === undefined || isFloatingSpelling(r) ? undefined : declaredWidth(r);
+    return ownDeclared && width !== undefined && width <= 32;
+  };
   const returnUntouchedArg = () => {
-    if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {
+    if (!(wordReturn || statesWordReturn()) || bareReturns.length === 0 || !r3IsAnArgument()) {
       return;
     }
     for (const { op, bi } of bareReturns) {
