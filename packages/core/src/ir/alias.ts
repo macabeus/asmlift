@@ -140,6 +140,48 @@ export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): 
 }
 
 /**
+ * A constant DISPLACEMENT off a root, read through defs alone: `add(p, K)`, `add(K, p)`, `sub(p, K)`,
+ * or a chain of them, as the root `p`, the summed `K`, and the chain's values from `addr` toward
+ * `p`. Null when `addr` is not such a link. `sub` is not commutative, so `K - p` stops the walk; a
+ * link whose two operands are both constants stops it too (that is a literal address,
+ * {@link constAddressOf}'s question). The one reading of address arithmetic that raise/structs.ts
+ * (which accesses share a base) and raise/offsetnames.ts (which named global an address stands on)
+ * both ask, so the two cannot disagree about where a chain ends.
+ */
+export function constDisplacementOf(
+  defs: Map<Value, Op>,
+  addr: Value,
+): { root: Value; k: number; chain: Value[] } | null {
+  const constOf = (x: Value): number | null => {
+    const d = defs.get(x);
+    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : null;
+  };
+  let k = 0;
+  const chain: Value[] = [];
+  let cur = addr;
+  for (;;) {
+    const d = defs.get(cur);
+    if (!d || (d.opcode !== 'add' && d.opcode !== 'sub') || d.operands.length !== 2) {
+      break;
+    }
+    const [x, y] = d.operands;
+    const ky = constOf(y);
+    const kx = d.opcode === 'add' ? constOf(x) : null;
+    if (ky !== null && kx === null) {
+      k += d.opcode === 'add' ? ky : -ky;
+      cur = x;
+    } else if (kx !== null && ky === null) {
+      k += kx;
+      cur = y;
+    } else {
+      break;
+    }
+    chain.push(d.results[0]);
+  }
+  return chain.length === 0 ? null : { root: cur, k, chain };
+}
+
+/**
  * Are these two accesses through ONE base provably different byte cells — same base value, both at
  * a constant offset and width, ranges non-overlapping? The everyday struct interleave
  * `… = p->field_0; p->field_4 = …`, where the store cannot change what the load sees even though

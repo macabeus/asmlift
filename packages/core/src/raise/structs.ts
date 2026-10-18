@@ -47,7 +47,7 @@
 // at an offset natural C alignment could not place it at) is rejected LOUD. An overlap is a union
 // member on a base whose layout only this function's accesses describe, and no struct at all on
 // one whose address is declared elsewhere (`recognizeStructs`).
-import { constAddressOf, globalCellOf } from '../ir/alias';
+import { constAddressOf, constDisplacementOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { placedAt } from '../ir/discipline';
 import { nextStructIndex } from '../ir/struct-names';
@@ -374,38 +374,6 @@ function fieldSize(t: IrType): number {
   }
 }
 
-/** A constant displacement off a root — `add(p, K)`, `add(K, p)`, `sub(p, K)`, or a chain of them —
- *  read through `defs`: the root `p`, the total `K`, and the chain's values from `v` toward `p`. */
-function displacementOf(defs: Map<Value, Op>, v: Value): { root: Value; k: number; chain: Value[] } | null {
-  const constOf = (x: Value): number | null => {
-    const d = defs.get(x);
-    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : null;
-  };
-  let k = 0;
-  const chain: Value[] = [];
-  let cur = v;
-  for (;;) {
-    const d = defs.get(cur);
-    if (!d || (d.opcode !== 'add' && d.opcode !== 'sub')) {
-      break;
-    }
-    const [x, y] = d.operands;
-    const ky = constOf(y);
-    const kx = d.opcode === 'add' ? constOf(x) : null;
-    if (ky !== null && kx === null) {
-      k += d.opcode === 'add' ? ky : -ky;
-      cur = x;
-    } else if (kx !== null && ky === null) {
-      k += kx;
-      cur = y;
-    } else {
-      break;
-    }
-    chain.push(d.results[0]);
-  }
-  return chain.length === 0 ? null : { root: cur, k, chain };
-}
-
 /** FOLD A MATERIALISED DISPLACEMENT INTO THE ACCESS: a load/store whose base is `add(p, K)` (or a
  *  chain of constant adds/subs off `p`) becomes an access of `p` at `off + K`, so `recognizeStructs`
  *  sees it in `p`'s access set and spells it as the member it is.
@@ -495,7 +463,7 @@ export function foldDisplacedAccesses(fn: Fn, opts: DisplacedOptions = {}): numb
   const byRoot = new Map<Value, { access: Access; k: number }[]>();
   const refused = new Set<Value>();
   for (const [base, accesses] of accessesOf) {
-    const disp = displacementOf(defs, base);
+    const disp = constDisplacementOf(defs, base);
     if (!disp || refused.has(disp.root)) {
       continue;
     }

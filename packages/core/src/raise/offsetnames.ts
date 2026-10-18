@@ -100,6 +100,7 @@
 // the map spells two ways at either end, a width the map does not state, a width that disagrees
 // with the access, a store onto a `const` name — refuse NOTHING here and are pinned by
 // `offset-names.test.ts` alone.
+import { constDisplacementOf } from '../ir/alias';
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -317,33 +318,16 @@ function addressesByName(symbols: SymbolMap): Map<string, { addr: number; info: 
 }
 
 /** The named base an address value stands on, following `add`/`sub` chains through constants —
- *  the `adds r1,#12` walk is a chain of them, and each link is its own candidate. Stops at
- *  anything else, block parameters included (they have no def, so a loop-carried pointer
- *  induction never resolves). */
+ *  the `adds r1,#12` walk is a chain of them, and each link is its own candidate. The chain is
+ *  ir/alias.ts `constDisplacementOf`, the reading raise/structs.ts shares; it stops at anything
+ *  else, block parameters included (they have no def, so a loop-carried pointer induction never
+ *  resolves). */
 function namedBase(v: Value, defOf: Map<Value, Op>): { sym: string; code: boolean; offset: number } | null {
-  const d = defOf.get(v);
-  if (d === undefined) {
-    return null;
-  }
-  if (d.opcode === 'gaddr') {
-    return { sym: d.attrs.sym as string, code: d.attrs.code === true, offset: 0 };
-  }
-  if (d.opcode !== 'add' && d.opcode !== 'sub') {
-    return null;
-  }
-  const [a, b] = d.operands;
-  const ka = defOf.get(a)?.opcode === 'const' ? (defOf.get(a)!.attrs.value as number) : null;
-  const kb = defOf.get(b)?.opcode === 'const' ? (defOf.get(b)!.attrs.value as number) : null;
-  // `sub` is not commutative: only `base - K` is an offset off the base.
-  if (kb !== null) {
-    const base = namedBase(a, defOf);
-    return base && { ...base, offset: base.offset + (d.opcode === 'sub' ? -kb : kb) };
-  }
-  if (ka !== null && d.opcode === 'add') {
-    const base = namedBase(b, defOf);
-    return base && { ...base, offset: base.offset + ka };
-  }
-  return null;
+  const disp = constDisplacementOf(defOf, v);
+  const d = defOf.get(disp?.root ?? v);
+  return d?.opcode === 'gaddr'
+    ? { sym: d.attrs.sym as string, code: d.attrs.code === true, offset: disp?.k ?? 0 }
+    : null;
 }
 
 /** Every `add`/`sub` in `fn` that resolves to a named base plus a non-zero constant, with the

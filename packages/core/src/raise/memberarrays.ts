@@ -261,7 +261,9 @@ function stripExt(v: Value, defs: Map<Value, Op>): Value {
   }
 }
 
-/** `add(x, const)` read as (other operand, constant), or null. The add is commutative. */
+/** `add(x, const)` read as (other operand, constant), or null. The add is commutative. ONE link, not
+ *  a chain, and no `sub`: the shapes this pass reads are a single `add` of a scaled index or of a
+ *  member offset. A chain of constant displacements is ir/alias.ts `constDisplacementOf`. */
 function constAddend(op: Op, defs: Map<Value, Op>): { of: Value; k: number } | null {
   if (op.opcode !== 'add' || op.operands.length !== 2) {
     return null;
