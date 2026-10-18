@@ -459,6 +459,23 @@ function ptrMemberElement(
 // 4096 — including offsets past Thumb's immediate range, and under multi-member, across-a-call
 // and in-a-loop shapes. It is one load whose member offset becomes the same immediate the cast
 // form used, and unlike the indexed form it composes.
+//
+// ONE SHAPE IS NOT IDENTICAL: on agbcc, a STORE to an offset past Thumb's
+// immediate range. expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target
+// (:2535) and evaluates the right-hand side first in store_field (:2624), while it expands a cast
+// (INDIRECT_REF) target whole (:2689) before the right-hand side (:2747). So the member form loads
+// a loaded value before it materialises `base + K` and the cast form after it, and with a constant
+// or a parameter on the right the two still allocate registers differently. Neither spelling is
+// the source's by default: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object, and the
+// order in which the address and the value are computed is the evidence between them. The member
+// is emitted here; raise/structs.ts `foldDisplacedAccesses` folds such a store into its struct by
+// default and the `/far-cast` lift keeps it on its address, so the differ referees the two
+// (`synthetic:sfar_b` pins the member). A LOAD's member and cast forms compile alike, but agbcc
+// gives each member access its own `base + K`, so one materialised base read at two offsets is a
+// held pointer, and the fold leaves it on its address (`held-pointer-offsets`, `synthetic:sfar_held`
+// pins it); so does ido past its `addiu` reach (target.ts `farMemberBasePerAccess`). On ido, KMC,
+// GCC 2.7.2 and mwcc one access's two forms compile alike past a 16-bit displacement, a loaded
+// value included, and `/far-cast` is offered there for the neighbours a folded store respells.
 
 /** The pointee a global's value may be spelled through: the members the declaration synthesis
  *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts

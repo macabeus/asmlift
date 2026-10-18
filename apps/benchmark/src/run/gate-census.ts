@@ -24,9 +24,9 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Eleven passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
+// holding the call. Twelve passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, the three loop folds
+// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the three loop folds
 // in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `reroll`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
@@ -62,6 +62,7 @@ import {
   UNMERGE_VALUE_GATES,
   unmergeJoins,
 } from '@asmlift/core/l3/unmerge';
+import { declaresVoidReturn } from '@asmlift/core/proto';
 import {
   EXIT_TRAMPOLINE_GATES,
   type ExitTrampoline,
@@ -81,6 +82,13 @@ import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-
 import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
 import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '@asmlift/core/raise/reroll';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
+import {
+  DISPLACED_BASE_GATES,
+  DISPLACED_ROOT_GATES,
+  type DisplacedBase,
+  type DisplacedRoot,
+  foldDisplacedAccesses,
+} from '@asmlift/core/raise/structs';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
@@ -185,6 +193,32 @@ export const PASSES: Record<string, CensusablePass> = {
       const restore = pass.run;
       pass.run = (fn, _self, _opts, target) =>
         foldTruncatedLoads(fn, target.capabilities.endianness === 'little', gates);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  displaced: {
+    // raise/structs.ts's two tables for the displaced-access fold: `DISPLACED_BASE_GATES`, asked
+    // once per materialised base `add(p, K)` that carries a constant-offset access, and
+    // `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. On every lift that
+    // reaches the pass, `/far-cast`'s included, which skips a base carrying a store before either
+    // table sees it.
+    tables: [
+      ['base', DISPLACED_BASE_GATES as readonly Gate<never>[]],
+      ['root', DISPLACED_ROOT_GATES as readonly Gate<never>[]],
+    ],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'displaced');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'displaced' — the pass's caller-side seam moved");
+      }
+      const base = w[0] as readonly Gate<DisplacedBase>[];
+      const root = w[1] as readonly Gate<DisplacedRoot>[];
+      const restore = pass.run;
+      pass.run = (fn, self, opts, target) =>
+        foldDisplacedAccesses(fn, opts.displaced, target.compilerBehaviors, declaresVoidReturn(self), base, root);
       return () => {
         pass.run = restore;
       };

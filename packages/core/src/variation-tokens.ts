@@ -71,6 +71,7 @@ const TOKENS = [
   { name: 'shared-ret', variationKind: 'lift' },
   { name: 'shared-tail', variationKind: 'lift' },
   { name: 'kept-slot', variationKind: 'lift' },
+  { name: 'far-cast', variationKind: 'lift' },
   // structure: `structure()` re-run with other options
   { name: 'flip-branch', variationKind: 'structure' },
   { name: 'defsite', variationKind: 'structure' },

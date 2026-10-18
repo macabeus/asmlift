@@ -921,6 +921,192 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['struct', 'field', 'mixed-width'],
     toolchains: ALL,
   },
+  // A MEMBER PAST THE DISPLACEMENT RANGE, reached through an address the machine materialises first
+  // (`adds r3, #38; strb r2, [r3]`; a Thumb byte displacement stops at 31, a halfword's at 62).
+  // agbcc stores the member's loaded value in a different order from the cast `*((u8 *)s + 38)`:
+  // the member form loads `*q` before the `adds`, the cast after it (gcc/expr.c expand_assignment,
+  // :2535 vs :2689), so these two pin the member spelling (raise/structs.ts foldDisplacedAccesses).
+  {
+    sym: 'sfar_b',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;};\nvoid sfar_b(struct S*s,u8*q){ s->c=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_b(struct S*,u8*);',
+    proto: { sfar_b: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_h',
+    src: 'struct T{s32 a;u8 pad[66];u16 h;};\nvoid sfar_h(struct T*s,u16*q){ s->h=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct T; void sfar_h(struct T*,u16*);',
+    proto: { sfar_h: { returnsVoid: true } },
+  },
+  // The other side of the same pair: the source wrote the cast, or held the address in a pointer,
+  // and agbcc built the address before the right-hand side. The `/far-cast` lift keeps the store
+  // on its address; the default member spelling compiles to a different object.
+  {
+    sym: 'sfar_cast',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;};\nvoid sfar_cast(struct S*s,u8*q){ *((u8*)s+38)=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_cast(struct S*,u8*);',
+    proto: { sfar_cast: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_ptr',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;u8 d;};\nvoid sfar_ptr(struct S*s,u8*q,u8*r){ u8*p=&s->c; p[0]=*q; p[1]=*r; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_ptr(struct S*,u8*,u8*);',
+    proto: { sfar_ptr: { returnsVoid: true } },
+  },
+  // A uniform-width root: every access one byte wide, so the access set alone reads as an array.
+  // The far store's order (`*q` loaded before the `adds #38`) is the member's and no cast's, and
+  // only the member spelling reproduces it. `sfar_bb` also leaves the second address in r0 at the
+  // void function's `bx lr`, which is no use of it.
+  {
+    sym: 'sfar_ub',
+    src: 'struct B{u8 a;u8 pad[37];u8 c;};\nvoid sfar_ub(struct B*p,u8*q){ p->c=*q; p->a=0; }',
+    features: ['struct', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'struct B; void sfar_ub(struct B*,u8*);',
+    proto: { sfar_ub: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_bb',
+    src: 'struct B{u8 a;u8 pad[37];u8 c;u8 d;};\nvoid sfar_bb(struct B*p){ p->d=p->c; }',
+    features: ['struct', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'struct B; void sfar_bb(struct B*);',
+    proto: { sfar_bb: { returnsVoid: true } },
+  },
+  // A held pointer read at two offsets: agbcc shares one `adds r1, #38` between `ldrb [r1]` and
+  // `ldrb [r1, #1]`, where the member spelling `p->c + p->d` gives each access its own `adds`. So
+  // the pointer is the source's and the fold leaves it alone (raise/structs.ts
+  // `held-pointer-offsets`). Inside the `addiu` reach ido and mwcc share one base across members
+  // as they do for a held pointer, and KMC lifts the held pair as members at the same bytes, so
+  // this pins agbcc only; ido past that reach is `sfar_msg`'s.
+  {
+    sym: 'sfar_held',
+    src: 'struct S{s32 a;u16 b;u8 pad[32];u8 c;u8 d;};\nu32 sfar_held(struct S*p){ u8*d=&p->c; return d[0]+d[1]+p->a; }',
+    features: ['struct', 'field', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; u32 sfar_held(struct S*);',
+  },
+  // The same gap past a 16-bit displacement: ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and
+  // GCC 2.7.2's `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1;
+  // stb r4, -25537(r5)`. There the member and both cast spellings compile to the same bytes
+  // (compiled on all six builds, a stored loaded value too), so these rows pin the recovered
+  // struct type, not the bytes. `x` is a word: a `u8` parameter adds ido's `sw a1, 4(sp)` home,
+  // a parameter-width question this row is not about.
+  {
+    sym: 'sfar_big',
+    src: 'struct S{s32 a;u8 pad[39995];u8 big;};\nvoid sfar_big(struct S*p,u32 x){ p->a=1; p->big=x; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct S; void sfar_big(struct S*,u32);',
+    proto: { sfar_big: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_big',
+    src: 'struct S{s32 a;u8 pad[39995];u8 big;};\nvoid sfar_big(struct S*p,u32 x){ p->a=1; p->big=x; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'struct S; void sfar_big(struct S*,u32);',
+    proto: { sfar_big: { returnsVoid: true } },
+  },
+  // A held far pointer past ido's `addiu` reach, the OoT/MM idiom of a message context inside the
+  // play state (msg at 0x10A24): ido shares one `lui at, 1; addu v1, a0, at` between the held
+  // pointer's accesses where the member spelling gives every access its own `lui`/`addu`, so the
+  // fold leaves it on its address (`held-pointer-offsets`, target.ts `farMemberBasePerAccess`).
+  // `sfar_msgs` stores first and reads after: KMC loads both before the store, and only the store
+  // kept on its address (`/far-cast`) keeps the loads where the source wrote them. Elsewhere these
+  // two pin the type.
+  ...(
+    [
+      [['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'], undefined],
+      [['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] => [
+    {
+      sym: 'sfar_msg',
+      src:
+        'struct Msg{u8 a;u8 a1;u16 b;s32 c;};struct Play{s32 frames;u8 pad[0x10A20];struct Msg msg;};\n' +
+        's32 sfar_msg(struct Play*play,u8*q){ struct Msg*m=&play->msg; m->a=*q; return m->c; }',
+      features: ['struct', 'field', 'pointer'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'struct Play; s32 sfar_msg(struct Play*,u8*);',
+    },
+    {
+      sym: 'sfar_msgs',
+      src:
+        'struct Msg{u8 a;u8 a1;u16 b;s32 c;};struct Play{s32 frames;u8 pad[0x10A20];struct Msg msg;};\n' +
+        's32 sfar_msgs(struct Play*play){ struct Msg*m=&play->msg; m->b=0; return m->c+m->a; }',
+      features: ['struct', 'field', 'pointer'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'struct Play; s32 sfar_msgs(struct Play*);',
+    },
+    // A held far pointer written at three offsets: mwcc_242_81 and mwcc_247_107 give it and the
+    // member spelling one shared `addis` base each, in different registers, so only `/far-cast`
+    // rebuilds it there.
+    {
+      sym: 'sfar_hold',
+      src:
+        'struct H{s32 a;u8 pad[69996];u8 b;u8 b1;u16 b2;u8 b3;u8 b4;};\n' +
+        'void sfar_hold(struct H*p,u8*q){ u8*d=&p->b; d[0]=*q; *(u16*)(d+2)=0; d[5]=1; }',
+      features: ['struct', 'field', 'pointer', 'store'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'struct H; void sfar_hold(struct H*,u8*);',
+      proto: { sfar_hold: { returnsVoid: true } },
+    },
+  ]),
+  // An address constant added to an integer (GBA VRAM here, any segment or device base on MIPS and
+  // PPC): no member offset, so the integer stays one (raise/structs.ts `address-constant`).
+  {
+    sym: 'sfar_addr',
+    src: 'u32 sfar_addr(u32 x){ return *(u16*)(x+0x6000000) + *(u8*)(x+0x6000004); }',
+    features: ['pointer', 'mixed-width'],
+    toolchains: ALL,
+    ctx: 'u32 sfar_addr(u32);',
+  },
+  // A byte buffer whose far store takes a value an earlier statement loaded: the member and the
+  // cast spelling both load it before the address, so the order is no struct evidence and the
+  // buffer stays one.
+  {
+    sym: 'sfar_buf',
+    src: 'void sfar_buf(u8*p,u8*q,u8*r){ u8 v=*q; *r=0; p[38]=v; }',
+    features: ['pointer', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void sfar_buf(u8*,u8*,u8*);',
+    proto: { sfar_buf: { returnsVoid: true } },
+  },
+  // A byte buffer whose far store takes a call's result: agbcc expands the call before the address
+  // under the member and the cast spelling alike, so the order is no struct evidence and the
+  // buffer stays one.
+  {
+    sym: 'sfar_call',
+    src: 'int sfar_k(int);\nvoid sfar_call(u8*p,u8*q,s32 n){ p[60]=sfar_k(n); p[q[0]]=0; }',
+    features: ['pointer', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'int sfar_k(int); void sfar_call(u8*,u8*,s32);',
+    proto: { sfar_k: { params: 1 }, sfar_call: { returnsVoid: true } },
+  },
+  // A held far pointer beside a far member store on one root: the pointer stays on its address and
+  // the store still joins the struct.
+  {
+    sym: 'sfar_mix',
+    src:
+      'struct S{s32 a;u16 b;u8 pad[32];u8 f38;u8 f39;u8 pad2[28];u16 f68;u16 f70;};\n' +
+      'u32 sfar_mix(struct S*p,u8*q){ u16*d=&p->f68; p->f38=*q; return d[0]+d[1]; }',
+    features: ['struct', 'field', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; u32 sfar_mix(struct S*,u8*);',
+  },
 
   // ── unions (the same storage read at two widths / in two type domains) ──────────────────
   // A union is only measurable when the SAME bytes are reached through members of different width

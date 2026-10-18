@@ -47,11 +47,13 @@
 // at an offset natural C alignment could not place it at) is rejected LOUD. An overlap is a union
 // member on a base whose layout only this function's accesses describe, and no struct at all on
 // one whose address is declared elsewhere (`recognizeStructs`).
-import { constAddressOf, globalCellOf } from '../ir/alias';
+import { constAddressOf, constDisplacementOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
+import { placedAt } from '../ir/discipline';
 import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess, unionViewSigns } from '../ir/types';
 import type { StructType } from '../l3/ast';
+import { type Gate, firstRejection } from '../l3/gates';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
 import { storeSigned } from './storesign';
 
@@ -371,6 +373,297 @@ function fieldSize(t: IrType): number {
     default:
       return 4;
   }
+}
+
+export interface DisplacedOptions {
+  /** leave every STORE on its materialised address, folding only the loads (`/far-cast`) */
+  keepStores?: boolean;
+  /** called when a lift without `keepStores` folds a store, which is what offers `/far-cast` */
+  onFoldedStore?: () => void;
+}
+
+/** The target facts the fold reads (target.ts `compilerBehaviors`). */
+export interface DisplacedBehaviors {
+  farMemberStoreOrder?: boolean;
+  farMemberBasePerAccess?: { past: number };
+}
+
+/** One materialised base, as `DISPLACED_BASE_GATES` judges it. */
+export interface DisplacedBase {
+  base: Value;
+  accesses: readonly Access[];
+  disp: { root: Value; k: number; chain: Value[] };
+  defs: Map<Value, Op>;
+  arrayBases: Set<Value>;
+  /** does every use of `v` go to `next` (a link of the chain), or, at the chain's head, to the
+   *  BASE operand of a constant-offset load/store? */
+  onlyFeeds: (v: Value, next: Value | undefined) => boolean;
+  behaviors: DisplacedBehaviors;
+}
+
+/** One root and every access the fold would move onto it, as `DISPLACED_ROOT_GATES` judges it. */
+export interface DisplacedRoot {
+  root: Value;
+  /** the root's own accesses plus the moved ones at their folded offsets */
+  merged: readonly Access[];
+  /** some moved store's value is computed BEFORE its address — the member's order on a target
+   *  with `farMemberStoreOrder`, which no cast or held pointer builds */
+  memberStoreOrder: boolean;
+}
+
+/** The smallest displacement `address-constant` reads as an address rather than a member offset. */
+const ADDRESS_CONSTANT_FLOOR = 1 << 24;
+
+export const DISPLACED_BASE_GATES: readonly Gate<DisplacedBase>[] = [
+  {
+    id: 'not-recovery-root',
+    why: 'the root is typed already, a frame, global or literal address, or a variable-index array',
+    sound: false,
+    rejects: ({ disp: { root: p }, defs, arrayBases }) => {
+      const d = defs.get(p)?.opcode;
+      return (
+        p.type.kind !== 'unknown' ||
+        d === 'laddr' ||
+        d === 'gaddr' ||
+        d === 'const' ||
+        arrayBases.has(p) ||
+        globalCellOf(defs, p, 0) !== null ||
+        constAddressOf(defs, p, 0) !== null
+      );
+    },
+  },
+  {
+    // `*(u16 *)(x + 0x6000000)`, `*(u8 *)(0x6000000 + i * 2)`: a hardware or segment address added
+    // to an index. Read as a member it retypes the integer as a pointer to a struct with a 96 MiB
+    // pad. No struct on these machines comes near 16 MiB (GBA EWRAM is 256 KiB, N64 RDRAM 8 MiB,
+    // GameCube main RAM 24 MiB in all), and every address region a constant names starts past it.
+    id: 'address-constant',
+    why: 'a displacement of 16 MiB or more is an address constant added to an index, not a member offset',
+    sound: false,
+    rejects: ({ disp: { k } }) => Math.abs(k) >= ADDRESS_CONSTANT_FLOOR,
+  },
+  {
+    id: 'claimed-chain',
+    why: 'another struct pass already typed a value of the chain, or an indexed access reaches it',
+    sound: false,
+    rejects: ({ disp: { chain }, arrayBases }) => chain.some((v) => v.type.kind !== 'unknown' || arrayBases.has(v)),
+  },
+  {
+    id: 'held-address',
+    why: 'the address is used as a value too, so the source held it',
+    sound: false,
+    rejects: ({ disp: { chain }, onlyFeeds }) =>
+      !chain.every((v, i) => onlyFeeds(v, i === 0 ? undefined : chain[i - 1])),
+  },
+  {
+    id: 'placed-access',
+    why: 'a volatile or device-pinned access keeps the address it was written through',
+    sound: false,
+    rejects: ({ accesses }) => accesses.some((a) => placedAt(a.op) !== null),
+  },
+  {
+    id: 'negative-offset',
+    why: 'a folded offset below the root is no member',
+    sound: false,
+    rejects: ({ accesses, disp: { k } }) => accesses.some((a) => a.off + k < 0),
+  },
+  {
+    id: 'held-pointer-offsets',
+    why: 'one materialised base at two offsets is a held pointer where every member access gets its own',
+    sound: false,
+    rejects: ({ accesses, disp: { k }, behaviors: { farMemberBasePerAccess: perAccess } }) =>
+      perAccess !== undefined && Math.abs(k) > perAccess.past && new Set(accesses.map((a) => a.off)).size > 1,
+  },
+];
+
+export const DISPLACED_ROOT_GATES: readonly Gate<DisplacedRoot>[] = [
+  {
+    id: 'array-shaped',
+    why: 'uniform-stride or single accesses are no struct evidence, unless a store shows the member order',
+    sound: false,
+    rejects: ({ merged, memberStoreOrder }) => isArray([...merged]) && !memberStoreOrder,
+  },
+  {
+    id: 'no-layout',
+    why: 'the accesses overlap or misalign, so no plain struct lays them out',
+    sound: false,
+    rejects: ({ merged }) => {
+      try {
+        buildStruct('Struct', [...merged]);
+        return false;
+      } catch {
+        return true;
+      }
+    },
+  },
+];
+
+/** FOLD A MATERIALISED DISPLACEMENT INTO THE ACCESS: a load/store whose base is `add(p, K)` (or a
+ *  chain of constant adds/subs off `p`) becomes an access of `p` at `off + K`, so `recognizeStructs`
+ *  sees it in `p`'s access set and spells it as the member it is.
+ *
+ *  WHY. Every ISA has a displacement range, and a member past it is reached through an address the
+ *  machine materialises first: Thumb's `adds rX, #38; strb [rX]` (a byte past 31, a half past 62,
+ *  a word past 124), ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and GCC 2.7.2's
+ *  `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1; stb r4, -25537(r5)`.
+ *  Unfolded, such an access is keyed on the materialised address, never joins its struct, and is
+ *  spelled as a cast `*((u8 *)p + 38)`. On agbcc that spelling is a different program: for a
+ *  COMPONENT_REF target expand_assignment (gcc/expr.c :2535) expands only the base and store_field
+ *  (:2624) evaluates the right-hand side first, while a cast (INDIRECT_REF) target is expanded whole
+ *  (:2689) before the right-hand side (:2747). A member store of a loaded value therefore loads it
+ *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store), and
+ *  with a constant or a parameter on the right the two still allocate registers differently. The
+ *  cast is a source spelling too: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object. So
+ *  the fold is the default and `opts.keepStores` (the `/far-cast` lift) keeps every such store on
+ *  its address for the differ to referee.
+ *  A LOAD through a cast and through a member compile alike, and fold in both lifts — but a load
+ *  through a HELD pointer does not: agbcc materialises one `add` per member access, even for
+ *  adjacent members (`p->f38 + p->f39` is `add #0x26` and `add #0x27`), so one materialised base
+ *  read or written at two distinct offsets (`add r1, #0x26; ldrb [r1]; ldrb [r1, #1]`) is the
+ *  pointer the source held, and the member spelling cannot rebuild it (`held-pointer-offsets`).
+ *  ido does the same past its `addiu` reach, where the assembler gives each member access its own
+ *  `lui`/`addu` (target.ts `farMemberBasePerAccess` states the reach per compiler). On ido, KMC,
+ *  GCC 2.7.2 and mwcc one access through a member and through a cast compile alike, a store of a
+ *  loaded value included, and there the fold buys the type; what it can cost is the neighbours'
+ *  spelling — a folded store no longer aliases the loads beside it, and a held mwcc pointer is
+ *  respelled as members — which is why `/far-cast` is offered there too.
+ *
+ *  THE REFUSALS ARE TWO GATE TABLES, so `pnpm bench gates --pass displaced` can count which one
+ *  keeps a row on the cast spelling: `DISPLACED_BASE_GATES`, asked once per materialised base, and
+ *  `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. A base the first
+ *  refuses keeps its own accesses on its materialised address while the root's other bases are
+ *  still asked; a root the second refuses keeps every access off it on its address.
+ *  Every gate is a spelling choice, not a soundness rule: the fold rewrites address arithmetic
+ *  into the same address, so no candidate it admits reads different memory, and the differ
+ *  referees. NOT TABLED: `/far-cast`'s `keepStores` skip, which is the variation itself
+ *  rather than a refusal. Runs right before `recognizeStructs`, after raise/truncload.ts, which
+ *  therefore never sees a folded access. Returns the number of accesses folded. */
+export function foldDisplacedAccesses(
+  fn: Fn,
+  opts: DisplacedOptions = {},
+  behaviors: DisplacedBehaviors = {},
+  voidReturn = false,
+  baseGates: readonly Gate<DisplacedBase>[] = DISPLACED_BASE_GATES,
+  rootGates: readonly Gate<DisplacedRoot>[] = DISPLACED_ROOT_GATES,
+): number {
+  const defs = defOpMap(fn);
+  const { accessesOf, arrayBases } = constOffsetAccesses(fn);
+  // Every use of each value: the op and operand index, or null for an edge argument.
+  const uses = new Map<Value, { op: Op | null; at: number }[]>();
+  const use = (v: Value, op: Op | null, at: number) => {
+    let l = uses.get(v);
+    if (!l) {
+      l = [];
+      uses.set(v, l);
+    }
+    l.push({ op, at });
+  };
+  // Where each op stands, for the store-order reading.
+  const position = new Map<Op, { block: number; at: number }>();
+  fn.blocks.forEach((b, block) => {
+    (b.ops as Op[]).forEach((op, at) => {
+      position.set(op, { block, at });
+      op.operands.forEach((v, i) => use(v, op, i));
+      for (const s of op.successors) {
+        for (const v of s.args) {
+          use(v, null, -1);
+        }
+      }
+    });
+  });
+  // A `ret` of a function declared void reads no value: the address merely sits in the return
+  // register when the function ends (`add r0, #0x27; strb r1, [r0]; bx lr`).
+  const onlyFeeds = (v: Value, next: Value | undefined): boolean =>
+    (uses.get(v) ?? []).every(({ op, at }) =>
+      op === null
+        ? false
+        : voidReturn && op.opcode === 'ret'
+          ? true
+          : next === undefined
+            ? (op.opcode === 'load' || op.opcode === 'store') && at === 0
+            : op.results[0] === next && op.opcode !== 'load' && op.opcode !== 'store',
+    );
+  // THE MEMBER'S ORDER (target.ts `farMemberStoreOrder`): the stored value is computed by a
+  // non-constant op in the same block before the chain's first link, AS THIS STORE'S RIGHT-HAND
+  // SIDE: this store is its only reader, and no memory access or call stands between it and the
+  // chain. A constant or a parameter on the right leaves no order to read, so it is no evidence
+  // either way; neither is a value an earlier statement computed (`u8 v = *q; *r = 0; p[38] = v;`),
+  // which the member and the cast spellings both load before the address, byte for byte. Nor is a
+  // value that IS a call: agbcc expands every call of a right-hand side before either target
+  // (MODIFY_EXPR's preexpand_calls, gcc/expr.c:6777), so `p->f60 = k()` and `p[60] = k()` are one
+  // object. What the right-hand side computes from a call's result still orders (`p->f60 = k() + 1`
+  // adds before the address, `p[60] = k() + 1` after it).
+  const effect = (op: Op): boolean =>
+    op.opcode === 'store' ||
+    op.opcode === 'astore' ||
+    op.opcode === 'load' ||
+    op.opcode === 'aload' ||
+    op.opcode === 'call' ||
+    op.opcode === 'opaque';
+  const memberOrdered = (a: Access, chain: Value[]): boolean => {
+    const value = a.op.operands[1];
+    const vdef = defs.get(value);
+    const first = defs.get(chain[chain.length - 1]);
+    const v = vdef && vdef.opcode !== 'const' && vdef.opcode !== 'call' ? position.get(vdef) : undefined;
+    const f = first ? position.get(first) : undefined;
+    return (
+      v !== undefined &&
+      f !== undefined &&
+      v.block === f.block &&
+      v.at < f.at &&
+      (uses.get(value) ?? []).length === 1 &&
+      !(fn.blocks[v.block].ops as Op[]).slice(v.at + 1, f.at).some(effect)
+    );
+  };
+  const byRoot = new Map<Value, { access: Access; k: number; memberOrder: boolean }[]>();
+  for (const [base, accesses] of accessesOf) {
+    const disp = constDisplacementOf(defs, base);
+    if (!disp) {
+      continue;
+    }
+    // `/far-cast`: a store kept on its address keeps the chain's value used by something other
+    // than a folded access, so no load sharing that address folds either.
+    if (opts.keepStores === true && accesses.some((a) => a.op.opcode === 'store')) {
+      continue;
+    }
+    // A refused base stays on its address and its root's other bases are still asked: a held
+    // `u16 *d = &p->f68` beside a member store `p->f38 = *q` keeps `d` and folds the store.
+    if (firstRejection(baseGates, { base, accesses, disp, defs, arrayBases, onlyFeeds, behaviors }) !== null) {
+      continue;
+    }
+    const list = byRoot.get(disp.root) ?? [];
+    byRoot.set(disp.root, list);
+    for (const access of accesses) {
+      const memberOrder =
+        behaviors.farMemberStoreOrder === true && access.op.opcode === 'store' && memberOrdered(access, disp.chain);
+      list.push({ access, k: disp.k, memberOrder });
+    }
+  }
+  let folded = 0;
+  for (const [root, moved] of byRoot) {
+    const merged = [
+      ...(accessesOf.get(root) ?? []),
+      ...moved.map(({ access, k }) => ({ ...access, off: access.off + k })),
+    ];
+    const memberStoreOrder = moved.some((m) => m.memberOrder);
+    if (firstRejection(rootGates, { root, merged, memberStoreOrder }) !== null) {
+      continue;
+    }
+    for (const { access, k } of moved) {
+      access.op.operands[0] = root;
+      access.op.attrs.off = access.off + k;
+      folded++;
+      if (access.op.opcode === 'store') {
+        opts.onFoldedStore?.();
+      }
+    }
+    // An array-shaped set the member's store order admitted: `recognizeStructs` would read it as
+    // an array, so the struct its evidence names is synthesized here.
+    if (isArray(merged)) {
+      root.type = T.ptr(buildStruct(`Struct${firstFreeStructIndex(fn)}`, merged));
+    }
+  }
+  return folded;
 }
 
 /** Recover struct-pointer types from access-pattern evidence. Runs after array legalization and

@@ -858,6 +858,34 @@ export interface TargetDescription {
     // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
     // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
     foldsConstAddrOffset?: boolean;
+    // Does a STORE to a struct member past the ISA's displacement range compile differently from the
+    // same store through a cast of the base (`p->f38 = v` against `*((u8 *)p + 38) = v`)? agbcc's
+    // does: expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target (:2535)
+    // and evaluates the right-hand side first in store_field (:2624), and it expands a cast target
+    // whole (:2689) before the right-hand side (:2747). Measured on agbcc for a loaded, a constant, a
+    // computed and a parameter right-hand side: every pair builds two objects, and a hoisted
+    // `u8 *d = &p->f38; *d = v;` builds the cast's. True reads a moved store whose right-hand side
+    // is computed before its address as struct evidence (raise/structs.ts `memberStoreOrder`).
+    // ido, KMC, GCC 2.7.2 and the three mwcc builds put the two spellings in one object, a loaded
+    // right-hand side included, so they leave it absent. `/far-cast`, the lift that keeps such a
+    // store on its materialised address, is offered on every target and does not read this.
+    farMemberStoreOrder?: boolean;
+    // Does a member past the displacement range get its OWN materialised base at every access, so
+    // that one base read or written at two distinct offsets is a pointer the source held? Stated
+    // as the displacement `past` which that holds: a base materialised with a displacement whose
+    // magnitude exceeds it was built for one access. agbcc's is 0, every base: `p->f38 + p->f39`
+    // compiles to `add r0, #0x26; ldrb [r0]` and `add r1, #0x27; ldrb [r1]`, while
+    // `u8 *d = &p->f38; d[0] + d[1]` shares one `add r1, #0x26` between `ldrb [r1]` and
+    // `ldrb [r1, #1]`, and only the pointer spelling rebuilds those bytes. ido's is 32767, the
+    // `addiu` reach: inside it ido shares one `addiu at, a0, 32767` across adjacent members
+    // (`sb a1, 7232(at); sb a2, 7233(at)`), and past it the assembler expands every member access
+    // to its own `lui at, 3; addu at, at, a0` while a held `u8 *d = &p->b` (b at 200000) shares one
+    // `lui at, 3; addu v0, a0, at` between `sb t6, 3392(v0)` and `sw zero, 3396(v0)`. True refuses
+    // raise/structs.ts's displaced-access fold for such a base (`held-pointer-offsets`). The three
+    // mwcc builds share one `addis` base across members and a held pointer alike, and KMC and
+    // GCC 2.7.2 lift the held pair as members at the same bytes, so they leave it absent. Absent ⇒
+    // the fold reads a shared base as members.
+    farMemberBasePerAccess?: { past: number };
     // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
     // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
     // spelling emits the indexed one's stores wherever the pointee is not volatile? agbcc does, on
@@ -1238,6 +1266,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     nearBaseSpan: 255,
     volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
+    farMemberStoreOrder: true,
+    farMemberBasePerAccess: { past: 0 },
     foldsPointerAdvance: true,
     pointerIntConversionIsFree: true,
     keepsPointerSumAddend: true,
@@ -1473,6 +1503,9 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED: the probes at the fields.
     forwardsStructReturnDestination: true,
     discardedReadMayFillArgRegister: false,
+    // MEASURED, the probes at the field: past the `addiu` reach every member access gets its own
+    // `lui`/`addu`, and a held pointer shares one.
+    farMemberBasePerAccess: { past: 32767 },
   },
 };
 

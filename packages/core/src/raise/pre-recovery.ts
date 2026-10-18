@@ -13,7 +13,7 @@
 import { Block, Fn } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
-import type { FnProto } from '../proto';
+import { type FnProto, declaresVoidReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { readDeclaredMembers } from './aggmembers';
 import { recognizeArrays } from './arrays';
@@ -40,7 +40,7 @@ import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeS
 import { recognizeSoftDiv } from './softdiv';
 import { seedNarrowStoreSigns } from './storesign';
 import { recognizeStructArrays } from './struct-arrays';
-import { recognizeStructs } from './structs';
+import { type DisplacedOptions, foldDisplacedAccesses, recognizeStructs } from './structs';
 import { TRUNC_LOAD_GATES, foldTruncatedLoads } from './truncload';
 import { recognizeWideHelpers, refuseUnmodelledHelpers } from './widehelpers';
 
@@ -53,6 +53,8 @@ export interface PreRecoveryOptions {
   shortCircuit?: BranchShortCircuitOptions;
   /** raise/paramwidth.ts `narrowExtendedParams` — the `/narrow-param` lift. */
   paramWidth?: ParamWidthOptions;
+  /** raise/structs.ts `foldDisplacedAccesses` — the `/far-cast` lift. */
+  displaced?: DisplacedOptions;
 }
 
 export interface ParamWidthOptions {
@@ -249,6 +251,16 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // sits there so the three struct synthesizers read in the order of their evidence. `narrowlocal`
   // reads the carrier's extension chain rather than any address, so nothing here orders against it.
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
+  // RIGHT BEFORE `structs`, whose input it widens: an access through a materialised `add(p, K)`
+  // joins `p`'s access set at `off + K`. After `truncload`, `struct-arrays` and `member-arrays`, so
+  // none of them sees a folded access, and a displacement either of the last two typed is refused.
+  // `dce: true` — the `add` chain a fold leaves readerless. `opts.displaced` is `/far-cast`.
+  {
+    id: 'displaced',
+    run: (fn, self, opts, target) =>
+      foldDisplacedAccesses(fn, opts.displaced, target.compilerBehaviors, declaresVoidReturn(self)),
+    dce: true,
+  },
   {
     id: 'structs',
     run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary),
