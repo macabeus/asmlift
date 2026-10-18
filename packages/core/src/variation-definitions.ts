@@ -212,15 +212,6 @@ export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: TargetB
       compiles: 'same',
     },
   },
-  farMemberStoreOrder: {
-    reads: 'orders a member store past the displacement range differently from the same store through a cast',
-    witness: {
-      compiler: 'agbcc',
-      unit: 'struct S { s32 a; u8 pad[34]; u8 f38; };\nvoid example(struct S *p, u8 *q) { @ }',
-      spellings: ['p->f38 = *q; p->a = 0;', '*((u8 *)p + 38) = *q; p->a = 0;'],
-      compiles: 'different',
-    },
-  },
   foldsPointerAdvance: {
     reads: 'folds a stepped pointer back into an offset load',
     witness: {
@@ -493,7 +484,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'agbcc evaluates the right-hand side of a member store before it adds up the address, and the address ' +
       'of a cast store before the right-hand side, so the two spellings allocate and order registers ' +
-      "differently. A hoisted `u8 *d = &p->f38; *d = v;` builds the cast spelling's object.",
+      "differently; a hoisted `u8 *d = &p->f38; *d = v;` builds the cast spelling's object. Elsewhere the " +
+      'member and the cast compile alike one access at a time, but a folded store no longer aliases the ' +
+      'loads beside it, so the lift moves those loads past it, and a pointer the source held is spelled as ' +
+      'members: KMC and GCC 2.7.2 build two loads written before a store and the same loads written after ' +
+      'it into different objects, and two of the three mwcc builds allocate a held pointer and the member ' +
+      'spelling different registers.',
     offeredWhen: {
       when: 'The default lift folded a store through a materialised `base + K` address into its struct.',
       decidedBy: { symbol: 'enumerateCandidates', file: RANK },

@@ -2093,10 +2093,12 @@ export function enumerateCandidates(
       // `/far-cast` — keep each store the displaced-access fold would move into a struct on the
       // address it was reached through (raise/structs.ts `foldDisplacedAccesses`). On agbcc the
       // member store and the cast store are two objects (target.ts `farMemberStoreOrder`), and a
-      // hoisted pointer the source held builds the cast's, so which one the source wrote is the
-      // differ's to say. A LIFT variation because the fold decides which struct the stores join,
-      // which recovery and every later stage read. Enumerated only where this setting's lift folded
-      // a store, and only on a target whose registry gate admits it.
+      // hoisted pointer the source held builds the cast's. Elsewhere a folded store stops aliasing
+      // the loads beside it and a held pointer is spelled as members, which KMC, GCC 2.7.2 and mwcc
+      // build into other objects. So which one the source wrote is the differ's to say, on every
+      // target. A LIFT variation because the fold decides which struct the stores join, which
+      // recovery and every later stage read. Enumerated only where this setting's lift folded a
+      // store.
       const castSettings: { variations: readonly Variation[]; keepStores: boolean }[] =
         foldedStore && offeredOn(target, ['far-cast'])
           ? [

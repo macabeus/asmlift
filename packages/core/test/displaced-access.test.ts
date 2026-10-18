@@ -164,6 +164,30 @@ describe('a member past a 16-bit displacement is a member', () => {
   });
 });
 
+// ido past the `addiu` reach. `struct H { s32 a; u8 pad[199996]; u8 b; u8 b1; u16 b2; u32 c; };`
+// The member spelling `p->b = *q; p->c = 0;` gives each access its own `lui at, 3; addu`; a held
+// `struct Msg *m = &play->msg; m->a = *q; return m->c;` (msg at 0x10A24) shares one `addu v1`.
+const IDO_MEMBERS =
+  '00000000 <m1>:\n   0:\tlbu\tt6,0(a1)\n   4:\tlui\tat,0x3\n   8:\taddu\tat,at,a0\n   c:\tsb\tt6,3392(at)\n' +
+  '  10:\tlui\tat,0x3\n  14:\taddu\tat,at,a0\n  18:\tjr\tra\n  1c:\tsw\tzero,3396(at)\n';
+const IDO_HELD =
+  '00000000 <o1>:\n   0:\tlbu\tt6,0(a1)\n   4:\tlui\tat,0x1\n   8:\taddu\tv1,a0,at\n   c:\tlw\tv0,2600(v1)\n' +
+  '  10:\tjr\tra\n  14:\tsb\tt6,2596(v1)\n';
+
+describe('what ido says about a far base past its addiu reach', () => {
+  test('one lui/addu per access is the member spelling', () => {
+    const c = lift('m1', IDO_MEMBERS, 'ido7.1');
+    expect(c).toContain('a0->field_200000 = *a1;');
+    expect(c).toContain('a0->field_200004 = 0;');
+  });
+
+  test('REFUSES: one lui/addu read and written at two offsets is a held pointer', () => {
+    const c = lift('o1', IDO_HELD, 'ido7.1', false);
+    expect(c).not.toContain('field_68132');
+    expect(c).toContain('65536');
+  });
+});
+
 // The refusals no compiled fixture reaches cheaply, on hand-written IR.
 function emit(ir: string, opts: DisplacedOptions = {}): { folded: number; c: string } {
   const fn = parse(ir);
@@ -199,9 +223,22 @@ describe('the fold reads its target facts', () => {
     expect(fold({})).toBe(2);
   });
 
+  test('past its reach only: ido shares an addiu base, and builds a lui base per access', () => {
+    expect(fold({ farMemberBasePerAccess: { past: 32767 } })).toBe(2);
+    const far = (k: number) => {
+      const fn = parse(shared.replace('{value=38}', `{value=${k}}`));
+      verify(fn);
+      return foldDisplacedAccesses(fn, {}, { farMemberBasePerAccess: { past: 32767 } });
+    };
+    expect(far(32767)).toBe(2);
+    expect(far(196608)).toBe(0);
+  });
+
   test('and is refused where every member access gets its own base (agbcc)', () => {
-    expect(fold({ farMemberBasePerAccess: true })).toBe(0);
-    expect(fold({ farMemberBasePerAccess: true }, without(DISPLACED_BASE_GATES, 'held-pointer-offsets'))).toBe(2);
+    expect(fold({ farMemberBasePerAccess: { past: 0 } })).toBe(0);
+    expect(fold({ farMemberBasePerAccess: { past: 0 } }, without(DISPLACED_BASE_GATES, 'held-pointer-offsets'))).toBe(
+      2,
+    );
   });
 
   // `store %3, %v` with `%v` loaded before the add: the member's order on agbcc.

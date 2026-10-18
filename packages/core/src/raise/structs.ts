@@ -391,16 +391,19 @@ function fieldSize(t: IrType): number {
  *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store), and
  *  with a constant or a parameter on the right the two still allocate registers differently. The
  *  cast is a source spelling too: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object. So
- *  the fold is the default and `opts.keepStores` (the `/far-cast` lift, offered where target.ts
- *  `farMemberStoreOrder` holds) keeps every such store on its address for the differ to referee.
+ *  the fold is the default and `opts.keepStores` (the `/far-cast` lift) keeps every such store on
+ *  its address for the differ to referee.
  *  A LOAD through a cast and through a member compile alike, and fold in both lifts — but a load
  *  through a HELD pointer does not: agbcc materialises one `add` per member access, even for
  *  adjacent members (`p->f38 + p->f39` is `add #0x26` and `add #0x27`), so one materialised base
  *  read or written at two distinct offsets (`add r1, #0x26; ldrb [r1]; ldrb [r1, #1]`) is the
  *  pointer the source held, and the member spelling cannot rebuild it (`held-pointer-offsets`).
- *  On ido, KMC, GCC 2.7.2 and mwcc the member and cast spellings compile alike, a store of a
- *  loaded value included, and ido and mwcc share one base across members; there the fold buys the
- *  type.
+ *  ido does the same past its `addiu` reach, where the assembler gives each member access its own
+ *  `lui`/`addu` (target.ts `farMemberBasePerAccess` states the reach per compiler). On ido, KMC,
+ *  GCC 2.7.2 and mwcc one access through a member and through a cast compile alike, a store of a
+ *  loaded value included, and there the fold buys the type; what it can cost is the neighbours'
+ *  spelling — a folded store no longer aliases the loads beside it, and a held mwcc pointer is
+ *  respelled as members — which is why `/far-cast` is offered there too.
  *
  *  THE REFUSALS ARE TWO GATE TABLES, so `pnpm bench gates --pass displaced` can count which one
  *  keeps a row on the cast spelling: `DISPLACED_BASE_GATES`, asked once per materialised base, and
@@ -421,7 +424,7 @@ export interface DisplacedOptions {
 /** The target facts the fold reads (target.ts `compilerBehaviors`). */
 export interface DisplacedBehaviors {
   farMemberStoreOrder?: boolean;
-  farMemberBasePerAccess?: boolean;
+  farMemberBasePerAccess?: { past: number };
 }
 
 /** One materialised base, as `DISPLACED_BASE_GATES` judges it. */
@@ -494,8 +497,8 @@ export const DISPLACED_BASE_GATES: readonly Gate<DisplacedBase>[] = [
     id: 'held-pointer-offsets',
     why: 'one materialised base at two offsets is a held pointer where every member access gets its own',
     sound: false,
-    rejects: ({ accesses, behaviors }) =>
-      behaviors.farMemberBasePerAccess === true && new Set(accesses.map((a) => a.off)).size > 1,
+    rejects: ({ accesses, disp: { k }, behaviors: { farMemberBasePerAccess: perAccess } }) =>
+      perAccess !== undefined && Math.abs(k) > perAccess.past && new Set(accesses.map((a) => a.off)).size > 1,
   },
 ];
 

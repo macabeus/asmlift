@@ -473,8 +473,9 @@ function ptrMemberElement(
 // (`synthetic:sfar_b` pins the member). A LOAD's member and cast forms compile alike, but agbcc
 // gives each member access its own `base + K`, so one materialised base read at two offsets is a
 // held pointer, and the fold leaves it on its address (`held-pointer-offsets`, `synthetic:sfar_held`
-// pins it). On ido, KMC, GCC 2.7.2 and mwcc the two compile alike past a 16-bit displacement, a
-// loaded value included.
+// pins it); so does ido past its `addiu` reach (target.ts `farMemberBasePerAccess`). On ido, KMC,
+// GCC 2.7.2 and mwcc one access's two forms compile alike past a 16-bit displacement, a loaded
+// value included, and `/far-cast` is offered there for the neighbours a folded store respells.
 
 /** The pointee a global's value may be spelled through: the members the declaration synthesis
  *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts
