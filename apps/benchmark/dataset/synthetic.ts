@@ -10701,6 +10701,21 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'struct T3 { int a, b, c; };\nstruct T3 ownsret_cond(int x, int y);',
   },
+  // Two `return t;`s: IDO copies the frame object out once at each, so each copy is a return of
+  // the struct (core frontend/own-struct-return.ts `returnAtEachCopy`); kmc and gcc 2.7.2 merge
+  // the member stores past the join, which the lift spells through three variables. Not on agbcc
+  // or mwcc, whose frame audits decline the call's frame.
+  {
+    sym: 'ownsret_tworet',
+    src:
+      'struct T3 { int a, b, c; };\nextern int gOtr(int);\n' +
+      'struct T3 ownsret_tworet(int x){ struct T3 t; if (x) { t.a = 1; t.b = 2; t.c = 3; return t; }' +
+      ' t.a = gOtr(x); t.b = 0; t.c = 0; return t; }',
+    features: ['struct-return', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    proto: { gOtr: { params: ['int'], returns: 'int' } },
+    ctx: 'struct T3 { int a, b, c; };\nextern int gOtr(int);\nstruct T3 ownsret_tworet(int x);',
+  },
   // Eight bytes: agbcc returns any struct whose second member is not a bitfield through memory
   // (thumb.c:1423-1493), so it lifts as the struct return; mwcc's svr4 rule hands it back in
   // r3:r4, a register pair the lift returns one word of, so the declaration refuses it there.
