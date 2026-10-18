@@ -2533,6 +2533,11 @@ function liftOnce(
         const advance: Instr = { ...ins, mnemonic: 'addi', ops: [base, base, String(off)] };
         decodedFrom.set(advance, ins);
         decode(advance);
+        // The advanced base is the update's side effect, and proves no argument (`ssa.ts`
+        // `noteIncidentalWrite`).
+        if (lastDef !== null) {
+          ssa.noteIncidentalWrite(lastDef);
+        }
         const access: Instr = { addr: ins.addr, mnemonic: plain, ops: [r, `0(${base})`] };
         decodedFrom.set(access, ins);
         decode(access);

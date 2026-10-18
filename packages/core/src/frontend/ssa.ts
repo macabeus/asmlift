@@ -172,6 +172,15 @@ export interface SsaBuilder {
    *  (frontend/call-plan.ts `decideGap`). A `ret` does not count, since a frontend returns the
    *  return register at every `ret` whatever the declared type. */
   requireReader(v: Value, refuse: () => void): void;
+  /** Record that `v` is a value an instruction wrote as a SIDE EFFECT of its own job, which the
+   *  compiler may leave in a register nobody reads: the base writeback of a Thumb `ldmia`/`stmia`,
+   *  which has no form without one, and the base a PowerPC load or store with update advances. Such
+   *  a value is no evidence that anything wanted it, so the guessed-arity gap (frontend/call-plan.ts
+   *  `decideGap`) never takes one as an argument. agbcc copies a struct of 3+ words with
+   *  `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both writebacks dead in r2/r3. */
+  noteIncidentalWrite(v: Value): void;
+  /** Whether {@link noteIncidentalWrite} recorded `v`. */
+  isIncidentalWrite(v: Value): boolean;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -507,6 +516,8 @@ export function makeSsaBuilder(
   const soleReaders: Array<{ value: Value; op: Op; refuse: () => void }> = [];
   /** The reader obligations `requireReader` recorded, checked in `finish`. */
   const readObligations: Array<{ value: Value; refuse: () => void }> = [];
+  /** The side-effect values `noteIncidentalWrite` recorded. */
+  const incidentalWrites = new Set<Value>();
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
   // proportional to what a block READS rather than to how many times it reads it. The value a key
   // holds only changes at a write, and the verdict only flips at a call, so a run of identical
@@ -1374,6 +1385,10 @@ export function makeSsaBuilder(
     requireReader: (value: Value, refuse: () => void) => {
       readObligations.push({ value, refuse });
     },
+    noteIncidentalWrite: (v: Value) => {
+      incidentalWrites.add(v);
+    },
+    isIncidentalWrite: (v: Value) => incidentalWrites.has(v),
     useOutsideOps: (v: Value, b: number) => {
       usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
     },

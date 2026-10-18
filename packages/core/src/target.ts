@@ -1122,15 +1122,22 @@ export interface TargetDescription {
     discardsUnusedReadsInto?: string;
     // MAY A DISCARDED READ LAND IN AN ARGUMENT REGISTER, at flags that delete a plain read nobody
     // uses? Where it may, a value a load left in an argument register is no proof that the next
-    // call takes it. `true` for agbcc, which loads a discarded `volatile` read into the lowest free
-    // argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
-    // `g(s, *(int *)K)`). `false` for ido7.1 (`lw zero`, `lbu zero`, `lh zero`, and `lw zero` +
-    // `lw at` for a doubleword), gcc2.7.2kmc and gcc2.7.2 (`lw v0`, `lw v1`, `lbu v0`, `lhu v0`), and
-    // mwcc_242_81, mwcc_233_163n and mwcc_247_107 (`lwz r0`, `lbz r0`, `lha r0`, and no load at all
-    // for a doubleword). Compiled at the canonical flags: a discarded read of a global, through a
-    // parameter, of each width, and under the pressure of three values live across the call. Read
-    // by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a load decides only where
-    // this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
+    // call takes it. The discard register is the allocator's first free one, not a fixed register,
+    // so a single read on its own says nothing: the probe that decides is one where the usual
+    // discard register is busy. `true` for agbcc, which loads a discarded `volatile` read into the
+    // lowest free argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
+    // `g(s, *(int *)K)`). `true` for gcc2.7.2kmc and gcc2.7.2, which discard into v0/v1 until those
+    // are busy and then into a1: `int a = ga * 3; *(volatile int *)&gx; *(volatile int *)&gx;
+    // ga = a + 1; return logv(s) + 1;` is `lw a1,0(v0); lw v0,0(v0); ... jal logv` (`lw a1,0(v1)` on
+    // gcc2.7.2), the bytes of the twin that passes the first read. `true` for mwcc_242_81,
+    // mwcc_233_163n and mwcc_247_107, which discard into r0 until it is busy and then into r4: the
+    // same function's first read is `lwz r4,gx` on all three, and with three reads mwcc_233_163n's
+    // last one is `lwz r4,gx` right before `bl logv`, byte-identical to the twin that passes it.
+    // `false` for ido7.1 alone: `lw zero`, `lbu zero`, `lh zero`, and `lw zero` + `lw at` for a
+    // doubleword, with four discarded reads stacked under the same pressure too. Compiled at the
+    // canonical flags. Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a
+    // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
+    // refuses more.
     discardedReadMayFillArgRegister?: boolean;
   };
 }
@@ -1606,7 +1613,7 @@ export const MIPS_GCC: TargetDescription = {
     outgoingAreaNeverLoadedFrom: 16,
     // MEASURED on BOTH toolchains this description serves: the probes at the fields.
     forwardsStructReturnDestination: false,
-    discardedReadMayFillArgRegister: false,
+    discardedReadMayFillArgRegister: true,
   },
 };
 
@@ -1723,7 +1730,7 @@ export const PPC_MWCC: TargetDescription = {
     discardsUnusedReadsInto: 'r0',
     // MEASURED on all three builds: the probes at the fields.
     forwardsStructReturnDestination: false,
-    discardedReadMayFillArgRegister: false,
+    discardedReadMayFillArgRegister: true,
   },
 };
 

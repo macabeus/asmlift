@@ -231,51 +231,56 @@ describe('the compiler facts a decided gap reads, stated for every toolchain', (
     expect(facts).toMatchObject({
       agbcc: [true, false],
       'ido7.1': [false, true],
-      'gcc2.7.2kmc': [false, false],
-      'gcc2.7.2': [false, false],
-      mwcc_242_81: [false, false],
-      mwcc_233_163n: [false, false],
-      mwcc_247_107: [false, false],
+      'gcc2.7.2kmc': [true, false],
+      'gcc2.7.2': [true, false],
+      mwcc_242_81: [true, false],
+      mwcc_233_163n: [true, false],
+      mwcc_247_107: [true, false],
     });
   });
 });
 
-// A LOAD ONLY THE CALL READS IS AN ARGUMENT where no discarded read lands in an argument register
-// (`compilerBehaviors.discardedReadMayFillArgRegister`): KMC discards into v0, mwcc into r0, so
-// `int logv(); int f(const char *s, int *q){ return logv(s, *q) + 1; }` decides its gap there.
-// agbcc's discarded read in r1 refuses (thumb-frontend.test.ts, `fvol`).
+// A LOAD ONLY THE CALL READS IS AN ARGUMENT only where no discarded read lands in an argument
+// register (`compilerBehaviors.discardedReadMayFillArgRegister`): ido7.1 discards into $zero every
+// time, so `int logv(); int f(const char *s, int *q){ return logv(s, *q) + 1; }` decides its gap
+// there. KMC and GCC 2.7.2 discard into a1 and mwcc into r4 once v0/v1 or r0 are busy, the bytes of
+// the twin that passes the read, so there it refuses, as agbcc's r1 does (thumb-frontend.test.ts,
+// `fvol`).
 describe('a value a load left above the gap', () => {
-  test('decides it on O32 (gcc2.7.2kmc), where a discarded read goes to v0', () => {
-    const pld2 = [
-      '0:\taddiu\tsp,sp,-24',
-      '4:\tsw\tra,16(sp)',
-      '8:\tjal\t0 <f>',
-      'c:\tlw\ta1,0(a1)',
-      '10:\tlw\tra,16(sp)',
-      '14:\taddiu\tv0,v0,1',
-      '18:\tjr\tra',
-      '1c:\taddiu\tsp,sp,24',
-    ];
-    const lift = (target: typeof MIPS_GCC) =>
-      decompile('f', mips(pld2), target, {
-        asmData: jalTo(8, 'logv'),
-        prototypes: own(['const char *', 's32 *']),
-      }).source;
-    expect(lift(MIPS_GCC)).toContain('return logv(a0, *a1) + 1;');
+  const pld2 = [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,16(sp)',
+    '8:\tjal\t0 <f>',
+    'c:\tlw\ta1,0(a1)',
+    '10:\tlw\tra,16(sp)',
+    '14:\taddiu\tv0,v0,1',
+    '18:\tjr\tra',
+    '1c:\taddiu\tsp,sp,24',
+  ];
+  const lift = (target: typeof MIPS_GCC) =>
+    decompile('f', mips(pld2), target, {
+      asmData: jalTo(8, 'logv'),
+      prototypes: own(['const char *', 's32 *']),
+    }).source;
+  test('decides it on O32 (ido7.1), where a discarded read goes to $zero', () => {
+    expect(lift(MIPS_IDO)).toContain('return logv(a0, *a1) + 1;');
     // where the fact is unmeasured, a load decides nothing
     const unmeasured = {
-      ...MIPS_GCC,
-      compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, discardedReadMayFillArgRegister: undefined },
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, discardedReadMayFillArgRegister: undefined },
     };
     expect(() => lift(unmeasured)).toThrow(/a1 holds a value and a0 holds none/);
   });
-  test('decides it on PowerPC (mwcc_242_81), where a discarded read goes to r0', () => {
-    const pld2 =
+  test('refuses on O32 (gcc2.7.2kmc), where a discarded read may go to a1', () => {
+    expect(() => lift(MIPS_GCC)).toThrow(/a1 holds a value and a0 holds none/);
+  });
+  test('refuses on PowerPC (mwcc_242_81), where a discarded read may go to r4', () => {
+    const ppc =
       '0 <f>:\n0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tlwz     r4,0(r4)\n' +
       '10:\tbl      10 <f+0x10>\n\t\t\t10: R_PPC_REL24\tlogv\n14:\tlwz     r0,20(r1)\n18:\taddi    r3,r3,1\n' +
       '1c:\tmtlr    r0\n20:\taddi    r1,r1,16\n24:\tblr\n';
-    expect(decompile('f', pld2, PPC_MWCC, { prototypes: own(['const char *', 's32 *']) }).source).toContain(
-      'return logv(a0, *a1) + 1;',
+    expect(() => decompile('f', ppc, PPC_MWCC, { prototypes: own(['const char *', 's32 *']) })).toThrow(
+      /r4 holds a value and r3 holds none/,
     );
   });
 });

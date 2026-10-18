@@ -673,10 +673,17 @@ export function callDeclarations(
   //     register (`compilerBehaviors.discardedReadMayFillArgRegister`), it must also be something no
   //     memory read produced: agbcc puts a DISCARDED volatile read in the lowest free argument
   //     register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, at -O0 too), the passgap shape
-  //     exactly. The other compilers discard into $zero, v0/v1 or r0, so there a load only the call
-  //     reads is an argument: `logv(s, gx)` lifts. Nothing else may read the value either
+  //     exactly. gcc2.7.2kmc, gcc2.7.2 and the three mwcc builds do the same once their usual
+  //     discard register (v0/v1, r0) is busy: `int a = ga * 3; *(volatile int *)&gx; ...; logv(s)`
+  //     is `lw a1,0(v0); ... jal logv` on KMC and `lwz r4,gx` on mwcc, the bytes of the twin that
+  //     passes the read. Only ido7.1 discards into $zero every time, so only there a load only the
+  //     call reads is an argument: `logv(s, gx)` lifts. Nothing else may read the value either
   //     (`SsaBuilder.requireSoleReader`, asked of the finished function): `gx = 1; logv(s)` and
   //     `gx = 1; logv(s, 1)` are one agbcc object, the stored constant left in r1.
+  //   - the value must be no instruction's side effect (`SsaBuilder.noteIncidentalWrite`): a base
+  //     writeback is left in its register whether anything wants it or not. agbcc copies a struct of
+  //     3+ words as `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both writebacks
+  //     dead, so `*p = *q; return logv(s, n) + 1;` lifted `logv(a0, a1, a2 + 3, a3 + 3)`.
   //   - where a caller forwards its own destination as a callee's hidden pointer
   //     (`compilerBehaviors.forwardsStructReturnDestination`, ido7.1), a gap at the first argument
   //     register is decided only where the call's result is read (`SsaBuilder.requireReader`,
@@ -725,6 +732,7 @@ export function callDeclarations(
     const readsRefuse = target.compilerBehaviors.discardedReadMayFillArgRegister !== false;
     if (
       !accept(v) ||
+      ssa.isIncidentalWrite(v) ||
       sig === undefined ||
       sig.effects ||
       (sig.reads && readsRefuse) ||

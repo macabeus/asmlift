@@ -1158,7 +1158,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // first argument register while `1` goes into the second, and a count that stops at the first
   // lifts `logv() + 1`. The gap is DECIDED where the register above it surely is an argument
   // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value nothing else reads
-  // (and, on agbcc, that no memory read produced), and where argument words fill in order the gap
+  // (and, off ido7.1, that no memory read produced and no base writeback left), and where argument
+  // words fill in order the gap
   // below it is the function's own arguments passed on. On ido7.1 a gap at a0 also needs the call's
   // result read, as `+ 1` reads it here (`passsr`). On O32 the own declaration (`ctx`) must put an
   // integer word in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC
@@ -1209,8 +1210,8 @@ export const SYNTHETIC: SynthSpec[] = [
   ]),
   // A VALUE A MEMORY READ LEFT IN THE REGISTER ABOVE decides nothing: agbcc puts a discarded
   // volatile read in the lowest free argument register (`ldr r1,[r1]; bl g`), the `passgap` shape,
-  // while the source passes `s` alone. agbcc's alone, a declined witness: the other compilers
-  // discard into $zero, v0 or r0.
+  // while the source passes `s` alone. agbcc's alone, a declined witness: on its own, this read goes
+  // to $zero, v0 or r0 elsewhere.
   {
     sym: 'passvol',
     src: 'int g();\nint passvol(int s){ *(volatile int *)0x4000000; return g(s) + 1; }',
@@ -1218,10 +1219,14 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'int passvol(int);',
   },
-  // …WHICH ONLY agbcc DOES: the other compilers discard a read into $zero, v0/v1 or r0, never an
-  // argument register (target.ts `discardedReadMayFillArgRegister`), so there a load only the call
-  // reads is an argument and the gap below it is decided. Not on agbcc, where `logv(s, gx)` is the
-  // object `passvol`'s shape compiles to, `ldr r1,[r1]` either way.
+  // …AND THE SAME HOLDS OFF agbcc BUT ON ido7.1. gcc2.7.2kmc and gcc2.7.2 discard into v0/v1 and
+  // the three mwcc builds into r0 only while those are free; once they are busy, the read goes to
+  // a1/r4. `int a = ga * 3; *(volatile int *)&gx; *(volatile int *)&gx; ga = a + 1; return logv(s)
+  // + 1;` is `lw a1,0(v0); ... jal logv` on KMC and `lwz r4,gx` on mwcc, the bytes of the twin that
+  // passes the read (target.ts `discardedReadMayFillArgRegister`). So `logv(s, gx)` is undecidable
+  // there, and those cells are declined witnesses. ido7.1 discards into $zero every time, so there a
+  // load only the call reads is an argument, and its cell is MATCH. Not on agbcc, where `logv(s, gx)`
+  // is the object `passvol`'s shape compiles to, `ldr r1,[r1]` either way.
   ...(
     [
       [['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
@@ -1238,6 +1243,22 @@ export const SYNTHETIC: SynthSpec[] = [
     ...(cflags === undefined ? {} : { cflags: [...cflags] }),
     ctx: 'extern int gx;\nint passld(const char *);',
   })),
+  // A BASE WRITEBACK LEFT IN THE REGISTER ABOVE decides nothing: agbcc copies a struct of 3+ words
+  // as `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both advanced bases dead in
+  // r2/r3, so with `s` and `n` passed on in r0/r1 the call looks like it takes `p + 3` and `q + 3`
+  // too. Read as arguments they lifted `logv(a0, a1, a2 + 3, a3 + 3)`, which agbcc recompiles to
+  // separate `add`s. A writeback is no evidence that anything wanted the value
+  // (frontend/ssa.ts `noteIncidentalWrite`), so the cell is a declined witness. agbcc's alone: the
+  // other compilers copy with plain loads and stores, or in a loop outside the call's block.
+  {
+    sym: 'passwb',
+    src:
+      'struct T { int x, y, z; };\nint logv();\n' +
+      'int passwb(const char *s, int n, struct T *p, struct T *q){ *p = *q; return logv(s, n) + 1; }',
+    features: ['struct-copy', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'struct T { int x, y, z; };\nint passwb(const char *, int, struct T *, struct T *);',
+  },
   // IDO HANDS A CALLER'S OWN DESTINATION ON AS THE CALLEE'S HIDDEN STRUCT-RETURN POINTER, leaving a0
   // untouched under the set a1: `*p = sg(1)` is `jal sg; li a1,1`, the bytes of `sg(p, 1)` with its
   // result unused (target.ts `forwardsStructReturnDestination`). So a gap at a0 is decided only where

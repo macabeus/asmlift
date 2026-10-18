@@ -5473,6 +5473,9 @@ function lowerBlockTransfer(fill: ThumbFill, cur: BlockCursor, ins: Instr): void
     const adv = mkValue(T.unk(32));
     irb.ops.push(mkOp('add', { operands: [base0, constVal(4 * list.length, bi)], results: [adv] }));
     writeData(baseReg, bi, adv);
+    // agbcc's block copy leaves this dead in an argument register before a call (`ssa.ts`
+    // `noteIncidentalWrite`), so it proves no argument there.
+    fill.ssa.noteIncidentalWrite(adv);
   }
 }
 

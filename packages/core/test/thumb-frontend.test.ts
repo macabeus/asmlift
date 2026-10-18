@@ -4583,6 +4583,17 @@ describe('a gap in the argument registers of an undeclared call', () => {
     expect(() => decompile('fvol', fvol, ARMV4T_AGBCC)).toThrow(GAP);
   });
 
+  // `struct T { int x, y, z; }; int logv(); int fwb(const char *s, int n, struct T *p, struct T *q){
+  // *p = *q; return logv(s, n) + 1; }`: agbcc's block copy leaves both advanced bases dead in r2/r3,
+  // pure adds only the call reads. A writeback is no evidence that anything wanted the value
+  // (`SsaBuilder.noteIncidentalWrite`); read as arguments it lifted `logv(a0, a1, a2 + 3, a3 + 3)`.
+  test('a base writeback left in the register above does not decide the gap', () => {
+    const fwb =
+      'fwb:\n\tpush\t{r4, r5, r6, lr}\n\tldmia\tr3!, {r4, r5, r6}\n\tstmia\tr2!, {r4, r5, r6}\n\tbl\tlogv\n' +
+      '\tadd\tr0, r0, #0x1\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('fwb', fwb, ARMV4T_AGBCC)).toThrow(/r2 holds a value and r0 holds none/);
+  });
+
   // `int logv(); int gx; int fst2(const char *s){ gx = 1; return logv(s, 1) + 1; }` is one object with
   // `gx = 1; return logv(s) + 1;`: the stored constant stays in r1, so a value something else reads
   // decides nothing. `int fkeep(const char *s, int c){ int t = c * 3; int r = logv(s, t); return r

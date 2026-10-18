@@ -815,9 +815,13 @@ unless it is decided (frontend/call-plan.ts `decideGap`). It is decided when the
 surely an argument. The call's own block wrote that register with a value nothing but the call
 reads, at flags that delete a dead computation. Argument words fill in order, so every register
 below an argument is the function's own argument passed on. So `logv(s, 1)` lifts `logv(a0, 1)` and
-`g3(1, b, 3)` lifts `g3(1, a1, 3)`. Two compiler facts narrow it. Where a discarded read may land in
-an argument register (`discardedReadMayFillArgRegister`, agbcc), a value a memory read produced
-decides nothing; elsewhere `logv(s, gx)` lifts. Where a caller hands its own destination on as a
+`g3(1, b, 3)` lifts `g3(1, a1, 3)`. A value an instruction wrote as a side effect decides nothing
+(frontend/ssa.ts `noteIncidentalWrite`): agbcc's `ldmia`/`stmia` block copy leaves its advanced bases
+dead in r2/r3, and a PowerPC update form's advanced base is marked the same way. Two compiler facts
+narrow it. Where a discarded read may land in an argument register
+(`discardedReadMayFillArgRegister`: agbcc, gcc2.7.2kmc, gcc2.7.2 and the three mwcc builds, whose
+discard register is the first free one once v0/v1 or r0 are busy), a value a memory read produced
+decides nothing; on ido7.1, which discards into $zero every time, `logv(s, gx)` lifts. Where a caller hands its own destination on as a
 callee's hidden struct-return pointer (`forwardsStructReturnDestination`, ido7.1), a gap at the
 first argument register is decided only where something other than a `ret` reads the call's result.
 The decision covers the gap and that register only. Every register the count takes past it must be
