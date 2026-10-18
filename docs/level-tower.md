@@ -986,10 +986,10 @@ return object — an `laddr` marked `returned`, which names the caller's storage
 struct S ret; ret.a = a0; return ret; }`. A frame object the struct was built in and copied out of
 whole (IDO's word copy, agbcc's `ldmia`/`stmia`) is that local, and the copy is `return ret;`'s
 own lowering, so it folds where nothing else reads the object, something stores to it, and every
-write to it is on a path into the copy, ahead of it. It folds one copy, in one block, of an object
-that holds the struct alone: IDO's copy repeated at each of several `return r;`s, and an object
-the frontend shares with another address-taken local, keep the copy as member stores — the same
-function, one copy too many.
+write to it is on a path into a copy, ahead of it. It folds one whole copy per block, of an object
+that holds the struct alone: where IDO repeats the copy at each of several `return r;`s, each copy
+block returns the struct itself (`returnAtEachCopy`); an object the frontend shares with another
+address-taken local keeps the copy as member stores — the same function, one copy too many.
 Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
 an `[own-return]` note, the soft policy of its arity bound. A stated return the context lays out —
 `struct S`, or a typedef of one — is read with that layout (`proto-context.ts`

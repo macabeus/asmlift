@@ -591,7 +591,7 @@ function ownStructReturnThroughMemory(
   return { type: read.type, stated, declaration: spelledDeclaration(name, declared!) };
 }
 
-/** The struct a function returns through a hidden pointer, and which declaration said so. */
+/** The struct a function's own declaration returns by value, and which declaration said so. */
 interface OwnStructReturn {
   type: Extract<IrType, { kind: 'struct' }>;
   stated: boolean;

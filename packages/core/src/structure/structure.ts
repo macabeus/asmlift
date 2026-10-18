@@ -2638,7 +2638,7 @@ export function structure(
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         if (op.opcode === 'laddr' && op.attrs[OWN_RETURN_OBJECT] === true) {
-          // the function's own return object, in its caller's storage: no frame offset names it
+          // the function's own return object, which no frame offset names
           names.set(op, mint('ret'));
         } else if (op.opcode === 'laddr') {
           const off = op.attrs.off as number;

@@ -931,7 +931,7 @@ function structReturnOf(
  *  struct laid out as a local of it is declared (`type`) where the target returns it through a
  *  hidden pointer in argument 0, `'register'` where it returns it in registers, and the reason
  *  otherwise. Both halves of the return read this: a call to such a callee (`structReturnOf`) and a
- *  function that itself returns one (frontend/own-struct-return.ts). */
+ *  function that itself returns one (pipeline.ts `ownStructReturnThroughMemory`). */
 export function returnedStruct(
   own: FnProto,
   target: TargetDescription,

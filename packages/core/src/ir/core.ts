@@ -314,8 +314,9 @@ export function foldWriteOrder(order: WriteOrder | undefined, from: Block, into:
 }
 
 /** The `laddr` attribute that marks a function's OWN struct return object: the local its hidden
- *  struct-return pointer became (frontend/own-struct-return.ts), which lives in the caller's
- *  storage and not in this frame, so no frame offset names it and its `off` means nothing. */
+ *  struct-return pointer became, or the one its struct returned in a register is built in
+ *  (frontend/own-struct-return.ts). Neither lives in this frame, so no frame offset names it and
+ *  its `off` means nothing. */
 export const OWN_RETURN_OBJECT = 'returned';
 
 /** The `ret` attribute that says it hands back the {@link OWN_RETURN_OBJECT} whole, by value: its

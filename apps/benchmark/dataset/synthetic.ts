@@ -10675,9 +10675,10 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern int gOcH;\nvoid ownctx_home(void);',
   },
   // A FUNCTION WHOSE OWN CONTEXT DECLARATION RETURNS A STRUCT (core frontend/own-struct-return.ts).
-  // No row states its own `proto`: the harness hands the lift the ctx's own entry, as a `--context`
-  // lift reads it. Through memory, the caller's storage arrives in argument 0 and comes back in the
-  // return register, so with nothing declared each lifts as `s32 *f(s32 *a0, …)`; the declaration
+  // No struct row states its own `proto`: the harness hands the lift the ctx's own entry, as a
+  // `--context` lift reads it. Through memory, the caller's storage arrives in argument 0 (and
+  // comes back in the return register on agbcc and O32), so with nothing declared each lifts as the
+  // pointer function `s32 *f(s32 *a0, …)`; the declaration
   // makes it the struct return, with the hidden pointer the returned local. `ownsret_ctx` is 12
   // bytes, which every toolchain returns through memory — IDO copies it out of a frame object word
   // by word, agbcc with `ldmia`/`stmia`, kmc and gcc 2.7.2 through a frame temp the lift forwards,

@@ -576,7 +576,8 @@ describe('a callee declared to return a struct or union by value', () => {
 // s.a = x; s.b = x + 1; return s; }` stores through the r0 it was handed and hands r0 back, and
 // mwcc_242_81's `rmk12`, a 12-byte struct, stores through r3: with nothing declared each is the
 // pointer function `s32 *f(s32 *a0, s32 a1)`, and under its declaration the struct return it is. A
-// struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`) is the lift's own return.
+// struct that comes back in r0 is that register's word, spelled as the struct where it is one
+// word of one integer member (agbcc's `struct S1 { u32 x; }`).
 describe('a function that itself returns a struct', () => {
   const u32s = (...names: string[]) => ({
     kind: 'struct' as const,

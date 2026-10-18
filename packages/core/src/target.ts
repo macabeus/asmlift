@@ -966,7 +966,8 @@ export interface TargetDescription {
     // Under every rule the caller's half is lowered (frontend/call-plan.ts), and a function that
     // itself returns a struct through memory lifts as that struct where its declaration says so and
     // the lift proves the hidden pointer is only its storage (frontend/own-struct-return.ts); it is
-    // read as the pointer function it compiles to where nothing declares it.
+    // read as the pointer function it compiles to where nothing declares it, or where a context's
+    // declaration does and the proof fails (pipeline.ts `returnOwnStruct`).
     // ABSENT ⇒ unmeasured, and such a call declines.
     aggregateReturn?: 'apcs' | 'svr4' | 'memory';
     // WHETHER A FUNCTION THAT RETURNS A STRUCT THROUGH MEMORY HANDS THE HIDDEN POINTER BACK in the
@@ -978,8 +979,8 @@ export interface TargetDescription {
     // returns with r3 = a reload of a frame word. It decides what the proof that a function's own
     // struct return goes through that pointer asks of each `ret` (frontend/own-struct-return.ts):
     // where it is `true` every `ret` must hand back the pointer, and where it is `false` what the
-    // return register holds is no part of the function. ABSENT ⇒ unmeasured, and read as `true`,
-    // which only refuses more.
+    // return register holds is no part of the function, save a value computed for the return alone
+    // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
     structReturnHandsBackPointer?: boolean;
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
     // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,

@@ -189,7 +189,8 @@ function storageAddresses(fn: Fn, hidden: Value, dead: ReadonlySet<Op>): Map<Val
 /** Why the incoming pointer is not provably the storage a struct of `size` bytes is returned in —
  *  undefined where it is. `addresses` are it and what is derived from it (`storageAddresses`);
  *  uses in `dead` ops are no reads, and so is a `ret`'s where the compiler does not hand the
- *  pointer back (`handsBack` false), since what the return register then holds is garbage. */
+ *  pointer back (`handsBack` false), since what the return register then holds is no part of the
+ *  struct return (`returnedAlone` asks the rest of it). */
 function provedReturnStorage(
   fn: Fn,
   addresses: ReadonlyMap<Value, number>,
@@ -305,7 +306,8 @@ interface FrameAccess {
  *  object's stores are the return object's, the copy is deleted, and the frame object goes with it.
  *
  *  It folds only where that is the same function, which needs every one of:
- *   - the copies tile the struct, `[0, size)`, each byte once: the compiler copies the whole of it;
+ *   - the copies in each block tile the struct, `[0, size)`, each byte once: the compiler copies the
+ *     whole of it, once per block (IDO repeats the copy at each `return r;`);
  *   - each copied load is read by its copy alone, and is a load of the frame object at
  *     `shift + off` for the copy at `off`;
  *   - the frame object is reached only through `laddr`s of its offset, as the base of unqualified
@@ -313,11 +315,13 @@ interface FrameAccess {
  *     range `[shift, shift + size)`, so the struct is all the object holds;
  *   - at least one store reaches the frame object: one nothing stores to is a struct returned
  *     wholly unset, whose copy is all that writes `ret`;
- *   - every copy is in ONE block, and no store to the frame object follows a copied load: not later
- *     in that block, and not in any block reachable from it — so the copy reads what was stored —
- *     and every store to the object is on a path into that block, so it is one the returned struct
- *     holds and not a write to storage a path that returns without the copy leaves alone.
- *  Anything else leaves `fn` as it is. */
+ *   - no store to the frame object follows a copied load: not later in a copy's block, and not in
+ *     any block reachable from one — so each copy reads what was stored — every store to the object
+ *     is on a path into a copy block, and no return is reached through no copy, so each store is
+ *     one the returned struct holds and not a write to storage a path that skips the copy leaves
+ *     alone (`storeFollowsCopy`).
+ *  Anything else leaves `fn` as it is. Where the copy is in several blocks, each returns the struct
+ *  itself (`returnAtEachCopy`). */
 function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>): void {
   const defs = new Map<Value, Op>();
   const blockOf = new Map<Op, Block>();
