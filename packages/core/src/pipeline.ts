@@ -333,18 +333,22 @@ export function liftStamped(
   ownContext?: FnProto,
   notes?: string[],
 ): Fn {
-  const own = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
+  // Its callers split the table already; split again here, where every lift passes, so that no
+  // frontend is handed a marked context entry to read as a stated, hard bound.
+  const split = splitOwnContext(prototypes, name, ownContext);
+  const table = split.prototypes ?? {};
+  const own = Object.hasOwn(table, name) ? table[name] : undefined;
   refuseOwnStructReturnThroughMemory(name, target, own);
   const fn = liftWithinContextBound(
     name,
     asm,
     target,
-    prototypes,
+    table,
     asmData,
     symbols,
     contextGlobals,
     liftOptions,
-    ownContext,
+    split.ownContextProto,
     notes,
   );
   verify(fn);
@@ -489,8 +493,9 @@ function spelledDeclaration(name: string, p: FnProto): string {
  *  hands back in one register (agbcc's one-word struct in r0) is the lift's own return; one it hands
  *  back in two (mwcc's svr4 eight-byte struct in r3:r4) refuses, since the lift returns one word.
  *
- *  A context's own entry for the function is left out (`withContextPrototypes`), so there the
- *  pointer function is all the lift is told; a stated return naming a struct the context lays out
+ *  A context's own entry for the function is left out of the prototypes (`withContextPrototypes`)
+ *  and bounds only the argument registers (`liftWithinContextBound`), so there the pointer
+ *  function is all the lift is told; a stated return naming a struct the context lays out
  *  reaches here with that layout (`withOwnReturnLayout`). Asked of the declaration alone, before
  *  any frontend runs. */
 function refuseOwnStructReturnThroughMemory(name: string, target: TargetDescription, own: FnProto | undefined): void {

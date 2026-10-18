@@ -3,7 +3,7 @@
 // Thumb degrades it to a loud `opaque`. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
-import { decompile } from '../src/pipeline';
+import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -1204,6 +1204,31 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         't3: its context declaration `int t3(int)` fills 1 argument word, and the body reads r1, r2 past it — ' +
           'kept as parameters, which the header contradicts',
       ]);
+    });
+
+    // a table carrying the context's entry under its mark is split where every lift passes, so a
+    // path that hands the lift such a table unsplit still bounds softly, never hard
+    test('a marked entry in the table bounds the lift softly', () => {
+      const OC_CB =
+        'oc_cb:\n\tpush\t{lr}\n\tadd\tr2, r0, #0x4\n\tldr\tr1, [r0, #0x8]\n\tadd\tr1, r1, #0x1\n\tadd\tr0, r2, #0\n' +
+        '\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';
+      const g = { g: { params: ['int *', 'int'], returnsVoid: true } };
+      const notes: string[] = [];
+      const fn = liftStamped(
+        'oc_cb',
+        OC_CB,
+        ARMV4T_AGBCC,
+        { ...g, oc_cb: { params: [], returnsVoid: true, fromContext: true } },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        notes,
+      );
+      expect(fn.blocks[0].params).toHaveLength(1);
+      expect(fn.blocks.some((b) => b.ops.some((op) => op.opcode === 'undef'))).toBe(false);
+      expect(notes).toHaveLength(1);
     });
 
     test('a read of the last argument register lifts as without it, and a stated entry wins', () => {
