@@ -17,12 +17,15 @@ import {
   aggregateType,
   byValueCallArgs,
   byValueRefusal,
+  ownArgumentWordsOn,
+  ownLeadingWordParamsOn,
   returnedAggregate,
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
 import { type Block, type Op, type Value, calleeName, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
+import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
 import {
   type FnProto,
@@ -43,7 +46,7 @@ import {
 import { type ContextGlobals, structNamed } from '../proto-context';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
-import type { TargetDescription } from '../target';
+import { type TargetDescription, argRegisterHoles } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { HighHalves } from './high-half';
 import { unspellableReason } from './reloc-symbol';
@@ -214,6 +217,8 @@ export function callDeclarations(
   prototypes: Prototypes,
   lowering: CallLowering,
   fail: FrontendRefusal,
+  /** the function's own declaration, where one binds its body — asked as a call is lowered */
+  ownDeclaration: () => FnProto | undefined = () => (Object.hasOwn(prototypes, name) ? prototypes[name] : undefined),
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -651,6 +656,82 @@ export function callDeclarations(
       );
     }
   };
+  // A GAP IN A GUESSED ARITY IS DECIDED WHERE THE REGISTER ABOVE IT IS SURELY AN ARGUMENT
+  // (`fallbackArgc`'s `decide`). The gap refuses because an argument register left at its incoming
+  // value and one the call does not pass look the same — but only while nothing says the call takes
+  // an argument above it. A register the call's own block wrote with a value that no memory read
+  // produced and that nothing but the call reads says exactly that: an optimising compiler deletes a
+  // dead computation, so the value exists only to be passed. And where argument words fill in order,
+  // every word below an argument is an argument too, so the gap's registers are passed on unchanged.
+  // Measured on 2026-10-18 at every toolchain's canonical flags: `logv(s, 1)` sets r1/a1/r4 alone,
+  // and at -O0 no gap arises at all (every argument is reloaded from its home first).
+  //
+  // EACH CLAUSE IS A MEASURED COUNTEREXAMPLE, so each refuses:
+  //   - the value must be the call's own block's, and something no memory read produced: agbcc puts a
+  //     DISCARDED volatile read in the lowest free argument register (`*(volatile int *)K; g(s)` is
+  //     `ldr r1,[r1]; bl g`, at -O0 too), the passgap shape exactly. Nothing else may read it either
+  //     (`SsaBuilder.requireSoleReader`, asked of the finished function): `gx = 1; logv(s)` and
+  //     `gx = 1; logv(s, 1)` are one agbcc object, the stored constant left in r1.
+  //   - each gap register must hold the function's own incoming value on every path
+  //     (`holdsEntryValue`): one a call destroyed is the trim's, and holds nothing.
+  //   - where the ABI can leave a register empty below a filled one (target.ts `argRegisterHoles`)
+  //     the gap may be that hole. An argument aligned to 8 skips an odd word (O32 a1, PowerPC
+  //     r4/r6/r8), and the hole is ruled out only where that argument's second word holds nothing:
+  //     no value reaches it and the own declaration fills fewer words. A leading float shadows the
+  //     first general words on O32, ruled out where the own declaration surely puts an integer word
+  //     in each gap register and no floating argument register holds a value.
+  //   - where the own declaration binds the body, each gap register must surely hold one of its
+  //     integer word parameters (`ownLeadingWordParamsOn`): no hidden struct pointer, no float.
+  // The proven register's value is returned, for the sole-reader obligation the call then takes on.
+  const decideGap = (
+    ssa: SsaBuilder,
+    bi: number,
+    gap: readonly string[],
+    set: string,
+    accept: (v: Value) => boolean,
+  ): Value | undefined => {
+    const regs = target.argRegs;
+    if (!ssa.writtenSinceCall(set, bi)) {
+      return undefined;
+    }
+    const v = ssa.readVar(set, bi);
+    const def = ssa.irBlocks[bi].ops.find((op) => op.results.includes(v));
+    const sig = def === undefined ? undefined : (OPCODES[def.opcode as keyof typeof OPCODES] as OpSig | undefined);
+    if (!accept(v) || sig === undefined || sig.effects || sig.reads || sig.terminator || def!.opcode === 'undef') {
+      return undefined;
+    }
+    if (gap.some((g) => ssa.writtenSinceCall(g, bi) || !ssa.holdsEntryValue(g, bi))) {
+      return undefined;
+    }
+    const own = ownDeclaration();
+    const surelyOwn = own === undefined ? undefined : ownLeadingWordParamsOn(name, own, target);
+    if (surelyOwn !== undefined && gap.some((g) => regs.indexOf(g) >= surelyOwn)) {
+      return undefined;
+    }
+    const holes = argRegisterHoles(target);
+    if (
+      holes.leadingFloatShadow &&
+      regs.indexOf(gap[0]) === 0 &&
+      (surelyOwn === undefined || (target.fpu?.argRegs ?? []).some((r) => ssa.hasReachingDef(r, bi)))
+    ) {
+      return undefined;
+    }
+    const ownWords = own === undefined ? undefined : ownArgumentWordsOn(name, own, target);
+    for (const g of gap.filter((r) => holes.skippable.has(r))) {
+      const j = regs.indexOf(g);
+      const second = regs[j + 2];
+      if (
+        regs[j + 1] !== set ||
+        second === undefined ||
+        ssa.hasReachingDef(second, bi, accept) ||
+        ownWords === undefined ||
+        j + 2 < ownWords
+      ) {
+        return undefined;
+      }
+    }
+    return v;
+  };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
@@ -694,12 +775,25 @@ export function callDeclarations(
     const { widths, returns } = p;
     // the leading arguments a variadic declaration states, where the rest is guessed
     const floor = widths === null ? variadicFloor(callee) : 0;
+    // the gaps `decideGap` decided: the value that proved each, the gap's own refusal, owed if that
+    // proof fails once the function is lifted, and how many argument words they put beyond doubt
+    const decided: Array<{ value: Value; refuse: () => void }> = [];
+    let decidedWords = 0;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !placeholders?.has(v),
             gap: { name, at: guess.at, fail },
             floor,
+            decide: (gap, set, refuse) => {
+              const value = decideGap(ssa, bi, gap, set, (v) => !placeholders?.has(v));
+              if (value === undefined) {
+                return false;
+              }
+              decided.push({ value, refuse });
+              decidedWords = target.argRegs.indexOf(set) + 1;
+              return true;
+            },
             entry: (reg) =>
               !ssa.writtenSinceCall(reg, bi) &&
               ssa.holdsValue(
@@ -839,6 +933,9 @@ export function callDeclarations(
       },
     });
     ssa.irBlocks[bi].ops.push(call);
+    for (const d of decided) {
+      ssa.requireSoleReader(d.value, call, d.refuse);
+    }
     // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
     // known whether every path to here passes through another call, which would have clobbered
     // the argument registers this guess just read.
@@ -869,7 +966,8 @@ export function callDeclarations(
               ),
         site.withholdsSetupArgs,
         site.asksEveryCut,
-        floor,
+        // a decided gap puts its words beyond doubt, so neither reading cuts below them
+        Math.max(floor, decidedWords),
       );
     }
     if (p.declaredVoid) {

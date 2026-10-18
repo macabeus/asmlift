@@ -2484,7 +2484,7 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
-  options: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'>,
+  options: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn'>,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
   const { cfg, frame, ssa, pairs, statics } = fill;
@@ -4709,14 +4709,25 @@ function thumbFillOf(
   prototypes: Prototypes,
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
-  { contextOwnWords, ownMemoryReturn }: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'> = {},
+  {
+    contextOwnWords,
+    contextOwnProto,
+    ownMemoryReturn,
+  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn'> = {},
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
   assertScratchRegsPartitioned(target); // first, for the refusal order; `registerLiveIns` asks again
-  const calls = callDeclarations(name, target, prototypes, THUMB_CALL_LOWERING, (message) => {
-    throw new FrontendUnsupportedError(message);
-  });
+  const calls = callDeclarations(
+    name,
+    target,
+    prototypes,
+    THUMB_CALL_LOWERING,
+    (message) => {
+      throw new FrontendUnsupportedError(message);
+    },
+    () => (Object.hasOwn(prototypes, name) ? prototypes[name] : contextOwnProto),
+  );
   const frame = measureThumbFrame({ target, cfg, calls, oneObject });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---

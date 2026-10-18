@@ -159,6 +159,12 @@ export interface SsaBuilder {
     asksEveryCut?: () => boolean,
     floor?: number,
   ): void;
+  /** Require that nothing but `op` reads `v` once the function is lifted — no other op, no join that
+   *  survives, no frame store (`frameWrites`), no op-less use (`useOutsideOps`) — or call `refuse`.
+   *  A read the lowering has yet to see may come after `op` through a copy in a register the call
+   *  leaves alone, so the question is asked in `finish`, of the finished function. Its asker is the
+   *  guessed-arity gap (frontend/call-plan.ts `decideGap`). */
+  requireSoleReader(v: Value, op: Op, refuse: () => void): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -490,6 +496,8 @@ export function makeSsaBuilder(
   const staleByValue = new Map<Value, StaleRead[]>();
   /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
   const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
+  /** The sole-reader obligations `requireSoleReader` recorded, checked in `finish`. */
+  const soleReaders: Array<{ value: Value; op: Op; refuse: () => void }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
   // proportional to what a block READS rather than to how many times it reads it. The value a key
   // holds only changes at a write, and the verdict only flips at a call, so a run of identical
@@ -1351,6 +1359,9 @@ export function makeSsaBuilder(
     entryValue,
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
+    requireSoleReader: (value: Value, op: Op, refuse: () => void) => {
+      soleReaders.push({ value, op, refuse });
+    },
     useOutsideOps: (v: Value, b: number) => {
       usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
     },
@@ -1440,6 +1451,19 @@ export function makeSsaBuilder(
       refuseStaleCallerSavedReads();
       simplifyTrivialPhis(fn, dropPhiRecord);
       pruneDeadParams(fn, dropPhiRecord);
+      // A SOLE-READER OBLIGATION (`requireSoleReader`), over the finished function: after both
+      // prunes, so a join nothing reads is no reader.
+      for (const { value, op, refuse } of soleReaders) {
+        const reads = (o: Op) =>
+          o !== op && (o.operands.includes(value) || o.successors.some((e) => e.args.includes(value)));
+        if (
+          frameWrites.has(value) ||
+          usesOutsideOps.some((u) => u.value === value) ||
+          irBlocks.some((blk) => blk.ops.some(reads))
+        ) {
+          refuse();
+        }
+      }
       // A HIDDEN INPUT IS NO UNINITIALISED LOCAL (`LiveInModel.hiddenInputRegs`). After the
       // trivial-phi pass, so a join every path of which arrives undefined is no join. The
       // compiler's local is assigned on SOME path, and its entry value meets that definition as a
@@ -1638,8 +1662,11 @@ export function makeSsaBuilder(
  *  the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
  *  up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
  *  `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
- *  cannot be decided here — the function's own arity is exactly what is missing — so this refuses
- *  and names the gap rather than guessing. A declaration answers it, and this scan is never
+ *  cannot be decided from the register file alone — the function's own arity is exactly what is
+ *  missing — so this refuses and names the gap rather than guessing, unless `decide` answers it:
+ *  the lowering may show that the register above the gap is surely an argument, and where argument
+ *  words fill in order the gap below it is then this function's own arguments passed on
+ *  (frontend/call-plan.ts `decideGap`). A declaration answers it outright, and this scan is never
  *  weighed against one: it is a guess, and a guess that cannot fail cannot witness a width a
  *  declaration left open. */
 export function fallbackArgc(
@@ -1658,6 +1685,11 @@ export function fallbackArgc(
      *  did not set it up on: one a call destroyed it on ends there, and one this block wrote it on
      *  since its last call set it up (`CallDeclarations.lower` asks it) */
     entry?: (reg: string) => boolean;
+    /** whether the gap `gap` — argument registers nothing reaches, in order — below `set`, the next
+     *  one a value reaches, is decided: the frontend shows `set` holds an argument, so `gap` holds
+     *  arguments passed on unchanged (`CallDeclarations.lower`'s `decideGap`). Handed the gap's
+     *  refusal, owed should a proof it defers fail. Absent, or false, the gap refuses. */
+    decide?: (gap: readonly string[], set: string, refuse: () => void) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -1666,44 +1698,59 @@ export function fallbackArgc(
   const { name, at, fail } = opts.gap;
   const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
   const floor = opts.floor ?? 0;
-  let n = floor;
-  while (n < argRegs.length && setUp(n)) {
-    // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
-    // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
-    // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
-    // function's own argument passed on, or one the call is not handed. Counted, it is an argument
-    // the source never passed — `int logv(const char *, int, ...)` and `logv(s, c) + 1` in a
-    // function whose unused third parameter IDO home-stores lifts `logv(a0, a1, a2)`. Below a
-    // floor the scan never asks, and with none the guess keeps counting it: there it is the far
-    // commoner `if (a) g(a)`, and the same refusal declines 17 lifts of kleod's 20 units and 40 of
-    // sa3's (`DecompressAlloc(a0)`, `m4aSongNumStart(a1)`), where the floored rule moves none.
-    //
-    // ONLY A PATH THE ENTRY VALUE STILL ARRIVES BY IS ASKED. `setUp` walks through calls, so an
-    // entry value a call destroyed reaches it too — `g(x); dprint(s)` — and that register holds
-    // nothing; the trim cuts it (`trimClobberedCallArgs`) and `dprint(a0)` is the bytes. And a
-    // register this block wrote since its last call was set up here, by the copy that put the
-    // value back — `g(y); dprint(s, x)` re-sets r1 from a saved copy — whatever value SSA names.
-    if (floor > 0 && opts.entry?.(argRegs[n])) {
-      fail(
-        `cannot lift '${name}': the call ${call} has a prototype stating only its first ${floor} ` +
-          `argument${floor === 1 ? '' : 's'}, and ${argRegs[n]} past them still holds this function's own incoming ` +
-          'value — an argument passed on unchanged and one the call is not handed look the same here, so the ' +
-          'argument count is not decidable',
-      );
+  // the run of argument registers the caller set up from `from`, each past a declaration's
+  // stated words asked whether it still holds the incoming value
+  const run = (from: number): number => {
+    let n = from;
+    while (n < argRegs.length && setUp(n)) {
+      // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
+      // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
+      // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
+      // function's own argument passed on, or one the call is not handed. Counted, it is an argument
+      // the source never passed — `int logv(const char *, int, ...)` and `logv(s, c) + 1` in a
+      // function whose unused third parameter IDO home-stores lifts `logv(a0, a1, a2)`. Below a
+      // floor the scan never asks, and with none the guess keeps counting it: there it is the far
+      // commoner `if (a) g(a)`, and the same refusal declines 17 lifts of kleod's 20 units and 40 of
+      // sa3's (`DecompressAlloc(a0)`, `m4aSongNumStart(a1)`), where the floored rule moves none.
+      //
+      // ONLY A PATH THE ENTRY VALUE STILL ARRIVES BY IS ASKED. `setUp` walks through calls, so an
+      // entry value a call destroyed reaches it too — `g(x); dprint(s)` — and that register holds
+      // nothing; the trim cuts it (`trimClobberedCallArgs`) and `dprint(a0)` is the bytes. And a
+      // register this block wrote since its last call was set up here, by the copy that put the
+      // value back — `g(y); dprint(s, x)` re-sets r1 from a saved copy — whatever value SSA names.
+      if (floor > 0 && opts.entry?.(argRegs[n])) {
+        fail(
+          `cannot lift '${name}': the call ${call} has a prototype stating only its first ${floor} ` +
+            `argument${floor === 1 ? '' : 's'}, and ${argRegs[n]} past them still holds this function's own incoming ` +
+            'value — an argument passed on unchanged and one the call is not handed look the same here, so the ' +
+            'argument count is not decidable',
+        );
+      }
+      n++;
     }
-    n++;
-  }
+    return n;
+  };
+  let n = run(floor);
+  // A GAP BELOW A REGISTER THAT HOLDS A VALUE refuses, unless the frontend decides it: then the run
+  // goes on through the gap and the register above it, and the next gap is asked the same.
   for (let k = n + 1; k < argRegs.length; k++) {
     if (setUp(k)) {
-      fail(
-        `cannot lift '${name}': the call ${call} ` +
-          (opts.floor
-            ? `has a prototype stating only its first ${opts.floor} argument${opts.floor === 1 ? '' : 's'}`
-            : 'has no prototype') +
-          `, ${argRegs[k]} holds a ` +
-          `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
-          `the call does not pass look the same here, so the argument count is not decidable`,
-      );
+      const [gapAt, setAt] = [n, k];
+      const refuse = () =>
+        fail(
+          `cannot lift '${name}': the call ${call} ` +
+            (opts.floor
+              ? `has a prototype stating only its first ${opts.floor} argument${opts.floor === 1 ? '' : 's'}`
+              : 'has no prototype') +
+            `, ${argRegs[setAt]} holds a ` +
+            `value and ${argRegs[gapAt]} holds none — an argument register left at its incoming value and one ` +
+            `the call does not pass look the same here, so the argument count is not decidable`,
+        );
+      if (!opts.decide?.(argRegs.slice(n, k), argRegs[k], refuse)) {
+        refuse();
+      }
+      n = run(k);
+      k = n;
     }
   }
   return n;

@@ -421,15 +421,24 @@ function liftWithinContextBound(
       ? undefined
       : ownArgumentWordsOn(name, ownContext, target);
   if (words === undefined || words >= target.argRegs.length) {
-    return unbounded();
+    return words === undefined
+      ? unbounded()
+      : forgetAbsorbedKeys(
+          frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
+            ...liftOptions,
+            contextOwnProto: ownContext!,
+          }),
+        );
   }
   const declared = spelledDeclaration(name, ownContext!);
+  const declaredWords = words;
   for (;;) {
     let fn: Fn;
     try {
       fn = frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, {
         ...liftOptions,
         contextOwnWords: words,
+        ...(words === declaredWords ? { contextOwnProto: ownContext! } : {}),
       });
     } catch (e) {
       if (!(e instanceof FrontendUnsupportedError)) {

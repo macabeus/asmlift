@@ -3,7 +3,7 @@
 // neutral and consumes the Fn without knowing which frontend produced it. See registry.ts
 // for target→frontend dispatch.
 import type { Fn } from '../ir/core';
-import type { Prototypes } from '../proto';
+import type { FnProto, Prototypes } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -47,6 +47,11 @@ export interface LiftOptions {
    *  of the stated entry's words (frontend/ssa.ts `registerLiveIns`). Every frontend reads it; PowerPC,
    *  as with a stated entry, only for a body a compiler wrote. */
   contextOwnWords?: number;
+  /** The declaration context's own entry itself, beside the words it fills (`contextOwnWords`),
+   *  wherever the lift is bounded by exactly those words — never once the bound was raised past a
+   *  register the body reads, which says the entry is wrong. Read where the TYPES of the own
+   *  parameters decide something the word count cannot (frontend/call-plan.ts `decideGap`). */
+  contextOwnProto?: FnProto;
   /** The size in bytes of a struct the function's own declaration returns through a hidden pointer
    *  (pipeline.ts `liftStamped`), and where to hand a refusal that declaration may answer: one about
    *  the RETURN's width that such a struct explains, which the frontend then defers instead of
