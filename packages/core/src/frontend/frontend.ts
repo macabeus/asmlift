@@ -36,10 +36,6 @@ export interface Frontend {
   ): Fn;
 }
 
-/** A question the asm leaves open that a frontend answers one way by default and, asked, the other
- *  way: the LIFT variations of rank.ts that live in the frontend. A frontend with no such question
- *  ignores the whole bag. One input rides beside them that no variation sets, the context's
- *  own-entry bound (`contextOwnWords`). */
 /** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts
  *  `callDeclarations`): a stated entry, which `proves`, or the declaration context's
  *  (`LiftOptions.contextOwnProto`). */
@@ -58,6 +54,11 @@ export function ownDeclarationOf(
   return Object.hasOwn(prototypes, name) ? { proto: prototypes[name], proves: true } : context;
 }
 
+/** A question the asm leaves open that a frontend answers one way by default and, asked, the other
+ *  way: the LIFT variations of rank.ts that live in the frontend. A frontend with no such question
+ *  ignores the whole bag. Two inputs ride beside them that no variation sets, both from the
+ *  declaration context's own entry: its bound (`contextOwnWords`) and the entry itself
+ *  (`contextOwnProto`). */
 export interface LiftOptions {
   /** The argument words the declaration context's own entry for the function fills, where no
    *  stated entry does (pipeline.ts `liftWithinContextBound`, which raises it past a register the
