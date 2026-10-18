@@ -541,10 +541,17 @@ function ownStructReturnThroughMemory(
         : { type, stated, declaration: spelledDeclaration(name, declared!), register: true };
     }
     if (size !== undefined) {
+      const pair =
+        `this target hands its ${size} bytes back in two registers — a function that itself returns a struct ` +
+        'in a register pair is not modelled';
+      if (stated) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': it is declared to return ${spelled} by value, and ${pair}`,
+        );
+      }
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${stated ? 'it is declared' : `its context declaration \`${spelledDeclaration(name, declared!)}\` says it`} ` +
-          `${stated ? 'to return' : 'returns'} ${spelled} by value, and this target hands its ${size} bytes back in two registers — a function ` +
-          'that itself returns a struct in a register pair is not modelled',
+        `cannot lift '${name}': its context declaration says it returns ${spelled} by value, and ${pair} ` +
+          `(\`${spelledDeclaration(name, declared!)}\`)`,
       );
     }
     return undefined;
@@ -604,7 +611,8 @@ function returnOwnStruct(
   const declared = `${own.type.declared ?? 'a struct'} by value, which this target returns through a hidden pointer in ${target.argRegs[0]}`;
   if (own.stated) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': it is declared to return ${declared}, and the lift cannot show that pointer is only its storage: ${why}`,
+      `cannot lift '${name}': it is declared to return ${own.type.declared ?? 'a struct'} by value, which this target returns ` +
+        `through a hidden pointer in ${target.argRegs[0]}, and the lift cannot show that pointer is only its storage: ${why}`,
     );
   }
   notes?.push(

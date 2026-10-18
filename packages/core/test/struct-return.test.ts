@@ -729,7 +729,7 @@ describe('a function that itself returns a struct', () => {
       /it is declared to return struct S8 by value, and this target hands its 8 bytes back in two registers/,
     );
     expect(() => decompile('rmk8', rmk8, PPC_MWCC, { ownContextProto: S8 })).toThrow(
-      /its context declaration `struct S8 rmk8\(s32\)` says it returns struct S8 by value, and this target hands its 8 bytes back in two registers/,
+      /its context declaration says it returns struct S8 by value, and this target hands its 8 bytes back in two registers [^]*\(`struct S8 rmk8\(s32\)`\)/,
     );
   });
 });

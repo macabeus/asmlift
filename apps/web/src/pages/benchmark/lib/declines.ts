@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 255 distinct decline messages (the texts reached by
+// `packages/core/src` throws 256 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -627,7 +627,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'struct-return',
     label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
     pattern:
-      /is declared to return [^,—]+ by value(?:, and | — )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
+      /(?:is declared to return|says it returns) [^,—]+ by value(?:, and | — |, which )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
   },
   {
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.
