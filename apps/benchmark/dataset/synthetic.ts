@@ -921,6 +921,50 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['struct', 'field', 'mixed-width'],
     toolchains: ALL,
   },
+  // A MEMBER PAST THE DISPLACEMENT RANGE, reached through an address the machine materialises first
+  // (`adds r3, #38; strb r2, [r3]`; a Thumb byte displacement stops at 31, a halfword's at 62).
+  // agbcc stores the member's loaded value in a different order from the cast `*((u8 *)s + 38)`:
+  // the member form loads `*q` before the `adds`, the cast after it (gcc/expr.c expand_assignment,
+  // :2535 vs :2689), so these two pin the member spelling (raise/structs.ts foldDisplacedAccesses).
+  {
+    sym: 'sfar_b',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;};\nvoid sfar_b(struct S*s,u8*q){ s->c=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_b(struct S*,u8*);',
+    proto: { sfar_b: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_h',
+    src: 'struct T{s32 a;u8 pad[66];u16 h;};\nvoid sfar_h(struct T*s,u16*q){ s->h=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct T; void sfar_h(struct T*,u16*);',
+    proto: { sfar_h: { returnsVoid: true } },
+  },
+  // The same gap past a 16-bit displacement: ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and
+  // GCC 2.7.2's `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1;
+  // stb r4, -25537(r5)`. There the member and both cast spellings compile to the same bytes
+  // (compiled on all six builds, a stored loaded value too), so these rows pin the recovered
+  // struct type, not the bytes. `x` is a word: a `u8` parameter adds ido's `sw a1, 4(sp)` home,
+  // a parameter-width question this row is not about.
+  {
+    sym: 'sfar_big',
+    src: 'struct S{s32 a;u8 pad[39995];u8 big;};\nvoid sfar_big(struct S*p,u32 x){ p->a=1; p->big=x; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct S; void sfar_big(struct S*,u32);',
+    proto: { sfar_big: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_big',
+    src: 'struct S{s32 a;u8 pad[39995];u8 big;};\nvoid sfar_big(struct S*p,u32 x){ p->a=1; p->big=x; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'struct S; void sfar_big(struct S*,u32);',
+    proto: { sfar_big: { returnsVoid: true } },
+  },
 
   // ── unions (the same storage read at two widths / in two type domains) ──────────────────
   // A union is only measurable when the SAME bytes are reached through members of different width
