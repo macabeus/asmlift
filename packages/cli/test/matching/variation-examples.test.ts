@@ -120,6 +120,7 @@ const REACHED_ONLY_THROUGH: readonly VariationName[] = [
   'vol-slot',
   'vol-store',
   'coalesce',
+  'far-cast',
 ];
 
 describe("asmlift matches an example's `after` only through its variation", () => {

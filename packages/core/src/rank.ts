@@ -645,6 +645,7 @@ export function enumerateCandidates(
   // silently dropping one, the failure nothing reports.
   let sharedLiftTreeOwned = false;
   let sharedLiftExtendedReaders = false;
+  let sharedLiftFoldedStore = false;
   // Shared lift: recover ONCE with no signedness pin, to learn which entry params are
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -679,6 +680,11 @@ export function enumerateCandidates(
         sharedLiftExtendedReaders = true;
       },
     },
+    displaced: {
+      onFoldedStore: () => {
+        sharedLiftFoldedStore = true;
+      },
+    },
   });
   recoverTypes(sharedLift);
   const ptrIdx = new Set<number>(
@@ -705,10 +711,17 @@ export function enumerateCandidates(
   // ReferenceError instead — a wrong answer traded for a loud one.
   //
   // `/narrow-param`'s gate is read off the same lift the same way: the width pass reports a
-  // parameter the variation's lift would narrow (raise/pre-recovery.ts `ParamWidthOptions`).
-  const liftReportsIn = (symbols: typeof opts.symbols): { treeOwned: boolean; extendedReaders: boolean } => {
+  // parameter the variation's lift would narrow (raise/pre-recovery.ts `ParamWidthOptions`). So is
+  // `/far-cast`'s: the displaced-access fold reports a store it moved into a struct.
+  const liftReportsIn = (
+    symbols: typeof opts.symbols,
+  ): { treeOwned: boolean; extendedReaders: boolean; foldedStore: boolean } => {
     if (symbols === opts.symbols) {
-      return { treeOwned: sharedLiftTreeOwned, extendedReaders: sharedLiftExtendedReaders };
+      return {
+        treeOwned: sharedLiftTreeOwned,
+        extendedReaders: sharedLiftExtendedReaders,
+        foldedStore: sharedLiftFoldedStore,
+      };
     }
     const p = liftStamped(
       name,
@@ -722,7 +735,7 @@ export function enumerateCandidates(
       ownContext.ownContextProto,
     );
     applyIdiomPatterns(p, target, opts.patterns);
-    const seen = { treeOwned: false, extendedReaders: false };
+    const seen = { treeOwned: false, extendedReaders: false, foldedStore: false };
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
       shortCircuit: {
         onTreeOwned: () => {
@@ -732,6 +745,11 @@ export function enumerateCandidates(
       paramWidth: {
         onExtendedReaders: () => {
           seen.extendedReaders = true;
+        },
+      },
+      displaced: {
+        onFoldedStore: () => {
+          seen.foldedStore = true;
         },
       },
     });
@@ -1938,8 +1956,9 @@ export function enumerateCandidates(
     // again.
     let treeOwnedFold: boolean;
     let extendedReaders: boolean;
+    let foldedStore: boolean;
     try {
-      ({ treeOwned: treeOwnedFold, extendedReaders } = liftReportsIn(symbolSetting.symbols));
+      ({ treeOwned: treeOwnedFold, extendedReaders, foldedStore } = liftReportsIn(symbolSetting.symbols));
     } catch (e) {
       if (abortsRow(symbolSetting.variations)) {
         throw e;
@@ -2067,16 +2086,33 @@ export function enumerateCandidates(
             { variations: ['kept-slot'], keepTailSlots: true },
           ]
         : [{ variations: [], keepTailSlots: false }];
+      // `/far-cast` — keep each store the displaced-access fold would move into a struct on the
+      // address it was reached through (raise/structs.ts `foldDisplacedAccesses`). On agbcc the
+      // member store and the cast store are two objects (target.ts `farMemberStoreOrder`), and a
+      // hoisted pointer the source held builds the cast's, so which one the source wrote is the
+      // differ's to say. A LIFT variation because the fold decides which struct the stores join,
+      // which recovery and every later stage read. Enumerated only where this setting's lift folded
+      // a store, and only on a target whose registry gate admits it.
+      const castSettings: { variations: readonly Variation[]; keepStores: boolean }[] =
+        foldedStore && offeredOn(target, ['far-cast'])
+          ? [
+              { variations: [], keepStores: false },
+              { variations: ['far-cast'], keepStores: true },
+            ]
+          : [{ variations: [], keepStores: false }];
       const liftSettings = narrowSettings.flatMap((l) =>
         connectiveSettings.flatMap((c) =>
           paramSettings.flatMap((w) =>
-            tailSettings.map((k) => ({
-              ...l,
-              ...c,
-              ...w,
-              ...k,
-              variations: [...l.variations, ...c.variations, ...w.variations, ...k.variations],
-            })),
+            tailSettings.flatMap((k) =>
+              castSettings.map((f) => ({
+                ...l,
+                ...c,
+                ...w,
+                ...k,
+                ...f,
+                variations: [...l.variations, ...c.variations, ...w.variations, ...k.variations, ...f.variations],
+              })),
+            ),
           ),
         ),
       );
@@ -2170,6 +2206,7 @@ export function enumerateCandidates(
                   guessesParamWidth = true;
                 },
               },
+              displaced: { keepStores: liftSetting.keepStores },
             },
           );
         } catch (e) {

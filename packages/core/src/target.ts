@@ -858,6 +858,17 @@ export interface TargetDescription {
     // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
     // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
     foldsConstAddrOffset?: boolean;
+    // Does a STORE to a struct member past the ISA's displacement range compile differently from the
+    // same store through a cast of the base (`p->f38 = v` against `*((u8 *)p + 38) = v`)? agbcc's
+    // does: expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target (:2535)
+    // and evaluates the right-hand side first in store_field (:2624), and it expands a cast target
+    // whole (:2689) before the right-hand side (:2747). Measured on agbcc for a loaded, a constant, a
+    // computed and a parameter right-hand side: every pair builds two objects, and a hoisted
+    // `u8 *d = &p->f38; *d = v;` builds the cast's. True offers `/far-cast`, the lift that keeps
+    // such a store on its materialised address. ido, KMC, GCC 2.7.2 and the three mwcc builds put the
+    // two spellings in one object, a loaded right-hand side included, so they leave it absent.
+    // Absent ⇒ the variation is never offered.
+    farMemberStoreOrder?: boolean;
     // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
     // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
     // spelling emits the indexed one's stores wherever the pointee is not volatile? agbcc does, on
@@ -1238,6 +1249,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     nearBaseSpan: 255,
     volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
+    farMemberStoreOrder: true,
     foldsPointerAdvance: true,
     pointerIntConversionIsFree: true,
     keepsPointerSumAddend: true,

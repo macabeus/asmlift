@@ -1,8 +1,9 @@
 // A MEMBER PAST THE DISPLACEMENT RANGE (raise/structs.ts `foldDisplacedAccesses`). The machine
 // reaches it through an address it materialises first, and the lift keyed the access on that
-// address, so the member never joined its struct and was spelled as a cast. On agbcc the cast is a
-// different program for a store of a loaded value (gcc/expr.c expand_assignment :2535 vs :2689),
-// which is what kept `sa3:sub_800F0E8` from matching. Every agbcc fixture is agbcc's own output at
+// address, so the member never joined its struct and was spelled as a cast. On agbcc a member
+// store and a cast store build two objects (gcc/expr.c expand_assignment :2535 vs :2689): the
+// member is what kept `sa3:sub_800F0E8` from matching, and the cast (or a hoisted pointer) is the
+// `/far-cast` lift, which keeps the store on its address. Every agbcc fixture is agbcc's own output at
 // the corpus flags (`-mthumb-interwork -O2 -fhex-asm -fprologue-bugfix`), every MIPS/PPC one the
 // toolchain's own disassembly at its canonical flags.
 import { describe, expect, test } from 'vitest';
@@ -12,7 +13,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { foldDisplacedAccesses, recognizeStructs } from '../src/raise/structs';
+import { type DisplacedOptions, foldDisplacedAccesses, recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, type ToolchainId, canonicalFlagsOf, structureOptionsFor, targetFor } from '../src/target';
 
@@ -107,10 +108,10 @@ describe('a member past a 16-bit displacement is a member', () => {
 });
 
 // The refusals no compiled fixture reaches cheaply, on hand-written IR.
-function emit(ir: string): { folded: number; c: string } {
+function emit(ir: string, opts: DisplacedOptions = {}): { folded: number; c: string } {
   const fn = parse(ir);
   verify(fn);
-  const folded = foldDisplacedAccesses(fn);
+  const folded = foldDisplacedAccesses(fn, opts);
   recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   recoverTypes(fn);
   verify(fn);
@@ -128,8 +129,35 @@ describe('foldDisplacedAccesses refusals', () => {
 }
 `;
 
-  test('folds the plain shape', () => {
-    expect(emit(twoAccesses('store %3, %1 {off=0, width=1}')).folded).toBe(1);
+  test('folds the plain shape, and reports the store it folded', () => {
+    let reported = 0;
+    const { folded } = emit(twoAccesses('store %3, %1 {off=0, width=1}'), { onFoldedStore: () => reported++ });
+    expect(folded).toBe(1);
+    expect(reported).toBe(1);
+  });
+
+  // `/far-cast`: agbcc builds the cast's object for `*((u8 *)p + 38) = v` and for a hoisted
+  // `u8 *d = &p->f38; *d = v;`, so the lift that keeps a store on its address is the differ's.
+  test('/far-cast keeps a store on its address and still folds a load', () => {
+    const ir = `fn f {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = const {value=38}
+  %3: unk32 = add %0, %2
+  store %3, %1 {off=0, width=1}
+  %4: unk32 = const {value=40}
+  %5: unk32 = add %0, %4
+  %6: unk32 = load %5 {off=0, width=1, signed=false}
+  store %0, %6 {off=0, width=4}
+  ret
+}
+`;
+    let reported = 0;
+    const { folded, c } = emit(ir, { keepStores: true, onFoldedStore: () => reported++ });
+    expect(folded).toBe(1);
+    expect(reported).toBe(0);
+    expect(c).toContain('field_40');
+    expect(c).not.toContain('field_38');
+    expect(c).toContain('(u8 *)a0 + 38');
   });
 
   test('a volatile access stays on its materialised address', () => {

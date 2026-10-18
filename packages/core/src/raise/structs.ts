@@ -419,8 +419,13 @@ function displacementOf(defs: Map<Value, Op>, v: Value): { root: Value; k: numbe
  *  COMPONENT_REF target expand_assignment (gcc/expr.c :2535) expands only the base and store_field
  *  (:2624) evaluates the right-hand side first, while a cast (INDIRECT_REF) target is expanded whole
  *  (:2689) before the right-hand side (:2747). A member store of a loaded value therefore loads it
- *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store). On
- *  ido, KMC, GCC 2.7.2 and mwcc the two spellings compile alike; there the fold buys the type.
+ *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store), and
+ *  with a constant or a parameter on the right the two still allocate registers differently. The
+ *  cast is a source spelling too: a hoisted `u8 *d = &p->f38; *d = v;` builds the cast's object. So
+ *  the fold is the default and `opts.keepStores` (the `/far-cast` lift, offered where target.ts
+ *  `farMemberStoreOrder` holds) keeps every such store on its address for the differ to referee;
+ *  loads compile alike either way and fold in both. On ido, KMC, GCC 2.7.2 and mwcc the two
+ *  spellings compile alike, a store of a loaded value included; there the fold buys the type.
  *
  *  REFUSES, leaving every access off that root on its materialised address, as before:
  *    • the root is no recovery target of `recognizeStructs`: already typed, a frame (`laddr`), a
@@ -437,7 +442,14 @@ function displacementOf(defs: Map<Value, Op>, v: Value): { root: Value; k: numbe
  *      root whose own accesses already overlap keeps its spelling.
  *  Runs right before `recognizeStructs`, after raise/truncload.ts, which therefore never sees a
  *  folded access. Returns the number of accesses folded. */
-export function foldDisplacedAccesses(fn: Fn): number {
+export interface DisplacedOptions {
+  /** leave every STORE on its materialised address, folding only the loads (`/far-cast`) */
+  keepStores?: boolean;
+  /** called when a lift without `keepStores` folds a store, which is what offers `/far-cast` */
+  onFoldedStore?: () => void;
+}
+
+export function foldDisplacedAccesses(fn: Fn, opts: DisplacedOptions = {}): number {
   const defs = defOpMap(fn);
   const { accessesOf, arrayBases } = constOffsetAccesses(fn);
   // Every use of each value: the op and operand index, or null for an edge argument.
@@ -487,6 +499,11 @@ export function foldDisplacedAccesses(fn: Fn): number {
     if (!disp || refused.has(disp.root)) {
       continue;
     }
+    // `/far-cast`: a store kept on its address keeps the chain's value used by something other
+    // than a folded access, so no load sharing that address folds either.
+    if (opts.keepStores === true && accesses.some((a) => a.op.opcode === 'store')) {
+      continue;
+    }
     const ok =
       isRecoveryRoot(disp.root) &&
       disp.chain.every(
@@ -523,6 +540,9 @@ export function foldDisplacedAccesses(fn: Fn): number {
       access.op.operands[0] = root;
       access.op.attrs.off = access.off + k;
       folded++;
+      if (access.op.opcode === 'store') {
+        opts.onFoldedStore?.();
+      }
     }
   }
   return folded;

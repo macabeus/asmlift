@@ -212,6 +212,15 @@ export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: TargetB
       compiles: 'same',
     },
   },
+  farMemberStoreOrder: {
+    reads: 'orders a member store past the displacement range differently from the same store through a cast',
+    witness: {
+      compiler: 'agbcc',
+      unit: 'struct S { s32 a; u8 pad[34]; u8 f38; };\nvoid example(struct S *p, u8 *q) { @ }',
+      spellings: ['p->f38 = *q; p->a = 0;', '*((u8 *)p + 38) = *q; p->a = 0;'],
+      compiles: 'different',
+    },
+  },
   foldsPointerAdvance: {
     reads: 'folds a stepped pointer back into an offset load',
     witness: {
@@ -471,6 +480,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       note: 'the shape of `synthetic:mergenarrow`',
     },
     implementedIn: 'packages/core/src/frontend/mips.ts',
+  },
+  'far-cast': {
+    title: 'Store past the displacement range through a cast',
+    summary: 'a store to a member past the instruction offset range is spelled through a cast of the base',
+    detail:
+      'A member past the offset an instruction can carry is reached through an address the machine adds up ' +
+      'first, and by default that access joins its struct and is spelled as the member. A store there could ' +
+      'equally have been written through a cast of the base, `*((u8 *)p + 38) = v`, or through a pointer the ' +
+      'source held, and on some compilers that is a different object. This lift keeps every such store on ' +
+      'the address it was reached through; loads still join the struct.',
+    compilerBehavior:
+      'agbcc evaluates the right-hand side of a member store before it adds up the address, and the address ' +
+      'of a cast store before the right-hand side, so the two spellings allocate and order registers ' +
+      "differently. A hoisted `u8 *d = &p->f38; *d = v;` builds the cast spelling's object.",
+    offeredWhen: {
+      when: 'The default lift folded a store through a materialised `base + K` address into its struct.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'struct S { s32 a; u8 pad[34]; u8 f38; };\nvoid example(struct S *p, u8 *q) { @ }',
+      before: 'p->f38 = *q; p->a = 0;',
+      after: '*((u8 *)p + 38) = *q; p->a = 0;',
+    },
+    implementedIn: 'packages/core/src/raise/structs.ts',
   },
 
   // ── structure ───────────────────────────────────────────────────────────────────────────────
