@@ -258,7 +258,9 @@ function returnedAlone(
     }
     const web = webs.get(ret.operands[0]) ?? [ret.operands[0]];
     const alone = web.every((v) =>
-      (readers.get(v) ?? []).every((op) => op.opcode === 'ret' || (op.successors.length > 0 && !op.operands.includes(v))),
+      (readers.get(v) ?? []).every(
+        (op) => op.opcode === 'ret' || (op.successors.length > 0 && !op.operands.includes(v)),
+      ),
     );
     const computed = web.some((v) =>
       defs.has(v) ? defs.get(v)!.opcode !== 'undef' : entry.has(v) && !addresses.has(v),

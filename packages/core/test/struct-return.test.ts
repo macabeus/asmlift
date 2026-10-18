@@ -771,7 +771,10 @@ describe('a function that itself returns a struct', () => {
       { prototypes: { use }, ownContextProto: S8two },
     ];
     for (const opts of both) {
-      expect(() => decompile('wide', passed, ARMV4T_AGBCC, opts)).toThrow(eightBytes);
+      // …and says why the struct that would explain the epilogue is not shown to be it
+      expect(() => decompile('wide', passed, ARMV4T_AGBCC, opts)).toThrow(
+        /says the return type is 5 to 8 bytes [^]*; the 8-byte struct its own declaration returns through r0 would explain it, but the lift cannot show r0 is only that struct's storage: r0 is read by a call/,
+      );
     }
   });
 

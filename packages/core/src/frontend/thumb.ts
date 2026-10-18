@@ -4527,10 +4527,15 @@ function thumbPairs({
       }
       if (widerEpilogue) {
         const label = asmBlocks[bi].label;
-        const refuse = (): never => {
+        // `unproved`: why the declared struct, which would explain the epilogue, is not shown to be it
+        const refuse = (unproved?: string): never => {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': the epilogue of '${label}' says the return type is 5 to 8 bytes ` +
-              '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
+              '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1' +
+              (unproved === undefined
+                ? ''
+                : `; the ${ownMemoryReturn!.bytes}-byte struct its own declaration returns through r0 would explain it, ` +
+                  `but the lift cannot show r0 is only that struct's storage: ${unproved}`),
           );
         };
         if (ownMemoryReturn !== undefined && ownMemoryReturn.bytes > 4 && ownMemoryReturn.bytes <= 8) {

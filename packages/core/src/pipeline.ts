@@ -343,7 +343,7 @@ export function liftStamped(
   const own = Object.hasOwn(table, name) ? table[name] : undefined;
   const ownReturn = ownStructReturnThroughMemory(name, target, own, split.ownContextProto, notes);
   // a refusal about the return's width that the declared struct explains waits for the proof
-  let deferred: (() => never) | undefined;
+  let deferred: ((unproved: string) => never) | undefined;
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   const fn = liftWithinContextBound(
     name,
@@ -598,14 +598,15 @@ interface OwnStructReturn {
  *  machine code's function, with a note in `notes`: the context's own entry is a header nothing
  *  checked against a definition (`liftWithinContextBound` says why that makes it soft). Either way, a
  *  refusal the frontend `deferred` because this struct would explain it (agbcc's 8-byte epilogue,
- *  `LiftOptions.ownMemoryReturn`) is thrown where the proof fails, since nothing else explains it. */
+ *  `LiftOptions.ownMemoryReturn`) is thrown where the proof fails, since nothing else explains it, and
+ *  says why the proof failed. */
 function returnOwnStruct(
   fn: Fn,
   name: string,
   target: TargetDescription,
   own: OwnStructReturn,
   notes: string[] | undefined,
-  deferred: (() => never) | undefined,
+  deferred: ((unproved: string) => never) | undefined,
 ): void {
   if (own.register) {
     // a word the struct may not be all of stays the lift's own return, as the machine has it, and
@@ -625,7 +626,7 @@ function returnOwnStruct(
     return;
   }
   // a refusal the frontend deferred because this struct would explain it stands where it does not
-  deferred?.();
+  deferred?.(why);
   const declared = `${own.type.declared ?? 'a struct'} by value, which this target returns through a hidden pointer in ${target.argRegs[0]}`;
   if (own.stated) {
     throw new FrontendUnsupportedError(
