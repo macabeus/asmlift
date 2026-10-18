@@ -520,7 +520,8 @@ function spelledDeclaration(name: string, p: FnProto): string {
  *  A struct the rule hands back in one register (agbcc's and mwcc's one-word struct in r0/r3) is
  *  that register's word: the plan says so (`register`), and a struct that is all one word-wide
  *  integer member is spelled as that member (frontend/own-struct-return.ts
- *  `liftOwnRegisterStruct`), where any other one stays the word the lift returns. */
+ *  `liftOwnRegisterStruct`), where any other one stays the word the lift returns, with a note in
+ *  `notes` saying why (`returnOwnStruct`). */
 function ownStructReturnThroughMemory(
   name: string,
   target: TargetDescription,
@@ -608,8 +609,16 @@ function returnOwnStruct(
   deferred: (() => never) | undefined,
 ): void {
   if (own.register) {
-    // a word the struct may not be all of stays the lift's own return, as the machine has it
-    liftOwnRegisterStruct(fn, own.type);
+    // a word the struct may not be all of stays the lift's own return, as the machine has it, and
+    // the note says why the declared struct is not what it returns
+    const kept = liftOwnRegisterStruct(fn, own.type);
+    if (kept !== undefined) {
+      notes?.push(
+        `[own-return] ${name}: its ${own.stated ? '' : 'context '}declaration \`${own.declaration}\` returns ` +
+          `${own.type.declared ?? 'a struct'} by value in ${target.returnReg}, and ${kept} — lifted as the word ` +
+          'the machine code returns, which the header contradicts',
+      );
+    }
     return;
   }
   const why = liftOwnStructReturn(fn, own.type, target);

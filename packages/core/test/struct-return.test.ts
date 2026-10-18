@@ -777,4 +777,23 @@ describe('a function that itself returns a struct', () => {
       /a return hands back something other than the address it was handed in r0/,
     );
   });
+
+  // a register struct that is not one word of one member stays the word, and says why
+  test('a register struct kept as the word carries a note', () => {
+    const rmk2 = 'rmk2:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tbx\tlr\n';
+    const S2 = {
+      params: ['s32'],
+      returns: 'struct S2',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'h', type: 'u16' }] },
+    };
+    for (const [opts, which] of [
+      [{ prototypes: { rmk2: S2 } }, 'declaration'],
+      [{ ownContextProto: S2 }, 'context declaration'],
+    ] as const) {
+      expect(decompile('rmk2', rmk2, ARMV4T_AGBCC, opts).ownArityNotes).toEqual([
+        `[own-return] rmk2: its ${which} \`struct S2 rmk2(s32)\` returns struct S2 by value in r0, and it is not one ` +
+          'word that is all one integer member — lifted as the word the machine code returns, which the header contradicts',
+      ]);
+    }
+  });
 });
