@@ -311,6 +311,13 @@ describe('foldDisplacedAccesses refusals', () => {
     expect(c).toContain('(u8 *)a0 + 38');
   });
 
+  // `*(u16 *)(x + 0x6000000)`: an address constant added to an index, never a member offset.
+  test('a displacement of 16 MiB or more is an address constant', () => {
+    const ir = twoAccesses('store %3, %1 {off=0, width=1}').replace('{value=38}', '{value=100663296}');
+    expect(emit(ir).folded).toBe(0);
+    expect(emit(ir.replace('{value=100663296}', '{value=16777215}')).folded).toBe(1);
+  });
+
   test('a volatile access stays on its materialised address', () => {
     const { folded, c } = emit(twoAccesses('store %3, %1 {off=0, width=1, volatile=true}'));
     expect(folded).toBe(0);

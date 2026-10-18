@@ -450,6 +450,9 @@ export interface DisplacedRoot {
   memberStoreOrder: boolean;
 }
 
+/** The smallest displacement `address-constant` reads as an address rather than a member offset. */
+const ADDRESS_CONSTANT_FLOOR = 1 << 24;
+
 export const DISPLACED_BASE_GATES: readonly Gate<DisplacedBase>[] = [
   {
     id: 'not-recovery-root',
@@ -467,6 +470,16 @@ export const DISPLACED_BASE_GATES: readonly Gate<DisplacedBase>[] = [
         constAddressOf(defs, p, 0) !== null
       );
     },
+  },
+  {
+    // `*(u16 *)(x + 0x6000000)`, `*(u8 *)(0x6000000 + i * 2)`: a hardware or segment address added
+    // to an index. Read as a member it retypes the integer as a pointer to a struct with a 96 MiB
+    // pad. No struct on these machines comes near 16 MiB (GBA EWRAM is 256 KiB, N64 RDRAM 8 MiB,
+    // GameCube main RAM 24 MiB in all), and every address region a constant names starts past it.
+    id: 'address-constant',
+    why: 'a displacement of 16 MiB or more is an address constant added to an index, not a member offset',
+    sound: false,
+    rejects: ({ disp: { k } }) => Math.abs(k) >= ADDRESS_CONSTANT_FLOOR,
   },
   {
     id: 'claimed-chain',
