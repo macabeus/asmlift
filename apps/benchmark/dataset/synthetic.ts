@@ -942,6 +942,25 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct T; void sfar_h(struct T*,u16*);',
     proto: { sfar_h: { returnsVoid: true } },
   },
+  // The other side of the same pair: the source wrote the cast, or held the address in a pointer,
+  // and agbcc built the address before the right-hand side. The `/far-cast` lift keeps the store
+  // on its address; the default member spelling compiles to a different object.
+  {
+    sym: 'sfar_cast',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;};\nvoid sfar_cast(struct S*s,u8*q){ *((u8*)s+38)=*q; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_cast(struct S*,u8*);',
+    proto: { sfar_cast: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_ptr',
+    src: 'struct S{s32 a;s32 b;u8 pad[30];u8 c;u8 d;};\nvoid sfar_ptr(struct S*s,u8*q,u8*r){ u8*p=&s->c; p[0]=*q; p[1]=*r; s->a=0; }',
+    features: ['struct', 'field', 'store', 'mixed-width'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; void sfar_ptr(struct S*,u8*,u8*);',
+    proto: { sfar_ptr: { returnsVoid: true } },
+  },
   // The same gap past a 16-bit displacement: ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and
   // GCC 2.7.2's `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1;
   // stb r4, -25537(r5)`. There the member and both cast spellings compile to the same bytes
