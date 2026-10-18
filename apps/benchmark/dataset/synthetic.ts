@@ -1157,16 +1157,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // register this function never wrote may still hold its own incoming argument: `s` stays in the
   // first argument register while `1` goes into the second, and a count that stops at the first
   // lifts `logv() + 1`. The gap is DECIDED where the register above it surely is an argument
-  // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value no memory read
-  // produced and nothing else reads, and where argument words fill in order the gap below it is the
-  // function's own arguments passed on. On O32 the own declaration (`ctx`) must put an integer word
-  // in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC the second
-  // word of an 8-byte argument that could skip the gap must hold nothing — `passmid`'s a3/r6 is no
-  // parameter of `(int, int)`. On PowerPC the own declaration must also show no floating parameter,
-  // since a float passed on in f1 is invisible. And the call must show nothing past its count: no own
-  // parameter, no outgoing stack word, and no register the count takes past the decided one
-  // without the same proof (`decidedCallRefusal`). `ctx` declares neither callee, so neither decompiler is told the
-  // arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
+  // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value nothing else reads
+  // (and, on agbcc, that no memory read produced), and where argument words fill in order the gap
+  // below it is the function's own arguments passed on. On ido7.1 a gap at a0 also needs the call's
+  // result read, as `+ 1` reads it here (`passsr`). On O32 the own declaration (`ctx`) must put an
+  // integer word in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC
+  // the second word of an 8-byte argument that could skip the gap must hold nothing — `passmid`'s
+  // a3/r6 is no parameter of `(int, int)`. On PowerPC the own declaration must also show no floating
+  // parameter, since a float passed on in f1 is invisible. And the call must show nothing past its
+  // count: no own parameter, no outgoing stack word, and no register the count takes past the
+  // decided one without the same proof (`decidedCallRefusal`). `ctx` declares neither callee, so
+  // neither decompiler is told the arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
   // machine code as `g2()`, so no row expects a decline for it.
   ...(
     [
@@ -1216,6 +1217,38 @@ export const SYNTHETIC: SynthSpec[] = [
     features: [],
     toolchains: ['agbcc'],
     ctx: 'int passvol(int);',
+  },
+  // …WHICH ONLY agbcc DOES: the other compilers discard a read into $zero, v0/v1 or r0, never an
+  // argument register (target.ts `discardedReadMayFillArgRegister`), so there a load only the call
+  // reads is an argument and the gap below it is decided. Not on agbcc, where `logv(s, gx)` is the
+  // object `passvol`'s shape compiles to, `ldr r1,[r1]` either way.
+  ...(
+    [
+      [['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [
+        ['mwcc_233_163n', 'mwcc_247_107'],
+        ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+      ],
+    ] as const
+  ).map(([toolchains, cflags]): SynthSpec => ({
+    sym: 'passld',
+    src: 'int logv();\nint gx;\nint passld(const char *s){ return logv(s, gx) + 1; }',
+    features: ['global'],
+    toolchains: [...toolchains],
+    ...(cflags === undefined ? {} : { cflags: [...cflags] }),
+    ctx: 'extern int gx;\nint passld(const char *);',
+  })),
+  // IDO HANDS A CALLER'S OWN DESTINATION ON AS THE CALLEE'S HIDDEN STRUCT-RETURN POINTER, leaving a0
+  // untouched under the set a1: `*p = sg(1)` is `jal sg; li a1,1`, the bytes of `sg(p, 1)` with its
+  // result unused (target.ts `forwardsStructReturnDestination`). So a gap at a0 is decided only where
+  // something other than a `ret` reads the call's result, and this cell is a declined witness. The
+  // other compilers copy through a frame temporary and leave no gap, so the row is ido7.1's alone.
+  {
+    sym: 'passsr',
+    src: 'struct S { int a, b, c; };\nstruct S sg();\nint passsr(struct S *p){ *p = sg(1); return 0; }',
+    features: ['struct-return'],
+    toolchains: ['ido7.1'],
+    ctx: 'struct S { int a, b, c; };\nint passsr(struct S *);',
   },
   // THE HOLE AN 8-BYTE ARGUMENT SKIPS: `g(1, 3LL)` and `g(1, b, 0, 3)` are one object on O32 and
   // PowerPC (a1/r4 untouched under the set a2:a3/r5:r6 pair), so the gap is not decidable and these
