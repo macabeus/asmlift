@@ -459,6 +459,16 @@ function ptrMemberElement(
 // 4096 — including offsets past Thumb's immediate range, and under multi-member, across-a-call
 // and in-a-loop shapes. It is one load whose member offset becomes the same immediate the cast
 // form used, and unlike the indexed form it composes.
+//
+// ONE SHAPE THAT MEASUREMENT MISSED IS NOT IDENTICAL: on agbcc, a STORE OF A LOADED VALUE to an
+// offset past Thumb's immediate range. The member form loads the value before it materialises
+// `base + K` and the cast form after it, because expand_assignment (gcc/expr.c) expands only the
+// base of a COMPONENT_REF target (:2535) and evaluates the right-hand side first in store_field
+// (:2624), while it expands a cast (INDIRECT_REF) target whole (:2689) before the right-hand side
+// (:2747). `synthetic:sfar_b` pins it. The member is the source's own spelling there, so the
+// difference only argues for emitting it, which this does; raise/structs.ts
+// `foldDisplacedAccesses` is the same question for a pointer the lift recovers a struct for. On
+// ido, KMC, GCC 2.7.2 and mwcc the two compile alike past a 16-bit displacement too.
 
 /** The pointee a global's value may be spelled through: the members the declaration synthesis
  *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts

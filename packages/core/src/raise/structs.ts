@@ -49,6 +49,7 @@
 // one whose address is declared elsewhere (`recognizeStructs`).
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
+import { placedAt } from '../ir/discipline';
 import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess, unionViewSigns } from '../ir/types';
 import type { StructType } from '../l3/ast';
@@ -371,6 +372,160 @@ function fieldSize(t: IrType): number {
     default:
       return 4;
   }
+}
+
+/** A constant displacement off a root — `add(p, K)`, `add(K, p)`, `sub(p, K)`, or a chain of them —
+ *  read through `defs`: the root `p`, the total `K`, and the chain's values from `v` toward `p`. */
+function displacementOf(defs: Map<Value, Op>, v: Value): { root: Value; k: number; chain: Value[] } | null {
+  const constOf = (x: Value): number | null => {
+    const d = defs.get(x);
+    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : null;
+  };
+  let k = 0;
+  const chain: Value[] = [];
+  let cur = v;
+  for (;;) {
+    const d = defs.get(cur);
+    if (!d || (d.opcode !== 'add' && d.opcode !== 'sub')) {
+      break;
+    }
+    const [x, y] = d.operands;
+    const ky = constOf(y);
+    const kx = d.opcode === 'add' ? constOf(x) : null;
+    if (ky !== null && kx === null) {
+      k += d.opcode === 'add' ? ky : -ky;
+      cur = x;
+    } else if (kx !== null && ky === null) {
+      k += kx;
+      cur = y;
+    } else {
+      break;
+    }
+    chain.push(d.results[0]);
+  }
+  return chain.length === 0 ? null : { root: cur, k, chain };
+}
+
+/** FOLD A MATERIALISED DISPLACEMENT INTO THE ACCESS: a load/store whose base is `add(p, K)` (or a
+ *  chain of constant adds/subs off `p`) becomes an access of `p` at `off + K`, so `recognizeStructs`
+ *  sees it in `p`'s access set and spells it as the member it is.
+ *
+ *  WHY. Every ISA has a displacement range, and a member past it is reached through an address the
+ *  machine materialises first: Thumb's `adds rX, #38; strb [rX]` (a byte past 31, a half past 62,
+ *  a word past 124), ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and GCC 2.7.2's
+ *  `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1; stb r4, -25537(r5)`.
+ *  The lift keys such an access on the materialised address, so it never joined its struct and was
+ *  spelled as a cast `*((u8 *)p + 38)`. On agbcc that spelling is a different program: for a
+ *  COMPONENT_REF target expand_assignment (gcc/expr.c :2535) expands only the base and store_field
+ *  (:2624) evaluates the right-hand side first, while a cast (INDIRECT_REF) target is expanded whole
+ *  (:2689) before the right-hand side (:2747). A member store of a loaded value therefore loads it
+ *  before the `adds #K`, and the cast store after (`sa3:sub_800F0E8`'s offset-38 byte store). On
+ *  ido, KMC, GCC 2.7.2 and mwcc the two spellings compile alike; there the fold buys the type.
+ *
+ *  REFUSES, leaving every access off that root on its materialised address, as before:
+ *    • the root is no recovery target of `recognizeStructs`: already typed, a frame (`laddr`), a
+ *      global (`gaddr`) or literal address, one declared elsewhere, or a variable-index array base;
+ *    • a value of the chain is typed (struct-arrays or member-arrays claimed it), is an
+ *      `aload`/`astore` base, or has any use but the next link of the chain or the BASE of a
+ *      constant-offset load/store — a stored value, a call argument, a compare, an edge argument (a
+ *      loop-carried induction step) — because then the source held the address itself;
+ *    • an access is placement-stamped (volatile, device-pinned, declared volatile);
+ *    • a folded offset would be negative;
+ *    • the root's folded access set would not make a struct: array-shaped (uniform stride, or one
+ *      access — no struct evidence) or a layout `buildStruct` refuses (an overlap or a packed
+ *      field). So the overlap and packed refusals never fire on an access this fold moved, and a
+ *      root whose own accesses already overlap keeps its spelling.
+ *  Runs right before `recognizeStructs`, after raise/truncload.ts, which therefore never sees a
+ *  folded access. Returns the number of accesses folded. */
+export function foldDisplacedAccesses(fn: Fn): number {
+  const defs = defOpMap(fn);
+  const { accessesOf, arrayBases } = constOffsetAccesses(fn);
+  // Every use of each value: the op and operand index, or null for an edge argument.
+  const uses = new Map<Value, { op: Op | null; at: number }[]>();
+  const use = (v: Value, op: Op | null, at: number) => {
+    let l = uses.get(v);
+    if (!l) {
+      l = [];
+      uses.set(v, l);
+    }
+    l.push({ op, at });
+  };
+  for (const b of fn.blocks) {
+    for (const op of b.ops as Op[]) {
+      op.operands.forEach((v, i) => use(v, op, i));
+      for (const s of op.successors) {
+        for (const v of s.args) {
+          use(v, null, -1);
+        }
+      }
+    }
+  }
+  const isRecoveryRoot = (p: Value): boolean => {
+    const d = defs.get(p)?.opcode;
+    return (
+      p.type.kind === 'unknown' &&
+      d !== 'laddr' &&
+      d !== 'gaddr' &&
+      d !== 'const' &&
+      !arrayBases.has(p) &&
+      globalCellOf(defs, p, 0) === null &&
+      constAddressOf(defs, p, 0) === null
+    );
+  };
+  const onlyFeeds = (v: Value, next: Value | undefined): boolean =>
+    (uses.get(v) ?? []).every(({ op, at }) =>
+      op === null
+        ? false
+        : next === undefined
+          ? (op.opcode === 'load' || op.opcode === 'store') && at === 0
+          : op.results[0] === next && op.opcode !== 'load' && op.opcode !== 'store',
+    );
+  const byRoot = new Map<Value, { access: Access; k: number }[]>();
+  const refused = new Set<Value>();
+  for (const [base, accesses] of accessesOf) {
+    const disp = displacementOf(defs, base);
+    if (!disp || refused.has(disp.root)) {
+      continue;
+    }
+    const ok =
+      isRecoveryRoot(disp.root) &&
+      disp.chain.every(
+        (v, i) =>
+          v.type.kind === 'unknown' && !arrayBases.has(v) && onlyFeeds(v, i === 0 ? undefined : disp.chain[i - 1]),
+      ) &&
+      accesses.every((a) => placedAt(a.op) === null && a.off + disp.k >= 0);
+    if (!ok) {
+      refused.add(disp.root);
+      byRoot.delete(disp.root);
+      continue;
+    }
+    const list = byRoot.get(disp.root) ?? [];
+    byRoot.set(disp.root, list);
+    for (const access of accesses) {
+      list.push({ access, k: disp.k });
+    }
+  }
+  let folded = 0;
+  for (const [root, moved] of byRoot) {
+    const merged = [
+      ...(accessesOf.get(root) ?? []),
+      ...moved.map(({ access, k }) => ({ ...access, off: access.off + k })),
+    ];
+    if (isArray(merged)) {
+      continue;
+    }
+    try {
+      buildStruct('Struct', merged);
+    } catch {
+      continue;
+    }
+    for (const { access, k } of moved) {
+      access.op.operands[0] = root;
+      access.op.attrs.off = access.off + k;
+      folded++;
+    }
+  }
+  return folded;
 }
 
 /** Recover struct-pointer types from access-pattern evidence. Runs after array legalization and

@@ -619,11 +619,14 @@ test('a negative access offset stays exact — no struct member at a negative of
 // pointer-global rule already uses, CAST THEN ADD.
 describe('byte offsets on a rendered pointer', () => {
   // `ldr r2,[r0,#4]` / `str r2,[r0,#8]` type a0 as `s32 *`; then two byte stores through it, one
-  // at an offset the element size divides (60) and one at an offset it does not (62).
+  // at an offset the element size divides (60) and one at an offset it does not (62). The function
+  // RETURNS the second address, so the source held it as a pointer: without that use the two stores
+  // are members of a recovered struct instead (raise/structs.ts `foldDisplacedAccesses`), and this
+  // rendering is never reached.
   const bytesOnWordPtr =
     'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
     '\tadd\tr3, r0, #0x3e\n\tmov\tr4, #0x7\n\tstrb\tr4, [r3]\n' +
-    '\tadd\tr3, r0, #0x3c\n\tstrb\tr4, [r3]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    '\tadd\tr3, r0, #0x3c\n\tstrb\tr4, [r3]\n\tadd\tr0, r3, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
 
   test('an offset the element size does not divide casts the BASE, not the sum', () => {
     const src = decompile('f', bytesOnWordPtr, ARMV4T_AGBCC).source;
@@ -647,10 +650,11 @@ describe('byte offsets on a rendered pointer', () => {
     // to ask — so the reinterpret cast, which was the only carrier of the access's signedness,
     // stopped being emitted. `*(u8 *)p` where the machine did `ldrsb` is not merely a different
     // value: an `unsigned char` promotes to a non-negative `int`, so `p[9] < 0` goes dead.
+    // (returning the address, as `bytesOnWordPtr` does, keeps it off a recovered struct)
     const signedByte =
       'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
       '\tadd\tr3, r0, #0x1\n\tldrsb\tr1, [r3]\n\tstr\tr1, [r0, #0xc]\n' +
-      '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      '\tadd\tr0, r3, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     const src = decompile('f', signedByte, ARMV4T_AGBCC).source;
     expect(src).toContain('*(s8 *)((u8 *)a0 + 1)'); // byte 1, read signed
     expect(src).not.toMatch(/=\s*\*\(\(u8 \*\)a0 \+ 1\)/); // the unsigned read
