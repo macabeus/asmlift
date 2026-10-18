@@ -180,6 +180,22 @@ describe("the context's own entry", () => {
         'kept as a parameter, which the header contradicts',
     ]);
   });
+
+  // `int t2(int a, int b, int c){ return a ? b : c; }` under `int t2(int);` at KMC -O2: a1's and
+  // a2's undefined values meet in v0's join, which collapses into one keyed v0
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('keeps two registers past it read through one join, with a note (%s)', (_c, target) => {
+    const T2 = ['0:\tbeqz\ta0,c <f+0xc>', '4:\tmove\tv0,a2', '8:\tmove\tv0,a1', 'c:\tjr\tra', '10:\tnop'];
+    const r = decompile('f', obj(T2), target, { ownContextProto: { params: ['int'], returns: 'int' } });
+    expect(r.source).toBe(src(T2, target));
+    expect(r.source).toMatch(/^s32 f\(s32 a0, s32 a1, s32 a2\) \{/m);
+    expect(r.ownArityNotes).toEqual([
+      'f: its context declaration `int f(int)` fills 1 argument word, and the body reads a1, a2 past it — ' +
+        'kept as parameters, which the header contradicts',
+    ]);
+  });
 });
 
 describe('the register half: scratch and saved registers', () => {

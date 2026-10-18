@@ -1186,6 +1186,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ).toMatch(/uninit_r0/);
     });
 
+    // `int t3(int a, int b, int c){ int x = a ? b : c; g(0); return g(x); }` under `int t3(int);`:
+    // r1's and r2's undefined values meet in r4's join, which collapses into one keyed r4
+    // (frontend/ssa.ts `collapseUndefinedJoins`), and the read of r1/r2 must survive that
+    test('a read of two registers past it through one join keeps both, with a note', () => {
+      const T3 =
+        't3:\n\tpush\t{r4, lr}\n\tadd\tr4, r2, #0\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr4, r1, #0\n.L3:\n' +
+        '\tmov\tr0, #0x0\n\tbl\tg\n\tadd\tr0, r4, #0\n\tbl\tg\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { g: { params: ['int'], returns: 'int' } };
+      const r = decompile('t3', T3, ARMV4T_AGBCC, {
+        prototypes: g,
+        ownContextProto: { params: ['int'], returns: 'int' },
+      });
+      expect(r.source).toBe(decompile('t3', T3, ARMV4T_AGBCC, { prototypes: g }).source);
+      expect(r.source).toMatch(/^s32 t3\(s32 a0, s32 a1, s32 a2\) \{/m);
+      expect(r.ownArityNotes).toEqual([
+        't3: its context declaration `int t3(int)` fills 1 argument word, and the body reads r1, r2 past it — ' +
+          'kept as parameters, which the header contradicts',
+      ]);
+    });
+
     test('a read of the last argument register lifts as without it, and a stated entry wins', () => {
       const UFIRST =
         'ufirst:\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x5\n\tble\t.L6\n\tldr\tr0, .L7\n\tstr\tr3, [r0]\n' +

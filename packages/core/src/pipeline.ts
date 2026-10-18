@@ -16,8 +16,9 @@ import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { frontendFor } from './frontend/registry';
-import { type Fn, type Op, type Value, reachableBlocks } from './ir/core';
-import { deletableWhenDead } from './ir/discipline';
+import { ABSORBED_KEYS } from './frontend/ssa';
+import { type Fn, reachableBlocks } from './ir/core';
+import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
 import { firstTrivialPhi } from './ir/simplify';
 import { T, intWidth } from './ir/types';
@@ -373,9 +374,9 @@ export function liftStamped(
  *  "READS" MEANS THE FINISHED LIFT, not the SSA builder. A register is read as the argument of a
  *  call whose arity was guessed, and the guess then trims it (`k4(a, b, 2, 0); zq(a); sl();` reads
  *  a2/a3 as `zq`'s and `sl`'s possible arguments); so the test is that an undefined value of a
- *  dropped register survives into the lift — an `undef` keyed by it whose value reaches an effect,
- *  a terminator's operand or a join that does (`readDroppedArgRegs`). A read the raising tower
- *  would delete later still counts: that only keeps the parameter.
+ *  dropped register survives into the lift — an `undef` keyed by it, or by a join that took it,
+ *  that `dce` would not delete (`readDroppedArgRegs`). A read the raising tower would delete later
+ *  still counts: that only keeps the parameter.
  *
  *  A LIFT THAT REFUSES WITHIN THE BOUND IS LIFTED WITHOUT IT, with a note, so the bound turns no
  *  lift into a decline. The one refusal it adds is a stated entry's (frontend/ssa.ts
@@ -396,7 +397,8 @@ function liftWithinContextBound(
   notes: string[] | undefined,
 ): Fn {
   const frontend = frontendFor(target);
-  const unbounded = () => frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions);
+  const unbounded = () =>
+    forgetAbsorbedKeys(frontend.lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions));
   let words =
     ownContext === undefined || Object.hasOwn(prototypes, name)
       ? undefined
@@ -425,7 +427,7 @@ function liftWithinContextBound(
     }
     const read = readDroppedArgRegs(fn, target.argRegs.slice(words));
     if (read.length === 0) {
-      return fn;
+      return forgetAbsorbedKeys(fn);
     }
     notes?.push(
       `${name}: its context declaration \`${declared}\` fills ${words} argument word${words === 1 ? '' : 's'}, ` +
@@ -440,57 +442,33 @@ function liftWithinContextBound(
 }
 
 /** The dropped argument registers whose undefined value the lift still reads: an `undef` keyed by
- *  one whose result reaches something the lift must keep. Live from the ops `deletableWhenDead`
- *  says no to (an effect, a terminator's own operands), through every operand of a live op, and
- *  through a successor's argument only where the block parameter it binds is live: an undefined
- *  value carried round a loop into a join nothing reads is dead, which `deadOps` — counting every
- *  successor argument a use — would keep. */
+ *  one, or that absorbed one when its join collapsed (frontend/ssa.ts `ABSORBED_KEYS`), which is
+ *  not dead (`deadOps`, the definition `dce` deletes by). */
 function readDroppedArgRegs(fn: Fn, dropped: readonly string[]): string[] {
-  const def = new Map<Value, Op>();
-  const incoming = new Map<Value, Value[]>();
-  const live = new Set<Value>();
-  const work: Value[] = [];
-  const mark = (v: Value) => {
-    if (!live.has(v)) {
-      live.add(v);
-      work.push(v);
-    }
-  };
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const r of op.results) {
-        def.set(r, op);
-      }
-      for (const s of op.successors) {
-        s.block.params.forEach((p, k) => {
-          const a = s.args[k];
-          if (a !== undefined) {
-            incoming.set(p, [...(incoming.get(p) ?? []), a]);
-          }
-        });
-      }
-    }
-  }
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      if (!deletableWhenDead(op) || op.results.length !== 1) {
-        op.operands.forEach(mark);
-      }
-    }
-  }
-  for (let v = work.pop(); v !== undefined; v = work.pop()) {
-    def.get(v)?.operands.forEach(mark);
-    incoming.get(v)?.forEach(mark);
-  }
+  const dead = deadOps(fn.blocks);
   const read = new Set<string>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'undef' && live.has(op.results[0]) && dropped.includes(String(op.attrs.key))) {
-        read.add(String(op.attrs.key));
+      if (op.opcode === 'undef' && !dead.has(op)) {
+        for (const k of [String(op.attrs.key), ...String(op.attrs[ABSORBED_KEYS] ?? '').split(',')]) {
+          read.add(k);
+        }
       }
     }
   }
   return dropped.filter((r) => read.has(r));
+}
+
+/** `fn` with no `undef` carrying `ABSORBED_KEYS`, which nothing past the own-entry bound reads. */
+function forgetAbsorbedKeys(fn: Fn): Fn {
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'undef') {
+        delete op.attrs[ABSORBED_KEYS];
+      }
+    }
+  }
+  return fn;
 }
 
 /** A declaration as a note spells it: `int f(short, int)`, `void f(void)`. */
