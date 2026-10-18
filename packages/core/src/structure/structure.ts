@@ -46,7 +46,9 @@ import { globalBaseOf } from '../ir/alias';
 import {
   Block,
   Fn,
+  OWN_RETURN_OBJECT,
   Op,
+  RETURNS_OBJECT,
   Successor,
   Value,
   byValueOperands,
@@ -2635,7 +2637,10 @@ export function structure(
     const undefByKey = new Map<string, string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if (op.opcode === 'laddr') {
+        if (op.opcode === 'laddr' && op.attrs[OWN_RETURN_OBJECT] === true) {
+          // the function's own return object, in its caller's storage: no frame offset names it
+          names.set(op, mint('ret'));
+        } else if (op.opcode === 'laddr') {
           const off = op.attrs.off as number;
           let n = byOff.get(off);
           if (n === undefined) {
@@ -4736,6 +4741,12 @@ export function structure(
   // which over-declines, the refusing direction.
   let zeroTripStale: Map<Value, string> | null = null;
   const expr = (v: Value): Expr => exprWith(activeSub)(v);
+  // A return that hands back the function's own struct return object (frontend/own-struct-return.ts)
+  // returns that local by value, `return ret;`, where its address would print `&ret`.
+  const returnedValue = (term: Op): Expr => {
+    const value = expr(term.operands[0]);
+    return term.attrs[RETURNS_OBJECT] === true && value.k === 'addr' ? { k: 'var', name: value.name } : value;
+  };
   const withSub = <R>(sub: Map<Value, string>, run: () => R): R => {
     const prev = activeSub;
     activeSub = prev ? new Map([...prev, ...sub]) : sub;
@@ -5547,7 +5558,7 @@ export function structure(
     const term = b.ops[b.ops.length - 1];
     if (term.opcode === 'ret') {
       // A void function's `bx lr` leaves whatever in r0; suppress that phantom return value.
-      const value = returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]);
+      const value = returnsVoid || !term.operands.length ? undefined : returnedValue(term);
       // The `value === undefined` half is a GUARD: `l3/tailret.ts` re-checks it before deleting
       // anything, so marking a value-carrying return would change no output. The mark claims the asm
       // shows no `return;` STATEMENT here, which is a claim about a VOID return only.
@@ -7386,11 +7397,14 @@ export function structure(
   // `synthetic:dma_fill_uninit` loses its record here, and so did `kleod:ProcessInputAndUpdateEntities`
   // before that row was retired (2026-09-13).
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
+    if (at.attrs[OWN_RETURN_OBJECT] === true) {
+      return {};
+    }
     const off = at.attrs.off as number;
     const roots = new Set<Value>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if (op.opcode === 'laddr' && (op.attrs.off as number) === off) {
+        if (op.opcode === 'laddr' && (op.attrs.off as number) === off && op.attrs[OWN_RETURN_OBJECT] !== true) {
           roots.add(op.results[0]);
         }
       }

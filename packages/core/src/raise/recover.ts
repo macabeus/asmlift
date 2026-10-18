@@ -2,7 +2,7 @@
 // (signed comparisons/divisions ⇒ signed operands), types memory-access bases as pointers,
 // propagates pointer-ness across the SSA, then defaults the rest to s32. Emits recovered
 // types onto the SSA values in place.
-import { Fn, Value, defOpMap } from '../ir/core';
+import { Fn, RETURNS_OBJECT, Value, defOpMap } from '../ir/core';
 import { IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { storeSigned } from './storesign';
 
@@ -249,6 +249,10 @@ export function returnType(fn: Fn): IrType {
     const term = b.ops[b.ops.length - 1];
     if (term?.opcode === 'ret' && term.operands.length > 0) {
       const v = term.operands[0];
+      // the function's own struct return object, handed back whole (ir/core.ts `RETURNS_OBJECT`)
+      if (term.attrs[RETURNS_OBJECT] === true && v.type.kind === 'ptr') {
+        return v.type.to;
+      }
       // A NARROW value in the return register does not make the DECLARED return type narrow: the
       // register is a word, and the value's width says how it was COMPUTED, not what the header
       // spelled. The two readings compile alike through agbcc and do NOT through mwcc —

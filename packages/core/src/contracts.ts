@@ -777,9 +777,16 @@ export function assertLocalsWritten(sfn: SFn): void {
     }
     exprChildren(e).forEach(walkExpr);
   };
+  // A store to a member of a local struct (`ret.a = v`) writes that local.
+  const memberOf = (e: Expr): string | undefined =>
+    e.k === 'field' && e.dot === true ? (e.base.k === 'var' ? e.base.name : memberOf(e.base)) : undefined;
   const walkStmt = (st: Stmt): void => {
     if (st.k === 'assign' && suspect.has(st.name)) {
       written.add(st.name);
+    }
+    const member = st.k === 'store' ? memberOf(st.lval) : undefined;
+    if (member !== undefined && suspect.has(member)) {
+      written.add(member);
     }
     stmtExprs(st).forEach(walkExpr);
     stmtChildren(st).forEach(walkStmt);

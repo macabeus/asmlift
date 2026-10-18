@@ -17,7 +17,7 @@
 // stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
 // consumption point makes staleness impossible by construction.
 import type { IrType } from '../ir/types';
-import { type AggregateLayout, type ParamType, type Prototypes, spellableProto } from '../proto';
+import { type AggregateLayout, type FnProto, type ParamType, type Prototypes, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
 import { Expr, SFn, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
@@ -78,6 +78,28 @@ export interface SymbolRef {
    *  implicit declaration a call makes comes too late for it; `declare.ts` prints that same
    *  declaration first, `int F();`, which states no parameter and so binds the call as before. */
   implicitCall?: true;
+  /** THE STRUCT THE FUNCTION ITSELF RETURNS ({@link ownReturnDefinition}): a ref under the
+   *  function's own name that declares nothing of it — its definition is its declaration — and only
+   *  defines `returned`, the type its own signature spells. */
+  definesReturn?: true;
+}
+
+/** The ref that defines the struct `tree` itself returns by value — a type the project's headers
+ *  own (ir/types.ts `declared`), so the candidate's declarations define it as they define a
+ *  callee's (`SymbolRef.returned`) — from the members its own declaration `own` lists. Undefined
+ *  where it returns no such struct, or its declaration lists no members. */
+export function ownReturnDefinition(tree: SFn, own: FnProto | undefined): SymbolRef | undefined {
+  const t = tree.retType;
+  const layout = own?.returnLayout;
+  if (t.kind !== 'struct' || t.declared === undefined || layout?.members === undefined) {
+    return undefined;
+  }
+  return {
+    name: tree.name,
+    info: { name: tree.name, kind: 'code' },
+    returned: { name: t.name, declared: t.declared, layout },
+    definesReturn: true,
+  };
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the

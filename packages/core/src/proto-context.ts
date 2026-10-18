@@ -1378,7 +1378,10 @@ function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<strin
  *  parameter, with an `[own-arity]` note naming the declaration and the register. (On kleod, whose
  *  every header its compiler checked, the entry stated as a hard bound takes the lifts with more
  *  parameters than their header from 52 of 377 to 1 of 373.) Only a typed list the bound can lay
- *  out is handed over; every other shape abstains.
+ *  out is handed over; every other shape abstains. A struct the entry returns through memory is
+ *  read on the same soft footing (pipeline.ts `returnOwnStruct`): lifted as that struct where the
+ *  machine proves the hidden pointer is only its storage, and kept as the pointer function with an
+ *  `[own-return]` note where it does not.
  *
  *  The benchmark hands each row the same entry (`withOwnContextMark`, apps/benchmark
  *  context-proto.ts `rowPrototypes`) where its manifest `proto` states none for the row's own
@@ -1493,7 +1496,7 @@ export function withOwnContextMark(
  *  the lifted function's own struct return is a spelling: `struct S1` sized by nothing, where the
  *  rule that decides whether it comes back through a hidden pointer reads a size
  *  (`returnsInMemory`), and `T8`, which reads as no aggregate at all and lifts as the pointer
- *  function its hidden pointer makes it (pipeline.ts `refuseOwnStructReturnThroughMemory`).
+ *  function its hidden pointer makes it (pipeline.ts `ownStructReturnThroughMemory`).
  *  A return already laid out, a scalar, a pointer or a floating type is left as stated, and so is
  *  a name the context does not lay out. */
 export function withOwnReturnLayout(

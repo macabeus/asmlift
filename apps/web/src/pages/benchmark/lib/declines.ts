@@ -614,9 +614,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // TWO MORE THROWS ARE THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
     // for a call that does lower but whose hidden pointer is not a local of this frame (a global, a
     // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2. And
-    // `pipeline.ts` `refuseOwnStructReturnThroughMemory`, on every frontend, of a function whose own
-    // stated declaration returns a struct (the callee's half) through memory, or in a register pair,
-    // or by a rule nothing sizes, which opens on the same clause as `plan`'s; no row states its own.
+    // `pipeline.ts` `ownStructReturnThroughMemory` and `returnOwnStruct`, on every frontend, of a
+    // function whose own declaration returns a struct (the callee's half): in a register pair (a
+    // context's declaration too — `ownsret_pair` on mwcc_242_81), by a rule nothing sizes, or
+    // through memory where the lift cannot show the hidden pointer is only its storage (a stated
+    // declaration alone), each opening on the same clause as `plan`'s.
     //
     // ITS `plan` INHABITANT IS `sret12` ON mwcc_242_81, a 12-byte struct the PowerPC lowering passes
     // no hidden pointer for. The call-plan refusals that only HAVE a struct return in them — its

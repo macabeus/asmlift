@@ -591,15 +591,18 @@ describe('a struct passed by value beside the hidden pointer', () => {
   });
 });
 
-// The function's own declaration is the caller's to state (a context's is left out, as the map's is)
+// THE FUNCTION'S OWN STRUCT RETURN, stated or from its context's own entry (frontend/own-struct-return.ts)
 describe('a function that itself returns a struct', () => {
-  test('refuses where its declaration is stated', () => {
-    const prototypes = { ...PROTOS, rmk1: returning('S1w', layout(['x', 'u32']), ['s32']) };
-    expect(() =>
-      decompile('rmk1', obj('rmk1', KMC_RMK1.lines), MIPS_GCC, { asmData: relocs(KMC_RMK1.rs), prototypes }),
-    ).toThrow(
-      /cannot lift 'rmk1': it is declared to return struct S1w by value, and this target returns that through a hidden pointer in a0/,
-    );
+  const S1W = returning('S1w', layout(['x', 'u32']), ['s32']);
+  const own = (name: string, f: Fixture, target: TargetDescription, p: object) =>
+    decompile(name, obj(name, f.lines), target, { asmData: relocs(f.rs), ...p }).source;
+
+  test('is the struct its declaration names, the hidden a0 its storage', () => {
+    for (const p of [{ prototypes: { ...PROTOS, rmk1: S1W } }, { prototypes: PROTOS, ownContextProto: S1W }]) {
+      expect(own('rmk1', KMC_RMK1, MIPS_GCC, p)).toMatch(
+        /struct S1w rmk1\(s32 a0\) \{\n\s+struct S1w ret;\n\s+ret\.x = a0 \+ 1;\n\s+return ret;\n\}/,
+      );
+    }
   });
 
   test('is the pointer function it compiles to where nothing states it', () => {

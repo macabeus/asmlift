@@ -918,22 +918,46 @@ function structReturnOf(
   own: FnProto,
   fail: FrontendRefusal,
 ): StructReturn | 'register' {
-  const refuse = (why: string): never =>
+  const read = returnedStruct(own, target);
+  if (typeof read === 'object' && 'refused' in read) {
     fail(
-      `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${why}`,
+      `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${read.refused}`,
     );
+  }
+  return read as StructReturn | 'register';
+}
+
+/** HOW A FUNCTION DECLARED TO RETURN A STRUCT OR UNION BY VALUE HANDS IT BACK on this target: the
+ *  struct laid out as a local of it is declared (`type`) where the target returns it through a
+ *  hidden pointer in argument 0, `'register'` where it returns it in registers, and the reason
+ *  otherwise. Both halves of the return read this: a call to such a callee (`structReturnOf`) and a
+ *  function that itself returns one (frontend/own-struct-return.ts). */
+export function returnedStruct(
+  own: FnProto,
+  target: TargetDescription,
+): { type: Extract<IrType, { kind: 'struct' }> } | 'register' | { refused: string } {
   const layout = returnedAggregate(own);
   const inMemory = returnsInMemory(layout, target);
   if (inMemory === undefined) {
-    refuse(
-      'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
+    return {
+      refused:
+        'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
         'say how it lays one of them out (an enum, a bitfield), or it states no rule ' +
         '(a prototype states them as `returnLayout`, a context by defining the struct)',
-    );
+    };
   }
   if (inMemory === false) {
     return 'register';
   }
+  const type = structLocalType(own, target);
+  return 'refused' in type ? type : { type };
+}
+
+/** The struct a declaration returns by value as a local of it is declared, or why it has none. */
+export function structLocalType(
+  own: FnProto,
+  target: TargetDescription,
+): Extract<IrType, { kind: 'struct' }> | { refused: string } {
   // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
   // is what the declarations block defines it by, and a typedef name is that tag too
   const spelling = (own.returns ?? '')
@@ -942,16 +966,17 @@ function structReturnOf(
     .replace(/\s+/g, ' ');
   const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
   if (tag === undefined) {
-    refuse('it names no type a local of it could be declared with');
+    return { refused: 'it names no type a local of it could be declared with' };
   }
-  const type = aggregateType(tag!, spelling, layout, target);
-  if (type === undefined) {
-    refuse(
-      'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
+  const type = aggregateType(tag, spelling, returnedAggregate(own), target);
+  if (type?.kind !== 'struct') {
+    return {
+      refused:
+        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
         '(an enum, a bitfield) — the local it lands in has no type here',
-    );
+    };
   }
-  return { type: type! };
+  return type;
 }
 
 /** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering

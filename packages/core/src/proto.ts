@@ -125,8 +125,10 @@ export interface FnProto {
   returnLayout?: AggregateLayout;
   /** ON THE FUNCTION'S OWN ENTRY, `true` says the entry is its declaration context's header entry
    *  (proto-context.ts `ownContextEntry`) and not the caller's word: it bounds the argument
-   *  registers SOFTLY (pipeline.ts `liftWithinContextBound`) and is read as nothing else — not as
-   *  the return, not by any reader of a stated own entry. Each entry path takes it out of the table
+   *  registers SOFTLY (pipeline.ts `liftWithinContextBound`), and a struct it returns through
+   *  memory is lifted as that struct where the lift proves the hidden pointer is only its storage
+   *  (pipeline.ts `returnOwnStruct`), and kept as the pointer function with a note where it does not;
+   *  it is read as nothing else — not as a scalar return, not by any reader of a stated own entry. Each entry path takes it out of the table
    *  before anything reads it (proto-context.ts `splitOwnContext`). It is how a table carries the
    *  entry a `--context` lift was handed: a benchmark row publishes it so its `--proto` replay
    *  lifts as the harness did. On a callee's entry it is ignored. */

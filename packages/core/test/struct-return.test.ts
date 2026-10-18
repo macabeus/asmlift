@@ -572,34 +572,79 @@ describe('a callee declared to return a struct or union by value', () => {
   });
 });
 
-// THE CALLEE HALF IS NOT MODELLED on any frontend (pipeline.ts `refuseOwnStructReturnThroughMemory`). agbcc's
-// `struct S8 rmk8(s32 x){ struct S8 s; s.a = x; s.b = x + 1; return s; }` stores through the r0 it
-// was handed, and lifted as is it is `s32 *rmk8(s32 *a0, s32 a1)`; mwcc_242_81's `rmk12`, a
-// 12-byte struct, stores through r3. A struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`)
-// is the lift's own return.
+// THE CALLEE HALF (frontend/own-struct-return.ts). agbcc's `struct S8 rmk8(s32 x){ struct S8 s;
+// s.a = x; s.b = x + 1; return s; }` stores through the r0 it was handed and hands r0 back, and
+// mwcc_242_81's `rmk12`, a 12-byte struct, stores through r3: with nothing declared each is the
+// pointer function `s32 *f(s32 *a0, s32 a1)`, and under its declaration the struct return it is. A
+// struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`) is the lift's own return.
 describe('a function that itself returns a struct', () => {
   const u32s = (...names: string[]) => ({
     kind: 'struct' as const,
     members: names.map((name) => ({ name, type: 'u32' })),
   });
-  test('through memory, it refuses where its declaration is stated, on agbcc', () => {
-    const rmk8 = 'rmk8:\n\tadd\tr2, r1, #0\n\tadd\tr3, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr3, [r0, #0x4]\n\tbx\tlr\n';
-    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
-    expect(() => decompile('rmk8', rmk8, ARMV4T_AGBCC, { prototypes })).toThrow(
-      /cannot lift 'rmk8': it is declared to return struct S8 by value, and this target returns that through a hidden pointer in r0/,
+  const S8 = { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') };
+  const S12 = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+  const rmk8 = 'rmk8:\n\tadd\tr2, r1, #0\n\tadd\tr3, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr3, [r0, #0x4]\n\tbx\tlr\n';
+
+  test('through memory, a stated declaration lifts the struct it returns, on agbcc', () => {
+    expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { prototypes: { rmk8: S8 } }).source).toMatch(
+      /struct S8 rmk8\(s32 a0\) \{\n\s+struct S8 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+return ret;\n\}/,
     );
     expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, {}).source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
   });
 
-  test('through memory, it refuses where its declaration is stated, on mwcc', () => {
+  test('through memory, a stated declaration lifts the struct it returns, on mwcc', () => {
     const rmk12 =
       '14 <rmk12>:\n14:\tstwu    r1,-32(r1)\n18:\taddi    r5,r4,1\n1c:\taddi    r0,r4,2\n20:\tstw     r4,0(r3)\n' +
       '24:\tstw     r5,4(r3)\n28:\tstw     r4,8(r1)\n2c:\tstw     r5,12(r1)\n30:\tstw     r0,16(r1)\n' +
       '34:\tstw     r0,8(r3)\n38:\taddi    r1,r1,32\n3c:\tblr\n';
-    const prototypes = { rmk12: { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') } };
-    expect(() => decompile('rmk12', rmk12, PPC_MWCC, { prototypes })).toThrow(
-      /cannot lift 'rmk12': it is declared to return struct S12 by value, and this target returns that through a hidden pointer in r3/,
+    expect(decompile('rmk12', rmk12, PPC_MWCC, { prototypes: { rmk12: S12 } }).source).toMatch(
+      /struct S12 rmk12\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+ret\.c = a0 \+ 2;\n\s+return ret;/,
     );
+  });
+
+  // a candidate's own unit has no header, so the struct its signature spells is defined among its
+  // declarations, and the function itself is declared by its definition alone
+  test('the struct it returns is defined in the declarations block, stated or from the context', () => {
+    for (const opts of [{ prototypes: { rmk8: S8 } }, { ownContextProto: S8 }]) {
+      const [c] = enumerateCandidates('rmk8', rmk8, ARMV4T_AGBCC, opts);
+      expect(c.source).not.toMatch(/^struct S8 \{/m);
+      const decls = renderDeclarations(c.symbolRefs ?? []);
+      expect(decls).toContain('struct S8 { u32 a; u32 b; };');
+      expect(decls).not.toMatch(/rmk8/);
+    }
+  });
+
+  // hand-written refusals of the proof: the pointer read back, and the pointer handed to a callee
+  const rb = 'rb:\n\tldr\tr2, [r0]\n\tadd\tr2, r2, #0x1\n\tstr\tr2, [r0, #0x4]\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+  const esc =
+    'esc:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tstr\tr1, [r4]\n\tbl\tuse\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+  const use = { params: ['void *'], returnsVoid: true };
+
+  test('a stated declaration refuses where the pointer is anything but the storage', () => {
+    expect(() => decompile('rb', rb, ARMV4T_AGBCC, { prototypes: { rb: S8 } })).toThrow(
+      /cannot lift 'rb': it is declared to return struct S8 by value, which this target returns through a hidden pointer in r0, and the lift cannot show that pointer is only its storage: r0 is read by a load/,
+    );
+    expect(() => decompile('esc', esc, ARMV4T_AGBCC, { prototypes: { esc: S8, use } })).toThrow(
+      /the lift cannot show that pointer is only its storage: r0 is read by a call/,
+    );
+  });
+
+  test("a context's own declaration lifts the struct, and keeps the pointer function with a note where it cannot", () => {
+    expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { ownContextProto: S8 }).source).toMatch(/struct S8 rmk8\(s32 a0\)/);
+    const kept = decompile('rb', rb, ARMV4T_AGBCC, { ownContextProto: S8 });
+    expect(kept.source).toMatch(/s32 \* rb\(s32 \*a0, s32 a1\)/);
+    expect(kept.ownArityNotes).toEqual([
+      expect.stringMatching(
+        /^\[own-return\] rb: its context declaration `struct S8 rb\(s32\)` returns struct S8 by value, [^]*r0 is read by a load/,
+      ),
+    ]);
+    // …and one nothing lays out keeps it too, saying what is missing
+    const unsized = decompile('rmk8', rmk8, ARMV4T_AGBCC, {
+      ownContextProto: { ...S8, returnLayout: { kind: 'struct' } },
+    });
+    expect(unsized.source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
+    expect(unsized.ownArityNotes).toEqual([expect.stringMatching(/\[own-return\] rmk8: [^]*nothing here lays it out/)]);
   });
 
   test('in the return register, it lifts', () => {
@@ -623,12 +668,12 @@ describe('a function that itself returns a struct', () => {
     );
   });
 
-  test('a stated typedef of a struct is that struct, and refuses where it comes back through memory', () => {
+  test('a stated typedef of a struct is that struct, returned through memory', () => {
     const rt8 = 'rt8:\n\tadd\tr2, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr1, [r0, #0x4]\n\tbx\tlr\n';
     const prototypes = withOwnReturnLayout({ rt8: { params: ['s32'], returns: 'T8' } }, 'rt8', CTX, 'c');
     expect(prototypes?.rt8?.returnLayout).toEqual(u32s('a', 'b'));
-    expect(() => decompile('rt8', rt8, ARMV4T_AGBCC, { prototypes })).toThrow(
-      /cannot lift 'rt8': it is declared to return T8 by value, and this target returns that through a hidden pointer in r0/,
+    expect(decompile('rt8', rt8, ARMV4T_AGBCC, { prototypes }).source).toMatch(
+      /T8 rt8\(s32 a0\) \{\n\s+T8 ret;\n\s+ret\.a = a0 \+ 1;\n\s+ret\.b = a0;\n\s+return ret;/,
     );
   });
 
@@ -639,12 +684,15 @@ describe('a function that itself returns a struct', () => {
     }
   });
 
-  // mwcc's svr4 rule hands an eight-byte struct back in r3:r4, and the lift returns r3 alone
+  // mwcc's svr4 rule hands an eight-byte struct back in r3:r4, and the lift returns r3 alone — so
+  // a context's declaration refuses it as a stated one does, where it would lift `s32 rmk8(s32 a0)`
   test('in a register pair, it refuses', () => {
     const rmk8 = '0 <rmk8>:\n0:\taddi    r4,r3,0\n4:\taddi    r3,r3,1\n8:\tblr\n';
-    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
-    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { prototypes })).toThrow(
+    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { prototypes: { rmk8: S8 } })).toThrow(
       /it is declared to return struct S8 by value, and this target hands its 8 bytes back in two registers/,
+    );
+    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { ownContextProto: S8 })).toThrow(
+      /its context declaration `struct S8 rmk8\(s32\)` says it returns struct S8 by value, and this target hands its 8 bytes back in two registers/,
     );
   });
 });
