@@ -591,15 +591,144 @@ describe('a struct passed by value beside the hidden pointer', () => {
   });
 });
 
-// The function's own declaration is the caller's to state (a context's is left out, as the map's is)
+// ido7.1 `struct S12 rmk12(s32 x){ struct S12 s; s.a = x; s.b = 0; s.c = x + 3; return s; }` builds
+// the struct at sp+4 and copies it out word by word through t7
+const IDO_RMK12: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-16',
+    '4:\taddiu\tt6,a1,3',
+    '8:\tsw\ta1,4(sp)',
+    'c:\tsw\tzero,8(sp)',
+    '10:\tsw\tt6,12(sp)',
+    '14:\taddiu\tt7,sp,4',
+    '18:\tlw\tt9,0(t7)',
+    '1c:\tmove\tv0,a0',
+    '20:\tsw\tt9,0(a0)',
+    '24:\tlw\tt8,4(t7)',
+    '28:\tsw\tt8,4(a0)',
+    '2c:\tlw\tt9,8(t7)',
+    '30:\taddiu\tsp,sp,16',
+    '34:\tjr\tra',
+    '38:\tsw\tt9,8(a0)',
+  ],
+  rs: [],
+};
+
+// THE FUNCTION'S OWN STRUCT RETURN, stated or from its context's own entry (frontend/own-struct-return.ts)
 describe('a function that itself returns a struct', () => {
-  test('refuses where its declaration is stated', () => {
-    const prototypes = { ...PROTOS, rmk1: returning('S1w', layout(['x', 'u32']), ['s32']) };
-    expect(() =>
-      decompile('rmk1', obj('rmk1', KMC_RMK1.lines), MIPS_GCC, { asmData: relocs(KMC_RMK1.rs), prototypes }),
-    ).toThrow(
-      /cannot lift 'rmk1': it is declared to return struct S1w by value, and this target returns that through a hidden pointer in a0/,
+  const S1W = returning('S1w', layout(['x', 'u32']), ['s32']);
+  const S12 = returning('S12', layout(['a', 'u32'], ['b', 'u32'], ['c', 'u32']), ['s32']);
+  const own = (name: string, f: Fixture, target: TargetDescription, p: object) =>
+    decompile(name, obj(name, f.lines), target, { asmData: relocs(f.rs), ...p }).source;
+
+  test('is the struct its declaration names, the hidden a0 its storage', () => {
+    for (const p of [{ prototypes: { ...PROTOS, rmk1: S1W } }, { prototypes: PROTOS, ownContextProto: S1W }]) {
+      expect(own('rmk1', KMC_RMK1, MIPS_GCC, p)).toMatch(
+        /struct S1w rmk1\(s32 a0\) \{\n\s+struct S1w ret;\n\s+ret\.x = a0 \+ 1;\n\s+return ret;\n\}/,
+      );
+    }
+  });
+
+  test("IDO's frame copy is the return", () => {
+    const source = own('rmk12', IDO_RMK12, MIPS_IDO, { ownContextProto: S12 });
+    expect(source).toMatch(
+      /struct S12 rmk12\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = 0;\n\s+ret\.c = a0 \+ 3;\n\s+return ret;/,
     );
+    expect(source).not.toMatch(/sp0/);
+  });
+
+  // ido7.1 `struct S12 c2(s32 x){ struct S12 r; if (x) { r.a = 1; r.b = 2; r.c = 3; return r; }
+  // r.a = g2(x); r.b = 0; r.c = 0; return r; }` copies the frame object out once per `return r;`,
+  // the second time through the pointer it spilled across the call
+  test("IDO's copy at each of two returns is a return in each", () => {
+    const c2: Fixture = {
+      lines: [
+        '0:\taddiu\tsp,sp,-40',
+        '4:\tsw\tra,20(sp)',
+        '8:\tbeqz\ta1,4c <c2+0x4c>',
+        'c:\tmove\ta2,a0',
+        '10:\tli\tt6,1',
+        '14:\tli\tt7,2',
+        '18:\tli\tt8,3',
+        '1c:\tsw\tt8,36(sp)',
+        '20:\tsw\tt7,32(sp)',
+        '24:\tsw\tt6,28(sp)',
+        '28:\taddiu\tt9,sp,28',
+        '2c:\tlw\tt1,0(t9)',
+        '30:\tmove\tv0,a0',
+        '34:\tsw\tt1,0(a0)',
+        '38:\tlw\tt0,4(t9)',
+        '3c:\tsw\tt0,4(a0)',
+        '40:\tlw\tt1,8(t9)',
+        '44:\tb\t88 <c2+0x88>',
+        '48:\tsw\tt1,8(a0)',
+        '4c:\tmove\ta0,a1',
+        '50:\tjal\t0 <c2>',
+        '54:\tsw\ta2,40(sp)',
+        '58:\tsw\tv0,28(sp)',
+        '5c:\tsw\tzero,32(sp)',
+        '60:\tsw\tzero,36(sp)',
+        '64:\taddiu\tt2,sp,28',
+        '68:\tlw\tt4,0(t2)',
+        '6c:\tlw\ta2,40(sp)',
+        '70:\tsw\tt4,0(a2)',
+        '74:\tlw\tt3,4(t2)',
+        '78:\tmove\tv0,a2',
+        '7c:\tsw\tt3,4(a2)',
+        '80:\tlw\tt4,8(t2)',
+        '84:\tsw\tt4,8(a2)',
+        '88:\tlw\tra,20(sp)',
+        '8c:\taddiu\tsp,sp,40',
+        '90:\tjr\tra',
+        '94:\tnop',
+      ],
+      rs: [[0x50, 'R_MIPS_26', 'g2']],
+    };
+    const g2 = { params: ['s32'], returns: 's32' };
+    const source = own('c2', c2, MIPS_IDO, { prototypes: { g2 }, ownContextProto: S12 });
+    expect(source).toMatch(
+      /struct S12 c2\(s32 a0\) \{\n\s+struct S12 ret;\n\s+if \(a0 != 0\) \{\n\s+ret\.c = 3;\n\s+ret\.b = 2;\n\s+ret\.a = 1;\n\s+return ret;\n\s+\}[^]*ret\.a = g2\(a0\);\n\s+ret\.b = 0;\n\s+ret\.c = 0;\n\s+return ret;/,
+    );
+    expect(source).not.toMatch(/sp\d+/);
+  });
+
+  // hand-written: the copy's last word is moved to a store that follows it, so the frame object is
+  // written after it is copied, and what was copied is not what the object last held
+  test('a frame object stored to after its copy is not folded', () => {
+    const late = {
+      ...IDO_RMK12,
+      lines: [...IDO_RMK12.lines.slice(0, 13), '34:\tsw\tzero,8(t7)', '38:\tjr\tra', '3c:\tsw\tt9,8(a0)'],
+    };
+    expect(own('rmk12', late, MIPS_IDO, { ownContextProto: S12 })).toMatch(
+      /struct S12 ret;[^]*ret\.a = [^]*sp0[^]*return ret;/,
+    );
+  });
+
+  // hand-written: the else path stores to the frame object and returns without the copy, so that
+  // store is no write to the caller's storage, and folding it into the return would make it one
+  test('a frame object stored to on a path that skips its copy is not folded', () => {
+    const skip: Fixture = {
+      lines: [
+        '0:\taddiu\tsp,sp,-8',
+        '4:\tbeqz\ta1,24 <f+0x24>',
+        '8:\tnop',
+        'c:\tsw\ta1,0(sp)',
+        '10:\taddiu\tt7,sp,0',
+        '14:\tlw\tt9,0(t7)',
+        '18:\tsw\tt9,0(a0)',
+        '1c:\tb\t2c <f+0x2c>',
+        '20:\tnop',
+        '24:\tsw\ta2,0(sp)',
+        '28:\tnop',
+        '2c:\tmove\tv0,a0',
+        '30:\tjr\tra',
+        '34:\taddiu\tsp,sp,8',
+      ],
+      rs: [],
+    };
+    const source = own('f', skip, MIPS_IDO, { ownContextProto: { ...S1W, params: ['s32', 's32'] } });
+    expect(source).toMatch(/if \(a0 != 0\) \{\n\s+sp0 = a0;\n\s+ret\.x = sp0;\n\s+\}\n\s+return ret;/);
+    expect(source).not.toMatch(/= a1;/);
   });
 
   test('is the pointer function it compiles to where nothing states it', () => {

@@ -1378,7 +1378,10 @@ function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<strin
  *  parameter, with an `[own-arity]` note naming the declaration and the register. (On kleod, whose
  *  every header its compiler checked, the entry stated as a hard bound takes the lifts with more
  *  parameters than their header from 52 of 377 to 1 of 373.) Only a typed list the bound can lay
- *  out is handed over; every other shape abstains.
+ *  out is handed over; every other shape abstains. A struct the entry returns through memory is
+ *  read on the same soft footing (pipeline.ts `returnOwnStruct`): lifted as that struct where the
+ *  machine proves the hidden pointer is only its storage, and kept as the pointer function with an
+ *  `[own-return]` note where it does not.
  *
  *  The benchmark hands each row the same entry (`withOwnContextMark`, apps/benchmark
  *  context-proto.ts `rowPrototypes`) where its manifest `proto` states none for the row's own
@@ -1419,24 +1422,38 @@ export function withContextPrototypes(
 /** THE CONTEXT'S OWN ENTRY FOR `own`, where it is a TYPED LIST a lift may bound its argument
  *  registers by — the entry `withContextPrototypes` leaves out — and `undefined` everywhere else.
  *
- *  Its reader is the context bound (pipeline.ts `liftWithinContextBound`), which is SOFT: a register past it
- *  that the lift goes on to read stays a parameter, so a header entry too short costs a diagnostic,
- *  never `uninit_<reg>`. Only an entry whose every parameter the bound can lay out is handed over,
- *  and every other shape ABSTAINS:
+ *  It has two readers, and both are SOFT. The context bound (pipeline.ts `liftWithinContextBound`):
+ *  a register past it that the lift goes on to read stays a parameter, so a header entry too short
+ *  costs a diagnostic, never `uninit_<reg>`. And the entry's struct return (pipeline.ts
+ *  `ownStructReturnThroughMemory`), lifted as that struct only where the machine proves the hidden
+ *  pointer is its storage, and kept as the pointer function with an `[own-return]` note where it
+ *  does not. An entry whose every parameter the bound can lay out is handed over, and so is one
+ *  that returns a struct or union by value whatever its parameters say, since what the return reads
+ *  is the return alone: a hidden pointer comes first in every parameter list, `...` or a struct
+ *  passed by value included (kleod's `struct Unk_0800BEF0_2 sub_0800BEF0(struct Unk_0800BEF0)`).
+ *  The bound reads such an entry through `ownArgumentWordsOn`, which lays out none of those lists
+ *  and so bounds nothing. Where the entry returns no struct, every other shape ABSTAINS:
  *   - no entry, or one the context dropped (two declarations that conflict: C++ overloads);
  *   - a variadic declaration (`variadicParams`, no `params`): its arity is each caller's;
  *   - `()` (no `params` at all): it states none, and a K&R definition may take any;
  *   - a struct passed by value, or a spelling nothing here sizes: either may fill any number of
  *     words;
  *   - a symbol that names a C++ member function or a mangled free function, whose declaration the
- *     context does not key by the symbol; a context naming one the same is not its declaration.
+ *     context does not key by the symbol; a context naming one the same is not its declaration, so
+ *     this abstains on it whatever it returns.
  *  A bare count is no context entry (`prototypesFromContext` reads lists), and abstains as well. */
 export function ownContextEntry(context: Prototypes, own: string): FnProto | undefined {
   const p = Object.hasOwn(context, own) ? context[own] : undefined;
-  if (p === undefined || p === null || !Array.isArray(p.params) || p.variadicParams !== undefined) {
+  if (p === undefined || p === null || typeof p.params === 'number') {
     return undefined;
   }
   if (demangledName(own) !== null || implicitArgumentWords(own) !== 0) {
+    return undefined;
+  }
+  if (declaresAggregateReturn(p)) {
+    return p;
+  }
+  if (!Array.isArray(p.params) || p.variadicParams !== undefined) {
     return undefined;
   }
   const params = p.params;
@@ -1493,7 +1510,7 @@ export function withOwnContextMark(
  *  the lifted function's own struct return is a spelling: `struct S1` sized by nothing, where the
  *  rule that decides whether it comes back through a hidden pointer reads a size
  *  (`returnsInMemory`), and `T8`, which reads as no aggregate at all and lifts as the pointer
- *  function its hidden pointer makes it (pipeline.ts `refuseOwnStructReturnThroughMemory`).
+ *  function its hidden pointer makes it (pipeline.ts `ownStructReturnThroughMemory`).
  *  A return already laid out, a scalar, a pointer or a floating type is left as stated, and so is
  *  a name the context does not lay out. */
 export function withOwnReturnLayout(

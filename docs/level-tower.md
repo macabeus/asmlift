@@ -972,14 +972,31 @@ caller's own forwarded pointer — each refuses on every frontend that passes th
 path chose (the audit, above). MIPS and Thumb pass the pointer, and PowerPC refuses a call that
 would. THE CALLEE HALF, on every frontend: a function
 that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
-returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. A
-context's own entry for it bounds only its argument registers, softly and counting the pointer's
-word, and its return is not read, so nothing there contradicts that; where the caller states that declaration, every frontend refuses it, before any
-frontend runs (`pipeline.ts` `refuseOwnStructReturnThroughMemory`, beside the refusal of a narrow
-return of a wide declaration). A stated return the context lays out — `struct S`, or a typedef of
-one — is read with that layout (`proto-context.ts` `withOwnReturnLayout`), so a one-word struct the
-rule returns in a register lifts as its word, and one it returns in a register pair (mwcc's svr4
-eight bytes in r3:r4) refuses, since the lift returns one word.
+returns it, so with nothing declared it lifts as `s32 *f(s32 *a0, …)` — which is also what `void
+f(S *)` compiles to, so only a declaration can say which the source wrote. Where its own
+declaration — stated, or the context's own entry, whatever its parameter list — returns the
+struct, the lift is checked after the frontend runs (`frontend/own-struct-return.ts`, L1, from
+`pipeline.ts` `liftStamped`): where the compiler hands the pointer back (agbcc and O32, `target.ts`
+`structReturnHandsBackPointer`) every return hands back the incoming pointer, and where it does not
+(the three mwcc builds, which leave in r3 whatever was last there) no return hands back a value
+computed for the return alone; the pointer and the constants added to it are read only as the
+bases of unqualified stores inside the struct, and at least one store goes through it. Then the pointer is the function's own
+return object — an `laddr` marked `returned`, which names the caller's storage and no frame offset
+— its stores are that local's members, and each `ret` returns it by value: `struct S f(s32 a0) {
+struct S ret; ret.a = a0; return ret; }`. A frame object the struct was built in and copied out of
+whole (IDO's word copy, agbcc's `ldmia`/`stmia`) is that local, and the copy is `return ret;`'s
+own lowering, so it folds where nothing else reads the object, something stores to it, and every
+write to it is on a path into a copy, ahead of it. It folds one whole copy per block, of an object
+that holds the struct alone: where IDO repeats the copy at each of several `return r;`s, each copy
+block returns the struct itself (`returnAtEachCopy`); an object the frontend shares with another
+address-taken local keeps the copy as member stores — the same function, one copy too many.
+Where the check fails, a stated declaration refuses and a context's keeps the pointer function with
+an `[own-return]` note, the soft policy of its arity bound. A stated return the context lays out —
+`struct S`, or a typedef of one — is read with that layout (`proto-context.ts`
+`withOwnReturnLayout`), so a one-word struct the rule returns in a register lifts as its word — as
+the struct where it is all one word-wide integer member (`liftOwnRegisterStruct`) — and
+one it returns in a register pair (mwcc's svr4 eight bytes in r3:r4) refuses, stated or from the
+context, since the lift returns one word.
 A symbol map states a
 signless return of a word or less as nothing, since it is an enum as often as a struct; and a
 context return spelled by a typedef the reader never saw keeps its parameters.

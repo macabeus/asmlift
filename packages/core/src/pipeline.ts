@@ -1,6 +1,6 @@
 // asmlift — the library entry point. `decompile(name, asm, target)` runs the raising tower and
 // returns structured results: the source, the per-level IR dumps, and diagnostics.
-import { aggregateSize, returnedAggregate, returnsInMemory } from './aggregate';
+import { aggregateSize, ownArgumentWordsOn, returnedAggregate, returnsInMemory } from './aggregate';
 import { cBackend } from './backend/c';
 import {
   ContractError,
@@ -13,15 +13,17 @@ import {
   assertTypesRecovered,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
+import { returnedStruct, structLocalType } from './frontend/call-plan';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
+import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
 import { frontendFor } from './frontend/registry';
 import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
 import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
 import { firstTrivialPhi } from './ir/simplify';
-import { T, intWidth } from './ir/types';
+import { type IrType, T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
@@ -34,7 +36,6 @@ import {
   type Prototypes,
   declaresAggregateReturn,
   declaresVoidReturn,
-  ownArgumentWords,
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
@@ -93,8 +94,9 @@ export interface DecompileOptions {
    *  (raise/declared-volatile.ts), so the cast it is read through carries the qualifier. */
   contextGlobals?: ContextGlobals;
   /** the declaration context's own entry for `name` (proto-context.ts `ownContextEntry`), which
-   *  bounds the argument registers SOFTLY where `prototypes` states no entry for it
-   *  (`liftStamped`); absent ⇒ nothing bounds them softly. A `prototypes` entry for `name` marked
+   *  bounds the argument registers SOFTLY where `prototypes` states no entry for it, and whose
+   *  struct return, where it declares one, is lifted where the machine proves it (`liftStamped`);
+   *  absent ⇒ nothing bounds them softly. A `prototypes` entry for `name` marked
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
@@ -339,7 +341,10 @@ export function liftStamped(
   const split = splitOwnContext(prototypes, name, ownContext);
   const table = split.prototypes ?? {};
   const own = Object.hasOwn(table, name) ? table[name] : undefined;
-  refuseOwnStructReturnThroughMemory(name, target, own);
+  const ownReturn = ownStructReturnThroughMemory(name, target, own, split.ownContextProto, notes);
+  // a refusal about the return's width that the declared struct explains waits for the proof
+  let deferred: ((unproved: string) => never) | undefined;
+  const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   const fn = liftWithinContextBound(
     name,
     asm,
@@ -348,18 +353,24 @@ export function liftStamped(
     asmData,
     symbols,
     contextGlobals,
-    liftOptions,
+    bytes === undefined
+      ? liftOptions
+      : { ...liftOptions, ownMemoryReturn: { bytes, defer: (refuse) => void (deferred ??= refuse) } },
     split.ownContextProto,
     notes,
   );
   verify(fn);
+  if (ownReturn !== undefined) {
+    returnOwnStruct(fn, name, target, ownReturn, notes, deferred);
+    verify(fn);
+  }
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));
   return fn;
 }
 
 /** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
- *  words it fills (`ownArgumentWords`, the layout a stated entry gets) is lifted as an uninitialised
+ *  words it fills (`ownArgumentWordsOn`, the layout a stated entry gets) is lifted as an uninitialised
  *  local's home, and where the finished lift still READS one, the function is lifted again with
  *  the bound raised past it, so that register stays the parameter a context-less lift makes it,
  *  with an `[own-arity]` note naming the declaration and the register.
@@ -408,7 +419,7 @@ function liftWithinContextBound(
   let words =
     ownContext === undefined || Object.hasOwn(prototypes, name)
       ? undefined
-      : ownArgumentWords(name, ownContext, target);
+      : ownArgumentWordsOn(name, ownContext, target);
   if (words === undefined || words >= target.argRegs.length) {
     return unbounded();
   }
@@ -482,57 +493,158 @@ function forgetAbsorbedKeys(fn: Fn): Fn {
   return fn;
 }
 
-/** A declaration as a note spells it: `int f(short, int)`, `void f(void)`. */
+/** A declaration as a note spells it: `int f(short, int)`, `void f(void)`, `int f(int, ...)`, and
+ *  `int f()` for one that states no parameters. */
 function spelledDeclaration(name: string, p: FnProto): string {
   const ret = p.returns ?? (p.returnsVoid === true ? 'void' : 'int');
-  const params = Array.isArray(p.params) && p.params.length > 0 ? p.params.join(', ') : 'void';
+  const params =
+    p.variadicParams !== undefined
+      ? [...p.variadicParams, '...'].join(', ')
+      : Array.isArray(p.params)
+        ? p.params.length > 0
+          ? p.params.join(', ')
+          : 'void'
+        : '';
   return `${ret} ${name}(${params})`;
 }
 
-/** THE CALLEE HALF OF A STRUCT RETURNED THROUGH MEMORY IS NOT MODELLED, on any frontend. A function
- *  declared to return a struct or union by value that its target's rule (`returnsInMemory`)
- *  returns through memory is handed its caller's hidden pointer in the first argument register, so
- *  its declared parameters sit one register up and its result is a run of stores through that
- *  pointer. Lifted as is, it is `s32 *f(s32 *a0, s32 a1)`: the machine code's function, and not
- *  the one the declaration names, so where the caller states that declaration it refuses rather
- *  than publish a signature that contradicts it — and where the rule cannot answer, because the
- *  target states none or nothing sizes the struct, it refuses too, saying which. A struct the rule
- *  hands back in one register (agbcc's one-word struct in r0) is the lift's own return; one it hands
- *  back in two (mwcc's svr4 eight-byte struct in r3:r4) refuses, since the lift returns one word.
- *
- *  A context's own entry for the function is left out of the prototypes (`withContextPrototypes`)
- *  and bounds only the argument registers (`liftWithinContextBound`), so there the pointer
- *  function is all the lift is told; a stated return naming a struct the context lays out
- *  reaches here with that layout (`withOwnReturnLayout`). Asked of the declaration alone, before
- *  any frontend runs. */
-function refuseOwnStructReturnThroughMemory(name: string, target: TargetDescription, own: FnProto | undefined): void {
-  if (!declaresAggregateReturn(own)) {
+/** A FUNCTION THAT ITSELF RETURNS A STRUCT BY VALUE, as its declaration says: a stated entry for
+ *  `name` (`own`), or else the context's own entry (`ownContext`, proto-context.ts
+ *  `ownContextEntry`). Where its target's rule (`returnsInMemory`) returns the struct through
+ *  memory, its caller hands it the storage in the first argument register, so its declared
+ *  parameters sit one register up, and the lift is the pointer function `s32 *f(s32 *a0, s32 a1)`
+ *  until `returnOwnStruct` proves that pointer is the storage and lifts the struct return the
+ *  declaration names. This answers what that proof is handed — the struct laid out, and which
+ *  declaration said so — and refuses, before any frontend runs, where no lift can be the declared
+ *  function:
+ *   - a struct the rule hands back in two registers (mwcc's svr4 eight-byte struct in r3:r4): the
+ *     lift returns one word, and would drop the second register — on both declarations, since a
+ *     context's header that says so is the only thing that says the second register is live;
+ *   - a stated declaration whose struct the rule cannot place, because the target states no rule
+ *     or nothing lays the struct out, or that names no type a local can be declared with. A context
+ *     entry that cannot be placed keeps the pointer lift, with a note in `notes`: what it costs is
+ *     a signature the header contradicts, which the compiler rejects.
+ *  A struct the rule hands back in one register (agbcc's and mwcc's one-word struct in r0/r3) is
+ *  that register's word: the plan says so (`register`), and a struct that is all one word-wide
+ *  integer member is spelled as that member (frontend/own-struct-return.ts
+ *  `liftOwnRegisterStruct`), where any other one stays the word the lift returns, with a note in
+ *  `notes` saying why (`returnOwnStruct`). */
+function ownStructReturnThroughMemory(
+  name: string,
+  target: TargetDescription,
+  own: FnProto | undefined,
+  ownContext: FnProto | undefined,
+  notes: string[] | undefined,
+): OwnStructReturn | undefined {
+  const stated = own !== undefined;
+  const declared = stated ? own : ownContext;
+  if (!declaresAggregateReturn(declared)) {
+    return undefined;
+  }
+  const spelled = declared!.returns ?? 'a struct or union';
+  const read = returnedStruct(declared!, target);
+  if (read === 'register') {
+    // A struct wider than a word that comes back in registers is a pair the lift returns one word
+    // of, dropping the second register; one of a word or less is that word
+    const size = aggregateSize(returnedAggregate(declared!), target)?.size;
+    if (size !== undefined && size <= 4) {
+      const type = structLocalType(declared!, target);
+      return 'refused' in type
+        ? undefined
+        : { type, stated, declaration: spelledDeclaration(name, declared!), register: true };
+    }
+    if (size !== undefined) {
+      const pair =
+        `this target hands its ${size} bytes back in two registers — a function that itself returns a struct ` +
+        'in a register pair is not modelled';
+      if (stated) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': it is declared to return ${spelled} by value, and ${pair}`,
+        );
+      }
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': its context declaration says it returns ${spelled} by value, and ${pair} ` +
+          `(\`${spelledDeclaration(name, declared!)}\`)`,
+      );
+    }
+    return undefined;
+  }
+  if ('refused' in read) {
+    const how =
+      returnsInMemory(returnedAggregate(declared!), target) === true
+        ? `this target returns that through a hidden pointer in ${target.argRegs[0]}, and ${read.refused}`
+        : target.compilerBehaviors.aggregateReturn === undefined
+          ? `nothing here says whether this target returns it through a hidden pointer in ${target.argRegs[0]}`
+          : `nothing here lays it out, and this target's rule needs its layout to say whether it comes back through a ` +
+            `hidden pointer in ${target.argRegs[0]}`;
+    if (stated) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': it is declared to return ${spelled} by value, and ${how}`,
+      );
+    }
+    notes?.push(
+      `[own-return] ${name}: its context declaration \`${spelledDeclaration(name, declared!)}\` returns a struct by value, ` +
+        `and ${how} — lifted as the machine code's function, which the header contradicts`,
+    );
+    return undefined;
+  }
+  return { type: read.type, stated, declaration: spelledDeclaration(name, declared!) };
+}
+
+/** The struct a function's own declaration returns by value, and which declaration said so. */
+interface OwnStructReturn {
+  type: Extract<IrType, { kind: 'struct' }>;
+  stated: boolean;
+  declaration: string;
+  /** the target hands it back in the return register, not through a hidden pointer */
+  register?: true;
+}
+
+/** Lifts `fn`'s struct return (frontend/own-struct-return.ts `liftOwnStructReturn`), where the
+ *  lift proves the hidden pointer is the struct's storage. Where it does not, a STATED declaration
+ *  refuses — the pointer function contradicts it — and a context's keeps the pointer lift, as the
+ *  machine code's function, with a note in `notes`: the context's own entry is a header nothing
+ *  checked against a definition (`liftWithinContextBound` says why that makes it soft). Either way, a
+ *  refusal the frontend `deferred` because this struct would explain it (agbcc's 8-byte epilogue,
+ *  `LiftOptions.ownMemoryReturn`) is thrown where the proof fails, since nothing else explains it, and
+ *  says why the proof failed. */
+function returnOwnStruct(
+  fn: Fn,
+  name: string,
+  target: TargetDescription,
+  own: OwnStructReturn,
+  notes: string[] | undefined,
+  deferred: ((unproved: string) => never) | undefined,
+): void {
+  if (own.register) {
+    // a word the struct may not be all of stays the lift's own return, as the machine has it, and
+    // the note says why the declared struct is not what it returns
+    const kept = liftOwnRegisterStruct(fn, own.type);
+    if (kept !== undefined) {
+      notes?.push(
+        `[own-return] ${name}: its ${own.stated ? '' : 'context '}declaration \`${own.declaration}\` returns ` +
+          `${own.type.declared ?? 'a struct'} by value in ${target.returnReg}, and ${kept} — lifted as the word ` +
+          'the machine code returns, which the header contradicts',
+      );
+    }
     return;
   }
-  const layout = returnedAggregate(own!);
-  const inMemory = returnsInMemory(layout, target);
-  // A struct wider than a word that comes back in registers (mwcc's svr4 rule hands up to eight
-  // bytes back in r3:r4) is a pair the lift returns one word of, dropping the second register
-  const size = aggregateSize(layout, target)?.size;
-  if (inMemory === false && size !== undefined && size > 4) {
+  const why = liftOwnStructReturn(fn, own.type, target);
+  if (why === undefined) {
+    return;
+  }
+  // a refusal the frontend deferred because this struct would explain it stands where it does not
+  deferred?.(why);
+  const declared = `${own.type.declared ?? 'a struct'} by value, which this target returns through a hidden pointer in ${target.argRegs[0]}`;
+  if (own.stated) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': it is declared to return ${own!.returns ?? 'a struct or union'} by value, and this target hands its ` +
-        `${size} bytes back in two registers — a function that itself returns a struct in a register pair is not modelled`,
+      `cannot lift '${name}': it is declared to return ${own.type.declared ?? 'a struct'} by value, which this target returns ` +
+        `through a hidden pointer in ${target.argRegs[0]}, and the lift cannot show that pointer is only its storage: ${why}`,
     );
   }
-  if (inMemory === false) {
-    return;
-  }
-  const how =
-    inMemory === true
-      ? `this target returns that through a hidden pointer in ${target.argRegs[0]}`
-      : target.compilerBehaviors.aggregateReturn === undefined
-        ? `nothing here says whether this target returns it through a hidden pointer in ${target.argRegs[0]}`
-        : `nothing here lays it out, and this target's rule needs its layout to say whether it comes back through a ` +
-          `hidden pointer in ${target.argRegs[0]}`;
-  throw new FrontendUnsupportedError(
-    `cannot lift '${name}': it is declared to return ${own!.returns ?? 'a struct or union'} by value, and ${how} — ` +
-      'a function that itself returns a struct through a hidden pointer is not modelled',
+  notes?.push(
+    `[own-return] ${name}: its context declaration \`${own.declaration}\` returns ${declared}, and the lift cannot show ` +
+      `that pointer is only its storage (${why}) — lifted as the machine code's pointer function, which the header contradicts`,
   );
 }
 

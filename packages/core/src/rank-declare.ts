@@ -12,8 +12,8 @@ import { type Fn, type Value, defOpMap } from './ir/core';
 import { qualified } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import type { SFn } from './l3/ast';
-import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import type { Prototypes } from './proto';
+import { type SymbolRef, collectSymbolRefs, ownReturnDefinition } from './l3/symbol-refs';
+import type { FnProto, Prototypes } from './proto';
 import { storeSigned, storedConstantSign } from './raise/storesign';
 import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS, type TargetDescription } from './target';
@@ -280,8 +280,11 @@ export function makeRefCollector(ctx: {
   target: Pick<TargetDescription, 'doubleArgWords'>;
   /** reports a refusal at most once per (name, reason); the caller owns the dedup */
   refuse: (name: string, reason: RefusedDeclarationReason) => void;
+  /** the function's own declaration — stated, or the context's own entry — whose struct return a
+   *  tree that returns it needs defined (`ownReturnDefinition`) */
+  own?: FnProto;
 }): (tree: SFn) => { symbolRefs?: SymbolRef[] } {
-  const { declSymbols, accessFacts, mapSymbols, targetNames, prototypes, target, refuse } = ctx;
+  const { declSymbols, accessFacts, mapSymbols, targetNames, prototypes, target, refuse, own } = ctx;
   return (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
@@ -357,6 +360,10 @@ export function makeRefCollector(ctx: {
       }
       return [{ ...r, ...(access ? { access } : {}), ...synthesized }];
     });
+    const returned = ownReturnDefinition(tree, own);
+    if (returned !== undefined) {
+      refs.push(returned);
+    }
     return refs.length ? { symbolRefs: refs } : {};
   };
 }

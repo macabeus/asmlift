@@ -963,12 +963,25 @@ export interface TargetDescription {
     //     structs, `union {u32; u16;}` and `{u32 a:8; u32 b:8;}` are each handed `addiu a0,sp,N`
     //     ahead of the `jal`, with the declared arguments from a1 on, and the callee returns that
     //     pointer, `move v0,a0`).
-    // Under every rule only the caller's half is lowered (frontend/call-plan.ts); a function that
-    // itself returns a struct through memory refuses where its declaration is stated, and is read
-    // as the pointer function it compiles to where it is not (pipeline.ts
-    // `refuseOwnStructReturnThroughMemory`).
+    // Under every rule the caller's half is lowered (frontend/call-plan.ts), and a function that
+    // itself returns a struct through memory lifts as that struct where its declaration says so and
+    // the lift proves the hidden pointer is only its storage (frontend/own-struct-return.ts); it is
+    // read as the pointer function it compiles to where nothing declares it, or where a context's
+    // declaration does and the proof fails (pipeline.ts `returnOwnStruct`).
     // ABSENT ⇒ unmeasured, and such a call declines.
     aggregateReturn?: 'apcs' | 'svr4' | 'memory';
+    // WHETHER A FUNCTION THAT RETURNS A STRUCT THROUGH MEMORY HANDS THE HIDDEN POINTER BACK in the
+    // return register — a COMPILER fact, which no rule above implies. `true` for ido7.1, gcc2.7.2kmc
+    // and gcc2.7.2 (`move v0,a0`, the O32 rule) and for agbcc (`add r0, r6, #0` after a call, r0
+    // left alone in a leaf: compiled `struct S12 f(s32 x)` with and without a call to `fill(t)`).
+    // `false` for mwcc_242_81, mwcc_233_163n and mwcc_247_107, whose callee clobbers r3 before the
+    // `blr`: the same `struct S12 b4(s32 x)` saves the pointer in r30/r31, stores through it, and
+    // returns with r3 = a reload of a frame word. It decides what the proof that a function's own
+    // struct return goes through that pointer asks of each `ret` (frontend/own-struct-return.ts):
+    // where it is `true` every `ret` must hand back the pointer, and where it is `false` what the
+    // return register holds is no part of the function, save a value computed for the return alone
+    // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
+    structReturnHandsBackPointer?: boolean;
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
     // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
     // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
@@ -1191,6 +1204,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     aggregateBoundary: 4,
     largestAlignment: 4,
     aggregateReturn: 'apcs',
+    structReturnHandsBackPointer: true,
     byValueAggregateArgWords: true,
     enumBytes: 4,
     bitfieldPacking: 'contiguous',
@@ -1364,6 +1378,7 @@ export const MIPS_IDO: TargetDescription = {
     largestAlignment: 8,
     // MEASURED on all three O32 toolchains: the probes at the field.
     aggregateReturn: 'memory',
+    structReturnHandsBackPointer: true,
     byValueAggregateArgWords: true,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
@@ -1510,6 +1525,7 @@ export const MIPS_GCC: TargetDescription = {
     largestAlignment: 8,
     // MEASURED on BOTH toolchains this description serves: the probes at the field.
     aggregateReturn: 'memory',
+    structReturnHandsBackPointer: true,
     byValueAggregateArgWords: true,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
@@ -1599,6 +1615,9 @@ export const PPC_MWCC: TargetDescription = {
     // member at 8 and size 16
     largestAlignment: 8,
     aggregateReturn: 'svr4',
+    // MEASURED on all three builds: r3 holds a reload of a frame word at the `blr` of a struct
+    // returner that calls something
+    structReturnHandsBackPointer: false,
     // MEASURED on mwcc_242_81 through the `.comment` alignment record: an array or a struct is at
     // 4 at least (`u8[1]`, a struct of two bytes), a scalar at its width; a string-literal
     // initializer gets no more than the array does (`char s[] = "hello!"` and a `u8` list both 4);

@@ -10674,6 +10674,106 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['ido7.1'],
     ctx: 'extern int gOcH;\nvoid ownctx_home(void);',
   },
+  // A FUNCTION WHOSE OWN CONTEXT DECLARATION RETURNS A STRUCT (core frontend/own-struct-return.ts).
+  // No struct row states its own `proto`: the harness hands the lift the ctx's own entry, as a
+  // `--context` lift reads it. Through memory, the caller's storage arrives in argument 0 (and
+  // comes back in the return register on agbcc and O32), so with nothing declared each lifts as the
+  // pointer function `s32 *f(s32 *a0, …)`; the declaration
+  // makes it the struct return, with the hidden pointer the returned local. `ownsret_ctx` is 12
+  // bytes, which every toolchain returns through memory — IDO copies it out of a frame object word
+  // by word, agbcc with `ldmia`/`stmia`, kmc and gcc 2.7.2 through a frame temp the lift forwards,
+  // and mwcc builds it in place. `ownsret_cond` builds it on two arms before one copy.
+  {
+    sym: 'ownsret_ctx',
+    src:
+      'struct T3 { int a, b, c; };\n' +
+      'struct T3 ownsret_ctx(int x, int y){ struct T3 t; t.a = y; t.b = x * 3; t.c = x + y; return t; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T3 { int a, b, c; };\nstruct T3 ownsret_ctx(int x, int y);',
+  },
+  {
+    sym: 'ownsret_cond',
+    src:
+      'struct T3 { int a, b, c; };\n' +
+      'struct T3 ownsret_cond(int x, int y){ struct T3 t; if (x > y) { t.a = x; t.b = 1; } else { t.a = y; t.b = 2; }' +
+      ' t.c = x - y; return t; }',
+    features: ['struct-return', 'branch'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T3 { int a, b, c; };\nstruct T3 ownsret_cond(int x, int y);',
+  },
+  // Two `return t;`s: IDO copies the frame object out once at each, so each copy is a return of
+  // the struct (core frontend/own-struct-return.ts `returnAtEachCopy`); kmc and gcc 2.7.2 merge
+  // the member stores past the join, which the lift spells through three variables. Not on agbcc
+  // or mwcc, whose frame audits decline the call's frame.
+  {
+    sym: 'ownsret_tworet',
+    src:
+      'struct T3 { int a, b, c; };\nextern int gOtr(int);\n' +
+      'struct T3 ownsret_tworet(int x){ struct T3 t; if (x) { t.a = 1; t.b = 2; t.c = 3; return t; }' +
+      ' t.a = gOtr(x); t.b = 0; t.c = 0; return t; }',
+    features: ['struct-return', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    proto: { gOtr: { params: ['int'], returns: 'int' } },
+    ctx: 'struct T3 { int a, b, c; };\nextern int gOtr(int);\nstruct T3 ownsret_tworet(int x);',
+  },
+  // Eight bytes: agbcc returns any struct whose second member is not a bitfield through memory
+  // (thumb.c:1423-1493), so it lifts as the struct return; mwcc's svr4 rule hands it back in
+  // r3:r4, a register pair the lift returns one word of, so the declaration refuses it there.
+  {
+    sym: 'ownsret_pair',
+    src: 'struct T2 { int a, b; };\nstruct T2 ownsret_pair(int x){ struct T2 p; p.a = x - 1; p.b = x << 2; return p; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct T2 { int a, b; };\nstruct T2 ownsret_pair(int x);',
+  },
+  // A call between the member stores. mwcc does not hand the hidden pointer back: at the blr r3
+  // holds what the last call left there (core target.ts `structReturnHandsBackPointer`), so only
+  // the declaration says the stores are the result; O32 `move v0,a0`. Not on agbcc, which builds
+  // the struct in a frame temp across the calls and copies it out with ldmia/stmia: the frame
+  // audit declines that (`stack pointer used as data`), a gap of its own; agbcc's hand-back is
+  // ownsret_pairnl's.
+  {
+    sym: 'ownsret_call',
+    src:
+      'struct T3 { int a, b, c; };\nextern int gOsc(int);\n' +
+      'struct T3 ownsret_call(int x, int y){ struct T3 t; t.a = gOsc(x); t.b = gOsc(y); t.c = 0; return t; }',
+    features: ['struct-return', 'multi-arg'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    proto: { gOsc: { params: ['int'], returns: 'int' } },
+    ctx: 'struct T3 { int a, b, c; };\nextern int gOsc(int);\nstruct T3 ownsret_call(int x, int y);',
+  },
+  // Eight bytes again, in a function that makes a call: agbcc gives the struct DImode, so its
+  // epilogue is `pop {r2}; bx r2`, the one a `long long` return takes, which the declaration
+  // explains (core frontend/thumb.ts `refuseWordReturns`). mwcc's r3:r4 pair is ownsret_pair's.
+  {
+    sym: 'ownsret_pairnl',
+    src:
+      'struct T2 { int a, b; };\nextern int gOsp(int);\n' +
+      'struct T2 ownsret_pairnl(int x){ struct T2 p; p.a = gOsp(x); p.b = x; return p; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    proto: { gOsp: { params: ['int'], returns: 'int' } },
+    ctx: 'struct T2 { int a, b; };\nextern int gOsp(int);\nstruct T2 ownsret_pairnl(int x);',
+  },
+  // One word of one member: agbcc and mwcc hand it back in r0/r3, which holds the member, and the
+  // O32 toolchains through memory, as any struct.
+  {
+    sym: 'ownsret_r0',
+    src: 'struct W1 { unsigned int x; };\nstruct W1 ownsret_r0(int a){ struct W1 w; w.x = a + 5; return w; }',
+    features: ['struct-return'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct W1 { unsigned int x; };\nstruct W1 ownsret_r0(int a);',
+  },
+  // mwcc_242_81 compiles `int f(int a){ return a; }` to a bare `blr`: no path writes r3, and the
+  // stated `int` return is what says the function returns the argument it was handed there.
+  {
+    sym: 'ownsret_bare',
+    src: 'int ownsret_bare(int a){ return a; }',
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81'],
+    proto: { ownsret_bare: { params: ['int'], returns: 'int' } },
+  },
   {
     sym: 'byvalregs',
     src:

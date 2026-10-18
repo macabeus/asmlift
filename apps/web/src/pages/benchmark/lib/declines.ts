@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 255 distinct decline messages (the texts reached by
+// `packages/core/src` throws 256 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -614,9 +614,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // TWO MORE THROWS ARE THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
     // for a call that does lower but whose hidden pointer is not a local of this frame (a global, a
     // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2. And
-    // `pipeline.ts` `refuseOwnStructReturnThroughMemory`, on every frontend, of a function whose own
-    // stated declaration returns a struct (the callee's half) through memory, or in a register pair,
-    // or by a rule nothing sizes, which opens on the same clause as `plan`'s; no row states its own.
+    // `pipeline.ts` `ownStructReturnThroughMemory` and `returnOwnStruct`, on every frontend, of a
+    // function whose own declaration returns a struct (the callee's half): in a register pair (a
+    // context's declaration too — `ownsret_pair` on mwcc_242_81), by a rule nothing sizes, or
+    // through memory where the lift cannot show the hidden pointer is only its storage (a stated
+    // declaration alone), each opening on the same clause as `plan`'s.
     //
     // ITS `plan` INHABITANT IS `sret12` ON mwcc_242_81, a 12-byte struct the PowerPC lowering passes
     // no hidden pointer for. The call-plan refusals that only HAVE a struct return in them — its
@@ -625,7 +627,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'struct-return',
     label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
     pattern:
-      /is declared to return [^,—]+ by value(?:, and | — )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
+      /(?:is declared to return|says it returns) [^,—]+ by value(?:, and | — |, which )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
   },
   {
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.

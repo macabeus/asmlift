@@ -47,6 +47,14 @@ export interface LiftOptions {
    *  of the stated entry's words (frontend/ssa.ts `registerLiveIns`). Every frontend reads it; PowerPC,
    *  as with a stated entry, only for a body a compiler wrote. */
   contextOwnWords?: number;
+  /** The size in bytes of a struct the function's own declaration returns through a hidden pointer
+   *  (pipeline.ts `liftStamped`), and where to hand a refusal that declaration may answer: one about
+   *  the RETURN's width that such a struct explains, which the frontend then defers instead of
+   *  throwing, as the function that throws it. The pipeline calls that after all unless the lift
+   *  proves the pointer is that struct's storage (frontend/own-struct-return.ts), handing it why the
+   *  proof failed, which the refusal then says. Thumb only: agbcc's interworking epilogue sizes an
+   *  8-byte struct returned through memory as it sizes a `long long` (`eightByteReturnScratch`). */
+  ownMemoryReturn?: { bytes: number; defer(refuse: (unproved: string) => never): void };
   /** MIPS: keep the slot of a `b`/`j` whose slot is the last word of a common tail its two arms
    *  both spell (`sll; b T; sra` against `sll; sra; T:`), rather than retarget it to the copy at
    *  T-4 and merge the arms. The default retargets (frontend/mips.ts `normaliseBranchLikely`). An

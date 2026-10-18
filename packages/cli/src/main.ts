@@ -765,7 +765,9 @@ export async function runCli(
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
   const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
-  const ownArityNote = (notes: readonly string[]) => notes.map((n) => `asmlift: [own-arity] ${n}\n`).join('');
+  // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
+  const ownArityNote = (notes: readonly string[]) =>
+    notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score

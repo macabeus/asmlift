@@ -18,10 +18,11 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
+import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, ownArgumentWords, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -2461,7 +2462,7 @@ export function lift(
   options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options.contextOwnWords),
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options),
   );
 }
 
@@ -2483,9 +2484,9 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
-  contextOwnWords: number | undefined,
+  options: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'>,
 ): Fn | FrameObjectRelift {
-  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, contextOwnWords);
+  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
   const { cfg, frame, ssa, pairs, statics } = fill;
   const { fn, irBlocks, paramReg } = ssa;
 
@@ -4416,6 +4417,7 @@ function thumbPairs({
   name,
   target,
   own,
+  ownMemoryReturn,
   ssa,
   asmBlocks,
   callClobbers,
@@ -4423,6 +4425,7 @@ function thumbPairs({
   name: string;
   target: TargetDescription;
   own: FnProto | undefined;
+  ownMemoryReturn: LiftOptions['ownMemoryReturn'];
   ssa: SsaBuilder;
   asmBlocks: readonly AsmBlock[];
   callClobbers: readonly string[];
@@ -4503,7 +4506,10 @@ function thumbPairs({
    *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
    *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
    *  the same way. A word return drops r1 in the first two, and the third is a false decline the
-   *  epilogue cannot tell apart from them. */
+   *  epilogue cannot tell apart from them — save where the function's own declaration says it
+   *  returns a struct of 5 to 8 bytes through memory (`ownMemoryReturn`): the refusal is then
+   *  deferred to the pipeline, which throws it unless the lift proves r0 is only that struct's
+   *  storage (frontend/own-struct-return.ts), and that proof is what tells the third case apart. */
   const refuseWordReturns = () => {
     const classes = halfOf.size ? mergeClasses({ blocks: ssa.irBlocks }) : new Map<Value, readonly Value[]>();
     const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
@@ -4520,10 +4526,23 @@ function thumbPairs({
         );
       }
       if (widerEpilogue) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the epilogue of '${asmBlocks[bi].label}' says the return type is 5 to 8 bytes ` +
-            '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
-        );
+        const label = asmBlocks[bi].label;
+        // `unproved`: why the declared struct, which would explain the epilogue, is not shown to be it
+        const refuse = (unproved?: string): never => {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': the epilogue of '${label}' says the return type is 5 to 8 bytes ` +
+              '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1' +
+              (unproved === undefined
+                ? ''
+                : `; the ${ownMemoryReturn!.bytes}-byte struct its own declaration returns through r0 would explain it, ` +
+                  `but the lift cannot show r0 is only that struct's storage: ${unproved}`),
+          );
+        };
+        if (ownMemoryReturn !== undefined && ownMemoryReturn.bytes > 4 && ownMemoryReturn.bytes <= 8) {
+          ownMemoryReturn.defer(refuse);
+          continue;
+        }
+        refuse();
       }
     }
   };
@@ -4690,7 +4709,7 @@ function thumbFillOf(
   prototypes: Prototypes,
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
-  contextOwnWords?: number,
+  { contextOwnWords, ownMemoryReturn }: Pick<LiftOptions, 'contextOwnWords' | 'ownMemoryReturn'> = {},
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -4710,10 +4729,10 @@ function thumbFillOf(
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
   // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
-  // argument registers (`ownArgumentWords`): agbcc homes a local in r3 past a two-parameter one.
+  // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWords(name, prototypes[name], target)),
+    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({
@@ -4728,6 +4747,7 @@ function thumbFillOf(
     name,
     target,
     own: prototypes[name],
+    ownMemoryReturn,
     ssa,
     asmBlocks: cfg.asmBlocks,
     callClobbers: calls.callClobbers,

@@ -6,9 +6,9 @@
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
-import { decompile } from '../src/pipeline';
+import { type DecompileOptions, decompile } from '../src/pipeline';
 import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
-import { withOwnReturnLayout } from '../src/proto-context';
+import { ownContextEntry, prototypesFromContext, withOwnReturnLayout } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
@@ -572,40 +572,161 @@ describe('a callee declared to return a struct or union by value', () => {
   });
 });
 
-// THE CALLEE HALF IS NOT MODELLED on any frontend (pipeline.ts `refuseOwnStructReturnThroughMemory`). agbcc's
-// `struct S8 rmk8(s32 x){ struct S8 s; s.a = x; s.b = x + 1; return s; }` stores through the r0 it
-// was handed, and lifted as is it is `s32 *rmk8(s32 *a0, s32 a1)`; mwcc_242_81's `rmk12`, a
-// 12-byte struct, stores through r3. A struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`)
-// is the lift's own return.
+// THE CALLEE HALF (frontend/own-struct-return.ts). agbcc's `struct S8 rmk8(s32 x){ struct S8 s;
+// s.a = x; s.b = x + 1; return s; }` stores through the r0 it was handed and hands r0 back, and
+// mwcc_242_81's `rmk12`, a 12-byte struct, stores through r3: with nothing declared each is the
+// pointer function `s32 *f(s32 *a0, s32 a1)`, and under its declaration the struct return it is. A
+// struct that comes back in r0 is that register's word, spelled as the struct where it is one
+// word of one integer member (agbcc's `struct S1 { u32 x; }`).
 describe('a function that itself returns a struct', () => {
   const u32s = (...names: string[]) => ({
     kind: 'struct' as const,
     members: names.map((name) => ({ name, type: 'u32' })),
   });
-  test('through memory, it refuses where its declaration is stated, on agbcc', () => {
-    const rmk8 = 'rmk8:\n\tadd\tr2, r1, #0\n\tadd\tr3, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr3, [r0, #0x4]\n\tbx\tlr\n';
-    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
-    expect(() => decompile('rmk8', rmk8, ARMV4T_AGBCC, { prototypes })).toThrow(
-      /cannot lift 'rmk8': it is declared to return struct S8 by value, and this target returns that through a hidden pointer in r0/,
+  const S8 = { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') };
+  const S12 = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+  const rmk8 = 'rmk8:\n\tadd\tr2, r1, #0\n\tadd\tr3, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr3, [r0, #0x4]\n\tbx\tlr\n';
+
+  test('through memory, a stated declaration lifts the struct it returns, on agbcc', () => {
+    expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { prototypes: { rmk8: S8 } }).source).toMatch(
+      /struct S8 rmk8\(s32 a0\) \{\n\s+struct S8 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+return ret;\n\}/,
     );
     expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, {}).source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
   });
 
-  test('through memory, it refuses where its declaration is stated, on mwcc', () => {
+  test('through memory, a stated declaration lifts the struct it returns, on mwcc', () => {
     const rmk12 =
       '14 <rmk12>:\n14:\tstwu    r1,-32(r1)\n18:\taddi    r5,r4,1\n1c:\taddi    r0,r4,2\n20:\tstw     r4,0(r3)\n' +
       '24:\tstw     r5,4(r3)\n28:\tstw     r4,8(r1)\n2c:\tstw     r5,12(r1)\n30:\tstw     r0,16(r1)\n' +
       '34:\tstw     r0,8(r3)\n38:\taddi    r1,r1,32\n3c:\tblr\n';
-    const prototypes = { rmk12: { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') } };
-    expect(() => decompile('rmk12', rmk12, PPC_MWCC, { prototypes })).toThrow(
-      /cannot lift 'rmk12': it is declared to return struct S12 by value, and this target returns that through a hidden pointer in r3/,
+    expect(decompile('rmk12', rmk12, PPC_MWCC, { prototypes: { rmk12: S12 } }).source).toMatch(
+      /struct S12 rmk12\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+ret\.c = a0 \+ 2;\n\s+return ret;/,
     );
   });
 
-  test('in the return register, it lifts', () => {
+  // agbcc -O2 `struct S12 rmk12(s32 x){ struct S12 s; s.a = x; s.b = 0; s.c = x + 3; return s; }`
+  // builds the struct at sp and copies it out with ldmia/stmia, whose write-back nothing reads
+  const rmk12 =
+    'rmk12:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr1, [sp]\n\tmov\tr2, #0x0\n\tstr\tr2, [sp, #0x4]\n' +
+    '\tadd\tr1, r1, #0x3\n\tstr\tr1, [sp, #0x8]\n\tadd\tr2, r0, #0\n\tmov\tr1, sp\n\tldmia\tr1!, {r3, r4, r5}\n' +
+    '\tstmia\tr2!, {r3, r4, r5}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a struct built in a frame object and copied out whole is the returned struct', () => {
+    const { source } = decompile('rmk12', rmk12, ARMV4T_AGBCC, { prototypes: { rmk12: S12 } });
+    expect(source).toMatch(
+      /struct S12 rmk12\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = 0;\n\s+ret\.c = a0 \+ 3;\n\s+return ret;/,
+    );
+    expect(source).not.toMatch(/sp0/);
+  });
+
+  // hand-written: the frame object is read again past the copy, so it is not only the returned
+  // struct, and the copy stays — the same function, spelled with the copy as member stores
+  test('a frame object read besides its copy is not folded', () => {
+    const reread =
+      rmk12.replace(
+        '\tadd\tsp, sp, #0xc\n',
+        '\tldr\tr3, [sp]\n\tldr\tr4, .L4\n\tstr\tr3, [r4]\n\tadd\tsp, sp, #0xc\n',
+      ) + '\t.align\t2, 0\n.L4:\n\t.word\tgW\n';
+    const { source } = decompile('rmk12', reread, ARMV4T_AGBCC, { prototypes: { rmk12: S12 } });
+    expect(source).toMatch(/struct S12 ret;[^]*ret\.a = \*\(s32 \*\)sp0;[^]*return ret;/);
+  });
+
+  // agbcc -O2 `struct S12 u1(s32 *p) { struct S12 r; *p = 1; return r; }`: the frame object copied
+  // out is stored to by nothing, so it is no struct the body built, and the copy of its unset words
+  // stays as what writes `ret` — folded, `ret` would be read and never written
+  test('a frame object nothing stores to is not folded', () => {
+    const u1 =
+      'u1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, #0x1\n\tstr\tr2, [r1]\n\tadd\tr2, r0, #0\n' +
+      '\tmov\tr1, sp\n\tldmia\tr1!, {r3, r4, r5}\n\tstmia\tr2!, {r3, r4, r5}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    const proto = { params: ['s32 *'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    for (const opts of [{ prototypes: { u1: proto } }, { ownContextProto: proto }]) {
+      expect(decompile('u1', u1, ARMV4T_AGBCC, opts).source).toMatch(
+        /struct S12 u1\(s32 \*a0\) \{[^]*\*a0 = 1;[^]*ret\.a = [^;]+;[^]*ret\.b = [^;]+;[^]*ret\.c = [^;]+;[^]*return ret;/,
+      );
+    }
+  });
+
+  // a candidate's own unit has no header, so the struct its signature spells is defined among its
+  // declarations, and the function itself is declared by its definition alone
+  test('the struct it returns is defined in the declarations block, stated or from the context', () => {
+    for (const opts of [{ prototypes: { rmk8: S8 } }, { ownContextProto: S8 }]) {
+      const [c] = enumerateCandidates('rmk8', rmk8, ARMV4T_AGBCC, opts);
+      expect(c.source).not.toMatch(/^struct S8 \{/m);
+      const decls = renderDeclarations(c.symbolRefs ?? []);
+      expect(decls).toContain('struct S8 { u32 a; u32 b; };');
+      expect(decls).not.toMatch(/rmk8/);
+    }
+  });
+
+  // hand-written refusals of the proof: the pointer read back, and the pointer handed to a callee
+  const rb = 'rb:\n\tldr\tr2, [r0]\n\tadd\tr2, r2, #0x1\n\tstr\tr2, [r0, #0x4]\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+  const esc =
+    'esc:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tstr\tr1, [r4]\n\tbl\tuse\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+  const use = { params: ['void *'], returnsVoid: true };
+
+  test('a stated declaration refuses where the pointer is anything but the storage', () => {
+    expect(() => decompile('rb', rb, ARMV4T_AGBCC, { prototypes: { rb: S8 } })).toThrow(
+      /cannot lift 'rb': it is declared to return struct S8 by value, which this target returns through a hidden pointer in r0, and the lift cannot show that pointer is only its storage: r0 is read by a load/,
+    );
+    expect(() => decompile('esc', esc, ARMV4T_AGBCC, { prototypes: { esc: S8, use } })).toThrow(
+      /the lift cannot show that pointer is only its storage: r0 is read by a call/,
+    );
+  });
+
+  test("a context's own declaration lifts the struct, and keeps the pointer function with a note where it cannot", () => {
+    expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { ownContextProto: S8 }).source).toMatch(/struct S8 rmk8\(s32 a0\)/);
+    const kept = decompile('rb', rb, ARMV4T_AGBCC, { ownContextProto: S8 });
+    expect(kept.source).toMatch(/s32 \* rb\(s32 \*a0, s32 a1\)/);
+    expect(kept.ownArityNotes).toEqual([
+      expect.stringMatching(
+        /^\[own-return\] rb: its context declaration `struct S8 rb\(s32\)` returns struct S8 by value, [^]*r0 is read by a load/,
+      ),
+    ]);
+    // …and one nothing lays out keeps it too, saying what is missing
+    const unsized = decompile('rmk8', rmk8, ARMV4T_AGBCC, {
+      ownContextProto: { ...S8, returnLayout: { kind: 'struct' } },
+    });
+    expect(unsized.source).toMatch(/s32 \* rmk8\(s32 \*a0, s32 a1\)/);
+    expect(unsized.ownArityNotes).toEqual([expect.stringMatching(/\[own-return\] rmk8: [^]*nothing here lays it out/)]);
+  });
+
+  // kleod's `struct Unk_0800BEF0_2 sub_0800BEF0(struct Unk_0800BEF0 arg0);`: a parameter list the
+  // arity bound cannot lay out — a struct by value, `...`, `()` — still says the return, which comes
+  // first, so the context's entry carries it and the bound abstains
+  test("a context's own declaration whose parameters bound nothing still lifts the struct it returns", () => {
+    const struct = 'typedef int s32; struct S8 { unsigned a, b; }; struct P1 { s32 x; };\n';
+    for (const decl of ['struct S8 rmk8(struct P1 p);', 'struct S8 rmk8(s32 n, ...);', 'struct S8 rmk8();']) {
+      const entry = ownContextEntry(prototypesFromContext(struct + decl, 'c'), 'rmk8');
+      expect(decompile('rmk8', rmk8, ARMV4T_AGBCC, { ownContextProto: entry }).source).toMatch(
+        /struct S8 rmk8\(s32 a0\) \{\n\s+struct S8 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+return ret;/,
+      );
+    }
+    // …and where the proof fails, the pointer function says so, spelling the declaration it read
+    const entry = ownContextEntry(prototypesFromContext(struct + 'struct S8 rb(s32 n, ...);', 'c'), 'rb');
+    const kept = decompile('rb', rb, ARMV4T_AGBCC, { ownContextProto: entry });
+    expect(kept.source).toMatch(/s32 \* rb\(s32 \*a0, s32 a1\)/);
+    expect(kept.ownArityNotes).toEqual([
+      expect.stringMatching(
+        /^\[own-return\] rb: its context declaration `struct S8 rb\(s32, \.\.\.\)` returns struct S8/,
+      ),
+    ]);
+  });
+
+  // agbcc and mwcc hand a one-word struct back in r0/r3, which holds its one member
+  test('in the return register, it is that register, and a one-word struct of one member is the struct', () => {
     const rmk1 = 'rmk1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
-    const prototypes = { rmk1: { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') } };
-    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+    const S1 = { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') };
+    const one = /struct S1 rmk1\(s32 a0\) \{\n\s+struct S1 ret;\n\s+ret\.x = a0 \+ 1;\n\s+return ret;\n\}/;
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: { rmk1: S1 } }).source).toMatch(one);
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { ownContextProto: S1 }).source).toMatch(one);
+    // a halfword struct is not all of the word agbcc rounds it to, so the word is the return
+    const S2 = {
+      params: ['s32'],
+      returns: 'struct S2',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'h', type: 'u16' }] },
+    };
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: { rmk1: S2 } }).source).toMatch(/return a0 \+ 1;/);
   });
 
   // A `--proto` table spells the return and lays nothing out; the context it is lifted beside does
@@ -617,18 +738,18 @@ describe('a function that itself returns a struct', () => {
     const stated = { rmk1: { params: ['s32'], returns: 'struct S1' } };
     const prototypes = withOwnReturnLayout(stated, 'rmk1', CTX, 'c');
     expect(prototypes?.rmk1?.returnLayout).toEqual(u32s('x'));
-    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/ret\.x = a0 \+ 1;\n\s+return ret;/);
     expect(() => decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: stated })).toThrow(
       /it is declared to return struct S1 by value, and nothing here lays it out, and this target's rule needs its layout/,
     );
   });
 
-  test('a stated typedef of a struct is that struct, and refuses where it comes back through memory', () => {
+  test('a stated typedef of a struct is that struct, returned through memory', () => {
     const rt8 = 'rt8:\n\tadd\tr2, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr1, [r0, #0x4]\n\tbx\tlr\n';
     const prototypes = withOwnReturnLayout({ rt8: { params: ['s32'], returns: 'T8' } }, 'rt8', CTX, 'c');
     expect(prototypes?.rt8?.returnLayout).toEqual(u32s('a', 'b'));
-    expect(() => decompile('rt8', rt8, ARMV4T_AGBCC, { prototypes })).toThrow(
-      /cannot lift 'rt8': it is declared to return T8 by value, and this target returns that through a hidden pointer in r0/,
+    expect(decompile('rt8', rt8, ARMV4T_AGBCC, { prototypes }).source).toMatch(
+      /T8 rt8\(s32 a0\) \{\n\s+T8 ret;\n\s+ret\.a = a0 \+ 1;\n\s+ret\.b = a0;\n\s+return ret;/,
     );
   });
 
@@ -639,12 +760,102 @@ describe('a function that itself returns a struct', () => {
     }
   });
 
-  // mwcc's svr4 rule hands an eight-byte struct back in r3:r4, and the lift returns r3 alone
+  // mwcc's svr4 rule hands an eight-byte struct back in r3:r4, and the lift returns r3 alone — so
+  // a context's declaration refuses it as a stated one does, where it would lift `s32 rmk8(s32 a0)`
   test('in a register pair, it refuses', () => {
     const rmk8 = '0 <rmk8>:\n0:\taddi    r4,r3,0\n4:\taddi    r3,r3,1\n8:\tblr\n';
-    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
-    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { prototypes })).toThrow(
+    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { prototypes: { rmk8: S8 } })).toThrow(
       /it is declared to return struct S8 by value, and this target hands its 8 bytes back in two registers/,
+    );
+    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { ownContextProto: S8 })).toThrow(
+      /its context declaration says it returns struct S8 by value, and this target hands its 8 bytes back in two registers [^]*\(`struct S8 rmk8\(s32\)`\)/,
+    );
+  });
+  // agbcc -O2 `struct S8 f(int unused, int y){ struct S8 s; s.a = y; s.b = 1; return s; }`: a
+  // non-leaf whose 8-byte struct takes DImode, so its epilogue pops the return address into r2 as a
+  // `long long`'s does. The declaration explains that epilogue only where the proof holds.
+  const wide =
+    'wide:\n\tpush\t{r4, lr}\n\tadd\tr3, r2, #0\n\tmov\tr4, #0x1\n\tstr\tr3, [r0]\n\tstr\tr4, [r0, #0x4]\n' +
+    '\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+  const S8two = { params: ['s32', 's32'], returns: 'struct S8', returnLayout: u32s('a', 'b') };
+  const eightBytes = /the epilogue of 'wide' says the return type is 5 to 8 bytes/;
+
+  test('an 8-byte struct whose epilogue says 8 bytes is the struct, on agbcc, where the proof holds', () => {
+    const struct =
+      /struct S8 wide\(s32 a0, s32 a1\) \{\n\s+struct S8 ret;\n\s+ret\.a = a1;\n\s+ret\.b = 1;\n\s+return ret;/;
+    expect(decompile('wide', wide, ARMV4T_AGBCC, { prototypes: { wide: S8two } }).source).toMatch(struct);
+    expect(decompile('wide', wide, ARMV4T_AGBCC, { ownContextProto: S8two }).source).toMatch(struct);
+    // nothing declared, the epilogue is all there is to read
+    expect(() => decompile('wide', wide, ARMV4T_AGBCC, {})).toThrow(eightBytes);
+    // the pointer handed to a callee: no proof, so the epilogue's refusal stands on both declarations
+    const passed = wide.replace('\tpop\t{r4}\n', '\tbl\tuse\n\tpop\t{r4}\n');
+    const both: DecompileOptions[] = [
+      { prototypes: { wide: S8two, use } },
+      { prototypes: { use }, ownContextProto: S8two },
+    ];
+    for (const opts of both) {
+      // …and says why the struct that would explain the epilogue is not shown to be it
+      expect(() => decompile('wide', passed, ARMV4T_AGBCC, opts)).toThrow(
+        /says the return type is 5 to 8 bytes [^]*; the 8-byte struct its own declaration returns through r0 would explain it, but the lift cannot show r0 is only that struct's storage: r0 is read by a call/,
+      );
+    }
+  });
+
+  // mwcc does not hand the pointer back: its callee leaves in r3 whatever was last there (a
+  // reloaded frame word it also stores; target.ts `structReturnHandsBackPointer`). Hand-written,
+  // the shape of rmk12 with r3 reused before the blr for a word the body stores.
+  test('on mwcc, what r3 holds at the blr is no part of a struct return', () => {
+    const reused =
+      '0 <ru>:\n0:\taddi    r5,r4,1\n4:\tstw     r4,0(r3)\n8:\tstw     r5,4(r3)\n' +
+      'c:\tli      r0,0\n10:\tstw     r0,8(r3)\n14:\tmr      r3,r5\n18:\tblr\n';
+    const proto = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    const struct =
+      /struct S12 ru\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+ret\.c = 0;\n\s+return ret;/;
+    expect(decompile('ru', reused, PPC_MWCC, { prototypes: { ru: proto } }).source).toMatch(struct);
+    expect(decompile('ru', reused, PPC_MWCC, { ownContextProto: proto }).source).toMatch(struct);
+    // …where agbcc's r0 must still be the pointer at every return
+    const r0 = 'ru:\n\tadd\tr2, r1, #0x1\n\tstr\tr1, [r0]\n\tstr\tr2, [r0, #0x4]\n\tmov\tr0, #0x7\n\tbx\tlr\n';
+    expect(() => decompile('ru', r0, ARMV4T_AGBCC, { prototypes: { ru: S8 } })).toThrow(
+      /a return hands back something other than the address it was handed in r0/,
+    );
+  });
+
+  // …save a value computed for that return alone, which no struct return computes: mwcc_242_81 -O4,p
+  // `int fake(struct S12 *p, int x) { p->a = x; p->b = 0; p->c = 1; return x * 2; }` under a header
+  // that says `struct S12 fake(int x)` would drop the `x * 2` it returns
+  test('on mwcc, a return of a value nothing else reads is no struct return', () => {
+    const fake =
+      '0 <fake>:\n0:\tstw     r4,0(r3)\n4:\tli      r5,0\n8:\tli      r0,1\nc:\tstw     r5,4(r3)\n' +
+      '10:\tstw     r0,8(r3)\n14:\tslwi    r3,r4,1\n18:\tblr\n';
+    const proto = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    const alone = /a return hands back in r3 a value nothing else reads/;
+    expect(() => decompile('fake', fake, PPC_MWCC, { prototypes: { fake: proto } })).toThrow(alone);
+    const kept = decompile('fake', fake, PPC_MWCC, { ownContextProto: proto });
+    expect(kept.source).toMatch(/s32 fake\(s32 \*a0, s32 a1\) \{[^]*return a1 << 1;/);
+    expect(kept.ownArityNotes).toEqual([expect.stringMatching(/^\[own-return\] fake: [^]*nothing else reads/)]);
+  });
+
+  // a register struct that is not one word of one member stays the word, and says why
+  test('a register struct kept as the word carries a note, and takes no hidden argument word', () => {
+    const rmk2 = 'rmk2:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tbx\tlr\n';
+    const S2 = {
+      params: ['s32'],
+      returns: 'struct S2',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'h', type: 'u16' }] },
+    };
+    for (const [opts, which] of [
+      [{ prototypes: { rmk2: S2 } }, 'declaration'],
+      [{ ownContextProto: S2 }, 'context declaration'],
+    ] as const) {
+      expect(decompile('rmk2', rmk2, ARMV4T_AGBCC, opts).ownArityNotes).toEqual([
+        `[own-return] rmk2: its ${which} \`struct S2 rmk2(s32)\` returns struct S2 by value in r0, and it is not one ` +
+          'word that is all one integer member — lifted as the word the machine code returns, which the header contradicts',
+      ]);
+    }
+    // the bound reads the target's rule: a struct in r0 puts no pointer ahead of the one parameter
+    const past = rmk2.replace('\tbx\tlr', '\torr\tr0, r1\n\tbx\tlr');
+    expect(decompile('rmk2', past, ARMV4T_AGBCC, { ownContextProto: S2 }).ownArityNotes[0]).toMatch(
+      /fills 1 argument word, and the body reads r1 past it/,
     );
   });
 });

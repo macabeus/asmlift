@@ -1382,3 +1382,28 @@ describe('mullw operand order survives the frontend into the idiom layer', () =>
     expect(src).not.toContain('%');
   });
 });
+
+// mwcc_242_81 at canonical flags, compiled: `int r1(int a) { return a; }` is a bare `blr` — no path
+// writes r3, so nothing in the body says the function returns a word. A stated `int` return says
+// it: the bare return hands back r3's entry value, the argument. A context's own entry is not read
+// for it, and with nothing declared it stays the `void` function the body shows.
+describe('a bare return under a stated word return', () => {
+  const r1 = '00000000 <r1>:\n0:\tblr\n';
+  test('hands back the argument r3 holds', () => {
+    const prototypes = { r1: { params: ['int'], returns: 'int' } };
+    expect(decompile('r1', r1, PPC_MWCC, { prototypes }).source).toMatch(/s32 r1\(s32 a0\) \{\n\s+return a0;\n\}/);
+  });
+
+  test('stays bare with nothing stated, a context entry, a void return or no argument', () => {
+    expect(decompile('r1', r1, PPC_MWCC, {}).source).toMatch(/void r1\(void\)/);
+    expect(decompile('r1', r1, PPC_MWCC, { ownContextProto: { params: ['int'], returns: 'int' } }).source).toMatch(
+      /void r1\(void\)/,
+    );
+    for (const r of [
+      { params: ['int'], returnsVoid: true },
+      { params: [], returns: 'int' },
+    ]) {
+      expect(decompile('r1', r1, PPC_MWCC, { prototypes: { r1: r } }).source).toMatch(/void r1\(void\) \{\n\s+return;/);
+    }
+  });
+});

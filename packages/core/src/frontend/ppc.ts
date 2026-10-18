@@ -39,6 +39,7 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
+import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
@@ -49,7 +50,6 @@ import {
   declaredWidth,
   declaresVoidReturn,
   isFloatingSpelling,
-  ownArgumentWords,
   ownFirstArgumentPassed,
 } from '../proto';
 import type { ContextGlobals } from '../proto-context';
@@ -1428,7 +1428,7 @@ function liftOnce(
   // ABI lets a callee use unsaved, is an uninitialised local. `registerLiveIns` (frontend/ssa.ts)
   // composes it, as it does for Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
   // the treatment a target claiming no partition gets. The function's own declaration bounds the
-  // general argument registers (`ownArgumentWords`): mwcc 2.3.3 homes locals in r5..r10 past a
+  // general argument registers (`ownArgumentWordsOn`): mwcc 2.3.3 homes locals in r5..r10 past a
   // two-parameter one. The FPRs are not bounded here.
   //
   // NOT WHERE THE BODY IS HAND-WRITTEN. A declaration states a compiled function's register
@@ -1447,7 +1447,7 @@ function liftOnce(
       registerLiveIns(
         target,
         savedRegs,
-        !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWords(name, prototypes[name], target)),
+        !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
       ),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
@@ -1897,8 +1897,17 @@ function liftOnce(
     const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
     return ARG_REGS.some((r) => live.has(r)) || r3WrittenToReturn();
   };
+  /** Whether the function's own STATED declaration returns a word: then it returns one even where
+   *  no path writes r3, and a bare return hands back what the caller left there — `int f(int a) {
+   *  return a; }` is a bare `blr`. A context's own entry is not read for this (its return is a
+   *  header nothing checked), and neither is a hand-written body's (`ownDeclared` false). */
+  const statesWordReturn = (): boolean => {
+    const r = prototypes[name]?.returns;
+    const width = r === undefined || isFloatingSpelling(r) ? undefined : declaredWidth(r);
+    return ownDeclared && width !== undefined && width <= 32;
+  };
   const returnUntouchedArg = () => {
-    if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {
+    if (!(wordReturn || statesWordReturn()) || bareReturns.length === 0 || !r3IsAnArgument()) {
       return;
     }
     for (const { op, bi } of bareReturns) {

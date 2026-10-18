@@ -1012,6 +1012,7 @@ export function enumerateCandidates(
     prototypes,
     target,
     refuse,
+    own: Object.hasOwn(prototypes, name) ? prototypes[name] : ownContext.ownContextProto,
   });
   // THE RESPELL SET, as a function whose PARAMETER LIST is the invariant the tree skip below
   // rests on: every source here is a pure function of the structured tree and this call's own
