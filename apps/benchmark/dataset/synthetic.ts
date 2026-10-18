@@ -10662,6 +10662,18 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct OcT { int a; int b; int c; };\nextern void g2(int *, int);\nvoid ownctx_cb(void);',
     proto: { g2: { params: ['int *', 'int'], returnsVoid: true } },
   },
+  // `ownctx_home`: IDO at -g3 (and -O0) homes every argument register its definition declares
+  // (`sw a0,0(sp); sw a1,4(sp)`), read back or not. Those stores are the asm reading a0 and a1, so a
+  // `(void)` header past them keeps both as parameters, with a note: lifted `(void)`, the candidate
+  // compiles without the two stores. The canonical -O2 drops the homes, so this row sets its flags.
+  {
+    sym: 'ownctx_home',
+    src: 'extern int gOcH;\nvoid ownctx_home(int a, int b){ gOcH = 1; }',
+    cflags: ['-mips2', '-O2', '-g3', '-32', '-non_shared', '-G', '0'],
+    features: ['global'],
+    toolchains: ['ido7.1'],
+    ctx: 'extern int gOcH;\nvoid ownctx_home(void);',
+  },
   {
     sym: 'byvalregs',
     src:
