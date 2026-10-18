@@ -56,6 +56,7 @@ import {
   RETURNS_OBJECT,
   type Value,
   defOpMap,
+  fallThroughOf,
   mergeClasses,
   mkOp,
   mkValue,
@@ -345,7 +346,8 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
   let frame: number | undefined;
   let shift: number | undefined;
   const copiedLoads = new Set<Op>();
-  const tiles: [number, number][] = [];
+  // the copies by the block they are in: one whole copy per block, as IDO repeats it at each return
+  const tiles = new Map<Block, [number, number][]>();
   for (const c of copies) {
     const load = defs.get(c.operands[1]);
     const base = load?.opcode === 'load' ? defs.get(load.operands[0]) : undefined;
@@ -356,8 +358,7 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
       qualified(c) ||
       qualified(load) ||
       load.attrs.width !== c.attrs.width ||
-      (uses.get(load.results[0]) ?? []).length !== 1 ||
-      blockOf.get(c) !== blockOf.get(copies[0])
+      (uses.get(load.results[0]) ?? []).length !== 1
     ) {
       return;
     }
@@ -368,11 +369,14 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
     frame = base.attrs.off as number;
     shift = s;
     copiedLoads.add(load);
-    tiles.push([c.attrs.off as number, c.attrs.width as number]);
+    const at = blockOf.get(c)!;
+    (tiles.get(at) ?? tiles.set(at, []).get(at)!).push([c.attrs.off as number, c.attrs.width as number]);
   }
-  tiles.sort((a, b) => a[0] - b[0]);
-  if (tiles.reduce((end, [off, w]) => (end === off ? off + w : -1), 0) !== size) {
-    return;
+  for (const t of tiles.values()) {
+    t.sort((a, b) => a[0] - b[0]);
+    if (t.reduce((end, [off, w]) => (end === off ? off + w : -1), 0) !== size) {
+      return;
+    }
   }
   // every access to the frame object, and nothing else that reaches it
   const accesses: FrameAccess[] = [];
@@ -399,7 +403,7 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
   const stores = accesses.filter((a) => a.op.opcode === 'store');
   // a frame object nothing stores to is a struct returned wholly unset (`struct S12 r; return r;`):
   // folding it would leave `ret` read and never written, so the copy of its unset words stays
-  if (stores.length === 0 || storeFollowsCopy(fn, blockOf.get(copies[0])!, copiedLoads, stores, blockOf)) {
+  if (stores.length === 0 || storeFollowsCopy(fn, [...tiles.keys()], copiedLoads, stores, blockOf)) {
     return;
   }
   for (const { op, at } of stores) {
@@ -415,21 +419,48 @@ function foldFrameCopy(fn: Fn, ret: Value, size: number, dead: ReadonlySet<Op>):
   for (const b of fn.blocks) {
     b.ops = b.ops.filter((op) => !laddrs.includes(op) || read.has(op.results[0]));
   }
+  if (tiles.size > 1) {
+    returnAtEachCopy(fn, [...tiles.keys()]);
+  }
 }
 
-/** Whether a store in `stores` is not one the copy reads: it can run after a copied load — later in
- *  the copy's block `at`, or in any block reachable from it (which includes `at` itself, where it
- *  heads a loop) — or it runs on a path that never reaches the copy at all, where the caller's
- *  storage was left unwritten and folding would write it. */
+/** A COPY REPEATED IN SEVERAL BLOCKS IS A `return` IN EACH: IDO lowers every `return r;` to its own
+ *  copy and branches on to the one epilogue, where the lift has a block that only returns. So each
+ *  copy block that branches straight to such a block returns there itself, and the block goes where
+ *  nothing else reaches it — `if (x) { …; return ret; } …; return ret;`, the function IDO compiled,
+ *  where one `return ret;` past the join compiles to one copy. */
+function returnAtEachCopy(fn: Fn, at: readonly Block[]): void {
+  for (const b of at) {
+    const br = b.ops[b.ops.length - 1];
+    const m = br?.opcode === 'br' && br.successors.length === 1 ? br.successors[0].block : undefined;
+    const ret = m?.ops.length === 1 ? m.ops[0] : undefined;
+    if (ret?.opcode !== 'ret' || ret.operands.some((v) => m!.params.includes(v))) {
+      continue;
+    }
+    const { fallthrough: _, ...attrs } = ret.attrs;
+    b.ops[b.ops.length - 1] = mkOp('ret', { operands: [...ret.operands], attrs: { ...attrs, ...fallThroughOf(br) } });
+  }
+  const preds = predecessors(fn);
+  fn.blocks = fn.blocks.filter((b, k) => k === 0 || (preds.get(b) ?? []).length > 0);
+}
+
+/** Whether a store in `stores` is not one a copy reads, or a copy is not one every return reads. The
+ *  copies are one whole copy per block in `at`. A store is not read by one where it can run after a
+ *  copied load — later in its copy's block, or in any block reachable from a copy's (which includes
+ *  that block itself, where it heads a loop) — or where it runs on a path that reaches no copy at
+ *  all, where the caller's storage was left unwritten and folding would write it. And a return
+ *  reached on a path through no copy hands back storage the machine leaves alone, which a folded
+ *  `ret` would hold the frame object's stores in. */
 function storeFollowsCopy(
   fn: Fn,
-  at: Block,
+  at: readonly Block[],
   loads: ReadonlySet<Op>,
   stores: readonly FrameAccess[],
   blockOf: ReadonlyMap<Op, Block>,
 ): boolean {
-  const first = at.ops.findIndex((op) => loads.has(op));
-  if (first < 0 || [...loads].some((l) => blockOf.get(l) !== at)) {
+  const copying = new Set(at);
+  const first = new Map(at.map((b) => [b, b.ops.findIndex((op) => loads.has(op))]));
+  if ([...first.values()].some((i) => i < 0) || [...loads].some((l) => !copying.has(blockOf.get(l)!))) {
     return true;
   }
   const walk = (from: Block[], next: (b: Block) => Block[]): Set<Block> => {
@@ -444,11 +475,22 @@ function storeFollowsCopy(
     }
     return seen;
   };
-  const after = walk(successorsOf(at), successorsOf);
+  const after = walk(at.flatMap(successorsOf), successorsOf);
   const preds = predecessors(fn);
-  const before = walk(preds.get(at) ?? [], (b) => preds.get(b) ?? []);
+  const before = walk(
+    at.flatMap((b) => preds.get(b) ?? []),
+    (b) => preds.get(b) ?? [],
+  );
+  // the blocks the entry reaches through no copy, none of which may return
+  const copyless =
+    fn.blocks.length === 0 || copying.has(fn.blocks[0])
+      ? new Set<Block>()
+      : walk([fn.blocks[0]], (b) => successorsOf(b).filter((s) => !copying.has(s)));
+  if ([...copyless].some((b) => b.ops.some((op) => op.opcode === 'ret'))) {
+    return true;
+  }
   return stores.some(({ op }) => {
     const b = blockOf.get(op)!;
-    return after.has(b) || (b === at ? at.ops.indexOf(op) > first : !before.has(b));
+    return after.has(b) || (copying.has(b) ? b.ops.indexOf(op) > first.get(b)! : !before.has(b));
   });
 }

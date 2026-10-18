@@ -637,6 +637,61 @@ describe('a function that itself returns a struct', () => {
     expect(source).not.toMatch(/sp0/);
   });
 
+  // ido7.1 `struct S12 c2(s32 x){ struct S12 r; if (x) { r.a = 1; r.b = 2; r.c = 3; return r; }
+  // r.a = g2(x); r.b = 0; r.c = 0; return r; }` copies the frame object out once per `return r;`,
+  // the second time through the pointer it spilled across the call
+  test("IDO's copy at each of two returns is a return in each", () => {
+    const c2: Fixture = {
+      lines: [
+        '0:\taddiu\tsp,sp,-40',
+        '4:\tsw\tra,20(sp)',
+        '8:\tbeqz\ta1,4c <c2+0x4c>',
+        'c:\tmove\ta2,a0',
+        '10:\tli\tt6,1',
+        '14:\tli\tt7,2',
+        '18:\tli\tt8,3',
+        '1c:\tsw\tt8,36(sp)',
+        '20:\tsw\tt7,32(sp)',
+        '24:\tsw\tt6,28(sp)',
+        '28:\taddiu\tt9,sp,28',
+        '2c:\tlw\tt1,0(t9)',
+        '30:\tmove\tv0,a0',
+        '34:\tsw\tt1,0(a0)',
+        '38:\tlw\tt0,4(t9)',
+        '3c:\tsw\tt0,4(a0)',
+        '40:\tlw\tt1,8(t9)',
+        '44:\tb\t88 <c2+0x88>',
+        '48:\tsw\tt1,8(a0)',
+        '4c:\tmove\ta0,a1',
+        '50:\tjal\t0 <c2>',
+        '54:\tsw\ta2,40(sp)',
+        '58:\tsw\tv0,28(sp)',
+        '5c:\tsw\tzero,32(sp)',
+        '60:\tsw\tzero,36(sp)',
+        '64:\taddiu\tt2,sp,28',
+        '68:\tlw\tt4,0(t2)',
+        '6c:\tlw\ta2,40(sp)',
+        '70:\tsw\tt4,0(a2)',
+        '74:\tlw\tt3,4(t2)',
+        '78:\tmove\tv0,a2',
+        '7c:\tsw\tt3,4(a2)',
+        '80:\tlw\tt4,8(t2)',
+        '84:\tsw\tt4,8(a2)',
+        '88:\tlw\tra,20(sp)',
+        '8c:\taddiu\tsp,sp,40',
+        '90:\tjr\tra',
+        '94:\tnop',
+      ],
+      rs: [[0x50, 'R_MIPS_26', 'g2']],
+    };
+    const g2 = { params: ['s32'], returns: 's32' };
+    const source = own('c2', c2, MIPS_IDO, { prototypes: { g2 }, ownContextProto: S12 });
+    expect(source).toMatch(
+      /struct S12 c2\(s32 a0\) \{\n\s+struct S12 ret;\n\s+if \(a0 != 0\) \{\n\s+ret\.c = 3;\n\s+ret\.b = 2;\n\s+ret\.a = 1;\n\s+return ret;\n\s+\}[^]*ret\.a = g2\(a0\);\n\s+ret\.b = 0;\n\s+ret\.c = 0;\n\s+return ret;/,
+    );
+    expect(source).not.toMatch(/sp\d+/);
+  });
+
   // hand-written: the copy's last word is moved to a store that follows it, so the frame object is
   // written after it is copied, and what was copied is not what the object last held
   test('a frame object stored to after its copy is not folded', () => {
