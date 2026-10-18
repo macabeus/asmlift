@@ -10465,6 +10465,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      CodeWarrior builds only; ido7.1 walks a pointer to a separately built end, and mwcc counts
   //      down `ctr`. gcc2.7.2kmc and gcc2.7.2 are controls. `dowbreak_code` is its do-while twin, a
   //      bottom-tested source with no peel, which keeps its bottom test on every toolchain.
+  //      `breakret_code` ends in a `return`, which the arm must not copy; `breakidx_code` reads the
+  //      counter after the loop, a value the head and the arm hand the exit alike.
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
@@ -10769,6 +10771,36 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void dowbreak_code(void);',
     proto: { dowbreak_code: { returnsVoid: true } },
   })),
+  ...(
+    [
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]) => [
+    {
+      sym: 'breakret_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        's32 breakret_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    return gOut;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 's32 breakret_code(void);',
+    },
+    {
+      sym: 'breakidx_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        'void breakidx_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = i;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakidx_code(void);',
+      proto: { breakidx_code: { returnsVoid: true } },
+    },
+  ]),
   {
     sym: 'spilldead',
     src:
