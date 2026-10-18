@@ -961,6 +961,38 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct S; void sfar_ptr(struct S*,u8*,u8*);',
     proto: { sfar_ptr: { returnsVoid: true } },
   },
+  // A uniform-width root: every access one byte wide, so the access set alone reads as an array.
+  // The far store's order (`*q` loaded before the `adds #38`) is the member's and no cast's, and
+  // only the member spelling reproduces it. `sfar_bb` also leaves the second address in r0 at the
+  // void function's `bx lr`, which is no use of it.
+  {
+    sym: 'sfar_ub',
+    src: 'struct B{u8 a;u8 pad[37];u8 c;};\nvoid sfar_ub(struct B*p,u8*q){ p->c=*q; p->a=0; }',
+    features: ['struct', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'struct B; void sfar_ub(struct B*,u8*);',
+    proto: { sfar_ub: { returnsVoid: true } },
+  },
+  {
+    sym: 'sfar_bb',
+    src: 'struct B{u8 a;u8 pad[37];u8 c;u8 d;};\nvoid sfar_bb(struct B*p){ p->d=p->c; }',
+    features: ['struct', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'struct B; void sfar_bb(struct B*);',
+    proto: { sfar_bb: { returnsVoid: true } },
+  },
+  // A held pointer read at two offsets: agbcc shares one `adds r1, #38` between `ldrb [r1]` and
+  // `ldrb [r1, #1]`, where the member spelling `p->c + p->d` gives each access its own `adds`. So
+  // the pointer is the source's and the fold leaves it alone (raise/structs.ts
+  // `held-pointer-offsets`). On ido and mwcc the members share one base too, and KMC lifts the held
+  // pair as members at the same bytes, so this pins agbcc only.
+  {
+    sym: 'sfar_held',
+    src: 'struct S{s32 a;u16 b;u8 pad[32];u8 c;u8 d;};\nu32 sfar_held(struct S*p){ u8*d=&p->c; return d[0]+d[1]+p->a; }',
+    features: ['struct', 'field', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S; u32 sfar_held(struct S*);',
+  },
   // The same gap past a 16-bit displacement: ido's `addiu at, a0, 32767; sb a1, 7232(at)`, KMC's and
   // GCC 2.7.2's `lui at, 1; addu at, at, a0; sb a1, -25537(at)`, mwcc's `addis r5, r3, 1;
   // stb r4, -25537(r5)`. There the member and both cast spellings compile to the same bytes
