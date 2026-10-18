@@ -36,7 +36,7 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
-import { StructureError, structure } from '../src/structure/structure';
+import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, structureOptionsFor } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -149,7 +149,7 @@ const TRAILING_DOWHILE_EXPR = TRAILING_DOWHILE.replace(
   '  %15: s32 = add %7, %10\n  cond_br %12, ^bb2(%8, %13, %11), ^bb3(%15)',
 );
 
-// REFUSAL — the guard tests something the loop does not. `isGuardShapedPred` only asks whether the
+// NOT FUSED — the guard tests something the loop does not. `isGuardShapedPred` only asks whether the
 // block branches to the header and to the exit; an `if` on an unrelated value has that shape, and
 // fusing it away deletes it, running a loop the source skipped.
 const UNRELATED_GUARD = `fn badguard {
@@ -206,12 +206,15 @@ test('the same edit under a fused guard sinks too, and the guard edge supplies t
   );
 });
 
-test('a guard not provably the loop test is not sinkable — declines instead of vanishing', () => {
-  // Same CFG as TRAILING_PTR, which IS accepted; only the guard's condition differs. Guard fusion
-  // drops the test, so sinking — which makes the zero-trip path load-bearing — must first prove
-  // the `while` re-asks the same question.
+test('a guard not provably the loop test is not sinkable — it stays an `if`, one copy per exit edge', () => {
+  // Same CFG as TRAILING_PTR; only the guard's condition differs. Guard fusion drops the test, so
+  // sinking — which makes the zero-trip path load-bearing — must first prove the `while` re-asks the
+  // same question. Unproven, the guard is an ordinary `if` around a do-while, and each exit edge's
+  // copies ride that edge rather than a post-loop copy both would have to share.
   expect(() => emit(TRAILING_PTR)).not.toThrow();
-  expect(() => emit(UNRELATED_GUARD)).toThrow(StructureError);
+  expect(emit(UNRELATED_GUARD)).toMatch(
+    /if \(a1 != 0\) \{\n\s+v0 = \(s32 \*\)&head;\n\s+do \{\n\s+v1 = v0;\n\s+v0 = \(s32 \*\)\*v0;\n\s+\} while \(a0 != v0\);\n\s+\} else \{\n\s+v1 = \(s32 \*\)&head;/,
+  );
 });
 
 test('a zero-trip value the post-loop copy cannot reproduce seeds a copy sunk into the body', () => {

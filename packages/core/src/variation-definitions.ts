@@ -445,6 +445,33 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: 'packages/core/src/raise/tailsink.ts',
     seeAlso: ['shared-ret'],
   },
+  'kept-slot': {
+    title: 'Each arm keeps its copy of a shared tail',
+    summary: "a MIPS jump's delay slot that ends a tail both arms spell stays in its own arm",
+    detail:
+      'IDO, KMC and GCC 2.7.2 fill the delay slot of a `b` or `j` with a copy of the first word at its ' +
+      'target, so by default the jump is read as landing one word earlier and the two arms meet there. ' +
+      'Where the word before the jump also matches the word before that copy, the two arms may instead ' +
+      'have been written out twice, each ending in the same instructions. This lift keeps the slot in its ' +
+      'own arm, so each arm keeps the whole tail it spells.',
+    compilerBehavior:
+      'The two readings are one object: the slot runs before the target on its one edge either way. ' +
+      'Which arms the source wrote out is something only the differ can tell. The question arises on IDO ' +
+      'alone: GCC 2.7.2 and KMC cross-jump a tail both arms spell into one copy at the join before they ' +
+      'fill any slot, so their output has no tail written twice (`mergenarrow` builds with no `b` on either).',
+    offeredWhen: {
+      when: 'The MIPS lift reported a `b`/`j` whose slot ends a common tail of two or more words, and retargeted it.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'void example(s32 *out, s32 a, s32 b, s32 c) { @ }',
+      before: 's32 v; if (c) { v = (a + b) << 16; } else { v = (a - b) << 16; } out[0] = v >> 16;',
+      after: 's16 v; if (c) { v = a + b; } else { v = a - b; } out[0] = v;',
+      note: 'the shape of `synthetic:mergenarrow`',
+    },
+    implementedIn: 'packages/core/src/frontend/mips.ts',
+  },
 
   // ── structure ───────────────────────────────────────────────────────────────────────────────
   'flip-branch': {

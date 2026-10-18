@@ -10,7 +10,9 @@ import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (...lines: string[]) =>
@@ -285,8 +287,10 @@ test('a recovered jump table and a nullified slot refuse where they meet, both w
   // it checks. Both ways they can meet are therefore checked in `lift`, after recovery, and both
   // are silent wrong answers if they are not: the bounds branch emits a `switch_br`, which runs its
   // delay slot unconditionally, and an arm landing ON a nullified slot would run the slot with no
-  // branch conditioning it and then jump to that branch's target. Neither occurs in the corpus —
-  // no compiler emits a case arm into a delay slot — so refusing costs nothing.
+  // branch conditioning it and then jump to that branch's target. No compiler emits a case arm into
+  // a delay slot, so that refusal costs nothing. KMC does write a likely bounds branch, but with the
+  // default's first word in its slot, which `normaliseBranchLikely` retargets (the stolen-slot tests
+  // below); the slots here are no word's copy, so both still refuse.
   const dispatch = (bounds: string) =>
     obj(
       ' 0:\tsltiu\tat,a0,0x2',
@@ -332,4 +336,354 @@ test('a recovered jump table and a nullified slot refuse where they meet, both w
   expect(() => decompile('f', dispatch('beqzl'), MIPS_GCC, { asmData })).toThrow(
     /branch-likely at 0x4 — a recovered switch's bounds branch cannot annul its delay slot/,
   );
+});
+
+// THE STOLEN SLOT. IDO, KMC and GCC 2.7.2 fill a likely slot by copying the target's first word
+// into it, so the slot is also the word at T-4: `bnezl r,T; S` with S at T-4. `normaliseBranchLikely`
+// then retargets the branch to T-4 with an empty slot. Taken runs S then T either way, not taken
+// annuls S either way, so the rewrite is exact whatever else reaches T-4 — and it keeps the join at
+// T-4 that the copy's own taken-edge block would have skipped.
+test('a slot that is the target-4 word, stolen, retargets the branch to target-4 with an empty slot', () => {
+  // Taken: a1 + 1. Not taken: 5 + 1. One `return a1 + 1` after the `if`, not the copy on each arm.
+  expect(
+    src(
+      '0:\tbnezl\ta0,10 <f+0x10>',
+      '4:\taddiu\ta1,a1,1',
+      '8:\tli\ta1,5',
+      'c:\taddiu\ta1,a1,1',
+      '10:\tjr\tra',
+      '14:\tmove\tv0,a1',
+    ),
+  ).toBe('s32 f(s32 a0, s32 a1) {\n    if (a0 == 0) a1 = 5;\n    return a1 + 1;\n}\n');
+  // A slot that writes the register the branch tests is still exact: the branch reads its operand
+  // before the slot either way, and the taken edge runs the same word at T-4.
+  expect(
+    src(
+      '0:\tbnezl\ta0,10 <f+0x10>',
+      '4:\taddiu\ta0,a0,1',
+      '8:\tli\ta0,5',
+      'c:\taddiu\ta0,a0,1',
+      '10:\tjr\tra',
+      '14:\tmove\tv0,a0',
+    ),
+  ).toBe('s32 f(s32 a0) {\n    if (a0 == 0) a0 = 5;\n    return a0 + 1;\n}\n');
+});
+
+test('the stolen-slot rewrite asks for the same relocation, not only the same text', () => {
+  // `lw v0,0(v1)` at 0x8 reads A; the same text at 0x14 reads B when its relocation says so. The
+  // taken path reads A whichever: a rewrite on text alone would return B there.
+  const asm = obj(
+    '0:\tlui\tv1,0x0',
+    '4:\tbnezl\ta0,18 <f+0x18>',
+    '8:\tlw\tv0,0(v1)',
+    'c:\tjr\tra',
+    '10:\tli\tv0,3',
+    '14:\tlw\tv0,0(v1)',
+    '18:\tjr\tra',
+    '1c:\tnop',
+  );
+  const asmData = (atT4: string): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(8)]]),
+    relocs: [
+      { section: '.text', offset: 0x0, type: 'R_MIPS_HI16', sym: 'A', addend: 0 },
+      { section: '.text', offset: 0x8, type: 'R_MIPS_LO16', sym: 'A', addend: 0 },
+      { section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: atT4, addend: 0 },
+    ],
+    symbols: new Map([
+      ['A', { section: '.data', value: 0, size: 4, index: 1 }],
+      ['B', { section: '.data', value: 4, size: 4, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  });
+  const want = 's32 f(s32 a0) {\n    if (a0 == 0) {\n        return 3;\n    } else {\n        return A;\n    }\n}\n';
+  // the same relocation: rewritten, and the emptied slot's own record is not attached to its `nop`
+  expect(decompile('f', asm, MIPS_GCC, { asmData: asmData('A') }).source).toBe(want);
+  // a different one: the slot stays the taken edge's own block, reading A
+  expect(decompile('f', asm, MIPS_GCC, { asmData: asmData('B') }).source).toBe(want);
+});
+
+test('a stolen slot that completes a `%lo` keeps its slot, so each path pairs it with its own `%hi`', () => {
+  // Each path loads v1's high half for itself (0x0 and 0xc for the likely branch; 0x8 and 0x14
+  // for the `b`). Retargeted, the one copy at T-4 would read v1 at a join, where it is the block
+  // parameter and not the half, and the fold would refuse a function that lifts.
+  const asmData = (lo: number[], hi: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(8)]]),
+    relocs: [
+      ...hi.map((offset) => ({ section: '.text', offset, type: 'R_MIPS_HI16', sym: 'A', addend: 0 })),
+      ...lo.map((offset) => ({ section: '.text', offset, type: 'R_MIPS_LO16', sym: 'A', addend: 0 })),
+    ],
+    symbols: new Map([['A', { section: '.data', value: 0, size: 4, index: 1 }]]),
+    symbolCount: 1,
+    bigEndian: true,
+  });
+  const likely = obj(
+    '0:\tlui\tv1,0x0',
+    '4:\tbnezl\ta0,18 <f+0x18>',
+    '8:\tlw\tv0,0(v1)',
+    'c:\tlui\tv1,0x0',
+    '10:\tli\ta1,3',
+    '14:\tlw\tv0,0(v1)',
+    '18:\tjr\tra',
+    '1c:\taddu\tv0,v0,a1',
+  );
+  expect(decompile('f', likely, MIPS_IDO, { asmData: asmData([0x8, 0x14], [0x0, 0xc]) }).source).toBe(
+    's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 == 0) a1 = 3;\n    v0 = A;\n    return v0 + a1;\n}\n',
+  );
+  const jump = obj(
+    '0:\tbeqz\ta0,14 <f+0x14>',
+    '4:\tli\ta1,1',
+    '8:\tlui\tv1,0x0',
+    'c:\tb\t24 <f+0x24>',
+    '10:\tlw\tv0,0(v1)',
+    '14:\tlui\tv1,0x0',
+    '18:\tli\ta1,3',
+    '1c:\tsw\ta1,0(a2)',
+    '20:\tlw\tv0,0(v1)',
+    '24:\tjr\tra',
+    '28:\taddu\tv0,v0,a1',
+  );
+  const out = decompile('f', jump, MIPS_IDO, { asmData: asmData([0x10, 0x20], [0x8, 0x14]) }).source;
+  expect(out).toContain('v0 = A;');
+  expect(out).toContain('*a2 = 3;');
+});
+
+test('the stolen-slot rewrite leaves alone a target-4 that is a delay slot or outside the function', () => {
+  // 0x10 is `beqz`'s slot: it runs after that branch, and a branch landing on it is not modelled.
+  // Not taken: a1 = 6, then 9 or 6 by a2; taken: a1 + 1.
+  const out = src(
+    '0:\tbnezl\ta0,14 <f+0x14>',
+    '4:\taddiu\ta1,a1,1',
+    '8:\tli\ta1,5',
+    'c:\tbeqz\ta2,1c <f+0x1c>',
+    '10:\taddiu\ta1,a1,1',
+    '14:\tjr\tra',
+    '18:\tmove\tv0,a1',
+    '1c:\tjr\tra',
+    '20:\tli\tv0,9',
+  );
+  expect(out).toContain('a1 + 1');
+  expect(out).toContain('return 9;');
+  // T-4 is the word before the function's first: there is no word there to share. The slot stays
+  // the taken edge's own block, so each turn of the loop adds 2 and the exit adds the entry's 1.
+  expect(src('0:\taddiu\ta0,a0,1', '4:\tbnezl\ta1,0 <f>', '8:\taddiu\ta0,a0,1', 'c:\tjr\tra', '10:\tmove\tv0,a0')).toBe(
+    's32 f(s32 a0, s32 a1) {\n    while (a1 != 0) {\n        a0 = a0 + 1 + 1;\n    }\n    return a0 + 1;\n}\n',
+  );
+});
+
+test('an unconditional `b`/`j` whose slot is the target-4 word, stolen, retargets the same way', () => {
+  // `b T; S` runs S then T on its one edge, as `b T-4; nop` does, so the `if` joins at T-4 and the
+  // `+ 1` is spelled once — not `v0 = a1 + 1` on one arm and `v0 = 6` on the other.
+  const want = 's32 f(s32 a0, s32 a1) {\n    if (a0 == 0) a1 = 5;\n    return a1 + 1;\n}\n';
+  for (const jump of ['b', 'j']) {
+    expect(
+      src(
+        '0:\tbeqz\ta0,10 <f+0x10>',
+        '4:\tnop',
+        `8:\t${jump}\t18 <f+0x18>`,
+        'c:\taddiu\ta1,a1,1',
+        '10:\tli\ta1,5',
+        '14:\taddiu\ta1,a1,1',
+        '18:\tjr\tra',
+        '1c:\tmove\tv0,a1',
+      ),
+    ).toBe(want);
+  }
+  // A branch landing on the `b`'s slot runs it and falls on to 0x10, not to T: the slot keeps its
+  // word, and that landing refuses.
+  expect(
+    lift(
+      '0:\tbeqz\ta0,c <f+0xc>',
+      '4:\tnop',
+      '8:\tb\t18 <f+0x18>',
+      'c:\taddiu\ta1,a1,1',
+      '10:\tli\ta2,5',
+      '14:\taddiu\ta1,a1,1',
+      '18:\tjr\tra',
+      '1c:\tmove\tv0,a1',
+    ),
+  ).toThrow(/branch to 0xc is not a block boundary/);
+});
+
+test('a `b` whose slot ends a common tail of both arms retargets by default, and `/kept-slot` keeps it', () => {
+  // ido `mergenarrow`: `sll; b T; sra` against `sll; sra; T:` — one `(s16)` per arm written out
+  // twice, or a stolen `sra` past arms the source merged. One object either way, so the default lift
+  // retargets and the kept slot is a lift variation the differ referees.
+  const mergenarrow = obj(
+    '0:\tbeqz\ta3,18 <f+0x18>',
+    '4:\tsubu\tv0,a1,a2',
+    '8:\taddu\tv0,a1,a2',
+    'c:\tsll\tv0,v0,0x10',
+    '10:\tb\t20 <f+0x20>',
+    '14:\tsra\tv0,v0,0x10',
+    '18:\tsll\tv0,v0,0x10',
+    '1c:\tsra\tv0,v0,0x10',
+    '20:\tjr\tra',
+    '24:\tsw\tv0,0(a0)',
+  );
+  const merged = decompile('f', mergenarrow, MIPS_IDO).source;
+  expect(merged).toContain('v0 = a1 + a2 << 16;');
+  expect(merged).toContain('*a0 = v0 >> 16;');
+  const cands = enumerateCandidates('f', mergenarrow, MIPS_IDO, {});
+  const kept = cands.filter((c) => hasVariation(c.variations, 'kept-slot'));
+  expect(kept.length).toBeGreaterThan(0);
+  expect(kept.some((c) => c.source.includes('v0 = (s16)(a1 + a2);'))).toBe(true);
+  expect(cands.some((c) => !hasVariation(c.variations, 'kept-slot') && c.source.includes('a1 + a2 << 16'))).toBe(true);
+  // A slot no common tail ends offers no `/kept-slot` at all: nothing for it to keep.
+  const plain = obj(
+    '0:\tbeqz\ta0,10 <f+0x10>',
+    '4:\tnop',
+    '8:\tb\t18 <f+0x18>',
+    'c:\taddiu\ta1,a1,1',
+    '10:\tli\ta1,5',
+    '14:\taddiu\ta1,a1,1',
+    '18:\tjr\tra',
+    '1c:\tmove\tv0,a1',
+  );
+  expect(enumerateCandidates('f', plain, MIPS_IDO, {}).filter((c) => hasVariation(c.variations, 'kept-slot'))).toEqual(
+    [],
+  );
+  // ido `mergeu16`: `b T; S; S; T:` jumps over exactly the one copy, so retargeted it would jump to
+  // its own next word: nothing was stolen, and the slot is kept on every lift.
+  expect(
+    src(
+      '0:\tbeqz\ta3,14 <f+0x14>',
+      '4:\tsubu\tv0,a1,a2',
+      '8:\taddu\tv0,a1,a2',
+      'c:\tb\t18 <f+0x18>',
+      '10:\tandi\tv0,v0,0xffff',
+      '14:\tandi\tv0,v0,0xffff',
+      '18:\tjr\tra',
+      '1c:\tsw\tv0,0(a0)',
+    ),
+  ).toContain('v0 = a1 + a2 & 65535;');
+});
+
+/** A two-case dispatch on `a0` whose bounds branch is `bounds at,4c` with `slot` in its delay slot,
+ *  and whose default at 0x48 starts with `li v0,9`. */
+const boundsDispatch = (bounds: string, slot: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ` 4:\t${bounds}\tat,4c <f+0x4c>`,
+    ` 8:\t${slot}`,
+    ' c:\tsll\tv0,a0,0x2',
+    '10:\tlui\tv1,0x0',
+    '14:\taddu\tat,v1,v0',
+    '18:\tlw\tat,0(at)',
+    '1c:\tjr\tat',
+    '20:\tnop',
+    '24:\tli\tv0,3',
+    '28:\tjr\tra',
+    '2c:\tnop',
+    '30:\tli\tv0,8',
+    '34:\tjr\tra',
+    '38:\tnop',
+    '3c:\tnop',
+    '40:\tnop',
+    '44:\tnop',
+    '48:\tli\tv0,9',
+    '4c:\tjr\tra',
+    '50:\tnop',
+  );
+const tableData = (arms: number[], hi: number): AsmData => ({
+  sections: new Map([['.rodata', new Uint8Array(arms.flatMap((a) => [0, 0, 0, a]))]]),
+  relocs: [
+    { section: '.text', offset: hi, type: 'R_MIPS_HI16', sym: 'jt', addend: 0 },
+    ...arms.map((_, k) => ({ section: '.rodata', offset: 4 * k, type: 'R_MIPS_32', sym: '.text', addend: 0 })),
+  ],
+  symbols: new Map([
+    ['jt', { section: '.rodata', value: 0, size: 4 * arms.length, index: 1 }],
+    ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+  ]),
+  symbolCount: 2,
+  bigEndian: true,
+});
+
+test("KMC's likely bounds branch whose slot is the default's first word lifts as the switch", () => {
+  // `beqzl at,DEF; S` with S = DEF-4's word is `beqz at,DEF-4; nop`: the bounds branch then runs an
+  // empty slot, which is what the `switch_br` it emits runs, and the default starts one word early.
+  const asmData = tableData([0x24, 0x30], 0x10);
+  expect(decompile('f', boundsDispatch('beqzl', 'li\tv0,9'), MIPS_GCC, { asmData }).source).toBe(
+    's32 f(s32 a0) {\n    switch (a0) {\n        case 0:\n            return 3;\n        case 1:\n            return 8;\n' +
+      '        default:\n            return 9;\n    }\n}\n',
+  );
+  // a slot that is NOT the default's word keeps the nullified slot, and the refusal it meets
+  expect(() => decompile('f', boundsDispatch('beqzl', 'li\tv0,7'), MIPS_GCC, { asmData })).toThrow(
+    /branch-likely at 0x4 — a recovered switch's bounds branch cannot annul its delay slot/,
+  );
+});
+
+test('a recovered switch arm landing on a slot the rewrite emptied refuses', () => {
+  // Hardware entering 0x34 for `case 1` runs `li v0,9`, then returns 8 from the `jr`'s slot. The
+  // emptied slot would run a `nop` there instead.
+  const asm = obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,4c <f+0x4c>',
+    ' 8:\tsll\tv0,a0,0x2',
+    ' c:\tlui\tv1,0x0',
+    '10:\taddu\tat,v1,v0',
+    '14:\tlw\tat,0(at)',
+    '18:\tjr\tat',
+    '1c:\tnop',
+    '20:\tnop',
+    '24:\tli\tv0,3',
+    '28:\tjr\tra',
+    '2c:\tnop',
+    '30:\tbnezl\ta1,44 <f+0x44>',
+    '34:\tli\tv0,9',
+    '38:\tjr\tra',
+    '3c:\tli\tv0,8',
+    '40:\tli\tv0,9',
+    '44:\tjr\tra',
+    '48:\tnop',
+    '4c:\tjr\tra',
+    '50:\tli\tv0,1',
+  );
+  const want =
+    /a recovered switch arm lands on the delay slot at 0x34, which the stolen-slot rewrite of a branch-likely or `b`\/`j` emptied/;
+  expect(() => decompile('f', asm, MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) })).toThrow(want);
+  // the same arm on a `b`'s emptied slot: entered there, the hardware runs `li v0,9` and falls on
+  expect(() =>
+    decompile('f', asm.replace('bnezl\ta1,44', 'b\t44'), MIPS_GCC, { asmData: tableData([0x24, 0x34], 0xc) }),
+  ).toThrow(want);
+});
+
+test('a latch retargeted onto its stolen word is a guarded self-loop the kept guard spells as `if` + `do-while`', () => {
+  // `while (*s) { n++; s++; }` at IDO: the retarget turns `14:..1c: bnezl t7,14; lbu t7,1(a0)` into
+  // one block, `t = s[1]; n++; s++; while (t)`, behind the `*s` guard. The guard is not the loop's
+  // own test (`s[0]` against `s[1]`), so it stays an `if`; emitWhile, which would merge the guard's
+  // exit edge into the loop's, cannot spell a test that reads `s` before its update.
+  // The do-while emitter spells it with a `++` at the leaf.
+  const strlen1 = src(
+    ' 0:\tlbu\tt6,0(a0)',
+    ' 4:\tmove\tv1,zero',
+    ' 8:\tbeqz\tt6,24 <f+0x24>',
+    ' c:\tnop',
+    '10:\tlbu\tt7,1(a0)',
+    '14:\taddiu\tv1,v1,1',
+    '18:\taddiu\ta0,a0,1',
+    '1c:\tbnezl\tt7,14 <f+0x14>',
+    '20:\tlbu\tt7,1(a0)',
+    '24:\tjr\tra',
+    '28:\tmove\tv0,v1',
+  );
+  expect(strlen1).toMatch(
+    /if \(\*a0 != 0\) \{\n\s+v0 = 0;\n\s+do \{\n\s+v0 = v0 \+ 1;\n\s+\} while \(a0\+\+\[1\] != 0\);/,
+  );
+  // `while (*++p == ' ') {}`: the guard's exit edge carries `p + 1` too, which the fused form's
+  // post-loop copy cannot reproduce; the `if` recovery carries each exit edge's copy on that edge.
+  const skipsp = src(
+    ' 0:\tlbu\tt6,1(a0)',
+    ' 4:\tli\tv0,32',
+    ' 8:\taddiu\ta0,a0,1',
+    ' c:\tbne\tv0,t6,24 <f+0x24>',
+    '10:\tnop',
+    '14:\tlbu\tt7,1(a0)',
+    '18:\taddiu\ta0,a0,1',
+    '1c:\tbeql\tv0,t7,18 <f+0x18>',
+    '20:\tlbu\tt7,1(a0)',
+    '24:\tjr\tra',
+    '28:\tmove\tv0,a0',
+  );
+  expect(skipsp).toMatch(/do \{\n\s+\} while \(32 == \w+\+\+\[1\]\);/);
 });

@@ -103,8 +103,11 @@ test('a materialized header def structures as guard + do-while instead of declin
 
 // ZERO-TRIP hazard: a materialized header def (u reads sibling t → t materializes) carried on
 // the exit edge. Inside `if (guard)` the temp is assigned only when the guard held, so a
-// post-loop read of its name on the guard-false path is uninitialized — decline loud, for the
-// proven-guard shape (kept only because the header holds materialized defs) and the unproven one.
+// post-loop read of its name on the guard-false path would be uninitialized — which emitWhile, which
+// merges the guard's exit edge into the loop's post-loop copies, cannot spell. A kept guard is an
+// ordinary `if` around a do-while, so the guard is handed to the `if` recovery instead, and each
+// exit edge carries its own copies on that edge: for the proven-guard shape (kept only because the
+// header holds materialized defs) and the unproven one.
 const ZERO_TRIP_PROVEN = `fn zerotrip {
 ^bb0(%0: s32):
   %1: s32 = const {value=1}
@@ -133,9 +136,19 @@ const ZERO_TRIP_UNPROVEN = ZERO_TRIP_PROVEN.replace('fn zerotrip', 'fn unproven'
   '%6: u32 = icmp_sle %0, %5\n  cond_br %6, ^bb2(%2, %4), ^bb1(%0)',
 );
 
-test('a materialized temp on the exit edge declines: the guarded body may never assign it', () => {
-  expect(() => emit(ZERO_TRIP_PROVEN)).toThrow(/a post-loop read reaches a temp/);
-  expect(() => emit(ZERO_TRIP_UNPROVEN)).toThrow(/a post-loop read reaches a temp/);
+test('a materialized temp on the exit edge hands the kept guard to the `if` recovery, one copy per edge', () => {
+  // Read by hand: the oracle cannot judge this loop (it counts down by two, past zero for odd n).
+  // `return (n - 1) + (n - 1 + 5)` on the zero-trip edge; the loop's own `t`, `t + 5` on the other.
+  const zeroTripCopies = /v3 = v0 \+ 5;/;
+  const loopCopies = /do \{\n\s+v1 = v2 - 1;\n\s+v2 = v2 - 2;\n\s+\} while \(v2 != 0\);\n\s+v0 = v1;\n\s+v3 = v1 \+ 5;/;
+  for (const ir of [ZERO_TRIP_PROVEN, ZERO_TRIP_UNPROVEN]) {
+    const c = emit(ir);
+    expect(c).toMatch(zeroTripCopies);
+    expect(c).toMatch(loopCopies);
+    expect(c).toContain('return v0 + v3;');
+  }
+  expect(emit(ZERO_TRIP_PROVEN)).toContain('if (a0 == 0) {');
+  expect(emit(ZERO_TRIP_UNPROVEN)).toContain('if (a0 > 0) {');
 });
 
 // A PURE PREHEADER between the guard and the self-loop — the compiler's loop-invariant motion
@@ -339,4 +352,100 @@ const AFTER_A_NESTED_GUARDED_LOOP = `fn nested {
 
 test('a zero-trip read after a nested guarded loop still declines', () => {
   expect(() => emit(AFTER_A_NESTED_GUARDED_LOOP)).toThrow(ZERO_TRIP);
+});
+
+// A CALL IN THE GUARD IS NOT THE LOOP'S TEST BECAUSE IT CALLS THE SAME FUNCTION. The loop tests
+// `v < v` over the result `%2` of a call the entry block made once; the guard tests `v < f0(a0)`, a
+// second call. Read through both calls, the two compares look alike, and fusion would delete the
+// guard and with it the call `f0(a0)` and the test. A call is read through only where it runs at
+// its own test, with no effect between it and the test, so the guard is kept, and so is the call.
+const CALL_IN_THE_GUARD = `fn callguard {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="f0"}
+  %3: s32 = sub %1, %2
+  %6: u32 = icmp_slt %3, %0
+  cond_br %6, ^bb1(), ^bb3()
+^bb1():
+  %7: s32 = call %0 {target="f0"}
+  %8: u32 = icmp_slt %2, %7
+  cond_br %8, ^bb2(), ^bb3()
+^bb2():
+  %11: u32 = icmp_slt %2, %2
+  cond_br %11, ^bb2(), ^bb3()
+^bb3():
+  %12: s32 = call %1 {target="f0"}
+  ret %1
+}
+`;
+
+test('a guard whose call only looks like the loop test keeps its `if` and its call', () => {
+  const fn = parse(CALL_IN_THE_GUARD);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn);
+  expect(cBackend.emit(tree)).toContain('if (v0 < (s32)f0(a0)) {');
+  const r = irAgreement(CALL_IN_THE_GUARD, tree, SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});
+
+// THE BLOCK IS NOT THE POSITION. Both guards below sit in the block the loop's cached value was
+// computed in, so a check by block alone reads that value through. In the first, two calls of `f`
+// run back to back and the loop tests the first one's result; in the second, a load runs, then a
+// call that may change what it read, then the guard's reload (`v = *p; g(); if (i < *p) do {}
+// while (i < v)`, which ido7.1 compiles to this shape once the stolen slot is retargeted). Each
+// value is an evaluation at one point, read through only where no effect runs between it and the
+// test, so the guard is kept, with its call or its reload.
+const TWO_CALLS_IN_THE_GUARD = `fn call2 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="f"}
+  %3: s32 = call %0 {target="f"}
+  %4: u32 = icmp_slt %1, %3
+  cond_br %4, ^bb1(%1), ^bb2(%1)
+^bb1(%6: s32):
+  %7: s32 = call %6 {target="h"}
+  %8: s32 = const {value=1}
+  %9: s32 = add %6, %8
+  %10: u32 = icmp_slt %9, %2
+  cond_br %10, ^bb1(%9), ^bb2(%9)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+const A_LOAD_BEFORE_A_CALL = `fn ldcall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = load %0 {off=0, width=4, signed=1}
+  %3: s32 = call {target="f"}
+  %4: s32 = load %0 {off=0, width=4, signed=1}
+  %5: u32 = icmp_slt %1, %4
+  cond_br %5, ^bb1(%1), ^bb2(%1)
+^bb1(%6: s32):
+  %7: s32 = call %6 {target="h"}
+  %8: s32 = const {value=1}
+  %9: s32 = add %6, %8
+  %10: u32 = icmp_slt %9, %2
+  cond_br %10, ^bb1(%9), ^bb2(%9)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+test("a guard in the cached value's own block keeps its `if` and its second call", () => {
+  const fn = parse(TWO_CALLS_IN_THE_GUARD);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn);
+  expect(cBackend.emit(tree)).toContain('if (v1 < (s32)f(a0)) {');
+  const r = irAgreement(TWO_CALLS_IN_THE_GUARD, tree, SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});
+
+// The IR interpreter models no memory, so this one is pinned on its text: the reload stays in the
+// guard, and the loop tests the value read before the call.
+test("a guard in the cached value's own block keeps its `if` and its reload after a call", () => {
+  const c = emit(A_LOAD_BEFORE_A_CALL);
+  expect(c).toContain('if (v1 < *(s32 *)a0) {');
+  expect(c).toContain('} while (v1 < v0);');
 });

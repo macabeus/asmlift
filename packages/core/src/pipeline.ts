@@ -14,6 +14,7 @@ import {
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
+import type { LiftOptions } from './frontend/frontend';
 import { frontendFor } from './frontend/registry';
 import { type Fn, reachableBlocks } from './ir/core';
 import { print } from './ir/print';
@@ -264,10 +265,11 @@ export function liftStamped(
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
+  liftOptions?: LiftOptions,
 ): Fn {
   const own = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
   refuseOwnStructReturnThroughMemory(name, target, own);
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols, contextGlobals);
+  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols, contextGlobals, liftOptions);
   verify(fn);
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));

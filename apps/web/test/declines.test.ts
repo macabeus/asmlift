@@ -963,12 +963,17 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
+  //
+  // `loop-exit-values` has no rows: a kept guard (one that is not the loop's own test) that meets
+  // one of its refusals is an ordinary `if` around a do-while (structure.ts `keptGuardDoWhiles`).
+  // The refusals fire only on a FUSED guard, and no benchmark row reaches one.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',
+    'loop-exit-values',
     'pool-word-shape',
     'structs',
     'tu-scoped-name',

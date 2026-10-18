@@ -9,7 +9,9 @@
 // `cond_br` is emitted. A `jr ra` return's delay slot (which computes the return value) runs
 // first, then the value is read. A call's (`jal`) delay slot runs before the call, so it can set
 // an argument up. A branch-likely (`beql`/`bnel`…) annuls its slot when not taken, so the slot is
-// a block of its own on the taken edge (`toBlocks`).
+// a block of its own on the taken edge (`toBlocks`) — unless it is a copy of the word before the
+// target, when the branch is retargeted there with an empty slot (`normaliseBranchLikely`, which
+// does the same for a `b`/`j` whose slot is that copy).
 //
 // Comparison model: MIPS fuses compare-and-branch, so a branch lowers directly to an icmp
 // (the branch mnemonics are signed/equality only). `bltz/bgez/blez/bgtz` compare against zero; `beq/bne`
@@ -31,6 +33,7 @@ import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
+  type DisasmReloc,
   parseImm,
   parseMem,
   parseDisasm as parseSharedDisasm,
@@ -51,7 +54,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import type { Frontend } from './frontend';
+import type { Frontend, LiftOptions } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
@@ -210,10 +213,15 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { zer
 // THE ADDEND IS NOT ON THE RECORD. MIPS objects are REL: the relocation has no addend field and the
 // address's low bits live in the two instruction immediates, so a record that DOES carry an addend
 // is not the format assumed here, and refuses.
-function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
+function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData, freed: ReadonlySet<number>): void {
   const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
   for (const r of ad.relocs) {
     if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16' && r.type !== 'R_MIPS_26')) {
+      continue;
+    }
+    // A slot `normaliseBranchLikely` emptied holds a `nop` now; its old word's relocation
+    // describes the copy at the target, which carries its own.
+    if (freed.has(r.offset)) {
       continue;
     }
     const ins = byAddr.get(r.offset);
@@ -581,18 +589,47 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
   return out;
 }
 
-// BRANCH-LIKELY → the ordinary branch that tests the same way, in place, returning the addresses
-// rewritten. The mnemonic is all that differs in the COMPARISON; what differs in the FLOW is the
-// delay slot, which `toBlocks` then places on the taken edge alone.
+// BRANCH-LIKELY → the ordinary branch that tests the same way, in place. The mnemonic is all that
+// differs in the COMPARISON; what differs in the FLOW is the delay slot, which `toBlocks` then
+// places on the taken edge alone. `likely` holds the branches so placed.
+//
+// UNLESS THE SLOT IS THE TARGET'S OWN FIRST WORD, STOLEN — which is how IDO, KMC and GCC 2.7.2 fill
+// a likely slot: `bnezl r,T; S` where the word at T-4 is also S (ido 4932 of the 4984 likely
+// branches in the af splat corpus). Then the branch is retargeted to T-4 with an empty slot,
+// `bnez r,T-4; nop`, and `freed` holds the slot addresses so emptied. That is exact on both paths
+// WHATEVER ELSE REACHES T-4: taken runs S then T either way, and not taken annuls S either way. It
+// matters because the copy otherwise becomes a block of its own on the taken edge, which reaches T
+// past every join T-4 is part of — a switch arm whose `break` it skips, so the arms stop
+// linearizing (ido), or a recovered switch's bounds branch that cannot annul its slot (KMC). The
+// rewrite holds only while every word means what its bytes say, so it is made only when:
+//   - the two words are the same instruction with the same relocation — text alone cannot tell
+//     `lui at,0x0` against one symbol from the same text against another;
+//   - T-4 is not the slot itself (T = branch+8, a slot that skips only itself: nothing to share);
+//   - T-4 and T are both in the function, and T-4 is no transfer's delay slot — a slot runs only
+//     after its own transfer, so falling into one from T-8's side is not what its bytes say;
+//   - the slot completes no `%lo`. Its `%hi` is a register each path loads for itself (`lui v1;
+//     b T; lw v1,%lo(g)(v1)` against `lui v1; …; lw v1,%lo(g)(v1); T:`), and retargeted, the one
+//     copy at T-4 reads that register at a join, where it is the block parameter and not the half:
+//     the high/low fold would refuse a function the kept slot lifts. Exact either way, so the
+//     shape keeps its slot rather than trade a lift for a decline.
+// A branch landing on the slot refuses below, rewrite or not; a recovered jump-table arm landing on
+// a freed slot refuses in `lift`, where the tables exist.
 //
 // Refuses, by name, every shape that placement cannot model. A nullified slot read as an ordinary
 // always-executed one is not a cosmetic error: `absi` would return `-x` for every `x >= 0`, and a
 // store in such a slot would be performed on a path that never performs it. That is C which
 // compiles and is wrong — strictly worse than the decline it would replace.
-function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number): Set<number> {
+function normaliseBranchLikely(
+  name: string,
+  instrs: Instr[],
+  startAddr: number,
+  relocOf: (ins: Instr) => DisasmReloc | null,
+  options: LiftOptions = {},
+): { likely: Set<number>; freed: Set<number> } {
   const likely = instrs.filter((ins) => ins.mnemonic in LIKELY_BASE);
-  if (likely.length === 0) {
-    return new Set();
+  const uncond = instrs.filter(isUncond);
+  if (likely.length === 0 && uncond.length === 0) {
+    return { likely: new Set(), freed: new Set() };
   }
   const refusal = (ins: Instr, why: string) =>
     new FrontendUnsupportedError(
@@ -610,6 +647,32 @@ function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number)
   const at = new Map(instrs.map((ins) => [ins.addr, ins]));
   const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
+  const freed = new Set<number>();
+  // The words as listed, before any slot below is emptied.
+  const listed = new Map(at);
+  // `br T; S` → `br T-4; nop` when S is the word at T-4, stolen; true when it did.
+  const unsteal = (br: Instr, slot: Instr): boolean => {
+    const target = br.target!;
+    const stolen = at.get(target - 4);
+    const beforeStolen = at.get(target - 8);
+    if (
+      target === br.addr + 8 ||
+      stolen === undefined ||
+      !at.has(target) ||
+      (beforeStolen !== undefined && isControlTransfer(beforeStolen)) ||
+      !sameWord(slot, stolen, relocOf) ||
+      relocOf(slot)?.type === 'R_MIPS_LO16'
+    ) {
+      return false;
+    }
+    br.target = target - 4;
+    // The emptied slot is a fresh `nop`: the old word's relocation must not ride along with it.
+    const nop: Instr = { addr: slot.addr, mnemonic: 'nop', ops: [] };
+    instrs[instrs.indexOf(slot)] = nop;
+    at.set(slot.addr, nop);
+    freed.add(slot.addr);
+    return true;
+  };
   for (const br of likely) {
     const slot = at.get(br.addr + 4);
     const fallThrough = at.get(br.addr + 8);
@@ -646,9 +709,68 @@ function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number)
       throw refusal(br, 'another branch targets the delay slot, which would run it unconditioned');
     }
     br.mnemonic = LIKELY_BASE[br.mnemonic];
-    rewritten.add(br.addr);
+    if (!unsteal(br, slot)) {
+      rewritten.add(br.addr);
+    }
   }
-  return rewritten;
+  // AN UNCONDITIONAL `b`/`j` RUNS ITS SLOT ON ITS ONE EDGE ALONE, which is all the proof above asks
+  // of the slot, and the same fill steals the target's first word into it (`b T; S` with S at T-4:
+  // ido 1234, gcc 2.7.2 1075, KMC 51 in the splat corpus). Unretargeted, the copy is the `b`'s own
+  // body and T-4 a separate block reaching T, so a join that the two share is split into one arm
+  // per copy. Asked here only where nothing else depends on the slot: not a slot already empty, not
+  // a `b` in some transfer's own delay slot, not a slot another branch lands on (entered there, the
+  // word runs and the flow falls on to the `b`'s next word, not to T), and not a `j` relocated
+  // against a symbol, whose printed target is a field rather than an address (it refuses below).
+  for (const br of uncond) {
+    const slot = at.get(br.addr + 4);
+    const prev = at.get(br.addr - 4);
+    const reloc = br.mnemonic === 'j' ? relocOf(br) : null;
+    if (
+      br.target === undefined ||
+      slot === undefined ||
+      slot.mnemonic === 'nop' ||
+      isControlTransfer(slot) ||
+      targets.has(slot.addr) ||
+      (prev === undefined ? br.addr !== startAddr : isControlTransfer(prev)) ||
+      (reloc !== null && !reloc.sym.startsWith('.'))
+    ) {
+      continue;
+    }
+    // A `b` THAT JUMPS OVER EXACTLY THE ONE COPY (`b T; S; S; T:`, KMC `sw_void`, ido `mergeu16`)
+    // would, retargeted, jump to its own next word: the two arms are each written out, and nothing
+    // was stolen from T. That is a fact of the jump, so it is answered here.
+    if (br.target - 4 === br.addr + 8) {
+      continue;
+    }
+    // A COMMON TAIL OF TWO OR MORE WORDS is the question the asm leaves open: `sll; b T; sra`
+    // against `sll; sra; T:` (ido `mergenarrow`) is one sign extension per arm, written out twice,
+    // or a stolen `sra` whose arms the source merged — the same object either way. Retargeted, the
+    // `<< 16` stays in each arm and the `>> 16` moves past the join; kept, each arm reads as the
+    // one `(s16)` it is. Neither reading wins on the corpus (over the af/mp3/sbk2 splat functions
+    // with this shape, retargeting shortens 19 lifts and lengthens 3, `func_80026D34` the
+    // `mergenarrow` case), so the default retargets and the kept slot is the `/kept-slot` lift
+    // variation the differ referees. A likely slot emptied above the `b` is no common tail; one
+    // emptied before T still counts, as the word it was. A `nop` is no tail at all.
+    const before = listed.get(br.target - 8);
+    const tail =
+      prev !== undefined && prev.mnemonic !== 'nop' && before !== undefined && sameWord(prev, before, relocOf);
+    if (tail && options.keepTailSlots === true) {
+      continue;
+    }
+    if (unsteal(br, slot) && tail) {
+      options.onTailSlot?.();
+    }
+  }
+  return { likely: rewritten, freed };
+}
+
+/** Two words are the same instruction: one spelling and one relocation (or none on either). */
+function sameWord(a: Instr, b: Instr, relocOf: (ins: Instr) => DisasmReloc | null): boolean {
+  if (a.mnemonic !== b.mnemonic || a.ops.join() !== b.ops.join() || a.target !== b.target) {
+    return false;
+  }
+  const [ra, rb] = [relocOf(a), relocOf(b)];
+  return ra === null || rb === null ? ra === rb : ra.type === rb.type && ra.sym === rb.sym && ra.addend === rb.addend;
 }
 
 // EVERY control transfer this frontend models has a delay slot — the word at `branch + 4`, which
@@ -1172,9 +1294,10 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
   context?: ContextGlobals,
+  options: LiftOptions = {},
 ): Fn {
   return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options),
   );
 }
 
@@ -1187,6 +1310,7 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
+  options: LiftOptions,
 ): Fn | FrameObjectRelift {
   // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
   // and Splat-disassembled `.s` (pmret-style N64 projects). Splat is normalised to the SAME
@@ -1219,20 +1343,35 @@ function liftOnce(
   // BRANCH-LIKELY is rewritten to its ordinary branch FIRST, so everything downstream — jump-table
   // recovery's block-boundary walk included — sees one branch vocabulary. What stays special is the
   // slot, and `toBlocks` is where that is placed.
-  const likelyAddrs = normaliseBranchLikely(name, instrs, startAddr);
+  // A word's relocation is on the word in Splat text, and in the object's table for objdump.
+  const relocOf = (ins: Instr): DisasmReloc | null =>
+    splat ? (ins.reloc ?? null) : asmData ? textRelocAt(asmData, ins.addr) : null;
+  const { likely: likelyAddrs, freed: freedSlots } = normaliseBranchLikely(name, instrs, startAddr, relocOf, options);
   // Regime B: recover jump tables from the `jr`-dispatch idiom + the AsmData table. A recovered
   // dispatch's `jr` is subsumed into a `switch_br` (emitted from its bounds block), so it is
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData, likelyAddrs) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
-  // THE TWO WAYS A RECOVERED TABLE MEETS AN ANNULLED SLOT, neither of which `normaliseBranchLikely`
-  // can see: the table does not exist while it runs. (1) The dispatch's bounds branch emits a
-  // `switch_br`, which runs its delay slot unconditionally — a nullified slot is not that. (2) An
-  // arm of the table lands ON a nullified slot, which would run the slot with no branch
-  // conditioning it and then jump to that branch's target: `case 1:` would take the taken arm's
-  // value where the hardware runs the slot and falls on through. Neither idiom has ever been seen
-  // in the corpus; refuse rather than answer either one wrong.
+  // THE WAYS A RECOVERED TABLE MEETS A LIKELY SLOT, none of which `normaliseBranchLikely` can see:
+  // the table does not exist while it runs. (1) The dispatch's bounds branch emits a `switch_br`,
+  // which runs its delay slot unconditionally — a nullified slot is not that. KMC writes this
+  // bounds branch as `beqzl at,DEF` with DEF's first word in the slot (`sw_h3`..`sw_h5`), and that
+  // one was retargeted to an ordinary branch before it got here; a slot that is NOT the default's
+  // stolen word still refuses. (2) An arm of the table lands ON a nullified slot, which would run
+  // the slot with no branch conditioning it and then jump to that branch's target: `case 1:` would
+  // take the taken arm's value where the hardware runs the slot and falls on through. (3) An arm
+  // lands on a slot the rewrite EMPTIED, a likely branch's or a `b`/`j`'s, which would run the
+  // `nop` where the hardware runs the word it replaced. (2) and (3) have never been seen in the
+  // corpus; refuse rather than answer any of them wrong.
   const jtArms = new Set([...jts.values()].flatMap((jt) => [...jt.caseAddrs, jt.defaultAddr]));
+  for (const addr of freedSlots) {
+    if (jtArms.has(addr)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': a recovered switch arm lands on the delay slot at 0x${addr.toString(16)}, ` +
+          'which the stolen-slot rewrite of a branch-likely or `b`/`j` emptied',
+      );
+    }
+  }
   for (const addr of likelyAddrs) {
     if (jts.has(addr)) {
       throw new FrontendUnsupportedError(
@@ -1249,7 +1388,7 @@ function liftOnce(
   // text spells the halves and writes its own records). Runs AFTER jump-table recovery, so that
   // reads `.text` relocs pristine and a recovered table base is decided before any of this.
   if (!splat && asmData) {
-    attachMipsRelocs(name, instrs, asmData);
+    attachMipsRelocs(name, instrs, asmData, freedSlots);
   }
   // TRUSTWORTHINESS: fail LOUD on a control transfer this frontend cannot model — the `opaque`
   // path cannot catch these (implicit or no register destination). A `jalr` clobbers `v0`

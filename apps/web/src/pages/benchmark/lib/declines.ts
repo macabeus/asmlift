@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 254 distinct decline messages (the texts reached by
+// `packages/core/src` throws 255 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -245,11 +245,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // THE LEFTOVER SHAPES OF A CAPABILITY THAT LANDED, not a capability that is missing — the one
     // class here that a reader would otherwise misread in the worse direction. Branch-likely is
     // modelled: a likely branch nullifies its delay slot, and the slot becomes its own block on the
-    // taken edge. What still refuses is what that model left over — `normaliseBranchLikely` in
-    // `packages/core/src/frontend/mips.ts` on the shapes the ISA leaves undefined, and the two
-    // recovered-switch interactions in `lift` ("cannot annul its delay slot", "lands on its delay
-    // slot"). No compiled row in the corpus reaches any of them, so the class reads 0; deleting it
-    // would assert that nothing is left, which is the opposite falsehood.
+    // taken edge, or — where the slot is a copy of the word before the target — the branch is
+    // retargeted there with an empty slot. What still refuses is what that model left over —
+    // `normaliseBranchLikely` in `packages/core/src/frontend/mips.ts` on the shapes the ISA leaves
+    // undefined, and the three recovered-switch interactions in `lift` ("cannot annul its delay
+    // slot", "lands on its delay slot", "which the stolen-slot rewrite of a branch-likely or
+    // `b`/`j` emptied"). No compiled row in the corpus reaches any of them, so the class reads 0;
+    // deleting it would assert that nothing is left, which is the opposite falsehood.
     //
     // THAT THROW HAS SEVEN ARMS AND ONLY THREE ARE SCANNED. The other four refuse a disassembly the
     // reader cannot account for — an unresolved branch target, and no instruction at the slot, at

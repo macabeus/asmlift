@@ -1938,7 +1938,21 @@ export function enumerateCandidates(
       if (cand.signed && !pinnable) {
         break;
       }
-      const base = liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals);
+      let tailSlot = false;
+      const base = liftStamped(
+        name,
+        asm,
+        target,
+        prototypes,
+        opts.asmData,
+        symbolSetting.symbols,
+        opts.contextGlobals,
+        {
+          onTailSlot: () => {
+            tailSlot = true;
+          },
+        },
+      );
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
@@ -2015,14 +2029,30 @@ export function enumerateCandidates(
             { variations: ['narrow-param'], extendedReaders: true },
           ]
         : [{ variations: [], extendedReaders: false }];
+      // `/kept-slot` — keep the delay slot of a MIPS `b`/`j` whose slot ends a common tail both arms
+      // spell, where the default lift retargets it to the copy before its target and merges the
+      // arms (frontend/mips.ts `normaliseBranchLikely`: the two are one object, and which the source
+      // wrote is the differ's to say). A LIFT variation because the rewrite is the CFG every later
+      // stage reads. Enumerated only where this setting's default lift reports such a slot; crossed
+      // with the others, and the dedup collapses what agrees. An IDO reading: GCC 2.7.2 and KMC
+      // cross-jump a tail both arms spell before they fill a slot, so they leave no such tail.
+      const tailSettings: { variations: readonly Variation[]; keepTailSlots: boolean }[] = tailSlot
+        ? [
+            { variations: [], keepTailSlots: false },
+            { variations: ['kept-slot'], keepTailSlots: true },
+          ]
+        : [{ variations: [], keepTailSlots: false }];
       const liftSettings = narrowSettings.flatMap((l) =>
         connectiveSettings.flatMap((c) =>
-          paramSettings.map((w) => ({
-            ...l,
-            ...c,
-            ...w,
-            variations: [...l.variations, ...c.variations, ...w.variations],
-          })),
+          paramSettings.flatMap((w) =>
+            tailSettings.map((k) => ({
+              ...l,
+              ...c,
+              ...w,
+              ...k,
+              variations: [...l.variations, ...c.variations, ...w.variations, ...k.variations],
+            })),
+          ),
         ),
       );
       for (const liftSetting of liftSettings) {
@@ -2037,7 +2067,9 @@ export function enumerateCandidates(
           fn =
             liftSetting.variations.length === 0
               ? base
-              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals);
+              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals, {
+                  keepTailSlots: liftSetting.keepTailSlots,
+                });
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it
           }
