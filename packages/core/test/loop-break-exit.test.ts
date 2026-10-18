@@ -892,3 +892,50 @@ test('an `else break;` in a tested loop joins its `if` inside the body', () => {
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
+
+// The same arm in a loop that tests at its top: the header is a pure test into an exit that takes
+// no copies, so the loop is a `while` and the arm a `break` inside it, as in a `for` whose body
+// breaks after running code (`synthetic:break_code:agbcc`, re-rolled with its top test restored).
+const CODE_ARM_TOP_TESTED = `fn codearmtop {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: u32 = icmp_slt %2, %0
+  cond_br %3, ^bb2(), ^bb4()
+^bb2():
+  %4: s32 = call %2 {target="t"}
+  %5: s32 = const {value=7}
+  %6: u32 = icmp_eq %4, %5
+  cond_br %6, ^bb3(), ^bb5()
+^bb3():
+  %7: s32 = call %2 {target="hit"}
+  br ^bb4()
+^bb5():
+  %8: s32 = const {value=1}
+  %9: s32 = add %2, %8
+  br ^bb1(%9)
+^bb4():
+  %10: s32 = call {target="out"}
+  ret %10
+}`;
+
+test('a top-tested loop whose `break` arm runs code is a `while`, the arm ahead of the `break`', () => {
+  const { src, agreement, shipped } = judged(CODE_ARM_TOP_TESTED);
+  expect(src).toContain('for (v0 = 0; v0 < a0; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(src).toMatch(/\{\n {12}hit\(v\d\);\n {12}break;\n {8}\}/);
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+test('an arm into an exit that takes copies keeps the loop `while (1)`', () => {
+  // the exit takes the counter: the header hands it `i`, the arm `-1`
+  const copies = CODE_ARM_TOP_TESTED.replace('cond_br %3, ^bb2(), ^bb4()', 'cond_br %3, ^bb2(), ^bb4(%2)')
+    .replace('  br ^bb4()\n^bb5():', '  %11: s32 = const {value=-1}\n  br ^bb4(%11)\n^bb5():')
+    .replace('^bb4():\n  %10: s32 = call {target="out"}', '^bb4(%12: s32):\n  %10: s32 = call %12 {target="out"}');
+  const { src, agreement } = judged(copies);
+  expect(src).toContain('while (1) {');
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+});
