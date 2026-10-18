@@ -1797,8 +1797,8 @@ export function fallbackArgc(
   // empty gap), or the gap refuses. The decision says the register above the gap is an argument and
   // nothing about the ones above that. Without the gap's refusal the run would count whatever reaches
   // them: a store's address or value, a discarded volatile read, a temp, an incoming value read
-  // elsewhere. Measured 2026-10-18 at canonical flags: `gp[1] = 3; return g(a, -gy) + 1;` lifted
-  // `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` lifted `g(a0, a2 + 1, a2)` on all seven
+  // elsewhere. Measured 2026-10-18 at canonical flags: `gp[1] = 3; return g(a, -gy) + 1;` would
+  // lift `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` `g(a0, a2 + 1, a2)` on all seven
   // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
   // argument.
   for (let k = n + 1; k < argRegs.length; k++) {

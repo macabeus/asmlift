@@ -2,7 +2,7 @@
 // left at its incoming value below one the call's own block set up is the function's own argument
 // passed on — where the set one is surely an argument, and the ABI cannot leave the gap empty below
 // it. Each fixture is the toolchain's own output (canonical flags, 2026-10-18); the Thumb shapes are
-// in thumb-frontend.test.ts beside the refusal they replaced.
+// in thumb-frontend.test.ts beside the refusals that still hold there.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -348,7 +348,7 @@ describe('on Thumb (agbcc), a decided gap proves only the register above it', ()
     expect(decompile('f', ok3, ARMV4T_AGBCC).source).toContain('return g(a0, 1, 2) + 1;');
   });
   // `int g(); int gp[4]; int gy; int f(int a, int b, int c){ gp[1] = 3; return g(a, -gy) + 1; }`:
-  // r2 holds the store's address, which lifted `g(a0, -gy, &gp)`
+  // r2 holds the store's address, which would lift `g(a0, -gy, &gp)`
   test('a store address above it refuses', () => {
     const fa =
       'f:\n\tpush\t{lr}\n\tldr\tr2, .L3\n\tmov\tr1, #0x3\n\tstr\tr1, [r2, #0x4]\n\tldr\tr1, .L3+0x4\n' +
@@ -357,7 +357,7 @@ describe('on Thumb (agbcc), a decided gap proves only the register above it', ()
     expect(() => decompile('f', fa, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
   });
   // `int g(); int f(int a, int b, int c){ return g(a, c + 1) + 1; }`: r2 still holds c, read for
-  // `c + 1`, which lifted `g(a0, a2 + 1, a2)`
+  // `c + 1`, which would lift `g(a0, a2 + 1, a2)`
   test('an incoming value read elsewhere above it refuses', () => {
     const fd = thumb('f', '\tadd\tr1, r2, #0x1\n\tbl\tg\n');
     expect(() => decompile('f', fd, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);

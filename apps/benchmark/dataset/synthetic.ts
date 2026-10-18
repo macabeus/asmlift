@@ -1157,18 +1157,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // register this function never wrote may still hold its own incoming argument: `s` stays in the
   // first argument register while `1` goes into the second, and a count that stops at the first
   // lifts `logv() + 1`. The gap is DECIDED where the register above it surely is an argument
-  // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value nothing else reads
-  // (and, off ido7.1, that no memory read produced and no base writeback left), and where argument
-  // words fill in order the gap
-  // below it is the function's own arguments passed on. On ido7.1 a gap at a0 also needs the call's
-  // result read, as `+ 1` reads it here (`passsr`). On O32 the own declaration (`ctx`) must put an
-  // integer word in the gap register, since a leading float leaves a0 empty, and on O32 and PowerPC
-  // the second word of an 8-byte argument that could skip the gap must hold nothing — `passmid`'s
-  // a3/r6 is no parameter of `(int, int)`. On PowerPC the own declaration must also show no floating
-  // parameter, since a float passed on in f1 is invisible. And the call must show nothing past its
-  // count: no own parameter, no outgoing stack word, and no register the count takes past the
-  // decided one without the same proof (`decidedCallRefusal`). `ctx` declares neither callee, so
-  // neither decompiler is told the arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
+  // (frontend/call-plan.ts `decideGap`): the call's own block set it to a value nothing else reads,
+  // that no base writeback left and, off ido7.1, that no memory read produced. Where argument words
+  // fill in order, the gap below it is then the function's own arguments passed on. On ido7.1 a gap
+  // at a0 also needs the call's result read, as `+ 1` reads it here (`passsr`). On O32 the own
+  // declaration (`ctx`) must put an integer word in the gap register, since a leading float leaves
+  // a0 empty, and on O32 and PowerPC the second word of an 8-byte argument that could skip the gap
+  // must hold nothing — `passmid`'s a3/r6 is no parameter of `(int, int)`. On PowerPC the own
+  // declaration must also show no floating parameter, since a float passed on in f1 is invisible.
+  // Every register the count takes past the decided one needs the same proof, and the call must
+  // show nothing past its count: no own parameter, no outgoing stack word (`decidedCallRefusal`).
+  // `ctx` declares neither callee, so neither decompiler is told the arity. A run of pass-through
+  // arguments with nothing set up past it (`g2(a, b)`) is the same
   // machine code as `g2()`, so no row expects a decline for it.
   ...(
     [
@@ -1246,8 +1246,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // A BASE WRITEBACK LEFT IN THE REGISTER ABOVE decides nothing: agbcc copies a struct of 3+ words
   // as `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both advanced bases dead in
   // r2/r3, so with `s` and `n` passed on in r0/r1 the call looks like it takes `p + 3` and `q + 3`
-  // too. Read as arguments they lifted `logv(a0, a1, a2 + 3, a3 + 3)`, which agbcc recompiles to
-  // separate `add`s. A writeback is no evidence that anything wanted the value
+  // too. Read as arguments they would lift `logv(a0, a1, a2 + 3, a3 + 3)`, which agbcc recompiles
+  // to separate `add`s. A writeback is no evidence that anything wanted the value
   // (frontend/ssa.ts `noteIncidentalWrite`), so the cell is a declined witness. agbcc's alone: the
   // other compilers copy with plain loads and stores, or in a loop outside the call's block.
   {

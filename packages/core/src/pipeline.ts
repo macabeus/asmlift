@@ -419,7 +419,7 @@ function liftWithinContextBound(
   // (`LiftOptions.contextOwnProto.proves`). Any other lift may only refuse on it: the unbounded
   // relift below, and a bound raised past a register the body reads. Otherwise a decided arity gap
   // (frontend/call-plan.ts `decideGap`) that the entry refuses would come back from the relift as a
-  // lift without it. With `int pr(void)` in the context, `logv(s, 1)` lifted `logv(a0, 1)`, the
+  // lift without it. With `int pr(void)` in the context, `logv(s, 1)` would lift `logv(a0, 1)`, the
   // same as with no declaration.
   const context = (proves: boolean): LiftOptions =>
     ownContext === undefined || Object.hasOwn(prototypes, name)

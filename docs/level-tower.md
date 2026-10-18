@@ -783,9 +783,9 @@ that many argument words, read as stated, so one this function passes through un
 argument and one a call destroyed refuses; only what the `...` takes is guessed, above them, and a
 gap there is treated as for an undeclared callee (frontend/call-plan.ts `variadicFloor`), and so is a
 register there that still holds this function's own incoming value, which a read of it leaves behind
-as a definition (frontend/ssa.ts `fallbackArgc`), which refuses — one a call destroyed holds nothing and one the
-call's block re-set since its last call is set up, so neither refuses. Where a fixed parameter is
-a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
+as a definition (frontend/ssa.ts `fallbackArgc`), which refuses — one a call destroyed holds
+nothing and one the call's block re-set since its last call is set up, so neither refuses. Where a
+fixed parameter is a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
 unsized spelling, which may be two words, the guess places the call from the first register. Every
 parameter is at least one word, so a guess that counts fewer registers than that declaration's fixed
 parameters, or than an unsized plain list's parameters (`void h(int, Foo)` with `Foo` unresolved),
@@ -821,9 +821,10 @@ dead in r2/r3, and a PowerPC update form's advanced base is marked the same way.
 narrow it. Where a discarded read may land in an argument register
 (`discardedReadMayFillArgRegister`: agbcc, gcc2.7.2kmc, gcc2.7.2 and the three mwcc builds, whose
 discard register is the first free one once v0/v1 or r0 are busy), a value a memory read produced
-decides nothing; on ido7.1, which discards into $zero every time, `logv(s, gx)` lifts. Where a caller hands its own destination on as a
-callee's hidden struct-return pointer (`forwardsStructReturnDestination`, ido7.1), a gap at the
-first argument register is decided only where something other than a `ret` reads the call's result.
+decides nothing; on ido7.1, which discards into $zero every time, `logv(s, gx)` lifts. Where a
+caller hands its own destination on as a callee's hidden struct-return pointer
+(`forwardsStructReturnDestination`, ido7.1), a gap at the first argument register is decided only
+where something other than a `ret` reads the call's result.
 The decision covers the gap and that register only. Every register the count takes past it must be
 proven the same way. The call refuses where its arity could still run past the count
 (`decidedCallRefusal`): an own parameter that may sit there, an outgoing stack word that reaches it,

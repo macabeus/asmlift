@@ -683,12 +683,12 @@ export function callDeclarations(
   //   - the value must be no instruction's side effect (`SsaBuilder.noteIncidentalWrite`): a base
   //     writeback is left in its register whether anything wants it or not. agbcc copies a struct of
   //     3+ words as `ldmia r3!, {r4, r5, r6}; stmia r2!, {r4, r5, r6}` and leaves both writebacks
-  //     dead, so `*p = *q; return logv(s, n) + 1;` lifted `logv(a0, a1, a2 + 3, a3 + 3)`.
+  //     dead, so `*p = *q; return logv(s, n) + 1;` would lift `logv(a0, a1, a2 + 3, a3 + 3)`.
   //   - where a caller forwards its own destination as a callee's hidden pointer
   //     (`compilerBehaviors.forwardsStructReturnDestination`, ido7.1), a gap at the first argument
   //     register is decided only where the call's result is read (`SsaBuilder.requireReader`,
   //     owed by `lower`), by anything but a `ret`. `int b3(struct S *p){ *p = sg(1); return 0; }` is
-  //     `jal sg; li a1,1` with a0 untouched, and lifted `sg(a0, 1)` even with `int b3(struct S *)`
+  //     `jal sg; li a1,1` with a0 untouched, and would lift `sg(a0, 1)` even with `int b3(struct S *)`
   //     declared: the hidden pointer stated as a C argument, and the `*p =` store dropped. IDO reads
   //     no forwarded struct return's result register (five shapes, at the target.ts field), but a
   //     `ret` reads it in a function ending in the call, `void b7(struct S *p){ *p = sg(1); }`.
@@ -775,14 +775,14 @@ export function callDeclarations(
   // every gapless call, and three things say otherwise. Each refuses (returns true):
   //   - an own parameter that may sit past the count (`ownArgumentWordsOn`, an upper bound). It is
   //     just as likely passed on as the gap below it was. On gcc2.7.2kmc and ido7.1, `int ll6(int a,
-  //     int b, int c, int d){ return g(a, 2, c, d, 5) + 1; }` leaves c and d in a2/a3 and lifted
+  //     int b, int c, int d){ return g(a, 2, c, d, 5) + 1; }` leaves c and d in a2/a3 and would lift
   //     `g(a0, 2)`.
   //   - a word of the outgoing area that reaches the call (`guess.refuse`, asked as if the count
   //     filled every argument register). It is a fifth argument, so every register below it is an
   //     argument too: the same `ll6`'s `sw v0,16(sp)`.
   //   - a floating argument this ABI passes apart from the general words (`fpu.slots: 'separate'`,
   //     PowerPC), which no guess counts. `int fl2(int b, float x){ return g(b, x, 3) + 1; }` leaves
-  //     x in f1 on all three mwcc builds and lifted `g(a0, 3)`. A float in f1 that nothing reads is
+  //     x in f1 on all three mwcc builds and would lift `g(a0, 3)`. A float in f1 that nothing reads is
   //     invisible, so on such an ABI only an own declaration whose parameters are all integers rules
   //     it out. Without a declaration this refuses. A value reaching an FPU argument register refuses
   //     on every ABI.
@@ -857,12 +857,13 @@ export function callDeclarations(
     const { widths, returns } = p;
     // the leading arguments a variadic declaration states, where the rest is guessed
     const floor = widths === null ? variadicFloor(callee) : 0;
-    // the gaps `decideGap` decided: the value that proved each, the gap's own refusal, owed if that
-    // proof fails once the function is lifted, and how many argument words they put beyond doubt
+    // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
+    // that proof fails once the function is lifted
     const decided: Array<{ value: Value; refuse: () => void }> = [];
     // the refusals of the decided gaps at the first argument register that the call's result must
     // be read to keep (`compilerBehaviors.forwardsStructReturnDestination`, at `decideGap`)
     const resultOwed: Array<() => void> = [];
+    // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
     const argc =
       widths === null

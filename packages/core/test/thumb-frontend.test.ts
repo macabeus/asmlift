@@ -4586,7 +4586,7 @@ describe('a gap in the argument registers of an undeclared call', () => {
   // `struct T { int x, y, z; }; int logv(); int fwb(const char *s, int n, struct T *p, struct T *q){
   // *p = *q; return logv(s, n) + 1; }`: agbcc's block copy leaves both advanced bases dead in r2/r3,
   // pure adds only the call reads. A writeback is no evidence that anything wanted the value
-  // (`SsaBuilder.noteIncidentalWrite`); read as arguments it lifted `logv(a0, a1, a2 + 3, a3 + 3)`.
+  // (`SsaBuilder.noteIncidentalWrite`); read as arguments it would lift `logv(a0, a1, a2 + 3, a3 + 3)`.
   test('a base writeback left in the register above does not decide the gap', () => {
     const fwb =
       'fwb:\n\tpush\t{r4, r5, r6, lr}\n\tldmia\tr3!, {r4, r5, r6}\n\tstmia\tr2!, {r4, r5, r6}\n\tbl\tlogv\n' +
