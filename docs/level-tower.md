@@ -972,9 +972,9 @@ caller's own forwarded pointer — each refuses on every frontend that passes th
 path chose (the audit, above). MIPS and Thumb pass the pointer, and PowerPC refuses a call that
 would. THE CALLEE HALF, on every frontend: a function
 that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
-returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. Its
-own declaration is left out of a context's prototypes (`withContextPrototypes`), so nothing there
-contradicts that; where the caller states that declaration, every frontend refuses it, before any
+returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. A
+context's own entry for it bounds only its argument registers, softly and counting the pointer's
+word, and its return is not read, so nothing there contradicts that; where the caller states that declaration, every frontend refuses it, before any
 frontend runs (`pipeline.ts` `refuseOwnStructReturnThroughMemory`, beside the refusal of a narrow
 return of a wide declaration). A stated return the context lays out — `struct S`, or a typedef of
 one — is read with that layout (`proto-context.ts` `withOwnReturnLayout`), so a one-word struct the
@@ -1499,15 +1499,19 @@ on anything it cannot bound) is one no caller fills, so `registerLiveIns` moves 
 uninitialised side — KMC's `a2` past `uninit_spill(int, int *)`, agbcc's `r3`, mwcc 2.3.3's
 `r5`..`r10`. The words a typed list may be handed ahead of its parameters count too: a struct's
 hidden return pointer wherever the return is not shown to be a scalar, and a C++ method's `this`;
-a bare count is the argument registers, read as a call reads it. Only a
-stated declaration (`--proto`, a row's `proto`) or a mangled symbol's parameter codes is read there,
-never the context's entry for the function itself, and an incoming stack argument past the bound
-refuses, since no local lives in the caller's frame. The context's own entry is left out on a
-measured trade (`proto-context.ts` `withContextPrototypes`): on kleod, whose headers its compiler
-checked, honouring it takes the lifts with more parameters than their header from 52 of 377 to 1 of
-373 and corrects 5 wrong-C reads, but the entry of a function still `INCLUDE_ASM` was never checked
-against a definition, one too short turns a real argument into `uninit_<reg>`, and no corpus
-measures how often that happens — every real bench row restates its own entry as `proto`. Nor is
+a bare count is the argument registers, read as a call reads it. A
+stated declaration (`--proto`, a row's `proto`) or a mangled symbol's parameter codes bounds the
+edge HARD, and an incoming stack argument past it refuses, since no local lives in the caller's
+frame. The context's entry for the function itself bounds it SOFTLY, and only where it is a typed
+list (`proto-context.ts` `ownContextEntry`, `pipeline.ts` `liftWithinContextBound`): the entry of a
+function still `INCLUDE_ASM` was never checked against a definition, and one too short — sbk2's
+`void f(void);` task callbacks, 407 of 525 short when their functions were decompiled — would turn
+a real argument into `uninit_<reg>`. So a dropped register the finished lift still reads (an
+`undef` of it, or of a join that absorbed it, that `dce` keeps) is lifted again as the parameter a
+context-less lift makes it, with an `[own-arity]` note naming the declaration and the register; one
+nothing reads is no parameter (sa3's `void Task_802F698(void)` lifted with four), and a lift that
+refuses within the bound is lifted without it, with a note. The bench hands each row its own
+context entry the same way (`withOwnContextMark`). Nor is
 any declaration read for a hand-written body (PowerPC: one naming a callee-saved register it never
 saved), whose declared type is no register interface.
 
