@@ -291,6 +291,29 @@ describe('the fold reads its target facts', () => {
     expect(run('%7: unk32 = const {value=0}\n  store %9, %7 {off=0, width=1}')).toBe(0);
     expect(run('store %9, %4 {off=0, width=1}')).toBe(0);
   });
+  // A value that IS a call — `p[60] = k()` — is expanded before the address under either spelling
+  // (agbcc's preexpand_calls): no evidence. An op computed from its result still orders.
+  const called = (value: string, stored: string) => `fn f {
+^bb0(%0: unk32):
+  %4: unk32 = call {target="k"}
+  ${value}
+  %2: unk32 = const {value=60}
+  %3: unk32 = add %0, %2
+  store %3, ${stored} {off=0, width=1}
+  %5: unk32 = const {value=0}
+  store %0, %5 {off=0, width=1}
+  ret
+}
+`;
+  test('a call result stored as it is is no member order', () => {
+    const run = (value: string, stored: string) => {
+      const fn = parse(called(value, stored));
+      verify(fn);
+      return foldDisplacedAccesses(fn, {}, { farMemberStoreOrder: true }, true);
+    };
+    expect(run('', '%4')).toBe(0);
+    expect(run('%7: unk32 = const {value=1}\n  %6: unk32 = add %4, %7', '%6')).toBe(1);
+  });
 });
 
 describe('foldDisplacedAccesses refusals', () => {

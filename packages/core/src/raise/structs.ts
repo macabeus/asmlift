@@ -588,7 +588,11 @@ export function foldDisplacedAccesses(
   // SIDE: this store is its only reader, and no memory access or call stands between it and the
   // chain. A constant or a parameter on the right leaves no order to read, so it is no evidence
   // either way; neither is a value an earlier statement computed (`u8 v = *q; *r = 0; p[38] = v;`),
-  // which the member and the cast spellings both load before the address, byte for byte.
+  // which the member and the cast spellings both load before the address, byte for byte. Nor is a
+  // value that IS a call: agbcc expands every call of a right-hand side before either target
+  // (MODIFY_EXPR's preexpand_calls, gcc/expr.c:6777), so `p->f60 = k()` and `p[60] = k()` are one
+  // object. What the right-hand side computes from a call's result still orders (`p->f60 = k() + 1`
+  // adds before the address, `p[60] = k() + 1` after it).
   const effect = (op: Op): boolean =>
     op.opcode === 'store' ||
     op.opcode === 'astore' ||
@@ -600,7 +604,7 @@ export function foldDisplacedAccesses(
     const value = a.op.operands[1];
     const vdef = defs.get(value);
     const first = defs.get(chain[chain.length - 1]);
-    const v = vdef && vdef.opcode !== 'const' ? position.get(vdef) : undefined;
+    const v = vdef && vdef.opcode !== 'const' && vdef.opcode !== 'call' ? position.get(vdef) : undefined;
     const f = first ? position.get(first) : undefined;
     return (
       v !== undefined &&
