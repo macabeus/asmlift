@@ -42,6 +42,7 @@ import { effectful, spelledWhenDead } from '../ir/discipline';
 import { type EntryReading, sameAtEntry } from '../ir/entry';
 import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
+import { intWidth } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
 /** One loop whose shape admits a re-roll, and the facts its admission reads. */
@@ -109,16 +110,20 @@ export const REROLL_GATES: readonly Gate<PeeledTest>[] = [
 ];
 
 /** Re-roll every peeled loop test the conditions above admit; returns how many. */
-export function rerollPeeledTests(fn: Fn, gates: readonly Gate<PeeledTest>[] = REROLL_GATES): number {
+export function rerollPeeledTests(
+  fn: Fn,
+  gates: readonly Gate<PeeledTest>[] = REROLL_GATES,
+  topGates: readonly Gate<FoldedTopTest>[] = TOP_TEST_GATES,
+): number {
   let done = 0;
   // one at a time: each rotation changes the loop forest
-  while (rerollOne(fn, gates)) {
+  while (rerollOne(fn, gates, topGates)) {
     done++;
   }
   return done;
 }
 
-function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[]): boolean {
+function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[], topGates: readonly Gate<FoldedTopTest>[]): boolean {
   const preds = predecessors(fn);
   const defs = new Map<Value, Op>();
   const defBlock = new Map<Value, Block>();
@@ -237,9 +242,203 @@ function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[]): boolean {
     fn.blocks.splice(fn.blocks.indexOf(H), 0, T);
     // H's params now take T's own params on their one in-edge: each is that value under a second name
     simplifyTrivialPhis(fn);
+    restoreTopTest(fn, { E, T, H }, topGates);
     return true;
   }
   return false;
+}
+
+/** One re-rolled loop whose exit test could head it again, and the facts its admission reads. */
+export interface FoldedTopTest {
+  /** does the exit edge carry a value? */
+  exitCarriesValue: boolean;
+  /** does the exit test read a value of the loop's blocks other than those H hands round? */
+  readsLoopValue: boolean;
+  /** the exit test on the entry values: `stays` (provably not taken), `leaves`, or `unknown` (not a
+   *  constant: a memory read, a call, a parameter, an opcode `EVAL` does not fold) */
+  atEntry: 'stays' | 'leaves' | 'unknown';
+}
+
+export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
+  {
+    id: 'exit-carries-value',
+    why: 'a value on the exit edge becomes a second copy of the exit after the loop, a spelling measured worse',
+    sound: false,
+    rejects: (c) => c.exitCarriesValue,
+  },
+  {
+    id: 'reads-loop-value',
+    why: 'the new head is reached before the loop body, where the body’s own values do not exist yet',
+    sound: true,
+    guardedBy: 'reroll.test.ts: each top-test refusal above is its rule’s alone',
+    rejects: (c) => c.readsLoopValue,
+  },
+  {
+    id: 'not-staying-at-entry',
+    why: 'a head test that could leave on entry would skip the first iteration the asm always runs',
+    sound: true,
+    guardedBy: 'reroll.test.ts: each top-test refusal above is its rule’s alone',
+    rejects: (c) => c.atEntry !== 'stays',
+  },
+];
+
+/** Integer opcodes `evalConst` folds, on 32-bit values. */
+const EVAL: Readonly<Record<string, (a: number, b: number) => number>> = {
+  add: (a, b) => (a + b) | 0,
+  sub: (a, b) => (a - b) | 0,
+  and: (a, b) => a & b,
+  or: (a, b) => a | b,
+  xor: (a, b) => a ^ b,
+  icmp_eq: (a, b) => +(a === b),
+  icmp_ne: (a, b) => +(a !== b),
+  icmp_slt: (a, b) => +(a < b),
+  icmp_sle: (a, b) => +(a <= b),
+  icmp_sgt: (a, b) => +(a > b),
+  icmp_sge: (a, b) => +(a >= b),
+  icmp_ult: (a, b) => +(a >>> 0 < b >>> 0),
+  icmp_ule: (a, b) => +(a >>> 0 <= b >>> 0),
+  icmp_ugt: (a, b) => +(a >>> 0 > b >>> 0),
+  icmp_uge: (a, b) => +(a >>> 0 >= b >>> 0),
+};
+
+/** RESTORE THE TOP TEST THE COMPILER FOLDED AWAY. A loop `rerollOne` just rotated is now
+ *
+ *     E: br T(A)      T(q): test(q) ? X : H      H: …; B = next(q); exit(B) ? Y : T(B)
+ *
+ *  which spells `while (1) { …; if (exit) break; }` — and that compiles as a do-while, whose test is
+ *  at the bottom. But the peel is evidence that the source tested at the TOP: agbcc's `while`/`for`
+ *  emit the exit test ahead of the body (c-parse.in), `expand_end_loop` rotates it to the bottom
+ *  and enters at it (stmt.c), and `duplicate_loop_exit_test` copies it in front of the loop
+ *  (jump.c), where a constant start folds it away and leaves the first body test in E. A do-while
+ *  has no such jump and no peel. So where H's exit test, read on the entry values A, provably stays
+ *  in, it moves to a new head C:
+ *
+ *     E: br C(A)      C(c): exit(c) ? Y : T(c)      T: test(c) ? X : H      H: …; br C(next(c))
+ *
+ *  which runs the same iterations: on entry the test is false, and every later time it is H's own
+ *  test on H's values. Refuses by `TOP_TEST_GATES`; a refusal keeps the loop as rotated. */
+function restoreTopTest(
+  fn: Fn,
+  loop: { E: Block; T: Block; H: Block },
+  gates: readonly Gate<FoldedTopTest>[],
+): boolean {
+  const { E, T, H } = loop;
+  const hTerm = H.ops[H.ops.length - 1];
+  const eTerm = E.ops[E.ops.length - 1];
+  const preds = predecessors(fn);
+  if (
+    hTerm?.opcode !== 'cond_br' ||
+    eTerm?.opcode !== 'br' ||
+    eTerm.successors[0].block !== T ||
+    (preds.get(H) ?? []).some((p) => p !== T) ||
+    (preds.get(T) ?? []).some((p) => p !== E && p !== H)
+  ) {
+    return false;
+  }
+  const back = hTerm.successors.findIndex((s) => s.block === T);
+  if (back < 0 || hTerm.successors[1 - back].block === T) {
+    return false;
+  }
+  const exit = hTerm.successors[1 - back];
+  const B = hTerm.successors[back].args;
+  const A = eTerm.successors[0].args;
+  const inLoop = new Set<Value>([
+    ...T.params,
+    ...H.params,
+    ...[T, H].flatMap((b) => b.ops.flatMap((op) => op.results)),
+  ]);
+  const defs = new Map<Value, Op>(
+    fn.blocks.flatMap((b) => b.ops.flatMap((op) => op.results.map((r) => [r, op] as const))),
+  );
+  // what moves: the ops of H the exit test is computed from, minus those that compute what H hands round
+  const kept = sliceOf(defs, H, B);
+  const moved = new Set([...sliceOf(defs, H, [hTerm.operands[0]])].filter((op) => !kept.has(op)));
+  const movedResults = new Set([...moved].flatMap((op) => op.results));
+  // …and the test is all they compute: a value another op of the loop reads stays where it is
+  const readers = [T, H].flatMap((b) => b.ops).filter((op) => op !== hTerm && !moved.has(op));
+  if (
+    readers.some((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)].some((v) => movedResults.has(v)))
+  ) {
+    return false;
+  }
+  // the exit test on the entry values: each B[k] read as A[k], through E's ops and the moved ones
+  const entry = new Map<Value, Value>(B.map((v, k) => [v, A[k]]));
+  const evalConst = (v0: Value): number | null => {
+    const v = entry.get(v0) ?? v0;
+    const d = defs.get(v);
+    if (d === undefined || intWidth(v.type) !== 32) {
+      return null;
+    }
+    if (d.opcode === 'const') {
+      return typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
+    }
+    const f = EVAL[d.opcode];
+    if (!f || d.operands.length !== 2 || !(moved.has(d) || E.ops.includes(d))) {
+      return null;
+    }
+    const x = evalConst(d.operands[0]);
+    const y = evalConst(d.operands[1]);
+    return x === null || y === null ? null : f(x, y);
+  };
+  const cond = evalConst(hTerm.operands[0]);
+  const site: FoldedTopTest = {
+    exitCarriesValue: exit.args.length > 0,
+    readsLoopValue: [...[...moved].flatMap((op) => op.operands), hTerm.operands[0]].some(
+      (v) => inLoop.has(v) && !movedResults.has(v) && !B.includes(v),
+    ),
+    atEntry: cond === null ? 'unknown' : (cond !== 0) === (back === 0) ? 'stays' : 'leaves',
+  };
+  if (firstRejection(gates, site) !== null) {
+    return false;
+  }
+  const c = B.map((v) => mkValue(v.type));
+  const rename = new Map<Value, Value>(B.map((v, k) => [v, c[k]]));
+  const sub = (v: Value) => rename.get(v) ?? v;
+  const headOps = H.ops.filter((op) => moved.has(op));
+  for (const op of headOps) {
+    op.operands = op.operands.map(sub);
+  }
+  const C: Block = {
+    params: c,
+    ops: [
+      ...headOps,
+      {
+        opcode: 'cond_br',
+        operands: [sub(hTerm.operands[0])],
+        results: [],
+        attrs: { ...hTerm.attrs },
+        successors: hTerm.successors.map((s, k) =>
+          k === back ? { block: T, args: [...c] } : { block: s.block, args: s.args.map(sub) },
+        ),
+      },
+    ],
+  };
+  H.ops = [
+    ...H.ops.filter((op) => op !== hTerm && !moved.has(op)),
+    { opcode: 'br', operands: [], results: [], attrs: {}, successors: [{ block: C, args: [...B] }] },
+  ];
+  eTerm.successors = [{ block: C, args: [...A] }];
+  // write order: E and H wrote T's keys on their edges, and now write C's; C writes nothing itself
+  const order = fn.writeOrder;
+  if (order !== undefined) {
+    for (const pred of [E, H]) {
+      const rec = order.lastWrite.get(pred);
+      T.params.forEach((tk, k) => {
+        const at = rec?.get(tk);
+        rec?.delete(tk);
+        if (at !== undefined) {
+          rec?.set(c[k], at);
+        }
+      });
+    }
+    if (order.writes.has(T)) {
+      order.writes.set(C, 0);
+    }
+  }
+  fn.blocks.splice(fn.blocks.indexOf(T), 0, C);
+  // T's params now take C's on their one in-edge
+  simplifyTrivialPhis(fn);
+  return true;
 }
 
 /** THE WRITE-ORDER BOOKKEEPING THE ROTATION OWES (ir/core.ts `WriteOrder`). A missing `lastWrite`
