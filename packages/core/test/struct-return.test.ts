@@ -732,4 +732,22 @@ describe('a function that itself returns a struct', () => {
       /its context declaration says it returns struct S8 by value, and this target hands its 8 bytes back in two registers [^]*\(`struct S8 rmk8\(s32\)`\)/,
     );
   });
+  // mwcc does not hand the pointer back: its callee leaves in r3 whatever was last there (a call's
+  // result, a reloaded frame word; target.ts `structReturnHandsBackPointer`). Hand-written, the
+  // shape of rmk12 with r3 reused before the blr.
+  test('on mwcc, what r3 holds at the blr is no part of a struct return', () => {
+    const reused =
+      '0 <ru>:\n0:\taddi    r5,r4,1\n4:\tstw     r4,0(r3)\n8:\tstw     r5,4(r3)\n' +
+      'c:\tli      r0,0\n10:\tstw     r0,8(r3)\n14:\tli      r3,7\n18:\tblr\n';
+    const proto = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    const struct =
+      /struct S12 ru\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+ret\.c = 0;\n\s+return ret;/;
+    expect(decompile('ru', reused, PPC_MWCC, { prototypes: { ru: proto } }).source).toMatch(struct);
+    expect(decompile('ru', reused, PPC_MWCC, { ownContextProto: proto }).source).toMatch(struct);
+    // …where agbcc's r0 must still be the pointer at every return
+    const r0 = 'ru:\n\tadd\tr2, r1, #0x1\n\tstr\tr1, [r0]\n\tstr\tr2, [r0, #0x4]\n\tmov\tr0, #0x7\n\tbx\tlr\n';
+    expect(() => decompile('ru', r0, ARMV4T_AGBCC, { prototypes: { ru: S8 } })).toThrow(
+      /a return hands back something other than the address it was handed in r0/,
+    );
+  });
 });

@@ -2,10 +2,12 @@
 //
 // A function declared to return a struct by value, on a target whose rule (aggregate.ts
 // `returnsInMemory`) returns it through memory, is handed its caller's storage in the first
-// argument register and hands the same address back in the return register (O32 `move v0,a0`;
-// agbcc and mwcc leave r0/r3 holding it). Its result is the stores through that pointer, so the
-// machine code is the function `S *f(S *a0, ...)` — which is also what `void f(S *)` and `S *f(S *)`
-// compile to, and why only the declaration can say which one the source wrote.
+// argument register. Where its compiler hands the same address back in the return register (O32
+// `move v0,a0`; agbcc leaves r0 holding it, or restores it), the machine code is the function
+// `S *f(S *a0, ...)`; where it does not (mwcc leaves in r3 whatever was last there, `target.ts`
+// `structReturnHandsBackPointer`), it is `void f(S *a0, ...)`. Its result is the stores through that
+// pointer either way, which is also what `void f(S *)` and `S *f(S *)` compile to, and why only the
+// declaration can say which one the source wrote.
 //
 // Where the declaration says `struct S f(...)` and the lift PROVES the pointer is that storage and
 // nothing else, the pointer becomes a local of the struct, its stores become that local's members,
@@ -15,7 +17,9 @@
 //
 // THE PROOF, over the whole lifted function — each condition its own refusal:
 //   - the function takes argument register 0 at all (the entry block's first parameter);
-//   - every `ret` returns that incoming pointer and nothing else;
+//   - where the compiler hands the pointer back (`structReturnHandsBackPointer`), every `ret`
+//     returns that incoming pointer and nothing else; where it does not, what a `ret` hands back
+//     is no part of the function, and is read as nothing;
 //   - outside the ops `dce` deletes (agbcc's `stmia r2!` writes back an address nothing reads),
 //     the pointer is read only as the base of an unqualified store, at a byte offset that keeps the
 //     store inside the struct, and is never the stored value — so it is not read through, does
@@ -67,7 +71,8 @@ export function liftOwnStructReturn(fn: Fn, type: StructType, target: TargetDesc
   const size = type.size ?? 0;
   const dead = deadOps(fn.blocks);
   const addresses = storageAddresses(fn, hidden, dead);
-  const why = provedReturnStorage(fn, addresses, size, reg, dead);
+  const handsBack = target.compilerBehaviors.structReturnHandsBackPointer !== false;
+  const why = provedReturnStorage(fn, addresses, size, reg, dead, handsBack);
   if (why !== undefined) {
     return why;
   }
@@ -171,13 +176,15 @@ function storageAddresses(fn: Fn, hidden: Value, dead: ReadonlySet<Op>): Map<Val
 
 /** Why the incoming pointer is not provably the storage a struct of `size` bytes is returned in —
  *  undefined where it is. `addresses` are it and what is derived from it (`storageAddresses`);
- *  uses in `dead` ops are no reads. */
+ *  uses in `dead` ops are no reads, and so is a `ret`'s where the compiler does not hand the
+ *  pointer back (`handsBack` false), since what the return register then holds is garbage. */
 function provedReturnStorage(
   fn: Fn,
   addresses: ReadonlyMap<Value, number>,
   size: number,
   reg: string,
   dead: ReadonlySet<Op>,
+  handsBack: boolean,
 ): string | undefined {
   let stores = 0;
   for (const [i, b] of fn.blocks.entries()) {
@@ -189,7 +196,7 @@ function provedReturnStorage(
         return `${reg} reaches a join`;
       }
       if (op.opcode === 'ret') {
-        if (op.operands.length !== 1 || addresses.get(op.operands[0]) !== 0) {
+        if (handsBack && (op.operands.length !== 1 || addresses.get(op.operands[0]) !== 0)) {
           return `a return hands back something other than the address it was handed in ${reg}`;
         }
         continue;
