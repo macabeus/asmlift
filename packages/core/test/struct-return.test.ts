@@ -759,13 +759,13 @@ describe('a function that itself returns a struct', () => {
     }
   });
 
-  // mwcc does not hand the pointer back: its callee leaves in r3 whatever was last there (a call's
-  // result, a reloaded frame word; target.ts `structReturnHandsBackPointer`). Hand-written, the
-  // shape of rmk12 with r3 reused before the blr.
+  // mwcc does not hand the pointer back: its callee leaves in r3 whatever was last there (a
+  // reloaded frame word it also stores; target.ts `structReturnHandsBackPointer`). Hand-written,
+  // the shape of rmk12 with r3 reused before the blr for a word the body stores.
   test('on mwcc, what r3 holds at the blr is no part of a struct return', () => {
     const reused =
       '0 <ru>:\n0:\taddi    r5,r4,1\n4:\tstw     r4,0(r3)\n8:\tstw     r5,4(r3)\n' +
-      'c:\tli      r0,0\n10:\tstw     r0,8(r3)\n14:\tli      r3,7\n18:\tblr\n';
+      'c:\tli      r0,0\n10:\tstw     r0,8(r3)\n14:\tmr      r3,r5\n18:\tblr\n';
     const proto = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
     const struct =
       /struct S12 ru\(s32 a0\) \{\n\s+struct S12 ret;\n\s+ret\.a = a0;\n\s+ret\.b = a0 \+ 1;\n\s+ret\.c = 0;\n\s+return ret;/;
@@ -776,6 +776,21 @@ describe('a function that itself returns a struct', () => {
     expect(() => decompile('ru', r0, ARMV4T_AGBCC, { prototypes: { ru: S8 } })).toThrow(
       /a return hands back something other than the address it was handed in r0/,
     );
+  });
+
+  // …save a value computed for that return alone, which no struct return computes: mwcc_242_81 -O4,p
+  // `int fake(struct S12 *p, int x) { p->a = x; p->b = 0; p->c = 1; return x * 2; }` under a header
+  // that says `struct S12 fake(int x)` would drop the `x * 2` it returns
+  test('on mwcc, a return of a value nothing else reads is no struct return', () => {
+    const fake =
+      '0 <fake>:\n0:\tstw     r4,0(r3)\n4:\tli      r5,0\n8:\tli      r0,1\nc:\tstw     r5,4(r3)\n' +
+      '10:\tstw     r0,8(r3)\n14:\tslwi    r3,r4,1\n18:\tblr\n';
+    const proto = { params: ['s32'], returns: 'struct S12', returnLayout: u32s('a', 'b', 'c') };
+    const alone = /a return hands back in r3 a value nothing else reads/;
+    expect(() => decompile('fake', fake, PPC_MWCC, { prototypes: { fake: proto } })).toThrow(alone);
+    const kept = decompile('fake', fake, PPC_MWCC, { ownContextProto: proto });
+    expect(kept.source).toMatch(/s32 fake\(s32 \*a0, s32 a1\) \{[^]*return a1 << 1;/);
+    expect(kept.ownArityNotes).toEqual([expect.stringMatching(/^\[own-return\] fake: [^]*nothing else reads/)]);
   });
 
   // a register struct that is not one word of one member stays the word, and says why

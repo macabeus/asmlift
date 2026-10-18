@@ -19,7 +19,14 @@
 //   - the function takes argument register 0 at all (the entry block's first parameter);
 //   - where the compiler hands the pointer back (`structReturnHandsBackPointer`), every `ret`
 //     returns that incoming pointer and nothing else; where it does not, what a `ret` hands back
-//     is no part of the function, and is read as nothing;
+//     is read as nothing — save a value COMPUTED FOR THE RETURN ALONE (`returnedAlone`): one that
+//     nothing but a `ret` reads, through joins of nothing else. mwcc's struct-returning callee
+//     leaves in r3 what was last there, which is a value the body needed for something else (a
+//     reloaded word it stores, the pointer itself); a value nothing else reads is a scalar the
+//     function computed to return, which the declaration would silently drop — `int f(struct S12
+//     *p, int x) { ...; return x * 2; }` under a header that says `struct S12 f(int x)`. It does
+//     not catch a returned value the body also stores (`return x;` past `p->a = x`), which the
+//     machine code cannot tell from a struct return;
 //   - outside the ops `dce` deletes (agbcc's `stmia r2!` writes back an address nothing reads),
 //     the pointer is read only as the base of an unqualified store, at a byte offset that keeps the
 //     store inside the struct, and is never the stored value — so it is not read through, does
@@ -48,6 +55,8 @@ import {
   type Op,
   RETURNS_OBJECT,
   type Value,
+  defOpMap,
+  mergeClasses,
   mkOp,
   mkValue,
   predecessors,
@@ -72,7 +81,9 @@ export function liftOwnStructReturn(fn: Fn, type: StructType, target: TargetDesc
   const dead = deadOps(fn.blocks);
   const addresses = storageAddresses(fn, hidden, dead);
   const handsBack = target.compilerBehaviors.structReturnHandsBackPointer !== false;
-  const why = provedReturnStorage(fn, addresses, size, reg, dead, handsBack);
+  const why =
+    provedReturnStorage(fn, addresses, size, reg, dead, handsBack) ??
+    (handsBack ? undefined : returnedAlone(fn, addresses, dead, target.returnReg));
   if (why !== undefined) {
     return why;
   }
@@ -213,6 +224,50 @@ function provedReturnStorage(
     }
   }
   return stores === 0 ? `nothing is stored through ${reg}` : undefined;
+}
+
+/** Where the compiler does not hand the pointer back: why a `ret` hands back a value the function
+ *  computed for that return alone — undefined where none does. A ret's value and every value joined
+ *  with it (`mergeClasses`) form its web; the web is the return's alone where nothing but a `ret` or
+ *  a jump into the web reads any of it (ops in `dead` read nothing), and it is a computed value
+ *  where some member is an op's result other than an `undef` (a register the machine left unset),
+ *  or an incoming register other than the pointer. */
+function returnedAlone(
+  fn: Fn,
+  addresses: ReadonlyMap<Value, number>,
+  dead: ReadonlySet<Op>,
+  reg: string,
+): string | undefined {
+  const readers = new Map<Value, Op[]>();
+  const defs = defOpMap(fn);
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (!dead.has(op)) {
+        for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+          (readers.get(v) ?? readers.set(v, []).get(v)!).push(op);
+        }
+      }
+    }
+  }
+  const webs = mergeClasses(fn);
+  const entry = new Set(fn.blocks[0]?.params ?? []);
+  for (const b of fn.blocks) {
+    const ret = b.ops[b.ops.length - 1];
+    if (ret?.opcode !== 'ret' || ret.operands.length !== 1 || addresses.has(ret.operands[0])) {
+      continue;
+    }
+    const web = webs.get(ret.operands[0]) ?? [ret.operands[0]];
+    const alone = web.every((v) =>
+      (readers.get(v) ?? []).every((op) => op.opcode === 'ret' || (op.successors.length > 0 && !op.operands.includes(v))),
+    );
+    const computed = web.some((v) =>
+      defs.has(v) ? defs.get(v)!.opcode !== 'undef' : entry.has(v) && !addresses.has(v),
+    );
+    if (alone && computed) {
+      return `a return hands back in ${reg} a value nothing else reads, which a function returning the struct through memory has no reason to compute`;
+    }
+  }
+  return undefined;
 }
 
 /** Why `op`, which reads an address `k` bytes into the struct at operand indexes `at`, is not a
