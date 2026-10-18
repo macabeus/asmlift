@@ -16,7 +16,7 @@ import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { frontendFor } from './frontend/registry';
-import { ABSORBED_KEYS } from './frontend/ssa';
+import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
 import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
@@ -447,13 +447,16 @@ function liftWithinContextBound(
 
 /** The dropped argument registers whose undefined value the lift still reads: an `undef` keyed by
  *  one, or that absorbed one when its join collapsed (frontend/ssa.ts `ABSORBED_KEYS`), which is
- *  not dead (`deadOps`, the definition `dce` deletes by). */
+ *  not dead (`deadOps`, the definition `dce` deletes by) or which the machine stored to a slot
+ *  nothing reads back (`HOMED_UNDEF`). That store reaches no op, and it is still a read: IDO -g3 and
+ *  -O0 home every argument register the definition declares, so a header naming fewer contradicts
+ *  the asm, and the main lift's `(a0, a1)` is the one that recompiles to the same words. */
 function readDroppedArgRegs(fn: Fn, dropped: readonly string[]): string[] {
   const dead = deadOps(fn.blocks);
   const read = new Set<string>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'undef' && !dead.has(op)) {
+      if (op.opcode === 'undef' && (!dead.has(op) || op.attrs[HOMED_UNDEF] === true)) {
         for (const k of [String(op.attrs.key), ...String(op.attrs[ABSORBED_KEYS] ?? '').split(',')]) {
           read.add(k);
         }
@@ -463,12 +466,14 @@ function readDroppedArgRegs(fn: Fn, dropped: readonly string[]): string[] {
   return dropped.filter((r) => read.has(r));
 }
 
-/** `fn` with no `undef` carrying `ABSORBED_KEYS`, which nothing past the own-entry bound reads. */
+/** `fn` with no `undef` carrying `ABSORBED_KEYS` or `HOMED_UNDEF`, which nothing past the own-entry
+ *  bound reads. */
 function forgetAbsorbedKeys(fn: Fn): Fn {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode === 'undef') {
         delete op.attrs[ABSORBED_KEYS];
+        delete op.attrs[HOMED_UNDEF];
       }
     }
   }

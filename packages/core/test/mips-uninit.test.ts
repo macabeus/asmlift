@@ -196,6 +196,22 @@ describe("the context's own entry", () => {
         'kept as parameters, which the header contradicts',
     ]);
   });
+
+  // `void f(int a, int b){ }` under `void f(void);` at IDO -O2 -g3: the prologue homes both argument
+  // registers to slots nothing reads back, and those stores are the asm reading a0 and a1
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('keeps a register past it that the body only homes, with a note (%s)', (_c, target) => {
+    const HOMES = ['0:\tsw\ta0,0(sp)', '4:\tsw\ta1,4(sp)', '8:\tjr\tra', 'c:\tnop'];
+    const r = decompile('f', obj(HOMES), target, { ownContextProto: { params: [], returnsVoid: true } });
+    expect(r.source).toBe(src(HOMES, target));
+    expect(r.source).toMatch(/^void f\(s32 a0, s32 a1\) \{/m);
+    expect(r.ownArityNotes).toEqual([
+      'f: its context declaration `void f(void)` fills 0 argument words, and the body reads a0, a1 past them — ' +
+        'kept as parameters, which the header contradicts',
+    ]);
+  });
 });
 
 describe('the register half: scratch and saved registers', () => {

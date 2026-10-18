@@ -1561,6 +1561,12 @@ export function makeSsaBuilder(
         }
       }
       const defs0 = defOpMap(fn);
+      for (const v of deadHomed) {
+        const d = defs0.get(v);
+        if (d?.opcode === 'undef') {
+          d.attrs[HOMED_UNDEF] = true;
+        }
+      }
       for (const p of irBlocks[0].params) {
         const reg = paramReg.get(p);
         const first = reg === undefined ? undefined : firstEntryWrite.get(reg);
@@ -2292,14 +2298,21 @@ export function narrowToSetupArgs(fn: Fn): boolean {
 
 // ── shared frontend tail helpers ──
 
-/** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
- *  function's own frame. Shared so they spell it identically and the frame-partition rule can
- *  recognise any frontend's slots. See the virtual-key note in the module header. */
 /** The `undef` attribute naming the other keys whose undefined values a collapsed join absorbed
  *  (`collapseUndefinedJoins`), comma-separated. Read once, by the own-entry bound (pipeline.ts `readDroppedArgRegs`),
  *  and removed before anything else sees the lift. */
 export const ABSORBED_KEYS = 'absorbed';
 
+/** The `undef` attribute marking an undefined value the machine stored to a stack slot nothing reads
+ *  back (`finish`, the same test as an entry parameter's `deadHome`). The store reaches no op, so the
+ *  value looks dead, yet the asm read the register: IDO at -g3 and -O0 homes every argument register
+ *  its definition declares (`sw a1,4(sp)`) whether or not the body uses it. Read once, by the
+ *  own-entry bound (pipeline.ts `readDroppedArgRegs`), and removed with `ABSORBED_KEYS`. */
+export const HOMED_UNDEF = 'homed';
+
+/** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
+ *  function's own frame. Shared so they spell it identically and the frame-partition rule can
+ *  recognise any frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 /** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary
