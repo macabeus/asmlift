@@ -4376,16 +4376,20 @@ export function structure(
       return FCMP_TO_BIN[d.opcode] ? rel : { k: 'un', op: '!', e: rel };
     }
     // A conversion is C's cast to the type it converts to. Converting an integer, the cast's
-    // operand must RENDER signed, because C converts an unsigned one with the unsigned conversion,
-    // which agbcc open-codes and an FPU computes differently: the pin `icmp_s*` takes below.
+    // operand must BE signed, because C converts an unsigned one with the unsigned conversion,
+    // which agbcc open-codes and an FPU computes differently: the pin `icmp_s*` takes below. A cast
+    // does not promote its operand, so a `u8` or `u16` name is unsigned here, where it would
+    // promote to `int` in arithmetic: agbcc compiles `(float)c` over an `unsigned char` as the
+    // unsigned conversion and `(float)(s32)c` as `__floatsisf`.
     if (FLOAT_TO_INT.has(d.opcode)) {
       const w = intWidth(d.results[0].type) === WIDE_BITS ? WIDE_BITS : 32;
       return { k: 'cast', to: T.int(w, d.opcode === 'fptosi'), e: e(d.operands[0]) };
     }
     if (INT_TO_FLOAT.has(d.opcode)) {
       const x = e(d.operands[0]);
-      const signed: Expr =
-        renderedIntSignedness(x, vtEnv) === true ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
+      const own = ['var', 'postincr', 'cast', 'index', 'field'].includes(x.k) ? exprCType(x, vtEnv) : undefined;
+      const isSigned = own?.kind === 'int' && own.width < 32 ? own.signed : renderedIntSignedness(x, vtEnv) === true;
+      const signed: Expr = isSigned ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
       return { k: 'cast', to: d.results[0].type, e: signed };
     }
     if (FLOAT_RESIZE[d.opcode]) {

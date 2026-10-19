@@ -2739,6 +2739,17 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'float u2f(unsigned);',
   },
+  // A byte compared with a float is promoted to `int` and converted with `__floatsisf`, which the lift
+  // spells `(float)(s32)a0`: a bare `(float)a0` of the `u8` converts unsigned, which agbcc open-codes.
+  // agbcc only: on O32 the float after an int arrives in `a1` (an `mtc1` bit cast the lift refuses),
+  // and mwcc converts through an `lfd` of its magic constant.
+  {
+    sym: 'fcmpu8',
+    src: 'int fcmpu8(unsigned char c,float x){ return x < c; }',
+    features: ['float', 'compare', 'int-to-float', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'int fcmpu8(unsigned char,float);',
+  },
   {
     sym: 'fcall',
     src: 'float g1(float);\nfloat fcall(float a,float b){ return g1(a*b); }',

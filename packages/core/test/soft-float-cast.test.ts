@@ -44,6 +44,12 @@ describe('the integer side is any integer', () => {
     expect(lift('s2f')).toBe('float s2f(s16 a0) {\n    return (float)a0;\n}\n');
   });
 
+  // A cast does not promote its operand, so `(float)` of an `unsigned char` is the unsigned
+  // conversion, which agbcc open-codes: the zero-extended byte is converted as the int it fits.
+  test('a narrow unsigned integer is converted as a signed int', () => {
+    expect(lift('uc2f')).toBe('float uc2f(u8 a0) {\n    return (float)(s32)a0;\n}\n');
+  });
+
   test('a conversion feeding a conversion, and an integer read on', () => {
     expect(lift('fround')).toBe('float fround(float a0) {\n    return (float)(s32)a0;\n}\n');
     expect(lift('f2iadd')).toBe('s32 f2iadd(float a0, s32 a1) {\n    return (s32)a0 + a1;\n}\n');
