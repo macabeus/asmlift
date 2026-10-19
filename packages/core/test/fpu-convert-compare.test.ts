@@ -292,6 +292,19 @@ describe('PowerPC: a float compare in a condition-register field', () => {
           '  10:\taddi    r1,r1,16\n  14:\tblr\n',
       ),
     ).toThrow('reload of a stack local');
+    // Hand asm: a word stored there before the `stfd` is no longer what a reload reads.
+    const declared = { prototypes: { ff: { params: ['int', 'float'], returns: 'int' } } };
+    const over =
+      '   0:\tfctiwz  f0,f1\n   4:\tstwu    r1,-16(r1)\n   8:\taddi    r4,r3,5\n   c:\tstw     r4,8(r1)\n' +
+      '  10:\tstfd    f0,8(r1)\n  14:\tlwz     r3,8(r1)\n  18:\taddi    r1,r1,16\n  1c:\tblr\n';
+    const high = "the high word the 'stfd' at 0x10 stores is reloaded and used";
+    expect(() => decompile('ff', objdump('ff', over), PPC_MWCC, declared)).toThrow(high);
+    // …nor on the path that stored it, where a join meets the other path's word
+    const joined =
+      '   0:\tfctiwz  f0,f1\n   4:\tstwu    r1,-16(r1)\n   8:\tcmpwi   r3,0\n   c:\tbeq     18 <ff+0x18>\n' +
+      '  10:\tstfd    f0,8(r1)\n  14:\tb       1c <ff+0x1c>\n  18:\tstw     r3,8(r1)\n  1c:\tlwz     r3,8(r1)\n' +
+      '  20:\taddi    r1,r1,16\n  24:\tblr\n';
+    expect(() => decompile('ff', objdump('ff', joined), PPC_MWCC, declared)).toThrow(high);
   });
 
   test('an ordering bit of the quiet compare refuses', () => {

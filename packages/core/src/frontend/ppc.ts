@@ -1660,15 +1660,19 @@ function liftOnce(
    *    it back with `mtlr` is the return. Any other use is a function reading its own return address
    *    (MP4's `asm { mflr retaddr }` does, to tag an allocation with its caller), which no C
    *    expression spells: a store elsewhere refuses at once, anything else once the function is
-   *    built. A read alone does not refuse, so a copy (`mr`) still carries it to its save. */
+   *    built. A read alone does not refuse, so a copy (`mr`) still carries it to its save.
+   *  - `fctiwz-high`: the HIGH word an `stfd` of an `fctiwz` result stores, with the address of the
+   *    `stfd`. `fctiwz` leaves that half undefined, so a reload of it is no value. No consumer. */
   type NonValue =
     | { kind: 'frame-address'; off: number | string; addr: number }
     | { kind: 'restored'; reg: string; addr: number }
-    | { kind: 'return-address'; addr: number };
+    | { kind: 'return-address'; addr: number }
+    | { kind: 'fctiwz-high'; addr: number };
   const NON_VALUE_RULES: Record<NonValue['kind'], { refuseAtRead: boolean; mustBeConsumed: boolean }> = {
     'frame-address': { refuseAtRead: true, mustBeConsumed: true },
     restored: { refuseAtRead: true, mustBeConsumed: false },
     'return-address': { refuseAtRead: false, mustBeConsumed: false },
+    'fctiwz-high': { refuseAtRead: true, mustBeConsumed: false },
   };
   const nonValues = new Map<Value, NonValue>();
   /** The non-values their consumer took (only `frame-address` has one that must). */
@@ -1691,6 +1695,11 @@ function liftOnce(
         return fail(
           `cannot lift '${name}': the return address the 'mflr' at 0x${nv.addr.toString(16)} ` +
             `copies out is used as a value — a function reading its own return address has no C spelling`,
+        );
+      case 'fctiwz-high':
+        return fail(
+          `cannot lift '${name}': the high word the 'stfd' at 0x${nv.addr.toString(16)} stores is reloaded and ` +
+            `used — 'fctiwz' leaves that half of its result undefined`,
         );
     }
   };
@@ -2680,7 +2689,8 @@ function liftOnce(
                   );
                 }
                 const depth = r1At.get(ins);
-                const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
+                const reaching = (off: number) =>
+                  valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi, (v) => !nonValues.has(v));
                 // …save a word at or above the loaded-word bound, which is a local's
                 const inParamArea = (off: number) =>
                   typeof depth !== 'number' ||
@@ -3387,7 +3397,7 @@ function liftOnce(
         // `fctiwz fD,fS` truncates toward zero into the integer word of fD's low half, which reaches
         // the integer file only through memory: `stfd fD,N(r1)` and `lwz rT,N+4(r1)` (the low word,
         // big-endian). So fD holds that integer as a WORD, and its `stfd` stores it to the frame word
-        // a reload reads; its high half is no value, so a reload of that word refuses.
+        // a reload reads; its high half is no value (`fctiwz-high`), so a use of its reload refuses.
         case 'fctiwz': {
           if (fpu === undefined || ins.ops.length !== 2 || !ins.ops.every(isFpKey)) {
             emitOpaqueDest(ins);
@@ -3406,7 +3416,11 @@ function liftOnce(
             break;
           }
           const off = entryOffset(ins, s) + 4;
+          refuseMixedSlot(ins, s, off - 4, 'value');
           refuseMixedSlot(ins, s, off, 'value');
+          const high = mkValue(T.unk(32));
+          nonValues.set(high, { kind: 'fctiwz-high', addr: ins.addr });
+          writeVar(stackSlotKey(off - 4), bi, high);
           writeVar(stackSlotKey(off), bi, held);
           if (!valueSlots.has(off)) {
             valueSlots.set(off, { addr: ins.addr, mem: s, read: false, stored: [] });
