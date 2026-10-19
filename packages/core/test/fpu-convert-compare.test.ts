@@ -1,11 +1,13 @@
-// Hardware floating point, between the files: the conversions (`trunc.w`, `cvt.s.w`/`cvt.d.w`, with
-// `mfc1`/`mtc1` moving the integer word) and the compares (`c.eq`/`c.lt`/`c.le` and the branch on
-// the condition code they set), onto the IR's conversions and float compares. Every listing is the
+// Hardware floating point, between the files: on MIPS the conversions (`trunc.w`, `cvt.s.w`/`cvt.d.w`,
+// with `mfc1`/`mtc1` moving the integer word) and the compares (`c.eq`/`c.lt`/`c.le` and the branch on
+// the condition code they set); on PowerPC `fctiwz` through the frame and `fcmpo`/`fcmpu` through a
+// condition-register field, a branch, a `cror` or an `mfcr` extract — onto the IR's conversions and
+// float compares. Every listing is the
 // toolchain's own at its canonical flags, and each lift recompiles to it (checked when taken).
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const objdump = (sym: string, body: string) => `00000000 <${sym}>:\n${body}`;
 const lift = (sym: string, body: string, target: TargetDescription = MIPS_IDO) =>
@@ -120,5 +122,82 @@ describe('what refuses', () => {
         MIPS_GCC,
       ),
     ).toThrow("it writes both $f0 and v0 (the 'mfc1' at 0x4)");
+  });
+});
+
+describe('PowerPC: a float compare in a condition-register field', () => {
+  const ppc = (sym: string, body: string) => decompile(sym, objdump(sym, body), PPC_MWCC).source;
+  // An FPR holds a double whichever the source declared, and mwcc compiles the float and double
+  // spellings of each of these to one object: the precision is unstated, and spells `float`.
+  test.each([
+    // int fcmp(float a, float b){ return a > b; } — the GT bit, rotated to the bottom
+    ['fcmp', '   0:\tfcmpo   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\trlwinm  r3,r0,2,31,31\n   c:\tblr\n', 'a0 > a1'],
+    // int flt(float a, float b){ return a < b; } — the LT bit, shifted down
+    ['flt', '   0:\tfcmpo   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\tsrwi    r3,r0,31\n   c:\tblr\n', 'a0 < a1'],
+    // int fle(float a, float b){ return a <= b; } — `cror eq,lt,eq` makes EQ the OR
+    [
+      'fle',
+      '   0:\tfcmpo   cr0,f1,f2\n   4:\tcror    eq,lt,eq\n   8:\tmfcr    r0\n   c:\trlwinm  r3,r0,3,31,31\n  10:\tblr\n',
+      'a0 <= a1',
+    ],
+    // int feq(float a, float b){ return a == b; } — the quiet compare
+    ['feq', '   0:\tfcmpu   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\trlwinm  r3,r0,3,31,31\n   c:\tblr\n', 'a0 == a1'],
+  ])('%s, a bit of an mfcr copy', (sym, body, value) => {
+    expect(ppc(sym, body)).toBe(`s32 ${sym}(float a0, float a1) {\n    return ${value};\n}\n`);
+  });
+
+  // void fbr(float a, float b){ if (a > b) gI = 1; } — `blelr-` returns when GT is CLEAR, which is
+  // `!(a > b)`, true on a NaN; the store is guarded by `a > b`.
+  test('a conditional return on a cleared bit is the unordered compare', () => {
+    const src = ppc(
+      'fbr',
+      '   0:\tfcmpo   cr0,f1,f2\n   4:\tblelr-\n   8:\tli      r0,1\n   c:\tstw     r0,0(r3)\n  10:\tblr\n',
+    );
+    expect(src).toContain('if (a1 > a2) {');
+  });
+
+  // int f2i(float x){ return (int)x; } — the integer word reaches r3 through the frame, low word.
+  test('fctiwz through the frame is the cast to int', () => {
+    expect(
+      ppc(
+        'f2i',
+        '   0:\tfctiwz  f0,f1\n   4:\tstwu    r1,-16(r1)\n   8:\tstfd    f0,8(r1)\n   c:\tlwz     r3,12(r1)\n' +
+          '  10:\taddi    r1,r1,16\n  14:\tblr\n',
+      ),
+    ).toBe('s32 f2i(float a0) {\n    return (s32)a0;\n}\n');
+  });
+
+  test('…and its high word is no value', () => {
+    expect(() =>
+      ppc(
+        'f2i',
+        '   0:\tfctiwz  f0,f1\n   4:\tstwu    r1,-16(r1)\n   8:\tstfd    f0,8(r1)\n   c:\tlwz     r3,8(r1)\n' +
+          '  10:\taddi    r1,r1,16\n  14:\tblr\n',
+      ),
+    ).toThrow('reload of a stack local');
+  });
+
+  test('an ordering bit of the quiet compare refuses', () => {
+    expect(() =>
+      ppc('g', '   0:\tfcmpu   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\trlwinm  r3,r0,2,31,31\n   c:\tblr\n'),
+    ).toThrow('extracts from a copy of the condition register something other than one bit a float compare set');
+    expect(() => ppc('g', '   0:\tfcmpu   cr0,f1,f2\n   4:\tblelr-\n   8:\tli      r3,1\n   c:\tblr\n')).toThrow(
+      "conditional branch 'ble' orders the operands of an 'fcmpu'",
+    );
+  });
+
+  test('a copy of the condition register read as an integer refuses', () => {
+    expect(() => ppc('g', '   0:\tfcmpo   cr0,f1,f2\n   4:\tmfcr    r3\n   8:\tblr\n')).toThrow(
+      "a copy of the condition register ('mfcr') is read as an integer",
+    );
+  });
+
+  test('a cror across two fields refuses', () => {
+    expect(() =>
+      ppc(
+        'g',
+        '   0:\tfcmpo   cr0,f1,f2\n   4:\tcror    eq,4*cr1+lt,eq\n   8:\tbeqlr-\n   c:\tli      r3,1\n  10:\tblr\n',
+      ),
+    ).toThrow("'cror' at 0x4 — only an OR of two bits of the field a float compare set");
   });
 });

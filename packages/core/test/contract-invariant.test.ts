@@ -179,12 +179,12 @@ const PROBES: Record<string, Probe> = {
     deadWithoutOpSource: 's32 clzdead(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     // `divw`/`divwu` are MODELLED (→ sdiv/udiv), so they are not in this corpus.
     negativeSpace: ['mulhw', 'mulhwu', 'rlwnm'],
-    // Same four arms. `fcmpo`'s destination is a CONDITION register, which is the PowerPC shape
+    // Same four arms. `ps_cmpo0`'s destination is a CONDITION register, which is the PowerPC shape
     // that forces the predicate to read every operand rather than only `ops[0]`.
     fpu: [
       // A fused multiply-add: the plain arithmetic lifts through the float homes in both precisions.
       ['arithmetic', '0:\tfmadd\tf1,f1,f2,f3\n4:\tblr\n'],
-      ['a compare into a condition register', '0:\tfcmpo\tcr0,f1,f2\n4:\tblr\n'],
+      ['a compare into a condition register', '0:\tps_cmpo0\tcr0,f1,f2\n4:\tblr\n'],
       ['an FPU store', '0:\tstfs\tf1,0(r3)\n4:\tblr\n'],
       ['the FPSCR', '0:\tmtfsfi\t7,0\n4:\tblr\n'],
     ],

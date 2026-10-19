@@ -240,12 +240,13 @@ describe('an FPU instruction that names no FP register is refused by the file to
 describe('the predicate reads every operand, not the destination', () => {
   // THE TWO SHAPES THAT DECIDE IT, one on each side of `isReg`.
   //
-  // `fcmpo cr0,f1,f2` writes a CONDITION register: `ops[0]` is not an FP register and a
+  // `ps_cmpo0 cr0,f1,f2` writes a CONDITION register: `ops[0]` is not an FP register and a
   // destination-only test files it under "no register destination to degrade", the message about
   // the one operand that is not the problem.
+  // (`fcmpo`/`fcmpu` are decoded, as the float compares; a paired-single compare is not.)
   test('a PowerPC float compare, whose destination is a condition register', () => {
-    const run = liftPpc('fcmpo   cr0,f1,f2');
-    expect(run).toThrow(/unmodelled floating-point instruction 'fcmpo'/);
+    const run = liftPpc('ps_cmpo0 cr0,f1,f2');
+    expect(run).toThrow(/unmodelled floating-point instruction 'ps_cmpo0'/);
     expect(run).toThrow(/floating-point register file \(f1, f2\)/);
   });
 
