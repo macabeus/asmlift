@@ -39,9 +39,9 @@
 // Every check that fails leaves the function as it was.
 //
 // The rotation is ISA-neutral; the top test it then restores (`restoreTopTest`) is not. That rule
-// reads the peel as a top-tested source, a GCC fact measured on agbcc alone: the re-roll fires
-// there and nowhere else in the corpus, and no other profile has been probed for a peeled do-while.
-// Where one peels it, the cost is a `for` spelled where the source was a do-while, never wrong C.
+// reads the peel as a top-tested source, a GCC fact measured on agbcc alone, the one profile the
+// re-roll fires on; no other profile has been probed for a peeled do-while. Where one peels it, the
+// cost is a `for` spelled where the source was a do-while, never wrong C.
 import { Block, Fn, Op, Successor, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
 import { effectful, spelledWhenDead } from '../ir/discipline';
 import { type EntryReading, sameAtEntry } from '../ir/entry';
@@ -293,9 +293,7 @@ export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
   },
 ];
 
-/** Integer opcodes `evalConst` folds, on 32-bit values. `add` and `or` are raise/const.ts's own fold
- *  (`foldConstPair`), whose int32 normalisation is that pass's one decision; the rest are its
- *  neighbours the exit test reads, wrapped the same way. */
+/** Integer opcodes `evalConst` folds, as int32; `add` and `or` through raise/const.ts's `foldConstPair`. */
 const EVAL: Readonly<Record<string, (a: number, b: number) => number>> = {
   add: (a, b) => foldConstPair('add', a, b)!,
   or: (a, b) => foldConstPair('or', a, b)!,
@@ -371,7 +369,7 @@ function restoreTopTest(
   const kept = sliceOf(defs, H, B);
   const moved = new Set([...sliceOf(defs, H, [hTerm.operands[0]])].filter((op) => !kept.has(op)));
   const movedResults = new Set([...moved].flatMap((op) => op.results));
-  // …and the test is all they compute: a value another op of the loop reads stays where it is
+  // …and the test is all they compute: where another op of the loop reads one, the loop stays rotated
   const readers = [T, H].flatMap((b) => b.ops).filter((op) => op !== hTerm && !moved.has(op));
   if (
     readers.some((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)].some((v) => movedResults.has(v)))
@@ -408,9 +406,8 @@ function restoreTopTest(
   const intoExit = fn.blocks
     .flatMap((b) => b.ops[b.ops.length - 1]?.successors ?? [])
     .filter((s) => s.block === exit.block && s !== exit && s !== guard?.out);
-  // the blocks after the exit, which C enters now and T no longer dominates: an arm out of T and the
-  // exit both read T's values there before the move, the exit's edge then reading them one
-  // iteration on
+  // the blocks from the exit on, which C now enters and T no longer dominates: a loop value read
+  // there would be read one iteration on
   const after = new Set<Block>();
   for (const stack = [exit.block]; stack.length > 0;) {
     const x = stack.pop()!;

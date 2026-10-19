@@ -1521,9 +1521,8 @@ interface LoopRules {
   /** The def's value enters some loop's header live and every consumer sits outside that loop, as
    *  does the def: the value is carried ACROSS the loop, not into it. */
   liveAcrossLoop(def: Op, r: Value, consumers: Op[]): boolean;
-  /** `liveAcrossLoop`, and neither the def nor any consumer sits in any loop: the value is computed
-   *  ahead of every loop it crosses and read only once they have been left, never inside one the
-   *  compiler could have hoisted it out of, nor inside an enclosing loop. */
+  /** `liveAcrossLoop`, and neither the def nor any consumer sits in any loop, enclosing ones
+   *  included: never a value the compiler could have hoisted out of one. */
   carriedPastLoops(def: Op, r: Value, consumers: Op[]): boolean;
   /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
   readsPreUpdate(L: BottomTestedLoop, op: Op, r: Value): boolean;
@@ -2055,11 +2054,9 @@ function namePureOp(rules: MaterializeRules, state: MaterializeState, op: Op, b:
   // invariant motion may have put it). `j = n * 3; for (…) { if (t[i] == 7) { gHit = j; break; } }`
   // computes `j` ahead of the loop and holds it in a register to the break arm, which sits outside
   // the natural loop. Inlined, `gHit = n * 3` moves the computation into the arm, and every profile
-  // compiles it there: against that target the restored `for` scores 38 inlined and 1 named on
-  // agbcc, 46 and 24 on mwcc, 5 and 1 on kmc and gcc272, 15 either way on IDO. A `const` is
-  // re-materialized where it is used, and an address loses its inline byte-stride cast standing
-  // alone and is what a compiler CSEs and moves freely (named, `sa3:PackSaveSector` went 349 ->
-  // 372), so neither is named.
+  // compiles it there (IDO scores the two alike). A `const` is re-materialized where it is used, and
+  // an address loses its inline byte-stride cast standing alone and is what a compiler CSEs and
+  // moves freely, so neither is named.
   if (op.opcode !== 'const' && pr && useSitesOf.has(pr) && !scopes.addressCone(op) && !rendersAsAddress(op)) {
     const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
     if (loops.carriedPastLoops(op, pr, cons)) {

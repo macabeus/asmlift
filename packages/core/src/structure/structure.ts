@@ -2894,8 +2894,8 @@ export function structure(
       (l2) => l2.header === nl.header || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
     ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
   // An edge out of `nl` that does not land on `exit` itself, read the one way both the `while` and the
-  // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return that
-  // `owned` the loop emits. The break arm is asked first: where the exit ends in a `return`,
+  // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return whose
+  // tail the loop emits (`owned`). The break arm is asked first: where the exit ends in a `return`,
   // `earlyReturnArm` would also take the arm and copy that tail into it, where the asm holds one copy.
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {

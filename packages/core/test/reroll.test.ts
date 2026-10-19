@@ -271,6 +271,7 @@ test('the re-roll reads the shape the trampoline fold leaves, so the trampoline 
 //
 // With a constant bound the rotated loop's exit test, read on the entry values, provably stays in:
 // the source tested at the top (`for (i = 0; i < 16; i++)`), and the re-rolled loop says so again.
+// With a variable bound the compiler keeps that test as a guard, which the restore deletes.
 
 const bounded = (ir: string) =>
   ir.replace('  %9: u32 = icmp_slt %8, %1\n', '  %40: s32 = const {value=16}\n  %9: u32 = icmp_slt %8, %40\n');

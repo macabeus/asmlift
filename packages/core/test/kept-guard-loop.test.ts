@@ -225,7 +225,7 @@ test('after a guarded loop, an inlined op over such a value declines too', () =>
   ).toThrow(ZERO_TRIP);
 });
 
-// A pure value over it that is no address is carried across the loop, so it is named ahead of the
+// A pure value over it that is not an address is carried across the loop, so it is named ahead of the
 // loop (structure/analysis.ts), and the read after the loop reads that name.
 test('after a guarded loop, a pure value over such a value is named before the loop', () => {
   const c = emit(

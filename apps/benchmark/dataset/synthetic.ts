@@ -10470,12 +10470,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      bounds the loop by a parameter, so agbcc keeps the copied test as a guard rather than fold
   //      it, which the restore then deletes; on gcc2.7.2kmc and gcc2.7.2 the same source is a guard
   //      and a bottom test with no peel, which the default lift keeps and a ranked candidate
-  //      matches. `breaknend_code` exits straight into
-  //      the epilogue, where the arm's sunk `return` is the `break` it fell from. `breakretarm_code`
-  //      can return from the arm as well as break: the `while` writes the arm's own `return` inside
-  //      it, ahead of the `break` (structure.ts `codeBreakArm`). `breakinv_code`'s arm reads a value
-  //      computed ahead of the loop, which crosses it in a register and is named there
-  //      (structure/analysis.ts, a pure value carried across a loop), not inlined into the arm.
+  //      matches. `breaknend_code` exits straight into the epilogue, where the arm's sunk `return`
+  //      is the `break` it fell from. `breakretarm_code` can return from the arm as well as break:
+  //      the `while` writes the arm's own `return` inside it, ahead of the `break` (structure.ts
+  //      `codeBreakArm`). `breakinv_code`'s arm reads a value computed ahead of the loop, which
+  //      crosses it in a register and is named there (structure/analysis.ts, a pure value carried
+  //      across a loop), not inlined into the arm.
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
