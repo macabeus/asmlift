@@ -10475,7 +10475,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the `while` writes the arm's own `return` inside it, ahead of the `break` (structure.ts
   //      `codeBreakArm`). `breakinv_code`'s arm reads a value computed ahead of the loop, which
   //      crosses it in a register and is named there (structure/analysis.ts, a pure value carried
-  //      across a loop), not inlined into the arm.
+  //      across a loop), not inlined into the arm. `breakretinc_code` is `breakretarm_code` with
+  //      `gHit += 1`: mwcc leaves r3 holding gHit's value on one exit and the walked pointer on the
+  //      other, a join only the void function's `ret` reads, which must not type gHit as a pointer
+  //      (pipeline.ts `dropVoidReturnOperands`).
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
@@ -10856,6 +10859,18 @@ export const SYNTHETIC: SynthSpec[] = [
       ...(cflags ? { cflags } : {}),
       ctx: 'void breakinv_code(s32 n);',
       proto: { breakinv_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakretinc_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\nextern s32 gKey;\n' +
+        'void breakretinc_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            if (gKey)\n                return;\n            gHit += 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakretinc_code(void);',
+      proto: { breakretinc_code: { returnsVoid: true } },
     },
   ]),
   {
