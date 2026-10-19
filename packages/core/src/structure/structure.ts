@@ -86,10 +86,12 @@ import {
   exprHasEffect,
   gapReasonFor,
   isLoop,
+  keepsHelperRel,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
   negateCond,
+  regainsHelperRel,
   stmtChildren,
   stmtExprs,
   stmtsEqual,
@@ -4372,7 +4374,14 @@ export function structure(
     }
     if (FCMP_TO_BIN[d.opcode] || FCMP_TO_BIN[NEGATED_FCMP[d.opcode] ?? '']) {
       const op = FCMP_TO_BIN[d.opcode] ?? FCMP_TO_BIN[NEGATED_FCMP[d.opcode]];
-      const rel: Expr = { k: 'bin', op, l: e(d.operands[0]), r: e(d.operands[1]) };
+      const spelled = typeof d.attrs.relation === 'string' ? FCMP_TO_BIN[d.attrs.relation] : undefined;
+      const rel: Expr = {
+        k: 'bin',
+        op,
+        l: e(d.operands[0]),
+        r: e(d.operands[1]),
+        ...(spelled !== undefined ? { helperRel: spelled } : {}),
+      };
       return FCMP_TO_BIN[d.opcode] ? rel : { k: 'un', op: '!', e: rel };
     }
     // A conversion is C's cast to the type it converts to. Converting an integer, the cast's
@@ -6757,7 +6766,19 @@ export function structure(
     ) {
       out.push(...unionStmtsEvidence(thenS, elseS));
     } else {
-      out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));
+      // A compare whose runtime helper names the relation the source spelled DECIDES its own sense,
+      // one-armed or two: the arm order is the one that spells that relation, because no spelling
+      // of its negation calls the same helper (l3/ast.ts `keepsHelperRel`). `if (a == b) {} else`
+      // is how the source wrote agbcc's `bl __eqsf2; cmp r0, #0; beq` over the arm.
+      const helperSense = keepsHelperRel(cond) ? false : regainsHelperRel(cond) ? true : undefined;
+      const negate = helperSense ?? negateHere;
+      out.push(
+        negate
+          ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS }
+          : helperSense === false
+            ? { k: 'if', cond, then: thenS, else: elseS }
+            : mkIf(cond, thenS, elseS),
+      );
     }
     if (merge && merge !== stop) {
       out.push(...structureRegion(merge, stop));
@@ -7954,7 +7975,7 @@ function substVar(e: Expr, from: string, to: string): Expr {
 
 // empty-then peephole: `if (c) {} else { S }` → `if (!c) { S }`
 function mkIf(cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt {
-  if (thenS.length === 0 && elseS.length > 0) {
+  if (thenS.length === 0 && elseS.length > 0 && !keepsHelperRel(cond)) {
     return { k: 'if', cond: negateCond(cond), then: elseS, else: [] };
   }
   return { k: 'if', cond, then: thenS, else: elseS };

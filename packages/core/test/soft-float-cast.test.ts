@@ -134,6 +134,30 @@ describe('a compare helper is the compare its test computes', () => {
   });
 });
 
+// `__eqsf2` and `__nesf2` each fold to `==` or to `!=` by the sense of the branch that tests them,
+// and gcc folds `!(a == b)` into `a != b` before it picks the helper, so the relation the helper is
+// named for is the one the source spelled: the arm order keeps it, never its negation
+// (runtime-helpers.ts `RuntimeHelper.relation`, l3/ast.ts `keepsHelperRel`).
+describe('an equality helper keeps the relation the source spelled', () => {
+  const guard = (name: string, args: string, cond: string, arm: string) =>
+    `void ${name}(${args}) {\n    if (${cond}) {\n    } else {\n        ${arm}\n    }\n}\n`;
+
+  test.each([
+    ['feqret', 'float a0, float a1, s32 *a2', 'a0 == a1'],
+    ['fneret', 'float a0, float a1, s32 *a2', 'a0 != a1'],
+    ['dneret', 'double a0, double a1, s32 *a2', 'a0 != a1'],
+  ])('%s, a guard return over the store', (name, args, cond) => {
+    expect(lift(name)).toBe(guard(name, args, cond, '*a2 = 1;'));
+  });
+
+  // Two guards fold to one connective; negating it would flip both helpers, so it stays as it is.
+  test('a connective of two guards', () => {
+    expect(lift('fguards')).toBe(
+      guard('fguards', 'float a0, float a1, float a2, s32 *a3', 'a0 == a1 || a0 != a2', '*a3 = 1;'),
+    );
+  });
+});
+
 describe('what a compare refuses', () => {
   // The result reaches the return as a word: it is no test, and its value is libgcc's, not C's.
   test('a result read as the integer it is', () => {

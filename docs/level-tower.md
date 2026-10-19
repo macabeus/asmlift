@@ -867,6 +867,11 @@ every compiler here compiles the two apart. `FCMP_TRUTH` defines each by its ans
 greater and unordered, and `NEGATED_FCMP`, not `NEGATED_ICMP`, is their negation. At L3 they lower
 to `f< f<= f> f>= f== f!=`, of which `negateCond` flips only `f==`/`f!=`, so an unordered compare
 prints as the `!` it is; a conversion lowers to C's cast, an integer operand pinned to render signed.
+One flip is still not free: agbcc picks `__eqsf2` or `__nesf2` by the relation the SOURCE spelled,
+having folded `!(a == b)` into `a != b` first, so the fold stamps that relation on the compare
+(`RuntimeHelper.relation`, carried to L3 as `Expr.helperRel`) and the structurer and the L3 arm swaps
+choose the arm order that spells it rather than negate it (`keepsHelperRel`, `regainsHelperRel`);
+`if (a == b) {} else` is the guard return's spelling there.
 
 **The ABI homes are target DATA.** `TargetDescription.fpu` names the float argument registers, the
 float return and how the two files COUNT: o32 is `'leading'` (argument k is in `$f12`/`$f14` only

@@ -16,7 +16,14 @@ export type Expr =
   // `exprEquals` ignores it, as it ignores `index.operandOff`: two nodes that print alike are
   // alike to a CSE. A merge that keeps one of two equal nodes keeps it through `unionEvidence`, so
   // the evidence of the one it drops is not lost with it.
-  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true }
+  //
+  // `helperRel` is evidence too: on a float `==`/`!=`, the relation the SOURCE spelled, where the
+  // compiler picked a runtime helper by it (runtime-helpers.ts `RuntimeHelper.relation` — agbcc's
+  // `__eqsf2` and `__nesf2`). It rides through `negateCond` unchanged, so a node whose `op` is not
+  // its `helperRel` is one a negation moved off the helper, and `keepsHelperRel` /
+  // `regainsHelperRel` below are what a pass choosing between `if (c) A else B` and
+  // `if (!c) B else A` asks. Ignored by `exprEquals` and by the printer, like `unsignedCmp`.
+  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true; helperRel?: BinOp }
   | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
@@ -1263,6 +1270,36 @@ export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   'f==': 'f!=',
   'f!=': 'f==',
 };
+
+/** The compares under `e`'s connectives whose runtime helper names the relation the source spelled
+ *  (`helperRel`), each answering whether it spells that relation now. `negateCond` flips every one
+ *  of them at once, through De Morgan. */
+function helperRelLeaves(e: Expr, out: boolean[] = []): boolean[] {
+  if (e.k === 'bin' && (e.op === '&&' || e.op === '||')) {
+    helperRelLeaves(e.l, out);
+    helperRelLeaves(e.r, out);
+  } else if (e.k === 'bin' && e.helperRel !== undefined) {
+    out.push(e.op === e.helperRel);
+  }
+  return out;
+}
+
+/** Whether `e` spells, at every compare of it whose runtime helper names the relation the source
+ *  spelled, that relation — so that negating `e` recompiles to the other helper at each of them:
+ *  the relation's twin and its `!` alike, since gcc folds `!(a == b)` into `a != b`. An arm swap
+ *  that would negate it keeps `e` and its arm order instead. */
+export function keepsHelperRel(e: Expr): boolean {
+  const leaves = helperRelLeaves(e);
+  return leaves.length > 0 && leaves.every((own) => own);
+}
+
+/** Whether negating `e` puts every such compare back on its helper's relation: the swap a pass
+ *  would otherwise leave alone is the one that spells the helpers. A condition mixing the two has
+ *  neither answer, and no arm order spells it. */
+export function regainsHelperRel(e: Expr): boolean {
+  const leaves = helperRelLeaves(e);
+  return leaves.length > 0 && leaves.every((own) => !own);
+}
 
 export function negateCond(e: Expr): Expr {
   if (e.k === 'bin') {

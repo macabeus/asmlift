@@ -42,6 +42,7 @@
 // through untouched (a miss, never a miscompile).
 import { disjointConstSlots } from '../ir/alias';
 import {
+  type AttrVal,
   Block,
   Fn,
   Op,
@@ -863,8 +864,17 @@ function negateCondOps(defs: Map<Value, Op>, v: Value, budget: number): { ops: O
     }
     const out = mkValue(T.unk(32));
     const negated = NEGATED_ICMP[d.opcode] ?? NEGATED_FCMP[d.opcode];
+    // A float compare whose runtime helper names the relation the source spelled (raise/
+    // floathelpers.ts `attrs.relation`) has no negation that calls the same helper — gcc folds
+    // `!(a == b)` into `a != b` — so a fold that would negate it off that relation refuses, and one
+    // that negates it back onto the relation keeps the stamp for the structurer to spell.
+    const relation = d.attrs.relation;
+    if (negated && relation === d.opcode) {
+      return null;
+    }
     if (negated) {
-      ops.push(mkOp(negated, { operands: [...d.operands], results: [out] }));
+      const attrs: Record<string, AttrVal> = typeof relation === 'string' ? { relation } : {};
+      ops.push(mkOp(negated, { operands: [...d.operands], results: [out], attrs }));
       return out;
     }
     if (d.opcode === 'logic_and' || d.opcode === 'logic_or') {

@@ -43,6 +43,7 @@ import {
   exprChildren,
   exprEquals,
   exprHasEffect,
+  keepsHelperRel,
   mentionedName,
   stmtChildren,
   stmtExprs,
@@ -249,7 +250,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         then = then.slice(1);
         els = els.slice(1);
       }
-      if (then.length === 0 && els.length > 0) {
+      if (then.length === 0 && els.length > 0 && !keepsHelperRel(cond)) {
         const neg = cond.k === 'bin' ? NEGATE_REL[cond.op] : undefined;
         if (neg !== undefined && cond.k === 'bin') {
           cond = { ...cond, op: neg };

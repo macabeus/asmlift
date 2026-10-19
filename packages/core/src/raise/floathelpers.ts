@@ -266,7 +266,15 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     if (calls.has(op)) {
       for (const t of found) {
         const operands = op.operands.map((o) => floatOf.get(o)!);
-        folded.set(t.at, helperOp(t.opcode, String(op.attrs.target), operands, t.at.results[0]));
+        const fcmp = helperOp(t.opcode, String(op.attrs.target), operands, t.at.results[0]);
+        // The relation the source spelled, where the test leaves it open: `__eqsf2` and `__nesf2`
+        // each fold to `fcmp_oeq` or to `fcmp_une`, by the sense of the branch that tests them
+        // (runtime-helpers.ts `RuntimeHelper.relation`).
+        const relation = helperOf(op)!.relation;
+        if (relation !== undefined) {
+          fcmp.attrs.relation = relation;
+        }
+        folded.set(t.at, fcmp);
         t.spent.forEach((x) => spent.add(x));
       }
     }

@@ -46,6 +46,14 @@ export interface RuntimeHelper {
    *  folds through the integer test its caller applies to the result (raise/floathelpers.ts), so it
    *  carries this in place of an `op`. */
   unordered?: 1 | -1;
+  /** THE RELATION THE SOURCE SPELLED, for a compare helper whose relation and its negation are both
+   *  C operators — `__eqsf2` for `==`, `__nesf2` for `!=`. agbcc's gcc folds `!(a == b)` into
+   *  `a != b` before it picks a helper, so the helper names the relation the source wrote, and a
+   *  lift that spells its negation (or the negation's `!`) recompiles to the other helper. The fold
+   *  stamps it on the compare as `attrs.relation` (raise/floathelpers.ts), and the structurer keeps
+   *  that relation's spelling by choosing the arm order instead (l3/ast.ts `Expr.helperRel`). The
+   *  ordered four need none: `!(a > b)` keeps `__gtsf2`, and no other helper computes it. */
+  relation?: 'fcmp_oeq' | 'fcmp_une';
 }
 
 /** The entry a target's table holds for `callee`, or undefined. THE ONE READER, because the table
@@ -224,14 +232,14 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // own relation tests FALSE on — `== 0`, `< 0`, `<= 0` are false on 1, `> 0`, `>= 0` on -1 — except
   // `__nesf2`, whose 1 makes `!=` true (fp-bit.c:1214-1309). agbcc tests the result against 0 with
   // the relation the helper is named for.
-  __eqsf2: { params: [32, 32], returns: 32, unordered: 1 },
-  __nesf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __eqsf2: { params: [32, 32], returns: 32, unordered: 1, relation: 'fcmp_oeq' },
+  __nesf2: { params: [32, 32], returns: 32, unordered: 1, relation: 'fcmp_une' },
   __gtsf2: { params: [32, 32], returns: 32, unordered: -1 },
   __gesf2: { params: [32, 32], returns: 32, unordered: -1 },
   __ltsf2: { params: [32, 32], returns: 32, unordered: 1 },
   __lesf2: { params: [32, 32], returns: 32, unordered: 1 },
-  __eqdf2: { params: [64, 64], returns: 32, unordered: 1 },
-  __nedf2: { params: [64, 64], returns: 32, unordered: 1 },
+  __eqdf2: { params: [64, 64], returns: 32, unordered: 1, relation: 'fcmp_oeq' },
+  __nedf2: { params: [64, 64], returns: 32, unordered: 1, relation: 'fcmp_une' },
   __gtdf2: { params: [64, 64], returns: 32, unordered: -1 },
   __gedf2: { params: [64, 64], returns: 32, unordered: -1 },
   __ltdf2: { params: [64, 64], returns: 32, unordered: 1 },

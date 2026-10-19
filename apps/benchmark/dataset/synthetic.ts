@@ -89,6 +89,17 @@ const MWCC_O0P = [
 ];
 // The same set at -O4,p, which the update-form rows (`upd_*`) build at.
 const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
+// The float compare rows that branch rather than return the relation, and those of them the source
+// declares void (each a float block below).
+const FCMP_BRANCH_ROWS: ReadonlySet<string> = new Set([
+  'fcmpbrn',
+  'fcmpeqbr',
+  'fcmpnebr',
+  'fcmphome',
+  'fcmpvoid',
+  'fcmpkeep',
+]);
+const FCMP_VOID_ROWS: ReadonlySet<string> = new Set(['fcmpbrn', 'fcmpeqbr', 'fcmpnebr', 'fcmpvoid']);
 /** The body the `oa_bigdead*` rows share (the outgoing-area family): twenty-eight values spilled to the
  *  frame, reloaded only inside a loop the first test may skip. */
 const BIGDEAD_BODY =
@@ -2635,7 +2646,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // (KMC, GCC 2.7.2 and IDO allocate `c` to `$f0`): the int returns its `li`s, and the void one is
   // the object of a float function returning `c`, which only its declaration tells apart. So is
   // `fcmpkeep`, a float function returning its first argument untouched (in `f1` on PowerPC, where
-  // `r3` is the other home), beside the void function that does not.
+  // `r3` is the other home), beside the void function that does not. `fcmpeqbr` and `fcmpnebr` are
+  // the equality guards: agbcc picks `__eqsf2` or `__nesf2` by the relation the source spelled and
+  // folds `!(a == b)` into `a != b` first, so only the arm order keeps the helper.
   ...(
     [
       [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
@@ -2654,6 +2667,16 @@ export const SYNTHETIC: SynthSpec[] = [
         'fcmpbrn',
         'extern int gI;\nvoid fcmpbrn(float a,float b){ if (!(a<b)) gI = 1; }',
         'extern int gI; void fcmpbrn(float,float);',
+      ],
+      [
+        'fcmpeqbr',
+        'extern int gI;\nvoid fcmpeqbr(float a,float b){ if (a==b) return; gI = 1; }',
+        'extern int gI; void fcmpeqbr(float,float);',
+      ],
+      [
+        'fcmpnebr',
+        'extern int gI;\nvoid fcmpnebr(float a,float b){ if (a!=b) return; gI = 1; }',
+        'extern int gI; void fcmpnebr(float,float);',
       ],
       [
         'fcmphome',
@@ -2680,13 +2703,13 @@ export const SYNTHETIC: SynthSpec[] = [
         ? ['float', 'cast', 'float-to-int']
         : sym.startsWith('i2')
           ? ['float', 'cast', 'int-to-float']
-          : sym === 'fcmpbrn' || sym === 'fcmphome' || sym === 'fcmpvoid' || sym === 'fcmpkeep'
+          : FCMP_BRANCH_ROWS.has(sym)
             ? ['float', 'compare', 'branch']
             : ['float', 'compare'],
       toolchains: [...toolchains],
       ...(cflags ? { cflags } : {}),
       ctx,
-      ...(sym === 'fcmpbrn' || sym === 'fcmpvoid' ? { proto: { [sym]: { returnsVoid: true } } } : {}),
+      ...(FCMP_VOID_ROWS.has(sym) ? { proto: { [sym]: { returnsVoid: true } } } : {}),
     })),
   ),
   ...(['f2i', 'fcmp'] as const).map((sym): SynthSpec => ({
