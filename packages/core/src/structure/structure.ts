@@ -2228,9 +2228,11 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
   return false;
 }
 /** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
- *  the region it heads holds no `ret`, re-enters no `body` block, admits no edge from outside itself,
- *  and leaves only for `exit`. Returns that region, or null. Each region block is then written once,
- *  inside the loop, ahead of the `break`. */
+ *  the region it heads re-enters no `body` block, admits no edge from outside itself, and leaves only
+ *  for `exit` or by a `ret` of its own. Returns that region, or null. Each region block is then
+ *  written once, inside the loop, ahead of the `break` — a `ret` among them as the `return` it is:
+ *  `if (t[i] == 7) { if (k) return; gHit = 1; break; }`. The region owns those `ret`s, since no
+ *  other edge enters it, so the `return` is written where the asm holds its one copy. */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
   from: Block,
@@ -2253,8 +2255,8 @@ function codeBreakArm(
       continue;
     }
     const t = x.ops[x.ops.length - 1];
-    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br')) {
-      return null; // re-enters the loop, returns, or dispatches
+    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br' && t.opcode !== 'ret')) {
+      return null; // re-enters the loop, or dispatches
     }
     region.add(x);
     stack.push(...successorsOf(x));

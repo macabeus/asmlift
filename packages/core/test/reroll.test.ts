@@ -392,20 +392,24 @@ test('each top-test refusal above is its rule’s alone', () => {
 });
 
 /** The hit arm can return as well as break: `if (p[i] == 7) { if (hit(a1)) return 2; break; }`. */
-const RETURNS_AND_BREAKS = TOP.replace(
-  '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
-  '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  cond_br %13, ^bb5(), ^bb4()\n^bb5():\n  %15: s32 = const {value=2}\n  ret %15',
-);
-
-test('an arm that can both return and reach the exit keeps the bottom test', () => {
-  // the restored `while` owns that arm neither as a `break` nor as an early return, and declines
-  const { src } = emitted(RETURNS_AND_BREAKS);
-  expect(src).not.toContain('v0 < 16');
-  expect(src.match(/hit\(/g)).toHaveLength(1);
-  // a heuristic: without it the head is restored, and the function no longer structures
-  expect(() => emitted(RETURNS_AND_BREAKS, without(TOP_TEST_GATES, 'arm-returns-and-breaks'))).toThrow(
-    /cannot structure/,
+const returnsAndBreaks = (ir: string) =>
+  ir.replace(
+    '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
+    '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  cond_br %13, ^bb5(), ^bb4()\n^bb5():\n  %15: s32 = const {value=2}\n  ret %15',
   );
+
+test('an arm that can both return and reach the exit is written inside the restored loop', () => {
+  // the arm owns its `ret` (no other edge enters it), so the `while` writes it as the `return` it is,
+  // ahead of the `break`, and the loop is tested at the top
+  const { src } = emitted(returnsAndBreaks(TOP));
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  expect(src).toMatch(/return 2;[\s\S]*break;/);
+  const arith = returnsAndBreaks(TOP_ARITH);
+  const sfn = structure(emitted(arith).fn);
+  expect(irAgreement(arith, sfn, SEEDS)).toEqual({ judged: 300, disagree: 0 });
+  expect(irAgreement(arith, readabilityRewrites(sfn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** `for (i = 0; i < n; i++)`: the copied exit test stays in front as a guard, `0 < a1`, and the

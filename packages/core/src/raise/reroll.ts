@@ -262,10 +262,6 @@ export interface FoldedTopTest {
   /** does the exit test or its edge read a value of the loop's blocks other than those H hands
    *  round, or does a block after the exit read one at all? */
   readsLoopValue: boolean;
-  /** what the arm out of the test, T's way out other than into H, does: leave for the exit at once
-   *  (`break`), run code that only leaves for the exit (`code`), never reach the exit (`return`), or
-   *  both reach the exit and return, or share its blocks with another way in (`mixed`) */
-  arm: 'break' | 'code' | 'return' | 'mixed';
   /** the exit test on the entry values: `stays` (provably not taken), `leaves`, `guarded` (not a
    *  constant, but the test of the guard the loop is entered under, on the same values and leaving
    *  for the same exit), or `unknown` (not a constant: a memory read, a call, a parameter, an opcode
@@ -279,12 +275,6 @@ export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
     why: 'an exit whose edges hand it different values becomes a second copy of it after the loop, a spelling measured worse',
     sound: false,
     rejects: (c) => c.exitValueDiffers,
-  },
-  {
-    id: 'arm-returns-and-breaks',
-    why: 'an arm that can both return and reach the exit is one no top-tested loop spelling owns: the structurer declines the restored loop, where it lifts the rotated one',
-    sound: false,
-    rejects: (c) => c.arm === 'mixed',
   },
   {
     id: 'reads-loop-value',
@@ -429,10 +419,8 @@ function restoreTopTest(
   const readAfter = [...after].flatMap((b) =>
     b.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)]),
   );
-  const tTerm = T.ops[T.ops.length - 1];
   const site: FoldedTopTest = {
     exitValueDiffers: exit.args.some((v, k) => intoExit.some((s) => own(s.args[k]) !== own(v))),
-    arm: tTerm?.opcode === 'cond_br' ? armOf(preds, T, tTerm, new Set([E, T, H]), exit.block) : 'mixed',
     readsLoopValue:
       [...[...moved].flatMap((op) => op.operands), hTerm.operands[0], ...exit.args].some(
         (v) => inLoop.has(v) && !movedResults.has(v) && !B.includes(v),
@@ -553,55 +541,6 @@ function rejoinSunkReturns(preds: ReadonlyMap<Block, Block[]>, T: Block, exit: B
     r.attrs = { fallthrough: true };
     r.successors = [{ block: exit, args: [] }];
   }
-}
-
-/** THE ARM OUT OF THE TEST, as the loop spellings read it (structure.ts `exitArmOf`). T's edge that
- *  does not go round to H enters `X`; the blocks reached from there without re-entering the loop are
- *  its region, which a `while` either writes inside the loop ahead of a `break` (`codeBreakArm`: it
- *  only leaves for the exit, holds no `ret`, and has no other way in) or as an early return
- *  (`earlyReturnArm`: it never reaches the exit). A region that does both, or that another edge
- *  enters on its way to the exit, is neither — the rotated `while (1)` reads its exits one by one,
- *  which a top-tested loop cannot. */
-function armOf(
-  preds: ReadonlyMap<Block, Block[]>,
-  T: Block,
-  tTerm: Op,
-  loop: ReadonlySet<Block>,
-  exit: Block,
-): FoldedTopTest['arm'] {
-  const outs = tTerm.successors.filter((s) => !loop.has(s.block));
-  if (outs.length !== 1) {
-    return 'mixed';
-  }
-  const X = outs[0].block;
-  if (X === exit) {
-    return 'break';
-  }
-  const region = new Set<Block>();
-  let reaches = false;
-  let returns = false;
-  for (const stack = [X]; stack.length > 0;) {
-    const x = stack.pop()!;
-    if (x === exit) {
-      reaches = true;
-      continue;
-    }
-    if (loop.has(x)) {
-      return 'mixed';
-    }
-    if (region.has(x)) {
-      continue;
-    }
-    region.add(x);
-    const t = x.ops[x.ops.length - 1];
-    returns ||= t?.opcode !== 'br' && t?.opcode !== 'cond_br';
-    stack.push(...successorsOf(x));
-  }
-  if (!reaches) {
-    return 'return';
-  }
-  const entered = (x: Block) => (preds.get(x) ?? []).every((p) => region.has(p) || (x === X && p === T));
-  return !returns && [...region].every(entered) ? 'code' : 'mixed';
 }
 
 /** The guard a loop is entered under, where the compiler kept the exit test it copied ahead of the

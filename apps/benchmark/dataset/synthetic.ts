@@ -10472,8 +10472,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      and a bottom test with no peel, which the default lift keeps and a ranked candidate
   //      matches. `breaknend_code` exits straight into
   //      the epilogue, where the arm's sunk `return` is the `break` it fell from. `breakretarm_code`
-  //      can return from the arm as well as break, a loop no top-tested spelling owns, so it keeps
-  //      the rotated loop rather than decline.
+  //      can return from the arm as well as break: the `while` writes the arm's own `return` inside
+  //      it, ahead of the `break` (structure.ts `codeBreakArm`).
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
