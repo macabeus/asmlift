@@ -12353,6 +12353,530 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 's32 sw_h5(s32 x, s32 *p);',
   },
+
+  // ── kleod decline census, second pass: the nineteen functions still declining at 504da435 ────
+  // The same census as the family above, re-run on main 504da435 (2026-10-19): of 0.9.0's 49 declines
+  // 30 now lift and 19 remain, under seven messages. Every one of the 19 was run through its refusing
+  // site again — instrumented in a private worktree, or ablated on the input side until one source
+  // element toggled the decline — and the seven messages turned out to be FOURTEEN causes. Each row
+  // below is the smallest shape that reproduces the real function's words, in its measured spelling;
+  // its control is the sibling that lifts. The toolchain list is decided per cell: a lane is on the
+  // row when the shape declines there on the same capability or lifts as a control, and off when it
+  // would measure an unrelated earlier link (named in the comment). agbcc's cross-jumping after reload
+  // (jump.c find_cross_jump) is behind eight of the fourteen.
+  //
+  //   1. stksidx (sub_0804CFD0). `s8 a[64]` at a runtime index times a global halfword. Thumb has no
+  //      `ldrsb rd,[rn,#imm]`; agbcc's `*extendqisi2_insn` (thumb.md:461-487) spells the signed byte
+  //      `ldrb/lsl #24/asr #24` only when the loaded value lands in the base register, and otherwise
+  //      `mov r1,#0 / ldrsb r1,[r0,r1]` — a register-offset load through a zero register, which the
+  //      frontend lowers as `add` + load@0, so the frame audit sees the indexed address flow into an
+  //      `add` and refuses (frame-objects.ts `indexedAccess`). `u8` (`stkidx`) and `s8` with the
+  //      multiplier in a parameter register both MATCH. ido7.1 / gcc2.7.2kmc / mwcc_242_81 lift it
+  //      (controls; kmc matches). Ablation-pinned.
+  //   2. imgpair / imgone (sub_0804D0B0). TWO brace-initialised locals in one frame (`s8 a[16]` from
+  //      .LC184, `u8 b[16]` from .LC186, each `bl memcpy` of 16). The frame audit declares a captured
+  //      object by its RESERVATION, so the object at sp is `u8 sp0[32]` and the second local is
+  //      `(u32)sp0 + 16`; the constant-init fold (l3/constinit.ts `planCopy`) then finds a 16-byte
+  //      image filling a 32-byte local and refuses. imgone (one image) MATCHes; a second address-taken
+  //      object of ANY kind beside the image declines in these words. agbcc only: the one-image control
+  //      itself fails elsewhere on the other three (ido7.1 lifts the image as `(s32 *)&.data` and no
+  //      candidate compiles; gcc2.7.2kmc refuses the copy's `swl`; mwcc_242_81 its anonymous constant
+  //      pool entry) — the local-aggregate-init gap on each, its own future row. Ablation-pinned.
+  //   3. spillu8byte / spillu8word (sub_0800D188, sub_08016EEC; one site, instrumented on both). A
+  //      `u8` local agbcc gives no register is promoted to SImode (thumb.h:344 PROMOTE_MODE), spilled
+  //      as a word (reload1.c:2274 → `str`), and a QImode use of it is alter_subreg's `(mem:QI slot)`
+  //      (final.c:2153-2159 → `ldrb`), which Thumb addresses at a slot >= 0x20 only through a copy of
+  //      sp (thumb.h:884, :786): `add r3, sp, #0x28 / ldrb r3, [r3]`. The capture taints the slot, the
+  //      direct str/ldr fold into the same object, and frame-objects.ts `objectShapes` refuses the
+  //      widths (4 vs 1) — a decline, not the one-object fallback, because the frame also holds a
+  //      struct-return temp (a bounded escape, `chooseFrameModel`). spillu8word reads the slot back as
+  //      a word: MATCH. agbcc only: ido7.1 and gcc2.7.2kmc spill the u8 as a byte and mwcc_242_81
+  //      keeps it in r16, so none compiles the shape (all three lift both at the same score).
+  //   4. bfstrad (SetUpRoomInfo). A u8 bitfield straddling a byte: agbcc packs bitfields contiguously
+  //      (thumb.h has no PCC_BITFIELD_TYPE_MATTERS, stor-layout.c:404-405), so `c:7` sits in bits 5-11
+  //      and is read as a HALFWORD (expmed.c:1153) beside the byte reads of `a` and `d`; the raise
+  //      clusters them into `union { u16; u8[2] }`, rounds it to agbcc's 4-byte aggregate boundary, and
+  //      `e` at +2 starts inside the rounding: raise/structs.ts `buildUnionStruct` declines. Move `e`
+  //      to +4 and it MATCHes. ido7.1 and mwcc_242_81 do not straddle (ido's overlap fits at its 1-byte
+  //      boundary): MATCH, controls. gcc2.7.2kmc reads the word three times and lifts on the
+  //      bitfield-from-word spelling, off. Instrument-pinned on the real function and the row.
+  //   5. unarrow1 (sub_08014760). Not a bitfield: a `u16` member narrowed to its low byte on one path
+  //      (`gUnk.unk54 += e->x - x0` into an s8 — combine.c `gen_lowpart_for_combine` turns the
+  //      subreg-of-MEM into `mem:QI`, so `ldrb` on that path and `ldrh` on the other). No wide read
+  //      dominates, truncload cannot fold, and the `{u16,u8}` union at +0 rounds over `y` at +2: the
+  //      same `buildUnionStruct` refusal. gcc2.7.2kmc narrows the same way, sizes the union at 2, and
+  //      lifts (control); mwcc_242_81 reads `lhz` on both paths, MATCH; ido7.1 lifts on narrow-param
+  //      (unrelated), off. Instrument-pinned.
+  //   6. sw_jtifbreak / sw_jtifbreak_ctl (sub_0800A804, sub_0800B3C0, sub_08042E64; one cause). A
+  //      jump-table arm that `break`s under a guard and otherwise falls into the next case. agbcc and
+  //      gcc2.7.2kmc also PRODUCE this shape from `case 1: if (c) f(i); break; case 2: f(i); break;` —
+  //      jump.c cross-jumps the shared `bl f; b end` tail into case 2's entry, byte-identical — which is
+  //      how the three kleod entity loops hit it; switch-recover's `analyzeArmExit` refuses because a
+  //      `break` is only ever loop-scoped. ido7.1's edge is native (it does not cross-jump). All three
+  //      decline; mwcc_242_81 builds a tree and lifts it as a nested-if ladder (21/35 against the
+  //      control's 2/35). `s32` and a trailing call on purpose: `u8` makes IDO decline first on v0 read
+  //      past a call, and a store after the switch makes KMC decline first on `arms do not linearize`.
+  //   7. cmn_field / cmn_eq / cmn_ult (sub_08022CA0). A compare against a NEGATED operand: agbcc has no
+  //      `cmp rA, -rB`, combine folds the `neg` into the compare, and thumb.md `cmnsi` (823-827) spells
+  //      it `cmn rA, rB`, which sets NZCV from a + b. Only a `cmp`'s flags are modelled (thumb.ts
+  //      FLAG_ONLY / retireFlags), so the branch declines. One row per branch class, since each tests a
+  //      different flag of the sum: signed (`bgt`), EQ/NE (`bne`), unsigned (`bcs`, C = carry out).
+  //      `a + b <= 0` is not folded (`add ; cmp #0`) and MATCHes: the control. The other three have no
+  //      compare-negative and MATCH all three (controls). Ablation-pinned.
+  //   8. jt_pre_midg (EntityCreate). A jump table with PRE's code INSIDE its dispatch: gcse's
+  //      `insert_insn_end_bb` (gcse.c:4231-4236) puts a later switch's index computation "just before
+  //      the tablejump", between `ldr r0,[r0]` and `mov pc` (thumb.md:979 tablejump is the `mov pc`
+  //      alone); `recoverJumpTable` wants exactly five instructions and the loud indirect-jump refusal
+  //      fires. EntityCreate's second table carries four such values. Give `case 4` a body or drop the
+  //      `if` path and the insertion moves to the join: MATCH (controls, not rows). ido7.1 and
+  //      gcc2.7.2kmc decline the control too, on their own second table (frontend/mips.ts `jr` after
+  //      `lw t7,32(at)`), off; mwcc_242_81 lifts it. Instrumented on every `return null`.
+  //   9. jt_dupdef (VisionSelectInputAndMovement). A table entry naming a label that ALIASES the
+  //      default: `case 8` and `default` have identical arms, jump.c cross-jumps case 8's, and its
+  //      label is left on the default's first instruction. `decode` aliases branches, but
+  //      `recoverJumpTable` matches `.word` entries as written and the same refusal fires. One label
+  //      for both (`case 8: default:`) MATCHes. ido7.1 and gcc2.7.2kmc MATCH and mwcc_242_81 lifts it
+  //      (their tables are object data). The family above's "table case aliasing `default`" set-aside.
+  //  10. thrbreak (sub_0801C82C). A `break` on `x == t[i].a` whose test the code after the loop
+  //      repeats: agbcc threads the break's jump through that test (jump.c thread_jumps, on from -O1),
+  //      so the loop's exit lands on the post-loop `if`'s THEN arm while the other exits land on the
+  //      re-test — two exit targets (structure.ts `singleExit`, then `foreverShape`, then `onStack`;
+  //      traced on the real function and the row). gcc2.7.2kmc threads it too (same guard); ido7.1 does
+  //      not and lifts (control); mwcc_242_81 off (frontend `nor` on both siblings).
+  //  11. brmerge (sub_0801D6B0). Two break arms that run their own code and then share one tail
+  //      (`gHit = i; break;`) before leaving the loop: `codeBreakArm` requires an arm's region to be
+  //      entered only through its own edge, the shared tail is entered from the other arm, both arms
+  //      refuse, and the header re-enters. Declines on agbcc, ido7.1 and gcc2.7.2kmc with lifting
+  //      one-arm controls; mwcc_242_81 off (its one-arm control declines at emission of the recovered
+  //      while). The three `continue` tests keep agbcc from peeling the first iteration.
+  //  12. dmasret (sub_080202D4). A `vu16` published to a DMA source register BESIDE a struct-return
+  //      temp of a two-field 4-byte struct (thumb.c:1426-1472 returns it in memory), with a store
+  //      through a computed pointer AFTER the DMA block. The audit bounds a DMA source read by walking
+  //      forward from the arming store (frame-objects.ts `readWindow`); the tail's store through an
+  //      unresolved pointer makes the walk unbounded, the escape reaches the temp
+  //      (`reaches-another-object`), and the one-object answer is withheld because a callee's return
+  //      storage is a writer it cannot hold (`writerNotKept`). Drop the tail store, make the callee
+  //      scalar, or drop the DMA: each lifts. agbcc only: the other three decline the scalar control on
+  //      the published address itself (no `readOnlyAddressSinks` off the GBA). Instrument-pinned.
+  //  13. spillhsret (sub_0803D4AC). A spilled local READ BACK NARROWER than it was stored, beside a
+  //      struct-return temp: a promoted `u16` spilled as a word (a slot the SSA model keys) and reloaded
+  //      `mov r2, sp / ldrh r2, [r2, #4]` because Thumb admits an sp-relative offset only at word size
+  //      (thumb.h:886-891) — an object of width 2 over the slot, "one byte, two models"
+  //      (`failIfSlotKeysIt`); the one-object answer is off because the hidden return pointer is an
+  //      escape. Word reload MATCHes. gcc2.7.2kmc MATCHes (control); ido7.1 and mwcc_242_81 lift the
+  //      row and its controls to one residual, off. The real function's by-value parameter read as
+  //      `ldrb` over its home is the same site and did not reproduce small. Instrument-pinned.
+  //  14. sretloop2ret / sretloop1ret (sub_08014230), break_elsetail / break_noelsetail (TextBoxInit),
+  //      retarm2_tail / retarm1_tail (sub_0801DFC4): one guard chain (`singleExit` → `foreverShape` →
+  //      `onStack`, traced on all three), three cross-jumped exit shapes. sretloop2ret: the function's
+  //      OWN hidden-pointer struct return written by two `p.at=..; p.kind=..; return p;` in one loop —
+  //      agbcc merges the two insert tails into one non-ret block; one assigning return lifts.
+  //      mwcc_242_81 returns the struct in r3 and lifts both (controls); ido7.1 (`swl`) and
+  //      gcc2.7.2kmc (frame as sp data) decline first, off. break_elsetail: break_value with an `else`
+  //      OUTSIDE the loop assigning the same u8, whose truncation tail is cross-jumped with the break's;
+  //      the `while` reading takes the break arm as the exit. Declines on all four (mwcc unrolls 8x,
+  //      MIPS put the `andi` in the arm); the no-else control lifts on all four. retarm2_tail: two arms
+  //      in one loop ending in the same `Hit(a); return;`, cross-jumped into one block no edge owns
+  //      (`earlyReturnArm`); one arm owning the tail MATCHes. mwcc_242_81 keeps the tails apart
+  //      (controls); ido7.1 and gcc2.7.2kmc decline on a void function's v0 after `jal`, off. The real
+  //      sub_0801DFC4 reaches this through three `goto`s whose goto-free spelling is a different
+  //      object, so the FUNCTION stays set aside under the no-goto rule; the row pins the guard.
+  // Still set aside, each one function: sub_0801D6B0's second blocker, a return tail shared by a loop
+  // exit and post-loop code (the `goto` set-aside; sound); sub_0803D4AC's by-value parameter byte read
+  // (same site as 13, not isolated); EntityCreate's and sub_0801DFC4's far-jump relays (lowered).
+  {
+    sym: 'stksidx',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nstruct E { u16 w; u8 k; u8 pad; };\nextern struct E gE;\nextern s16 gOut;\n' +
+      'extern const s8 gBlob[64];\nvoid stksidx(u32 i){ s8 a[64]; memcpy(&a[0], gBlob, sizeof a); gOut += a[i] * gE.w; }',
+    features: ['stack-addr', 'array', 'variable-index', 'sign-extend'],
+    toolchains: ALL,
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nstruct E { u16 w; u8 k; u8 pad; };\nextern struct E gE;\nextern s16 gOut;\nvoid stksidx(u32 i);',
+    proto: { stksidx: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgpair',
+    src:
+      'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\n' +
+      'void imgpair(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; u8 b[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70}; gO[i].x = a[3]; gO[i].y = b[5]; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgpair(u32 i);',
+    proto: { imgpair: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgone',
+    src:
+      'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\n' +
+      'void imgone(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; gO[i].x = a[3]; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgone(u32 i);',
+    proto: { imgone: { returnsVoid: true } },
+  },
+  {
+    sym: 'spillu8byte',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8byte(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' s = mk(k, 0, 0x10); gOut16 = s.a;\n' +
+      ' gOut8 = m; return v0; }',
+    features: ['narrow', 'promotion', 'struct-return', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8byte(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'spillu8word',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8word(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' s = mk(k, 0, 0x10); gOut16 = s.a;\n' +
+      ' gOut = m; return v0; }',
+    features: ['narrow', 'promotion', 'struct-return', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8word(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'bfstrad',
+    src:
+      'struct S { u8 a:2; u8 b:3; u8 c:7; u8 d:3; u16 e; u32 w; };\n' +
+      'extern u8 gA, gC, gD;\n' +
+      'extern u16 gE;\n' +
+      'void bfstrad(struct S *s)\n{\n    gA = s->a;\n    gC = s->c;\n    gD = s->d;\n    gE = s->e;\n}',
+    features: ['struct', 'bitfield', 'field', 'pointer', 'mixed-width'],
+    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81'],
+    ctx: 'struct S; extern u8 gA, gC, gD; extern u16 gE; void bfstrad(struct S *s);',
+    proto: { bfstrad: { returnsVoid: true } },
+  },
+  {
+    sym: 'unarrow1',
+    src:
+      'struct E { u16 x; u16 y; };\n' +
+      'extern s8 gDx;\n' +
+      'u32 unarrow1(struct E *e, u16 x0, s32 k)\n{\n    if (k != 0)\n    {\n        gDx += e->x - x0;\n        return e->y;\n    }\n    return e->x + e->y;\n}',
+    features: ['struct', 'field', 'pointer', 'narrow', 'mixed-width', 'branch'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81'],
+    ctx: 'struct E; extern s8 gDx; u32 unarrow1(struct E *e, u16 x0, s32 k);',
+  },
+  {
+    sym: 'sw_jtifbreak',
+    src:
+      'extern s32 gA, gB;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void sw_jtifbreak(s32 i, s32 k)\n{\n    switch (k) {\n    case 0: g(i); break;\n    case 1: if (i != gA && i != gB) break;\n' +
+      '    case 2: f(i); break;\n    case 3: h(i); break;\n    case 4: m(i); break;\n    }\n    r(0);\n}',
+    features: ['fallthrough', 'break', 'dense'],
+    toolchains: ALL,
+    ctx: 'extern s32 gA, gB;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid sw_jtifbreak(s32 i, s32 k);',
+    proto: {
+      sw_jtifbreak: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sw_jtifbreak_ctl',
+    src:
+      'extern s32 gA, gB;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void sw_jtifbreak_ctl(s32 i, s32 k)\n{\n    switch (k) {\n    case 0: g(i); break;\n    case 1: if (i == gA || i == gB) f(i); break;\n' +
+      '    case 2: q(i); break;\n    case 3: h(i); break;\n    case 4: m(i); break;\n    }\n    r(0);\n}',
+    features: ['dense', 'branch'],
+    toolchains: ALL,
+    ctx: 'extern s32 gA, gB;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid sw_jtifbreak_ctl(s32 i, s32 k);',
+    proto: {
+      sw_jtifbreak_ctl: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cmn_field',
+    src:
+      'struct Ent {\n    u8 pad[0x10];\n    s16 x;\n    u16 y;\n    u8 unk14;\n    u8 flags;\n};\nextern u16 gMag;\n' +
+      'void cmn_field(struct Ent *e)\n{\n    if (e->x <= -gMag) {\n        e->x = 0;\n    }\n}',
+    features: ['branch', 'compare'],
+    toolchains: ALL,
+    ctx: 'struct Ent {\n    u8 pad[0x10];\n    s16 x;\n    u16 y;\n    u8 unk14;\n    u8 flags;\n};\nextern u16 gMag;\nvoid cmn_field(struct Ent *e);',
+    proto: { cmn_field: { returnsVoid: true } },
+  },
+  {
+    sym: 'cmn_eq',
+    src: 'void cmn_eq(s32 a, s32 b, s32 *p)\n{\n    if (a == -b) {\n        *p = 1;\n    }\n}',
+    features: ['branch', 'compare'],
+    toolchains: ALL,
+    ctx: 'void cmn_eq(s32 a, s32 b, s32 *p);',
+    proto: { cmn_eq: { returnsVoid: true } },
+  },
+  {
+    sym: 'cmn_ult',
+    src: 'void cmn_ult(u32 a, u32 b, s32 *p)\n{\n    if (a < -b) {\n        *p = 1;\n    }\n}',
+    features: ['branch', 'compare'],
+    toolchains: ALL,
+    ctx: 'void cmn_ult(u32 a, u32 b, s32 *p);',
+    proto: { cmn_ult: { returnsVoid: true } },
+  },
+  {
+    sym: 'jt_pre_midg',
+    src:
+      'extern s32 gOut;\nvoid jt_pre_midg(s32 x, s32 *p, s32 c)\n{\n    if (c) {\n        gOut = x - 37;\n    } else {\n        switch (x) {\n' +
+      '        case 1: p[0] = 1; break;\n        case 2: p[1] = 2; break;\n        case 3: p[2] = 3; break;\n        case 4: break;\n' +
+      '        case 5: p[4] = 5; break;\n        case 6: p[5] = 6; break;\n        case 7: p[6] = 7; break;\n        case 8: p[7] = 8; break;\n' +
+      '        default: p[8] = 9; break;\n        }\n    }\n    switch (x) {\n' +
+      '    case 37: p[9] = 1; break;\n    case 38: p[10] = 2; break;\n    case 39: p[11] = 3; break;\n    case 40: p[12] = 4; break;\n' +
+      '    case 41: p[13] = 5; break;\n    case 42: p[14] = 6; break;\n    case 43: p[15] = 7; break;\n    case 44: p[16] = 8; break;\n    }\n}',
+    features: ['dense', 'branch'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'extern s32 gOut;\nvoid jt_pre_midg(s32 x, s32 *p, s32 c);',
+    proto: { jt_pre_midg: { returnsVoid: true } },
+  },
+  {
+    sym: 'jt_dupdef',
+    src:
+      'void jt_dupdef(u32 x, s32 *p)\n{\n    s32 v;\n    switch (x) {\n    case 1: v = 2; break;\n    case 2: v = 3; break;\n' +
+      '    case 3: v = 4; break;\n    case 4: v = 5; break;\n    case 5: v = 6; break;\n    case 6: v = 7; break;\n' +
+      '    case 7: v = 8; break;\n    case 8: v = 1; break;\n    default: v = 1; break;\n    }\n    *p = v;\n}',
+    features: ['dense', 'switch-arms'],
+    toolchains: ALL,
+    ctx: 'void jt_dupdef(u32 x, s32 *p);',
+    proto: { jt_dupdef: { returnsVoid: true } },
+  },
+  {
+    sym: 'thrbreak',
+    src:
+      'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
+      'void thrbreak(u8 x)\n{\n    u8 i;\n    for (i = 0; i < 3; i++) {\n        if (x == gTbl[i].a || x == gTbl[i].b)\n            break;\n    }\n    if (x == gTbl[i].a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
+    features: ['break', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void thrbreak(u8 x);',
+    proto: { thrbreak: { returnsVoid: true } },
+  },
+  {
+    sym: 'brmerge',
+    src:
+      'struct Ent { u16 x; u16 y; u8 kind; u8 target; u8 flags; u8 pad; };\nextern struct Ent gEnt[8];\nextern u8 gCount, gHit, gB;\n' +
+      'void brmerge(u8 self)\n{\n    u8 i;\n    for (i = 1; i <= gCount; i++) {\n        if (gEnt[i].kind > 0x1a)\n            continue;\n        if (gEnt[i].kind == 0x13)\n            continue;\n        if (gEnt[i].target == 1)\n            continue;\n        if (gEnt[i].x == gEnt[self].x)\n            gEnt[self].flags |= 0x10;\n        else if (gEnt[i].y == gEnt[self].y)\n            gEnt[self].flags |= 0x20;\n        else\n            continue;\n        gHit = i;\n        break;\n    }\n    gB = 1;\n}',
+    features: ['break', 'continue', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void brmerge(u8 self);',
+    proto: { brmerge: { returnsVoid: true } },
+  },
+  {
+    sym: 'dmasret',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u8 f; u8 pad[3]; };\n#define gEnts ((struct Ent *)0x03003440)\n' +
+      'extern struct S4 mk(u16 x);\n#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmasret(u8 i, u8 k)\n{\n    volatile u16 tmp;\n    struct S4 s;\n' +
+      '    if (k) {\n        s = mk(gEnts[i].x);\n        gEnts[i].x = s.a;\n    } else {\n        tmp = 0xFFFF;\n        gDma[0] = (u32)&tmp;\n        gDma[1] = 0x05000200;\n        gDma[2] = 0x81000010;\n    }\n' +
+      '    gEnts[i].f = 1;\n}',
+    features: ['struct-return', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nstruct S4 mk(u16 x);\nvoid dmasret(u8 i, u8 k);',
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      dmasret: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'spillhsret',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u32 w; };\n#define gEnts ((struct Ent *)0x03003440)\nextern u8 gFlags;\n' +
+      'extern struct S4 mk(u16 x);\n' +
+      'void spillhsret(u8 i)\n{\n    struct S4 s;\n    u16 k0, k1, k2, k3, k4, k5;\n' +
+      '    k0 = gEnts[i + 0].x;\n    k1 = gEnts[i + 1].x;\n    k2 = gEnts[i + 2].x;\n    k3 = gEnts[i + 3].x;\n    k4 = gEnts[i + 4].x;\n    k5 = gEnts[i + 5].x;\n' +
+      '    if (gFlags & 0x10) {\n        s = mk(gEnts[i].y);\n        if (s.a != 0xFFFF) {\n            gFlags |= 4;\n        } else {\n            gFlags &= ~4;\n        }\n    }\n' +
+      '    gEnts[i + 0].y = k0;\n    gEnts[i + 1].y = k1;\n    gEnts[i + 2].y = k2;\n    gEnts[i + 3].y = k3;\n    gEnts[i + 4].y = k4;\n    gEnts[i + 5].y = k5;\n}',
+    features: ['struct-return', 'value-home', 'struct'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nextern u8 gFlags;\nstruct S4 mk(u16 x);\nvoid spillhsret(u8 i);',
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      spillhsret: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sretloop2ret',
+    src:
+      'struct Pick { u16 at; u8 kind; };\nstruct Seg { u16 lo, mid, hi, end; u8 kind; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\nextern struct SegTab *gSegTab;\n' +
+      'struct Pick sretloop2ret(u16 x)\n{\n    struct Pick p;\n    u32 i;\n\n    p.at = 0xFFFF;\n' +
+      '    for (i = 0; i < gSegTab->count; i++) {\n        if (x <= gSegTab->segs[i].mid) {\n' +
+      '            p.at = gSegTab->segs[i].mid;\n            p.kind = gSegTab->segs[i].kind;\n            return p;\n        }\n' +
+      '        if (x <= gSegTab->segs[i].end) {\n            p.at = gSegTab->segs[i].end;\n            p.kind = gSegTab->segs[i].kind;\n            return p;\n        }\n' +
+      '    }\n    return p;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx:
+      'struct Pick { u16 at; u8 kind; };\nstruct Seg { u16 lo, mid, hi, end; u8 kind; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\nextern struct SegTab *gSegTab;\nstruct Pick sretloop2ret(u16 x);',
+    proto: {
+      sretloop2ret: {
+        params: ['u16'],
+        returns: 'struct Pick',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'at', type: 'u16' },
+            { name: 'kind', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'sretloop1ret',
+    src:
+      'struct Pick { u16 at; u8 kind; };\nstruct Seg { u16 lo, mid, hi, end; u8 kind; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\nextern struct SegTab *gSegTab;\n' +
+      'struct Pick sretloop1ret(u16 x)\n{\n    struct Pick p;\n    u32 i;\n\n    p.at = 0xFFFF;\n' +
+      '    for (i = 0; i < gSegTab->count; i++) {\n        if (x <= gSegTab->segs[i].mid) {\n' +
+      '            p.at = gSegTab->segs[i].mid;\n            p.kind = gSegTab->segs[i].kind;\n            return p;\n        }\n' +
+      '    }\n    return p;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx:
+      'struct Pick { u16 at; u8 kind; };\nstruct Seg { u16 lo, mid, hi, end; u8 kind; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\nextern struct SegTab *gSegTab;\nstruct Pick sretloop1ret(u16 x);',
+    proto: {
+      sretloop1ret: {
+        params: ['u16'],
+        returns: 'struct Pick',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'at', type: 'u16' },
+            { name: 'kind', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'break_elsetail',
+    src:
+      'extern u16 gTab[32];\nextern u16 gKey;\nextern u8 gOff;\nextern void Out(u8 id);\n' +
+      'void break_elsetail(void)\n{\n    u8 id = 0;\n    s32 i;\n\n    if (gOff == 0) {\n' +
+      '        for (i = 0; i < 32; i++) {\n            if (gTab[i] == gKey) {\n                id = i;\n                break;\n            }\n        }\n' +
+      '    } else {\n        id = gOff + 0x1A;\n    }\n    Out(id);\n}',
+    features: ['break', 'branch', 'narrow'],
+    toolchains: ALL,
+    ctx: 'extern u16 gTab[32];\nextern u16 gKey;\nextern u8 gOff;\nvoid Out(u8 id);\nvoid break_elsetail(void);',
+    proto: { Out: { params: 1, returnsVoid: true }, break_elsetail: { returnsVoid: true } },
+  },
+  {
+    sym: 'break_noelsetail',
+    src:
+      'extern u16 gTab[32];\nextern u16 gKey;\nextern u8 gOff;\nextern void Out(u8 id);\n' +
+      'void break_noelsetail(void)\n{\n    u8 id = 0;\n    s32 i;\n\n    if (gOff == 0) {\n' +
+      '        for (i = 0; i < 32; i++) {\n            if (gTab[i] == gKey) {\n                id = i;\n                break;\n            }\n        }\n' +
+      '    }\n    Out(id);\n}',
+    features: ['break', 'branch', 'narrow'],
+    toolchains: ALL,
+    ctx: 'extern u16 gTab[32];\nextern u16 gKey;\nextern u8 gOff;\nvoid Out(u8 id);\nvoid break_noelsetail(void);',
+    proto: { Out: { params: 1, returnsVoid: true }, break_noelsetail: { returnsVoid: true } },
+  },
+  {
+    sym: 'retarm2_tail',
+    src:
+      'extern u8 gTab[16];\nextern void Hit(u32 who);\nextern void Ping(u32 i);\nextern void Pong(u32 i);\n' +
+      'void retarm2_tail(u32 a, u32 n)\n{\n    u32 i;\n\n    for (i = 0; i < n; i++) {\n' +
+      '        if (gTab[i] == 7) {\n            Ping(i);\n            Hit(a);\n            return;\n        }\n' +
+      '        if (gTab[i] == 8) {\n            Pong(i);\n            Hit(a);\n            return;\n        }\n    }\n}',
+    features: ['branch'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'extern u8 gTab[16];\nvoid Hit(u32 who);\nvoid Ping(u32 i);\nvoid Pong(u32 i);\nvoid retarm2_tail(u32 a, u32 n);',
+    proto: {
+      Hit: { params: 1, returnsVoid: true },
+      Ping: { params: 1, returnsVoid: true },
+      Pong: { params: 1, returnsVoid: true },
+      retarm2_tail: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'retarm1_tail',
+    src:
+      'extern u8 gTab[16];\nextern void Hit(u32 who);\nextern void Ping(u32 i);\nextern void Pong(u32 i);\n' +
+      'void retarm1_tail(u32 a, u32 n)\n{\n    u32 i;\n\n    for (i = 0; i < n; i++) {\n' +
+      '        if (gTab[i] == 7) {\n            Ping(i);\n            Hit(a);\n            return;\n        }\n' +
+      '        if (gTab[i] == 8) {\n            Pong(i);\n            return;\n        }\n    }\n}',
+    features: ['branch'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'extern u8 gTab[16];\nvoid Hit(u32 who);\nvoid Ping(u32 i);\nvoid Pong(u32 i);\nvoid retarm1_tail(u32 a, u32 n);',
+    proto: {
+      Hit: { params: 1, returnsVoid: true },
+      Ping: { params: 1, returnsVoid: true },
+      Pong: { params: 1, returnsVoid: true },
+      retarm1_tail: { returnsVoid: true },
+    },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
