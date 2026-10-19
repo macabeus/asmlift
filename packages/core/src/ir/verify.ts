@@ -28,13 +28,15 @@ function doublesDeclared(op: Op): boolean {
 }
 
 /** The ops where a float meets an integer or the other precision, each held to the one shape it
- *  has: a conversion takes a float of either stated precision or none and gives an integer of 32 or
- *  64 bits, or the reverse; a resize takes its own source width to its own destination width; a
- *  compare takes two floats of one type and gives a 32-bit integer. */
+ *  has: a conversion takes a float of either stated precision or none and gives an integer, or the
+ *  reverse; a resize takes its own source width to its own destination width; a compare takes two
+ *  floats of one type and gives a 32-bit integer. The integer side may be narrower than a word once
+ *  recovery has typed it (`(float)x` of a `short` parameter), which converts the value it promotes
+ *  to; the C spelling casts through `s32`/`s64`. */
 function verifyFloatCrossing(op: Op): void {
   const ins = op.operands.map((o) => o.type);
   const out = op.results[0].type;
-  const isInt = (t: IrType) => intWidth(t) === 32 || intWidth(t) === WIDE_BITS;
+  const isInt = (t: IrType) => intWidth(t) !== null;
   const resize = FLOAT_RESIZE[op.opcode];
   const ok = FLOAT_TO_INT.has(op.opcode)
     ? ins[0].kind === 'float' && isInt(out)

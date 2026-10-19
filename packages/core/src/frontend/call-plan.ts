@@ -45,7 +45,7 @@ import {
   wordsOf,
 } from '../proto';
 import { type ContextGlobals, structNamed } from '../proto-context';
-import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
@@ -249,7 +249,7 @@ export function callDeclarations(
   const heldAtUndeclaredCall = new Set<Value>();
   const isFloatHelperName = (callee: string): boolean => {
     const h = lookupHelper(target.runtimeHelpers, callee);
-    return h !== undefined && isFloatHelper(h);
+    return h !== undefined && isFloatHelper(h) && floatSidesOf(h).result;
   };
   /** the callee that handed back each pair a call returned, by the pair's value */
   const pairCallee = new Map<Value, string>();

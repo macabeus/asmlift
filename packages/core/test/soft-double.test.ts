@@ -99,16 +99,12 @@ describe('what refuses', () => {
     );
   });
 
-  // A double into a compare or a conversion is a call to a helper the table SIGNS: its pair is
-  // built off the signature, the fold refuses the arithmetic that feeds it, and the helper itself
-  // has no op to fold into, so both decline naming the runtime.
-  test.each([
-    ['d2i', '__fixdfsi', '__muldf3'],
-    ['dgt', '__gtdf2', '__adddf3'],
-    ['d2f', '__truncdfsf2', '__subdf3'],
-  ])('%s: a double into %s', (name, callee, producer) => {
-    expect(() => lift(name)).toThrow(
-      `no model for the runtime helper '${producer}'; no model for the runtime helper '${callee}'`,
+  // A double into a compare is a call to a helper the table SIGNS: its pair is built off the
+  // signature, the fold refuses the arithmetic that feeds it, and the helper itself has no op to
+  // fold into, so both decline naming the runtime.
+  test('dgt: a double into __gtdf2', () => {
+    expect(() => lift('dgt')).toThrow(
+      "no model for the runtime helper '__adddf3'; no model for the runtime helper '__gtdf2'",
     );
   });
 
@@ -150,48 +146,69 @@ describe('the single-precision arithmetic helpers are the float ops', () => {
   test('fpass: a result nothing reads refuses', () => {
     expect(() => liftSingle('fpass')).toThrow("no model for the runtime helper '__addsf3'");
   });
+});
 
-  // A result into a conversion is a result passed to a call, and the conversion is a helper the
-  // table signs and cannot fold: both decline.
-  test('fconv: a result into a conversion refuses', () => {
-    expect(() => liftSingle('fconv')).toThrow(
-      "no model for the runtime helper '__addsf3'; no model for the runtime helper '__fixsfsi'",
-    );
+// A CONVERSION IS A FLOAT HELPER WITH AN INTEGER ON ONE SIDE: its float side keeps the closed-set
+// rule above, and its integer side is any integer the function computes or is handed.
+describe('the conversion helpers are the casts', () => {
+  const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
+  const liftSingle = (name: string) => decompile(name, single, ARMV4T_AGBCC).source;
+
+  test.each([
+    ['f2i', 's32 f2i(float a0) {\n    return (s32)a0;\n}\n'],
+    ['i2f', 'float i2f(s32 a0) {\n    return (float)a0;\n}\n'],
+    ['fconv', 's32 fconv(float a0, float a1) {\n    return (s32)(a0 + a1);\n}\n'],
+  ])('%s', (name, source) => {
+    expect(liftSingle(name)).toBe(source);
+  });
+
+  test.each([
+    ['d2i', 's32 d2i(double a0, double a1) {\n    return (s32)(a0 * a1);\n}\n'],
+    ['d2f', 'float d2f(double a0, double a1) {\n    return (float)(a0 - a1);\n}\n'],
+  ])('%s: a double into a conversion', (name, source) => {
+    expect(lift(name)).toBe(source);
   });
 });
 
 describe('what the table names', () => {
-  // The IR has no int<->float op to fold a compare or a conversion into, so the table SIGNS each
-  // and states no op: a call to one refuses, where unnamed its arity would be guessed and the argument
-  // it is handed unchanged dropped (`(int)x` as `__fixsfsi()`).
-  test('every compare and conversion, signed and with no op', () => {
-    const signed = {
-      __gtsf2: [[32, 32], 32],
-      __fixsfsi: [[32], 32],
-      __floatsisf: [[32], 32],
-      __gtdf2: [[64, 64], 32],
-      __eqdf2: [[64, 64], 32],
-      __floatsidf: [[32], 64],
-      __fixdfsi: [[64], 32],
-      __extendsfdf2: [[32], 64],
-      __truncdfsf2: [[64], 32],
-      __floatdisf: [[64], 32],
+  // Each conversion is the C cast it computes, at the widths its signature states: a long long is
+  // the 64-bit side of `__fixsfdi` and `__floatdisf`, and the unsigned conversions out of a float
+  // are `fptoui`. There is no unsigned conversion INTO a float, because agbcc calls none.
+  test('every conversion, with the op it computes', () => {
+    const conversions = {
+      __fixsfsi: ['fptosi', [32], 32],
+      __fixunssfsi: ['fptoui', [32], 32],
+      __floatsisf: ['sitofp', [32], 32],
+      __fixdfsi: ['fptosi', [64], 32],
+      __fixunsdfsi: ['fptoui', [64], 32],
+      __floatsidf: ['sitofp', [32], 64],
+      __fixsfdi: ['fptosi', [32], 64],
+      __fixunssfdi: ['fptoui', [32], 64],
+      __floatdisf: ['sitofp', [64], 32],
+      __fixdfdi: ['fptosi', [64], 64],
+      __fixunsdfdi: ['fptoui', [64], 64],
+      __floatdidf: ['sitofp', [64], 64],
+      __extendsfdf2: ['fpext', [32], 64],
+      __truncdfsf2: ['fptrunc', [64], 32],
     } as const;
-    for (const [name, [params, returns]] of Object.entries(signed)) {
-      expect(AGBCC_RUNTIME_HELPERS[name], name).toEqual({ params, returns });
+    for (const [name, [op, params, returns]] of Object.entries(conversions)) {
+      expect(AGBCC_RUNTIME_HELPERS[name], name).toEqual({ op, params, returns });
     }
   });
 
-  test.each([
-    ['f2i', '__fixsfsi'],
-    ['i2f', '__floatsisf'],
-    ['fcmp', '__gtsf2'],
-  ])('%s: a call to %s refuses', (name, helper) => {
+  // The compares only SIGN: their result is an integer every reader has to be shown to test.
+  test('every compare, signed and with no op', () => {
+    for (const name of ['__gtsf2', '__eqdf2', '__nesf2', '__ledf2']) {
+      expect(AGBCC_RUNTIME_HELPERS[name]?.op, name).toBeUndefined();
+    }
+  });
+
+  test.each([['fcmp', '__gtsf2']])('%s: a call to %s refuses', (name, helper) => {
     const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
     expect(() => decompile(name, single, ARMV4T_AGBCC).source).toThrow(`no model for the runtime helper '${helper}'`);
   });
 
-  test('the float arithmetic is float helpers, and nothing else in the table is', () => {
+  test('the float arithmetic and the conversions are float helpers, and nothing else in the table is', () => {
     const floats = Object.keys(AGBCC_RUNTIME_HELPERS).filter((name) => isFloatHelper(AGBCC_RUNTIME_HELPERS[name]));
     expect(floats).toEqual([
       '__adddf3',
@@ -204,6 +221,20 @@ describe('what the table names', () => {
       '__mulsf3',
       '__divsf3',
       '__negsf2',
+      '__fixsfsi',
+      '__fixunssfsi',
+      '__floatsisf',
+      '__fixdfsi',
+      '__fixunsdfsi',
+      '__floatsidf',
+      '__fixsfdi',
+      '__fixunssfdi',
+      '__floatdisf',
+      '__fixdfdi',
+      '__fixunsdfdi',
+      '__floatdidf',
+      '__extendsfdf2',
+      '__truncdfsf2',
     ]);
   });
 });

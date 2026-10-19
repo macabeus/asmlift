@@ -1,6 +1,6 @@
 // asmlift — the soft-float boundary (L1 recognition): where integer words become floats.
 //
-// Three things cross it. A runtime helper whose op is a float op (`isFloatHelper`) — the peer of
+// Three things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
 // A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). And a
 // double literal, two constant words, where the target states their order
@@ -11,7 +11,7 @@
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { T } from '../ir/types';
-import { arrivesAsDeclared, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
+import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { RaiseUnsupportedError } from './errors';
 import { isArgumentPair } from './pairparams';
@@ -48,7 +48,12 @@ import { isArgumentPair } from './pairparams';
  *     `s = a * b; g(s); return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and
  *     a declaration of `g` closes the trim's `g()` reading (`trimClobberedCallArgs`).
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
- *  set of floats and verify's float rule holds by construction. */
+ *  set of floats and verify's float rule holds by construction.
+ *
+ *  A CONVERSION HAS AN INTEGER ON ONE SIDE (`floatSidesOf`), and only its float side is held to the
+ *  rule above: `(float)i` converts whatever integer `i` is, a parameter, a load or a sum, and
+ *  `(int)x` hands an integer to anything. Its result must still be read, by the dead-result rule,
+ *  and a float the function also reads as a word is no float source for it either. */
 export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolean {
   const table = target.runtimeHelpers ?? {};
   let sites: Op[] = [];
@@ -57,6 +62,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const users = new Map<Value, Array<Op | null>>(); // null: an edge argument
   const use = (v: Value, by: Op | null) => users.set(v, [...(users.get(v) ?? []), by]);
   const helperOf = (op: Op) => (op.opcode === 'call' ? lookupHelper(table, String(op.attrs.target)) : undefined);
+  const sidesOf = (op: Op) => floatSidesOf(helperOf(op)!);
   for (const block of fn.blocks) {
     for (const op of block.ops) {
       op.results.forEach((r) => def.set(r, op));
@@ -90,7 +96,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // same call as a word is a word read.
   const floatUse = (u: Op | null, v: Value, calls: ReadonlySet<Op>): boolean =>
     u !== null &&
-    (calls.has(u) || (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.includes(i))));
+    ((calls.has(u) && sidesOf(u).operands) ||
+      (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.includes(i))));
   const floatsOnly = (v: Value, calls: ReadonlySet<Op>) => (users.get(v) ?? []).every((u) => floatUse(u, v, calls));
   const entry = fn.blocks[0].params;
   // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
@@ -112,7 +119,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   };
   const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
     const d = def.get(v);
-    return d !== undefined && calls.has(d);
+    return d !== undefined && calls.has(d) && sidesOf(d).result;
   };
   // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
   // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
@@ -153,11 +160,12 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   for (;;) {
     const calls = new Set(sites);
     const kept = sites.filter((op) => {
+      const sides = sidesOf(op);
       const read = (users.get(op.results[0]) ?? []).filter((u) => !deadHalf(u));
       return (
-        op.operands.every((o) => source(o, calls)) &&
+        (!sides.operands || op.operands.every((o) => source(o, calls))) &&
         read.length > 0 &&
-        read.every((u) => floatUse(u, op.results[0], calls) || u?.opcode === 'ret')
+        (!sides.result || read.every((u) => floatUse(u, op.results[0], calls) || u?.opcode === 'ret'))
       );
     });
     if (kept.length === sites.length) {
@@ -224,8 +232,13 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   };
   for (const op of sites) {
     const helper = helperOf(op)!;
-    op.operands.forEach((o, i) => retype(o, helper.params[i]));
-    floatOf.set(op.results[0], float(helper.returns));
+    const sides = floatSidesOf(helper);
+    if (sides.operands) {
+      op.operands.forEach((o, i) => retype(o, helper.params[i]));
+    }
+    if (sides.result) {
+      floatOf.set(op.results[0], float(helper.returns));
+    }
   }
   for (const [op, at] of consumers) {
     at.forEach((i) => retype(op.operands[i], 64));
@@ -233,12 +246,13 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   for (const block of fn.blocks) {
     block.ops = block.ops.flatMap((op) => {
       if (calls.has(op)) {
+        const sides = sidesOf(op);
         return [
           helperOp(
             helperOf(op)!.op!,
             String(op.attrs.target),
-            op.operands.map((o) => floatOf.get(o)!),
-            floatOf.get(op.results[0])!,
+            op.operands.map((o) => (sides.operands ? floatOf.get(o)! : o)),
+            sides.result ? floatOf.get(op.results[0])! : op.results[0],
           ),
         ];
       }

@@ -63,7 +63,7 @@ import {
 } from '../ir/core';
 import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
-import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
   type IrType,
   type StructField,
@@ -4379,7 +4379,7 @@ export function structure(
     // operand must RENDER signed, because C converts an unsigned one with the unsigned conversion,
     // which agbcc open-codes and an FPU computes differently: the pin `icmp_s*` takes below.
     if (FLOAT_TO_INT.has(d.opcode)) {
-      const w = intWidth(d.results[0].type) ?? 32;
+      const w = intWidth(d.results[0].type) === WIDE_BITS ? WIDE_BITS : 32;
       return { k: 'cast', to: T.int(w, d.opcode === 'fptosi'), e: e(d.operands[0]) };
     }
     if (INT_TO_FLOAT.has(d.opcode)) {

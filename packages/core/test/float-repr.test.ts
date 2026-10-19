@@ -253,6 +253,7 @@ describe('a float crosses into an integer only through a conversion or a compare
     ['s64', 'sitofp', 'f64'],
     ['f32', 'fpext', 'f64'],
     ['f64', 'fptrunc', 'f32'],
+    ['s16', 'sitofp', 'f32'],
   ])('%s through %s into %s verifies', (param, op, result) => {
     expect(() => verify(parse(fn1(param, op, result)))).not.toThrow();
   });
@@ -260,7 +261,7 @@ describe('a float crosses into an integer only through a conversion or a compare
   test.each([
     ['unk32', 'fptosi', 'unk32'],
     ['f32', 'fptosi', 'f32'],
-    ['f32', 'fptosi', 'unk16'],
+
     ['f32', 'sitofp', 'f32'],
     ['f64', 'fpext', 'f64'],
     ['f32', 'fptrunc', 'f32'],
