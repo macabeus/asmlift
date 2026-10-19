@@ -1521,9 +1521,9 @@ interface LoopRules {
   /** The def's value enters some loop's header live and every consumer sits outside that loop, as
    *  does the def: the value is carried ACROSS the loop, not into it. */
   liveAcrossLoop(def: Op, r: Value, consumers: Op[]): boolean;
-  /** `liveAcrossLoop`, and no consumer sits in a loop the def is outside of: the value is read only
-   *  where every loop it crosses has been left, never inside one the compiler could have hoisted it
-   *  out of. */
+  /** `liveAcrossLoop`, and neither the def nor any consumer sits in any loop: the value is computed
+   *  ahead of every loop it crosses and read only once they have been left, never inside one the
+   *  compiler could have hoisted it out of, nor inside an enclosing loop. */
   carriedPastLoops(def: Op, r: Value, consumers: Op[]): boolean;
   /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
   readsPreUpdate(L: BottomTestedLoop, op: Op, r: Value): boolean;
@@ -1557,7 +1557,7 @@ function makeLoopRules(a: {
     );
   const carriedPastLoops = (def: Op, r: Value, consumers: Op[]): boolean =>
     liveAcrossLoop(def, r, consumers) &&
-    loopBodies.every((L) => L.body.has(opBlock.get(def)!) || consumers.every((c) => !L.body.has(opBlock.get(c)!)));
+    loopBodies.every((L) => !L.body.has(opBlock.get(def)!) && consumers.every((c) => !L.body.has(opBlock.get(c)!)));
   /** THE PRE-UPDATE ESCAPE. A value a bottom-tested loop computes and the code after it reads,
    *  whose expression reads a loop variable — `do { s = &f->v; f = f->next; } while (--n); *out =
    *  s;`. Inlined at the post-loop read it re-reads that variable's NAME, which by then holds the
@@ -2050,16 +2050,17 @@ function namePureOp(rules: MaterializeRules, state: MaterializeState, op: Op, b:
   } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !scopes.addressCone(op)) {
     materialize.add(op);
   }
-  // A PURE VALUE CARRIED ACROSS A LOOP neither its def nor any consumer belongs to, as `nameAccess`
-  // names a read, and read inside no loop the def is outside of (where loop.c's invariant motion
-  // may have put it: that is `/expr-home`'s question, `homeLoopExprs`). `j = n * 3; for (…) { if
-  // (t[i] == 7) { gHit = j; break; } }` computes `j` ahead of the loop and holds it in a register
-  // to the break arm, which sits outside the natural loop. Inlined, `gHit = n * 3` moves the
-  // computation into the arm, and every profile compiles it there: against that target the
-  // restored `for` scores 38 inlined and 1 named on agbcc, 46 and 24 on mwcc, 5 and 1 on kmc and
-  // gcc272, 15 either way on IDO. A `const` is re-materialized where it is used, and an address cone
-  // loses its inline byte-stride cast standing alone, so neither is named.
-  if (op.opcode !== 'const' && pr && useSitesOf.has(pr) && !scopes.addressCone(op)) {
+  // A PURE VALUE CARRIED ACROSS A LOOP, computed and read outside every loop, as `nameAccess` names
+  // a read (`carriedPastLoops`; a value read inside a loop is `/expr-home`'s question, where loop.c's
+  // invariant motion may have put it). `j = n * 3; for (…) { if (t[i] == 7) { gHit = j; break; } }`
+  // computes `j` ahead of the loop and holds it in a register to the break arm, which sits outside
+  // the natural loop. Inlined, `gHit = n * 3` moves the computation into the arm, and every profile
+  // compiles it there: against that target the restored `for` scores 38 inlined and 1 named on
+  // agbcc, 46 and 24 on mwcc, 5 and 1 on kmc and gcc272, 15 either way on IDO. A `const` is
+  // re-materialized where it is used, and an address loses its inline byte-stride cast standing
+  // alone and is what a compiler CSEs and moves freely (named, `sa3:PackSaveSector` went 349 ->
+  // 372), so neither is named.
+  if (op.opcode !== 'const' && pr && useSitesOf.has(pr) && !scopes.addressCone(op) && !rendersAsAddress(op)) {
     const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
     if (loops.carriedPastLoops(op, pr, cons)) {
       materialize.add(op);
