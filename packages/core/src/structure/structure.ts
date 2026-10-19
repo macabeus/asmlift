@@ -4293,6 +4293,28 @@ export function structure(
       throw floatBitsRefusal(m);
     }
   };
+  // A STRUCT LOCAL'S BYTES STORED INTO A BARE ARRAY ELEMENT keep the cast cell. The bare `gA[i]`
+  // (globalaccess.ts `bareArrayLead`) checks the element's width, not its kind, and the bytes of
+  // `gA[i] = mk(x);` over `struct S gA[4]` are the bytes of a scalar array's store: `gA[a1] =
+  // *(s32 *)&mk_ret;` assigns an int to the struct element (agbcc: incompatible types in
+  // assignment). `((s32 *)&gA)[a1]` addresses the same bytes under any declaration. A recovered row
+  // subscript (`gA[r][i]`) has no flat index here to put in the cell, so it declines.
+  const structBytesCell = (value: Value, lval: Expr): Expr => {
+    const d = defs.get(value);
+    const local = d?.opcode === 'load' ? defs.get(d.operands[0]) : undefined;
+    const t = local?.results[0].type;
+    const fromStruct = local?.opcode === 'laddr' && t?.kind === 'ptr' && t.to.kind === 'struct';
+    if (!fromStruct || lval.k !== 'index' || lval.base.k !== 'var' || varType.has(lval.base.name)) {
+      return lval;
+    }
+    if (lval.lead?.some((l) => l.k !== 'const' || l.value !== 0)) {
+      throw new StructureError(
+        `a struct local's bytes stored into an element of '${lval.base.name}' by a row subscript have no cast cell to spell`,
+      );
+    }
+    const { lead: _lead, ...cell } = lval;
+    return { ...cell, base: { k: 'addr', name: lval.base.name } };
+  };
   // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
   // the audit refuses the union where its accesses would need one (`unionRefusal`)
   const unqualifiedView = (op: Op, viewed: Expr): Expr => {
@@ -5368,18 +5390,21 @@ export function structure(
           continue;
         }
         const baseExpr = expr(op.operands[0]);
-        const lval0 = memAccess(
-          op.operands[0],
-          baseExpr,
-          off,
-          width,
-          storeView(op, width),
-          ctype,
-          scalarGlobals,
-          symCtx,
-          true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
-          advanceStepOf(op.operands[0]),
-          qualifiedBy(op) === 'cast',
+        const lval0 = structBytesCell(
+          op.operands[1],
+          memAccess(
+            op.operands[0],
+            baseExpr,
+            off,
+            width,
+            storeView(op, width),
+            ctype,
+            scalarGlobals,
+            symCtx,
+            true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
+            advanceStepOf(op.operands[0]),
+            qualifiedBy(op) === 'cast',
+          ),
         );
         floatBitsStoreTarget(op.operands[1], lval0);
         if (lval0.k === 'var') {
@@ -5405,16 +5430,19 @@ export function structure(
         const elemSize = op.attrs.elemSize as number;
         const fieldOff = op.attrs.fieldOff as number | undefined;
         const stamp = op.attrs.signed as boolean | undefined;
-        const lval0 = arrayAccess(
-          op.operands[0],
-          expr(op.operands[0]),
-          expr(op.operands[1]),
-          fieldOff,
-          op.attrs.memberOff as number | undefined,
-          elemSize,
-          storeView(op, elemSize),
-          ctype,
-          symCtx,
+        const lval0 = structBytesCell(
+          op.operands[2],
+          arrayAccess(
+            op.operands[0],
+            expr(op.operands[0]),
+            expr(op.operands[1]),
+            fieldOff,
+            op.attrs.memberOff as number | undefined,
+            elemSize,
+            storeView(op, elemSize),
+            ctype,
+            symCtx,
+          ),
         );
         // a struct-array element's field: `base[i].field_K`, whose flat cell is
         // `(base + i)[K / width]` — C scales `base + i` by the element, exactly as `base[i]` does

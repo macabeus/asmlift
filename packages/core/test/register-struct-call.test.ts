@@ -99,6 +99,17 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     const after = 'f:\n\tpush\t{lr}\n\tbl\tmk\n\tbl\tother\n\tpop\t{r0}\n\tbx\tr0\n';
     expect(decompile('f', after, ARMV4T_AGBCC, { prototypes: decl }).source).toMatch(/mk\(a0\);\s+other\(\);/);
   });
+
+  // `extern struct T gA[4]; void t(s32 x, s32 i) { gA[i] = mk(x); }`: the bytes are a scalar array's
+  // store, and the bare `gA[a1] = *(s32 *)&mk_ret;` assigns an int to that header's struct element
+  test("the struct stored into an array element goes through the cast cell, whatever the array's element is", () => {
+    const t =
+      't:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tbl\tmk\n\tldr\tr1, .L3\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, r1\n' +
+      '\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgA\n';
+    expect(decompile('t', t, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'u32' }]) } }).source).toMatch(
+      /mk_ret = mk\(a0\);\s+\(\(s32 \*\)&gA\)\[a1\] = \*\(s32 \*\)&mk_ret;/,
+    );
+  });
 });
 
 /** the caller's own declaration, `void c(s32)`: r3 at its return is no value it hands back */
