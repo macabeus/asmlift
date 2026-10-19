@@ -319,16 +319,17 @@ describe('a pattern keyed on an English word claims sentences that are not about
     // anything. The arithmetic one has 97 sites in kleod's and sa3's hand-written asm and 2 in
     // their built `.s`, so filing it under a label that reads "across an edge" would send a roadmap
     // reader to build the wrong thing — the same over-claim the `stack-frames` class was narrowed
-    // for.
+    // for. Those two subjects have their own classes now: `non-compare-flags` (whose first rows are
+    // agbcc's `cmn` compares, `cmn_field`/`cmn_eq`/`cmn_ult`) and `entry-flags`.
     [
       "lift: cannot lift 'MultiBootWaitSendDone': conditional branch 'bgt' has no reaching compare: the flags " +
         "it tests were written by 'sub' in '.LWait', and only a compare's are modelled",
-      'other',
+      'non-compare-flags',
     ],
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
         "written by a call in 'f', over the compare that reached it, and only a compare's are modelled",
-      'other',
+      'non-compare-flags',
     ],
     // …INCLUDING when the writer is a block away, which is the shape that used to be filed as an
     // edge problem. The sentence the predecessor wrote is what crosses, so one gap reads the same
@@ -336,7 +337,7 @@ describe('a pattern keyed on an English word claims sentences that are not about
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
         "written by 'add' in '.L2', over the compare that reached it, and only a compare's are modelled",
-      'other',
+      'non-compare-flags',
     ],
     // …and a branch whose block nothing reaches is not an edge shape either: it reads the caller's.
     [
@@ -921,10 +922,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // fail here — but the count in the test's NAME is derived from the length alone and would not.
   // Read both when this list moves.
   //
-  // `structs` joins on the population reading: its thirteen inhabitants were overlaps on a
-  // base only this function's accesses describe, which raise/structs.ts declares as a union
-  // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
-  // is a population, not a capability.
+  // `structs` left the list when `bfstrad` and `unarrow1` on agbcc gave it inhabitants: a
+  // straddling u8 bitfield and a narrow store over a wider member, which raise/structs.ts reads
+  // as a union at offset 0 that does not fit agbcc's 4-byte aggregate boundary.
   //
   // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
   // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
@@ -976,7 +976,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'fp-cond-branch',
     'loop-exit-values',
     'pool-word-shape',
-    'structs',
     'tu-scoped-name',
     'unread-data-directive',
     'unstored-slot',
@@ -1227,6 +1226,13 @@ describe('a class may not outlive the message it classifies', () => {
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'clobbers CTR', 'packages/core/src/frontend/ppc.ts'],
     ['indirect-jump', "indirect jump 'jr ", 'packages/core/src/frontend/mips.ts'],
+    [
+      'indirect-jump',
+      '— jump tables / computed gotos / register tail calls not supported',
+      'packages/core/src/frontend/thumb.ts',
+    ],
+    ['non-compare-flags', 'the flags it tests were written by ', 'packages/core/src/frontend/thumb.ts'],
+    ['local-image', "reads the compiler's anonymous constant", 'packages/core/src/structure/structure.ts'],
     ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'not a modelled branch form', 'packages/core/src/frontend/mips.ts'],
@@ -1288,8 +1294,8 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 30],
-    ['structure/structure.ts', 22],
+    ['frontend/thumb.ts', 29],
+    ['structure/structure.ts', 21],
     ['frontend/ppc.ts', 15],
     ['frontend/mips.ts', 13],
     ['frontend/splat.ts', 8],
@@ -1300,7 +1306,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/register-struct-call.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 107;
+  const RESIDUE_TOTAL = 105;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
@@ -1374,6 +1380,7 @@ describe('the classifier is measured against the messages core can throw, not on
     // and the shapes themselves in `thumb-frontend.test.ts` and `ppc-frontend.test.ts`.
     'cross-block-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
     'entry-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
+    'non-compare-flags': 'thumb.ts interpolates the reason, and the class keys on the reason',
     // Same shape, one layer down: `l3/ast.ts`'s `gapReasonFor` builds this one and `structure.ts`
     // writes it into a marker, which `pipeline.ts` then interpolates into its throw. Pinned by hand
     // in `SPELT_BY` against the file that spells it, as `opaque-ops`'s sibling phrase is.
