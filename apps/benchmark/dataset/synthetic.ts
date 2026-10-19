@@ -2595,19 +2595,24 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'float fdiv(float,float);',
   },
-  { sym: 'fcmp', src: 'int fcmp(float a,float b){ return a>b; }', features: ['float', 'compare'], toolchains: ALL },
+  {
+    sym: 'fcmp',
+    src: 'int fcmp(float a,float b){ return a>b; }',
+    features: ['float', 'compare'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+  },
   {
     sym: 'i2f',
     src: 'float i2f(int x){ return (float)x; }',
     features: ['float', 'cast', 'int-to-float'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'float i2f(int);',
   },
   {
     sym: 'f2i',
     src: 'int f2i(float x){ return (int)x; }',
     features: ['float', 'cast', 'float-to-int'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'int f2i(float);',
   },
   {
@@ -2617,12 +2622,67 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'float fma1(float,float,float);',
   },
+  // THE FLOAT COMPARES AND CONVERSIONS, on every toolchain, because each spells them its own way and
+  // a NaN tells the negation of a relation from its flipped twin: agbcc calls one libgcc helper per
+  // relation and tests its result against 0 with a branch or a sign-bit idiom (`>> 31`, `~r >> 31`,
+  // `(-r | r) >> 31`), MIPS sets one condition code with `c.eq`/`c.lt`/`c.le` and branches on it
+  // either way round, and mwcc sets a condition-register field that a branch, a `cror` and an `mfcr`
+  // extract read. `fcmpngt` and `fcmpbrn` are the negations, which every compiler here compiles
+  // apart from `a <= b` and `a >= b`. `d2i`, `i2d` and `dcmpgt` are the double precision, which mwcc
+  // compiles to the same object as the float one. mwcc's `(float)i` and `(double)i` decline: the
+  // magic constant is an `lfd` of an SDA21 anonymous double, which nothing models.
+  ...(
+    [
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] =>
+    [
+      ['fcmplt', 'int fcmplt(float a,float b){ return a<b; }', 'int fcmplt(float,float);'],
+      ['fcmple', 'int fcmple(float a,float b){ return a<=b; }', 'int fcmple(float,float);'],
+      ['fcmpge', 'int fcmpge(float a,float b){ return a>=b; }', 'int fcmpge(float,float);'],
+      ['fcmpeq', 'int fcmpeq(float a,float b){ return a==b; }', 'int fcmpeq(float,float);'],
+      ['fcmpne', 'int fcmpne(float a,float b){ return a!=b; }', 'int fcmpne(float,float);'],
+      ['fcmpngt', 'int fcmpngt(float a,float b){ return !(a>b); }', 'int fcmpngt(float,float);'],
+      [
+        'fcmpbrn',
+        'extern int gI;\nvoid fcmpbrn(float a,float b){ if (!(a<b)) gI = 1; }',
+        'extern int gI; void fcmpbrn(float,float);',
+      ],
+      ['dcmpgt', 'int dcmpgt(double a,double b){ return a>b; }', 'int dcmpgt(double,double);'],
+      ['d2i', 'int d2i(double x){ return (int)x; }', 'int d2i(double);'],
+      ['i2d', 'double i2d(int x){ return (double)x; }', 'double i2d(int);'],
+    ].map(([sym, src, ctx]): SynthSpec => ({
+      sym,
+      src,
+      features: sym.endsWith('2i')
+        ? ['float', 'cast', 'float-to-int']
+        : sym.startsWith('i2')
+          ? ['float', 'cast', 'int-to-float']
+          : sym === 'fcmpbrn'
+            ? ['float', 'compare', 'branch']
+            : ['float', 'compare'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx,
+      ...(sym === 'fcmpbrn' ? { proto: { fcmpbrn: { returnsVoid: true } } } : {}),
+    })),
+  ),
+  ...(['f2i', 'fcmp'] as const).map((sym): SynthSpec => ({
+    sym,
+    src: sym === 'f2i' ? 'int f2i(float x){ return (int)x; }' : 'int fcmp(float a,float b){ return a>b; }',
+    features: sym === 'f2i' ? ['float', 'cast', 'float-to-int'] : ['float', 'compare'],
+    toolchains: ['mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: sym === 'f2i' ? 'int f2i(float);' : 'int fcmp(float,float);',
+  })),
   // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
-  // folds to a negation; a conversion is a helper the table signs and cannot fold, so `fconv`
-  // declines naming `__fixsfsi` (as `f2i`, `i2f` and `fcmp` above do on agbcc); and a helper whose
-  // result reaches only a GUESSED call declines. That call does not count r0, which the helper
-  // wrote, so `g1(a * b)` reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product
-  // deleted (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
+  // folds to a negation, `__fixsfsi` to the cast (`fconv`); and a helper whose result reaches only a
+  // GUESSED call declines. That call does not count r0, which the helper wrote, so `g1(a * b)`
+  // reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product deleted
+  // (raise/floathelpers.ts). The conversions to and from a long long are the 64-bit side of a
+  // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf`, and declines. agbcc
+  // only: the other toolchains have a hardware FPU.
   {
     sym: 'fneg',
     src: 'float fneg(float a){ return -a; }',
@@ -2636,6 +2696,27 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'cast', 'float-to-int', 'arithmetic'],
     toolchains: ['agbcc'],
     ctx: 'int fconv(float,float);',
+  },
+  {
+    sym: 'll2f',
+    src: 'float ll2f(long long x){ return (float)x; }',
+    features: ['float', 'cast', 'int-to-float', 'int64'],
+    toolchains: ['agbcc'],
+    ctx: 'float ll2f(long long);',
+  },
+  {
+    sym: 'f2u',
+    src: 'unsigned f2u(float x){ return (unsigned)x; }',
+    features: ['float', 'cast', 'float-to-int', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'unsigned f2u(float);',
+  },
+  {
+    sym: 'u2f',
+    src: 'float u2f(unsigned x){ return (float)x; }',
+    features: ['float', 'cast', 'int-to-float', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'float u2f(unsigned);',
   },
   {
     sym: 'fcall',
