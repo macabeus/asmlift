@@ -151,6 +151,32 @@ export const OPCODES = {
   // opcode rather than a `const` over a float type for the reason the arithmetic above has its own:
   // every pass that matches `const` is an integer fold.
   fconst: { operands: 0, results: 1, requiredAttrs: ['bits'] },
+  // The CROSSINGS between a float and an integer, C's conversions: `fptosi`/`fptoui` truncate toward
+  // zero into a signed or unsigned integer of the result's width (32 or 64), `sitofp` converts a
+  // signed one, `fpext`/`fptrunc` move between the precisions. The only ops a float and an integer
+  // meet in (ir/verify.ts). No `uitofp`: no compiler here converts an unsigned integer in one step
+  // (agbcc open-codes it around `__floatsisf`), so it would be an opcode with no producer.
+  fptosi: { operands: 1, results: 1 },
+  fptoui: { operands: 1, results: 1 },
+  sitofp: { operands: 1, results: 1 },
+  fpext: { operands: 1, results: 1 },
+  fptrunc: { operands: 1, results: 1 },
+  // The float COMPARES, a 0/1 integer out of two floats of one type. Ten and not six, because
+  // NaN makes C's relations a partial order: `!(a > b)` is true on a NaN and `a <= b` is not, and
+  // every compiler here compiles the two differently. So each ordered relation (`o`, false on a
+  // NaN) has its logical negation as an unordered opcode (`u`, true on a NaN): `fcmp_ule` IS
+  // `!(a > b)`. C's `!=` is `fcmp_une`. They stay out of `NEGATED_ICMP`, whose integer negation
+  // (`<` ↔ `>=`) would be the wrong program here; `NEGATED_FCMP` below is theirs.
+  fcmp_oeq: { operands: 2, results: 1 },
+  fcmp_une: { operands: 2, results: 1 },
+  fcmp_olt: { operands: 2, results: 1 },
+  fcmp_uge: { operands: 2, results: 1 },
+  fcmp_ole: { operands: 2, results: 1 },
+  fcmp_ugt: { operands: 2, results: 1 },
+  fcmp_ogt: { operands: 2, results: 1 },
+  fcmp_ule: { operands: 2, results: 1 },
+  fcmp_oge: { operands: 2, results: 1 },
+  fcmp_ult: { operands: 2, results: 1 },
   // --- memory ---
   load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
@@ -275,6 +301,65 @@ export const CAST_WIDTHS: ReadonlySet<number> = new Set([8, 16]);
  *  an op computes ON. */
 export const FLOAT_OPS: ReadonlySet<string> = new Set(['fadd', 'fsub', 'fmul', 'fdiv', 'fneg', 'fconst']);
 
+/** The conversions out of a float into an integer, and into a float out of an integer. */
+export const FLOAT_TO_INT: ReadonlySet<string> = new Set(['fptosi', 'fptoui']);
+export const INT_TO_FLOAT: ReadonlySet<string> = new Set(['sitofp']);
+/** The conversions between the two precisions, each named by the width it converts from and to. */
+export const FLOAT_RESIZE: Readonly<Record<string, { from: 32 | 64; to: 32 | 64 }>> = {
+  fpext: { from: 32, to: 64 },
+  fptrunc: { from: 64, to: 32 },
+};
+
+/** The logical negation of each float compare, NaN included (the registry's note on `fcmp_*`):
+ *  expanded both ways from the pairs, as `NEGATED_ICMP` is. */
+const FCMP_NEGATION_PAIRS: readonly (readonly [Opcode, Opcode])[] = [
+  ['fcmp_oeq', 'fcmp_une'],
+  ['fcmp_olt', 'fcmp_uge'],
+  ['fcmp_ole', 'fcmp_ugt'],
+  ['fcmp_ogt', 'fcmp_ule'],
+  ['fcmp_oge', 'fcmp_ult'],
+];
+export const NEGATED_FCMP: Readonly<Record<string, Opcode>> = Object.fromEntries(
+  FCMP_NEGATION_PAIRS.flatMap(([a, b]) => [
+    [a, b],
+    [b, a],
+  ]),
+);
+
+/** What each float compare answers when its first operand is LESS than, EQUAL to or GREATER than
+ *  its second, and when the two are UNORDERED (either is a NaN): the definition of the ten, from
+ *  which a compare a runtime computes some other way is read (raise/floathelpers.ts). */
+export const FCMP_TRUTH: Readonly<Record<string, readonly [lt: boolean, eq: boolean, gt: boolean, un: boolean]>> = {
+  fcmp_olt: [true, false, false, false],
+  fcmp_ole: [true, true, false, false],
+  fcmp_ogt: [false, false, true, false],
+  fcmp_oge: [false, true, true, false],
+  fcmp_oeq: [false, true, false, false],
+  fcmp_une: [true, false, true, true],
+  fcmp_uge: [false, true, true, true],
+  fcmp_ugt: [false, false, true, true],
+  fcmp_ule: [true, true, false, true],
+  fcmp_ult: [true, false, false, true],
+};
+
+/** The float compare whose truth table (`FCMP_TRUTH`'s order: less, equal, greater, unordered) is
+ *  `truth`, or undefined where none is — always true, say. The one reader of the table backwards,
+ *  for every place that computes a compare's answers some other way (agbcc's helper tests,
+ *  raise/floathelpers.ts; PowerPC's `cror` of two bits, frontend/ppc.ts). */
+export function fcmpOfTruth(truth: readonly boolean[]): Opcode | undefined {
+  return Object.keys(FCMP_TRUTH).find((k) => FCMP_TRUTH[k].every((t, i) => t === truth[i])) as Opcode | undefined;
+}
+
+/** Every op that computes on a float: the arithmetic, the conversions and the compares. A runtime
+ *  helper whose op is one of these is a float helper (runtime-helpers.ts `isFloatHelper`). */
+export const FLOAT_COMPUTING: ReadonlySet<string> = new Set([
+  ...FLOAT_OPS,
+  ...FLOAT_TO_INT,
+  ...INT_TO_FLOAT,
+  ...Object.keys(FLOAT_RESIZE),
+  ...Object.keys(NEGATED_FCMP),
+]);
+
 /** Signature lookup by RUNTIME opcode string (Op.opcode is a plain string — IR consumers switch
  *  on it); undefined for an unregistered opcode. */
 export function opSig(opcode: string): OpSig | undefined {
@@ -293,10 +378,10 @@ export function opSig(opcode: string): OpSig | undefined {
  *
  *  It lives here so that every consumer that has to say "the opposite of this compare" reads THIS
  *  one, and they cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
- *  shortcircuit.ts derives its `BOOL_OPS` from these keys (asserting negatable-icmp == boolean-op,
- *  true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
- *  vocabulary — deliberately separate, because signedness lives in the operand types there, so the
- *  two tables are not candidates for further consolidation. */
+ *  shortcircuit.ts derives its `BOOL_OPS` from these keys and `NEGATED_FCMP`'s (asserting
+ *  negatable compare == boolean-op, true today), and l3/ast.ts `NEGATE_REL` is the SAME relation
+ *  over the neutral L3 operator vocabulary — deliberately separate, because signedness lives in the
+ *  operand types there, so the two tables are not candidates for further consolidation. */
 const ICMP_NEGATION_PAIRS: readonly (readonly [Opcode, Opcode])[] = [
   ['icmp_eq', 'icmp_ne'],
   ['icmp_slt', 'icmp_sge'],

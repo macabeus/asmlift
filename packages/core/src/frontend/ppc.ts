@@ -52,8 +52,8 @@ import {
   mkValue,
   replaceAllUsesWith,
 } from '../ir/core';
-import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
-import type { Opcode } from '../ir/opcodes';
+import { deletableWhenDead } from '../ir/discipline';
+import { FCMP_TRUTH, NEGATED_FCMP, type Opcode, fcmpOfTruth } from '../ir/opcodes';
 import { T } from '../ir/types';
 import {
   type FnProto,
@@ -70,7 +70,13 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import { type Declarations, leftInDiscardRegister, pinDeadReads, unreadPairHalf } from './dead-reads';
+import {
+  type Declarations,
+  computedOnlyToReturn,
+  leftInDiscardRegister,
+  pinDeadReads,
+  unreadPairHalf,
+} from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -83,7 +89,19 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
+import {
+  type ReturnHomeRule,
+  carriesFloatHome,
+  declaredPrecision,
+  floatHomeAt,
+  fpPrecision,
+  fpuArgSlots,
+  refuseBothPrecisions,
+  refuseFpWordCrossings,
+  returnHomeRule,
+  settleReturnHome,
+  writesFloatReturn,
+} from './fpu';
 import {
   FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
@@ -180,9 +198,11 @@ const isReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
  *  in; `fmr` is a copy and has no opcode. `fneg` and `fmr` carry no precision at all — an FPR holds a
  *  double either way — so they take the function's (`frontend/fpu.ts` `fpPrecision`); in a function
  *  of only those, the floats state none (`T.fUnstated`), because the float and double spellings of a
- *  negation or a copy compile to one object. Everything else in the file keeps the register-file refusal `opaqueDest` gives it: `frsp`, the
- *  loads and stores, the conversions, the compares, the fused multiply-adds, paired singles — and a
- *  record form (`fadds.`), which sets `cr1`. */
+ *  negation or a copy compile to one object. The compares and `fctiwz` (`FP_CROSSINGS`) are decoded
+ *  in their own cases. Everything else in the file keeps the register-file refusal `opaqueDest`
+ *  gives it: `frsp`, the loads and stores but an integer word's `stfd` to the frame, the other
+ *  conversions, the fused multiply-adds, paired singles — and a record form (`fadds.`), which sets
+ *  `cr1`. */
 const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 | null }>> = {
   fadds: { op: 'fadd', width: 32 },
   fsubs: { op: 'fsub', width: 32 },
@@ -196,6 +216,10 @@ const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 | 
   fmr: { op: 'copy', width: null },
 };
 const FP_ARITH_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_ARITH));
+/** The FPU instructions that move a float's information into the integer file, none of which states
+ *  a precision: the compares (an FPR holds a double either way, and `a > b` over two floats is the
+ *  same `fcmpo` as over two doubles) and `fctiwz`, the truncation to an integer word. */
+const FP_CROSSINGS: ReadonlySet<string> = new Set(['fcmpo', 'fcmpu', 'fctiwz']);
 
 /** An FPU register: the token, and the key the SSA builder holds it under. ONE predicate for the
  *  decode above and the register-file refusal below (`fpReg`), so a token one of them reads as an
@@ -226,8 +250,30 @@ const rlwinmMask = (mb: number, me: number): number => {
 const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { relocs: true, hintSuffixes: true });
 
 /** A compare a `cr` field holds: its operands and signedness, which the reading branch turns into a
- *  condition. */
-type CrCompare = { lhs: Value; rhs: Value; signed: boolean };
+ *  condition. A FLOAT compare (`fcmpo`/`fcmpu`) states instead which compare each of the field's
+ *  three bits holds, since a `cror` can change one (`bits`); `quiet` is `fcmpu`'s, which C emits for
+ *  `==` and `!=` alone, so an ordering bit of it is refused. */
+type CrCompare = { lhs: Value; rhs: Value; signed: boolean; bits?: CrBits; quiet?: boolean };
+type CrBits = { readonly lt: Opcode; readonly gt: Opcode; readonly eq: Opcode };
+/** The bit of a field each branch reads, and whether it is taken when the bit is SET: `ble` is
+ *  "branch if not greater than", which after a float compare is `!(a > b)`, true on a NaN — never
+ *  `a <= b`. */
+const BRANCH_BIT: Readonly<Record<string, { bit: keyof CrBits; set: boolean }>> = {
+  blt: { bit: 'lt', set: true },
+  bge: { bit: 'lt', set: false },
+  bgt: { bit: 'gt', set: true },
+  ble: { bit: 'gt', set: false },
+  beq: { bit: 'eq', set: true },
+  bne: { bit: 'eq', set: false },
+};
+/** A condition-register bit as `cror` and the `mfcr` extracts name it: its field and its place in
+ *  the field, or null for the summary-overflow bit (`so`), which a float compare sets on a NaN and
+ *  nothing here reads. `eq` names cr0's; `4*cr1+eq` cr1's. */
+const crBitOf = (tok: string): { field: string; bit: keyof CrBits } | null => {
+  const m = /^(?:4\*cr([0-7])\+)?(lt|gt|eq)$/.exec(tok);
+  return m ? { field: `cr${m[1] ?? 0}`, bit: m[2] as keyof CrBits } : null;
+};
+const CR_BIT_NAMES: readonly (keyof CrBits | null)[] = ['lt', 'gt', 'eq', null];
 
 /** What a block leaves in the condition register for a successor to inherit. `fields` holds, per
  *  field, the compare it holds, or the sentence saying what overwrote it. A field absent from the map
@@ -1436,8 +1482,6 @@ function liftOnce(
   const reached = blocks.flatMap((b) => b.body);
   // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
-  const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
-  const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
   // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
   // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
@@ -1455,6 +1499,20 @@ function liftOnce(
   // (`stw r7,5612(r31)` with no save of r31), which compiled code never does: it saves before it
   // touches one. Such a body keeps every argument register a parameter, as with no declaration.
   const ownDeclared = !namesUnsavedCalleeSaved(reached, target, savedRegs);
+  // Which home the function returns in (frontend/fpu.ts `returnHomeRule`), by the own declaration
+  // where the body is a compiler's.
+  const homeRule: ReturnHomeRule = !fpu
+    ? { home: 'integer', declared: false }
+    : returnHomeRule(
+        ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
+        reached.some((ins) => FP_CROSSINGS.has(ins.mnemonic)),
+        () => writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu),
+      );
+  const floatReturn = homeRule.home === 'float';
+  const fpType = declaredPrecision(
+    fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined)),
+    ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
@@ -1602,15 +1660,19 @@ function liftOnce(
    *    it back with `mtlr` is the return. Any other use is a function reading its own return address
    *    (MP4's `asm { mflr retaddr }` does, to tag an allocation with its caller), which no C
    *    expression spells: a store elsewhere refuses at once, anything else once the function is
-   *    built. A read alone does not refuse, so a copy (`mr`) still carries it to its save. */
+   *    built. A read alone does not refuse, so a copy (`mr`) still carries it to its save.
+   *  - `fctiwz-high`: the HIGH word an `stfd` of an `fctiwz` result stores, with the address of the
+   *    `stfd`. `fctiwz` leaves that half undefined, so a reload of it is no value. No consumer. */
   type NonValue =
     | { kind: 'frame-address'; off: number | string; addr: number }
     | { kind: 'restored'; reg: string; addr: number }
-    | { kind: 'return-address'; addr: number };
+    | { kind: 'return-address'; addr: number }
+    | { kind: 'fctiwz-high'; addr: number };
   const NON_VALUE_RULES: Record<NonValue['kind'], { refuseAtRead: boolean; mustBeConsumed: boolean }> = {
     'frame-address': { refuseAtRead: true, mustBeConsumed: true },
     restored: { refuseAtRead: true, mustBeConsumed: false },
     'return-address': { refuseAtRead: false, mustBeConsumed: false },
+    'fctiwz-high': { refuseAtRead: true, mustBeConsumed: false },
   };
   const nonValues = new Map<Value, NonValue>();
   /** The non-values their consumer took (only `frame-address` has one that must). */
@@ -1633,6 +1695,11 @@ function liftOnce(
         return fail(
           `cannot lift '${name}': the return address the 'mflr' at 0x${nv.addr.toString(16)} ` +
             `copies out is used as a value — a function reading its own return address has no C spelling`,
+        );
+      case 'fctiwz-high':
+        return fail(
+          `cannot lift '${name}': the high word the 'stfd' at 0x${nv.addr.toString(16)} stores is reloaded and ` +
+            `used — 'fctiwz' leaves that half of its result undefined`,
         );
     }
   };
@@ -1697,6 +1764,10 @@ function liftOnce(
     number,
     { addr: number; mem: string; read: boolean; stored: { v: Value; at: number }[] }
   >();
+  // What each `mfcr` copied: the fields the condition register held, by the value the copy stands
+  // for. Nothing defines that value — it is no integer — and only an extract of one bit of a float
+  // compare's field reads it (`crBitValue`); anything else that does refuses once the SSA is finished.
+  const crCopies = new Map<Value, ReadonlyMap<string, CrCompare | string>>();
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
@@ -1739,8 +1810,9 @@ function liftOnce(
       ? `${name}+0x${blocks[bi].startAddr.toString(16)}`
       : `the return block '${name}' synthesizes`;
 
-  // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and then
-  // r3 is scratch like any other integer register. A table base left in r3 is no return value, as a
+  // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and then
+  // r3 is scratch like any other integer register. An undecided one returns r3 here, and
+  // `settleReturnHome` may hand each return f1 instead. A table base left in r3 is no return value, as a
   // pending half is none (`placeholders`); reading one would refuse, and a merge of one with a value
   // still does.
   const returnOperands = (bi: number): Value[] =>
@@ -1797,9 +1869,12 @@ function liftOnce(
   // kept only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
   const joinedCarryConsts: { ins: Instr; not: Op; add: Op; ca: Value }[] = [];
   let wordReturn = false;
+  /** Every return, as it is emitted. */
+  const returns: { op: Op; bi: number }[] = [];
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
     ops.push(op);
+    returns.push({ op, bi });
     if (floatReturn) {
       return;
     }
@@ -1815,17 +1890,12 @@ function liftOnce(
     }
   };
   /** Whether every word return hands back a value computed ONLY to be returned: on every path into
-   *  it, r3's last write is an op with no effect and no memory read (`spelledWhenDead` answers no)
-   *  whose value nothing but a return reads, directly or through the joins that carry it there.
-   *
-   *  The evidence is the compiler's, the claim `spelledWhenDead` already rests on: an optimizing
-   *  compiler deletes a pure computation nobody reads, so one that survives with a return as its
-   *  only reader was written for that return, and the function returns a word. `int f(int a) {
-   *  switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ; blr` on every case and a bare
-   *  `blr` out of range. A temporary is read again (`lwz r3,gB ; addi r0,r3,1`), and a
-   *  call's result and a load are excluded — a void function's call leaves its callee's result in
-   *  r3, and a discarded `volatile` read is a load nobody reads — so `void f(void) { if (gA & 2)
-   *  return; gB++; }` still answers no.
+   *  it, r3's last write is one (frontend/dead-reads.ts `computedOnlyToReturn`), so the function
+   *  returns a word. `int f(int a) { switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ;
+   *  blr` on every case and a bare `blr` out of range. A temporary is read again (`lwz r3,gB ; addi
+   *  r0,r3,1`), and a call's result and a load are excluded — a void function's call leaves its
+   *  callee's result in r3, and a discarded `volatile` read is a load nobody reads — so `void
+   *  f(void) { if (gA & 2) return; gB++; }` still answers no.
    *
    *  What it cannot tell apart is an `int f(void)` with a path that falls off its end: that path
    *  returns whatever the caller left in r3 too, and is lifted as returning it — the bytes' own
@@ -1835,61 +1905,8 @@ function liftOnce(
     if (wordReturns.length === 0) {
       return false;
     }
-    const defOp = new Map<Value, Op>();
-    const incoming = new Map<Value, Value[]>();
-    const uses = new Map<Value, Array<Op | Value | undefined>>();
-    const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
-      const l = m.get(k);
-      if (l) {
-        l.push(v);
-      } else {
-        m.set(k, [v]);
-      }
-    };
-    for (const blk of irBlocks) {
-      for (const op of blk.ops) {
-        op.results.forEach((r) => defOp.set(r, op));
-        op.operands.forEach((v) => push(uses, v, op));
-        for (const s of op.successors) {
-          s.args.forEach((v, i) => {
-            const p = s.block.params[i] as Value | undefined;
-            push(uses, v, p);
-            if (p !== undefined) {
-              push(incoming, p, v);
-            }
-          });
-        }
-      }
-    }
-    // A join is followed to what it merges, and every value on the way may have only returns, or
-    // joins that are themselves read only by returns, as readers. A cycle adds nothing the first
-    // visit did not judge.
-    const returnOnly = (v: Value, seen: Set<Value>): boolean => {
-      if (seen.has(v)) {
-        return true;
-      }
-      seen.add(v);
-      return (uses.get(v) ?? []).every(
-        (u) => u !== undefined && ('opcode' in u ? u.opcode === 'ret' : returnOnly(u, seen)),
-      );
-    };
-    const computed = (v: Value, seen: Set<Value>): boolean => {
-      if (seen.has(v)) {
-        return true;
-      }
-      seen.add(v);
-      if (!returnOnly(v, new Set())) {
-        return false;
-      }
-      const op = defOp.get(v);
-      if (op !== undefined) {
-        return !spelledWhenDead(op);
-      }
-      // an entry parameter (the caller's value) merges nothing
-      const ins = incoming.get(v);
-      return ins !== undefined && ins.every((a) => computed(a, seen));
-    };
-    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
+    const computed = computedOnlyToReturn(irBlocks);
+    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, computed));
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
    *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
@@ -2408,11 +2425,12 @@ function liftOnce(
     // mwcc's switch dispatch `cmpwi r0,1; beq- case1; bge- default` reads one compare from the
     // `beq-` and then from the `bge-` on its fall-through, which begins a block of its own.
     //
-    // The clobber rule is this frontend's own: a compare writes its field, a record-form op writes
-    // cr0, and a call destroys every volatile field (CR_VOLATILE). A field something else wrote holds
-    // the sentence saying so rather than an entry, so the branch that reads it can name the writer.
-    // Every other instruction that writes a CR field (`crxor`, `mtcrf`, `fcmpu`, …) names no
-    // register destination and is refused outright by the opaque policy, so it never reaches here.
+    // The clobber rule is this frontend's own: a compare writes its field (a float compare too), a
+    // record-form op writes cr0, a `cror` rewrites one bit of a float compare's field, and a call
+    // destroys every volatile field (CR_VOLATILE). A field something else wrote holds the sentence
+    // saying so rather than an entry, so the branch that reads it can name the writer. Every other
+    // instruction that writes a CR field (`crxor`, `mtcrf`, …) names no register destination and is
+    // refused outright by the opaque policy, so it never reaches here.
     const inherited = inheritFlags(bi, {
       preds,
       exit: exitCr,
@@ -2432,6 +2450,51 @@ function liftOnce(
       const hasCr = cmpOps[0]?.startsWith('cr') ?? false;
       const args = hasCr ? cmpOps.slice(1) : cmpOps;
       return { cr: hasCr ? cmpOps[0] : 'cr0', lhsTok: args[0], rhsTok: args[args.length - 1] };
+    };
+    // An FPU register holds a float or, after `fctiwz`, an integer word (frontend/fpu.ts
+    // `refuseFpWordCrossings` checks the edges); a float read refuses the word.
+    const readFloat = (ins: Instr, key: string): Value => {
+      const v = readReg(key, bi);
+      if (v.type.kind !== 'float') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads ${key} as a float, and it ` +
+            'holds an integer word',
+        );
+      }
+      return v;
+    };
+    // A compare or a conversion refuses beside a call (`callInsn`), and in a function its own
+    // declaration puts in both precisions (`declaredPrecision`): neither states a precision itself.
+    const refuseCrossingUnmodelled = (ins: Instr) => {
+      if (callInsn) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic}' computes on a float and '${callInsn.mnemonic}' at ` +
+            `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns ` +
+            `in and destroys are not modelled`,
+        );
+      }
+      if (fpType === null) {
+        refuseBothPrecisions(name, ins.mnemonic);
+      }
+    };
+    // ONE BIT of an `mfcr` copy, as the 0/1 it is: bit `n` counts from the most significant, four to
+    // a field (`lt`, `gt`, `eq`, `so`). `rlwinm rD,r0,K,31,31` rotates bit K-1 to the bottom and
+    // `srwi rD,r0,31` takes bit 0. Only a float compare's bit is read this way here, and it is the
+    // compare that bit holds (`CrBits`); anything else refuses.
+    const crBitValue = (ins: Instr, copy: Value, n: number): Value => {
+      const fields = crCopies.get(copy)!;
+      const field = `cr${n >> 2}`;
+      const bit = n < 0 ? null : CR_BIT_NAMES[n & 3];
+      const held = fields.get(field);
+      if (bit === null || typeof held !== 'object' || !held.bits || (held.quiet && bit !== 'eq')) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} extracts from a copy of the ` +
+            'condition register something other than one bit a float compare set',
+        );
+      }
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp(held.bits[bit], { operands: [held.lhs, held.rhs], results: [v] }));
+      return v;
     };
     const recordCmp = (cr: string, lhs: Value, rhs: Value, signed: boolean) => {
       cmpDef.set(cr, { lhs, rhs, signed });
@@ -2625,7 +2688,8 @@ function liftOnce(
                   );
                 }
                 const depth = r1At.get(ins);
-                const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
+                const reaching = (off: number) =>
+                  valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi, (v) => !nonValues.has(v));
                 // …save a word at or above the loaded-word bound, which is a local's
                 const inParamArea = (off: number) =>
                   typeof depth !== 'number' ||
@@ -3109,6 +3173,10 @@ function liftOnce(
           emitShImm('shl', d, read(s), parseImm(t));
           break;
         case 'srwi':
+          if (crCopies.has(read(s))) {
+            write(d, crBitValue(ins, read(s), parseImm(t) === 31 ? 0 : -1));
+            break;
+          }
           emitShImm('shr_u', d, read(s), parseImm(t));
           break;
         case 'srawi':
@@ -3141,6 +3209,10 @@ function liftOnce(
           break;
         case 'rlwinm': {
           const [sh, mb, me] = [parseImm(ins.ops[2]), parseImm(ins.ops[3]), parseImm(ins.ops[4])];
+          if (crCopies.has(read(s))) {
+            write(d, crBitValue(ins, read(s), mb === 31 && me === 31 ? (sh + 31) % 32 : -1));
+            break;
+          }
           // `rlwinm rD,rS,SH,MB,ME` = rotl(rS,SH) & mask(MB,ME). Three cases we can lower exactly:
           //  • SH==0            — a pure masked AND.
           //  • right-shift EXTRACT `(x>>n)&m` — the field lies in the SH bits the rotate brings round
@@ -3269,6 +3341,92 @@ function liftOnce(
           recordCmp(c.cr, read(c.lhsTok), rhs, false);
           break;
         }
+        // A FLOAT COMPARE sets its field's three bits from the IEEE relation of its operands; a NaN
+        // clears all three (and sets `so`). Which compare each bit holds is what a branch, a `cror`
+        // or an extract then reads.
+        case 'fcmpo':
+        case 'fcmpu': {
+          const [cr, a, bReg] = ins.ops;
+          if (fpu === undefined || !/^cr[0-7]$/.test(cr ?? '') || ![a, bReg].every(isFpKey)) {
+            emitOpaqueDest(ins);
+            break;
+          }
+          refuseCrossingUnmodelled(ins);
+          const lhs = readFloat(ins, a);
+          const rhs = readFloat(ins, bReg);
+          cmpDef.set(cr, {
+            lhs,
+            rhs,
+            signed: true,
+            bits: { lt: 'fcmp_olt', gt: 'fcmp_ogt', eq: 'fcmp_oeq' },
+            quiet: mnem === 'fcmpu',
+          });
+          break;
+        }
+        // `cror bD,bA,bB` ORs two bits into a third. mwcc's `<=` and `>=` over floats set `eq` to
+        // `lt | eq` or `gt | eq` of one field, which is the compare whose truth table is the OR of
+        // the two (`FCMP_TRUTH`). Bits of two fields, or of an integer compare, are not modelled.
+        case 'cror': {
+          const [dst, x, y] = ins.ops.map(crBitOf);
+          const field = dst?.field;
+          const held = field === undefined ? undefined : cmpDef.get(field);
+          const bits = typeof held === 'object' ? held.bits : undefined;
+          if (!dst || !x || !y || x.field !== field || y.field !== field || held === undefined || !bits) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': 'cror' at 0x${ins.addr.toString(16)} — only an OR of two bits of the field a ` +
+                'float compare set, into that field, is modelled',
+            );
+          }
+          const truth = FCMP_TRUTH[bits[x.bit]].map((t, i) => t || FCMP_TRUTH[bits[y.bit]][i]);
+          const opcode = fcmpOfTruth(truth);
+          if (opcode === undefined) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': 'cror' at 0x${ins.addr.toString(16)} ORs two bits into no compare of the operands`,
+            );
+          }
+          cmpDef.set(field!, { ...(held as CrCompare), bits: { ...bits, [dst.bit]: opcode } });
+          break;
+        }
+        case 'mfcr': {
+          const copy = mkValue(T.unk(32));
+          crCopies.set(copy, new Map(cmpDef));
+          write(d, copy);
+          break;
+        }
+        // `fctiwz fD,fS` truncates toward zero into the integer word of fD's low half, which reaches
+        // the integer file only through memory: `stfd fD,N(r1)` and `lwz rT,N+4(r1)` (the low word,
+        // big-endian). So fD holds that integer as a WORD, and its `stfd` stores it to the frame word
+        // a reload reads; its high half is no value (`fctiwz-high`), so a use of its reload refuses.
+        case 'fctiwz': {
+          if (fpu === undefined || ins.ops.length !== 2 || !ins.ops.every(isFpKey)) {
+            emitOpaqueDest(ins);
+            break;
+          }
+          refuseCrossingUnmodelled(ins);
+          const v = mkValue(T.unk(32));
+          ops.push(mkOp('fptosi', { operands: [readFloat(ins, s)], results: [v] }));
+          writeVar(d, bi, v);
+          break;
+        }
+        case 'stfd': {
+          const held = isFpKey(d) && fpu !== undefined ? readReg(d, bi) : undefined;
+          if (held === undefined || held.type.kind === 'float' || parseMem(s).base !== 'r1') {
+            emitOpaqueDest(ins);
+            break;
+          }
+          const off = entryOffset(ins, s) + 4;
+          refuseMixedSlot(ins, s, off - 4, 'value');
+          refuseMixedSlot(ins, s, off, 'value');
+          const high = mkValue(T.unk(32));
+          nonValues.set(high, { kind: 'fctiwz-high', addr: ins.addr });
+          writeVar(stackSlotKey(off - 4), bi, high);
+          writeVar(stackSlotKey(off), bi, held);
+          if (!valueSlots.has(off)) {
+            valueSlots.set(off, { addr: ins.addr, mem: s, read: false, stored: [] });
+          }
+          valueSlots.get(off)!.stored.push({ v: held, at: ins.addr });
+          break;
+        }
         case 'fadds':
         case 'fsubs':
         case 'fmuls':
@@ -3296,11 +3454,11 @@ function liftOnce(
           }
           const [dst, ...srcs] = ins.ops;
           if (op === 'copy') {
-            writeVar(dst, bi, read(srcs[0]));
+            writeVar(dst, bi, readFloat(ins, srcs[0]));
             break;
           }
           const v = mkValue(fpType);
-          ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
+          ops.push(mkOp(op, { operands: srcs.map((k) => readFloat(ins, k)), results: [v] }));
           writeVar(dst, bi, v);
           break;
         }
@@ -3424,7 +3582,16 @@ function liftOnce(
         );
       }
       const table = !cmp.signed ? COND_UNSIGNED : COND_SIGNED;
-      const cond = mkCmp(ops, table[base], cmp.lhs, cmp.rhs);
+      const { bit, set } = BRANCH_BIT[base];
+      if (cmp.bits && cmp.quiet && bit !== 'eq') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': conditional branch '${base}' orders the operands of an 'fcmpu', which C emits ` +
+            'for == and != alone',
+        );
+      }
+      const cond = cmp.bits
+        ? mkCmp(ops, set ? cmp.bits[bit] : NEGATED_FCMP[cmp.bits[bit]], cmp.lhs, cmp.rhs)
+        : mkCmp(ops, table[base], cmp.lhs, cmp.rhs);
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
       return;
     }
@@ -3455,6 +3622,13 @@ function liftOnce(
     ssa.markFilled(bi);
   });
   returnUntouchedArg();
+  // What f1 holds at each return, and, where the home is undecided and f1 holds a float this function
+  // computed on every path into every return, that float — read now, before the SSA is finished.
+  const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];
+  const carriesFloat = carriesFloatHome(homeRule, homes);
+  if (carriesFloat) {
+    returns.forEach(({ op, bi }) => op.operands.push(readReg(fpu!.returnReg, bi)));
+  }
   // A high half no `@l` ever completed — every `@l` consumer this frontend does not model (`ori`, a
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
@@ -3548,6 +3722,22 @@ function liftOnce(
     (v) => compared.has(v) || readWithoutOp.has(v) || ssa.frameWrites.has(v),
   );
   ssa.finish();
+  // A copy of the condition register is no integer: only a one-bit extract in its own block reads
+  // it, and a read across an edge resolves to it only now.
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if ([...op.operands, ...op.successors.flatMap((x) => x.args)].some((v) => crCopies.has(v))) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': a copy of the condition register ('mfcr') is read as an integer, which is not modelled`,
+        );
+      }
+    }
+  }
+  refuseFpWordCrossings(name, ssa.fn);
+  // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
+  if (fpu) {
+    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET);
+  }
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
   if (droppedPairHalf) {
     throw new PpcUnsupportedError(

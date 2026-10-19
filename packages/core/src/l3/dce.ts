@@ -25,7 +25,7 @@
 // unresolved `?` value trips the contract first and never reaches DCE; `mustKeep` treating `?` as
 // keep is defense-in-depth for any future caller that skips that check.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, negateCond, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, keepsHelperRel, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
  *  `addr` name counts too: taking a local's address makes every store to it observable through the
@@ -196,7 +196,7 @@ function dceBlock(
           if (mustKeep(s.cond, volatiles)) {
             rev.push({ k: 'exprstmt', value: s.cond });
           }
-        } else if (t.out.length === 0) {
+        } else if (t.out.length === 0 && !keepsHelperRel(s.cond)) {
           rev.push({ k: 'if', cond: negateCond(s.cond), then: e.out, else: [] });
         } else {
           rev.push({ k: 'if', cond: s.cond, then: t.out, else: e.out });

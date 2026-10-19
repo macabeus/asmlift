@@ -16,7 +16,14 @@ export type Expr =
   // `exprEquals` ignores it, as it ignores `index.operandOff`: two nodes that print alike are
   // alike to a CSE. A merge that keeps one of two equal nodes keeps it through `unionEvidence`, so
   // the evidence of the one it drops is not lost with it.
-  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true }
+  //
+  // `helperRel` is evidence too: on a float `==`/`!=`, the relation the SOURCE spelled, where the
+  // compiler picked a runtime helper by it (runtime-helpers.ts `RuntimeHelper.relation` — agbcc's
+  // `__eqsf2` and `__nesf2`). It rides through `negateCond` unchanged, so a node whose `op` is not
+  // its `helperRel` is one a negation moved off the helper, and `keepsHelperRel` /
+  // `regainsHelperRel` below are what a pass choosing between `if (c) A else B` and
+  // `if (!c) B else A` asks. Ignored by `exprEquals` and by the printer, like `unsignedCmp`.
+  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true; helperRel?: BinOp }
   | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
@@ -273,12 +280,20 @@ export type Expr =
 // and `+`/`-` are the pointer walks, reassociations and constant folds of a dozen L3 passes. A float
 // under any of those is a wrong program, so it gets operators none of them match — the same reason
 // the IR has `fadd` rather than a float-typed `add`. The unary minus splits the same way (`f-` on
-// `un`).
+// `un`). The float COMPARES split for the same reason and one more: NaN makes them a partial order,
+// so `negateCond` may flip `f==` and `f!=` into each other and no other — `!(a f> b)` is not
+// `a f<= b`, and it prints as the `!` it is.
 export type BinOp =
   | 'f+'
   | 'f-'
   | 'f*'
   | 'f/'
+  | 'f<'
+  | 'f<='
+  | 'f>'
+  | 'f>='
+  | 'f=='
+  | 'f!='
   | '+'
   | '-'
   | '*'
@@ -1250,7 +1265,75 @@ export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   '<=': '>',
   '==': '!=',
   '!=': '==',
+  // C's float `==` is false on a NaN and `!=` true, so these two are each other's negation; the
+  // ordered four have none in the operator vocabulary (the BinOp note).
+  'f==': 'f!=',
+  'f!=': 'f==',
 };
+
+/** The compares under `e`'s connectives whose runtime helper names the relation the source spelled
+ *  (`helperRel`), each answering whether it spells that relation now. `negateCond` flips every one
+ *  of them at once, through De Morgan. */
+function helperRelLeaves(e: Expr, out: boolean[] = []): boolean[] {
+  if (e.k === 'bin' && (e.op === '&&' || e.op === '||')) {
+    helperRelLeaves(e.l, out);
+    helperRelLeaves(e.r, out);
+  } else if (e.k === 'bin' && e.helperRel !== undefined) {
+    out.push(e.op === e.helperRel);
+  }
+  return out;
+}
+
+/** Whether `e` spells, at every compare of it whose runtime helper names the relation the source
+ *  spelled, that relation — so that negating `e` recompiles to the other helper at each of them:
+ *  the relation's twin and its `!` alike, since gcc folds `!(a == b)` into `a != b`. An arm swap
+ *  that would negate it keeps `e` and its arm order instead. */
+export function keepsHelperRel(e: Expr): boolean {
+  const leaves = helperRelLeaves(e);
+  return leaves.length > 0 && leaves.every((own) => own);
+}
+
+/** Whether negating `e` puts every such compare back on its helper's relation: the swap a pass
+ *  would otherwise leave alone is the one that spells the helpers. A condition mixing the two has
+ *  neither answer, and no arm order spells it. */
+export function regainsHelperRel(e: Expr): boolean {
+  const leaves = helperRelLeaves(e);
+  return leaves.length > 0 && leaves.every((own) => !own);
+}
+
+/** A loop's stay condition `P && S` whose compares under `S` are all negated off their helper's
+ *  relation, and whose `P` negates none: `{ head: P, guard: !S }`, which the loop spells
+ *  `while (P) { if (!S) break; … }` — the same tests in the same order, calling the helpers the
+ *  source called. `while (P && S)` has no spelling of that `S` that calls the helper (gcc folds
+ *  `!(a == b)` into `a != b`); the break guard is how the source wrote it before the branch fold
+ *  joined the two tests. Null when the condition already spells every helper's relation, or when no
+ *  split of its `&&` chain separates the two kinds of compare. */
+export function splitHelperBreak(cond: Expr): { head: Expr; guard: Expr } | null {
+  if (keepsHelperRel(cond) || helperRelLeaves(cond).length === 0) {
+    return null;
+  }
+  const conj: Expr[] = [];
+  const flatten = (e: Expr): void => {
+    if (e.k === 'bin' && e.op === '&&') {
+      flatten(e.l);
+      flatten(e.r);
+    } else {
+      conj.push(e);
+    }
+  };
+  flatten(cond);
+  const and = (xs: Expr[]): Expr => xs.reduce((l, r) => ({ k: 'bin', op: '&&', l, r }));
+  // The longest prefix that negates no helper leaf; the rest must negate every one it holds.
+  let k = 0;
+  while (k < conj.length && helperRelLeaves(conj[k]).every((own) => own)) {
+    k++;
+  }
+  if (k === 0 || k === conj.length) {
+    return null;
+  }
+  const rest = and(conj.slice(k));
+  return regainsHelperRel(rest) ? { head: and(conj.slice(0, k)), guard: negateCond(rest) } : null;
+}
 
 export function negateCond(e: Expr): Expr {
   if (e.k === 'bin') {

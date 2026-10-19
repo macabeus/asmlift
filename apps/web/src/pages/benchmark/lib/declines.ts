@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 262 distinct decline messages (the texts reached by
+// `packages/core/src` throws 278 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -149,7 +149,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 5 of the 21 rows, so a pattern requiring the decided spelling claims 16 of
+    // disjunction is 6 of the 22 rows, so a pattern requiring the decided spelling claims 16 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -335,12 +335,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // purpose, and they carried thirteen rows. None of the failure modes that were real survives a
     // pattern with no list in it.
     //
-    // What it does NOT cover is still decided elsewhere, and correctly: `bc1t`/`bc1f` name no FP
-    // register operand and refuse in `mips.ts` (`fp-cond-branch`, above), and an FPU instruction in
-    // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
+    // What it does NOT cover is still decided elsewhere, and correctly: a `bc1t`/`bc1f` this
+    // frontend cannot read names no FP register operand and refuses in `mips.ts` (`fp-cond-branch`,
+    // above; the one condition code a `c.cond` sets is read, so no row is left), and an FPU
+    // instruction in a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 65 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 76 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
@@ -348,8 +349,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // floating-point ABI — a float argument the homes cannot place, a call whose floating-point
     // registers are unmodelled, a function computing in both
     // precisions (`fmuls` feeding an `fadd`: the rounding between them is unmodelled).
+    //
+    // And the crossings between the files: an FPU register's integer word read as a float or the
+    // reverse (frontend/fpu.ts `refuseFpWordCrossings` and both frontends' reads), a function whose
+    // return home the bytes do not decide or that leaves a word in the float return register
+    // (`settleReturnHome`), a MIPS branch on a condition code no compare in its block set,
+    // PowerPC's condition-register readers past the shapes modelled (`cror`, an `mfcr` copy,
+    // `fcmpu`'s ordering bits), and a reload of the high word an `fctiwz` result's `stfd` leaves
+    // undefined.
     pattern:
-      /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision/,
+      /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|a float reaches the integer file|the float return register|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'|'fctiwz' leaves that half/,
   },
   {
     // UNINHABITED AT THE SOURCE NOW, RATHER THAN BY ARRAY ORDER. Until `fpReg` landed, all 13

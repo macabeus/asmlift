@@ -28,12 +28,15 @@ const lift =
 test('each unmodelled MIPS control transfer names ITS OWN gap, not a shared catch-all', () => {
   // A branch-likely and an FP condition-code branch are different gaps: the first needs the
   // nullified-slot model, the second needs `fcc`. One message for both misattributes whichever is
-  // not being worked on.
+  // not being worked on. A branch on a code no compare set, and one naming a MIPS IV code, refuse.
   expect(lift('0:\tbc1t\t8 <f+0x8>', '4:\tnop', '8:\tjr\tra', 'c:\tnop')).toThrow(
-    /floating-point condition-code branch 'bc1t' at 0x0 — the FP condition code is not modelled/,
+    /'bc1t' at 0x0 tests a condition code no compare in its block set/,
   );
   expect(lift('0:\tbc1fl\t8 <f+0x8>', '4:\tnop', '8:\tjr\tra', 'c:\tnop')).toThrow(
-    /floating-point condition-code branch 'bc1fl' at 0x0 — the FP condition code is not modelled/,
+    /'bc1f' at 0x0 tests a condition code no compare in its block set/,
+  );
+  expect(lift('0:\tbc1t\t$fcc1,8 <f+0x8>', '4:\tnop', '8:\tjr\tra', 'c:\tnop')).toThrow(
+    /floating-point condition-code branch 'bc1t' at 0x0 — only the one condition code a `c.cond` sets/,
   );
   // `bltzall` is branch-likely AND link: it is a call, and calls have their own refusal.
   expect(lift('0:\tbltzall\ta0,8 <f+0x8>', '4:\tnop', '8:\tjr\tra', 'c:\tnop')).toThrow(

@@ -63,7 +63,7 @@ import {
 } from '../ir/core';
 import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
-import { CAST_WIDTHS, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
   type IrType,
   type StructField,
@@ -86,10 +86,13 @@ import {
   exprHasEffect,
   gapReasonFor,
   isLoop,
+  keepsHelperRel,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
   negateCond,
+  regainsHelperRel,
+  splitHelperBreak,
   stmtChildren,
   stmtExprs,
   stmtsEqual,
@@ -1072,6 +1075,18 @@ const CMP_TO_BIN: Record<string, BinOp> = {
 // the pointer stride, the integer legalizations, the constant fold, the commutative re-spelling —
 // is an integer rule.
 const FLOAT_TO_BIN: Record<string, BinOp> = { fadd: 'f+', fsub: 'f-', fmul: 'f*', fdiv: 'f/' };
+
+// The float compares (ir/opcodes.ts) and their L3 operators. An ORDERED compare and `fcmp_une` are
+// C's relation; an unordered one is the logical NOT of the ordered relation it negates
+// (`NEGATED_FCMP`), and is spelled as that `!`, never as the integer negation of the relation.
+const FCMP_TO_BIN: Record<string, BinOp> = {
+  fcmp_olt: 'f<',
+  fcmp_ole: 'f<=',
+  fcmp_ogt: 'f>',
+  fcmp_oge: 'f>=',
+  fcmp_oeq: 'f==',
+  fcmp_une: 'f!=',
+};
 
 // The operators whose operand order the machine does not fix — candidates for the def-order
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
@@ -4358,6 +4373,38 @@ export function structure(
     if (d.opcode === 'fneg') {
       return { k: 'un', op: 'f-', e: e(d.operands[0]) };
     }
+    if (FCMP_TO_BIN[d.opcode] || FCMP_TO_BIN[NEGATED_FCMP[d.opcode] ?? '']) {
+      const op = FCMP_TO_BIN[d.opcode] ?? FCMP_TO_BIN[NEGATED_FCMP[d.opcode]];
+      const spelled = typeof d.attrs.relation === 'string' ? FCMP_TO_BIN[d.attrs.relation] : undefined;
+      const rel: Expr = {
+        k: 'bin',
+        op,
+        l: e(d.operands[0]),
+        r: e(d.operands[1]),
+        ...(spelled !== undefined ? { helperRel: spelled } : {}),
+      };
+      return FCMP_TO_BIN[d.opcode] ? rel : { k: 'un', op: '!', e: rel };
+    }
+    // A conversion is C's cast to the type it converts to. Converting an integer, the cast's
+    // operand must BE signed, because C converts an unsigned one with the unsigned conversion,
+    // which agbcc open-codes and an FPU computes differently: the pin `icmp_s*` takes below. A cast
+    // does not promote its operand, so a `u8` or `u16` name is unsigned here, where it would
+    // promote to `int` in arithmetic: agbcc compiles `(float)c` over an `unsigned char` as the
+    // unsigned conversion and `(float)(s32)c` as `__floatsisf`.
+    if (FLOAT_TO_INT.has(d.opcode)) {
+      const w = intWidth(d.results[0].type) === WIDE_BITS ? WIDE_BITS : 32;
+      return { k: 'cast', to: T.int(w, d.opcode === 'fptosi'), e: e(d.operands[0]) };
+    }
+    if (INT_TO_FLOAT.has(d.opcode)) {
+      const x = e(d.operands[0]);
+      const own = ['var', 'postincr', 'cast', 'index', 'field'].includes(x.k) ? exprCType(x, vtEnv) : undefined;
+      const isSigned = own?.kind === 'int' && own.width < 32 ? own.signed : renderedIntSignedness(x, vtEnv) === true;
+      const signed: Expr = isSigned ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
+      return { k: 'cast', to: d.results[0].type, e: signed };
+    }
+    if (FLOAT_RESIZE[d.opcode]) {
+      return { k: 'cast', to: d.results[0].type, e: e(d.operands[0]) };
+    }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
       // arithmetic case (pointer-spelling.ts ARITH_ROWS): its C type comes from the PROJECT's own
@@ -6720,7 +6767,19 @@ export function structure(
     ) {
       out.push(...unionStmtsEvidence(thenS, elseS));
     } else {
-      out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));
+      // A compare whose runtime helper names the relation the source spelled DECIDES its own sense,
+      // one-armed or two: the arm order is the one that spells that relation, because no spelling
+      // of its negation calls the same helper (l3/ast.ts `keepsHelperRel`). `if (a == b) {} else`
+      // is how the source wrote agbcc's `bl __eqsf2; cmp r0, #0; beq` over the arm.
+      const helperSense = keepsHelperRel(cond) ? false : regainsHelperRel(cond) ? true : undefined;
+      const negate = helperSense ?? negateHere;
+      out.push(
+        negate
+          ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS }
+          : helperSense === false
+            ? { k: 'if', cond, then: thenS, else: elseS }
+            : mkIf(cond, thenS, elseS),
+      );
     }
     if (merge && merge !== stop) {
       out.push(...structureRegion(merge, stop));
@@ -6863,6 +6922,14 @@ export function structure(
       { header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks, breakArms: wl.breakArms },
       () => [...argAssigns(wl.header, wl.bodyEntry), ...structureRegion(wl.bodyEntry, wl.header)],
     );
+    // A test whose tail is a float compare the stay sense moves off its runtime helper's relation
+    // (l3/ast.ts `splitHelperBreak`) leaves through a break guard, ahead of the edge's copies: the
+    // header evaluated it before them.
+    const split = splitHelperBreak(cond);
+    if (split !== null) {
+      cond = split.head;
+      body.unshift({ k: 'if', cond: split.guard, then: [{ k: 'break' }], else: [] });
+    }
     const out: Stmt[] = [{ k: 'while', cond, body }];
     out.push(...argAssigns(wl.header, wl.exit)); // phi args carried on the header→exit edge, if any
     out.push(...structureRegion(wl.exit, stop));
@@ -7917,7 +7984,7 @@ function substVar(e: Expr, from: string, to: string): Expr {
 
 // empty-then peephole: `if (c) {} else { S }` → `if (!c) { S }`
 function mkIf(cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt {
-  if (thenS.length === 0 && elseS.length > 0) {
+  if (thenS.length === 0 && elseS.length > 0 && !keepsHelperRel(cond)) {
     return { k: 'if', cond: negateCond(cond), then: elseS, else: [] };
   }
   return { k: 'if', cond, then: thenS, else: elseS };

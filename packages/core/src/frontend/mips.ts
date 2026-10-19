@@ -22,7 +22,7 @@
 // re-emits `sltu` (the operator is the same `<` — the signedness lives in the operand types).
 import { ownArgumentWordsOn } from '../aggregate';
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
-import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
+import { NEGATED_FCMP, NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
@@ -44,7 +44,18 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
+import {
+  type ReturnHomeRule,
+  carriesFloatHome,
+  floatHomeAt,
+  fpPrecision,
+  fpuArgSlots,
+  refuseBothPrecisions,
+  refuseFpWordCrossings,
+  returnHomeRule,
+  settleReturnHome,
+  writesFloatReturn,
+} from './fpu';
 import {
   FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
@@ -103,18 +114,22 @@ const LIKELY_BASE: Record<string, string> = {
   bgtzl: 'bgtz',
   bltzl: 'bltz',
   bgezl: 'bgez',
+  bc1tl: 'bc1t',
+  bc1fl: 'bc1f',
 };
-// A coprocessor-1 branch tests an FP condition code (`fcc`) that `c.cond.s/d` sets. Neither the
-// code nor the compare is modelled, so these refuse whether or not they are also likely.
+// A coprocessor-1 branch tests the FP condition code (`fcc`) that a `c.cond.s/d` sets: `bc1t` is
+// taken when it is set, `bc1f` when it is clear. MIPS I-III have one code and the branch names it
+// by its target alone; a MIPS IV `bc1t $fccN, L` names one of eight, which is not modelled.
 const isFpCondBranch = (m: string) => m.startsWith('bc1');
+const FP_COND_BRANCH: Readonly<Record<string, boolean>> = { bc1t: true, bc1f: false };
 
 /** The FPU arithmetic this frontend lifts, onto the float opcodes (`mov.s`/`mov.d` are copies and
  *  have none), with the precision each computes in: `.s` single, `.d` double, one per function
- *  (`frontend/fpu.ts` `fpPrecision`). Every other FPU instruction — the conversions, the moves to and
- *  from the integer file and memory, the compares — keeps the register-file refusal `opaqueDest`
- *  gives it, and so does one of these naming an odd register (a double's second half, or a single
- *  this frontend does not key) or a target with no `fpu` homes. `docs/floating-point.md` says what
- *  the next layer is. */
+ *  (`frontend/fpu.ts` `fpPrecision`). With the conversions and compares below, and `mfc1`/`mtc1`,
+ *  that is the decode; every other FPU instruction — the moves to and from memory, the conversions
+ *  between the precisions — keeps the register-file refusal `opaqueDest` gives it, and so does one
+ *  of these naming an odd register (a double's second half, or a single this frontend does not
+ *  key) or a target with no `fpu` homes. `docs/floating-point.md` says what the next layer is. */
 const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 }>> = {
   'add.s': { op: 'fadd', width: 32 },
   'sub.s': { op: 'fsub', width: 32 },
@@ -129,7 +144,41 @@ const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 }>
   'neg.d': { op: 'fneg', width: 64 },
   'mov.d': { op: 'copy', width: 64 },
 };
+/** The moves between the FPU's file and the integer file's VALUES, onto the conversions: `trunc.w`
+ *  truncates a float to the integer word it leaves in an FPU register (`mfc1` moves it out), and
+ *  `cvt.s.w`/`cvt.d.w` convert the integer word `mtc1` moved in. Each is one precision, like the
+ *  arithmetic. The `cvt.w` and `cfc1`/`ctc1` rounding-mode sequence IDO converts an UNSIGNED word
+ *  with, `cvt.s.d`/`cvt.d.s` between the precisions, and the other roundings stay refused. */
+const FP_CONVERT: Readonly<Record<string, { op: Opcode; width: 32 | 64 }>> = {
+  'trunc.w.s': { op: 'fptosi', width: 32 },
+  'trunc.w.d': { op: 'fptosi', width: 64 },
+  'cvt.s.w': { op: 'sitofp', width: 32 },
+  'cvt.d.w': { op: 'sitofp', width: 64 },
+};
+/** The compares that set the condition code, onto the float compares. Only the ORDERED three are
+ *  here, because only they are what IDO, KMC and GCC 2.7.2 emit for C's relations (compiled, every
+ *  relation in both precisions): `a > b` is `c.lt.s b, a`, `a != b` is `c.eq.s` with the branch
+ *  sense flipped, and a NaN answers false to all three. */
+const FP_COMPARE: Readonly<Record<string, { op: Opcode; width: 32 | 64 }>> = {
+  'c.eq.s': { op: 'fcmp_oeq', width: 32 },
+  'c.lt.s': { op: 'fcmp_olt', width: 32 },
+  'c.le.s': { op: 'fcmp_ole', width: 32 },
+  'c.eq.d': { op: 'fcmp_oeq', width: 64 },
+  'c.lt.d': { op: 'fcmp_olt', width: 64 },
+  'c.le.d': { op: 'fcmp_ole', width: 64 },
+};
 const FP_ARITH_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_ARITH));
+/** The decoded instructions that leave a FLOAT in an FPU register, which is what puts one in the
+ *  float return home: `trunc.w` leaves an integer word there, and `mtc1` the integer it moved. */
+const FP_FLOAT_WRITERS: ReadonlySet<string> = new Set([
+  ...FP_ARITH_MNEMONICS,
+  ...Object.keys(FP_CONVERT).filter((m) => FP_CONVERT[m].op === 'sitofp'),
+]);
+/** The decoded instructions that carry a float's information into the INTEGER file: a `mfc1` of a
+ *  truncated word, and a condition-code branch. Where one is present a value in `v0` may be the
+ *  function's result, and a write to `$f0` a temporary, so neither decides the return home
+ *  (frontend/fpu.ts `returnHomeRule`). */
+const crossesToIntegers = (m: string) => m === 'mfc1' || (LIKELY_BASE[m] ?? m) in FP_COND_BRANCH;
 /** A key the SSA builder holds for the FPU's file: `mipsEvenFpKey`'s canonical spelling. */
 const isFpKey = (k: string) => /^\$f\d+$/.test(k);
 
@@ -160,7 +209,7 @@ const isMipsReg = (s: string | undefined): s is string =>
 // has already loud-failed in `lift`.
 const isReturn = (ins: Instr) => ins.mnemonic === 'jr';
 const isUncond = (ins: Instr) => ins.mnemonic === 'b' || ins.mnemonic === 'j';
-const isCond = (ins: Instr) => ins.mnemonic in COND_Z || ins.mnemonic in COND_RR;
+const isCond = (ins: Instr) => ins.mnemonic in COND_Z || ins.mnemonic in COND_RR || ins.mnemonic in FP_COND_BRANCH;
 const isXfer = (ins: Instr) => isReturn(ins) || isUncond(ins) || isCond(ins);
 // ANY instruction that redirects control, modelled or not: on MIPS that is the whole `b*` space
 // (minus the `break` trap) plus `j*`. `isXfer` is the subset this frontend models; this is the
@@ -1329,15 +1378,16 @@ function liftOnce(
   // Headerless input — a raw fragment, and every Splat listing — says where the function starts
   // only by its first line.
   const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
-  // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what lets
-  // each be worked on alone: `bc1fl` is both, and the condition code blocks it either way. Asked
-  // FIRST, before the likely rewrite, so that a function carrying both reports the FP gap rather
-  // than whatever the likely placement happens to say about the other branch.
+  // An FP condition-code branch this frontend cannot read — one naming a MIPS IV condition code, or
+  // any on a target with no FPU homes — is a DIFFERENT gap from a branch-likely, and saying so is
+  // what lets each be worked on alone. Asked FIRST, before the likely rewrite, so that a function
+  // carrying both reports the FP gap rather than whatever the likely placement says about it.
   for (const ins of instrs) {
-    if (isFpCondBranch(ins.mnemonic)) {
+    const plain = LIKELY_BASE[ins.mnemonic] ?? ins.mnemonic;
+    if (isFpCondBranch(ins.mnemonic) && !(target.fpu && plain in FP_COND_BRANCH && ins.ops.length === 1)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': floating-point condition-code branch '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `— the FP condition code is not modelled`,
+          '— only the one condition code a `c.cond` sets, named by the target alone, is modelled',
       );
     }
   }
@@ -1478,7 +1528,7 @@ function liftOnce(
   // its first use, while `saveSlots` below fills progressively. The function's own declaration
   // bounds the argument registers (`ownArgumentWordsOn`): KMC and gcc 2.7.2 home a local in a2/a3
   // past a two-parameter one.
-  const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
+  const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width ?? FP_CONVERT[m]?.width ?? FP_COMPARE[m]?.width);
   const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
   // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
   // builder asks for before that claims no frame, which only refuses more.
@@ -1511,12 +1561,19 @@ function liftOnce(
   const ownReturnFitsAWord = declaresVoidReturn(own) || (ownWidth !== undefined && ownWidth <= 32);
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
-  const floatReturn = writesFloatReturn(
-    blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body)),
-    FP_ARITH_MNEMONICS,
-    mipsEvenFpKey,
-    fpu,
-  );
+  const bodyInstrs = blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body));
+  // Which home the function returns in (frontend/fpu.ts `returnHomeRule`). The branches count: a
+  // condition-code branch is how a compare's answer reaches the integer file.
+  const homeRule: ReturnHomeRule = !fpu
+    ? { home: 'integer', declared: false }
+    : returnHomeRule(
+        ownDeclarationOf(name, prototypes, options.contextOwnProto),
+        [...bodyInstrs, ...blocks.flatMap((b) => (b.branch ? [b.branch] : []))].some((ins) =>
+          crossesToIntegers(ins.mnemonic),
+        ),
+        () => writesFloatReturn(bodyInstrs, FP_FLOAT_WRITERS, mipsEvenFpKey, fpu),
+      );
+  const floatReturn = homeRule.home === 'float';
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
   // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer
@@ -1788,6 +1845,10 @@ function liftOnce(
   // dead `laddr` as a capture (`foldMovedCaptures`).
   const movedCaptures = new Set<Value>();
 
+  /** Every return, as it is emitted: `settleReturnHome` may hand it the float home instead. */
+  const returns: { op: Op; bi: number }[] = [];
+  /** The words an `mtc1` moved into an FPU register (`emitFpMove`). */
+  const movedIn = new Set<Value>();
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
     // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
@@ -1907,6 +1968,10 @@ function liftOnce(
     // DELIBERATELY (unlike divState): a cross-block `mult`/`mflo` pair has no observed inhabitant,
     // and the miss degrades to a LOUD opaque, never silence.
     let mulState: { rs: Value; rt: Value; signed: boolean } | null = null;
+    // The FP condition code a `c.cond` set in THIS block, as the compare it holds. Block-local like
+    // `mulState`: every compare and branch the compilers emit sit in one block, and a branch with
+    // none set here refuses rather than read a code across an edge.
+    let fcc: { opcode: Opcode; lhs: Value; rhs: Value; value: Value } | null = null;
     const emitCmp = (opc: Opcode, d: string, lhs: Value, rhs: Value) => {
       const v = mkValue(T.unk(32));
       ops.push(mkOp(opc, { operands: [lhs, rhs], results: [v] }));
@@ -2281,6 +2346,24 @@ function liftOnce(
         case 'mov.d':
           emitFpArith(ins);
           break;
+        case 'mfc1':
+        case 'mtc1':
+          emitFpMove(ins);
+          break;
+        case 'trunc.w.s':
+        case 'trunc.w.d':
+        case 'cvt.s.w':
+        case 'cvt.d.w':
+          emitFpConvert(ins);
+          break;
+        case 'c.eq.s':
+        case 'c.lt.s':
+        case 'c.le.s':
+        case 'c.eq.d':
+        case 'c.lt.d':
+        case 'c.le.d':
+          emitFpCompare(ins);
+          break;
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
@@ -2374,12 +2457,82 @@ function liftOnce(
       const [dst, ...srcs] = keys as string[];
       const { op } = FP_ARITH[ins.mnemonic];
       if (op === 'copy') {
-        write(dst, read(srcs[0]));
+        write(dst, readFloat(ins, srcs[0]));
         return;
       }
       const v = mkValue(fpType);
-      ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
+      ops.push(mkOp(op, { operands: srcs.map((k) => readFloat(ins, k)), results: [v] }));
       write(dst, v);
+    };
+    // AN FPU REGISTER HOLDS A FLOAT OR AN INTEGER WORD, and which is a fact about the instruction
+    // that last wrote it: `trunc.w` and `mtc1` leave a word, everything else a float. Each read says
+    // which it expects and refuses the other, so a word is never computed on as a float, nor a
+    // float's bits moved out as an integer.
+    const readFloat = (ins: Instr, key: string): Value => {
+      const v = read(key);
+      if (v.type.kind !== 'float') {
+        throw new FrontendUnsupportedError(`${site(ins)} reads ${key} as a float, and it holds an integer word`);
+      }
+      return v;
+    };
+    const readWord = (ins: Instr, key: string): Value => {
+      const v = read(key);
+      if (v.type.kind === 'float') {
+        throw new FrontendUnsupportedError(
+          `${site(ins)} reads ${key} as an integer word, and it holds a float — moving a float's bits is not modelled`,
+        );
+      }
+      return v;
+    };
+    // The keys of an instruction's FPU operands, or the register-file refusal where it names an odd
+    // half or the target has no float homes.
+    const fpOperands = (ins: Instr, at: readonly number[]): string[] | null => {
+      const keys = at.map((i) => mipsEvenFpKey(ins.ops[i] ?? ''));
+      if (fpu === undefined || keys.some((k) => k === null)) {
+        emitOpaqueDest(ins);
+        return null;
+      }
+      if (fpType === null) {
+        refuseBothPrecisions(name, ins.mnemonic);
+      }
+      return keys as string[];
+    };
+    // `mfc1 rt, fs` / `mtc1 rt, fs`: an integer word between the files, unchanged. Which words came
+    // IN is kept for `settleReturnHome`: the IR holds both homes as one value.
+    const emitFpMove = (ins: Instr) => {
+      const keys = fpOperands(ins, [1]);
+      if (keys === null) {
+        return;
+      }
+      if (ins.mnemonic === 'mfc1') {
+        write(ins.ops[0], readWord(ins, keys[0]));
+      } else {
+        const v = read(ins.ops[0]);
+        movedIn.add(v);
+        write(keys[0], v);
+      }
+    };
+    const emitFpConvert = (ins: Instr) => {
+      const keys = fpOperands(ins, [0, 1]);
+      if (keys === null) {
+        return;
+      }
+      const { op } = FP_CONVERT[ins.mnemonic];
+      const toInt = op === 'fptosi';
+      const v = mkValue(toInt ? T.unk(32) : fpType!);
+      ops.push(mkOp(op, { operands: [toInt ? readFloat(ins, keys[1]) : readWord(ins, keys[1])], results: [v] }));
+      write(keys[0], v);
+    };
+    const emitFpCompare = (ins: Instr) => {
+      const keys = fpOperands(ins, [0, 1]);
+      if (keys === null) {
+        return;
+      }
+      const opcode = FP_COMPARE[ins.mnemonic].op;
+      const [lhs, rhs] = keys.map((k) => readFloat(ins, k));
+      const value = mkValue(T.unk(32));
+      ops.push(mkOp(opcode, { operands: [lhs, rhs], results: [value] }));
+      fcc = { opcode, lhs, rhs, value };
     };
     // `%lo` completes the address a `lui %hi` began. The pairing asks SSA — through `readVar`, not
     // `read`, which refuses a half — what `rHi` holds HERE, so a pair separated by unrelated
@@ -2723,6 +2876,24 @@ function liftOnce(
       return { block: irBlocks[j], args: [] };
     };
 
+    // `bc1t` is taken on the code a compare in this block set, `bc1f` on its logical NOT, which is
+    // the UNORDERED compare (`NEGATED_FCMP`): `!(a < b)` is true on a NaN, and `a >= b` is not. A
+    // compare in the delay slot would set the code after the branch read it.
+    const fpCondValue = (ins: Instr): Value => {
+      if (fcc === null) {
+        throw new FrontendUnsupportedError(`${site(ins)} tests a condition code no compare in its block set`);
+      }
+      if (b.delay && b.delay.mnemonic in FP_COMPARE) {
+        throw new FrontendUnsupportedError(`${site(ins)} has a compare in its delay slot`);
+      }
+      if (FP_COND_BRANCH[ins.mnemonic]) {
+        return fcc.value;
+      }
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp(NEGATED_FCMP[fcc.opcode], { operands: [fcc.lhs, fcc.rhs], results: [v] }));
+      return v;
+    };
+
     // Recovered dense switch: dispatch a `switch_br` over the scrutinee (N case blocks, dense
     // 0..N-1, + default). The scrutinee is the value the `sltiu` bounded, so it is read BEFORE the
     // `beqz` delay slot runs, as a conditional branch reads its operands: IDO can scale the index
@@ -2743,7 +2914,7 @@ function liftOnce(
     }
 
     if (br && isCond(br)) {
-      const cond = condValue(br, ops, read, constVal, cmpDef);
+      const cond = br.mnemonic in FP_COND_BRANCH ? fpCondValue(br) : condValue(br, ops, read, constVal, cmpDef);
       // A NULLIFIED slot is not decoded here: it is its own block on the taken edge, and the
       // not-taken edge skips past it (toBlocks). Every pass after this one sees ordinary
       // conditional execution.
@@ -2780,8 +2951,9 @@ function liftOnce(
         ops.push(mkOp('br', { attrs: to === next ? { fallthrough: true } : {}, successors: [succ(to)] }));
         return;
       }
-      // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and
-      // then `v0` is scratch like any other integer register.
+      // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and
+      // then `v0` is scratch like any other integer register. An undecided one returns `v0` here,
+      // and `settleReturnHome` may hand the return the float home instead.
       const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v));
       // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
       // one word: returning v0 alone hands back the high word with the low one dropped, a function
@@ -2797,7 +2969,9 @@ function liftOnce(
         );
       }
       const retOps = floatReturn ? [read(fpu!.returnReg)] : returnsWord ? [readVar(RET, bi)] : [];
-      ops.push(mkOp('ret', { operands: retOps }));
+      const ret = mkOp('ret', { operands: retOps });
+      ops.push(ret);
+      returns.push({ op: ret, bi });
       return;
     }
     // unconditional branch
@@ -2808,11 +2982,23 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  // What the float home holds at each return, and, where the home is undecided and holds a float on
+  // every path into every return, that float — read now, before the SSA is finished.
+  const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];
+  const carriesFloat = carriesFloatHome(homeRule, homes);
+  if (carriesFloat) {
+    returns.forEach(({ op, bi }) => op.operands.push(readVar(fpu!.returnReg, bi)));
+  }
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
+  refuseFpWordCrossings(name, ssa.fn);
+  // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
+  if (fpu) {
+    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET, movedIn);
+  }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);
   for (const blk of irBlocks) {

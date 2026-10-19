@@ -555,15 +555,19 @@ function ownParamWidths(
 /** Whether a declared type is `double`, qualifiers aside. */
 const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
 
-/** Whether a declared type is a floating type, qualifiers aside: a C keyword, or a typedef of one
- *  every project declares (`FLOAT_TYPEDEFS`). */
-export const isFloatingSpelling = (t: ParamType): boolean => {
+/** The floating type a declared type is, qualifiers aside — a C keyword, or a typedef of one every
+ *  project declares (`FLOAT_TYPEDEFS`) — or undefined for any other type. */
+export const floatingSpelling = (t: ParamType): 'float' | 'double' | 'long double' | undefined => {
   const bare = t
     .replace(/\b(?:const|volatile)\b/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  return /^(?:float|double|long double)$/.test(FLOAT_TYPEDEFS.get(bare) ?? bare);
+  const spelled = FLOAT_TYPEDEFS.get(bare) ?? bare;
+  return spelled === 'float' || spelled === 'double' || spelled === 'long double' ? spelled : undefined;
 };
+
+/** Whether a declared type is a floating type (`floatingSpelling`). */
+export const isFloatingSpelling = (t: ParamType): boolean => floatingSpelling(t) !== undefined;
 
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
  *  prototype is a lower bound assembled from whatever a header extraction could read, and omits

@@ -49,7 +49,7 @@ describe('an instruction that touches the FPU is refused by the FILE it needs', 
     // ones it does).
     ['MIPS single-precision arithmetic', 'abs.s\t$f0,$f12', '\\$f0, \\$f12', liftMips],
     ['MIPS double-precision square root', 'sqrt.d\t$f0,$f12', '\\$f0, \\$f12', liftMips],
-    ['a MIPS format conversion', 'cvt.s.w\t$f6,$f4', '\\$f6, \\$f4', liftMips],
+    ['a MIPS conversion between the precisions', 'cvt.d.s\t$f6,$f4', '\\$f6, \\$f4', liftMips],
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
     ['a MIPS FPU load', 'lwc1\t$f0,0(a1)', '\\$f0', liftMips],
@@ -84,7 +84,7 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
     ['ABI-named arithmetic', 'sqrt.d      $ft2, $ft3', '\\$ft2, \\$ft3'],
     ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
     ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
-    ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],
+    ['a conversion between the precisions', 'cvt.d.s     $fv0, $fs0', '\\$fv0, \\$fs0'],
     // THE ODD HALF OF A DOUBLE-PRECISION PAIR, whose o32 ABI name takes a trailing `f` — so the
     // DIGIT IS NOT LAST, and a predicate anchored `\d+$` matches none of these while matching every
     // line above it. That is one spelling of one dialect, and missing it brings back all three of
@@ -230,7 +230,7 @@ describe('an FPU instruction that names no FP register is refused by the file to
   // in: this pair would be red if `fpControl` claimed them, because the message would stop naming
   // the registers.
   test.each([
-    ['mfc1', 'mfc1\tv0,$f12', /register file \(\$f12\)/, liftMips],
+    ['cvt.d.s', 'cvt.d.s\t$f0,$f12', /register file \(\$f0, \$f12\)/, liftMips],
     ['mffs', 'mffs    f0', /register file \(f0\)/, liftPpc],
   ])("'%s' names the file it reads, not the control register", (_label, insn, want, lift) => {
     expect(lift(insn)).toThrow(want);
@@ -240,23 +240,23 @@ describe('an FPU instruction that names no FP register is refused by the file to
 describe('the predicate reads every operand, not the destination', () => {
   // THE TWO SHAPES THAT DECIDE IT, one on each side of `isReg`.
   //
-  // `fcmpo cr0,f1,f2` writes a CONDITION register: `ops[0]` is not an FP register and a
+  // `ps_cmpo0 cr0,f1,f2` writes a CONDITION register: `ops[0]` is not an FP register and a
   // destination-only test files it under "no register destination to degrade", the message about
   // the one operand that is not the problem.
+  // (`fcmpo`/`fcmpu` are decoded, as the float compares; a paired-single compare is not.)
   test('a PowerPC float compare, whose destination is a condition register', () => {
-    const run = liftPpc('fcmpo   cr0,f1,f2');
-    expect(run).toThrow(/unmodelled floating-point instruction 'fcmpo'/);
+    const run = liftPpc('ps_cmpo0 cr0,f1,f2');
+    expect(run).toThrow(/unmodelled floating-point instruction 'ps_cmpo0'/);
     expect(run).toThrow(/floating-point register file \(f1, f2\)/);
   });
 
-  // `mfc1 v0,$f12` is the opposite: a destination `isMipsReg` ACCEPTS. A destination-only test
-  // never fires, an opaque is built on `v0`, and `$f12` — the register the instruction actually
-  // read — is dropped from its source list, so the decline arrives later and names a value rather
-  // than the file.
+  // `mfc1 v0,$f12` is the opposite: a destination `isMipsReg` ACCEPTS. It is decoded, as the move
+  // of an integer word, and `$f12` arrives holding the float argument: the refusal names the
+  // register the instruction read, and what it holds.
   test('a MIPS move OUT of the FPU, whose destination is an ordinary GPR', () => {
-    const run = liftMips('mfc1\tv0,$f12');
-    expect(run).toThrow(/unmodelled floating-point instruction 'mfc1'/);
-    expect(run).toThrow(/floating-point register file \(\$f12\)/);
+    expect(liftMips('mfc1\tv0,$f12')).toThrow(
+      "'mfc1' at 0x0 reads $f12 as an integer word, and it holds a float — moving a float's bits is not modelled",
+    );
   });
 });
 

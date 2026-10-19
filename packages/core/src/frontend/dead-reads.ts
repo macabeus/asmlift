@@ -139,7 +139,7 @@
  *     of `volatile` there, and no gate reads it (at `-O0` the plain twin is the same code). */
 import { globalBaseOf, globalCellOf } from '../ir/alias';
 import { type Block, type Op, type Successor, type Value, forwardingTarget } from '../ir/core';
-import { deadOps } from '../ir/discipline';
+import { deadOps, spelledWhenDead } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
 import type { ContextGlobals } from '../proto-context';
@@ -406,6 +406,71 @@ export function unreadPairHalf(
     into.add(v);
     return false; // keep walking: every path's value, not the first
   });
+}
+
+/** Whether a value was COMPUTED ONLY TO BE RETURNED: an op with no effect and no memory read
+ *  (`spelledWhenDead` answers no) whose value nothing but a return reads, directly or through the
+ *  joins that carry it there, or a join of such values. An entry parameter is the caller's value and
+ *  merges nothing, so it never is one. The evidence is the compiler's, the claim `spelledWhenDead`
+ *  already rests on: an optimizing compiler deletes a pure computation nobody reads, so one that
+ *  survives with a return as its only reader was written for that return. A value no op reads at
+ *  all answers yes too, which is what a frontend asks of the value a return home holds where the
+ *  `ret` does not read it (frontend/fpu.ts `settleReturnHome`). Read over `blocks` as they stand. */
+export function computedOnlyToReturn(blocks: readonly Block[]): (v: Value) => boolean {
+  const defOp = new Map<Value, Op>();
+  const incoming = new Map<Value, Value[]>();
+  const uses = new Map<Value, Array<Op | Value | undefined>>();
+  const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+    const l = m.get(k);
+    if (l) {
+      l.push(v);
+    } else {
+      m.set(k, [v]);
+    }
+  };
+  for (const blk of blocks) {
+    for (const op of blk.ops) {
+      op.results.forEach((r) => defOp.set(r, op));
+      op.operands.forEach((v) => push(uses, v, op));
+      for (const s of op.successors) {
+        s.args.forEach((v, i) => {
+          const p = s.block.params[i] as Value | undefined;
+          push(uses, v, p);
+          if (p !== undefined) {
+            push(incoming, p, v);
+          }
+        });
+      }
+    }
+  }
+  // A join is followed to what it merges, and every value on the way may have only returns, or
+  // joins that are themselves read only by returns, as readers. A cycle adds nothing the first
+  // visit did not judge.
+  const returnOnly = (v: Value, seen: Set<Value>): boolean => {
+    if (seen.has(v)) {
+      return true;
+    }
+    seen.add(v);
+    return (uses.get(v) ?? []).every(
+      (u) => u !== undefined && ('opcode' in u ? u.opcode === 'ret' : returnOnly(u, seen)),
+    );
+  };
+  const computed = (v: Value, seen: Set<Value>): boolean => {
+    if (seen.has(v)) {
+      return true;
+    }
+    seen.add(v);
+    if (!returnOnly(v, new Set())) {
+      return false;
+    }
+    const op = defOp.get(v);
+    if (op !== undefined) {
+      return !spelledWhenDead(op);
+    }
+    const ins = incoming.get(v);
+    return ins !== undefined && ins.every((a) => computed(a, seen));
+  };
+  return (v) => computed(v, new Set());
 }
 
 /** Stamp `volatile` on every read these blocks never use that no gate refuses, outermost first.

@@ -3,9 +3,9 @@
 asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the PowerPC EABI, in either
 precision — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and their `.d` twins, and
 `fadds`/`fsubs`/`fmuls`/`fdivs`, `fadd`/`fsub`/`fmul`/`fdiv`, `fneg`/`fmr` — through each ABI's float
-argument and return homes, and nothing else in that file; a function computing in both precisions
-refuses. `fneg` and `fmr` state no precision, so a function made only of them lifts a float of none
-(`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width. So does an
+argument and return homes, and the signed conversions and the compares between that file and the
+integer one (§6); a function computing in both precisions refuses. `fneg` and `fmr` state no precision, nor do PowerPC's compares and `fctiwz`, so a function made only of them lifts a float of none
+(`T.fUnstated`): C spells it `float`, a C++ declaration binds it at either width, and an own declaration that may prove and spells every float `double` makes it a double (`declaredPrecision`). So does an
 argument slot the body never reads (`float f1(double a, float b){ return b + b; }` is `fadds f1,f2,f2`):
 no instruction states its width, whatever the function's precision typed it. On MIPS o32 that holds
 only while no integer argument follows the slot, because there the slot's width is what placed the
@@ -317,13 +317,15 @@ modelled. MIPS refuses the same way, on any FPU register in a function that make
 IS the FP part of that gap, and a carrier decode onto the word load is the wrong one. The layer owns a
 typed memory access (a float element, a float struct member), and it owns an `lfs` of a small-data
 constant, which is how a float LITERAL arrives on PowerPC. **It must first replace two rules this
-layer rests on**: the float RETURN is decided by scanning for a decoded write to `$f0`/`f1`
-(`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that a float reaches only a float
-op, `ret` or a call argument its callee declares `double`. Both are sound only while no float can
-reach memory, so a store that lands before them
+layer rests on**: where no float reaches the integer file, the float RETURN is decided by scanning for
+a decoded write to `$f0`/`f1` (`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that
+a float reaches only a float op, a conversion, a compare, `ret` or a call argument its callee declares
+`double`. Both are sound only while no float can reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
-from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which
+from the value that reaches each `ret`, which is what a function with a conversion or a compare
+already gets (`settleReturnHome`): the home whose value at every return was computed only to be
+returned, the own declaration where neither or both are, and a refusal without one. After it: `frsp` and the int/float conversions, which
 are what a function computing in both precisions needs, and the compares and `bc1t`/`bc1f`, the
 fifth thing §1 named.
 
@@ -342,7 +344,20 @@ were wrong C that matched: a call nothing declares is lifted at a GUESSED arity,
 an argument passed on unchanged, so `a * b + c` published as `__addsf3(__mulsf3(), a2)`. A helper
 result nothing reads refuses (`synthetic:fcall:agbcc`): optimising (-O1, -O2), agbcc deletes a helper
 call whose result is dead, so the reader was a guessed call after it that took the result in r0, and folding would delete
-the arithmetic. The compares and the conversions of both precisions (`__gtsf2`, `__fixsfsi`,
-`__floatsidf`, `__extendsfdf2` …) are named too, with no op: the IR has no int<->float op to fold
-one into, so a call to one declines naming the runtime (`synthetic:f2i:agbcc`, `i2f`, `fcmp`,
-`fconv`), where unnamed each was the same guess, `(int)x` published as `__fixsfsi()`.
+the arithmetic. The conversions of both precisions (`__fixsfsi`, `__floatsidf`, `__extendsfdf2` …)
+fold to the IR's conversions, their integer side any integer (`synthetic:f2i:agbcc`, `i2f`, `fconv`,
+`ll2f`, `f2u`), and the compares (`__gtsf2` …) fold through the test their result is put to, read
+off libgcc's contract — its sign orders the operands and its value on a NaN is stated per helper — so
+the negated test is the unordered compare (`fcmp`, `fcmple`, `fcmpngt`, `fcmpbrn`). Unnamed, each was
+a guess, `(int)x` published as `__fixsfsi()`. agbcc has no unsigned-to-float helper: `(float)u` is
+open-coded and declines (`u2f`).
+
+**The crossings on an FPU.** The MIPS frontend decodes `trunc.w.{s,d}`, `cvt.{s,d}.w`, `mfc1`/`mtc1` of
+an integer word and `c.{eq,lt,le}.{s,d}` with `bc1t`/`bc1f`; PowerPC decodes `fcmpo`/`fcmpu` with the
+branches, `cror` and `mfcr` extracts that read their field, and `fctiwz` through its frame round trip.
+Every relation, its negation and both conversion directions are rows on all seven toolchains
+(`fcmplt` … `i2d`). Still declined: the unsigned conversions (IDO's `cfc1`/`ctc1` rounding-mode
+sequence, GCC's compare against 2^31, mwcc's `__cvt_fp2unsigned` call), the conversions between the
+precisions on an FPU, a float literal, mwcc's `(float)i` (an `lfd` of an SDA21 anonymous constant)
+and a float in a general register moved into the file. IDO's value form of a compare lifts as correct
+C that recompiles to another schedule than the bare `return a > b;`, which no candidate spells.

@@ -29,7 +29,7 @@
 // REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
 // frontend has paired those registers up.
 import { type Op, type Value, mkOp } from './ir/core';
-import { FLOAT_OPS, type Opcode, WIDE_BITS } from './ir/opcodes';
+import { FLOAT_COMPUTING, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
 import type { TargetDescription } from './target';
@@ -41,6 +41,19 @@ export interface RuntimeHelper {
   params: readonly number[];
   /** the returned width: 0 (void), 32, or 64 (a register PAIR). */
   returns: 0 | 32 | 64;
+  /** A THREE-WAY FLOAT COMPARE: its result's SIGN orders its two operands (negative, zero, positive
+   *  for less, equal, greater), and this is the value it returns where either is a NaN. A compare
+   *  folds through the integer test its caller applies to the result (raise/floathelpers.ts), so it
+   *  carries this in place of an `op`. */
+  unordered?: 1 | -1;
+  /** THE RELATION THE SOURCE SPELLED, for a compare helper whose relation and its negation are both
+   *  C operators — `__eqsf2` for `==`, `__nesf2` for `!=`. agbcc's gcc folds `!(a == b)` into
+   *  `a != b` before it picks a helper, so the helper names the relation the source wrote, and a
+   *  lift that spells its negation (or the negation's `!`) recompiles to the other helper. The fold
+   *  stamps it on the compare as `attrs.relation` (raise/floathelpers.ts), and the structurer keeps
+   *  that relation's spelling by choosing the arm order instead (l3/ast.ts `Expr.helperRel`). The
+   *  ordered four need none: `!(a > b)` keeps `__gtsf2`, and no other helper computes it. */
+  relation?: 'fcmp_oeq' | 'fcmp_une';
 }
 
 /** The entry a target's table holds for `callee`, or undefined. THE ONE READER, because the table
@@ -119,13 +132,24 @@ export function helperOp(opcode: Opcode, helper: string, operands: readonly Valu
   return mkOp(opcode, { operands: [...operands], results: [result], attrs: { helper } });
 }
 
-/** Whether a helper computes on floats: its op is a float op, so its operands and result are floats
- *  of the widths its signature states, carried in integer registers by a soft-float runtime. Every
- *  reader of the table asks this and not the width, because the two families fold into different
- *  IR: an integer helper into its op over the same values, a float helper into a float op over
- *  values re-typed as floats (`raise/floathelpers.ts`). */
+/** Whether a helper computes on floats: its op is a float op, a conversion or a compare, so the
+ *  operands and the result that op takes as floats are floats of the widths its signature states,
+ *  carried in integer registers by a soft-float runtime. Every reader of the table asks this and
+ *  not the width, because the two families fold into different IR: an integer helper into its op
+ *  over the same values, a float helper into its op over values re-typed as floats where the op
+ *  takes one (`raise/floathelpers.ts`). */
 export function isFloatHelper(h: RuntimeHelper): boolean {
-  return h.op !== undefined && FLOAT_OPS.has(h.op);
+  return h.unordered !== undefined || (h.op !== undefined && FLOAT_COMPUTING.has(h.op));
+}
+
+/** Which sides of a float helper are floats: its operands (one kind for all of them, in every op
+ *  here) and its result. A conversion has an integer on one side; a compare returns one. */
+export function floatSidesOf(h: RuntimeHelper): { operands: boolean; result: boolean } {
+  const op = h.op ?? '';
+  return {
+    operands: !INT_TO_FLOAT.has(op),
+    result: h.unordered === undefined && !FLOAT_TO_INT.has(op) && NEGATED_FCMP[op] === undefined,
+  };
 }
 
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.
@@ -160,15 +184,19 @@ export function helperPrototypes(
  *  `fallbackArgc`), and a guess drops what the function passes on unchanged — `a * b + c` as
  *  `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`.
  *
- *  THE COMPARES AND THE CONVERSIONS ARE HERE TOO, AND THEY ONLY SIGN: the IR has no int<->float op
- *  to fold one into, so each carries no `op` and refuses (`refuseUnmodelledHelpers`), as
- *  `IDO_RUNTIME_HELPERS` signs its conversions. Unnamed, each would be the same guess, dropping the
- *  argument passed on unchanged and matching byte for byte: `(int)x` as `__fixsfsi()`, `(float)i` as
- *  `__floatsisf()`, `a > b` as `__gtsf2() > 0`. The names are the ones agbcc
+ *  THE CONVERSIONS FOLD TOO, to the cast each computes (`fptosi`, `sitofp`, `fpext` …), with an
+ *  integer on one side that `raise/floathelpers.ts` takes as any integer. THE COMPARES fold through
+ *  the test their caller applies to the integer they return, by libgcc's contract for it
+ *  (`unordered`), and one whose result is read any other way refuses (`refuseUnmodelledHelpers`).
+ *  Unnamed, each would be the same guess, dropping the argument passed on unchanged and matching
+ *  byte for byte: `(int)x` as `__fixsfsi()`, `(float)i` as `__floatsisf()`, `a > b` as
+ *  `__gtsf2() > 0`. The names are the ones agbcc
  *  emits for every compare, every conversion between `int`, `unsigned`, `long long` and either
  *  precision, and every widening and narrowing between the two precisions (compiled evidence: one
- *  function per operation at the canonical flags); `__cmpdi2`, which it also calls converting an
- *  `unsigned long long`, is an integer compare and outside this family. */
+ *  function per operation at the canonical flags). There is no conversion of an unsigned integer
+ *  INTO a float: agbcc open-codes `(float)u` around `__floatsisf` and `__addsf3`. `__cmpdi2`, which
+ *  it also calls converting an `unsigned long long`, is an integer compare and outside this
+ *  family. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -199,34 +227,39 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
   __divsf3: { op: 'fdiv', params: [32, 32], returns: 32 },
   __negsf2: { op: 'fneg', params: [32], returns: 32 },
-  // The compares, one int out of two floats of either precision: its sign against 0 is the answer.
-  __eqsf2: { params: [32, 32], returns: 32 },
-  __nesf2: { params: [32, 32], returns: 32 },
-  __gtsf2: { params: [32, 32], returns: 32 },
-  __gesf2: { params: [32, 32], returns: 32 },
-  __ltsf2: { params: [32, 32], returns: 32 },
-  __lesf2: { params: [32, 32], returns: 32 },
-  __eqdf2: { params: [64, 64], returns: 32 },
-  __nedf2: { params: [64, 64], returns: 32 },
-  __gtdf2: { params: [64, 64], returns: 32 },
-  __gedf2: { params: [64, 64], returns: 32 },
-  __ltdf2: { params: [64, 64], returns: 32 },
-  __ledf2: { params: [64, 64], returns: 32 },
+  // The compares, one int out of two floats of either precision, each libgcc's three-way
+  // `__fpcmp_parts` when both are ordered (fp-bit.c:1117-1188). On a NaN each returns the value its
+  // own relation tests FALSE on — `== 0`, `< 0`, `<= 0` are false on 1, `> 0`, `>= 0` on -1 — except
+  // `__nesf2`, whose 1 makes `!=` true (fp-bit.c:1214-1309). agbcc tests the result against 0 with
+  // the relation the helper is named for.
+  __eqsf2: { params: [32, 32], returns: 32, unordered: 1, relation: 'fcmp_oeq' },
+  __nesf2: { params: [32, 32], returns: 32, unordered: 1, relation: 'fcmp_une' },
+  __gtsf2: { params: [32, 32], returns: 32, unordered: -1 },
+  __gesf2: { params: [32, 32], returns: 32, unordered: -1 },
+  __ltsf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __lesf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __eqdf2: { params: [64, 64], returns: 32, unordered: 1, relation: 'fcmp_oeq' },
+  __nedf2: { params: [64, 64], returns: 32, unordered: 1, relation: 'fcmp_une' },
+  __gtdf2: { params: [64, 64], returns: 32, unordered: -1 },
+  __gedf2: { params: [64, 64], returns: 32, unordered: -1 },
+  __ltdf2: { params: [64, 64], returns: 32, unordered: 1 },
+  __ledf2: { params: [64, 64], returns: 32, unordered: 1 },
   // The conversions: to and from a word, to and from a long long, and between the precisions.
-  __fixsfsi: { params: [32], returns: 32 },
-  __fixunssfsi: { params: [32], returns: 32 },
-  __floatsisf: { params: [32], returns: 32 },
-  __fixdfsi: { params: [64], returns: 32 },
-  __fixunsdfsi: { params: [64], returns: 32 },
-  __floatsidf: { params: [32], returns: 64 },
-  __fixsfdi: { params: [32], returns: 64 },
-  __fixunssfdi: { params: [32], returns: 64 },
-  __floatdisf: { params: [64], returns: 32 },
-  __fixdfdi: { params: [64], returns: 64 },
-  __fixunsdfdi: { params: [64], returns: 64 },
-  __floatdidf: { params: [64], returns: 64 },
-  __extendsfdf2: { params: [32], returns: 64 },
-  __truncdfsf2: { params: [64], returns: 32 },
+  // `__fix*` truncates toward zero, as C's conversion out of a float does.
+  __fixsfsi: { op: 'fptosi', params: [32], returns: 32 },
+  __fixunssfsi: { op: 'fptoui', params: [32], returns: 32 },
+  __floatsisf: { op: 'sitofp', params: [32], returns: 32 },
+  __fixdfsi: { op: 'fptosi', params: [64], returns: 32 },
+  __fixunsdfsi: { op: 'fptoui', params: [64], returns: 32 },
+  __floatsidf: { op: 'sitofp', params: [32], returns: 64 },
+  __fixsfdi: { op: 'fptosi', params: [32], returns: 64 },
+  __fixunssfdi: { op: 'fptoui', params: [32], returns: 64 },
+  __floatdisf: { op: 'sitofp', params: [64], returns: 32 },
+  __fixdfdi: { op: 'fptosi', params: [64], returns: 64 },
+  __fixunsdfdi: { op: 'fptoui', params: [64], returns: 64 },
+  __floatdidf: { op: 'sitofp', params: [64], returns: 64 },
+  __extendsfdf2: { op: 'fpext', params: [32], returns: 64 },
+  __truncdfsf2: { op: 'fptrunc', params: [64], returns: 32 },
 };
 
 /** CodeWarrior's PowerPC runtime (`Runtime.PPCEABI.H`), as the GameCube projects vendor it.

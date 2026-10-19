@@ -7,7 +7,7 @@
 // mutation of a live value.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { deadOps, effectful, orderSensitive } from '../ir/discipline';
-import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
+import { NEGATED_FCMP, NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
@@ -613,11 +613,18 @@ export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16),
 // Byte evidence is narrower than the reasoning: synthetic:inrange stays MATCH under gcc2.7.2kmc
 // with the folded spelling, which proves the round-trip there; elsewhere it is unmeasured.
 //
-// The negation comes from THE shared table (ir/opcodes.ts NEGATED_ICMP), so this fold, the MIPS
-// `slt …; beqz` branch fold and the short-circuit diamond negation cannot disagree about what the
-// opposite of a compare is. One pattern per comparison — a data-driven fold needs a fixed
-// replacement opcode, so the table is unrolled into ten patterns rather than expressed as a
-// (nonexistent) computed-opcode replacement.
+// The negation comes from THE shared tables (ir/opcodes.ts NEGATED_ICMP, and NEGATED_FCMP for a float
+// compare, whose negation is the unordered twin: `!(a > b)` is true on a NaN, `a <= b` is not), so
+// this fold, the MIPS `slt …; beqz` branch fold and the short-circuit diamond negation cannot
+// disagree about what the opposite of a compare is. One pattern per comparison — a data-driven fold
+// needs a fixed replacement opcode, so the tables are unrolled into one pattern per entry rather
+// than expressed as a (nonexistent) computed-opcode replacement.
+const NEGATED_CMP: Readonly<Record<string, Opcode>> = { ...NEGATED_ICMP, ...NEGATED_FCMP };
+// An integer compare's result is pinned u32 (below). A float compare's is the untyped word both
+// frontends give one (raise/recover.ts stamps no float compare), not the `xor`'s or the zero test's:
+// mwcc's `!(a > b)` is a `cntlzw` test that CNTLZW_EQ0 has already typed u32, and a u32 result
+// would declare an `int` function `u32`.
+const cmpResultType = (cmp: string): IrType => (cmp in NEGATED_ICMP ? T.u(32) : T.unk(32));
 const notCmpPat = (cmp: string): RewritePattern => ({
   id: `not-${cmp}`,
   applies: {},
@@ -632,7 +639,7 @@ const notCmpPat = (cmp: string): RewritePattern => ({
   // It is what raise/recover.ts stamps on every icmp result unconditionally anyway, so inheriting
   // the `xor`'s type would reach the same place; saying it here keeps the two icmp-producing
   // patterns on one discipline instead of leaving a reader to infer which is canonical.
-  replaceWith: { op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) },
+  replaceWith: { op: NEGATED_CMP[cmp], args: ['A', 'B'], resultType: cmpResultType(cmp) },
 });
 
 // The BRANCH-form siblings. Testing a boolean against zero is the same negation by another
@@ -655,15 +662,35 @@ const cmpZeroPat = (cmp: string, test: 'icmp_eq' | 'icmp_ne'): RewritePattern =>
       { op: 'const', attrEquals: { value: 0 }, args: [] },
     ],
   },
-  replaceWith: { op: test === 'icmp_eq' ? NEGATED_ICMP[cmp] : cmp, args: ['A', 'B'], resultType: T.u(32) },
+  replaceWith: { op: test === 'icmp_eq' ? NEGATED_CMP[cmp] : cmp, args: ['A', 'B'], resultType: cmpResultType(cmp) },
 });
 
+// KNOWN GAP: `!(a == b)` folds to `fcmp_une`, which C spells `a != b` — one program, which mwcc
+// compiles apart (`cntlzw` of the EQ bit for the first, `xori` for the second), so it recompiles to
+// the other object. Unfolded it would be no better: the zero test is CNTLZW_EQ0's u32, and a u32
+// result declares an `int` function `u32`.
+const notCmpPatterns = (
+  table: Readonly<Record<string, Opcode>>,
+  tests: readonly ('icmp_eq' | 'icmp_ne')[],
+): RewritePattern[] => [
+  ...Object.keys(table).map(notCmpPat),
+  ...Object.keys(table).flatMap((cmp) => tests.map((t) => cmpZeroPat(cmp, t))),
+];
+/** The float compares' share of `NOT_CMP_PATTERNS`, which raise/pre-recovery.ts runs again once
+ *  agbcc's compare helpers have folded to float compares: the idioms run before that pass, when
+ *  `__ltsf2(a, b) >> 31 ^ 1` has no compare to negate yet. WITHOUT `cmp != 0 → cmp`, which is how
+ *  PowerPC's record-form extract of a compare's bit reaches a branch (`mfcr; srwi. r0,r0,31;
+ *  bnelr`): mwcc 2.4.2 and 2.4.7 compile `if (!(a < b)) gI = 1;` to that. Folded through it, `if
+ *  (!(a0 < a1)) { gI = 1; return; }` recompiles to a plain `bltlr`; unfolded, `if (a0 < a1 == 0) {
+ *  …; return; }` recompiles to the extract (`synthetic:fcmpbrn`). */
+export const NOT_FCMP_PATTERNS: RewritePattern[] = notCmpPatterns(NEGATED_FCMP, ['icmp_eq']);
 /** `cmp ^ 1` and the zero-test forms `cmp == 0` / `cmp != 0` → the (negated) comparison. Every
- *  entry is one comparison of `NEGATED_ICMP`; the bundle is what the boolean-reasoning consumers
- *  downstream (short-circuit recovery, the structurer's condition spelling) actually match on. */
+ *  entry is one comparison of `NEGATED_ICMP` or `NEGATED_FCMP` (a float compare's `!= 0` aside,
+ *  `NOT_FCMP_PATTERNS`); the bundle is what the boolean-reasoning consumers downstream
+ *  (short-circuit recovery, the structurer's condition spelling) actually match on. */
 export const NOT_CMP_PATTERNS: RewritePattern[] = [
-  ...Object.keys(NEGATED_ICMP).map(notCmpPat),
-  ...Object.keys(NEGATED_ICMP).flatMap((cmp) => [cmpZeroPat(cmp, 'icmp_eq'), cmpZeroPat(cmp, 'icmp_ne')]),
+  ...notCmpPatterns(NEGATED_ICMP, ['icmp_eq', 'icmp_ne']),
+  ...NOT_FCMP_PATTERNS,
 ];
 
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is

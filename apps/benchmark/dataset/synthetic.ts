@@ -89,6 +89,26 @@ const MWCC_O0P = [
 ];
 // The same set at -O4,p, which the update-form rows (`upd_*`) build at.
 const MWCC_O4P = MWCC_O0P.map((f) => (f === '-O0,p' ? '-O4,p' : f));
+// The float compare rows that branch rather than return the relation, and those of them the source
+// declares void (each a float block below).
+const FCMP_BRANCH_ROWS: ReadonlySet<string> = new Set([
+  'fcmpbrn',
+  'fcmpeqbr',
+  'fcmpnebr',
+  'fcmpeqlp',
+  'fcmpnelp',
+  'fcmphome',
+  'fcmpvoid',
+  'fcmpkeep',
+]);
+const FCMP_VOID_ROWS: ReadonlySet<string> = new Set([
+  'fcmpbrn',
+  'fcmpeqbr',
+  'fcmpnebr',
+  'fcmpeqlp',
+  'fcmpnelp',
+  'fcmpvoid',
+]);
 /** The body the `oa_bigdead*` rows share (the outgoing-area family): twenty-eight values spilled to the
  *  frame, reloaded only inside a loop the first test may skip. */
 const BIGDEAD_BODY =
@@ -2595,19 +2615,24 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'float fdiv(float,float);',
   },
-  { sym: 'fcmp', src: 'int fcmp(float a,float b){ return a>b; }', features: ['float', 'compare'], toolchains: ALL },
+  {
+    sym: 'fcmp',
+    src: 'int fcmp(float a,float b){ return a>b; }',
+    features: ['float', 'compare'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+  },
   {
     sym: 'i2f',
     src: 'float i2f(int x){ return (float)x; }',
     features: ['float', 'cast', 'int-to-float'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'float i2f(int);',
   },
   {
     sym: 'f2i',
     src: 'int f2i(float x){ return (int)x; }',
     features: ['float', 'cast', 'float-to-int'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
     ctx: 'int f2i(float);',
   },
   {
@@ -2617,12 +2642,111 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'float fma1(float,float,float);',
   },
+  // THE FLOAT COMPARES AND CONVERSIONS, on every toolchain, because each spells them its own way and
+  // a NaN tells the negation of a relation from its flipped twin: agbcc calls one libgcc helper per
+  // relation and tests its result against 0 with a branch or a sign-bit idiom (`>> 31`, `~r >> 31`,
+  // `(-r | r) >> 31`), MIPS sets one condition code with `c.eq`/`c.lt`/`c.le` and branches on it
+  // either way round, and mwcc sets a condition-register field that a branch, a `cror` and an `mfcr`
+  // extract read. `fcmpngt` and `fcmpbrn` are the negations, which every compiler here compiles
+  // apart from `a <= b` and `a >= b`. `d2i`, `i2d` and `dcmpgt` are the double precision, which mwcc
+  // compiles to the same object as the float one. mwcc's `(float)i` and `(double)i` decline: the
+  // magic constant is an `lfd` of an SDA21 anonymous double, which nothing models. `fcmphome` and
+  // `fcmpvoid` put a float temporary in the float return register beside the compares that read it
+  // (KMC, GCC 2.7.2 and IDO allocate `c` to `$f0`): the int returns its `li`s, and the void one is
+  // the object of a float function returning `c`, which only its declaration tells apart. So is
+  // `fcmpkeep`, a float function returning its first argument untouched (in `f1` on PowerPC, where
+  // `r3` is the other home), beside the void function that does not. `fcmpeqbr` and `fcmpnebr` are
+  // the equality guards: agbcc picks `__eqsf2` or `__nesf2` by the relation the source spelled and
+  // folds `!(a == b)` into `a != b` first, so only the arm order keeps the helper. `fcmpeqlp` and
+  // `fcmpnelp` are those guards as a loop's break, which agbcc's branch fold joins to the loop test.
+  ...(
+    [
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] =>
+    [
+      ['fcmplt', 'int fcmplt(float a,float b){ return a<b; }', 'int fcmplt(float,float);'],
+      ['fcmple', 'int fcmple(float a,float b){ return a<=b; }', 'int fcmple(float,float);'],
+      ['fcmpge', 'int fcmpge(float a,float b){ return a>=b; }', 'int fcmpge(float,float);'],
+      ['fcmpeq', 'int fcmpeq(float a,float b){ return a==b; }', 'int fcmpeq(float,float);'],
+      ['fcmpne', 'int fcmpne(float a,float b){ return a!=b; }', 'int fcmpne(float,float);'],
+      ['fcmpngt', 'int fcmpngt(float a,float b){ return !(a>b); }', 'int fcmpngt(float,float);'],
+      ['fcmpnlt', 'int fcmpnlt(float a,float b){ return !(a<b); }', 'int fcmpnlt(float,float);'],
+      [
+        'fcmpbrn',
+        'extern int gI;\nvoid fcmpbrn(float a,float b){ if (!(a<b)) gI = 1; }',
+        'extern int gI; void fcmpbrn(float,float);',
+      ],
+      [
+        'fcmpeqbr',
+        'extern int gI;\nvoid fcmpeqbr(float a,float b){ if (a==b) return; gI = 1; }',
+        'extern int gI; void fcmpeqbr(float,float);',
+      ],
+      [
+        'fcmpnebr',
+        'extern int gI;\nvoid fcmpnebr(float a,float b){ if (a!=b) return; gI = 1; }',
+        'extern int gI; void fcmpnebr(float,float);',
+      ],
+      [
+        'fcmpeqlp',
+        'extern int gI;\nvoid fcmpeqlp(float a,float b,int n){ int i; for (i=0;i<n;i++){ if (a==b) break; gI+=i; } }',
+        'extern int gI; void fcmpeqlp(float,float,int);',
+      ],
+      [
+        'fcmpnelp',
+        'extern int gI;\nvoid fcmpnelp(float a,float b,int n){ int i; for (i=0;i<n;i++){ if (a!=b) break; gI+=i; } }',
+        'extern int gI; void fcmpnelp(float,float,int);',
+      ],
+      [
+        'fcmphome',
+        'int fcmphome(float a,float b){ float c=a+b; if (c<a) return 3; if (c>b) return 7; return 5; }',
+        'int fcmphome(float,float);',
+      ],
+      [
+        'fcmpvoid',
+        'extern int gI;\nvoid fcmpvoid(float a,float b){ float c=a*b; if (c<a) gI=1; if (c>b) gI=2; }',
+        'extern int gI; void fcmpvoid(float,float);',
+      ],
+      [
+        'fcmpkeep',
+        'extern int gI;\nfloat fcmpkeep(float a,float b){ if (a<b) gI=1; return a; }',
+        'extern int gI; float fcmpkeep(float,float);',
+      ],
+      ['dcmpgt', 'int dcmpgt(double a,double b){ return a>b; }', 'int dcmpgt(double,double);'],
+      ['d2i', 'int d2i(double x){ return (int)x; }', 'int d2i(double);'],
+      ['i2d', 'double i2d(int x){ return (double)x; }', 'double i2d(int);'],
+    ].map(([sym, src, ctx]): SynthSpec => ({
+      sym,
+      src,
+      features: sym.endsWith('2i')
+        ? ['float', 'cast', 'float-to-int']
+        : sym.startsWith('i2')
+          ? ['float', 'cast', 'int-to-float']
+          : FCMP_BRANCH_ROWS.has(sym)
+            ? ['float', 'compare', 'branch']
+            : ['float', 'compare'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx,
+      ...(FCMP_VOID_ROWS.has(sym) ? { proto: { [sym]: { returnsVoid: true } } } : {}),
+    })),
+  ),
+  ...(['f2i', 'fcmp'] as const).map((sym): SynthSpec => ({
+    sym,
+    src: sym === 'f2i' ? 'int f2i(float x){ return (int)x; }' : 'int fcmp(float a,float b){ return a>b; }',
+    features: sym === 'f2i' ? ['float', 'cast', 'float-to-int'] : ['float', 'compare'],
+    toolchains: ['mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: sym === 'f2i' ? 'int f2i(float);' : 'int fcmp(float,float);',
+  })),
   // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
-  // folds to a negation; a conversion is a helper the table signs and cannot fold, so `fconv`
-  // declines naming `__fixsfsi` (as `f2i`, `i2f` and `fcmp` above do on agbcc); and a helper whose
-  // result reaches only a GUESSED call declines. That call does not count r0, which the helper
-  // wrote, so `g1(a * b)` reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product
-  // deleted (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
+  // folds to a negation, `__fixsfsi` to the cast (`fconv`); and a helper whose result reaches only a
+  // GUESSED call declines. That call does not count r0, which the helper wrote, so `g1(a * b)`
+  // reads `__mulsf3(); return g1();` and, folded, `return g1();`, the product deleted
+  // (raise/floathelpers.ts). The conversions to and from a long long are the 64-bit side of a
+  // helper; `u2f` has none, agbcc open-coding `(float)u` around `__floatsisf`, and declines. agbcc
+  // only: the other toolchains have a hardware FPU.
   {
     sym: 'fneg',
     src: 'float fneg(float a){ return -a; }',
@@ -2636,6 +2760,38 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'cast', 'float-to-int', 'arithmetic'],
     toolchains: ['agbcc'],
     ctx: 'int fconv(float,float);',
+  },
+  {
+    sym: 'll2f',
+    src: 'float ll2f(long long x){ return (float)x; }',
+    features: ['float', 'cast', 'int-to-float', 'int64'],
+    toolchains: ['agbcc'],
+    ctx: 'float ll2f(long long);',
+  },
+  {
+    sym: 'f2u',
+    src: 'unsigned f2u(float x){ return (unsigned)x; }',
+    features: ['float', 'cast', 'float-to-int', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'unsigned f2u(float);',
+  },
+  {
+    sym: 'u2f',
+    src: 'float u2f(unsigned x){ return (float)x; }',
+    features: ['float', 'cast', 'int-to-float', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'float u2f(unsigned);',
+  },
+  // A byte compared with a float is promoted to `int` and converted with `__floatsisf`, which the lift
+  // spells `(float)(s32)a0`: a bare `(float)a0` of the `u8` converts unsigned, which agbcc open-codes.
+  // agbcc only: on O32 the float after an int arrives in `a1` (an `mtc1` bit cast the lift refuses),
+  // and mwcc converts through an `lfd` of its magic constant.
+  {
+    sym: 'fcmpu8',
+    src: 'int fcmpu8(unsigned char c,float x){ return x < c; }',
+    features: ['float', 'compare', 'int-to-float', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'int fcmpu8(unsigned char,float);',
   },
   {
     sym: 'fcall',

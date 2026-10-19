@@ -12,7 +12,7 @@
 // in the driver.
 import { Block, Fn } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
-import { dce } from '../pattern/engine';
+import { NOT_FCMP_PATTERNS, applyPattern, dce } from '../pattern/engine';
 import { type FnProto, declaresVoidReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { readDeclaredMembers } from './aggmembers';
@@ -152,9 +152,19 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // from `widehelpers` because it re-types words as floats — a helper's, a parameter a callee
   // declares `double`, a literal — with its own closed-set refusal, and a single-precision helper
   // is a float helper that is not wide.
+  // A fold re-runs the float compares' negation idioms (pattern/engine.ts `NOT_FCMP_PATTERNS`),
+  // which ran before there was a float compare to negate.
   {
     id: 'floathelpers',
-    run: (fn, _self, _opts, target) => recognizeFloatHelpers(fn, target),
+    run: (fn, _self, _opts, target) => {
+      if (!recognizeFloatHelpers(fn, target)) {
+        return false;
+      }
+      if (NOT_FCMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p, target), 0) > 0) {
+        dce(fn);
+      }
+      return true;
+    },
     dce: false,
   },
   // NOT gated, where `softdiv` is, and the asymmetry is the argument: a soft DIVISION is

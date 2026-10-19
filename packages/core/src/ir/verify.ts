@@ -3,14 +3,14 @@
 //   1. every block ends in exactly one terminator (and it is the last op)
 //   2. operands well-formed: opcode registered, correct arity/attrs
 //   3. SSA: each value defined once; every use is defined; def dominates use
-//   4. a float value is an operand or result of a float op or `ret` only — or a `double` operand of
-//      a call whose callee declares one there — and crosses an edge only into a block parameter of
-//      its own type; an `fconst` is a double, sixteen hex digits into an f64
+//   4. a float value is an operand or result of a float op, a conversion or a compare, or `ret` only
+//      — or a `double` operand of a call whose callee declares one there — and crosses an edge only
+//      into a block parameter of its own type; an `fconst` is a double, sixteen hex digits into an f64
 //   5. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
 import { Block, Fn, Op, Value, dominators } from './core';
 import { isDoubleBits } from './float-bits';
-import { FLOAT_OPS, WIDE_BITS, opSig } from './opcodes';
+import { FLOAT_COMPUTING, FLOAT_OPS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, WIDE_BITS, opSig } from './opcodes';
 import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
 
 export class VerifyError extends Error {}
@@ -25,6 +25,30 @@ function doublesDeclared(op: Op): boolean {
     op.results.every((r) => r.type.kind !== 'float') &&
     op.operands.every((o, i) => o.type.kind !== 'float' || (at.includes(i) && typeEquals(o.type, T.f64())))
   );
+}
+
+/** The ops where a float meets an integer or the other precision, each held to the one shape it
+ *  has: a conversion takes a float of either stated precision or none and gives an integer, or the
+ *  reverse; a resize takes its own source width to its own destination width; a compare takes two
+ *  floats of one type and gives a 32-bit integer. The integer side may be narrower than a word once
+ *  recovery has typed it (`(float)x` of a `short` parameter), which converts the value it promotes
+ *  to; the C spelling casts through `s32`/`s64`. */
+function verifyFloatCrossing(op: Op): void {
+  const ins = op.operands.map((o) => o.type);
+  const out = op.results[0].type;
+  const isInt = (t: IrType) => intWidth(t) !== null;
+  const resize = FLOAT_RESIZE[op.opcode];
+  const ok = FLOAT_TO_INT.has(op.opcode)
+    ? ins[0].kind === 'float' && isInt(out)
+    : INT_TO_FLOAT.has(op.opcode)
+      ? isInt(ins[0]) && out.kind === 'float'
+      : resize !== undefined
+        ? typeEquals(ins[0], resize.from === 64 ? T.f64() : T.f32()) &&
+          typeEquals(out, resize.to === 64 ? T.f64() : T.f32())
+        : ins[0].kind === 'float' && typeEquals(ins[0], ins[1]) && intWidth(out) === 32;
+  if (!ok) {
+    throw new VerifyError(`'${op.opcode}' does not take ${ins.map(typeToString).join(', ')} to ${typeToString(out)}`);
+  }
 }
 
 // Opcodes admitting EITHER a 2-operand register form OR a 1-operand + `imm` attr form.
@@ -242,6 +266,8 @@ export function verify(fn: Fn): void {
             if (floats.length !== all.length || all.some((t) => !typeEquals(t, all[0]))) {
               throw new VerifyError(`'${op.opcode}' computes on floats only, got ${all.map(typeToString).join(', ')}`);
             }
+          } else if (FLOAT_COMPUTING.has(op.opcode)) {
+            verifyFloatCrossing(op);
           } else if (floats.length > 0 && op.opcode !== 'ret' && !doublesDeclared(op)) {
             throw new VerifyError(`a float value reaches '${op.opcode}', which does not compute on floats`);
           }
