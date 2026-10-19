@@ -360,12 +360,18 @@ export function liftStamped(
     split.ownContextProto,
     notes,
   );
-  // a struct a callee returns in a register is the local the call assigns, which the function's own
-  // struct return may then hand back
-  liftRegisterStructCalls(fn, table, target, own ?? split.ownContextProto);
+  // a struct a callee returns in a register is the local the call assigns, or the function's own
+  // return where every return hands that struct back whole
+  const calls = liftRegisterStructCalls(
+    fn,
+    table,
+    target,
+    own ?? split.ownContextProto,
+    ownReturn?.register === true ? ownReturn.type : undefined,
+  );
   verify(fn);
-  if (ownReturn !== undefined) {
-    returnOwnStruct(fn, name, target, ownReturn, notes, deferred);
+  if (ownReturn !== undefined && !calls.handedBack) {
+    returnOwnStruct(fn, name, target, ownReturn, notes, deferred, calls.readsImage);
     verify(fn);
   }
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
@@ -644,11 +650,21 @@ function returnOwnStruct(
   own: OwnStructReturn,
   notes: string[] | undefined,
   deferred: ((unproved: string) => never) | undefined,
+  readsCallStruct: boolean,
 ): void {
   if (own.register) {
     // a word the struct may not be all of stays the lift's own return, as the machine has it, and
     // the note says why the declared struct is not what it returns
     const kept = liftOwnRegisterStruct(fn, own.type);
+    // … save a word computed from a struct a call returned (frontend/register-struct-call.ts),
+    // which no lift read before that call's struct was one, and which the word return would
+    // print as the scalar the declaration contradicts: that refuses, as it did
+    if (kept !== undefined && readsCallStruct) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': it is declared to return ${own.type.declared ?? 'a struct'} by value, which comes back in ` +
+          `${target.returnReg} — ${kept}, and what it returns is computed from a struct a call returned there`,
+      );
+    }
     if (kept !== undefined) {
       notes?.push(
         `[own-return] ${name}: its ${own.stated ? '' : 'context '}declaration \`${own.declaration}\` returns ` +

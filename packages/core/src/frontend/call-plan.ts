@@ -117,9 +117,9 @@ export interface CallPlan {
     | { readonly kind: 'pair' }
     | {
         readonly kind: 'register-struct';
-        /** the local the return register's image is read off (`registerStructLocal`), where one
-         *  can be declared; absent, the register holds nothing the caller may read */
-        readonly local?: Extract<IrType, { kind: 'struct' }>;
+        /** the return register holds the struct's image, which a local of it is read off
+         *  (`registerStructLocal`); false, it holds nothing the caller may read */
+        readonly image: boolean;
       }
     | { readonly kind: 'memory-struct'; readonly type: IrType };
   /** what the call leaves holding nothing this function can name, for `SsaBuilder.noteCall` */
@@ -322,31 +322,6 @@ export function callDeclarations(
     return declaresAggregateReturn(own) && structReturnOf(name, target, callee!, own!, fail) === 'register'
       ? 'register'
       : undefined;
-  };
-  // A STRUCT RETURNED IN THE RETURN REGISTER IS READ OFF A LOCAL OF IT (frontend/register-struct-call.ts).
-  // The register holds the struct's bytes as the target lays them in a word: from bit 0 up where
-  // the target is little-endian (agbcc's `{u16}` is `strh r0` off the call), from bit 31 down where it
-  // is big-endian (mwcc's is `srwi r0,r3,16`). So the register is the struct's image, which the call
-  // writes and `liftRegisterStructCalls` re-reads as a load of the local the call assigns, and the
-  // member a later read takes out of it is that local's member: `s = mk(x); gV = s.h;`, which is
-  // what every such compiler compiles to these bytes. Only the declaration says the call returns a
-  // struct at all, since the bytes are a scalar callee's, so only a callee the project declares
-  // gets one, and only where the local can be:
-  //   - declared with a type (`structLocalType`): a union or a bitfield has none here;
-  //   - one, two or four bytes, the widths one load reads whole — three bytes, or the second
-  //     register of an eight-byte struct, is an image no load here builds;
-  //   - printed beside its callee's prototype, which the declarations block defines it by.
-  // Otherwise the register still holds nothing the caller may read.
-  const registerStructLocal = (callee: string): Extract<IrType, { kind: 'struct' }> | undefined => {
-    const own = known(prototypes, callee);
-    if (own === undefined) {
-      return undefined;
-    }
-    const type = structLocalType(own, target);
-    if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0)) {
-      return undefined;
-    }
-    return spellableProto(own, target, type) === undefined ? undefined : type;
   };
   // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. A frontend's outgoing-argument
   // analysis and its call lowering both come through here, so the arity that LICENSED a block and
@@ -621,7 +596,7 @@ export function callDeclarations(
     // a runtime helper's return is its table's, whatever a project declares on its name
     const declaredVoid = !isRuntimeHelperName(callee) && declaresVoidReturn(own);
     const voided = lowering.voidReturn && declaredVoid;
-    const local = returned === 'register' ? registerStructLocal(callee) : undefined;
+    const image = returned === 'register' && registerStructLocal(known(prototypes, callee), target) !== undefined;
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
@@ -633,14 +608,14 @@ export function callDeclarations(
           : returned === undefined
             ? { kind: 'word' }
             : returned === 'register'
-              ? { kind: 'register-struct', ...(local === undefined ? {} : { local }) }
+              ? { kind: 'register-struct', image }
               : { kind: 'memory-struct', type: returned.type },
       // a struct leaves the return register holding nothing the caller may read as a value, save
       // the image of one a local can be read off, and a void callee leaves it holding whatever the
       // callee did
       clobbers: pair
         ? pairReturnClobbers
-        : (returned === undefined && !voided) || local !== undefined
+        : (returned === undefined && !voided) || image
           ? callClobbers
           : [...callClobbers, target.returnReg],
       declaredVoid,
@@ -1052,7 +1027,7 @@ export function callDeclarations(
       attrs: {
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
-        ...(returns.kind === 'register-struct' && returns.local !== undefined ? { [REGISTER_STRUCT]: true } : {}),
+        ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
         ...(doubles === undefined ? {} : { doubles }),
         ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
@@ -1114,7 +1089,7 @@ export function callDeclarations(
       if (callee !== undefined) {
         pairCallee.set(res, callee);
       }
-    } else if (returns.kind === 'word' || (returns.kind === 'register-struct' && returns.local !== undefined)) {
+    } else if (returns.kind === 'word' || (returns.kind === 'register-struct' && returns.image)) {
       site.write(target.returnReg, res); // the callee defines the return register …
     }
     // … and the clobber is recorded after it, so that def is the CALLEE's; a struct, the memory at
@@ -1122,7 +1097,7 @@ export function callDeclarations(
     // may read as a value, save the image of one a local is declared for, which a guessed arity
     // still does not count (`SsaBuilder.noteStructImage`)
     ssa.noteCall(bi, p.clobbers);
-    if (returns.kind === 'register-struct' && returns.local !== undefined) {
+    if (returns.kind === 'register-struct' && returns.image) {
       ssa.noteStructImage(bi, target.returnReg, res);
     }
   };
@@ -1211,6 +1186,53 @@ export function structLocalType(
     };
   }
   return type;
+}
+
+// A STRUCT RETURNED IN THE RETURN REGISTER IS READ OFF A LOCAL OF IT (frontend/register-struct-call.ts).
+// The register holds the struct's bytes as the target lays them in a word: from bit 0 up where
+// the target is little-endian (agbcc's `{u16}` is `strh r0` off the call), from bit 31 down where it
+// is big-endian (mwcc's is `srwi r0,r3,16`). So the register is the struct's image, which the call
+// writes and `liftRegisterStructCalls` re-reads as a load of the local the call assigns, and the
+// member a later read takes out of it is that local's member: `s = mk(x); gV = s.h;`, which is
+// what every such compiler compiles to these bytes. Only the declaration says the call returns a
+// struct at all, since the bytes are a scalar callee's, so only a callee the project declares
+// gets one, and only where the local can be:
+//   - declared with a type (`structLocalType`): a union or a bitfield has none here;
+//   - one, two or four bytes, the widths one load reads whole — three bytes, or the second
+//     register of an eight-byte struct, is an image no load here builds;
+//   - printed beside its callee's prototype, which the declarations block defines it by;
+//   - all integers: a floating member has no spelling here that reads its bits as the float they
+//     are (structure.ts `frameStructMember` spells an integer field), and `*(s32 *)&s` stored to a
+//     `float` converts the value (agbcc: `bl __floatsisf`).
+// Otherwise the register still holds nothing the caller may read. The ONE derivation of that type:
+// the call plan marks the call by it, and `liftRegisterStructCalls` declares the local by it.
+export function registerStructLocal(
+  own: FnProto | undefined,
+  target: TargetDescription,
+): Extract<IrType, { kind: 'struct' }> | undefined {
+  if (own === undefined) {
+    return undefined;
+  }
+  const type = structLocalType(own, target);
+  if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0) || hasFloatingMember(type)) {
+    return undefined;
+  }
+  return spellableProto(own, target, type) === undefined ? undefined : type;
+}
+
+function hasFloatingMember(t: IrType): boolean {
+  switch (t.kind) {
+    case 'float':
+      return true;
+    case 'struct':
+      return t.fields.some((f) => hasFloatingMember(f.type));
+    case 'union':
+      return t.members.some((f) => hasFloatingMember(f.type));
+    case 'array':
+      return hasFloatingMember(t.elem);
+    default:
+      return false;
+  }
 }
 
 /** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering

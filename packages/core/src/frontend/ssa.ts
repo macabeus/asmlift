@@ -2128,7 +2128,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     if (argRegs[0] === returnReg && !fresh.has(argRegs[0]) && destroyed && setsUpLater(fresh)) {
       const callee = s.op.attrs.target;
       throw new FrontendUnsupportedError(
-        `cannot lift '${inp.name}': argument ${argRegs.indexOf(returnReg) + 1} of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
+        `cannot lift '${inp.name}': argument 1 of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
           `is a struct an earlier call handed back in ${returnReg}, and nothing here passes one on as an argument — not modelled`,
       );
     }

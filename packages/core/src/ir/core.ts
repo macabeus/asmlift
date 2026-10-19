@@ -322,8 +322,15 @@ export const OWN_RETURN_OBJECT = 'returned';
 /** The `call` attribute of L1 that says its result is the IMAGE of a struct its callee is declared
  *  to return in the return register (frontend/call-plan.ts `registerStructLocal`): a word the
  *  frontend reads as any call's, which `liftRegisterStructCalls` (frontend/register-struct-call.ts)
- *  turns into the struct assigned to a local and re-read off it. No call carries it past that. */
+ *  turns into the struct assigned to a local and re-read off it. No call carries it past that.
+ *  `true`, or {@link STRUCT_HOMED} where the frontend saw the image stored to a frame home. */
 export const REGISTER_STRUCT = 'registerStruct';
+
+/** The value of {@link REGISTER_STRUCT} on a call whose image the function stores to a frame word
+ *  (frontend/ppc.ts): mwcc gives a struct the source names a home, read or not, and one the source
+ *  only returns none — `struct T s = mk(1); return s;` is `bl mk; stw r3,8(r1)`, `return mk(1);` is
+ *  `bl mk` alone. */
+export const STRUCT_HOMED = 'homed';
 
 /** The `laddr` attribute that marks the local a struct returned in a register is assigned to
  *  (frontend/register-struct-call.ts), holding the callee's name, which names the local. The struct lives in the return register, not in this frame,

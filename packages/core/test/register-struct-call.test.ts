@@ -234,3 +234,73 @@ describe("mwcc: the struct's frame home is the local the call assigns", () => {
     ).toThrow(/'8\(r1\)' is stored at 0x14 and never read back/);
   });
 });
+
+describe('a struct with a floating member has no local here', () => {
+  test('agbcc: `struct T { float a; }` comes back in r0, and r0 still holds nothing the caller may read', () => {
+    // `struct T s = mk(x); gF = s.a;` against `extern float gF;`: read as `*(s32 *)&s`, the store
+    // would convert the bits to a float (`bl __floatsisf`)
+    const fl = agbcc('c_f', 'str');
+    expect(() =>
+      decompile('c_f', fl, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'float' }]) } }),
+    ).toThrow(/r0 is read on a path where a call has destroyed it/);
+  });
+});
+
+describe("a function returning what a call returned returns the call's struct", () => {
+  const T16 = mk([{ name: 'a', type: 'u16' }]);
+  const W = mk([{ name: 'a', type: 'u32' }]);
+  const ownT = (name: string): Record<string, FnProto> => ({
+    [name]: { params: ['s32'], returns: 'struct T', returnLayout: T16.returnLayout },
+  });
+  const ownW = (name: string): Record<string, FnProto> => ({
+    [name]: { params: [], returns: 'struct T', returnLayout: W.returnLayout },
+  });
+
+  test('agbcc: `return mk(x);` of a `{u16}`, which the own side cannot spell as a member copy', () => {
+    const fwd = 'f:\n\tpush\t{lr}\n\tbl\tmk\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', fwd, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } }).source).toMatch(
+      /struct T f\(s32 a0\) \{\s+return mk\(a0\);\s+\}/,
+    );
+  });
+
+  test('a word computed from the struct and returned as the own `{u16}` declines, as it did', () => {
+    // `struct T s = mk(x); s.a += 1; return s;`: agbcc keeps the pad's bits, which no member copy says
+    const mod =
+      'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
+    expect(() => decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(
+      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, and what it returns is computed from a struct a call returned there/,
+    );
+  });
+
+  test('mwcc_242_81: the call itself with no home, the local where the source named one', () => {
+    const target = TOOLCHAIN_TARGETS.mwcc_242_81.description;
+    const head = (name: string) =>
+      `00000000 <${name}>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tli      r3,1\n` +
+      `   c:\tstw     r0,20(r1)\n  10:\tbl      10 <${name}+0x10>\n\t\t\t10: R_PPC_REL24\tmk\n  14:\tlwz     r0,20(r1)\n`;
+    // `return mk(1);`
+    const bare = `${head('f')}  18:\tmtlr    r0\n  1c:\taddi    r1,r1,16\n  20:\tblr\n`;
+    expect(decompile('f', bare, target, { prototypes: { ...ownW('f'), mk: W } }).source).toMatch(
+      /struct T f\(void\) \{\s+return mk\(1\);\s+\}/,
+    );
+    // `struct T s = mk(1); return s;`, whose home `stw r3,8(r1)` nothing reads
+    const named = `${head('f')}  18:\tstw     r3,8(r1)\n  1c:\tmtlr    r0\n  20:\taddi    r1,r1,16\n  24:\tblr\n`;
+    expect(decompile('f', named, target, { prototypes: { ...ownW('f'), mk: W } }).source).toMatch(
+      /struct T f\(void\) \{\s+struct T mk_ret;\s+mk_ret = mk\(1\);\s+return mk_ret;\s+\}/,
+    );
+  });
+});
+
+test('mwcc_242_81: an unread home after the last call is no stack word of a call nothing declares before it', () => {
+  // `foo(); s = mk1(x); gW = s.x;`, foo undeclared: its call runs before the home is written
+  const before =
+    '00000000 <f>:\n   0:\tstwu    r1,-32(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,36(r1)\n   c:\tstw     r31,28(r1)\n' +
+    '  10:\tmr      r31,r3\n  14:\tbl      14 <f+0x14>\n\t\t\t14: R_PPC_REL24\tfoo\n  18:\tmr      r3,r31\n' +
+    '  1c:\tbl      1c <f+0x1c>\n\t\t\t1c: R_PPC_REL24\tmk\n  20:\tstw     r3,0(0)\n\t\t\t20: R_PPC_EMB_SDA21\tgW\n' +
+    '  24:\tlwz     r0,36(r1)\n  28:\tstw     r3,8(r1)\n  2c:\tlwz     r31,28(r1)\n  30:\tmtlr    r0\n' +
+    '  34:\taddi    r1,r1,32\n  38:\tblr\n';
+  const target = TOOLCHAIN_TARGETS.mwcc_242_81.description;
+  expect(
+    decompile('f', before, target, { prototypes: { ...own('f'), mk: mk([{ name: 'x', type: 'u32' }]) } }).source,
+  ).toMatch(/foo\(a0\);\s+mk_ret = mk\(a0\);\s+gW = /);
+});

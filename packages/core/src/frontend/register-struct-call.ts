@@ -14,7 +14,14 @@
 // the top of the word, which is where the struct's first byte sits there (mwcc's `{u16}` member is
 // `srwi r0,r3,16` off the call). Whatever the caller then takes out of the word — a truncating
 // store, a shift, a mask — reads the local's bytes, and the member recovery spells it as the
-// member it is: `gV = s.h;`.
+// member it is: `gV = s.h;`. Save one: a 4-byte read of the local (a `{u32}`'s member, or agbcc's
+// `{u16}`, rounded to four bytes, read whole by an add only a halfword store reads: `gH += s.h;`
+// is `gH = *(s32 *)&s + gH;`) is spelled `*(s32 *)&s`, because
+// structure.ts `frameStructMember` keeps a 4-byte read's own signedness (`spellsAccessType`) rather
+// than the member's. That is the frame-member spelling on every toolchain, the O32 struct returned
+// through memory's too (`gW = *(s32 *)&sp16;`), not something of this file's: the value is right,
+// and only where a reader's operand order or a frame copy depends on it (gcc 2.7.2's `&sp16` adds
+// one) does the cast cost bytes.
 //
 // WHAT THE IMAGE LEAVES OUT IS NO VALUE. A struct of one or two bytes — mwcc's; agbcc rounds every
 // struct to four — fills only that much of the register, and the rest holds whatever the callee
@@ -29,6 +36,8 @@ import {
   OWN_RETURN_OBJECT,
   type Op,
   REGISTER_STRUCT,
+  RETURNS_OBJECT,
+  STRUCT_HOMED,
   type Value,
   calleeName,
   defOpMap,
@@ -37,10 +46,10 @@ import {
   replaceAllUsesWith,
 } from '../ir/core';
 import { qualified } from '../ir/discipline';
-import { T } from '../ir/types';
+import { type IrType, T, typeEquals } from '../ir/types';
 import { type FnProto, type Prototypes, declaresVoidReturn } from '../proto';
 import type { TargetDescription } from '../target';
-import { structLocalType } from './call-plan';
+import { registerStructLocal } from './call-plan';
 import { FrontendUnsupportedError } from './errors';
 
 /** One call's struct, as `liftRegisterStructCalls` re-read it: the block it was assigned in, the
@@ -55,28 +64,103 @@ interface Image {
   loaded: Value;
 }
 
+/** What `liftRegisterStructCalls` did to the function's own return. */
+export interface OwnReturnOfCalls {
+  /** every `ret` hands back a call's struct whole, by value (`return mk(x);`) */
+  handedBack: boolean;
+  /** some `ret` returns a word computed from a call's struct, which only the function's own struct
+   *  return (pipeline.ts `returnOwnStruct`) can spell */
+  readsImage: boolean;
+}
+
 /** Rewrites every call `REGISTER_STRUCT` marks into the struct assigned to a local of its declared
  *  type, its word re-read off that local. `prototypes` is the table the frontend planned the calls
  *  from, so each marked callee's declaration lays the local out; `ownDeclaration` is the function's
- *  own, stated or the context's, which says whether its return reads the register. */
+ *  own, stated or the context's, which says whether its return reads the register, and `ownStruct`
+ *  the struct it declares it returns in that register, if it does.
+ *
+ *  A FUNCTION THAT RETURNS WHAT A CALL RETURNED returns the call: where every `ret` hands back the
+ *  very image a call to a callee declared to return the function's own struct left in the
+ *  register, and nothing else reads that image, the call's value is the struct and each `ret`
+ *  returns it, `return mk(x);`. Split into the local and a member copy instead, `ret.x = mk_ret.x`,
+ *  it compiles to a frame copy the source never had (mwcc: `stw r3,8(r1)`). */
 export function liftRegisterStructCalls(
   fn: Fn,
   prototypes: Prototypes,
   target: TargetDescription,
   ownDeclaration: FnProto | undefined,
-): void {
+  ownStruct: Extract<IrType, { kind: 'struct' }> | undefined,
+): OwnReturnOfCalls {
   const bigEndian = target.capabilities.endianness === 'big';
   const images: Image[] = [];
+  const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((op) => op?.opcode === 'ret');
+  const marked = new Map<Value, Op>();
+  for (const op of fn.blocks.flatMap((b) => b.ops)) {
+    if (op.opcode === 'call' && op.attrs[REGISTER_STRUCT] !== undefined) {
+      marked.set(op.results[0], op);
+    }
+  }
+  const defs = defOpMap(fn);
+  const isFrameAddress = (v: Value): boolean => {
+    const d = defs.get(v);
+    return d?.opcode === 'laddr' && d.attrs[OWN_RETURN_OBJECT] !== true && d.attrs[CALL_RETURN_OBJECT] === undefined;
+  };
+  // a store of the image into a frame word is its home (`foldFrameHome`), which reads no member
+  const homeStore = (op: Op, word: Value): boolean =>
+    op.opcode === 'store' &&
+    op.operands[1] === word &&
+    op.operands[0] !== word &&
+    isFrameAddress(op.operands[0]) &&
+    !qualified(op);
+  const handedBack =
+    ownStruct !== undefined &&
+    rets.length > 0 &&
+    rets.every((r) => {
+      const word = r.operands.length === 1 ? r.operands[0] : undefined;
+      const call = word === undefined ? undefined : marked.get(word);
+      const type = call === undefined ? undefined : registerStructLocal(prototypes[calleeName(call)!], target);
+      return (
+        type !== undefined &&
+        typeEquals(type, ownStruct) &&
+        fn.blocks.every((b) =>
+          b.ops.every(
+            (op) =>
+              (op === r || homeStore(op, word!) || !op.operands.includes(word!)) &&
+              op.successors.every((e) => !e.args.includes(word!)),
+          ),
+        )
+      );
+    });
+  // a struct the source names — it has a home — is returned as that local, `return mk_ret;`; one
+  // with none is the call itself, `return mk(x);`
+  const returnedWhole = new Map<Value, Op>();
+  if (handedBack) {
+    for (const r of rets) {
+      const word = r.operands[0];
+      const call = marked.get(word)!;
+      const homed =
+        call.attrs[REGISTER_STRUCT] === STRUCT_HOMED || fn.blocks.some((b) => b.ops.some((op) => homeStore(op, word)));
+      if (homed) {
+        returnedWhole.set(word, r);
+        continue;
+      }
+      const { [REGISTER_STRUCT]: _, ...attrs } = call.attrs;
+      call.attrs = attrs;
+      call.results = [mkValue(ownStruct)];
+      r.operands = [call.results[0]];
+    }
+  }
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
       const call = b.ops[i];
-      if (call.opcode !== 'call' || call.attrs[REGISTER_STRUCT] !== true) {
+      if (call.opcode !== 'call' || call.attrs[REGISTER_STRUCT] === undefined) {
         continue;
       }
       const callee = calleeName(call);
       const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
-      const type = own === undefined ? undefined : structLocalType(own, target);
-      if (callee === undefined || type === undefined || 'refused' in type || type.size === undefined) {
+      // the type the plan marked the call by (`registerStructLocal` is its one derivation)
+      const type = registerStructLocal(own, target);
+      if (callee === undefined || type?.size === undefined) {
         throw new Error(`'${fn.name}': a call marked to return a struct in a register has no declared struct`);
       }
       const size = type.size;
@@ -137,8 +221,14 @@ export function liftRegisterStructCalls(
         i++;
       }
       images.push({ block: b, callee, local, size, word, loaded });
+      const ret = returnedWhole.get(word);
+      if (ret !== undefined) {
+        ret.operands = [local];
+        ret.attrs = { ...ret.attrs, [RETURNS_OBJECT]: true };
+      }
     }
   }
+
   // THE MEMBER TAKEN BACK DOWN IS THE LOAD. A big-endian caller reads a sub-word struct's first
   // member by shifting the register down by exactly what the image shifted it up (`srwi r0,r3,16`
   // for a `{u16}`), and the load is narrower than the shift leaves room for, so the two shifts
@@ -164,12 +254,60 @@ export function liftRegisterStructCalls(
   for (const { word, size, callee } of images) {
     const struct = size >= 4 ? FULL : bigEndian ? (FULL << (32 - 8 * size)) >>> 0 : (1 << (8 * size)) - 1;
     if ((demandedBits(fn, word, voidOwn) & ~struct) >>> 0 !== 0) {
+      // a home `foldFrameHome` left is one read outside the call's block (mwcc 2.3.3 stores the
+      // word whole in each arm of an `if` and reads the member in the join), which is no read past
+      // the struct, only one this fold does not follow
+      if (fn.blocks.some((b) => b.ops.some((op) => homeStore(op, word) && op.attrs.width === 4))) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${fn.name}': \`${callee}\` hands back a struct of ${size} byte${size === 1 ? '' : 's'} in ` +
+            `${target.returnReg}, which this function stores to a frame home it reads outside the call's block — ` +
+            'not modelled',
+        );
+      }
       throw new FrontendUnsupportedError(
         `cannot lift '${fn.name}': \`${callee}\` hands back a struct of ${size} byte${size === 1 ? '' : 's'} in ` +
           `${target.returnReg}, and this function reads bits of the register past it — what the callee left there is no value`,
       );
     }
   }
+  // read off the local after the home fold too, which re-points a home's loads at it
+  const readsImage = images.some(({ local }) => reaches(fn, local, (op) => op.opcode === 'ret'));
+  return { handedBack, readsImage };
+}
+
+/** Whether a value computed from `root` — through any op's result or a join — is read by an op
+ *  `at` accepts. */
+function reaches(fn: Fn, root: Value, at: (op: Op) => boolean): boolean {
+  const seen = new Set<Value>([root]);
+  const work = [root];
+  while (work.length > 0) {
+    const v = work.pop()!;
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.operands.includes(v)) {
+          if (at(op)) {
+            return true;
+          }
+          for (const r of op.results) {
+            if (!seen.has(r)) {
+              seen.add(r);
+              work.push(r);
+            }
+          }
+        }
+        for (const e of op.successors) {
+          e.args.forEach((a, i) => {
+            const p = e.block.params[i];
+            if (a === v && !seen.has(p)) {
+              seen.add(p);
+              work.push(p);
+            }
+          });
+        }
+      }
+    }
+  }
+  return false;
 }
 
 /** THE STRUCT'S FRAME HOME IS THE LOCAL. A compiler that gives the struct a home in the frame stores

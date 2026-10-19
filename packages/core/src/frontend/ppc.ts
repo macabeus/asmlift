@@ -40,7 +40,18 @@
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { ownArgumentWordsOn } from '../aggregate';
-import { Block, Fn, Op, REGISTER_STRUCT, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import {
+  Block,
+  Fn,
+  Op,
+  REGISTER_STRUCT,
+  STRUCT_HOMED,
+  Successor,
+  Value,
+  mkOp,
+  mkValue,
+  replaceAllUsesWith,
+} from '../ir/core';
 import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -1682,7 +1693,10 @@ function liftOnce(
   // other word.
   const incomingStackKey = (entryOff: number): string | undefined =>
     incomingStackArgKey(entryOff, PARAM_AREA_AT, ARG_REGS.length);
-  const valueSlots = new Map<number, { addr: number; mem: string; read: boolean; stored: Value[] }>();
+  const valueSlots = new Map<
+    number,
+    { addr: number; mem: string; read: boolean; stored: { v: Value; at: number }[] }
+  >();
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
@@ -2051,7 +2065,7 @@ function liftOnce(
       if (!valueSlots.has(off)) {
         valueSlots.set(off, { addr: ins.addr, mem, read: false, stored: [] });
       }
-      valueSlots.get(off)!.stored.push(v);
+      valueSlots.get(off)!.stored.push({ v, at: ins.addr });
       return true;
     };
     const frameLoad = (ins: Instr, dstReg: string, mem: string): boolean => {
@@ -3457,22 +3471,64 @@ function liftOnce(
   // register there whole even where every member read is taken off r3 itself: `s = mk1(x); gW =
   // s.x;` is `bl mk1; stw r3,gW; ...; stw r3,8(r1)`, and nothing reloads the home. A word every
   // store of which is such an image holds that struct, and is no call's stack argument where every
-  // call this function makes is declared to take none: then it is the local the call assigns, which
-  // `liftRegisterStructCalls` (frontend/register-struct-call.ts) declares.
-  const images = new Set(
-    irBlocks.flatMap((b) => b.ops.filter((op) => op.attrs[REGISTER_STRUCT] === true).map((op) => op.results[0])),
+  // call that can run after one of those stores — later in its block, or in a block reachable from
+  // it — is declared to take none: then it is the local the call assigns, which
+  // `liftRegisterStructCalls` (frontend/register-struct-call.ts) declares. A call before every store
+  // reads the word before it is written, so it cannot be handed the struct there.
+  const imageCalls = new Map(
+    irBlocks.flatMap((b) =>
+      b.ops.filter((op) => op.attrs[REGISTER_STRUCT] !== undefined).map((op) => [op.results[0], op] as const),
+    ),
   );
-  const noStackArgs = reached
-    .filter((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins))
-    .every((ins) => {
-      const declared = calls.declaredCall(ins.reloc?.sym ?? '');
-      return declared !== null && wordsOf(declared.widths, target) <= ARG_REGS.length;
-    });
+  const images = new Set(imageCalls.keys());
+  // a struct with a home is one the source names (ir/core.ts `STRUCT_HOMED`)
+  for (const { stored } of valueSlots.values()) {
+    for (const { v } of stored) {
+      const call = imageCalls.get(v);
+      if (call !== undefined) {
+        call.attrs = { ...call.attrs, [REGISTER_STRUCT]: STRUCT_HOMED };
+      }
+    }
+  }
+  const takesNoStackWord = (ins: Instr): boolean => {
+    if (ins.mnemonic === 'bctrl' || ins.mnemonic === 'blrl') {
+      return false; // nothing declares what an indirect call takes
+    }
+    if (ins.mnemonic !== 'bl' || saveRoutineOf(target, ins)) {
+      return true;
+    }
+    const declared = calls.declaredCall(ins.reloc?.sym ?? '');
+    return declared !== null && wordsOf(declared.widths, target) <= ARG_REGS.length;
+  };
+  const blockOfAddr = new Map(blocks.flatMap((b, bi) => b.body.map((ins, k) => [ins.addr, { bi, k }] as const)));
+  const noCallAfterTakesStack = (addr: number): boolean => {
+    const at = blockOfAddr.get(addr);
+    if (at === undefined) {
+      return false;
+    }
+    if (!blocks[at.bi].body.slice(at.k + 1).every(takesNoStackWord)) {
+      return false;
+    }
+    const seen = new Set<number>();
+    const work = [...succIdx[at.bi]];
+    while (work.length > 0) {
+      const bi = work.pop()!;
+      if (seen.has(bi)) {
+        continue;
+      }
+      seen.add(bi);
+      if (!blocks[bi].body.every(takesNoStackWord)) {
+        return false;
+      }
+      work.push(...succIdx[bi]);
+    }
+    return true;
+  };
   const depthOfAddr = new Map(blocks.flatMap((b) => b.body.map((ins) => [ins.addr, r1At.get(ins)] as const)));
   for (const [off, { addr, mem, read, stored }] of valueSlots) {
     const depth = depthOfAddr.get(addr);
     const deadLocal = typeof depth === 'number' && off < 0 && off >= loadedWordBound(depth);
-    const structHome = noStackArgs && stored.length > 0 && stored.every((v) => images.has(v));
+    const structHome = stored.length > 0 && stored.every(({ v, at }) => images.has(v) && noCallAfterTakesStack(at));
     if (!read && !deadLocal && !structHome) {
       throw new PpcUnsupportedError(
         `cannot lift '${name}': local stack frames not supported — '${mem}' is stored at 0x${addr.toString(16)} ` +
