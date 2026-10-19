@@ -99,7 +99,7 @@ test('the fold covers every comparison, in BOTH operand orders, and is involutiv
   const negated: Record<string, string> = { ...NEGATED_ICMP, ...NEGATED_FCMP };
   expect(NOT_CMP_PATTERNS.map((p) => p.id).sort()).toEqual(
     Object.keys(negated)
-      .flatMap((c) => [`not-${c}`, `not-zerotest-${c}`, `is-zerotest-${c}`])
+      .flatMap((c) => [`not-${c}`, `not-zerotest-${c}`, ...(c in NEGATED_FCMP ? [] : [`is-zerotest-${c}`])])
       .sort(),
   );
   for (const cmp of Object.keys(negated)) {

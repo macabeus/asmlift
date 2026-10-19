@@ -669,19 +669,30 @@ const cmpZeroPat = (cmp: string, test: 'icmp_eq' | 'icmp_ne'): RewritePattern =>
 // compiles apart (`cntlzw` of the EQ bit for the first, `xori` for the second), so it recompiles to
 // the other object. Unfolded it would be no better: the zero test is CNTLZW_EQ0's u32, and a u32
 // result declares an `int` function `u32`.
-const notCmpPatterns = (table: Readonly<Record<string, Opcode>>): RewritePattern[] => [
+const notCmpPatterns = (
+  table: Readonly<Record<string, Opcode>>,
+  tests: readonly ('icmp_eq' | 'icmp_ne')[],
+): RewritePattern[] => [
   ...Object.keys(table).map(notCmpPat),
-  ...Object.keys(table).flatMap((cmp) => [cmpZeroPat(cmp, 'icmp_eq'), cmpZeroPat(cmp, 'icmp_ne')]),
+  ...Object.keys(table).flatMap((cmp) => tests.map((t) => cmpZeroPat(cmp, t))),
 ];
 /** The float compares' share of `NOT_CMP_PATTERNS`, which raise/pre-recovery.ts runs again once
  *  agbcc's compare helpers have folded to float compares: the idioms run before that pass, when
- *  `__ltsf2(a, b) >> 31 ^ 1` has no compare to negate yet. */
-export const NOT_FCMP_PATTERNS: RewritePattern[] = notCmpPatterns(NEGATED_FCMP);
+ *  `__ltsf2(a, b) >> 31 ^ 1` has no compare to negate yet. WITHOUT `cmp != 0 → cmp`, which is how
+ *  PowerPC's record-form extract of a compare's bit reaches a branch (`mfcr; srwi. r0,r0,31;
+ *  bnelr`): mwcc 2.4.2 and 2.4.7 compile `if (!(a < b)) gI = 1;` to that, and the lift folded
+ *  through it, `if (!(a0 < a1)) { gI = 1; return; }`, to a plain `bltlr`, where the unfolded
+ *  `if (a0 < a1 == 0) { …; return; }` is the extract again (`synthetic:fcmpbrn`). */
+export const NOT_FCMP_PATTERNS: RewritePattern[] = notCmpPatterns(NEGATED_FCMP, ['icmp_eq']);
 /** `cmp ^ 1` and the zero-test forms `cmp == 0` / `cmp != 0` → the (negated) comparison. Every
- *  entry is one comparison of `NEGATED_ICMP` or `NEGATED_FCMP`; the bundle is what the
+ *  entry is one comparison of `NEGATED_ICMP` or `NEGATED_FCMP` (a float compare's `!= 0` aside,
+ *  `NOT_FCMP_PATTERNS`); the bundle is what the
  *  boolean-reasoning consumers downstream (short-circuit recovery, the structurer's condition
  *  spelling) actually match on. */
-export const NOT_CMP_PATTERNS: RewritePattern[] = [...notCmpPatterns(NEGATED_ICMP), ...NOT_FCMP_PATTERNS];
+export const NOT_CMP_PATTERNS: RewritePattern[] = [
+  ...notCmpPatterns(NEGATED_ICMP, ['icmp_eq', 'icmp_ne']),
+  ...NOT_FCMP_PATTERNS,
+];
 
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is
 // EVERY idiom asmlift owns; the list self-selects per target through patternApplies — agbcc/gcc get
