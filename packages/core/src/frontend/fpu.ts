@@ -247,15 +247,16 @@ export function carriesFloatHome(rule: ReturnHomeRule, homes: readonly HomeAtRet
 /** SETTLE THE RETURN HOME of a lifted function, and refuse where the bytes do not decide it.
  *  `sites` are its returns, each reading what the INTEGER home rule gave it (the operand a `ret`
  *  reads where the function returns a word), plus, where `carriesFloat`, the float home's value
- *  last; `homes` is what the float home holds at each (`floatHomeAt`). Run after the SSA is
- *  finished.
+ *  last; `homes` is what the float home holds at each (`floatHomeAt`); `movedIn` the words a move
+ *  from the integer file put in an FPU register. Run after the SSA is finished.
  *
  *  An INTEGER WORD in the float home at a return refuses, unless the integer home proves itself
  *  (below) or the own declaration says the return is no float: `mtc1 $zero,$f0` is how IDO, KMC and
  *  GCC 2.7.2 return `0.0f`, and `mtc1 a1,$f0` how they return a float that arrived in a GPR, and
  *  either is the word's bits as a float, which is not modelled. KMC's `trunc.w.s $f0,$f12; mfc1
- *  v0,$f0` leaves a word there too, and returns it in `v0`. A float return whose `ret` reads a word
- *  refuses as well.
+ *  v0,$f0` leaves a word there too, and returns it in `v0`. A word an `mtc1` moved in refuses even
+ *  where the integer home proves itself, since that proof reads the same value. A float return whose
+ *  `ret` reads a word refuses as well.
  *
  *  An UNDECIDED function returns the home whose value at every return was computed only to be
  *  returned (frontend/dead-reads.ts `computedOnlyToReturn`): an optimizing compiler emits no write
@@ -277,6 +278,7 @@ export function settleReturnHome(
   carriesFloat: boolean,
   fpu: Fpu,
   intReg: string,
+  movedIn: ReadonlySet<Value> = new Set(),
 ): void {
   const floatAt = carriesFloat ? sites.map(({ op }) => op.operands.pop()!) : undefined;
   const isFloat = (v: Value) => v.type.kind === 'float';
@@ -287,6 +289,16 @@ export function settleReturnHome(
       );
     }
     return;
+  }
+  // A word MOVED IN from the integer file (`mtc1 v0,$f0`) is one value with its source in the IR, so
+  // the integer home would seem to prove itself: `float u(float a, float b){ U u; u.i = a < b ? 1 :
+  // 2; return u.f; }` computes into `v0` and returns it in `$f0`. KMC's `f2i` leaves the word by
+  // `trunc.w` and moves it OUT, which is the other direction.
+  if (!rule.declared && homes.some((h) => h.defs.some((v) => movedIn.has(v)))) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': ${fpu.returnReg}, the float return register, holds an integer word at a return ` +
+        "that an 'mtc1' moved in from the integer file — the word's bits as a float are not modelled",
+    );
   }
   const computed = computedOnlyToReturn(fn.blocks);
   const intProven = sites.every(({ op }) => op.operands.length === 1 && computed(op.operands[0]));

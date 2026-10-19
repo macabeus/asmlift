@@ -1847,6 +1847,8 @@ function liftOnce(
 
   /** Every return, as it is emitted: `settleReturnHome` may hand it the float home instead. */
   const returns: { op: Op; bi: number }[] = [];
+  /** The words an `mtc1` moved into an FPU register (`emitFpMove`). */
+  const movedIn = new Set<Value>();
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
     // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
@@ -2495,7 +2497,8 @@ function liftOnce(
       }
       return keys as string[];
     };
-    // `mfc1 rt, fs` / `mtc1 rt, fs`: an integer word between the files, unchanged.
+    // `mfc1 rt, fs` / `mtc1 rt, fs`: an integer word between the files, unchanged. Which words came
+    // IN is kept for `settleReturnHome`: the IR holds both homes as one value.
     const emitFpMove = (ins: Instr) => {
       const keys = fpOperands(ins, [1]);
       if (keys === null) {
@@ -2504,7 +2507,9 @@ function liftOnce(
       if (ins.mnemonic === 'mfc1') {
         write(ins.ops[0], readWord(ins, keys[0]));
       } else {
-        write(keys[0], read(ins.ops[0]));
+        const v = read(ins.ops[0]);
+        movedIn.add(v);
+        write(keys[0], v);
       }
     };
     const emitFpConvert = (ins: Instr) => {
@@ -2992,7 +2997,7 @@ function liftOnce(
   refuseFpWordCrossings(name, ssa.fn);
   // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
   if (fpu) {
-    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET);
+    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET, movedIn);
   }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);

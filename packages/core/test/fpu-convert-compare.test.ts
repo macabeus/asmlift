@@ -158,7 +158,7 @@ describe('which home a function returns in, once a float reaches the integer fil
   // `mtc1 zero,$f0` is how the MIPS compilers return 0.0f: the word's bits as a float.
   test('an integer word in the float home at a return refuses', () => {
     expect(() => kmc('fz', '   0:\tmtc1\tzero,$f0\n   4:\tjr\tra\n   8:\tnop\n')).toThrow(
-      '$f0, the float return register, holds an integer word at a return, and v0 holds no value computed only to be returned',
+      "$f0, the float return register, holds an integer word at a return that an 'mtc1' moved in",
     );
     // float fz2(float a, float b){ if (a < b) return 0.0f; return a; } at IDO, where one path returns
     // the word and the other the float argument.
@@ -171,6 +171,24 @@ describe('which home a function returns in, once a float reaches the integer fil
         prototypes: { fz2: { params: ['float', 'float'], returns: 'float' } },
       }),
     ).toThrow('a return reads an integer word from $f0, the float return register');
+  });
+
+  // typedef union { int i; float f; } U; float u3(float a, float b){ U u; u.i = a < b ? 0x3f800000 :
+  // 0x40000000; return u.f; } and float u4(float a){ U u; u.i = (int)a << 1; return u.f; } at KMC
+  // compute the word in v0 and move it into $f0. v0's only reader in the IR is the return, as in
+  // KMC's f2i, which moves its word the other way.
+  test('a word moved into the float home refuses, though the integer home seems to prove itself', () => {
+    const u3 =
+      '   0:\tc.lt.s\t$f12,$f14\n   4:\tnop\n   8:\tnop\n   c:\tbc1t\t18 <u3+0x18>\n  10:\tlui\tv0,0x4000\n' +
+      '  14:\tlui\tv0,0x3f80\n  18:\tmtc1\tv0,$f0\n  1c:\tjr\tra\n  20:\tnop\n';
+    const u4 =
+      '   0:\ttrunc.w.s\t$f0,$f12\n   4:\tmfc1\tv0,$f0\n   8:\tnop\n   c:\tsll\tv0,v0,0x1\n' +
+      '  10:\tmtc1\tv0,$f0\n  14:\tjr\tra\n  18:\tnop\n';
+    const moved = "holds an integer word at a return that an 'mtc1' moved in from the integer file";
+    expect(() => kmc('u3', u3)).toThrow(moved);
+    expect(() => kmc('u4', u4)).toThrow(moved);
+    // the own declaration of an integer return says the caller reads v0
+    expect(kmc('u4', u4, { u4: { params: ['float'], returns: 'int' } })).toContain('return (s32)a0 << 1;');
   });
 
   // float mx(float a, float b, int *p){ if (a < b) *p = 1; return a; } at mwcc leaves f1, the first
