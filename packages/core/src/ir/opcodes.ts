@@ -379,9 +379,9 @@ export function opSig(opcode: string): OpSig | undefined {
  *  It lives here so that every consumer that has to say "the opposite of this compare" reads THIS
  *  one, and they cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
  *  shortcircuit.ts derives its `BOOL_OPS` from these keys and `NEGATED_FCMP`'s (asserting
- *  negatable compare == boolean-op, true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
- *  vocabulary — deliberately separate, because signedness lives in the operand types there, so the
- *  two tables are not candidates for further consolidation. */
+ *  negatable compare == boolean-op, true today), and l3/ast.ts `NEGATE_REL` is the SAME relation
+ *  over the neutral L3 operator vocabulary — deliberately separate, because signedness lives in the
+ *  operand types there, so the two tables are not candidates for further consolidation. */
 const ICMP_NEGATION_PAIRS: readonly (readonly [Opcode, Opcode])[] = [
   ['icmp_eq', 'icmp_ne'],
   ['icmp_slt', 'icmp_sge'],

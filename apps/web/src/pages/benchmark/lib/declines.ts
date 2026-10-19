@@ -337,8 +337,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     // What it does NOT cover is still decided elsewhere, and correctly: a `bc1t`/`bc1f` this
     // frontend cannot read names no FP register operand and refuses in `mips.ts` (`fp-cond-branch`,
-    // above; the one condition code a `c.cond` sets is read now, and no row is left), and an FPU instruction in
-    // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
+    // above; the one condition code a `c.cond` sets is read, so no row is left), and an FPU
+    // instruction in a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
     // in `declines.test.ts`: it claims the 65 rows whose own message names an FPU instruction.
@@ -353,10 +353,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // And the crossings between the files: an FPU register's integer word read as a float or the
     // reverse (frontend/fpu.ts `refuseFpWordCrossings` and both frontends' reads), a function whose
     // return home the bytes do not decide or that leaves a word in the float return register
-    // (`settleReturnHome`), a MIPS branch on a condition
-    // code no compare in its block set, PowerPC's condition-register readers past the shapes
-    // modelled (`cror`, an `mfcr` copy, `fcmpu`'s ordering bits), and a reload of the high word an
-    // `fctiwz` result's `stfd` leaves undefined.
+    // (`settleReturnHome`), a MIPS branch on a condition code no compare in its block set,
+    // PowerPC's condition-register readers past the shapes modelled (`cror`, an `mfcr` copy,
+    // `fcmpu`'s ordering bits), and a reload of the high word an `fctiwz` result's `stfd` leaves
+    // undefined.
     pattern:
       /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|a float reaches the integer file|the float return register|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'|'fctiwz' leaves that half/,
   },

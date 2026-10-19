@@ -826,8 +826,9 @@ const NEGATE_BUDGET = 8;
  *    - the cone exceeds `NEGATE_BUDGET` minted ops.
  *
  *  Ops are MINTED, never mutated: the originals stay where the caller hoisted them and die to the
- *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`fcmp_*`/`logic_and`/`logic_or` are
- *  ever rebuilt, all of them pure, so no effect can be duplicated or reordered by construction.
+ *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`fcmp_*`/`logic_and`/
+ *  `logic_or` are ever rebuilt, all of them pure, so no effect can be duplicated or reordered by
+ *  construction.
  *
  *  Nothing is SHARED between paths, and that is the point rather than a limitation. Memoizing `go`
  *  in a `Map<Value, Value>` is three lines and would make the budget unnecessary — and it would
@@ -837,10 +838,10 @@ const NEGATE_BUDGET = 8;
  *  of both folds. So the per-path rebuild is the mechanism and NEGATE_BUDGET is its price.
  *
  *  What it GUARANTEES about its result, which one caller leans on: every op it mints is an `icmp_*`,
- *  an `fcmp_*` or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value form hands an
- *  un-negated head straight on as the merge VALUE, which is why that caller checks booleanness for
- *  itself before deciding whether to call here at all (see its head gate); the branch form needs no
- *  such check, because its result only ever feeds a `cond_br`.
+ *  an `fcmp_*` or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value
+ *  form hands an un-negated head straight on as the merge VALUE, which is why that caller checks
+ *  booleanness for itself before deciding whether to call here at all (see its head gate); the
+ *  branch form needs no such check, because its result only ever feeds a `cond_br`.
  *
  *  PRECONDITION, earned by the caller and not checked here: every value in the cone must dominate
  *  the point the caller splices `ops` into — the minted comparisons reuse the ORIGINAL leaf

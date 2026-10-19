@@ -2,8 +2,9 @@
 // with `mfc1`/`mtc1` moving the integer word) and the compares (`c.eq`/`c.lt`/`c.le` and the branch on
 // the condition code they set); on PowerPC `fctiwz` through the frame and `fcmpo`/`fcmpu` through a
 // condition-register field, a branch, a `cror` or an `mfcr` extract — onto the IR's conversions and
-// float compares. Every listing is the
-// toolchain's own at its canonical flags, and each lift recompiles to it (checked when taken).
+// float compares. Every listing a test accepts is the toolchain's own at its canonical flags, and its
+// lift recompiled to it when the listing was taken; the tests pin the spelling. A refusal's listing may
+// be hand asm.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';

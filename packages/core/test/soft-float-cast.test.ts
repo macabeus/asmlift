@@ -1,6 +1,6 @@
-// agbcc's conversions: one libgcc call each (`runtime-helpers.ts` AGBCC_RUNTIME_HELPERS), folded by
-// `raise/floathelpers.ts` into the cast it computes. The float side of each keeps the closed-set rule
-// the arithmetic follows; the integer side is any integer value.
+// agbcc's conversions, and below its compares: one libgcc call each (`runtime-helpers.ts`
+// AGBCC_RUNTIME_HELPERS). A conversion folds in `raise/floathelpers.ts` into the cast it computes; its
+// float side keeps the closed-set rule the arithmetic follows, and its integer side is any integer.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';

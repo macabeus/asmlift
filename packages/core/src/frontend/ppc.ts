@@ -1891,12 +1891,11 @@ function liftOnce(
   };
   /** Whether every word return hands back a value computed ONLY to be returned: on every path into
    *  it, r3's last write is one (frontend/dead-reads.ts `computedOnlyToReturn`), so the function
-   *  returns a word. `int f(int a) {
-   *  switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ; blr` on every case and a bare
-   *  `blr` out of range. A temporary is read again (`lwz r3,gB ; addi r0,r3,1`), and a
-   *  call's result and a load are excluded — a void function's call leaves its callee's result in
-   *  r3, and a discarded `volatile` read is a load nobody reads — so `void f(void) { if (gA & 2)
-   *  return; gB++; }` still answers no.
+   *  returns a word. `int f(int a) { switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ;
+   *  blr` on every case and a bare `blr` out of range. A temporary is read again (`lwz r3,gB ; addi
+   *  r0,r3,1`), and a call's result and a load are excluded — a void function's call leaves its
+   *  callee's result in r3, and a discarded `volatile` read is a load nobody reads — so `void
+   *  f(void) { if (gA & 2) return; gB++; }` still answers no.
    *
    *  What it cannot tell apart is an `int f(void)` with a path that falls off its end: that path
    *  returns whatever the caller left in r3 too, and is lifted as returning it — the bytes' own
