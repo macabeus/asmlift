@@ -99,12 +99,12 @@ describe('what refuses', () => {
     );
   });
 
-  // A double into a compare is a call to a helper the table SIGNS: its pair is built off the
-  // signature, the fold refuses the arithmetic that feeds it, and the helper itself has no op to
-  // fold into, so both decline naming the runtime.
+  // A double into a compare, against a literal agbcc loads from its pool: the compare is the test
+  // its result is put to, `> 0`.
   test('dgt: a double into __gtdf2', () => {
-    expect(() => lift('dgt')).toThrow(
-      "no model for the runtime helper '__adddf3'; no model for the runtime helper '__gtdf2'",
+    expect(lift('dgt')).toBe(
+      's32 dgt(double a0, double a1) {\n    s32 v0;\n    if (a0 + a1 > 0.0) {\n        v0 = 1;\n    } else {\n' +
+        '        v0 = 0;\n    }\n    return v0;\n}\n',
     );
   });
 
@@ -196,19 +196,19 @@ describe('what the table names', () => {
     }
   });
 
-  // The compares only SIGN: their result is an integer every reader has to be shown to test.
-  test('every compare, signed and with no op', () => {
-    for (const name of ['__gtsf2', '__eqdf2', '__nesf2', '__ledf2']) {
-      expect(AGBCC_RUNTIME_HELPERS[name]?.op, name).toBeUndefined();
+  // A compare has no one op: which compare it is depends on the test its result is put to, so each
+  // states libgcc's answer on a NaN instead (`raise/floathelpers.ts` reads the rest off the test).
+  test('every compare, with its answer on a NaN and no op', () => {
+    const unordered = { __eqsf2: 1, __nesf2: 1, __ltsf2: 1, __lesf2: 1, __gtsf2: -1, __gesf2: -1 } as const;
+    for (const [name, nan] of Object.entries(unordered)) {
+      for (const helper of [name, name.replace('sf2', 'df2')]) {
+        expect(AGBCC_RUNTIME_HELPERS[helper]?.op, helper).toBeUndefined();
+        expect(AGBCC_RUNTIME_HELPERS[helper]?.unordered, helper).toBe(nan);
+      }
     }
   });
 
-  test.each([['fcmp', '__gtsf2']])('%s: a call to %s refuses', (name, helper) => {
-    const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
-    expect(() => decompile(name, single, ARMV4T_AGBCC).source).toThrow(`no model for the runtime helper '${helper}'`);
-  });
-
-  test('the float arithmetic and the conversions are float helpers, and nothing else in the table is', () => {
+  test('the float arithmetic, the compares and the conversions are float helpers, and nothing else is', () => {
     const floats = Object.keys(AGBCC_RUNTIME_HELPERS).filter((name) => isFloatHelper(AGBCC_RUNTIME_HELPERS[name]));
     expect(floats).toEqual([
       '__adddf3',
@@ -221,6 +221,18 @@ describe('what the table names', () => {
       '__mulsf3',
       '__divsf3',
       '__negsf2',
+      '__eqsf2',
+      '__nesf2',
+      '__gtsf2',
+      '__gesf2',
+      '__ltsf2',
+      '__lesf2',
+      '__eqdf2',
+      '__nedf2',
+      '__gtdf2',
+      '__gedf2',
+      '__ltdf2',
+      '__ledf2',
       '__fixsfsi',
       '__fixunssfsi',
       '__floatsisf',

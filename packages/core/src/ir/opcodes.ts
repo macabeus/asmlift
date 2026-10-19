@@ -326,6 +326,22 @@ export const NEGATED_FCMP: Readonly<Record<string, Opcode>> = Object.fromEntries
   ]),
 );
 
+/** What each float compare answers when its first operand is LESS than, EQUAL to or GREATER than
+ *  its second, and when the two are UNORDERED (either is a NaN): the definition of the ten, from
+ *  which a compare a runtime computes some other way is read (raise/floathelpers.ts). */
+export const FCMP_TRUTH: Readonly<Record<string, readonly [lt: boolean, eq: boolean, gt: boolean, un: boolean]>> = {
+  fcmp_olt: [true, false, false, false],
+  fcmp_ole: [true, true, false, false],
+  fcmp_ogt: [false, false, true, false],
+  fcmp_oge: [false, true, true, false],
+  fcmp_oeq: [false, true, false, false],
+  fcmp_une: [true, false, true, true],
+  fcmp_uge: [false, true, true, true],
+  fcmp_ugt: [false, false, true, true],
+  fcmp_ule: [true, true, false, true],
+  fcmp_ult: [true, false, false, true],
+};
+
 /** Every op that computes on a float: the arithmetic, the conversions and the compares. A runtime
  *  helper whose op is one of these is a float helper (runtime-helpers.ts `isFloatHelper`). */
 export const FLOAT_COMPUTING: ReadonlySet<string> = new Set([
@@ -354,8 +370,8 @@ export function opSig(opcode: string): OpSig | undefined {
  *
  *  It lives here so that every consumer that has to say "the opposite of this compare" reads THIS
  *  one, and they cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
- *  shortcircuit.ts derives its `BOOL_OPS` from these keys (asserting negatable-icmp == boolean-op,
- *  true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
+ *  shortcircuit.ts derives its `BOOL_OPS` from these keys and `NEGATED_FCMP`'s (asserting
+ *  negatable compare == boolean-op, true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
  *  vocabulary — deliberately separate, because signedness lives in the operand types there, so the
  *  two tables are not candidates for further consolidation. */
 const ICMP_NEGATION_PAIRS: readonly (readonly [Opcode, Opcode])[] = [

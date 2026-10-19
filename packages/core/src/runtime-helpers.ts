@@ -41,6 +41,11 @@ export interface RuntimeHelper {
   params: readonly number[];
   /** the returned width: 0 (void), 32, or 64 (a register PAIR). */
   returns: 0 | 32 | 64;
+  /** A THREE-WAY FLOAT COMPARE: its result's SIGN orders its two operands (negative, zero, positive
+   *  for less, equal, greater), and this is the value it returns where either is a NaN. A compare
+   *  folds through the integer test its caller applies to the result (raise/floathelpers.ts), so it
+   *  carries this in place of an `op`. */
+  unordered?: 1 | -1;
 }
 
 /** The entry a target's table holds for `callee`, or undefined. THE ONE READER, because the table
@@ -126,7 +131,7 @@ export function helperOp(opcode: Opcode, helper: string, operands: readonly Valu
  *  over the same values, a float helper into its op over values re-typed as floats where the op
  *  takes one (`raise/floathelpers.ts`). */
 export function isFloatHelper(h: RuntimeHelper): boolean {
-  return h.op !== undefined && FLOAT_COMPUTING.has(h.op);
+  return h.unordered !== undefined || (h.op !== undefined && FLOAT_COMPUTING.has(h.op));
 }
 
 /** Which sides of a float helper are floats: its operands (one kind for all of them, in every op
@@ -135,7 +140,7 @@ export function floatSidesOf(h: RuntimeHelper): { operands: boolean; result: boo
   const op = h.op ?? '';
   return {
     operands: !INT_TO_FLOAT.has(op),
-    result: !FLOAT_TO_INT.has(op) && NEGATED_FCMP[op] === undefined,
+    result: h.unordered === undefined && !FLOAT_TO_INT.has(op) && NEGATED_FCMP[op] === undefined,
   };
 }
 
@@ -172,10 +177,11 @@ export function helperPrototypes(
  *  `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`.
  *
  *  THE CONVERSIONS FOLD TOO, to the cast each computes (`fptosi`, `sitofp`, `fpext` …), with an
- *  integer on one side that `raise/floathelpers.ts` takes as any integer. THE COMPARES ONLY SIGN:
- *  each carries no `op` and refuses (`refuseUnmodelledHelpers`), as `IDO_RUNTIME_HELPERS` signs its
- *  conversions. Unnamed, each would be the same guess, dropping the argument passed on unchanged and
- *  matching byte for byte: `(int)x` as `__fixsfsi()`, `(float)i` as `__floatsisf()`, `a > b` as
+ *  integer on one side that `raise/floathelpers.ts` takes as any integer. THE COMPARES fold through
+ *  the test their caller applies to the integer they return, by libgcc's contract for it
+ *  (`unordered`), and one whose result is read any other way refuses (`refuseUnmodelledHelpers`).
+ *  Unnamed, each would be the same guess, dropping the argument passed on unchanged and matching
+ *  byte for byte: `(int)x` as `__fixsfsi()`, `(float)i` as `__floatsisf()`, `a > b` as
  *  `__gtsf2() > 0`. The names are the ones agbcc
  *  emits for every compare, every conversion between `int`, `unsigned`, `long long` and either
  *  precision, and every widening and narrowing between the two precisions (compiled evidence: one
@@ -213,19 +219,23 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
   __divsf3: { op: 'fdiv', params: [32, 32], returns: 32 },
   __negsf2: { op: 'fneg', params: [32], returns: 32 },
-  // The compares, one int out of two floats of either precision: its sign against 0 is the answer.
-  __eqsf2: { params: [32, 32], returns: 32 },
-  __nesf2: { params: [32, 32], returns: 32 },
-  __gtsf2: { params: [32, 32], returns: 32 },
-  __gesf2: { params: [32, 32], returns: 32 },
-  __ltsf2: { params: [32, 32], returns: 32 },
-  __lesf2: { params: [32, 32], returns: 32 },
-  __eqdf2: { params: [64, 64], returns: 32 },
-  __nedf2: { params: [64, 64], returns: 32 },
-  __gtdf2: { params: [64, 64], returns: 32 },
-  __gedf2: { params: [64, 64], returns: 32 },
-  __ltdf2: { params: [64, 64], returns: 32 },
-  __ledf2: { params: [64, 64], returns: 32 },
+  // The compares, one int out of two floats of either precision, each libgcc's three-way
+  // `__fpcmp_parts` when both are ordered (fp-bit.c:1117-1188). On a NaN each returns the value its
+  // own relation tests FALSE on — `== 0`, `< 0`, `<= 0` are false on 1, `> 0`, `>= 0` on -1 — except
+  // `__nesf2`, whose 1 makes `!=` true (fp-bit.c:1214-1309). agbcc tests the result against 0 with
+  // the relation the helper is named for.
+  __eqsf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __nesf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __gtsf2: { params: [32, 32], returns: 32, unordered: -1 },
+  __gesf2: { params: [32, 32], returns: 32, unordered: -1 },
+  __ltsf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __lesf2: { params: [32, 32], returns: 32, unordered: 1 },
+  __eqdf2: { params: [64, 64], returns: 32, unordered: 1 },
+  __nedf2: { params: [64, 64], returns: 32, unordered: 1 },
+  __gtdf2: { params: [64, 64], returns: 32, unordered: -1 },
+  __gedf2: { params: [64, 64], returns: 32, unordered: -1 },
+  __ltdf2: { params: [64, 64], returns: 32, unordered: 1 },
+  __ledf2: { params: [64, 64], returns: 32, unordered: 1 },
   // The conversions: to and from a word, to and from a long long, and between the precisions.
   // `__fix*` truncates toward zero, as C's conversion out of a float does.
   __fixsfsi: { op: 'fptosi', params: [32], returns: 32 },

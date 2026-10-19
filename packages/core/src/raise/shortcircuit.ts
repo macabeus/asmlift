@@ -59,11 +59,11 @@ import {
   successorsOf,
 } from '../ir/core';
 import { effectful, forgetHelperPlacement, orderSensitive, placedAt, speculationUnsafe } from '../ir/discipline';
-import { NEGATED_ICMP } from '../ir/opcodes';
+import { NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
-const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
+const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), ...Object.keys(NEGATED_FCMP), 'logic_and', 'logic_or']);
 
 /** Run `step` until it stops rewriting, and answer whether it ever did.
  *
@@ -805,7 +805,9 @@ const NEGATE_BUDGET = 8;
 /** The ops computing `!v`, or `null` when `v` cannot be negated.
  *
  *  Two cases, and no third:
- *    - an `icmp_*` in `NEGATED_ICMP` → the swapped-opcode comparison over the SAME operands.
+ *    - an `icmp_*` in `NEGATED_ICMP`, or an `fcmp_*` in `NEGATED_FCMP` → the swapped-opcode
+ *      comparison over the SAME operands. A float compare negates to its unordered twin, never to
+ *      the flipped relation, which a NaN would tell apart.
  *    - a `logic_and`/`logic_or` → the DUAL connective over its two recursively negated operands.
  *      De Morgan: `!(a || b)` is `!a && !b`. This is the only reason the helper is recursive, and
  *      it is what lets a chain fold past its first level (`a || !(b || c)`).
@@ -823,7 +825,7 @@ const NEGATE_BUDGET = 8;
  *    - the cone exceeds `NEGATE_BUDGET` minted ops.
  *
  *  Ops are MINTED, never mutated: the originals stay where the caller hoisted them and die to the
- *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`logic_and`/`logic_or` are
+ *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`fcmp_*`/`logic_and`/`logic_or` are
  *  ever rebuilt, all of them pure, so no effect can be duplicated or reordered by construction.
  *
  *  Nothing is SHARED between paths, and that is the point rather than a limitation. Memoizing `go`
@@ -833,8 +835,8 @@ const NEGATE_BUDGET = 8;
  *  Nothing collapses the duplicates later either — `numberPureValues` runs as `addrnum`, far ahead
  *  of both folds. So the per-path rebuild is the mechanism and NEGATE_BUDGET is its price.
  *
- *  What it GUARANTEES about its result, which one caller leans on: every op it mints is an `icmp_*`
- *  or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value form hands an
+ *  What it GUARANTEES about its result, which one caller leans on: every op it mints is an `icmp_*`,
+ *  an `fcmp_*` or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value form hands an
  *  un-negated head straight on as the merge VALUE, which is why that caller checks booleanness for
  *  itself before deciding whether to call here at all (see its head gate); the branch form needs no
  *  such check, because its result only ever feeds a `cond_br`.
@@ -860,8 +862,9 @@ function negateCondOps(defs: Map<Value, Op>, v: Value, budget: number): { ops: O
       return null;
     }
     const out = mkValue(T.unk(32));
-    if (NEGATED_ICMP[d.opcode]) {
-      ops.push(mkOp(NEGATED_ICMP[d.opcode], { operands: [...d.operands], results: [out] }));
+    const negated = NEGATED_ICMP[d.opcode] ?? NEGATED_FCMP[d.opcode];
+    if (negated) {
+      ops.push(mkOp(negated, { operands: [...d.operands], results: [out] }));
       return out;
     }
     if (d.opcode === 'logic_and' || d.opcode === 'logic_or') {

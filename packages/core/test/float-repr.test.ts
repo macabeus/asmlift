@@ -7,7 +7,7 @@ import { pascalBackend } from '../src/backend/pascal';
 import { MIPS_FP_REG } from '../src/frontend/splat';
 import { mkOp, mkValue } from '../src/ir/core';
 import { deletableWhenDead } from '../src/ir/discipline';
-import { NEGATED_FCMP, NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
+import { FCMP_TRUTH, NEGATED_FCMP, NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { type IrType, T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
@@ -288,6 +288,32 @@ describe('a float crosses into an integer only through a conversion or a compare
     }
     const fcmps = Object.keys(OPCODES).filter((k) => k.startsWith('fcmp_'));
     expect(new Set(Object.keys(NEGATED_FCMP))).toEqual(new Set(fcmps));
+    expect(new Set(Object.keys(FCMP_TRUTH))).toEqual(new Set(fcmps));
+  });
+
+  // The truth table defines them: a negation answers the opposite on every one of the four cases.
+  test('each negation is the complement of its truth table', () => {
+    for (const [a, b] of Object.entries(NEGATED_FCMP)) {
+      expect(FCMP_TRUTH[b]).toEqual(FCMP_TRUTH[a].map((x) => !x));
+    }
+    expect(FCMP_TRUTH.fcmp_une).toEqual([true, false, true, true]);
+  });
+
+  // …and the table is IEEE's, which JavaScript's own relations over a number and a NaN are.
+  test("the truth table is IEEE's", () => {
+    const ieee: Record<string, (a: number, b: number) => boolean> = {
+      fcmp_olt: (a, b) => a < b,
+      fcmp_ole: (a, b) => a <= b,
+      fcmp_ogt: (a, b) => a > b,
+      fcmp_oge: (a, b) => a >= b,
+      fcmp_oeq: (a, b) => a === b,
+      fcmp_une: (a, b) => a !== b,
+    };
+    for (const [op, f] of Object.entries(ieee)) {
+      const truth = [f(1, 2), f(2, 2), f(3, 2), f(NaN, 2)];
+      expect(FCMP_TRUTH[op], op).toEqual(truth);
+      expect(FCMP_TRUTH[NEGATED_FCMP[op]], op).toEqual(truth.map((x) => !x));
+    }
   });
 });
 

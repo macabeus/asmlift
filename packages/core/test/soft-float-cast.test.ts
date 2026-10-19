@@ -74,3 +74,72 @@ describe('what refuses', () => {
     expect(() => lift('u2f')).toThrow("no model for the runtime helper '__floatsisf'");
   });
 });
+
+// A compare helper returns libgcc's three-way answer, and the caller tests it against 0: the test is
+// what names the compare, read off the helper's contract (its sign orders the operands, and it
+// returns `unordered` on a NaN), so the negated test is the unordered compare and never the integer
+// flip of the relation.
+describe('a compare helper is the compare its test computes', () => {
+  const merged = (name: string, args: string, cond: string) =>
+    `s32 ${name}(${args}) {\n    s32 v0;\n    if (${cond}) {\n        v0 = 1;\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n`;
+  const ff = 'float a0, float a1';
+
+  // `cmp r0, #0` and a branch over a 0/1 merge.
+  test.each([
+    ['fgt', 'a0 > a1'],
+    ['fle', 'a0 <= a1'],
+    ['feq', 'a0 == a1'],
+  ])('%s, a test before a branch', (name, cond) => {
+    expect(lift(name)).toBe(merged(name, ff, cond));
+  });
+
+  // agbcc's three sign-bit spellings of a value: `r >> 31`, `~r >> 31`, `(-r | r) >> 31`.
+  test.each([
+    ['flt', 'a0 < a1'],
+    ['fge', 'a0 >= a1'],
+    ['fne', 'a0 != a1'],
+  ])('%s, a test of the sign bit', (name, value) => {
+    expect(lift(name)).toBe(`s32 ${name}(${ff}) {\n    return ${value};\n}\n`);
+  });
+
+  test.each([
+    ['dgt', 'a0 > a1'],
+    ['dle', 'a0 <= a1'],
+  ])('%s, over doubles', (name, cond) => {
+    expect(lift(name)).toBe(merged(name, 'double a0, double a1', cond));
+  });
+
+  // `!(a > b)` is `__gtsf2` tested `> 0` and the 0/1 flipped after; `!(a < b)` the same over `>> 31`.
+  test('a negation the source wrote stays a negation of the compare', () => {
+    expect(lift('fngt')).toContain('return v0 ^ 1;');
+    expect(lift('fnlt')).toBe(`s32 fnlt(${ff}) {\n    return a0 < a1 ^ 1;\n}\n`);
+  });
+
+  test('a branch on the compare', () => {
+    expect(lift('fbr')).toBe(`void fbr(${ff}) {\n    if (a0 > a1) gI = 1;\n}\n`);
+  });
+
+  // `if (!(a < b))` branches past the store when `__ltsf2` is negative: the test is `>= 0`, which is
+  // true on a NaN (`__ltsf2` returns 1 there), so it is `!(a < b)` and never `a >= b`.
+  test('a branch on a negated compare is the unordered compare', () => {
+    expect(lift('fbrn')).toBe(`void fbrn(${ff}) {\n    if (!(a0 < a1)) gI = 1;\n}\n`);
+  });
+});
+
+describe('what a compare refuses', () => {
+  // The result reaches the return as a word: it is no test, and its value is libgcc's, not C's.
+  test('a result read as the integer it is', () => {
+    expect(() => lift('fraw')).toThrow("no model for the runtime helper '__gtsf2'");
+  });
+
+  // Against any constant but 0 a test reads more of the result than its sign, which the contract
+  // states nothing about.
+  test('a test against anything but 0', () => {
+    expect(() => lift('fone')).toThrow("no model for the runtime helper '__gtsf2'");
+  });
+
+  // A single-precision literal is one constant word, which nothing reads as a float.
+  test('a single-precision literal operand', () => {
+    expect(() => lift('fzero')).toThrow("no model for the runtime helper '__gtsf2'");
+  });
+});
