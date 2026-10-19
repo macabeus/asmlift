@@ -935,10 +935,12 @@ holds a float or an integer word, and each read says which (`refuseFpWordCrossin
 | backend  | Pascal, on a float type, operator or negation                                                                                                                                                                                                                                                                                                                                                                                               | it throws rather than spelling an integer                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 **What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
-float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`
-touch it, and neither is the ORDER of integer parameters against float ones: both are spellings,
-fixed so the output is deterministic (`fpuArgSlots`). A declaration decides them, and only the C++
-backend reads one (`bindSpecParams`): in C, a project context declaring a float ahead of an integer
+float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`,
+the compares and `fctiwz` touch it, and neither is the ORDER of integer parameters against float
+ones: both are spellings, fixed so the output is deterministic (`fpuArgSlots`). A declaration decides
+them. The C++ backend reads one for both (`bindSpecParams`); the PowerPC frontend reads the own
+declaration's precision where it may prove (`declaredPrecision`: all `double` is double, both
+precisions refuse), and not the order: in C, a project context declaring a float ahead of an integer
 makes the fixed int-first spelling a redeclaration the compiler refuses.
 
 ## A struct returned by value, across the tower

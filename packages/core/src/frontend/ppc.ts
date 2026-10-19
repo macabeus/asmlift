@@ -92,6 +92,7 @@ import { assertInputFormat } from './format';
 import {
   type ReturnHomeRule,
   carriesFloatHome,
+  declaredPrecision,
   floatHomeAt,
   fpPrecision,
   fpuArgSlots,
@@ -1481,7 +1482,6 @@ function liftOnce(
   const reached = blocks.flatMap((b) => b.body);
   // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
-  const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined));
 
   // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
   // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
@@ -1509,6 +1509,10 @@ function liftOnce(
         () => writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu),
       );
   const floatReturn = homeRule.home === 'float';
+  const fpType = declaredPrecision(
+    fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined)),
+    ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
@@ -2451,13 +2455,18 @@ function liftOnce(
       }
       return v;
     };
-    const refuseFpBesideCall = (ins: Instr) => {
+    // A compare or a conversion refuses beside a call (`callInsn`), and in a function its own
+    // declaration puts in both precisions (`declaredPrecision`): neither states a precision itself.
+    const refuseCrossingUnmodelled = (ins: Instr) => {
       if (callInsn) {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': '${ins.mnemonic}' computes on a float and '${callInsn.mnemonic}' at ` +
             `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns ` +
             `in and destroys are not modelled`,
         );
+      }
+      if (fpType === null) {
+        refuseBothPrecisions(name, ins.mnemonic);
       }
     };
     // ONE BIT of an `mfcr` copy, as the 0/1 it is: bit `n` counts from the most significant, four to
@@ -3333,7 +3342,7 @@ function liftOnce(
             emitOpaqueDest(ins);
             break;
           }
-          refuseFpBesideCall(ins);
+          refuseCrossingUnmodelled(ins);
           const lhs = readFloat(ins, a);
           const rhs = readFloat(ins, bReg);
           cmpDef.set(cr, {
@@ -3384,7 +3393,7 @@ function liftOnce(
             emitOpaqueDest(ins);
             break;
           }
-          refuseFpBesideCall(ins);
+          refuseCrossingUnmodelled(ins);
           const v = mkValue(T.unk(32));
           ops.push(mkOp('fptosi', { operands: [readFloat(ins, s)], results: [v] }));
           writeVar(d, bi, v);

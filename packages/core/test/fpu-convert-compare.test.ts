@@ -248,6 +248,24 @@ describe('PowerPC: a float compare in a condition-register field', () => {
     ).toBe('s32 f2i(float a0) {\n    return (s32)a0;\n}\n');
   });
 
+  // int d2i(double x){ return (int)x; } is the same object: neither fctiwz nor fcmpo states a
+  // precision, so the own declaration does, and one stating both refuses.
+  test('the own declaration states the precision the instructions do not', () => {
+    const f2i =
+      '   0:\tfctiwz  f0,f1\n   4:\tstwu    r1,-16(r1)\n   8:\tstfd    f0,8(r1)\n   c:\tlwz     r3,12(r1)\n' +
+      '  10:\taddi    r1,r1,16\n  14:\tblr\n';
+    const lifted = (params: string[]) =>
+      decompile('d2i', objdump('d2i', f2i), PPC_MWCC, { prototypes: { d2i: { params, returns: 'int' } } }).source;
+    expect(lifted(['double'])).toBe('s32 d2i(double a0) {\n    return (s32)a0;\n}\n');
+    expect(lifted(['float'])).toBe('s32 d2i(float a0) {\n    return (s32)a0;\n}\n');
+    const fcmp = '   0:\tfcmpo   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\tsrwi    r3,r0,31\n   c:\tblr\n';
+    expect(() =>
+      decompile('mixd', objdump('mixd', fcmp), PPC_MWCC, {
+        prototypes: { mixd: { params: ['float', 'double'], returns: 'int' } },
+      }),
+    ).toThrow("'fcmpo' is in a function that computes in both single and double precision");
+  });
+
   test('…and its high word is no value', () => {
     expect(() =>
       ppc(

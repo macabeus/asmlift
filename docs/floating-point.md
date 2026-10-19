@@ -4,8 +4,8 @@ asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the Powe
 precision — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and their `.d` twins, and
 `fadds`/`fsubs`/`fmuls`/`fdivs`, `fadd`/`fsub`/`fmul`/`fdiv`, `fneg`/`fmr` — through each ABI's float
 argument and return homes, and the signed conversions and the compares between that file and the
-integer one (§6); a function computing in both precisions refuses. `fneg` and `fmr` state no precision, so a function made only of them lifts a float of none
-(`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width. So does an
+integer one (§6); a function computing in both precisions refuses. `fneg` and `fmr` state no precision, nor do PowerPC's compares and `fctiwz`, so a function made only of them lifts a float of none
+(`T.fUnstated`): C spells it `float`, a C++ declaration binds it at either width, and an own declaration that may prove and spells every float `double` makes it a double (`declaredPrecision`). So does an
 argument slot the body never reads (`float f1(double a, float b){ return b + b; }` is `fadds f1,f2,f2`):
 no instruction states its width, whatever the function's precision typed it. On MIPS o32 that holds
 only while no integer argument follows the slot, because there the slot's width is what placed the

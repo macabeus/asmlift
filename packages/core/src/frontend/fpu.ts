@@ -12,7 +12,7 @@ import type { Fn, Op, Value } from '../ir/core';
 import { FLOAT_OPS, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP } from '../ir/opcodes';
 import { pruneDeadParams } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
-import { declaresAggregateReturn, declaresVoidReturn, isFloatingSpelling } from '../proto';
+import { declaresAggregateReturn, declaresVoidReturn, floatingSpelling, isFloatingSpelling } from '../proto';
 import type { TargetDescription } from '../target';
 import { computedOnlyToReturn } from './dead-reads';
 import { FrontendUnsupportedError } from './errors';
@@ -31,6 +31,28 @@ export function fpPrecision(
 ): IrType | null {
   const widths = new Set(instrs.map((ins) => widthOf(ins.mnemonic)).filter((w) => w !== null && w !== undefined));
   return widths.size > 1 ? null : widths.has(64) ? T.f64() : widths.has(32) ? T.f32() : T.fUnstated();
+}
+
+/** The precision a function's OWN DECLARATION states for the floats it computes on, where none of
+ *  its instructions states one (`T.fUnstated`): `double` where every floating parameter and a
+ *  floating return are spelled `double`. PowerPC's `fcmpo`, `fctiwz`, `fmr` and `fneg` are one
+ *  object over a float and a double, so `int d2i(double x){ return (int)x; }` is the bytes of the
+ *  `float` function too, and only a declaration that may prove (`OwnDeclaration.proves`) tells them
+ *  apart. A declaration spelling both is a function in both precisions, null, which refuses where a
+ *  float instruction is decoded (`refuseBothPrecisions`). Any other leaves the precision unstated,
+ *  which C spells `float`: a `float` parameter of an old-style definition arrives as a double. */
+export function declaredPrecision(lifted: IrType | null, own: OwnDeclaration | undefined): IrType | null {
+  if (lifted?.kind !== 'float' || lifted.width !== null || !own?.proves) {
+    return lifted;
+  }
+  const { params, returns } = own.proto;
+  const spelled = [...(Array.isArray(params) ? params : []), ...(returns === undefined ? [] : [returns])]
+    .map(floatingSpelling)
+    .filter((f) => f !== undefined);
+  if (spelled.length === 0 || spelled.some((f) => f === 'long double')) {
+    return lifted;
+  }
+  return spelled.every((f) => f === 'double') ? T.f64() : spelled.every((f) => f === 'float') ? lifted : null;
 }
 
 /** Refuse a function computing in both precisions, where the frontend DECODES a float instruction of
