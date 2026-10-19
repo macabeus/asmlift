@@ -533,6 +533,12 @@ test('a loop-scoped `break` inside a case arm is refused, and `continue` is not'
   expect(emitCFamily('void f(s32 x)', armed(nested([{ k: 'continue' }])))).toContain('continue;');
   // CONTROL: an ordinary arm, and a loop OPENED INSIDE the arm, which captures its own `break`.
   expect(emitCFamily('void f(s32 x)', armed([set]))).toContain('case 0:');
+  // …and the SWITCH's own `break` (`ofSwitch`), which means between the labels what C makes of it.
+  const own = emitCFamily(
+    'void f(s32 x)',
+    armed([{ k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break', ofSwitch: true }], else: [] }]),
+  );
+  expect(own).toMatch(/case 0:\s*\n\s*if \(x\) break;/);
   expect(
     emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [set, { k: 'break' }] }])),
   ).toContain('case 0:');
@@ -1250,6 +1256,7 @@ test('every withholding on the `default:` position, one call each', () => {
     hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
+    structureArm: () => [],
   };
   const rec = makeSwitchRecovery(deps);
   const arms = (falls: number) => [a0, a1, a2].map((entry, i) => ({ entry, fallsThrough: i === falls }));

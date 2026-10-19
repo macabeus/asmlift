@@ -61,6 +61,10 @@ export interface SwitchRecoverDeps {
   ) => Stmt[] | null;
   expr: (v: Value) => Expr;
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
+  /** One arm's body, from `entry` to `stop`, inside the switch whose code resumes at `merge`. The
+   *  structurer owns what `break;` means there (structure.ts `structureArm`), so both regimes hand
+   *  it every arm and the exit verdict they read for it. */
+  structureArm: (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined) => Stmt[];
 }
 
 /** Where ONE switch arm's region leaves it — the fact that decides whether the arm can be spelled
@@ -71,11 +75,18 @@ export interface SwitchRecoverDeps {
  *   - `fallthrough`  every path out leaves into exactly ONE sibling arm's entry: C's fall-through.
  *                    Only spellable when that sibling is the arm emitted NEXT, which `chainArms`
  *                    below arranges and both regimes then re-read off the emission array (see the
- *                    l3/ast.ts non-neutrality note).
- *   - `unstructurable`  anything else: two different siblings, or a mix of "into a sibling" and
- *                    "out to the merge". C needs a `goto` for those. Regime A declines to
+ *                    l3/ast.ts non-neutrality note). With `breaks`, some paths out reach the
+ *                    switch's merge instead: `case 1: if (c) break; case 2: …`, the arm's own
+ *                    `break;` on those paths. `breaks` is the arm's region — every block the walk
+ *                    below reached, the entry included — which is what the structurer needs to
+ *                    find the arm's own joins (`structure.ts` `armJoin`).
+ *   - `unstructurable`  anything else: two different siblings, or a sibling beside a block the
+ *                    switch does not dominate. C needs a `goto` for those. Regime A declines to
  *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD. */
-export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | { kind: 'unstructurable'; why: string };
+export type ArmExit =
+  | { kind: 'break' }
+  | { kind: 'fallthrough'; to: Block; breaks?: ReadonlySet<Block> }
+  | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
   recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
@@ -325,6 +336,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     hoistDispatchCopies,
     expr,
     structureRegion,
+    structureArm,
   } = deps;
 
   // A block's index in `fn.blocks` as its position in the ASSEMBLY — the warrant for every reading
@@ -785,9 +797,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // same exit: if-recovery, which that backend prints fine. Asked HERE rather than left to the
     // backend because the backend's refusal is terminal (the whole function becomes a stub) while
     // this one costs nothing but the `switch` spelling.
+    //
+    // A falling arm that also BREAKS is declined here too, for now: this regime has a second
+    // recovery, and the switch spelling of that shape is not yet gated against the ladders that
+    // reach the same verdict.
     if (
       [...exitOf.values()].some(
-        (e) => e.kind === 'unstructurable' || (!spellSwitchFallthrough && e.kind === 'fallthrough'),
+        (e) =>
+          e.kind === 'unstructurable' ||
+          (e.kind === 'fallthrough' && (!spellSwitchFallthrough || e.breaks !== undefined)),
       )
     ) {
       return null;
@@ -1023,13 +1041,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
-        body: structureRegion(blk, to ?? merge),
+        body: structureArm(blk, to ?? merge, merge, exitOf.get(blk)),
         fallsThrough: to !== null,
       });
     }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
-    const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
+    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, exitOf.get(defaultBlk)) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
     // into it and no other subtree jumps there — the two references the tree walk can count.

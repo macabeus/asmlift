@@ -1192,6 +1192,7 @@ describe('a class may not outlive the message it classifies', () => {
       'packages/core/src/structure/structure.ts',
     ],
     ['switch-shapes', 'takes a value from the switch edge', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'a case body leaves its switch', 'packages/core/src/structure/structure.ts'],
     ['switch-shapes', 'reads the base of jump table', 'packages/core/src/frontend/jump-table.ts'],
     ['switch-shapes', "'s base, formed at", 'packages/core/src/frontend/jump-table.ts'],
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],

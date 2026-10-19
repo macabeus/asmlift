@@ -34,7 +34,8 @@
 // bottom-test `do-while`, `while (1)` for any other latch set (a conditional `continue`, a
 // mid-tested header), PROPERLY-nested loops, in-body `break`/early-`return`, comparison-tree and
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
-// `ArmExit` in switch-recover.ts). Still DECLINED (loud StructureError, never wrong code):
+// `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
+// others (jump tables; `switchFrames`). Still DECLINED (loud StructureError, never wrong code):
 // irreducible/overlapping loops, exits to more than one live merge, a `break` out of a nested loop's
 // body, a `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
 // entered by a plain br).
@@ -5606,6 +5607,61 @@ export function structure(
     }
   };
 
+  // THE SWITCH ARMS being structured, innermost last — one frame per arm, in both regimes, so a
+  // `break;` can be checked against what C binds it to. A C `break` leaves the innermost enclosing
+  // loop OR switch, so a switch-scoped one is only spelled where this arm's frame is the innermost
+  // switch frame AND no loop was entered since the arm began (`loop` is the loop frame the arm sits
+  // in). `breaks` is set only on an arm the exit analysis found falling into its sibling on some
+  // paths and reaching the switch's `merge` on others (`ArmExit`); a closed arm stops AT the merge
+  // and never needs the statement. A closed arm's frame still matters: it is what tells a
+  // `break;` reached inside a nested switch that it would bind the inner one.
+  type SwitchFrame = { merge: Block | null; loop: LoopFrame | null; breaks: ReadonlySet<Block> | null };
+  const switchFrames: SwitchFrame[] = [];
+  // Is `b` a breaking arm's merge, and may `break;` say so from here? Undefined when no breaking
+  // arm ends at `b`. Throws when one does but a nested loop or switch would capture the statement.
+  const switchBreakAt = (b: Block): Stmt[] | undefined => {
+    let i = switchFrames.length - 1;
+    while (i >= 0 && (switchFrames[i].breaks === null || switchFrames[i].merge !== b)) {
+      i--;
+    }
+    if (i < 0) {
+      return undefined;
+    }
+    if (i !== switchFrames.length - 1 || switchFrames[i].loop !== loopCtx) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a case body leaves its switch from inside a nested ` +
+          `${i !== switchFrames.length - 1 ? 'switch' : 'loop'}, where \`break\` would leave that instead`,
+      );
+    }
+    return [{ k: 'break', ofSwitch: true }];
+  };
+  // THE JOIN OF A BRANCH INSIDE A BREAKING ARM. The CFG's join for `if (c) break;` lies past the
+  // switch — the fall-through path reaches the merge too, through the next arm — so structuring to
+  // it would copy the next arm into this one. Inside the arm, both the sibling it falls into and
+  // the merge END the arm's paths, as a `ret` does: post-dominance over the arm's own region with
+  // those edges sent to EXIT. Null ⇒ the paths meet only at the arm's end, which is the caller's
+  // `stop`. Asked only in the innermost arm frame and outside any loop entered since, which is where
+  // `switchBreakAt` would spell the `break;`.
+  const armJoins = new Map<ReadonlySet<Block>, Map<Block, Block | null>>();
+  const armJoin = (b: Block): Block | null | undefined => {
+    const f = switchFrames[switchFrames.length - 1];
+    if (f === undefined || f.breaks === null || !f.breaks.has(b) || f.loop !== loopCtx) {
+      return undefined;
+    }
+    const region = f.breaks;
+    let pd = armJoins.get(region);
+    if (pd === undefined) {
+      pd = postDominators(fn, region, (n) => {
+        if (n.ops[n.ops.length - 1].opcode === 'ret') {
+          return [null];
+        }
+        return [...new Set(successorsOf(n).map((x) => (region.has(x) ? x : null)))];
+      });
+      armJoins.set(region, pd);
+    }
+    return pd.get(b) ?? null;
+  };
+
   // THE IMPLICIT CONTINUE. A branch with one edge back to the loop header spells that edge as
   // nothing at all: control falls to the bottom of the body and the loop goes round. That holds only
   // where the region being structured ends at the loop bottom (`stop === frame.header`). An `if` in
@@ -5703,6 +5759,12 @@ export function structure(
     if (b === stop) {
       return [];
     }
+    // The merge of the switch a falling arm also leaves: the edge copies are already out, and
+    // `break;` is the jump.
+    const brk = switchBreakAt(b);
+    if (brk !== undefined) {
+      return brk;
+    }
     // Back to a `while (1)` header from a region that ends short of the loop bottom: the edge's
     // copies are already out, and `continue` is the jump.
     if (loopCtx !== null && b === loopCtx.header && foreverLoops.has(b)) {
@@ -5733,6 +5795,16 @@ export function structure(
   // two places the map is handed to (`coalesceNames`, `makeLoopHazards`) only read it. So the
   // recognizer sees one settled naming however late a case body calls back into `structureRegion`,
   // and nothing here has to be rebuilt against a naming that moves underneath it.
+  // One switch arm, from `entry` to `stop`, under its frame (`switchFrames`).
+  const structureArm = (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined): Stmt[] => {
+    const breaks = exit?.kind === 'fallthrough' ? (exit.breaks ?? null) : null;
+    switchFrames.push({ merge, loop: loopCtx, breaks });
+    try {
+      return structureRegion(entry, stop);
+    } finally {
+      switchFrames.pop();
+    }
+  };
   const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms } = makeSwitchRecovery({
     fn,
     defs,
@@ -5751,6 +5823,7 @@ export function structure(
     hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
+    structureArm,
   });
 
   const structureBlock = (b: Block, stop: Block | null): Stmt[] => {
@@ -6102,7 +6175,7 @@ export function structure(
         return {
           // A falling-through arm stops AT its successor arm, which then emits that body once under
           // its own labels; a closed arm runs to the merge as before.
-          body: [...edgeCopies[i], ...structureRegion(a.entry, ft ? exit.to : merge)],
+          body: [...edgeCopies[i], ...structureArm(a.entry, ft ? exit.to : merge, merge, exit)],
           fallsThrough: ft,
         };
       });
@@ -6669,14 +6742,19 @@ export function structure(
       leavesByOwnedEdges(loopCtx, b)
         ? loopJoin(loopCtx, b, false)
         : undefined;
+    // Inside an arm that leaves its switch by `break;` on some paths, the arm's own join wins over
+    // every reading above: each of them reads the CFG, where the arm's paths meet past the switch.
+    const inArmJoin = armJoin(b);
     const merge =
-      bodyJoin !== undefined
-        ? (bodyJoin ?? stop)
-        : tested !== undefined
-          ? (tested ?? stop)
-          : clampToLoop
-            ? stop
-            : (ipd ?? stop);
+      inArmJoin !== undefined
+        ? (inArmJoin ?? stop)
+        : bodyJoin !== undefined
+          ? (bodyJoin ?? stop)
+          : tested !== undefined
+            ? (tested ?? stop)
+            : clampToLoop
+              ? stop
+              : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];

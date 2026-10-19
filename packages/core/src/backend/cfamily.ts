@@ -579,11 +579,12 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
  *  is one call. */
 function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
-  // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
-  // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
+  // A plain `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in
+  // C, so printing one between `case` labels rebinds it — a changed program that reads as ordinary
   // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
   // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
-  // arm first, loudly), so it is a contract on the next one.
+  // arm first, loudly), so it is a contract on the next one. A `break` marked `ofSwitch` already
+  // means what C makes of it there, and is printed.
   //
   // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
   // statement, which a `switch` is not, so it already means what L3 means. What a pass that re-spells
@@ -655,10 +656,13 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
 
 /** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
  *  L3 meant? A loop opened inside the arm captures its own, so its body is not walked; a nested
- *  `switch` captures one too and is checked when it is printed. */
+ *  `switch` captures one too and is checked when it is printed. A switch's own `break`
+ *  (`ofSwitch`) is the one that belongs here. */
 function switchBoundBreakIn(body: Stmt[]): boolean {
   return body.some(
-    (s) => s.k === 'break' || (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),
+    (s) =>
+      (s.k === 'break' && s.ofSwitch !== true) ||
+      (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),
   );
 }
 

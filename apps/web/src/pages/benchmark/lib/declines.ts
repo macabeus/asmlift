@@ -510,7 +510,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // next where the target language has no fall-through in its case statement, an arm falling
     // through into one that is not the next emitted, and the arm fallen into taking a value from
     // the switch edge that the fall-through path would re-run. Same capability, same site, so the
-    // pattern carries a phrase for each rather than the one the corpus happened to print.
+    // pattern carries a phrase for each rather than the one the corpus happened to print. A sixth
+    // is the switch-scoped `break;` it refuses where a nested loop or switch would capture it.
     //
     // The fall-through-POSITION one is keyed on the clause that opens its sentence, not on the one
     // that ends it. This file opens with the rule that a class is decided inside the first 200
@@ -529,7 +530,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '/,
   },
   {
     key: 'structs',

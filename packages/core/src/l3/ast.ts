@@ -343,7 +343,13 @@ export type Stmt =
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).
-  | { k: 'break' }
+  //
+  // `ofSwitch` makes the `break` the innermost enclosing SWITCH's instead: it leaves the arm it sits
+  // in for the code after the switch (`case 1: if (c) break; case 2: …`). Legal only inside a switch
+  // arm with no loop or switch between it and that arm — the producer's contract (structure.ts
+  // `switchBreakAt`). The C family prints both as `break;`, which is why a plain one is refused
+  // between `case` labels (backend/cfamily.ts) and this one is what the arm may carry.
+  | { k: 'break'; ofSwitch?: true }
   | { k: 'continue' }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
