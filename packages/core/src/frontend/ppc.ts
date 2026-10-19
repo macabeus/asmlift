@@ -52,7 +52,7 @@ import {
   mkValue,
   replaceAllUsesWith,
 } from '../ir/core';
-import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
+import { deletableWhenDead } from '../ir/discipline';
 import { FCMP_TRUTH, NEGATED_FCMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import {
@@ -70,7 +70,13 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import { type Declarations, leftInDiscardRegister, pinDeadReads, unreadPairHalf } from './dead-reads';
+import {
+  type Declarations,
+  computedOnlyToReturn,
+  leftInDiscardRegister,
+  pinDeadReads,
+  unreadPairHalf,
+} from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -83,7 +89,18 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, refuseBothPrecisions, refuseFpWordCrossings, writesFloatReturn } from './fpu';
+import {
+  type ReturnHomeRule,
+  carriesFloatHome,
+  floatHomeAt,
+  fpPrecision,
+  fpuArgSlots,
+  refuseBothPrecisions,
+  refuseFpWordCrossings,
+  returnHomeRule,
+  settleReturnHome,
+  writesFloatReturn,
+} from './fpu';
 import {
   FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
@@ -1464,7 +1481,6 @@ function liftOnce(
   const reached = blocks.flatMap((b) => b.body);
   // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
-  const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined));
 
   // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
@@ -1483,6 +1499,16 @@ function liftOnce(
   // (`stw r7,5612(r31)` with no save of r31), which compiled code never does: it saves before it
   // touches one. Such a body keeps every argument register a parameter, as with no declaration.
   const ownDeclared = !namesUnsavedCalleeSaved(reached, target, savedRegs);
+  // Which home the function returns in (frontend/fpu.ts `returnHomeRule`), by the own declaration
+  // where the body is a compiler's.
+  const homeRule: ReturnHomeRule = !fpu
+    ? { home: 'integer', declared: false }
+    : returnHomeRule(
+        ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
+        reached.some((ins) => FP_CROSSINGS.has(ins.mnemonic)),
+        () => writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu),
+      );
+  const floatReturn = homeRule.home === 'float';
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
@@ -1771,8 +1797,9 @@ function liftOnce(
       ? `${name}+0x${blocks[bi].startAddr.toString(16)}`
       : `the return block '${name}' synthesizes`;
 
-  // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and then
-  // r3 is scratch like any other integer register. A table base left in r3 is no return value, as a
+  // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and then
+  // r3 is scratch like any other integer register. An undecided one returns r3 here, and
+  // `settleReturnHome` may hand each return f1 instead. A table base left in r3 is no return value, as a
   // pending half is none (`placeholders`); reading one would refuse, and a merge of one with a value
   // still does.
   const returnOperands = (bi: number): Value[] =>
@@ -1829,9 +1856,12 @@ function liftOnce(
   // kept only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
   const joinedCarryConsts: { ins: Instr; not: Op; add: Op; ca: Value }[] = [];
   let wordReturn = false;
+  /** Every return, as it is emitted. */
+  const returns: { op: Op; bi: number }[] = [];
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
     ops.push(op);
+    returns.push({ op, bi });
     if (floatReturn) {
       return;
     }
@@ -1847,12 +1877,8 @@ function liftOnce(
     }
   };
   /** Whether every word return hands back a value computed ONLY to be returned: on every path into
-   *  it, r3's last write is an op with no effect and no memory read (`spelledWhenDead` answers no)
-   *  whose value nothing but a return reads, directly or through the joins that carry it there.
-   *
-   *  The evidence is the compiler's, the claim `spelledWhenDead` already rests on: an optimizing
-   *  compiler deletes a pure computation nobody reads, so one that survives with a return as its
-   *  only reader was written for that return, and the function returns a word. `int f(int a) {
+   *  it, r3's last write is one (frontend/dead-reads.ts `computedOnlyToReturn`), so the function
+   *  returns a word. `int f(int a) {
    *  switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ; blr` on every case and a bare
    *  `blr` out of range. A temporary is read again (`lwz r3,gB ; addi r0,r3,1`), and a
    *  call's result and a load are excluded — a void function's call leaves its callee's result in
@@ -1867,61 +1893,8 @@ function liftOnce(
     if (wordReturns.length === 0) {
       return false;
     }
-    const defOp = new Map<Value, Op>();
-    const incoming = new Map<Value, Value[]>();
-    const uses = new Map<Value, Array<Op | Value | undefined>>();
-    const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
-      const l = m.get(k);
-      if (l) {
-        l.push(v);
-      } else {
-        m.set(k, [v]);
-      }
-    };
-    for (const blk of irBlocks) {
-      for (const op of blk.ops) {
-        op.results.forEach((r) => defOp.set(r, op));
-        op.operands.forEach((v) => push(uses, v, op));
-        for (const s of op.successors) {
-          s.args.forEach((v, i) => {
-            const p = s.block.params[i] as Value | undefined;
-            push(uses, v, p);
-            if (p !== undefined) {
-              push(incoming, p, v);
-            }
-          });
-        }
-      }
-    }
-    // A join is followed to what it merges, and every value on the way may have only returns, or
-    // joins that are themselves read only by returns, as readers. A cycle adds nothing the first
-    // visit did not judge.
-    const returnOnly = (v: Value, seen: Set<Value>): boolean => {
-      if (seen.has(v)) {
-        return true;
-      }
-      seen.add(v);
-      return (uses.get(v) ?? []).every(
-        (u) => u !== undefined && ('opcode' in u ? u.opcode === 'ret' : returnOnly(u, seen)),
-      );
-    };
-    const computed = (v: Value, seen: Set<Value>): boolean => {
-      if (seen.has(v)) {
-        return true;
-      }
-      seen.add(v);
-      if (!returnOnly(v, new Set())) {
-        return false;
-      }
-      const op = defOp.get(v);
-      if (op !== undefined) {
-        return !spelledWhenDead(op);
-      }
-      // an entry parameter (the caller's value) merges nothing
-      const ins = incoming.get(v);
-      return ins !== undefined && ins.every((a) => computed(a, seen));
-    };
-    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
+    const computed = computedOnlyToReturn(irBlocks);
+    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, computed));
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
    *  decides when it says (`ownFirstArgumentPassed`, which reads it as the live-in bound does): a
@@ -3627,6 +3600,13 @@ function liftOnce(
     ssa.markFilled(bi);
   });
   returnUntouchedArg();
+  // What f1 holds at each return, and, where the home is undecided and f1 holds a float this function
+  // computed on every path into every return, that float — read now, before the SSA is finished.
+  const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];
+  const carriesFloat = carriesFloatHome(homeRule, homes);
+  if (carriesFloat) {
+    returns.forEach(({ op, bi }) => op.operands.push(readReg(fpu!.returnReg, bi)));
+  }
   // A high half no `@l` ever completed — every `@l` consumer this frontend does not model (`ori`, a
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
@@ -3733,19 +3713,8 @@ function liftOnce(
   }
   refuseFpWordCrossings(name, ssa.fn);
   // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
-  // A FLOAT ALSO REACHES THE INTEGER FILE through a compare or a conversion, and then a write to f1
-  // no longer says which home holds the result. Where r3 is written too that is undecided.
-  if (floatReturn && reached.some((ins) => FP_CROSSINGS.has(ins.mnemonic))) {
-    const r3 = reached.find(
-      (ins) => ins.ops[0] === target.returnReg && !/^(st|cmp|b|mt|tw|dcb|icb)/.test(ins.mnemonic),
-    );
-    if (r3 !== undefined) {
-      throw new PpcUnsupportedError(
-        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${r3.mnemonic}' at ` +
-          `0x${r3.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
-          'returns is not decided',
-      );
-    }
+  if (fpu) {
+    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET);
   }
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
   if (droppedPairHalf) {

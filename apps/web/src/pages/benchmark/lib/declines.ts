@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 274 distinct decline messages (the texts reached by
+// `packages/core/src` throws 276 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -351,12 +351,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // precisions (`fmuls` feeding an `fadd`: the rounding between them is unmodelled).
     //
     // And the crossings between the files: an FPU register's integer word read as a float or the
-    // reverse (frontend/fpu.ts `refuseFpWordCrossings` and both frontends' reads), a function that
-    // writes both return homes and moves a float into the integer file, a MIPS branch on a condition
+    // reverse (frontend/fpu.ts `refuseFpWordCrossings` and both frontends' reads), a function whose
+    // return home the bytes do not decide or that leaves a word in the float return register
+    // (`settleReturnHome`), a MIPS branch on a condition
     // code no compare in its block set, and PowerPC's condition-register readers past the shapes
     // modelled (`cror`, an `mfcr` copy, `fcmpu`'s ordering bits).
     pattern:
-      /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|moves a float's value into the integer file|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'/,
+      /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|a float reaches the integer file|the float return register|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'/,
   },
   {
     // UNINHABITED AT THE SOURCE NOW, RATHER THAN BY ARRAY ORDER. Until `fpReg` landed, all 13

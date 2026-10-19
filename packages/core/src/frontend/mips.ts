@@ -44,7 +44,18 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, refuseBothPrecisions, refuseFpWordCrossings, writesFloatReturn } from './fpu';
+import {
+  type ReturnHomeRule,
+  carriesFloatHome,
+  floatHomeAt,
+  fpPrecision,
+  fpuArgSlots,
+  refuseBothPrecisions,
+  refuseFpWordCrossings,
+  returnHomeRule,
+  settleReturnHome,
+  writesFloatReturn,
+} from './fpu';
 import {
   FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
@@ -165,7 +176,8 @@ const FP_FLOAT_WRITERS: ReadonlySet<string> = new Set([
 ]);
 /** The decoded instructions that carry a float's information into the INTEGER file: a `mfc1` of a
  *  truncated word, and a condition-code branch. Where one is present a value in `v0` may be the
- *  function's result, so the float return is no longer decided by a write to `$f0` alone. */
+ *  function's result, and a write to `$f0` a temporary, so neither decides the return home
+ *  (frontend/fpu.ts `returnHomeRule`). */
 const crossesToIntegers = (m: string) => m === 'mfc1' || (LIKELY_BASE[m] ?? m) in FP_COND_BRANCH;
 /** A key the SSA builder holds for the FPU's file: `mipsEvenFpKey`'s canonical spelling. */
 const isFpKey = (k: string) => /^\$f\d+$/.test(k);
@@ -1550,7 +1562,18 @@ function liftOnce(
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
   const bodyInstrs = blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body));
-  const floatReturn = writesFloatReturn(bodyInstrs, FP_FLOAT_WRITERS, mipsEvenFpKey, fpu);
+  // Which home the function returns in (frontend/fpu.ts `returnHomeRule`). The branches count: a
+  // condition-code branch is how a compare's answer reaches the integer file.
+  const homeRule: ReturnHomeRule = !fpu
+    ? { home: 'integer', declared: false }
+    : returnHomeRule(
+        ownDeclarationOf(name, prototypes, options.contextOwnProto),
+        [...bodyInstrs, ...blocks.flatMap((b) => (b.branch ? [b.branch] : []))].some((ins) =>
+          crossesToIntegers(ins.mnemonic),
+        ),
+        () => writesFloatReturn(bodyInstrs, FP_FLOAT_WRITERS, mipsEvenFpKey, fpu),
+      );
+  const floatReturn = homeRule.home === 'float';
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
   // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer
@@ -1822,6 +1845,8 @@ function liftOnce(
   // dead `laddr` as a capture (`foldMovedCaptures`).
   const movedCaptures = new Set<Value>();
 
+  /** Every return, as it is emitted: `settleReturnHome` may hand it the float home instead. */
+  const returns: { op: Op; bi: number }[] = [];
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
     // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
@@ -2921,8 +2946,9 @@ function liftOnce(
         ops.push(mkOp('br', { attrs: to === next ? { fallthrough: true } : {}, successors: [succ(to)] }));
         return;
       }
-      // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and
-      // then `v0` is scratch like any other integer register.
+      // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and
+      // then `v0` is scratch like any other integer register. An undecided one returns `v0` here,
+      // and `settleReturnHome` may hand the return the float home instead.
       const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v));
       // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
       // one word: returning v0 alone hands back the high word with the low one dropped, a function
@@ -2938,7 +2964,9 @@ function liftOnce(
         );
       }
       const retOps = floatReturn ? [read(fpu!.returnReg)] : returnsWord ? [readVar(RET, bi)] : [];
-      ops.push(mkOp('ret', { operands: retOps }));
+      const ret = mkOp('ret', { operands: retOps });
+      ops.push(ret);
+      returns.push({ op: ret, bi });
       return;
     }
     // unconditional branch
@@ -2949,6 +2977,13 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  // What the float home holds at each return, and, where the home is undecided and holds a float on
+  // every path into every return, that float — read now, before the SSA is finished.
+  const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];
+  const carriesFloat = carriesFloatHome(homeRule, homes);
+  if (carriesFloat) {
+    returns.forEach(({ op, bi }) => op.operands.push(readVar(fpu!.returnReg, bi)));
+  }
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
@@ -2956,18 +2991,8 @@ function liftOnce(
   ssa.finish();
   refuseFpWordCrossings(name, ssa.fn);
   // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
-  // A FLOAT ALSO REACHES THE INTEGER FILE once a conversion or a compare is decoded, and then a
-  // write to `$f0` no longer says which home holds the result: `(int)(a + b)` may add into `$f0`
-  // and return `v0`. Where both homes are written that is undecided, and refuses.
-  if (floatReturn && bodyInstrs.some((ins) => crossesToIntegers(ins.mnemonic))) {
-    const v0 = bodyInstrs.find((ins) => writtenReg(ins) === target.returnReg);
-    if (v0 !== undefined) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${v0.mnemonic}' at ` +
-          `0x${v0.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
-          'returns is not decided',
-      );
-    }
+  if (fpu) {
+    settleReturnHome(name, ssa.fn, homeRule, returns, homes, carriesFloat, fpu, RET);
   }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);

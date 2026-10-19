@@ -317,13 +317,15 @@ modelled. MIPS refuses the same way, on any FPU register in a function that make
 IS the FP part of that gap, and a carrier decode onto the word load is the wrong one. The layer owns a
 typed memory access (a float element, a float struct member), and it owns an `lfs` of a small-data
 constant, which is how a float LITERAL arrives on PowerPC. **It must first replace two rules this
-layer rests on**: the float RETURN is decided by scanning for a decoded write to `$f0`/`f1`
-(`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that a float reaches only a float
-op, `ret` or a call argument its callee declares `double`. Both are sound only while no float can
-reach memory, so a store that lands before them
+layer rests on**: where no float reaches the integer file, the float RETURN is decided by scanning for
+a decoded write to `$f0`/`f1` (`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that
+a float reaches only a float op, a conversion, a compare, `ret` or a call argument its callee declares
+`double`. Both are sound only while no float can reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
-from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which
+from the value that reaches each `ret`, which is what a function with a conversion or a compare
+already gets (`settleReturnHome`): the home whose value at every return was computed only to be
+returned, the own declaration where neither or both are, and a refusal without one. After it: `frsp` and the int/float conversions, which
 are what a function computing in both precisions needs, and the compares and `bc1t`/`bc1f`, the
 fifth thing §1 named.
 

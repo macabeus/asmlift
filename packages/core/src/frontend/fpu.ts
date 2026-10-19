@@ -8,12 +8,16 @@
 // the decode and neither of these, `float fadd(float a, float b){ return a + b; }` lifts on every
 // FPU target as `void fadd(s32 a0, s32 a1) { return; }` — two phantom integer parameters and a dead
 // add. `docs/floating-point.md` §2 measures that.
-import type { Fn, Value } from '../ir/core';
+import type { Fn, Op, Value } from '../ir/core';
 import { FLOAT_OPS, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP } from '../ir/opcodes';
+import { pruneDeadParams } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
+import { declaresAggregateReturn, declaresVoidReturn, isFloatingSpelling } from '../proto';
 import type { TargetDescription } from '../target';
+import { computedOnlyToReturn } from './dead-reads';
 import { FrontendUnsupportedError } from './errors';
-import type { ArgSlots } from './ssa';
+import type { OwnDeclaration } from './frontend';
+import type { ArgSlots, SsaBuilder } from './ssa';
 
 export type Fpu = NonNullable<TargetDescription['fpu']>;
 
@@ -137,26 +141,25 @@ export function fpuArgSlots(
   };
 }
 
-/** Whether a function RETURNS a float: some instruction the frontend decodes writes the float return
- *  register, in a block the entry REACHES. Decided over the whole function, before any `ret` is
- *  emitted, because a function has one return type on every path — a path that leaves the register
- *  untouched returns the float argument that arrived there (PowerPC's `f1` is both), or refuses by
- *  `fpuArgSlots`' rule 1. Reachable blocks only: `addi r3,r3,1; blr; fmr f1,f2` returns `r3`, and
- *  the `fmr` past the `blr` is on no path of it.
+/** Whether a function RETURNS a float, where no float reaches the integer file: some instruction the
+ *  frontend decodes writes the float return register, in a block the entry REACHES. Decided over the
+ *  whole function, before any `ret` is emitted, because a function has one return type on every
+ *  path — a path that leaves the register untouched returns the float argument that arrived there
+ *  (PowerPC's `f1` is both), or refuses by `fpuArgSlots`' rule 1. Reachable blocks only: `addi
+ *  r3,r3,1; blr; fmr f1,f2` returns `r3`, and the `fmr` past the `blr` is on no path of it.
  *
  *  And then the INTEGER return register is scratch, even where the function writes it. Both halves
- *  rest on one fact: a float reaches nothing but another float op, the return, or the integer file
- *  through a conversion or a compare — every move to memory is refused. A write to the float return
- *  register that did not feed the return would therefore be dead in the source, and the compiler
- *  does not emit dead arithmetic; an integer result, meanwhile, could only have come from a float by
- *  a conversion or a compare. IDO's unrolled `float pw(float a, int n)` is the witness for the
- *  second half: it counts in `v0`. So a frontend that decodes a conversion or a compare into the
- *  integer file refuses a function that writes both homes (frontend/mips.ts), and `decodes` names
- *  only the instructions that leave a FLOAT in a register.
+ *  rest on one fact: in such a function a float reaches nothing but another float op or the return
+ *  — every move to memory is refused. A write to the float return register that did not feed the
+ *  return would therefore be dead in the source, and the compiler does not emit dead arithmetic.
+ *  IDO's unrolled `float pw(float a, int n)` counts in `v0`.
  *
- *  THAT FACT IS WHAT HOLDS THIS RULE UP, and the next layer removes it: a layer that lets a float
- *  reach memory must first decide the return from the value that reaches each `ret`, not from a
- *  mnemonic scan (`fpu-lift.test.ts` pins the function that breaks it, `docs/floating-point.md` §6). */
+ *  THE FACT FAILS ONCE A FLOAT REACHES THE INTEGER FILE through a compare or a conversion: a float
+ *  temporary in the home then feeds the compare, not the return (`void vb(float a, float b, int *p)
+ *  { float c = a * b; if (c < a) *p = 1; }` multiplies into `$f0` on KMC). Such a function is
+ *  settled once lifted (`settleReturnHome`), never by this. A layer that lets a float reach MEMORY
+ *  removes the fact for every function, and must settle them all that way (`fpu-lift.test.ts` pins
+ *  the function that breaks it, `docs/floating-point.md` §6). */
 export function writesFloatReturn(
   instrs: readonly { mnemonic: string; ops: string[] }[],
   decodes: ReadonlySet<string>,
@@ -166,6 +169,135 @@ export function writesFloatReturn(
   return (
     fpu !== undefined &&
     instrs.some((ins) => decodes.has(ins.mnemonic) && ins.ops[0] !== undefined && destKey(ins.ops[0]) === fpu.returnReg)
+  );
+}
+
+/** Which home a function returns in, as far as can be said BEFORE its blocks are filled: the float
+ *  home, the integer one (which covers a `void` function), or `undecided`, which `settleReturnHome`
+ *  answers once the lift is done. The function's OWN DECLARATION decides first, where it may prove
+ *  (`OwnDeclaration.proves`): a floating return type is the float home, any other return the integer
+ *  one. Without it, a function where no float reaches the integer file (`crosses` false) is
+ *  decided by `writesFloatReturn`. One where a float does is undecided: a write to the float home
+ *  no longer says it is the result, and a value in the integer home may be one computed from a
+ *  float. */
+export interface ReturnHomeRule {
+  readonly home: 'float' | 'integer' | 'undecided';
+  /** whether the own declaration decided it */
+  readonly declared: boolean;
+}
+export function returnHomeRule(
+  own: OwnDeclaration | undefined,
+  crosses: boolean,
+  writesFloat: () => boolean,
+): ReturnHomeRule {
+  const p = own?.proves ? own.proto : undefined;
+  if (p !== undefined && (declaresVoidReturn(p) || declaresAggregateReturn(p) || p.returns !== undefined)) {
+    return { home: p.returns !== undefined && isFloatingSpelling(p.returns) ? 'float' : 'integer', declared: true };
+  }
+  return { home: crosses ? 'undecided' : writesFloat() ? 'float' : 'integer', declared: false };
+}
+
+/** What the float return home holds at a return, read WITHOUT a read: every definition that reaches
+ *  it, and whether one does on every path (a path that brings none brings the caller's register).
+ *  A read would leave a definition behind, and where the entry reaches it an entry parameter. Asked
+ *  once every block is filled. */
+export interface HomeAtReturn {
+  readonly every: boolean;
+  readonly defs: readonly Value[];
+}
+export function floatHomeAt(ssa: Pick<SsaBuilder, 'everyReachingDef'>, home: string, bi: number): HomeAtReturn {
+  const defs: Value[] = [];
+  const every = ssa.everyReachingDef(home, bi, (v) => {
+    defs.push(v);
+    return true;
+  });
+  return { every, defs };
+}
+
+/** Whether an undecided function's float home holds a FLOAT on every path into every return, so
+ *  that `settleReturnHome` may weigh it: then the frontend reads it at each return before the SSA is
+ *  finished, and hands it on as the `ret`'s LAST operand, where the SSA's own clean-up keeps it
+ *  current (a join it resolves away is replaced there, and one nothing read would be pruned). */
+export function carriesFloatHome(rule: ReturnHomeRule, homes: readonly HomeAtReturn[]): boolean {
+  return rule.home === 'undecided' && homes.every((h) => h.every && h.defs.every((v) => v.type.kind === 'float'));
+}
+
+/** SETTLE THE RETURN HOME of a lifted function, and refuse where the bytes do not decide it.
+ *  `sites` are its returns, each reading what the INTEGER home rule gave it (the operand a `ret`
+ *  reads where the function returns a word), plus, where `carriesFloat`, the float home's value
+ *  last; `homes` is what the float home holds at each (`floatHomeAt`). Run after the SSA is
+ *  finished.
+ *
+ *  An INTEGER WORD in the float home at a return refuses, unless the integer home proves itself
+ *  (below) or the own declaration says the return is no float: `mtc1 $zero,$f0` is how IDO, KMC and
+ *  GCC 2.7.2 return `0.0f`, and `mtc1 a1,$f0` how they return a float that arrived in a GPR, and
+ *  either is the word's bits as a float, which is not modelled. KMC's `trunc.w.s $f0,$f12; mfc1
+ *  v0,$f0` leaves a word there too, and returns it in `v0`. A float return whose `ret` reads a word
+ *  refuses as well.
+ *
+ *  An UNDECIDED function returns the home whose value at every return was computed only to be
+ *  returned (frontend/dead-reads.ts `computedOnlyToReturn`): an optimizing compiler emits no write
+ *  whose value nothing reads, so a value that survives with only a return to read it is the
+ *  result. `int vi2(float a, float b){ float c = a + b; if (c < a) return 3; … }` adds into `$f0`,
+ *  which the compares read, and returns the `li` in `v0`. Where the float home holds no float at
+ *  some return, the function returns none — unless the home is an argument register (`f1`), whose
+ *  float may be the caller's, and then the integer home must prove itself. Where neither home
+ *  proves, or both do, the lift refuses: `void vb(float a, float b, int *p){ float c = a * b; if (c
+ *  < a) *p = 1; }` and `float vb(…){ …; return c; }` are one object, and so are `float mx(float a,
+ *  float b, int *p){ if (a < b) *p = 1; return a; }` and the same function returning `p`. The own
+ *  declaration decides those (`returnHomeRule`). */
+export function settleReturnHome(
+  name: string,
+  fn: Fn,
+  rule: ReturnHomeRule,
+  sites: readonly { op: Op }[],
+  homes: readonly HomeAtReturn[],
+  carriesFloat: boolean,
+  fpu: Fpu,
+  intReg: string,
+): void {
+  const floatAt = carriesFloat ? sites.map(({ op }) => op.operands.pop()!) : undefined;
+  const isFloat = (v: Value) => v.type.kind === 'float';
+  if (rule.home === 'float') {
+    if (sites.some(({ op }) => !op.operands.every(isFloat))) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': a return reads an integer word from ${fpu.returnReg}, the float return register`,
+      );
+    }
+    return;
+  }
+  const computed = computedOnlyToReturn(fn.blocks);
+  const intProven = sites.every(({ op }) => op.operands.length === 1 && computed(op.operands[0]));
+  if (!rule.declared && !intProven && homes.some((h) => !h.defs.every(isFloat))) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': ${fpu.returnReg}, the float return register, holds an integer word at a return, ` +
+        `and ${intReg} holds no value computed only to be returned — the word's bits as a float are not modelled`,
+    );
+  }
+  if (rule.home === 'integer' || (floatAt === undefined && !fpu.argRegs.includes(fpu.returnReg))) {
+    if (floatAt !== undefined) {
+      pruneDeadParams(fn);
+    }
+    return;
+  }
+  const floatProven = floatAt !== undefined && floatAt.every(computed);
+  if (floatProven !== intProven) {
+    if (floatProven) {
+      sites.forEach(({ op }, i) => {
+        op.operands = [floatAt![i]];
+      });
+    }
+    // the home not returned may have left a join nothing reads now
+    pruneDeadParams(fn);
+    return;
+  }
+  throw new FrontendUnsupportedError(
+    `cannot lift '${name}': a float reaches the integer file (a compare or a conversion), and then whether it ` +
+      `returns ${fpu.returnReg}, ${intReg} or nothing is not decided by the bytes — ` +
+      (floatProven
+        ? 'each holds a value computed only to be returned'
+        : 'neither holds a value computed only to be returned') +
+      ', and no declaration of its own says',
   );
 }
 

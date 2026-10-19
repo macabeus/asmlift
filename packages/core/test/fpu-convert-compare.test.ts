@@ -110,18 +110,81 @@ describe('what refuses', () => {
       "'add.s' at 0x8 reads $f4 as a float, and it holds an integer word",
     );
   });
+});
 
-  // float fround(float x){ return (float)(int)x; } at KMC moves the truncated word out through v0,
-  // so both homes are written and a float reaches the integer file: which one returns is undecided.
-  test('a function writing both return homes and moving a float into the integer file', () => {
-    expect(() =>
-      lift(
+describe('which home a function returns in, once a float reaches the integer file', () => {
+  const kmc = (sym: string, body: string, prototypes = {}) =>
+    decompile(sym, objdump(sym, body), MIPS_GCC, { prototypes }).source;
+  // int vi2(float a, float b){ float c = a + b; if (c < a) return 3; if (c > b) return 7; return 5; }
+  // at KMC adds into $f0, the float return home, and the compares read it: the `li`s in v0, which
+  // nothing but the return reads, are the result.
+  const vi2 =
+    '   0:\tadd.s\t$f0,$f12,$f14\n   4:\tc.lt.s\t$f0,$f12\n   8:\tnop\n   c:\tbc1f\t1c <vi2+0x1c>\n  10:\tnop\n' +
+    '  14:\tj\t34 <vi2+0x34>\n  18:\tli\tv0,3\n  1c:\tc.lt.s\t$f14,$f0\n\t...\n  28:\tbc1t\t34 <vi2+0x34>\n' +
+    '  2c:\tli\tv0,7\n  30:\tli\tv0,5\n  34:\tjr\tra\n  38:\tnop\n';
+  test('a float temporary in the float home feeds a compare, and the integer home returns', () => {
+    const src = kmc('vi2', vi2);
+    expect(src).toMatch(/^s32 vi2\(float a0, float a1\)/);
+    expect(src).toContain('v0 = 3;');
+  });
+
+  // void vb1(float a, float b, int *p){ float c = a * b; if (c < a) *p = 1; if (c > b) *p = 2; } is
+  // one object with `float vb1(…){ …; return c; }`: c in $f0 feeds the compares, and v0 only the
+  // stores. The declaration decides it.
+  const vb1 =
+    '   0:\tnop\n   4:\tmul.s\t$f0,$f12,$f14\n   8:\tc.lt.s\t$f0,$f12\n\t...\n  14:\tbc1f\t20 <vb1+0x20>\n' +
+    '  18:\tli\tv0,1\n  1c:\tsw\tv0,0(a2)\n  20:\tc.lt.s\t$f14,$f0\n\t...\n  2c:\tbc1f\t38 <vb1+0x38>\n' +
+    '  30:\tli\tv0,2\n  34:\tsw\tv0,0(a2)\n  38:\tjr\tra\n  3c:\tnop\n';
+  test('where neither home holds a value computed only to be returned, the declaration decides', () => {
+    expect(() => kmc('vb1', vb1)).toThrow('whether it returns $f0, v0 or nothing is not decided by the bytes');
+    expect(kmc('vb1', vb1, { vb1: { returnsVoid: true } })).toMatch(/^void vb1\(float a0, float a1, s32 \*a2\)/);
+    expect(kmc('vb1', vb1, { vb1: { params: ['float', 'float', 'int *'], returns: 'float' } })).toContain(
+      'return a0 * a1;',
+    );
+  });
+
+  // float fround(float x){ return (float)(int)x; } at KMC moves the truncated word out through v0 and
+  // back in: v0 is read by the `mtc1`, and the `cvt.s.w` in $f0 only by the return.
+  test('the float home returns where its value is computed only to be returned', () => {
+    expect(
+      kmc(
         'fround',
         '   0:\ttrunc.w.s\t$f0,$f12\n   4:\tmfc1\tv0,$f0\n   8:\tnop\n   c:\tmtc1\tv0,$f0\n  10:\tnop\n' +
           '  14:\tjr\tra\n  18:\tcvt.s.w\t$f0,$f0\n  1c:\tnop\n',
-        MIPS_GCC,
       ),
-    ).toThrow("it writes both $f0 and v0 (the 'mfc1' at 0x4)");
+    ).toBe('float fround(float a0) {\n    return (float)(s32)a0;\n}\n');
+  });
+
+  // `mtc1 zero,$f0` is how the MIPS compilers return 0.0f: the word's bits as a float.
+  test('an integer word in the float home at a return refuses', () => {
+    expect(() => kmc('fz', '   0:\tmtc1\tzero,$f0\n   4:\tjr\tra\n   8:\tnop\n')).toThrow(
+      '$f0, the float return register, holds an integer word at a return, and v0 holds no value computed only to be returned',
+    );
+    // float fz2(float a, float b){ if (a < b) return 0.0f; return a; } at IDO, where one path returns
+    // the word and the other the float argument.
+    const fz2 =
+      '   0:\tc.lt.s\t$f12,$f14\n   4:\tnop\n   8:\tbc1fl\t20 <fz2+0x20>\n   c:\tmov.s\t$f0,$f12\n' +
+      '  10:\tmtc1\tzero,$f0\n  14:\tjr\tra\n  18:\tnop\n  1c:\tmov.s\t$f0,$f12\n  20:\tjr\tra\n  24:\tnop\n';
+    expect(() => lift('fz2', fz2)).toThrow('holds an integer word at a return');
+    expect(() =>
+      decompile('fz2', objdump('fz2', fz2), MIPS_IDO, {
+        prototypes: { fz2: { params: ['float', 'float'], returns: 'float' } },
+      }),
+    ).toThrow('a return reads an integer word from $f0, the float return register');
+  });
+
+  // float mx(float a, float b, int *p){ if (a < b) *p = 1; return a; } at mwcc leaves f1, the first
+  // float argument, untouched — one object with the same function returning `p` in r3.
+  const mx = '   0:\tfcmpo   cr0,f1,f2\n   4:\tbgelr-\n   8:\tli      r0,1\n   c:\tstw     r0,0(r3)\n  10:\tblr\n';
+  test('PowerPC: the float argument in f1 and the pointer in r3, and only the declaration decides', () => {
+    expect(() => decompile('mx', objdump('mx', mx), PPC_MWCC)).toThrow(
+      'whether it returns f1, r3 or nothing is not decided by the bytes',
+    );
+    const src = decompile('mx', objdump('mx', mx), PPC_MWCC, {
+      prototypes: { mx: { params: ['float', 'float', 'int *'], returns: 'float' } },
+    }).source;
+    expect(src).toMatch(/^float mx\(/);
+    expect(src).toMatch(/return a1;/);
   });
 });
 
@@ -146,13 +209,19 @@ describe('PowerPC: a float compare in a condition-register field', () => {
     expect(ppc(sym, body)).toBe(`s32 ${sym}(float a0, float a1) {\n    return ${value};\n}\n`);
   });
 
-  // void fbr(float a, float b){ if (a > b) gI = 1; } — `blelr-` returns when GT is CLEAR, which is
-  // `!(a > b)`, true on a NaN; the store is guarded by `a > b`.
+  // void fbr(float a, float b, int *p){ if (a > b) *p = 1; } — `blelr-` returns when GT is CLEAR,
+  // which is `!(a > b)`, true on a NaN; the store is guarded by `a > b`. Declared void, because the
+  // bytes are also those of a float function returning `a`.
   test('a conditional return on a cleared bit is the unordered compare', () => {
-    const src = ppc(
+    const src = decompile(
       'fbr',
-      '   0:\tfcmpo   cr0,f1,f2\n   4:\tblelr-\n   8:\tli      r0,1\n   c:\tstw     r0,0(r3)\n  10:\tblr\n',
-    );
+      objdump(
+        'fbr',
+        '   0:\tfcmpo   cr0,f1,f2\n   4:\tblelr-\n   8:\tli      r0,1\n   c:\tstw     r0,0(r3)\n  10:\tblr\n',
+      ),
+      PPC_MWCC,
+      { prototypes: { fbr: { returnsVoid: true } } },
+    ).source;
     expect(src).toContain('if (a1 > a2) {');
   });
 
