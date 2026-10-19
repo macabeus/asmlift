@@ -1166,7 +1166,8 @@ interface WhileLoopInfo {
   forwardPreds: Block[]; // header preds outside the loop body (the entry/init side)
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   arms: LoopArm[]; // the early-`return` exits out of the body (`earlyReturnArm`)
-  breaks: Set<Block>; // the body blocks whose edge to `exit` itself is a `break`
+  breaks: Set<Block>; // the body blocks whose edge to `exit` itself is a `break`, or enters a `breakArms` arm
+  breakArms: BreakArm[];
 }
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -2227,9 +2228,11 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
   return false;
 }
 /** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
- *  the region it heads holds no `ret`, re-enters no `body` block, admits no edge from outside itself,
- *  and leaves only for `exit`. Returns that region, or null. Each region block is then written once,
- *  inside the loop, ahead of the `break`. */
+ *  the region it heads re-enters no `body` block, admits no edge from outside itself, and leaves only
+ *  for `exit` or by a `ret` of its own. Returns that region, or null. Each region block is then
+ *  written once, inside the loop, ahead of the `break` — a `ret` among them as the `return` it is:
+ *  `if (t[i] == 7) { if (k) return; gHit = 1; break; }`. The region owns those `ret`s, since no
+ *  other edge enters it, so the `return` is written where the asm holds its one copy. */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
   from: Block,
@@ -2252,8 +2255,8 @@ function codeBreakArm(
       continue;
     }
     const t = x.ops[x.ops.length - 1];
-    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br')) {
-      return null; // re-enters the loop, returns, or dispatches
+    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br' && t.opcode !== 'ret')) {
+      return null; // re-enters the loop, or dispatches
     }
     region.add(x);
     stack.push(...successorsOf(x));
@@ -2890,6 +2893,16 @@ export function structure(
     [...forest.byHeader.values()].every(
       (l2) => l2.header === nl.header || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
     ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
+  // An edge out of `nl` that does not land on `exit` itself, read the one way both the `while` and the
+  // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return whose
+  // tail the loop emits (`owned`). The break arm is asked first: where the exit ends in a `return`,
+  // `earlyReturnArm` would also take the arm and copy that tail into it, where the asm holds one copy.
+  // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
+  const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
+    const region = codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
+    const owned = region === null ? earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit) : null;
+    return { region, owned };
+  };
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
@@ -2931,14 +2944,22 @@ export function structure(
     // The header's way out is not the loop's exit when it enters an arm that runs code and then
     // joins another exit edge (`codeBreakArm`) whose tail has an effect: that arm is a `break`, and
     // the loop a `while (1)`. Where the tail only returns, the `while` reading copies it into the
-    // other edge as an early `return`, and keeps that spelling.
+    // other edge as an early `return`, and keeps that spelling — unless the tail is a bare `return`
+    // and the arm itself runs code. gcc2.7.2's `for (i = 0; i < n; i++) { if (t[i] == 7) { gHit = 1;
+    // break; } }` keeps the arm inside a guarded bottom-tested loop, so the arm is the one in the
+    // loop, and a bare `return` copies no code: `while (t[i] != 7) { ...; if (i >= n) return; }
+    // gHit = 1;` is the spelling the bytes do not hold (breaknend_code 21/26 against 4/18).
     const runsEffect = (x: Block) => [x, ...reachFrom(x)].some((y) => !nl.body.has(y) && y.ops.some(effectful));
     const hOutIsBreakArm =
       hOut.length === 1 &&
-      nl.exitEdges.some(
-        (e) =>
-          e.to !== hOut[0].block && runsEffect(e.to) && codeBreakArm(preds, h, hOut[0].block, nl.body, e.to) !== null,
-      );
+      nl.exitEdges.some((e) => {
+        if (e.to === hOut[0].block) {
+          return false;
+        }
+        const region = codeBreakArm(preds, h, hOut[0].block, nl.body, e.to);
+        const bareReturn = e.to.ops.length === 1 && e.to.ops[0].opcode === 'ret' && e.to.ops[0].operands.length === 0;
+        return region !== null && (runsEffect(e.to) || (bareReturn && [...region].some((y) => y.ops.some(effectful))));
+      });
     if (
       !nl.selfLoop &&
       hTerm.opcode === 'cond_br' &&
@@ -2975,17 +2996,23 @@ export function structure(
     // to know which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
     const breaks = new Set<Block>();
+    const breakArms: BreakArm[] = [];
     let singleExit = true;
     for (const e of nl.exitEdges) {
       if (e.from === exitFrom && e.to === exit) {
         continue;
       }
-      const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
+      // a `while` takes a code-running break only into an exit that takes no copies: the header's exit
+      // copies are what `breakRule` shares with a break, and an arm's edge into the exit is not one
+      const { region, owned } = exitArmOf(nl, e, exit, kind === 'while' && exit.params.length === 0);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
       }
       if (kind === 'while' && e.to === exit && !innerBodyHas(nl, e.from)) {
         breaks.add(e.from);
+      } else if (region !== null) {
+        breaks.add(e.from);
+        breakArms.push({ from: e.from, to: e.to, region });
       } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
         singleExit = false;
         break;
@@ -3005,6 +3032,7 @@ export function structure(
         body: nl.body,
         arms,
         breaks,
+        breakArms,
       });
     } else {
       (guarded ? keptGuardDoWhiles : doWhileLoops).set(h, {
@@ -3057,15 +3085,14 @@ export function structure(
           breaks.add(e.from);
           return !innerBodyHas(nl, e.from);
         }
-        const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
+        const { region, owned } = exitArmOf(nl, e, exit, true);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
-        const region = owned === null ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
         if (region !== null) {
           breaks.add(e.from);
           breakArms.push({ from: e.from, to: e.to, region });
-          return !innerBodyHas(nl, e.from);
+          return true;
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
@@ -6733,10 +6760,10 @@ export function structure(
     // Mirror the br/cond_br cases: argAssigns then structureRegion. Structure the body under this
     // loop's frame so an in-body conditional exit (break / early return) is recognised instead of
     // tripping the header-re-entry `onStack` guard.
-    const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks }, () => [
-      ...argAssigns(wl.header, wl.bodyEntry),
-      ...structureRegion(wl.bodyEntry, wl.header),
-    ]);
+    const body = withLoop(
+      { header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks, breakArms: wl.breakArms },
+      () => [...argAssigns(wl.header, wl.bodyEntry), ...structureRegion(wl.bodyEntry, wl.header)],
+    );
     const out: Stmt[] = [{ k: 'while', cond, body }];
     out.push(...argAssigns(wl.header, wl.exit)); // phi args carried on the header→exit edge, if any
     out.push(...structureRegion(wl.exit, stop));

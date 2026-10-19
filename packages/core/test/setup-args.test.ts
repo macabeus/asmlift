@@ -20,15 +20,18 @@ const cands = (body: string, pool = '') => enumerateCandidates('f', fn(body) + p
 // nothing of its own. Whether the source passed the guarded value is what the two arms disagree on.
 const GUARDED_CALL = '\tldr\tr0, .Lp\n\tldrb\tr0, [r0]\n\tcmp\tr0, #0\n\tbne\t.L1\n\tbl\tbar\n.L1:\n';
 const POOL = '.Lp:\n\t.word\t0x3000000\n';
+// The guarded value passed to `bar`: nothing past the call reads it (the function is void), so it is
+// the read itself, not a local (agbcc folds the two reads into one), through the base or a hoisted one.
+const PASSED = /bar\(\*(\(u8 \*\)50331648|p0)\)/;
 
 describe('a guessed argument that survived from an earlier block', () => {
   test('is passed by default — compiled code really does leave one in place and branch to the call', () => {
-    expect(decompile('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, { prototypes: P }).source).toContain('bar(v0)');
+    expect(decompile('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, { prototypes: P }).source).toMatch(PASSED);
   });
 
   test('…and is dropped by the `/setup-args` sibling, which is enumerated beside it', () => {
     const cs = cands(GUARDED_CALL, POOL);
-    expect(cs.some((c) => c.source.includes('bar(v0)'))).toBe(true);
+    expect(cs.some((c) => PASSED.test(c.source))).toBe(true);
     expect(cs.some((c) => /bar\(\)/.test(c.source))).toBe(true);
     expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(true);
   });
@@ -59,7 +62,12 @@ describe('a guessed argument that survived from an earlier block', () => {
     // structure variation then reads, so the structure variations have to run under it.
     // `kleod:ReadKeyInput` (retired 2026-09-13) matched on `/setup-args/derived-home`, a combination
     // of this variation and a structure variation run beneath it.
-    const names = cands(GUARDED_CALL, POOL).map((c) => c.variations);
+    // Under the function's own `s32` return, the join of the guarded value and `bar`'s result is the
+    // value returned, which is what gives the structure variations something to re-spell. A void
+    // `f` reads nothing past the call, so it has no such join.
+    const names = enumerateCandidates('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, { prototypes: {} }).map(
+      (c) => c.variations,
+    );
     expect(names).toContainEqual(['unsigned', 'setup-args']);
     expect(
       names.filter((v) => hasVariations(v.slice(0, 2), ['unsigned', 'setup-args']) && v.length > 2).length,
@@ -76,7 +84,7 @@ describe('a guessed argument that survived from an earlier block', () => {
     const cs = enumerateCandidates('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, {
       prototypes: { ...P, bar: { params: 1 } },
     });
-    expect(cs.every((c) => c.source.includes('bar(v0)'))).toBe(true);
+    expect(cs.every((c) => PASSED.test(c.source))).toBe(true);
     expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
   });
 });

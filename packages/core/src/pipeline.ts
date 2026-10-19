@@ -22,7 +22,7 @@ import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
 import { deadOps } from './ir/discipline';
 import { print } from './ir/print';
-import { firstTrivialPhi } from './ir/simplify';
+import { firstTrivialPhi, pruneDeadParams } from './ir/simplify';
 import { type IrType, T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
@@ -777,6 +777,9 @@ export function raiseRecovered(
     pre,
   );
   hooks.beforeRecover?.();
+  if (declaresVoidReturn(self)) {
+    dropVoidReturnOperands(fn);
+  }
   recoverTypes(fn);
   verify(fn);
   assertTypesRecovered(fn);
@@ -814,6 +817,31 @@ export function raiseRecovered(
         `'${stranded.param}', whose every in-edge carries one value. A pass that retires an in-edge ` +
         `must run simplifyTrivialPhis after it.`,
     );
+  }
+}
+
+/** A FUNCTION ITS DECLARATION SAYS RETURNS NOTHING RETURNS NOTHING: each `ret` drops the return
+ *  register the frontend hands it (frontend/ssa.ts returns that register at every `ret`, whatever
+ *  the declared type), and the joins only that operand read go with it. Before type recovery, since
+ *  a join read by nothing else is no value of the program, and recovery would otherwise unify what
+ *  two paths leave in that register: mwcc's `if (*p == 7) { gHit += 1; break; }` leaves r3 holding
+ *  gHit's value on one exit and the walked pointer on the other, and the one join typed both as
+ *  `u8 *` (`gHit = (void *)(v0 + 1)`, which mwcc rejects). The structurer already reads no `ret`
+ *  operand under `returnsVoid`, so this changes no `return` it writes. */
+function dropVoidReturnOperands(fn: Fn): void {
+  let dropped = false;
+  for (const blk of fn.blocks) {
+    for (const op of blk.ops) {
+      if (op.opcode === 'ret' && op.operands.length > 0) {
+        op.operands = [];
+        dropped = true;
+      }
+    }
+  }
+  if (dropped) {
+    pruneDeadParams(fn);
+    dce(fn);
+    verify(fn);
   }
 }
 

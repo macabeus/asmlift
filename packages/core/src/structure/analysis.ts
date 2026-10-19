@@ -1521,6 +1521,9 @@ interface LoopRules {
   /** The def's value enters some loop's header live and every consumer sits outside that loop, as
    *  does the def: the value is carried ACROSS the loop, not into it. */
   liveAcrossLoop(def: Op, r: Value, consumers: Op[]): boolean;
+  /** `liveAcrossLoop`, and neither the def nor any consumer sits in any loop, enclosing ones
+   *  included: never a value the compiler could have hoisted out of one. */
+  carriedPastLoops(def: Op, r: Value, consumers: Op[]): boolean;
   /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
   readsPreUpdate(L: BottomTestedLoop, op: Op, r: Value): boolean;
   escapesAheadOfUpdate(op: Op, r: Value, consumers: Op[]): boolean;
@@ -1551,6 +1554,9 @@ function makeLoopRules(a: {
         !L.body.has(opBlock.get(def)!) &&
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
+  const carriedPastLoops = (def: Op, r: Value, consumers: Op[]): boolean =>
+    liveAcrossLoop(def, r, consumers) &&
+    loopBodies.every((L) => !L.body.has(opBlock.get(def)!) && consumers.every((c) => !L.body.has(opBlock.get(c)!)));
   /** THE PRE-UPDATE ESCAPE. A value a bottom-tested loop computes and the code after it reads,
    *  whose expression reads a loop variable — `do { s = &f->v; f = f->next; } while (--n); *out =
    *  s;`. Inlined at the post-loop read it re-reads that variable's NAME, which by then holds the
@@ -1710,6 +1716,7 @@ function makeLoopRules(a: {
     multiBlockHeaders,
     bottomTested,
     liveAcrossLoop,
+    carriedPastLoops,
     readsPreUpdate,
     escapesAheadOfUpdate,
     rebuiltPast,
@@ -2041,6 +2048,20 @@ function namePureOp(rules: MaterializeRules, state: MaterializeState, op: Op, b:
     }
   } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !scopes.addressCone(op)) {
     materialize.add(op);
+  }
+  // A PURE VALUE CARRIED ACROSS A LOOP, computed and read outside every loop, as `nameAccess` names
+  // a read (`carriedPastLoops`; a value read inside a loop is `/expr-home`'s question, where loop.c's
+  // invariant motion may have put it). `j = n * 3; for (…) { if (t[i] == 7) { gHit = j; break; } }`
+  // computes `j` ahead of the loop and holds it in a register to the break arm, which sits outside
+  // the natural loop. Inlined, `gHit = n * 3` moves the computation into the arm, and every profile
+  // compiles it there (IDO scores the two alike). A `const` is re-materialized where it is used, and
+  // an address loses its inline byte-stride cast standing alone and is what a compiler CSEs and
+  // moves freely, so neither is named.
+  if (op.opcode !== 'const' && pr && useSitesOf.has(pr) && !scopes.addressCone(op) && !rendersAsAddress(op)) {
+    const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
+    if (loops.carriedPastLoops(op, pr, cons)) {
+      materialize.add(op);
+    }
   }
   // A float PRODUCT read by a float add or subtract, directly or through a negation, is named
   // on a compiler that contracts (target.ts `contractsFloatProducts`): it fuses only WITHIN

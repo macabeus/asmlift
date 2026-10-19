@@ -13,7 +13,13 @@ import { type Gate, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
 import { recoverTypes } from '../src/raise/recover';
-import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '../src/raise/reroll';
+import {
+  type FoldedTopTest,
+  type PeeledTest,
+  REROLL_GATES,
+  TOP_TEST_GATES,
+  rerollPeeledTests,
+} from '../src/raise/reroll';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -259,4 +265,225 @@ test('the re-roll reads the shape the trampoline fold leaves, so the trampoline 
   expect(Object.fromEntries(ran)).toMatchObject({ trampoline: 1, reroll: 1 });
   const src = cBackend.emit(structure(fn, { returnsVoid: true, littleEndian: true }));
   expect(src.match(/gTab/g)).toHaveLength(1); // the test is written once, in the loop
+});
+
+// ── THE TOP TEST THE COMPILER FOLDED AWAY (reroll.ts `restoreTopTest`) ─────────────────────────
+//
+// With a constant bound the rotated loop's exit test, read on the entry values, provably stays in:
+// the source tested at the top (`for (i = 0; i < 16; i++)`), and the re-rolled loop says so again.
+// With a variable bound the compiler keeps that test as a guard, which the restore deletes.
+
+const bounded = (ir: string) =>
+  ir.replace('  %9: u32 = icmp_slt %8, %1\n', '  %40: s32 = const {value=16}\n  %9: u32 = icmp_slt %8, %40\n');
+const TOP = bounded(PEELED);
+const TOP_ARITH = bounded(PEELED_ARITH);
+const emitted = (ir: string, gates?: readonly Gate<FoldedTopTest>[]) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  rerollPeeledTests(fn, REROLL_GATES, gates);
+  verify(fn);
+  return { fn, src: cBackend.emit(structure(fn)) };
+};
+
+test('a re-rolled loop whose exit test stays in on entry is tested at the top', () => {
+  const { src } = emitted(TOP);
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  const { fn } = emitted(TOP_ARITH);
+  const sfn = structure(fn);
+  expect(irAgreement(TOP_ARITH, sfn, SEEDS)).toEqual({ judged: 300, disagree: 0 });
+  expect(irAgreement(TOP_ARITH, readabilityRewrites(sfn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The loop starts at 20, past the bound: the exit test leaves on entry, after one iteration. */
+const starts20 = (ir: string) =>
+  ir
+    .replace('  %2: s32 = const {value=0}\n', '  %2: s32 = const {value=0}\n  %60: s32 = const {value=20}\n')
+    .replace('cond_br %5, ^bb3(), ^bb1(%2)', 'cond_br %5, ^bb3(), ^bb1(%60)');
+const LEAVES = starts20(TOP).replace('%3: s32 = load %0 {off=0,', '%3: s32 = load %0 {off=20,');
+const LEAVES_ARITH = starts20(TOP_ARITH).replace('%3: s32 = add %2, %2', '%3: s32 = add %60, %60');
+
+test('an exit test true on the entry values keeps the bottom test', () => {
+  expect(rerolled(LEAVES).n).toBe(1);
+  expect(emitted(LEAVES).src).toContain('while (1) {');
+});
+
+test('an exit test against a parameter keeps the bottom test', () => {
+  expect(emitted(PEELED).src).toContain('while (1) {');
+});
+
+test('an exit test that reads memory keeps the bottom test', () => {
+  const loaded = PEELED.replace(
+    '  %9: u32 = icmp_slt %8, %1\n',
+    '  %40: s32* = gaddr {sym="gN"}\n  %41: s32 = load %40 {off=0, signed=true, width=4}\n  %9: u32 = icmp_slt %8, %41\n',
+  );
+  expect(emitted(loaded).src).toContain('while (1) {');
+});
+
+/** The bound is `1 + 15`, over the `1` the increment reads too, which stays in the latch. */
+const SHARES_INCREMENT = (ir: string) =>
+  ir.replace(
+    '  %9: u32 = icmp_slt %8, %1\n',
+    '  %40: s32 = const {value=15}\n  %41: s32 = add %7, %40\n  %9: u32 = icmp_slt %8, %41\n',
+  );
+
+test('an exit test reading a constant the increment shares keeps the bottom test', () => {
+  expect(emitted(SHARES_INCREMENT(PEELED)).src).toContain('while (1) {');
+});
+
+test('an exit that its edges hand different values keeps the bottom test', () => {
+  const carries = TOP.replace('cond_br %9, ^bb2(), ^bb4()', 'cond_br %9, ^bb2(), ^bb4(%8)')
+    .replace('  br ^bb4()\n^bb4():', '  br ^bb4(%2)\n^bb4(%50: s32):')
+    .replace('%14: s32 = call {target="out"}', '%14: s32 = call %50 {target="out"}');
+  const kept = emitted(carries);
+  expect(kept.src).toContain('while (1) {');
+  // a heuristic: without it the head is restored all the same
+  expect(emitted(carries, without(TOP_TEST_GATES, 'exit-value-differs')).fn.blocks).toHaveLength(
+    kept.fn.blocks.length + 1,
+  );
+});
+
+/** `gOut = i` after the loop: the latch hands the exit `exitArg`, the arm the counter it tested. */
+const OWN_VALUE_EXIT = (exitArg: string) =>
+  TOP_ARITH.replace('cond_br %9, ^bb2(), ^bb4()', 'cond_br %9, ^bb2(), ^bb4(' + exitArg + ')')
+    .replace('cond_br %5, ^bb3(), ^bb1(%2)', 'cond_br %5, ^bb3(%2), ^bb1(%2)')
+    .replace('cond_br %12, ^bb3(), ^bb1(%8)', 'cond_br %12, ^bb3(%8), ^bb1(%8)')
+    .replace(
+      '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
+      '^bb3(%51: s32):\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4(%51)',
+    )
+    .replace('^bb4():', '^bb4(%50: s32):')
+    .replace('%14: s32 = call {target="out"}', '%14: s32 = call %50 {target="out"}');
+
+test('an exit that takes the loop’s own value from every edge is tested at the top', () => {
+  // the counter the latch hands round and the one the arm tested are one value after the rotation
+  const own = OWN_VALUE_EXIT('%8');
+  const { fn, src } = emitted(own);
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  expect(irAgreement(own, structure(fn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The body tests `a1 < 2i` rather than `2i == a1`, so that skipping its first iteration shows on
+ *  the seeds the oracle draws, not on one in four billion. */
+const lessThan = (ir: string) =>
+  ir.replace('icmp_eq %3, %4', 'icmp_slt %4, %3').replace('icmp_eq %11, %4', 'icmp_slt %4, %11');
+
+test('each top-test refusal above is its rule’s alone', () => {
+  // without the rule the head goes ahead, and either breaks the IR or changes what it computes
+  const cases: [string, string][] = [
+    ['reads-loop-value', SHARES_INCREMENT(PEELED_ARITH)],
+    ['not-staying-at-entry', lessThan(LEAVES_ARITH)],
+    ['not-staying-at-entry', lessThan(PEELED_ARITH)],
+    // the exit reads the counter before its increment, which the new head has not got
+    ['reads-loop-value', OWN_VALUE_EXIT('%6')],
+  ];
+  for (const [id, ir] of cases) {
+    expect(emitted(ir).src, id).toContain('while (1) {');
+    let disagree: number;
+    try {
+      disagree = irAgreement(ir, structure(emitted(ir, without(TOP_TEST_GATES, id)).fn), SEEDS).disagree;
+    } catch {
+      disagree = 1;
+    }
+    expect(disagree, id).toBeGreaterThan(0);
+  }
+});
+
+/** The hit arm can return as well as break: `if (p[i] == 7) { if (hit(a1)) return 2; break; }`. */
+const returnsAndBreaks = (ir: string) =>
+  ir.replace(
+    '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
+    '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  cond_br %13, ^bb5(), ^bb4()\n^bb5():\n  %15: s32 = const {value=2}\n  ret %15',
+  );
+
+test('an arm that can both return and reach the exit is written inside the restored loop', () => {
+  // the arm owns its `ret` (no other edge enters it), so the `while` writes it as the `return` it is,
+  // ahead of the `break`, and the loop is tested at the top
+  const { src } = emitted(returnsAndBreaks(TOP));
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(src.match(/hit\(/g)).toHaveLength(1);
+  expect(src).toMatch(/return 2;[\s\S]*break;/);
+  const arith = returnsAndBreaks(TOP_ARITH);
+  const sfn = structure(emitted(arith).fn);
+  expect(irAgreement(arith, sfn, SEEDS)).toEqual({ judged: 300, disagree: 0 });
+  expect(irAgreement(arith, readabilityRewrites(sfn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The arm reads `j = a1 + 3`, computed ahead of the loop: `j = n + 3; for (…) { if (…) { hit(j); break; } }`. */
+const readsInvariant = (ir: string) =>
+  ir
+    .replace(
+      '  %2: s32 = const {value=0}\n',
+      '  %2: s32 = const {value=0}\n  %30: s32 = const {value=3}\n  %31: s32 = add %1, %30\n',
+    )
+    .replace('%13: s32 = call %1 {target="hit"}', '%13: s32 = call %31 {target="hit"}');
+
+test('a value the arm reads, computed ahead of the loop, is named ahead of it', () => {
+  // it crosses the loop in a register; inlined into the arm, every profile computes it there instead
+  const { src } = emitted(readsInvariant(TOP));
+  const named = src.match(/(v\d+) = a1 \+ 3;/);
+  expect(named).not.toBeNull();
+  expect(src.indexOf(named![0])).toBeLessThan(src.indexOf('for ('));
+  expect(src).toContain(`hit(${named![1]});`);
+  expect(irAgreement(readsInvariant(TOP_ARITH), structure(emitted(readsInvariant(TOP_ARITH)).fn), SEEDS)).toEqual({
+    judged: 300,
+    disagree: 0,
+  });
+});
+
+/** `for (i = 0; i < n; i++)`: the copied exit test stays in front as a guard, `0 < a1`, and the
+ *  peeled first test sits in the block it enters. */
+const guarded = (ir: string) =>
+  ir.replace(
+    '^bb0(%0: u8*, %1: s32):\n  %2: s32 = const {value=0}\n',
+    '^bb0(%0: u8*, %1: s32):\n  %2: s32 = const {value=0}\n  %20: u32 = icmp_slt %2, %1\n  cond_br %20, ^bb5(), ^bb4()\n^bb5():\n',
+  );
+const GUARDED = guarded(PEELED);
+const GUARDED_ARITH = guarded(PEELED_ARITH);
+
+test('a re-rolled loop entered under its own exit test is tested at the top, and the guard goes', () => {
+  const { fn, src } = emitted(GUARDED);
+  expect(src).toContain('for (v0 = 0; v0 < a1; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(src).not.toMatch(/if \(0 < a1\)/); // the guard is gone, not kept around the loop
+  expect(fn.blocks[0].ops.at(-1)?.opcode).toBe('br');
+  const arith = emitted(GUARDED_ARITH).fn;
+  for (const sfn of [structure(arith), readabilityRewrites(structure(arith))]) {
+    expect(irAgreement(GUARDED_ARITH, sfn, SEEDS)).toEqual({ judged: 300, disagree: 0 });
+  }
+});
+
+test('a guard that is not the exit test on the entry values, or code between it and the loop, keeps it', () => {
+  // the guard asks `1 < a1`, a test the loop's first iteration does not make
+  const other = GUARDED_ARITH.replace(
+    '  %20: u32 = icmp_slt %2, %1\n',
+    '  %21: s32 = const {value=1}\n  %20: u32 = icmp_slt %21, %1\n',
+  );
+  // the block the guard enters calls out before the loop: it would run on the way out as well
+  const runs = GUARDED_ARITH.replace('^bb5():\n', '^bb5():\n  %22: s32 = call {target="pre"}\n');
+  for (const ir of [other, runs]) {
+    const { fn, src } = emitted(ir);
+    expect(src).toContain('while (1) {');
+    expect(irAgreement(ir, structure(fn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
+  }
+});
+
+/** A void function whose loop exits straight into the epilogue: return-sinking gave the arm its own
+ *  copy of the `ret`, marked as the fall-through into the epilogue it was. */
+const SUNK = (attrs: string) =>
+  TOP.replace(
+    '^bb3():\n  %13: s32 = call %1 {target="hit"}\n  br ^bb4()',
+    `^bb3():\n  %13: s32 = call %1 {target="hit"}\n  ret${attrs}`,
+  ).replace('  %14: s32 = call {target="out"}\n  ret %14', '  ret');
+
+test('an arm that fell into the exit’s return breaks to it in the restored loop', () => {
+  const { src } = emitted(SUNK(' {fallthrough=true}'));
+  expect(src).toContain('for (v0 = 0; v0 < 16; v0 = v0 + 1) {');
+  expect(src).toMatch(/hit\(a1\);\s*break;/);
+  // an arm that branched to the epilogue wrote its `return;`, and keeps it
+  expect(emitted(SUNK('')).src).toMatch(/hit\(a1\);\s*return;/);
 });

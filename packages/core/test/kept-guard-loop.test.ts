@@ -212,16 +212,32 @@ test('after a guarded loop, a pre-loop value read by a loop variable holding ano
   expect(() => emit(CARRIED_OUTSIDE_VALUE)).toThrow(ZERO_TRIP);
 });
 
-// …and read through an op the region inlines, which is what the region renders.
+// …and read through an op the region inlines, which is what the region renders: an address, which
+// renders where it is read (structure/analysis.ts names no address cone).
 test('after a guarded loop, an inlined op over such a value declines too', () => {
   expect(() =>
     emit(
       CARRIED_OUTSIDE_VALUE.replace(
         '%3: s32 = const {value=0}\n',
-        '%3: s32 = const {value=0}\n  %20: s32 = add %1, %0\n',
+        '%3: s32 = const {value=0}\n  %21: u8* = gaddr {sym="gT"}\n  %20: u8* = add %21, %1\n',
       ).replace('call %1 {target="h"}', 'call %20 {target="h"}'),
     ),
   ).toThrow(ZERO_TRIP);
+});
+
+// A pure value over it that is not an address is carried across the loop, so it is named ahead of the
+// loop (structure/analysis.ts), and the read after the loop reads that name.
+test('after a guarded loop, a pure value over such a value is named before the loop', () => {
+  const c = emit(
+    CARRIED_OUTSIDE_VALUE.replace(
+      '%3: s32 = const {value=0}\n',
+      '%3: s32 = const {value=0}\n  %20: s32 = add %1, %0\n',
+    ).replace('call %1 {target="h"}', 'call %20 {target="h"}'),
+  );
+  const named = c.match(/(v\d+) = a1 \+ a0;/);
+  expect(named).not.toBeNull();
+  expect(c.indexOf(named![0])).toBeLessThan(c.indexOf('do {'));
+  expect(c).toContain(`return h(${named![1]});`);
 });
 
 // THE ONE FACT CHANGED: `p` starts at `%1` too, so its name holds `%1` on both paths.

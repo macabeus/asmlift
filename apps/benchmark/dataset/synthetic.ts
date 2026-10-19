@@ -10458,8 +10458,27 @@ export const SYNTHETIC: SynthSpec[] = [
   //      mwcc_242_81 lift it (controls); ido7.1 is off because it declines first on a pre-update
   //      loop variable.
   //   5. break_code (1, plus one that pairs it with a `goto`). The break arm runs code, so it is
-  //      outside the natural loop and becomes a second live exit. Declines the same way on ido7.1
-  //      and mwcc_242_81; gcc2.7.2kmc is off (the `%hi` link again).
+  //      outside the natural loop and becomes a second live exit. agbcc also peels the first test
+  //      into the entry, which it does only for a top-tested source (stmt.c expand_end_loop, jump.c
+  //      duplicate_loop_exit_test), so the re-rolled loop gets its folded top test back
+  //      (raise/reroll.ts `restoreTopTest`). The loop's shape decides the bytes on agbcc and the
+  //      CodeWarrior builds only; ido7.1 walks a pointer to a separately built end, and mwcc counts
+  //      down `ctr`. gcc2.7.2kmc and gcc2.7.2 are controls. `dowbreak_code` is its do-while twin, a
+  //      bottom-tested source with no peel, which keeps its bottom test on every toolchain.
+  //      `breakret_code` ends in a `return`, which the arm must not copy; `breakidx_code` reads the
+  //      counter after the loop, a value the head and the arm hand the exit alike. `breakn_code`
+  //      bounds the loop by a parameter, so agbcc keeps the copied test as a guard rather than fold
+  //      it, which the restore then deletes; on gcc2.7.2kmc and gcc2.7.2 the same source is a guard
+  //      and a bottom test with no peel, which the default lift keeps and a ranked candidate
+  //      matches. `breaknend_code` exits straight into the epilogue, where the arm's sunk `return`
+  //      is the `break` it fell from. `breakretarm_code` can return from the arm as well as break:
+  //      the `while` writes the arm's own `return` inside it, ahead of the `break` (structure.ts
+  //      `codeBreakArm`). `breakinv_code`'s arm reads a value computed ahead of the loop, which
+  //      crosses it in a register and is named there (structure/analysis.ts, a pure value carried
+  //      across a loop), not inlined into the arm. `breakretinc_code` is `breakretarm_code` with
+  //      `gHit += 1`: mwcc leaves r3 holding gHit's value on one exit and the walked pointer on the
+  //      other, a join only the void function's `ret` reads, which must not type gHit as a pointer
+  //      (pipeline.ts `dropVoidReturnOperands`).
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
@@ -10730,10 +10749,130 @@ export const SYNTHETIC: SynthSpec[] = [
       'void break_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
       '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
     features: ['break', 'array'],
-    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'void break_code(void);',
     proto: { break_code: { returnsVoid: true } },
   },
+  {
+    sym: 'break_code',
+    src:
+      'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+      'void break_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+      '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+    features: ['break', 'array'],
+    toolchains: ['mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'void break_code(void);',
+    proto: { break_code: { returnsVoid: true } },
+  },
+  ...(
+    [
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).map(([toolchains, cflags]) => ({
+    sym: 'dowbreak_code',
+    src:
+      'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+      'void dowbreak_code(void)\n{\n    u32 i;\n    i = 0;\n    do {\n' +
+      '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n        i++;\n    } while (i < 16);\n' +
+      '    gOut = 0;\n}',
+    features: ['break', 'array'],
+    toolchains: [...toolchains],
+    ...(cflags ? { cflags } : {}),
+    ctx: 'void dowbreak_code(void);',
+    proto: { dowbreak_code: { returnsVoid: true } },
+  })),
+  ...(
+    [
+      [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]) => [
+    {
+      sym: 'breakret_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        's32 breakret_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    return gOut;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 's32 breakret_code(void);',
+    },
+    {
+      sym: 'breakidx_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        'void breakidx_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = i;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakidx_code(void);',
+      proto: { breakidx_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakn_code',
+      src:
+        'extern u8 gTab[128];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        'void breakn_code(s32 n)\n{\n    s32 i;\n    for (i = 0; i < n; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakn_code(s32 n);',
+      proto: { breakn_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breaknend_code',
+      src:
+        'extern u8 gTab[128];\nextern s32 gHit;\n' +
+        'void breaknend_code(s32 n)\n{\n    s32 i;\n    for (i = 0; i < n; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breaknend_code(s32 n);',
+      proto: { breaknend_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakretarm_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\nextern s32 gKey;\n' +
+        'void breakretarm_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            if (gKey)\n                return;\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakretarm_code(void);',
+      proto: { breakretarm_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakinv_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        'void breakinv_code(s32 n)\n{\n    s32 i, j;\n    j = n * 3;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = j;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakinv_code(s32 n);',
+      proto: { breakinv_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakretinc_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\nextern s32 gKey;\n' +
+        'void breakretinc_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            if (gKey)\n                return;\n            gHit += 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakretinc_code(void);',
+      proto: { breakretinc_code: { returnsVoid: true } },
+    },
+  ]),
   {
     sym: 'spilldead',
     src:
