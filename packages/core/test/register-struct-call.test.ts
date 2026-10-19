@@ -110,6 +110,13 @@ const EPILOGUE = (at: number) =>
   [`lwz     r0,20(r1)`, `mtlr    r0`, `addi    r1,r1,16`, `blr`]
     .map((ins, k) => `  ${(at + 4 * k).toString(16)}:\t${ins}\n`)
     .join('');
+/** an mwcc 2.3.3 caller, which round-trips the image through the struct's home at 12(r1) */
+const mwcc233 = (name: string, load: string, store: string) =>
+  `00000000 <${name}>:\n   0:\tmflr    r0\n   4:\tstw     r0,4(r1)\n   8:\tstwu    r1,-16(r1)\n` +
+  `   c:\tbl      c <${name}+0xc>\n\t\t\tc: R_PPC_REL24\tmk\n  10:\tstw     r3,12(r1)\n  14:\t${load}\n` +
+  `  18:\t${store}     r0,0(0)\n\t\t\t1a: R_PPC_EMB_SDA21\tgV\n  1c:\tlwz     r0,20(r1)\n  20:\taddi    r1,r1,16\n` +
+  '  24:\tmtlr    r0\n  28:\tblr\n';
+
 describe('mwcc: a struct of up to four bytes comes back in r3, left-justified', () => {
   const b1 = mwcc(
     'c_b1',
@@ -126,10 +133,10 @@ describe('mwcc: a struct of up to four bytes comes back in r3, left-justified', 
       const target = TOOLCHAIN_TARGETS[tc].description;
       expect(
         decompile('c_b1', b1, target, { prototypes: { ...own('c_b1'), mk: mk([{ name: 'a', type: 'u8' }]) } }).source,
-      ).toMatch(/struct T mk_ret;\s+mk_ret = mk\(a0\);\s+(v0|gV) = mk_ret\.a;/);
+      ).toMatch(/struct T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.a;/);
       expect(
         decompile('c_h1', h1, target, { prototypes: { ...own('c_h1'), mk: mk([{ name: 'a', type: 'u16' }]) } }).source,
-      ).toMatch(/mk_ret = mk\(a0\);\s+(v0|gV) = mk_ret\.a;/);
+      ).toMatch(/mk_ret = mk\(a0\);\s+gV = mk_ret\.a;/);
     });
   }
 
@@ -143,5 +150,87 @@ describe('mwcc: a struct of up to four bytes comes back in r3, left-justified', 
     expect(() => decompile('c_h1', h1, target, { prototypes: { mk: mk([{ name: 'a', type: 'u16' }]) } })).toThrow(
       /`mk` hands back a struct of 2 bytes in r3/,
     );
+  });
+});
+
+describe("mwcc: the struct's frame home is the local the call assigns", () => {
+  // the home `stw r3,8(r1)` is written after the store to gV and read by nothing
+  const w1 = mwcc(
+    'c_w1',
+    '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgV\n  14:\tlwz     r0,20(r1)\n  18:\tstw     r3,8(r1)\n' +
+      '  1c:\tmtlr    r0\n  20:\taddi    r1,r1,16\n  24:\tblr\n',
+  );
+  // `struct T { u8 a, b; }`: the image's top half is stored to the home and b read back off it
+  const bb = mwcc(
+    'c_bb',
+    '  10:\tsrwi    r0,r3,16\n  14:\tsth     r0,8(r1)\n  18:\tlbz     r0,9(r1)\n  1c:\tstb     r0,0(0)\n' +
+      '\t\t\t1c: R_PPC_EMB_SDA21\tgV\n' +
+      EPILOGUE(0x20),
+  );
+  const BB = mk([
+    { name: 'a', type: 'u8' },
+    { name: 'b', type: 'u8' },
+  ]);
+  for (const tc of ['mwcc_242_81', 'mwcc_247_107'] as const) {
+    test(`${tc}: a home nothing reads, and one a member is read back from`, () => {
+      const target = TOOLCHAIN_TARGETS[tc].description;
+      expect(
+        decompile('c_w1', w1, target, { prototypes: { ...own('c_w1'), mk: mk([{ name: 'a', type: 'u32' }]) } }).source,
+      ).toMatch(/mk_ret = mk\(a0\);\s+gV = \*\(s32 \*\)&mk_ret;/);
+      expect(decompile('c_bb', bb, target, { prototypes: { ...own('c_bb'), mk: BB } }).source).toMatch(
+        /mk_ret = mk\(a0\);\s+gV = mk_ret\.b;/,
+      );
+    });
+  }
+
+  test("a home read back after a second call is the first call's local", () => {
+    // `struct T s = mk(x); struct T t = mk(x + 1); gW = s.a + t.a;`, `struct T { u16 a; }`: s's home
+    // at 12(r1) is reloaded past the second call
+    const t2 =
+      '00000000 <t2>:\n   0:\tstwu    r1,-32(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,36(r1)\n' +
+      '   c:\tstw     r31,28(r1)\n  10:\tmr      r31,r3\n  14:\tbl      14 <t2+0x14>\n\t\t\t14: R_PPC_REL24\tmk\n' +
+      '  18:\tsrwi    r0,r3,16\n  1c:\taddi    r3,r31,1\n  20:\tsth     r0,12(r1)\n  24:\tbl      24 <t2+0x24>\n' +
+      '\t\t\t24: R_PPC_REL24\tmk\n  28:\tlhz     r0,12(r1)\n  2c:\tsrwi    r3,r3,16\n  30:\tsth     r3,8(r1)\n' +
+      '  34:\tadd     r0,r0,r3\n  38:\tstw     r0,0(0)\n\t\t\t38: R_PPC_EMB_SDA21\tgW\n  3c:\tlwz     r31,28(r1)\n' +
+      '  40:\tlwz     r0,36(r1)\n  44:\tmtlr    r0\n  48:\taddi    r1,r1,32\n  4c:\tblr\n';
+    const target = TOOLCHAIN_TARGETS.mwcc_242_81.description;
+    expect(
+      decompile('t2', t2, target, { prototypes: { ...own('t2'), mk: mk([{ name: 'a', type: 'u16' }]) } }).source,
+    ).toMatch(/mk_ret = mk\(a0\);\s+mk_ret_ = mk\(a0 \+ 1\);\s+gW = mk_ret_\.a \+ mk_ret\.a;/);
+  });
+
+  test("mwcc_233_163n: the struct's home holds the image the call handed back", () => {
+    const target = TOOLCHAIN_TARGETS.mwcc_233_163n.description;
+    const lift = (members: { name: string; type: string }[], load: string, store: string) =>
+      decompile('c', mwcc233('c', load, store), target, { prototypes: { ...own('c'), mk: mk(members) } }).source;
+    expect(lift([{ name: 'a', type: 'u8' }], 'lbz     r0,12(r1)', 'stb')).toMatch(
+      /mk_ret = mk\(a0\);\s+gV = mk_ret\.a;/,
+    );
+    expect(lift([{ name: 'a', type: 'u16' }], 'lhz     r0,12(r1)', 'sth')).toMatch(
+      /mk_ret = mk\(a0\);\s+gV = mk_ret\.a;/,
+    );
+    expect(
+      lift(
+        [
+          { name: 'a', type: 'u8' },
+          { name: 'b', type: 'u8' },
+        ],
+        'lbz     r0,13(r1)',
+        'stb',
+      ),
+    ).toMatch(/mk_ret = mk\(a0\);\s+gV = mk_ret\.b;/);
+  });
+
+  test('an unread home is still refused where a call nothing declares might take it as a stack word', () => {
+    const target = TOOLCHAIN_TARGETS.mwcc_242_81.description;
+    const later =
+      '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgV\n  14:\tstw     r3,8(r1)\n' +
+      '  18:\tbl      18 <c_w1+0x18>\n\t\t\t18: R_PPC_REL24\tother\n' +
+      EPILOGUE(0x1c);
+    expect(() =>
+      decompile('c_w1', mwcc('c_w1', later), target, {
+        prototypes: { ...own('c_w1'), mk: mk([{ name: 'a', type: 'u32' }]) },
+      }),
+    ).toThrow(/'8\(r1\)' is stored at 0x14 and never read back/);
   });
 });

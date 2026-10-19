@@ -40,7 +40,7 @@
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { ownArgumentWordsOn } from '../aggregate';
-import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { Block, Fn, Op, REGISTER_STRUCT, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -51,6 +51,7 @@ import {
   declaresVoidReturn,
   isFloatingSpelling,
   ownFirstArgumentPassed,
+  wordsOf,
 } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
@@ -1681,7 +1682,7 @@ function liftOnce(
   // other word.
   const incomingStackKey = (entryOff: number): string | undefined =>
     incomingStackArgKey(entryOff, PARAM_AREA_AT, ARG_REGS.length);
-  const valueSlots = new Map<number, { addr: number; mem: string; read: boolean }>();
+  const valueSlots = new Map<number, { addr: number; mem: string; read: boolean; stored: Value[] }>();
   const loadedFrom = target.compilerBehaviors.outgoingAreaNeverLoadedFrom;
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
@@ -2048,8 +2049,9 @@ function liftOnce(
       }
       writeVar(stackSlotKey(off), bi, v);
       if (!valueSlots.has(off)) {
-        valueSlots.set(off, { addr: ins.addr, mem, read: false });
+        valueSlots.set(off, { addr: ins.addr, mem, read: false, stored: [] });
       }
+      valueSlots.get(off)!.stored.push(v);
       return true;
     };
     const frameLoad = (ins: Instr, dstReg: string, mem: string): boolean => {
@@ -3449,11 +3451,29 @@ function liftOnce(
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same
   // store, and dropping the second loses an argument — save a word at or above the loaded-word
   // bound of the frame it was stored in, which is no call's argument and so a dead local's.
+  //
+  // A STRUCT'S HOME is the other unread word that is no argument. mwcc 2.4.2 and 2.4.7 give a struct
+  // a callee returned in r3 (`registerStructLocal`, call-plan.ts) a home in the frame and store the
+  // register there whole even where every member read is taken off r3 itself: `s = mk1(x); gW =
+  // s.x;` is `bl mk1; stw r3,gW; ...; stw r3,8(r1)`, and nothing reloads the home. A word every
+  // store of which is such an image holds that struct, and is no call's stack argument where every
+  // call this function makes is declared to take none: then it is the local the call assigns, which
+  // `liftRegisterStructCalls` (frontend/register-struct-call.ts) declares.
+  const images = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.attrs[REGISTER_STRUCT] === true).map((op) => op.results[0])),
+  );
+  const noStackArgs = reached
+    .filter((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins))
+    .every((ins) => {
+      const declared = calls.declaredCall(ins.reloc?.sym ?? '');
+      return declared !== null && wordsOf(declared.widths, target) <= ARG_REGS.length;
+    });
   const depthOfAddr = new Map(blocks.flatMap((b) => b.body.map((ins) => [ins.addr, r1At.get(ins)] as const)));
-  for (const [off, { addr, mem, read }] of valueSlots) {
+  for (const [off, { addr, mem, read, stored }] of valueSlots) {
     const depth = depthOfAddr.get(addr);
     const deadLocal = typeof depth === 'number' && off < 0 && off >= loadedWordBound(depth);
-    if (!read && !deadLocal) {
+    const structHome = noStackArgs && stored.length > 0 && stored.every((v) => images.has(v));
+    if (!read && !deadLocal && !structHome) {
       throw new PpcUnsupportedError(
         `cannot lift '${name}': local stack frames not supported — '${mem}' is stored at 0x${addr.toString(16)} ` +
           `and never read back, and an unread home and a call's argument passed on the stack are the same store`,

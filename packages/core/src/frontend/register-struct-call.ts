@@ -26,6 +26,8 @@ import {
   type Block,
   CALL_RETURN_OBJECT,
   type Fn,
+  OWN_RETURN_OBJECT,
+  type Op,
   REGISTER_STRUCT,
   type Value,
   calleeName,
@@ -34,6 +36,7 @@ import {
   mkValue,
   replaceAllUsesWith,
 } from '../ir/core';
+import { qualified } from '../ir/discipline';
 import { T } from '../ir/types';
 import { type FnProto, type Prototypes, declaresVoidReturn } from '../proto';
 import type { TargetDescription } from '../target';
@@ -153,6 +156,9 @@ export function liftRegisterStructCalls(
       }
     }
   }
+  for (const image of images) {
+    foldFrameHome(fn, image);
+  }
   // what the image leaves out must be what no reader reads (`demandedBits`)
   const voidOwn = declaresVoidReturn(ownDeclaration);
   for (const { word, size, callee } of images) {
@@ -163,6 +169,73 @@ export function liftRegisterStructCalls(
           `${target.returnReg}, and this function reads bits of the register past it — what the callee left there is no value`,
       );
     }
+  }
+}
+
+/** THE STRUCT'S FRAME HOME IS THE LOCAL. A compiler that gives the struct a home in the frame stores
+ *  the register there as it comes back (mwcc: `bl mk; stw r3,8(r1); lhz r0,8(r1)` for `s = mk(x);
+ *  gOut = s.a;`) and reads its members off the home, so the home's bytes are the local's. Each load
+ *  of them is rewritten to read the local, which spells it as the member it is, and the store goes
+ *  where nothing else touches those bytes — the C's own assignment is that store.
+ *
+ *  Only what the bytes prove is folded. The home is a frame object whose address is no value — only
+ *  ever the base of a load or a store — so nothing but those accesses reaches its bytes; the store
+ *  writes the image whole (the word, or on big-endian the struct's own bytes, `sth`), unqualified,
+ *  in the call's block; and only the loads that follow it there, before any other store to the
+ *  home's bytes, and that lie inside the struct, read what it stored. A load of the pad past a
+ *  struct of one or two bytes reads no member, and stops the walk. */
+function foldFrameHome(fn: Fn, { block, local, size, word, loaded }: Image): void {
+  const defs = defOpMap(fn);
+  const frameOff = (v: Value): number | undefined => {
+    const d = defs.get(v);
+    return d?.opcode === 'laddr' &&
+      d.attrs[CALL_RETURN_OBJECT] === undefined &&
+      d.attrs[OWN_RETURN_OBJECT] !== true &&
+      typeof d.attrs.off === 'number'
+      ? d.attrs.off
+      : undefined;
+  };
+  const at = block.ops.findIndex(
+    (op) =>
+      op.opcode === 'store' &&
+      frameOff(op.operands[0]) !== undefined &&
+      !qualified(op) &&
+      ((op.operands[1] === word && op.attrs.width === 4) || (op.operands[1] === loaded && op.attrs.width === size)),
+  );
+  if (at < 0) {
+    return;
+  }
+  const home = block.ops[at];
+  const base = frameOff(home.operands[0])! + (home.attrs.off as number);
+  const touches = (op: Op): boolean => {
+    const off = frameOff(op.operands[0]);
+    const from = (off ?? NaN) + (op.attrs.off as number);
+    return from < base + (home.attrs.width as number) && from + (op.attrs.width as number) > base;
+  };
+  // every frame address in the function is only the base of an access, or nothing may be folded
+  const ops = fn.blocks.flatMap((b) => b.ops);
+  for (const op of ops) {
+    const bases = op.opcode === 'load' || op.opcode === 'store' ? 1 : 0;
+    if (op.operands.slice(bases).some((v) => frameOff(v) !== undefined)) {
+      return;
+    }
+  }
+  for (const op of block.ops.slice(at + 1)) {
+    if (op.opcode === 'store' && touches(op)) {
+      break;
+    }
+    if (op.opcode !== 'load' || !touches(op)) {
+      continue;
+    }
+    const from = frameOff(op.operands[0])! + (op.attrs.off as number) - base;
+    if (from < 0 || from + (op.attrs.width as number) > size || qualified(op)) {
+      break;
+    }
+    op.operands = [local, ...op.operands.slice(1)];
+    op.attrs = { ...op.attrs, off: from };
+  }
+  if (!ops.some((op) => op !== home && (op.opcode === 'load' || op.opcode === 'store') && touches(op))) {
+    block.ops.splice(block.ops.indexOf(home), 1);
   }
 }
 
