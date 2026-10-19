@@ -35,7 +35,7 @@
 // mid-tested header), PROPERLY-nested loops, in-body `break`/early-`return`, comparison-tree and
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
-// others (jump tables; `switchFrames`). Still DECLINED (loud StructureError, never wrong code):
+// others (`switchFrames`). Still DECLINED (loud StructureError, never wrong code):
 // irreducible/overlapping loops, exits to more than one live merge, a `break` out of a nested loop's
 // body, a `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
 // entered by a plain br).

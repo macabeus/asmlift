@@ -792,14 +792,19 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // backend because the backend's refusal is terminal (the whole function becomes a stub) while
     // this one costs nothing but the `switch` spelling.
     //
-    // A falling arm that also BREAKS is declined here too, for now: this regime has a second
-    // recovery, and the switch spelling of that shape is not yet gated against the ladders that
-    // reach the same verdict.
+    // A falling arm that also BREAKS (`case 1: if (c) break; case 2: …`) is a `switch` here only
+    // where it falls into a CASE arm, one the dispatch also enters by its own value. That arm is
+    // what if-recovery cannot spell without copying it into the arm that falls into it, and an
+    // if/else-if ladder writes no such pair. Falling into the `default:` arm is the other way
+    // round: the default is the ladder's `else`, and `if ((x == 3 || x == 5) && y == 100) A; else
+    // B;` compiles to exactly that tree — `synthetic:chainsense:agbcc`, a MATCH through
+    // if-recovery, which a `switch` with `case 3: case 5: if (y == 100) { A; break; } default: B;`
+    // would re-spell. So that one keeps declining to if-recovery, which spells it with no copy.
     if (
       [...exitOf.values()].some(
         (e) =>
           e.kind === 'unstructurable' ||
-          (e.kind === 'fallthrough' && (!spellSwitchFallthrough || e.breaks !== undefined)),
+          (e.kind === 'fallthrough' && (!spellSwitchFallthrough || (e.breaks !== undefined && !caseBlocks.has(e.to)))),
       )
     ) {
       return null;

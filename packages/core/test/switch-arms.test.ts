@@ -1048,7 +1048,9 @@ test('a chain elsewhere does not delete the evidence for where `default:` was wr
 // Regime A's fallback is if-recovery, which spells every edge the assembly has — so each of these
 // comes back as if-nesting rather than as a `switch` that guesses. What the assertions read is that
 // the arm at the far end of the offending edge never gets a `case` label of the recovered switch,
-// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling.
+// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling. One
+// shape here recovers now — a body reaching a sibling CASE and the switch's END, spelled with a
+// switch-scoped `break;` — and stays beside the near-miss it is told apart from.
 const threeCase = (c0: string, c1: string, c2: string) =>
   'f:\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -1088,10 +1090,10 @@ test('a body reaching TWO sibling arms declines — C fall-through reaches only 
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
 });
 
-test('a body reaching a sibling on one path and the switch END on another declines', () => {
-  // The shape that needs a switch-scoped `break;` inside a case body, which l3 does not emit
-  // (`{k:'break'}` is loop-scoped). Widening fall-through to swallow it would divert the exiting
-  // path into the next arm.
+test('a body reaching a sibling CASE on one path and the switch END on another breaks on that path', () => {
+  // `case 0: if (c) break; case 1: …` — the arm's own switch-scoped `break;` on the path to the
+  // END, the fall-through on the other. Case 1 keeps its own label and is emitted once, where
+  // if-recovery would have had to copy it into case 0.
   const out = of(
     threeCase(
       '\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Lc1\n',
@@ -1099,8 +1101,29 @@ test('a body reaching a sibling on one path and the switch END on another declin
       '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
     ),
   );
-  expect(armOrder(out)).not.toContain(1);
-  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(out).toMatch(/case 0:\s*\n\s*if \(a1 == 0\) break;\s*\n\s*case 1:\s*\n\s*\*a1 = 2;/);
+  expect(count(out, '*a1 = 2;')).toBe(1);
+});
+
+test('…but one that breaks or falls into the DEFAULT arm declines to if-recovery', () => {
+  // The `default:` is a ladder's `else`: `if ((x == 3 || x == 5) && y == 100) A; else B;` compiles
+  // to this tree (`synthetic:chainsense:agbcc`, which MATCHes through if-recovery), and if-recovery
+  // spells it with no copy, so the `switch` would only re-spell it.
+  const asm =
+    'f:\n' +
+    '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+    '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+    '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lc0:\n\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lc1:\n\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n' +
+    '.Lc2:\n\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n' +
+    '.Ldef:\n\tmov\tr0, #0x4\n\tstr\tr0, [r1]\n' +
+    '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+  const out = of(asm);
+  expect(out).not.toContain('switch (');
+  expect(count(out, '*a1 = 4;')).toBeGreaterThan(1);
 });
 
 // ── what the TARGET LANGUAGE can spell is a recovery input ───────────────────────────────────────
