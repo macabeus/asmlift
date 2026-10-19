@@ -31,11 +31,11 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 105 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       29  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, alignment fill that depends on the function's base
 //                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
@@ -46,12 +46,10 @@
 //                               caller's lr, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  22  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
-//                               the compiler's anonymous constant read other than as the
-//                               initializer of the locals its copies fill,
 //                               an access whose byte offset is not a whole number of its own elements
 //                               (no subscript spells it), a struct local's bytes stored into an array
 //                               element by a recovered row subscript, and three internal invariants (an ambiguous
@@ -122,10 +120,7 @@
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
 // `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
-// fourth value a decline could carry. One control-transfer capability is in that residue and is
-// worth naming on its own: `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls" (its MIPS sibling has a row, and the class `indirect-jump`). So are
-// two kinds of the naming family: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six
+// fourth value a decline could carry. Two kinds of the naming family are in that residue: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six
 // have a class here, while "names 'X', which is not a C identifier" and "names the function's
 // predefined name" have none (a Thumb pool word naming the predefined name is the exception:
 // `pool-word-shape` takes it). They have no rows, so they wait for one.
@@ -149,7 +144,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 6 of the 22 rows, so a pattern requiring the decided spelling claims 16 of
+    // disjunction is 6 of the 26 rows, so a pattern requiring the decided spelling claims 20 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -221,6 +216,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'entry-flags',
     label: 'Condition flags read at function entry (set by the caller)',
     pattern: /no compare reaches '[^']*', and it has no predecessor/,
+  },
+  {
+    // THE THUMB FLAGS A NON-COMPARE WROTE (`frontend/thumb.ts`, the reason the reaching-compare
+    // throw interpolates): a conditional branch testing flags that `cmn`, `tst`, flag-setting
+    // arithmetic or a call left, where only a compare's are modelled. The `cmn` inhabitants are
+    // agbcc's spelling of a compare against a negated value (thumb.md `cmnsi`): `cmn_field`,
+    // `cmn_eq` and `cmn_ult` decline here on agbcc and lift on the other three toolchains, which
+    // compare with `cmp`/`slt`. What it names to build is reading `cmn rA, rB` as `rA == -rB`
+    // style compares (and `tst` as `(rA & rB) != 0`), not an edge model.
+    key: 'non-compare-flags',
+    label: 'Thumb condition flags written by a non-compare (cmn / tst / flag-setting arithmetic / a call)',
+    pattern: /the flags it tests were written by /,
   },
   {
     // THE LEFTOVERS OF A CAPABILITY THAT LANDED, not a missing one — the reading `branch-likely`
@@ -572,6 +579,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /function-scope static/,
   },
   {
+    // THE COMPILER'S ANONYMOUS CONSTANT READ OTHER THAN AS ONE LOCAL'S INITIALIZER
+    // (`structure/structure.ts`, both throws, the refusal `l3/constinit.ts` plans): agbcc copies a
+    // local aggregate's initializer out of an anonymous `.LC` image, and the emitter spells that
+    // image only as the initializer of the locals its copies fill. Its first row is `imgpair`
+    // on agbcc, two indexed tables filled from one image, which the audit widens into one 32-byte
+    // object that is not an integer array of the image's 16 bytes (`imgone`, one table, lifts).
+    key: 'local-image',
+    label: "A local's initializer image the copies do not fill as one array (agbcc's anonymous .LC data)",
+    pattern: /reads the compiler's anonymous constant/,
+  },
+  {
     key: 'cxx-symbol',
     label: 'C++ symbols no C declaration reaches (vtables, class-scoped)',
     pattern: /C\+\+ class-scoped symbol|C\+\+ virtual table/,
@@ -801,10 +819,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a dispatch the jump-table recognizer refused, or a register tail call. The message says both,
     // and so does the label, dispatch side first. Its first row is IDO's second table in one
     // function, read at `lw t9,32(at)` (`sw_jtloop2:ido7.1`), which the recognizer does not take.
-    // Thumb's "indirect/computed jump" has no row and stays in the residue.
+    // Thumb's "indirect/computed jump … — jump tables / computed gotos / register tail calls" is the
+    // same refusal (`frontend/thumb.ts`), and its rows are agbcc's `mov pc, r0` dispatches the
+    // Thumb recognizer leaves unclaimed: `jt_pre_midg` (a guard between the bounds check and the
+    // table load) and `jt_dupdef` (a case label aliasing the default block). Thumb's other
+    // "indirect/computed jump" throw is a return that does not jump through the caller's lr, which
+    // is not a dispatch, so the Thumb half keys on the phrase only the dispatch refusal carries.
     key: 'indirect-jump',
     label: 'Indirect jumps no table claimed (an unrecovered jump-table dispatch, or a register tail call)',
-    pattern: /indirect jump 'jr /,
+    pattern: /indirect jump 'jr |indirect\/computed jump '[^']*' — jump tables/,
   },
   {
     key: 'block-boundary',
