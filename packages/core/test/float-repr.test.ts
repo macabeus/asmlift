@@ -7,10 +7,11 @@ import { pascalBackend } from '../src/backend/pascal';
 import { MIPS_FP_REG } from '../src/frontend/splat';
 import { mkOp, mkValue } from '../src/ir/core';
 import { deletableWhenDead } from '../src/ir/discipline';
+import { NEGATED_FCMP, NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { type IrType, T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import type { Expr } from '../src/l3/ast';
+import { type Expr, negateCond } from '../src/l3/ast';
 import { exprCType, renderedIntSignedness } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
@@ -235,5 +236,117 @@ describe('the floating-point homes a target declares', () => {
     expect(MIPS_GCC.fpu).toEqual(MIPS_IDO.fpu);
     expect(PPC_MWCC.fpu?.slots).toBe('separate');
     expect(PPC_MWCC.fpu?.returnReg).toBe('f1');
+  });
+});
+
+// The conversions and the compares: the only ops a float and an integer meet in.
+describe('a float crosses into an integer only through a conversion or a compare', () => {
+  const fn1 = (param: string, op: string, result: string) =>
+    `fn f {\n^bb0(%0: ${param}):\n  %1: ${result} = ${op} %0\n  ret %1\n}\n`;
+
+  test.each([
+    ['f32', 'fptosi', 'unk32'],
+    ['f64', 'fptoui', 's32'],
+    ['f32', 'fptosi', 'unk64'],
+    ['f?', 'fptosi', 'unk32'],
+    ['unk32', 'sitofp', 'f32'],
+    ['s64', 'sitofp', 'f64'],
+    ['f32', 'fpext', 'f64'],
+    ['f64', 'fptrunc', 'f32'],
+  ])('%s through %s into %s verifies', (param, op, result) => {
+    expect(() => verify(parse(fn1(param, op, result)))).not.toThrow();
+  });
+
+  test.each([
+    ['unk32', 'fptosi', 'unk32'],
+    ['f32', 'fptosi', 'f32'],
+    ['f32', 'fptosi', 'unk16'],
+    ['f32', 'sitofp', 'f32'],
+    ['f64', 'fpext', 'f64'],
+    ['f32', 'fptrunc', 'f32'],
+  ])('%s through %s into %s is rejected', (param, op, result) => {
+    expect(() => verify(parse(fn1(param, op, result)))).toThrow(`'${op}' does not take ${param} to ${result}`);
+  });
+
+  const cmp = (a: string, b: string, result = 'unk32') =>
+    `fn f {\n^bb0(%0: ${a}, %1: ${b}):\n  %2: ${result} = fcmp_olt %0, %1\n  ret %2\n}\n`;
+  test('a compare takes two floats of one type to a word', () => {
+    expect(() => verify(parse(cmp('f64', 'f64')))).not.toThrow();
+    expect(() => verify(parse(cmp('f32', 'f64')))).toThrow(/'fcmp_olt' does not take f32, f64 to unk32/);
+    expect(() => verify(parse(cmp('f32', 's32')))).toThrow(/'fcmp_olt' does not take f32, s32/);
+    expect(() => verify(parse(cmp('f32', 'f32', 'f32')))).toThrow(/'fcmp_olt' does not take f32, f32 to f32/);
+  });
+
+  // NaN: the negation of an ordered compare is the unordered one, never the flipped relation.
+  test('each compare negates to the one that is true exactly where it is false, NaN included', () => {
+    expect(NEGATED_FCMP.fcmp_ogt).toBe('fcmp_ule');
+    expect(NEGATED_FCMP.fcmp_oeq).toBe('fcmp_une');
+    for (const [a, b] of Object.entries(NEGATED_FCMP)) {
+      expect(NEGATED_FCMP[b]).toBe(a);
+      expect(a in NEGATED_ICMP).toBe(false);
+    }
+    const fcmps = Object.keys(OPCODES).filter((k) => k.startsWith('fcmp_'));
+    expect(new Set(Object.keys(NEGATED_FCMP))).toEqual(new Set(fcmps));
+  });
+});
+
+describe('their spelling', () => {
+  test.each([
+    ['f32', 'fptosi', 'unk32', 's32 f(float a0) {\n    return (s32)a0;\n}\n'],
+    ['f64', 'fptoui', 'unk32', 's32 f(double a0) {\n    return (u32)a0;\n}\n'],
+    ['f32', 'fptosi', 'unk64', 's64 f(float a0) {\n    return (s64)a0;\n}\n'],
+    ['s32', 'sitofp', 'f32', 'float f(s32 a0) {\n    return (float)a0;\n}\n'],
+    ['f32', 'fpext', 'f64', 'double f(float a0) {\n    return (double)a0;\n}\n'],
+    ['f64', 'fptrunc', 'f32', 'float f(double a0) {\n    return (float)a0;\n}\n'],
+  ])('%s through %s is C cast', (param, op, result, want) => {
+    expect(emitC(`fn f {\n^bb0(%0: ${param}):\n  %1: ${result} = ${op} %0\n  ret %1\n}\n`)).toBe(want);
+  });
+
+  // C converts an unsigned integer with the unsigned conversion, a different program.
+  test('an integer converted to a float renders signed', () => {
+    expect(emitC('fn f {\n^bb0(%0: u32):\n  %1: f64 = sitofp %0\n  ret %1\n}\n')).toContain('return (double)(s32)a0;');
+  });
+
+  test.each([
+    ['fcmp_olt', 'a0 < a1'],
+    ['fcmp_ole', 'a0 <= a1'],
+    ['fcmp_ogt', 'a0 > a1'],
+    ['fcmp_oge', 'a0 >= a1'],
+    ['fcmp_oeq', 'a0 == a1'],
+    ['fcmp_une', 'a0 != a1'],
+    ['fcmp_ule', '!(a0 > a1)'],
+    ['fcmp_ult', '!(a0 >= a1)'],
+    ['fcmp_ugt', '!(a0 <= a1)'],
+    ['fcmp_uge', '!(a0 < a1)'],
+  ])('%s is %s', (op, want) => {
+    const src = emitC(`fn f {\n^bb0(%0: f32, %1: f32):\n  %2: unk32 = ${op} %0, %1\n  ret %2\n}\n`);
+    expect(src).toBe(`s32 f(float a0, float a1) {\n    return ${want};\n}\n`);
+  });
+
+  // A branch on `!(a > b)` taken to skip the store reads as `if (a > b)`: the `!` comes off whole.
+  test('a branch on an unordered compare negates to the ordered one, not to a flipped relation', () => {
+    const src = emitC(
+      'fn f {\n^bb0(%0: f32, %1: f32):\n  %2: unk32 = fcmp_ule %0, %1\n  cond_br %2, ^bb2(), ^bb1()\n' +
+        '^bb1():\n  %3: unk32 = gaddr {sym = "g"}\n  %4: unk32 = const {value = 1}\n' +
+        '  store %3, %4 {off = 0, width = 4}\n  br ^bb2()\n^bb2():\n  ret\n}\n',
+    );
+    expect(src).toContain('if (a0 > a1) g = 1;');
+  });
+
+  test('negateCond flips only == and != between the float relations', () => {
+    const x: Expr = { k: 'var', name: 'x' };
+    expect(negateCond({ k: 'bin', op: 'f==', l: x, r: x })).toEqual({ k: 'bin', op: 'f!=', l: x, r: x });
+    expect(negateCond({ k: 'bin', op: 'f>', l: x, r: x })).toEqual({
+      k: 'un',
+      op: '!',
+      e: { k: 'bin', op: 'f>', l: x, r: x },
+    });
+  });
+
+  test('a float compare is a C int', () => {
+    const env = (name: string) => (name === 'x' ? T.f32() : T.s(32));
+    const x: Expr = { k: 'var', name: 'x' };
+    expect(exprCType({ k: 'bin', op: 'f<', l: x, r: x }, env)).toEqual(T.s(32));
+    expect(renderedIntSignedness({ k: 'bin', op: 'f!=', l: x, r: x }, env)).toBe(true);
   });
 });

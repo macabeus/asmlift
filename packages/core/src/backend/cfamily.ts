@@ -37,6 +37,12 @@ const PREC: Record<BinOp, number> = {
   'f/': 3,
   'f+': 4,
   'f-': 4,
+  'f<': 6,
+  'f<=': 6,
+  'f>': 6,
+  'f>=': 6,
+  'f==': 7,
+  'f!=': 7,
   '*': 3,
   '/': 3,
   '/u': 3, // the unsigned twins spell as C's `/` and `%` (see C_SPELLING) — same precedence
@@ -74,8 +80,20 @@ const C_SPELLING: Partial<Record<BinOp, { token: string; signed: boolean }>> = {
 };
 
 /** The float operators (l3/ast.ts BinOp) spell as C's own tokens and take no operand pin: C's
- *  arithmetic over two floats is the IEEE operation the machine did. */
-const FLOAT_TOKEN: Partial<Record<BinOp, string>> = { 'f+': '+', 'f-': '-', 'f*': '*', 'f/': '/' };
+ *  arithmetic over two floats is the IEEE operation the machine did, and its relations over two
+ *  floats are the IEEE compares — false on a NaN, `!=` true. */
+const FLOAT_TOKEN: Partial<Record<BinOp, string>> = {
+  'f+': '+',
+  'f-': '-',
+  'f*': '*',
+  'f/': '/',
+  'f<': '<',
+  'f<=': '<=',
+  'f>': '>',
+  'f>=': '>=',
+  'f==': '==',
+  'f!=': '!=',
+};
 
 /** Spell a recovered type in the decomp C-family typedef vocabulary (`s32`/`u32`/`u8`/`T *`). */
 export function cType(t: IrType): string {

@@ -273,12 +273,20 @@ export type Expr =
 // and `+`/`-` are the pointer walks, reassociations and constant folds of a dozen L3 passes. A float
 // under any of those is a wrong program, so it gets operators none of them match — the same reason
 // the IR has `fadd` rather than a float-typed `add`. The unary minus splits the same way (`f-` on
-// `un`).
+// `un`). The float COMPARES split for the same reason and one more: NaN makes them a partial order,
+// so `negateCond` may flip `f==` and `f!=` into each other and no other — `!(a f> b)` is not
+// `a f<= b`, and it prints as the `!` it is.
 export type BinOp =
   | 'f+'
   | 'f-'
   | 'f*'
   | 'f/'
+  | 'f<'
+  | 'f<='
+  | 'f>'
+  | 'f>='
+  | 'f=='
+  | 'f!='
   | '+'
   | '-'
   | '*'
@@ -1250,6 +1258,10 @@ export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   '<=': '>',
   '==': '!=',
   '!=': '==',
+  // C's float `==` is false on a NaN and `!=` true, so these two are each other's negation; the
+  // ordered four have none in the operator vocabulary (the BinOp note).
+  'f==': 'f!=',
+  'f!=': 'f==',
 };
 
 export function negateCond(e: Expr): Expr {

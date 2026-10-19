@@ -187,8 +187,24 @@ export function exprIntWidth(e: Expr, varType: VarTypes): 32 | 64 {
 export const FLOAT_BINOPS: ReadonlySet<BinOp> = new Set<BinOp>(['f+', 'f-', 'f*', 'f/']);
 
 /** The binary operators whose RESULT is a C `int` whatever their operands are — read by both
- *  halves of the conversion model, which is the point of naming them once. */
-const INT_RESULT_BINOPS = new Set<BinOp>(['<', '<=', '>', '>=', '==', '!=', '&&', '||']);
+ *  halves of the conversion model, which is the point of naming them once. A float compare is one:
+ *  its operands are floats and its result is C's `int`. */
+const INT_RESULT_BINOPS = new Set<BinOp>([
+  '<',
+  '<=',
+  '>',
+  '>=',
+  '==',
+  '!=',
+  '&&',
+  '||',
+  'f<',
+  'f<=',
+  'f>',
+  'f>=',
+  'f==',
+  'f!=',
+]);
 
 /** The USUAL ARITHMETIC CONVERSIONS over two rendered operands.
  *

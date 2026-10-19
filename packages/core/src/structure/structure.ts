@@ -63,7 +63,7 @@ import {
 } from '../ir/core';
 import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
-import { CAST_WIDTHS, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, opSig } from '../ir/opcodes';
 import {
   type IrType,
   type StructField,
@@ -1072,6 +1072,18 @@ const CMP_TO_BIN: Record<string, BinOp> = {
 // the pointer stride, the integer legalizations, the constant fold, the commutative re-spelling —
 // is an integer rule.
 const FLOAT_TO_BIN: Record<string, BinOp> = { fadd: 'f+', fsub: 'f-', fmul: 'f*', fdiv: 'f/' };
+
+// The float compares (ir/opcodes.ts) and their L3 operators. An ORDERED compare and `fcmp_une` are
+// C's relation; an unordered one is the logical NOT of the ordered relation it negates
+// (`NEGATED_FCMP`), and is spelled as that `!`, never as the integer negation of the relation.
+const FCMP_TO_BIN: Record<string, BinOp> = {
+  fcmp_olt: 'f<',
+  fcmp_ole: 'f<=',
+  fcmp_ogt: 'f>',
+  fcmp_oge: 'f>=',
+  fcmp_oeq: 'f==',
+  fcmp_une: 'f!=',
+};
 
 // The operators whose operand order the machine does not fix — candidates for the def-order
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
@@ -4357,6 +4369,27 @@ export function structure(
     }
     if (d.opcode === 'fneg') {
       return { k: 'un', op: 'f-', e: e(d.operands[0]) };
+    }
+    if (FCMP_TO_BIN[d.opcode] || FCMP_TO_BIN[NEGATED_FCMP[d.opcode] ?? '']) {
+      const op = FCMP_TO_BIN[d.opcode] ?? FCMP_TO_BIN[NEGATED_FCMP[d.opcode]];
+      const rel: Expr = { k: 'bin', op, l: e(d.operands[0]), r: e(d.operands[1]) };
+      return FCMP_TO_BIN[d.opcode] ? rel : { k: 'un', op: '!', e: rel };
+    }
+    // A conversion is C's cast to the type it converts to. Converting an integer, the cast's
+    // operand must RENDER signed, because C converts an unsigned one with the unsigned conversion,
+    // which agbcc open-codes and an FPU computes differently: the pin `icmp_s*` takes below.
+    if (FLOAT_TO_INT.has(d.opcode)) {
+      const w = intWidth(d.results[0].type) ?? 32;
+      return { k: 'cast', to: T.int(w, d.opcode === 'fptosi'), e: e(d.operands[0]) };
+    }
+    if (INT_TO_FLOAT.has(d.opcode)) {
+      const x = e(d.operands[0]);
+      const signed: Expr =
+        renderedIntSignedness(x, vtEnv) === true ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
+      return { k: 'cast', to: d.results[0].type, e: signed };
+    }
+    if (FLOAT_RESIZE[d.opcode]) {
+      return { k: 'cast', to: d.results[0].type, e: e(d.operands[0]) };
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
