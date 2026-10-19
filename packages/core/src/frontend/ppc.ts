@@ -1466,20 +1466,6 @@ function liftOnce(
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined));
-  // A FLOAT ALSO REACHES THE INTEGER FILE through a compare or a conversion, and then a write to f1
-  // no longer says which home holds the result. Where r3 is written too that is undecided.
-  if (floatReturn && reached.some((ins) => FP_CROSSINGS.has(ins.mnemonic))) {
-    const r3 = reached.find(
-      (ins) => ins.ops[0] === target.returnReg && !/^(st|cmp|b|mt|tw|dcb|icb)/.test(ins.mnemonic),
-    );
-    if (r3 !== undefined) {
-      throw new PpcUnsupportedError(
-        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${r3.mnemonic}' at ` +
-          `0x${r3.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
-          'returns is not decided',
-      );
-    }
-  }
 
   // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
   // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
@@ -3746,6 +3732,21 @@ function liftOnce(
     }
   }
   refuseFpWordCrossings(name, ssa.fn);
+  // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
+  // A FLOAT ALSO REACHES THE INTEGER FILE through a compare or a conversion, and then a write to f1
+  // no longer says which home holds the result. Where r3 is written too that is undecided.
+  if (floatReturn && reached.some((ins) => FP_CROSSINGS.has(ins.mnemonic))) {
+    const r3 = reached.find(
+      (ins) => ins.ops[0] === target.returnReg && !/^(st|cmp|b|mt|tw|dcb|icb)/.test(ins.mnemonic),
+    );
+    if (r3 !== undefined) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${r3.mnemonic}' at ` +
+          `0x${r3.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
+          'returns is not decided',
+      );
+    }
+  }
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
   if (droppedPairHalf) {
     throw new PpcUnsupportedError(

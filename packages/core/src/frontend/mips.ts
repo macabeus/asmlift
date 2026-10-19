@@ -1551,19 +1551,6 @@ function liftOnce(
   const fpu = target.fpu;
   const bodyInstrs = blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body));
   const floatReturn = writesFloatReturn(bodyInstrs, FP_FLOAT_WRITERS, mipsEvenFpKey, fpu);
-  // A FLOAT ALSO REACHES THE INTEGER FILE once a conversion or a compare is decoded, and then a
-  // write to `$f0` no longer says which home holds the result: `(int)(a + b)` may add into `$f0`
-  // and return `v0`. Where both homes are written that is undecided, and refuses.
-  if (floatReturn && bodyInstrs.some((ins) => crossesToIntegers(ins.mnemonic))) {
-    const v0 = bodyInstrs.find((ins) => writtenReg(ins) === target.returnReg);
-    if (v0 !== undefined) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${v0.mnemonic}' at ` +
-          `0x${v0.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
-          'returns is not decided',
-      );
-    }
-  }
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
   // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer
@@ -2968,6 +2955,20 @@ function liftOnce(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   refuseFpWordCrossings(name, ssa.fn);
+  // Asked once the lift is done, so a refusal the stream meets first keeps its own reason.
+  // A FLOAT ALSO REACHES THE INTEGER FILE once a conversion or a compare is decoded, and then a
+  // write to `$f0` no longer says which home holds the result: `(int)(a + b)` may add into `$f0`
+  // and return `v0`. Where both homes are written that is undecided, and refuses.
+  if (floatReturn && bodyInstrs.some((ins) => crossesToIntegers(ins.mnemonic))) {
+    const v0 = bodyInstrs.find((ins) => writtenReg(ins) === target.returnReg);
+    if (v0 !== undefined) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': it writes both ${fpu!.returnReg} and ${target.returnReg} (the '${v0.mnemonic}' at ` +
+          `0x${v0.addr.toString(16)}) and moves a float's value into the integer file, so which of them it ` +
+          'returns is not decided',
+      );
+    }
+  }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);
   for (const blk of irBlocks) {
