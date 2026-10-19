@@ -257,14 +257,14 @@ export function liftRegisterStructCalls(
   for (const { word, size, callee } of images) {
     const struct = size >= 4 ? FULL : bigEndian ? (FULL << (32 - 8 * size)) >>> 0 : (1 << (8 * size)) - 1;
     if ((demandedBits(fn, word, voidOwn) & ~struct) >>> 0 !== 0) {
-      // a home `foldFrameHome` left is one read outside the call's block (mwcc 2.3.3 stores the
-      // word whole in each arm of an `if` and reads the member in the join), which is no read past
-      // the struct, only one this fold does not follow
+      // a home `foldFrameHome` left — one read outside the call's block (mwcc 2.3.3 stores the
+      // word whole in each arm of an `if` and reads the member in the join), or written again
+      // before it is read — is no read past the struct, only one this fold does not follow
       if (fn.blocks.some((b) => b.ops.some((op) => homeStore(op, word) && op.attrs.width === 4))) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${fn.name}': \`${callee}\` hands back a struct of ${size} byte${size === 1 ? '' : 's'} in ` +
-            `${target.returnReg}, which this function stores to a frame home it reads outside the call's block — ` +
-            'not modelled',
+          `cannot lift '${fn.name}': local stack frames not supported — \`${callee}\` hands back a struct of ` +
+            `${size} byte${size === 1 ? '' : 's'} in ${target.returnReg}, and its frame home is written again or ` +
+            "read where the fold into the call's local does not reach",
         );
       }
       throw new FrontendUnsupportedError(
