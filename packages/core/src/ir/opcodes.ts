@@ -342,6 +342,14 @@ export const FCMP_TRUTH: Readonly<Record<string, readonly [lt: boolean, eq: bool
   fcmp_ult: [true, false, false, true],
 };
 
+/** The float compare whose truth table (`FCMP_TRUTH`'s order: less, equal, greater, unordered) is
+ *  `truth`, or undefined where none is — always true, say. The one reader of the table backwards,
+ *  for every place that computes a compare's answers some other way (agbcc's helper tests,
+ *  raise/floathelpers.ts; PowerPC's `cror` of two bits, frontend/ppc.ts). */
+export function fcmpOfTruth(truth: readonly boolean[]): Opcode | undefined {
+  return Object.keys(FCMP_TRUTH).find((k) => FCMP_TRUTH[k].every((t, i) => t === truth[i])) as Opcode | undefined;
+}
+
 /** Every op that computes on a float: the arithmetic, the conversions and the compares. A runtime
  *  helper whose op is one of these is a float helper (runtime-helpers.ts `isFloatHelper`). */
 export const FLOAT_COMPUTING: ReadonlySet<string> = new Set([

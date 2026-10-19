@@ -10,7 +10,7 @@
 // as floats, which only data flow may justify — see the function below.
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
-import { FCMP_TRUTH, type Opcode } from '../ir/opcodes';
+import { type Opcode, fcmpOfTruth } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
@@ -345,11 +345,11 @@ function compareTests(
   const found: CompareTest[] = [];
   const answer = (at: Op, spent: Op[], test: (x: number) => boolean): boolean => {
     const truth = [test(-1), test(0), test(1), test(unordered)];
-    const opcode = Object.entries(FCMP_TRUTH).find(([, t]) => t.every((b, i) => b === truth[i]))?.[0];
+    const opcode = fcmpOfTruth(truth);
     if (opcode === undefined) {
       return false;
     }
-    found.push({ at, opcode: opcode as Opcode, spent });
+    found.push({ at, opcode, spent });
     return true;
   };
   for (const u of readers(r)) {

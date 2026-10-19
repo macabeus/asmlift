@@ -53,7 +53,7 @@ import {
   replaceAllUsesWith,
 } from '../ir/core';
 import { deletableWhenDead } from '../ir/discipline';
-import { FCMP_TRUTH, NEGATED_FCMP, type Opcode } from '../ir/opcodes';
+import { FCMP_TRUTH, NEGATED_FCMP, type Opcode, fcmpOfTruth } from '../ir/opcodes';
 import { T } from '../ir/types';
 import {
   type FnProto,
@@ -3360,13 +3360,13 @@ function liftOnce(
             );
           }
           const truth = FCMP_TRUTH[bits[x.bit]].map((t, i) => t || FCMP_TRUTH[bits[y.bit]][i]);
-          const opcode = Object.keys(FCMP_TRUTH).find((k) => FCMP_TRUTH[k].every((t, i) => t === truth[i]));
+          const opcode = fcmpOfTruth(truth);
           if (opcode === undefined) {
             throw new PpcUnsupportedError(
               `cannot lift '${name}': 'cror' at 0x${ins.addr.toString(16)} ORs two bits into no compare of the operands`,
             );
           }
-          cmpDef.set(field!, { ...(held as CrCompare), bits: { ...bits, [dst.bit]: opcode as Opcode } });
+          cmpDef.set(field!, { ...(held as CrCompare), bits: { ...bits, [dst.bit]: opcode } });
           break;
         }
         case 'mfcr': {
