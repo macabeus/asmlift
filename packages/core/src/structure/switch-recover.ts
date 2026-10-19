@@ -536,11 +536,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     if (into.size === 0) {
       return { kind: 'break' };
     }
-    if (into.size === 1 && !toMerge && !escapes) {
-      return { kind: 'fallthrough', to: [...into][0] };
+    // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
+    // spells only where nothing breakable sits between that edge and the arm, which the structurer
+    // checks where it emits it (`structure.ts` `switchBreakAt`) and refuses loud otherwise.
+    if (into.size === 1 && !escapes) {
+      return { kind: 'fallthrough', to: [...into][0], ...(toMerge ? { breaks: seen } : {}) };
     }
-    // Name what is actually missing. These three are different facts, and only the first is a shape
-    // C has no spelling for — the other two are asmlift's own limits, so say so rather than blame C.
+    // Name what is actually missing. These are two different facts: the first is a shape C's
+    // fall-through cannot spell, the second leaves the switch's region sideways.
     const names = () => [...into].map((x) => `#${layoutIndex(x)}`).join(', ');
     if (into.size > 1) {
       return {
@@ -548,18 +551,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
       };
     }
-    if (escapes) {
-      return {
-        kind: 'unstructurable',
-        why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
-      };
-    }
     return {
       kind: 'unstructurable',
-      // `case 0: if (c) { …; break; } /* fall through */ case 1:` is the C for this, and the reason
-      // asmlift cannot write it is its own: `{k:'break'}` is emitted only for the innermost LOOP
-      // (l3/ast.ts), never switch-scoped. That is the capability this shape is waiting on.
-      why: `a case body reaches sibling case ${names()} on one path and the end of the switch on another — a switch-scoped \`break\` inside a case body is not emitted yet`,
+      why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
     };
   };
 

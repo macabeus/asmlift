@@ -1523,6 +1523,42 @@ test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if
   expect([...withdrawn.matchAll(/case (-?\d+):/g)].map((m) => m[1])).toEqual(['98', '6', '99', '7', '8', '9']);
 });
 
+// ── the switch-scoped `break;` ───────────────────────────────────────────────────────────────────
+// `corpus/agbcc-swifbreak.s`: case bodies that leave the switch on one path and fall into the next
+// case on another, compiled by agbcc. What each test reads is which construct the `break;` binds.
+const ifBreakAsm = () => readFileSync(new URL('corpus/agbcc-swifbreak.s', import.meta.url), 'utf8');
+const ifBreakLift = (sym: string) =>
+  decompile(sym, ifBreakAsm(), ARMV4T_AGBCC, {
+    prototypes: {
+      [sym]: { returnsVoid: true },
+      ...Object.fromEntries(['f', 'g', 'h', 'r'].map((n) => [n, { params: 1, returnsVoid: true }])),
+      p: { params: 0, returns: 's32' },
+    },
+  }).source;
+
+test('a switch-scoped `break;` inside a loop leaves the SWITCH, and the loop update still runs', () => {
+  // Klonoa's shape: the `switch` sits in a `for`. Printed, `break;` binds the innermost loop OR
+  // switch, so the statement that leaves the arm must sit inside the switch and the loop's update
+  // after it — a `break;` that left the loop would end the walk at the first such entity.
+  const out = ifBreakLift('inloop');
+  expect(out).toMatch(/case 0:\s*\n\s*if \(v0 != gA && v0 != gB\) break;\s*\n\s*case 1:\s*\n\s*f\(v0\);/);
+  expect(out).toMatch(/\}\s*\n\s*v0 = v0 \+ 1;\s*\n\s*\} while/);
+  expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('an arm whose `then` breaks and whose `else` falls into the next case keeps both', () => {
+  const out = ifBreakLift('elsearm');
+  expect(out).toMatch(
+    /if \(gA != 0\) \{\s*\n\s*h\(2\);\s*\n\s*break;\s*\n\s*\} else \{\s*\n\s*g\(3\);\s*\n\s*\}\s*\n\s*case 2:/,
+  );
+  expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
+  // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
+  expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);
+});
+
 test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {
   // PRE5's `placed` half asks whether every test and body block has a position at all, because
   // `layoutIndex` answers -1 for a block missing from `fn.blocks` and -1 taken as a position sorts

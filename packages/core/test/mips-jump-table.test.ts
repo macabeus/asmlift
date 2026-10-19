@@ -135,3 +135,87 @@ test('a table whose holes name the default block ends the switch there, on IDO a
   expect(out).toMatch(/case 5:[^]*\[4\] = 7;[^]*case 6:/);
   expect(out).toMatch(/case 7:[^]*\[4\] = 3;/);
 });
+
+// A CASE BODY THAT BREAKS ON ONE PATH AND FALLS INTO THE NEXT CASE ON ANOTHER, on IDO. IDO 7.1
+// `-O2` for `synthetic:sw_jtifbreak` (`case 1: if (i != gA && i != gB) break; case 2: f(i); break;`,
+// cases 0..4, `r(0)` after the switch). IDO does not cross-jump `if (c) f(i); break;` into this
+// shape the way agbcc and gcc 2.7.2 do, so here only the fall-through source gives the object, and
+// the `break;` must leave the switch on the path that skips the call.
+const ifBreakTable: AsmData = {
+  sections: new Map([['.rodata', new Uint8Array([0x28, 0x38, 0x58, 0x68, 0x78].flatMap((w) => [0, 0, 0, w]))]]),
+  relocs: [
+    { section: '.text', offset: 0x14, type: 'R_MIPS_HI16', sym: 'jt', addend: 0 },
+    { section: '.text', offset: 0x1c, type: 'R_MIPS_LO16', sym: 'jt', addend: 0 },
+    ...(
+      [
+        [0x28, 'R_MIPS_26', 'g'],
+        [0x38, 'R_MIPS_HI16', 'gA'],
+        [0x3c, 'R_MIPS_LO16', 'gA'],
+        [0x40, 'R_MIPS_HI16', 'gB'],
+        [0x4c, 'R_MIPS_LO16', 'gB'],
+        [0x58, 'R_MIPS_26', 'f'],
+        [0x68, 'R_MIPS_26', 'h'],
+        [0x78, 'R_MIPS_26', 'm'],
+        [0x80, 'R_MIPS_26', 'r'],
+      ] as const
+    ).map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+    ...[0, 4, 8, 12, 16].map((offset) => ({ section: '.rodata', offset, type: 'R_MIPS_32', sym: '.text', addend: 0 })),
+  ],
+  symbols: new Map([
+    ['jt', { section: '.rodata', value: 0, size: 20, index: 1 }],
+    ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+  ]),
+  symbolCount: 2,
+  bigEndian: true,
+};
+
+test('a case body that breaks on one path and falls into the next case on another, on IDO', () => {
+  const asm = obj(
+    ' 0:\taddiu\tsp,sp,-24',
+    ' 4:\tsltiu\tat,a1,5',
+    ' 8:\tbeqz\tat,80 <f+0x80>',
+    ' c:\tsw\tra,20(sp)',
+    '10:\tsll\tt6,a1,0x2',
+    '14:\tlui\tat,0x0',
+    '18:\taddu\tat,at,t6',
+    '1c:\tlw\tt6,0(at)',
+    '20:\tjr\tt6',
+    '24:\tnop',
+    '28:\tjal\t0 <f>',
+    '2c:\tnop',
+    '30:\tb\t80 <f+0x80>',
+    '34:\tnop',
+    '38:\tlui\tt7,0x0',
+    '3c:\tlw\tt7,0(t7)',
+    '40:\tlui\tt8,0x0',
+    '44:\tbeq\ta0,t7,58 <f+0x58>',
+    '48:\tnop',
+    '4c:\tlw\tt8,0(t8)',
+    '50:\tbne\ta0,t8,80 <f+0x80>',
+    '54:\tnop',
+    '58:\tjal\t0 <f>',
+    '5c:\tnop',
+    '60:\tb\t80 <f+0x80>',
+    '64:\tnop',
+    '68:\tjal\t0 <f>',
+    '6c:\tnop',
+    '70:\tb\t80 <f+0x80>',
+    '74:\tnop',
+    '78:\tjal\t0 <f>',
+    '7c:\tnop',
+    '80:\tjal\t0 <f>',
+    '84:\tmove\ta0,zero',
+    '88:\tlw\tra,20(sp)',
+    '8c:\taddiu\tsp,sp,24',
+    '90:\tjr\tra',
+    '94:\tnop',
+  ).replace('<f>:', '<sw>:');
+  const v = { params: 1, returnsVoid: true };
+  const out = decompile('sw', asm, MIPS_IDO, {
+    asmData: ifBreakTable,
+    prototypes: { sw: { returnsVoid: true }, f: v, g: v, h: v, m: v, r: v },
+  }).source;
+  expect(out).toMatch(/case 1:\s*\n\s*if \(a0 != gA && a0 != gB\) break;\s*\n\s*case 2:\s*\n\s*f\(a0\);\s*\n\s*break;/);
+  expect(out.match(/\bf\(/g)).toHaveLength(1);
+  expect(out).toMatch(/\}\s*\n\s*r\(0\);/);
+});

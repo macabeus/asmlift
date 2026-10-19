@@ -93,15 +93,17 @@ for (const t of MIPS_LANE) {
 }
 
 /** The agbcc lane: agbcc emits TEXT, so what is committed is the compiler's own `.s` — no objdump
- *  step and nothing to normalise. Four fixtures: the pair the declaration rests on, the NESTED
+ *  step and nothing to normalise. Five fixtures: the pair the declaration rests on, the NESTED
  *  tree that pins what PRE5's decline actually produces when the tree it declines holds a sub-tree
- *  that re-recovers (switch-recover.ts PRE5, "WHAT THE DECLINE PRODUCES"), and a dispatch that pins
- *  a case by its path (`switchBoundCase`). */
+ *  that re-recovers (switch-recover.ts PRE5, "WHAT THE DECLINE PRODUCES"), a dispatch that pins
+ *  a case by its path (`switchBoundCase`), and case bodies that break on one path and fall into
+ *  the next case on another (the switch-scoped `break;`). */
 const AGBCC_VARIANTS = [
   { out: 'agbcc-swfrontload.s', src: 'probe-agbcc-swfrontload.c' },
   { out: 'agbcc-swladder.s', src: 'probe-agbcc-swladder.c' },
   { out: 'agbcc-swnested.s', src: 'probe-agbcc-swnested.c' },
   { out: 'agbcc-swpathbound.s', src: 'probe-agbcc-swpathbound.c' },
+  { out: 'agbcc-swifbreak.s', src: 'probe-agbcc-swifbreak.c' },
 ] as const;
 
 for (const v of AGBCC_VARIANTS) {
