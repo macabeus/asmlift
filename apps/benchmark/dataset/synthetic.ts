@@ -10451,8 +10451,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sret1b and sret2b add {u8} (r0/r3 on both) and {u8, u8} (memory on agbcc, r3 on mwcc,
   //      read back off its home); sretun a union and sretbf a bitfield, which have no local type
   //      and decline wherever they come back in a register; sretfwd a function returning such a
-  //      struct straight from such a callee. A callee declared without its struct return stays a
-  //      scalar call, as the same bytes from a scalar callee do; that control is a core test
+  //      struct straight from such a callee, which returns the call (`return sg(1);`), and
+  //      sretname the same through a named local, which mwcc gives a home the bare call has not;
+  //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
+  //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
+  //      no member copy says so); sretfl a {float}, which has no local here and declines on agbcc
+  //      (r0 read as `*(s32 *)&s` would convert the bits) and on mwcc's lfs. A callee declared
+  //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
+  //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
   //      alpha-renamed.
   //   3. break_value (2). A `break` that carries a different value than the normal exit gets its
@@ -10842,6 +10848,56 @@ export const SYNTHETIC: SynthSpec[] = [
         proto: {
           sg: { params: ['s32'], returns: 'struct S1f', returnLayout: one('x', 'u32') },
           sretfwd: { params: [], returns: 'struct S1f', returnLayout: one('x', 'u32') },
+        },
+      },
+      {
+        sym: 'sretname',
+        src:
+          'struct S1n { u32 x; };\nextern struct S1n sn(s32 x);\nstruct S1n sretname(void)\n{\n' +
+          '    struct S1n s = sn(2);\n    return s;\n}',
+        features: ['struct-return', 'value-home'],
+        ...at,
+        ctx: 'struct S1n { u32 x; };\nstruct S1n sn(s32 x);\nstruct S1n sretname(void);',
+        proto: {
+          sn: { params: ['s32'], returns: 'struct S1n', returnLayout: one('x', 'u32') },
+          sretname: { params: [], returns: 'struct S1n', returnLayout: one('x', 'u32') },
+        },
+      },
+      {
+        sym: 'sret2fwd',
+        src: 'struct S2f { u16 h; };\nextern struct S2f sh(s32 x);\nstruct S2f sret2fwd(s32 x)\n{\n    return sh(x + 3);\n}',
+        features: ['struct-return', 'narrow'],
+        ...at,
+        ctx: 'struct S2f { u16 h; };\nstruct S2f sh(s32 x);\nstruct S2f sret2fwd(s32 x);',
+        proto: {
+          sh: { params: ['s32'], returns: 'struct S2f', returnLayout: one('h', 'u16') },
+          sret2fwd: { params: ['s32'], returns: 'struct S2f', returnLayout: one('h', 'u16') },
+        },
+      },
+      {
+        sym: 'sret2mod',
+        src:
+          'struct S2m { u16 h; };\nextern struct S2m sm(s32 x);\nstruct S2m sret2mod(s32 x)\n{\n' +
+          '    struct S2m s = sm(x);\n    s.h += 1;\n    return s;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct S2m { u16 h; };\nstruct S2m sm(s32 x);\nstruct S2m sret2mod(s32 x);',
+        proto: {
+          sm: { params: ['s32'], returns: 'struct S2m', returnLayout: one('h', 'u16') },
+          sret2mod: { params: ['s32'], returns: 'struct S2m', returnLayout: one('h', 'u16') },
+        },
+      },
+      {
+        sym: 'sretfl',
+        src:
+          'struct Fl { float f; };\nextern struct Fl mkfl(s32 x);\nextern float gF;\n' +
+          'void sretfl(s32 x)\n{\n    struct Fl s = mkfl(x);\n    gF = s.f;\n}',
+        features: ['struct-return', 'float'],
+        ...at,
+        ctx: 'struct Fl { float f; };\nstruct Fl mkfl(s32 x);\nvoid sretfl(s32 x);',
+        proto: {
+          mkfl: { params: ['s32'], returns: 'struct Fl', returnLayout: one('f', 'float') },
+          sretfl: { returnsVoid: true },
         },
       },
     ];
