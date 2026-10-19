@@ -2630,7 +2630,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // extract read. `fcmpngt` and `fcmpbrn` are the negations, which every compiler here compiles
   // apart from `a <= b` and `a >= b`. `d2i`, `i2d` and `dcmpgt` are the double precision, which mwcc
   // compiles to the same object as the float one. mwcc's `(float)i` and `(double)i` decline: the
-  // magic constant is an `lfd` of an SDA21 anonymous double, which nothing models.
+  // magic constant is an `lfd` of an SDA21 anonymous double, which nothing models. `fcmphome` and
+  // `fcmpvoid` put a float temporary in the float return register beside the compares that read it
+  // (KMC, GCC 2.7.2 and IDO allocate `c` to `$f0`): the int returns its `li`s, and the void one is
+  // the object of a float function returning `c`, which only its declaration tells apart. So is
+  // `fcmpkeep`, a float function returning its first argument untouched (in `f1` on PowerPC, where
+  // `r3` is the other home), beside the void function that does not.
   ...(
     [
       [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
@@ -2644,10 +2649,26 @@ export const SYNTHETIC: SynthSpec[] = [
       ['fcmpeq', 'int fcmpeq(float a,float b){ return a==b; }', 'int fcmpeq(float,float);'],
       ['fcmpne', 'int fcmpne(float a,float b){ return a!=b; }', 'int fcmpne(float,float);'],
       ['fcmpngt', 'int fcmpngt(float a,float b){ return !(a>b); }', 'int fcmpngt(float,float);'],
+      ['fcmpnlt', 'int fcmpnlt(float a,float b){ return !(a<b); }', 'int fcmpnlt(float,float);'],
       [
         'fcmpbrn',
         'extern int gI;\nvoid fcmpbrn(float a,float b){ if (!(a<b)) gI = 1; }',
         'extern int gI; void fcmpbrn(float,float);',
+      ],
+      [
+        'fcmphome',
+        'int fcmphome(float a,float b){ float c=a+b; if (c<a) return 3; if (c>b) return 7; return 5; }',
+        'int fcmphome(float,float);',
+      ],
+      [
+        'fcmpvoid',
+        'extern int gI;\nvoid fcmpvoid(float a,float b){ float c=a*b; if (c<a) gI=1; if (c>b) gI=2; }',
+        'extern int gI; void fcmpvoid(float,float);',
+      ],
+      [
+        'fcmpkeep',
+        'extern int gI;\nfloat fcmpkeep(float a,float b){ if (a<b) gI=1; return a; }',
+        'extern int gI; float fcmpkeep(float,float);',
       ],
       ['dcmpgt', 'int dcmpgt(double a,double b){ return a>b; }', 'int dcmpgt(double,double);'],
       ['d2i', 'int d2i(double x){ return (int)x; }', 'int d2i(double);'],
@@ -2659,13 +2680,13 @@ export const SYNTHETIC: SynthSpec[] = [
         ? ['float', 'cast', 'float-to-int']
         : sym.startsWith('i2')
           ? ['float', 'cast', 'int-to-float']
-          : sym === 'fcmpbrn'
+          : sym === 'fcmpbrn' || sym === 'fcmphome' || sym === 'fcmpvoid' || sym === 'fcmpkeep'
             ? ['float', 'compare', 'branch']
             : ['float', 'compare'],
       toolchains: [...toolchains],
       ...(cflags ? { cflags } : {}),
       ctx,
-      ...(sym === 'fcmpbrn' ? { proto: { fcmpbrn: { returnsVoid: true } } } : {}),
+      ...(sym === 'fcmpbrn' || sym === 'fcmpvoid' ? { proto: { [sym]: { returnsVoid: true } } } : {}),
     })),
   ),
   ...(['f2i', 'fcmp'] as const).map((sym): SynthSpec => ({
