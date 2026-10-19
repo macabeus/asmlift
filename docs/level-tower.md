@@ -871,7 +871,9 @@ One flip is still not free: agbcc picks `__eqsf2` or `__nesf2` by the relation t
 having folded `!(a == b)` into `a != b` first, so the fold stamps that relation on the compare
 (`RuntimeHelper.relation`, carried to L3 as `Expr.helperRel`) and the structurer and the L3 arm swaps
 choose the arm order that spells it rather than negate it (`keepsHelperRel`, `regainsHelperRel`);
-`if (a == b) {} else` is the guard return's spelling there.
+`if (a == b) {} else` is the guard return's spelling there. A tested loop whose test the branch fold
+joined to such a break guard has no `while (P && S)` spelling of it, so its test splits back into the
+header and the guard (`splitHelperBreak`): `while (P) { if (a == b) break; … }`.
 
 **The ABI homes are target DATA.** `TargetDescription.fpu` names the float argument registers, the
 float return and how the two files COUNT: o32 is `'leading'` (argument k is in `$f12`/`$f14` only

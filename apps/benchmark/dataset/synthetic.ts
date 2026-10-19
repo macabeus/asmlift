@@ -95,11 +95,20 @@ const FCMP_BRANCH_ROWS: ReadonlySet<string> = new Set([
   'fcmpbrn',
   'fcmpeqbr',
   'fcmpnebr',
+  'fcmpeqlp',
+  'fcmpnelp',
   'fcmphome',
   'fcmpvoid',
   'fcmpkeep',
 ]);
-const FCMP_VOID_ROWS: ReadonlySet<string> = new Set(['fcmpbrn', 'fcmpeqbr', 'fcmpnebr', 'fcmpvoid']);
+const FCMP_VOID_ROWS: ReadonlySet<string> = new Set([
+  'fcmpbrn',
+  'fcmpeqbr',
+  'fcmpnebr',
+  'fcmpeqlp',
+  'fcmpnelp',
+  'fcmpvoid',
+]);
 /** The body the `oa_bigdead*` rows share (the outgoing-area family): twenty-eight values spilled to the
  *  frame, reloaded only inside a loop the first test may skip. */
 const BIGDEAD_BODY =
@@ -2648,7 +2657,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `fcmpkeep`, a float function returning its first argument untouched (in `f1` on PowerPC, where
   // `r3` is the other home), beside the void function that does not. `fcmpeqbr` and `fcmpnebr` are
   // the equality guards: agbcc picks `__eqsf2` or `__nesf2` by the relation the source spelled and
-  // folds `!(a == b)` into `a != b` first, so only the arm order keeps the helper.
+  // folds `!(a == b)` into `a != b` first, so only the arm order keeps the helper. `fcmpeqlp` and
+  // `fcmpnelp` are those guards as a loop's break, which agbcc's branch fold joins to the loop test.
   ...(
     [
       [['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'], undefined],
@@ -2677,6 +2687,16 @@ export const SYNTHETIC: SynthSpec[] = [
         'fcmpnebr',
         'extern int gI;\nvoid fcmpnebr(float a,float b){ if (a!=b) return; gI = 1; }',
         'extern int gI; void fcmpnebr(float,float);',
+      ],
+      [
+        'fcmpeqlp',
+        'extern int gI;\nvoid fcmpeqlp(float a,float b,int n){ int i; for (i=0;i<n;i++){ if (a==b) break; gI+=i; } }',
+        'extern int gI; void fcmpeqlp(float,float,int);',
+      ],
+      [
+        'fcmpnelp',
+        'extern int gI;\nvoid fcmpnelp(float a,float b,int n){ int i; for (i=0;i<n;i++){ if (a!=b) break; gI+=i; } }',
+        'extern int gI; void fcmpnelp(float,float,int);',
       ],
       [
         'fcmphome',

@@ -92,6 +92,7 @@ import {
   mentionedName,
   negateCond,
   regainsHelperRel,
+  splitHelperBreak,
   stmtChildren,
   stmtExprs,
   stmtsEqual,
@@ -6921,6 +6922,14 @@ export function structure(
       { header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks, breakArms: wl.breakArms },
       () => [...argAssigns(wl.header, wl.bodyEntry), ...structureRegion(wl.bodyEntry, wl.header)],
     );
+    // A test whose tail is a float compare the stay sense moves off its runtime helper's relation
+    // (l3/ast.ts `splitHelperBreak`) leaves through a break guard, ahead of the edge's copies: the
+    // header evaluated it before them.
+    const split = splitHelperBreak(cond);
+    if (split !== null) {
+      cond = split.head;
+      body.unshift({ k: 'if', cond: split.guard, then: [{ k: 'break' }], else: [] });
+    }
     const out: Stmt[] = [{ k: 'while', cond, body }];
     out.push(...argAssigns(wl.header, wl.exit)); // phi args carried on the header→exit edge, if any
     out.push(...structureRegion(wl.exit, stop));

@@ -156,6 +156,18 @@ describe('an equality helper keeps the relation the source spelled', () => {
       guard('fguards', 'float a0, float a1, float a2, s32 *a3', 'a0 == a1 || a0 != a2', '*a3 = 1;'),
     );
   });
+
+  // A break guard the branch fold joins to the loop test: the loop's stay sense would negate the
+  // helper's relation, so the guard leaves as the source wrote it (l3/ast.ts `splitHelperBreak`).
+  test.each([
+    ['feqloop', 'a0 == a1'],
+    ['fneloop', 'a0 != a1'],
+  ])('%s, a break guard in a tested loop', (name, cond) => {
+    expect(lift(name)).toBe(
+      `void ${name}(float a0, float a1, s32 a2, s32 a3) {\n    s32 v0;\n` +
+        `    for (v0 = 0; v0 < a2; v0 = v0 + 1) {\n        if (${cond}) break;\n        gI = gI + v0;\n    }\n}\n`,
+    );
+  });
 });
 
 describe('what a compare refuses', () => {

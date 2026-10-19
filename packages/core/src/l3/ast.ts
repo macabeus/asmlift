@@ -1301,6 +1301,40 @@ export function regainsHelperRel(e: Expr): boolean {
   return leaves.length > 0 && leaves.every((own) => !own);
 }
 
+/** A loop's stay condition `P && S` whose compares under `S` are all negated off their helper's
+ *  relation, and whose `P` negates none: `{ head: P, guard: !S }`, which the loop spells
+ *  `while (P) { if (!S) break; … }` — the same tests in the same order, calling the helpers the
+ *  source called. `while (P && S)` has no spelling of that `S` that calls the helper (gcc folds
+ *  `!(a == b)` into `a != b`); the break guard is how the source wrote it before the branch fold
+ *  joined the two tests. Null when the condition already spells every helper's relation, or when no
+ *  split of its `&&` chain separates the two kinds of compare. */
+export function splitHelperBreak(cond: Expr): { head: Expr; guard: Expr } | null {
+  if (keepsHelperRel(cond) || helperRelLeaves(cond).length === 0) {
+    return null;
+  }
+  const conj: Expr[] = [];
+  const flatten = (e: Expr): void => {
+    if (e.k === 'bin' && e.op === '&&') {
+      flatten(e.l);
+      flatten(e.r);
+    } else {
+      conj.push(e);
+    }
+  };
+  flatten(cond);
+  const and = (xs: Expr[]): Expr => xs.reduce((l, r) => ({ k: 'bin', op: '&&', l, r }));
+  // The longest prefix that negates no helper leaf; the rest must negate every one it holds.
+  let k = 0;
+  while (k < conj.length && helperRelLeaves(conj[k]).every((own) => own)) {
+    k++;
+  }
+  if (k === 0 || k === conj.length) {
+    return null;
+  }
+  const rest = and(conj.slice(k));
+  return regainsHelperRel(rest) ? { head: and(conj.slice(0, k)), guard: negateCond(rest) } : null;
+}
+
 export function negateCond(e: Expr): Expr {
   if (e.k === 'bin') {
     const flipped = NEGATE_REL[e.op];
