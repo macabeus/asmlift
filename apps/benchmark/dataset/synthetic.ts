@@ -10466,7 +10466,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      down `ctr`. gcc2.7.2kmc and gcc2.7.2 are controls. `dowbreak_code` is its do-while twin, a
   //      bottom-tested source with no peel, which keeps its bottom test on every toolchain.
   //      `breakret_code` ends in a `return`, which the arm must not copy; `breakidx_code` reads the
-  //      counter after the loop, a value the head and the arm hand the exit alike.
+  //      counter after the loop, a value the head and the arm hand the exit alike. `breakn_code`
+  //      bounds the loop by a parameter, so agbcc keeps the copied test as a guard rather than fold
+  //      it, which the restore then deletes; on gcc2.7.2kmc and gcc2.7.2 the same source is a guard
+  //      and a bottom test with no peel, which the default lift keeps and a ranked candidate
+  //      matches. `breaknend_code` exits straight into
+  //      the epilogue, where the arm's sunk `return` is the `break` it fell from. `breakretarm_code`
+  //      can return from the arm as well as break, a loop no top-tested spelling owns, so it keeps
+  //      the rotated loop rather than decline.
   // The last five are one-function causes, picked from the twelve such causes for being real gaps
   // whose shape is not Thumb-specific, so each row measures more than one compiler:
   //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
@@ -10799,6 +10806,42 @@ export const SYNTHETIC: SynthSpec[] = [
       ...(cflags ? { cflags } : {}),
       ctx: 'void breakidx_code(void);',
       proto: { breakidx_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakn_code',
+      src:
+        'extern u8 gTab[128];\nextern s32 gHit;\nextern s32 gOut;\n' +
+        'void breakn_code(s32 n)\n{\n    s32 i;\n    for (i = 0; i < n; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakn_code(s32 n);',
+      proto: { breakn_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breaknend_code',
+      src:
+        'extern u8 gTab[128];\nextern s32 gHit;\n' +
+        'void breaknend_code(s32 n)\n{\n    s32 i;\n    for (i = 0; i < n; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breaknend_code(s32 n);',
+      proto: { breaknend_code: { returnsVoid: true } },
+    },
+    {
+      sym: 'breakretarm_code',
+      src:
+        'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\nextern s32 gKey;\n' +
+        'void breakretarm_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+        '        if (gTab[i] == 7) {\n            if (gKey)\n                return;\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+      features: ['break', 'array'],
+      toolchains: [...toolchains],
+      ...(cflags ? { cflags } : {}),
+      ctx: 'void breakretarm_code(void);',
+      proto: { breakretarm_code: { returnsVoid: true } },
     },
   ]),
   {
