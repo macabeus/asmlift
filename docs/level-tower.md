@@ -947,9 +947,47 @@ symbol map by size alone (a layout with no members), or from `--proto`.
 struct, laid out on the target (`aggregateType`), with a field for each member the IR can type and
 none for the rest (a nested aggregate, a bitfield, an enum, a plain `char`); `attrs.sret` says
 argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps
-the declared arguments where they are and writes no value: its bytes are a struct, so the return
-register is listed as destroyed, a read of it refuses, and a guessed arity after the call does not
-take it.
+the declared arguments where they are. Where the struct can be a local here
+(frontend/call-plan.ts `registerStructLocal`, the one derivation: a type `structLocalType`
+declares, of one, two or four bytes, all integers, its callee's prototype printable), the call
+writes the return register as its value, marked `REGISTER_STRUCT`, and the frontend reads that
+word as it reads any call's; a guessed arity after the call still does not take it (ssa.ts
+`noteStructImage`), since the bytes do not say whether a callee nothing declares is handed the
+struct or a member. Every other struct return writes no value: the return register is listed as
+destroyed and a read of it refuses.
+
+**L1 — the register's word becomes the struct** (frontend/register-struct-call.ts
+`liftRegisterStructCalls`, from `pipeline.ts` `liftStamped`, before the own-return check). Each
+marked call is rewritten onto the memory return's own form: an `laddr` marked
+`CALL_RETURN_OBJECT`, one per call (`nth` keeps two calls' structs two objects), is its `sret`
+argument 0, and the word is a load of that local — shifted up to the top of the word on a
+big-endian target, where a sub-word struct's first byte sits (mwcc's `{u16}` is `srwi r0,r3,16`
+off the call, which then cancels to the load). So the declarations block, `aggmembers` and the
+`s = mk(x); gV = s.h;` spelling are the memory return's. Two things are this pass's own:
+
+- **The frame home is the local.** mwcc stores the register to a frame word as it comes back
+  (`stw r3,8(r1)`, or the struct's own bytes, `sth`) where the source names a local, and reads
+  members off it; the PowerPC frontend marks such a call `STRUCT_HOMED` (and lets a home nothing
+  reads stand where no call after it could take the word as a stack argument, ppc.ts). The fold
+  re-points the loads that follow the store in the call's block at the local and drops the store
+  where nothing else touches those bytes. A home read in another block, or written again first,
+  is not folded.
+- **What the image leaves out is no value.** mwcc fills only one or two bytes of r3 for a `{u8}`
+  or `{u16}` (agbcc rounds every struct to four), so every reader must need only the struct's bits
+  (`demandedBits`): a truncating store, a shift or mask that drops the rest. A `ret` reads all 32
+  unless the function's own declaration returns nothing; with no own declaration that `ret` is the
+  frontend's guess, and where it is the only reader past the struct's bits and every `ret` hands
+  back a call's image as it came back, the function is lifted `void` — no C return is what the
+  register below the struct holds.
+
+**The own side composes with it.** A function whose every `ret` hands back a call's image of its
+own declared register-struct type returns the call (`return mk(x);`), or the call's local where
+mwcc wrote a home (`return mk_ret;`, which `struct T s = mk(1); return s;` compiles to and `return
+mk(1);` does not). Where the own return is a word the own side cannot spell as the struct
+(`liftOwnRegisterStruct`, a `{u8}` or `{u16}`) and the function reads any call's register struct,
+it refuses: the word may be computed from that struct through a frame slot as well as an op (an
+array, an escaped local, mwcc's home), and printed as the word it is it would be the scalar the
+declaration contradicts.
 
 **L3 and the backend.** The structurer stamps the call (`Expr` `call.sret`, as it stamps
 `wide64`), and the temp is a local declared with the headers' own spelling of the type:
@@ -969,7 +1007,9 @@ inside the project's headers drops that block.
 | frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
 | frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
 | frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
-| frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
+| frontend    | the return register read after a struct came back in it that `registerStructLocal` gives no local                     | its bytes are a struct, not a word this function named               |
+| L1          | a read of the register past a one- or two-byte struct's bits; a home read where the fold does not reach               | what the callee left there is no value                               |
+| L1          | an own `{u8}`/`{u16}` register return, kept as its word, in a function that reads a call's register struct            | the word printed as a scalar contradicts the declaration             |
 
 **Member reads of a returned struct.** A declared struct's range (`declaredStructs`: a return temp,
 or a struct passed by value) is an object boundary. The audit rebases onto its base both a
