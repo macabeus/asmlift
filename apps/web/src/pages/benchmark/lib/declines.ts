@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 261 distinct decline messages (the texts reached by
+// `packages/core/src` throws 262 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -46,14 +46,15 @@
 //                               caller's lr, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  22  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
 //                               the compiler's anonymous constant read other than as the
 //                               initializer of the locals its copies fill,
 //                               an access whose byte offset is not a whole number of its own elements
-//                               (no subscript spells it), and three internal invariants (an ambiguous
+//                               (no subscript spells it), a struct local's bytes stored into an array
+//                               element by a recovered row subscript, and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
 //   frontend/mips.ts        13  a relocation with an addend, a non-numeric immediate, the caller's

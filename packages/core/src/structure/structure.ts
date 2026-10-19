@@ -4257,11 +4257,12 @@ export function structure(
     const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === op.attrs.off) : undefined;
     return f?.type.kind === 'float' && f.type.width === width * 8 ? { name: f.name, width } : null;
   };
-  const floatBitsRefusal = (m: { name: string; width: number }): StructureError =>
-    new StructureError(
+  const refuseFloatBits = (m: { name: string; width: number }): never => {
+    throw new StructureError(
       `a ${m.width}-byte read of the floating member '${m.name}' of a struct local is an integer here, and C ` +
         'would convert it where a float is read — not modelled',
     );
+  };
   const refuseFloatMemberRead = (op: Op): void => {
     const m = floatMemberBits(op);
     const v = op.results[0];
@@ -4271,7 +4272,7 @@ export function structure(
         (u.opcode === 'astore' && u.operands[2] === v && u.operands[0] !== v && u.operands[1] !== v),
     );
     if (m !== null && !storedOnly) {
-      throw floatBitsRefusal(m);
+      refuseFloatBits(m);
     }
   };
   // …and the store side: the lvalue must be one whose type the lift spells, an integer of the
@@ -4290,7 +4291,7 @@ export function structure(
     const t = ctype(lval);
     const own = root.k !== 'var' || varType.has(root.name);
     if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
-      throw floatBitsRefusal(m);
+      refuseFloatBits(m);
     }
   };
   // A STRUCT LOCAL'S BYTES STORED INTO A BARE ARRAY ELEMENT keep the cast cell. The bare `gA[i]`
