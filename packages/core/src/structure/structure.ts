@@ -45,6 +45,7 @@
 import { globalBaseOf } from '../ir/alias';
 import {
   Block,
+  CALL_RETURN_OBJECT,
   Fn,
   OWN_RETURN_OBJECT,
   Op,
@@ -2660,6 +2661,9 @@ export function structure(
         if (op.opcode === 'laddr' && op.attrs[OWN_RETURN_OBJECT] === true) {
           // the function's own return object, which no frame offset names
           names.set(op, mint('ret'));
+        } else if (op.opcode === 'laddr' && typeof op.attrs[CALL_RETURN_OBJECT] === 'string') {
+          // the struct a call returned in a register, which no frame offset names either
+          names.set(op, mint(`${op.attrs[CALL_RETURN_OBJECT]}_ret`));
         } else if (op.opcode === 'laddr') {
           const off = op.attrs.off as number;
           let n = byOff.get(off);
@@ -7441,14 +7445,19 @@ export function structure(
   // `synthetic:dma_fill_uninit` loses its record here, and so did `kleod:ProcessInputAndUpdateEntities`
   // before that row was retired (2026-09-13).
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
-    if (at.attrs[OWN_RETURN_OBJECT] === true) {
+    if (at.attrs[OWN_RETURN_OBJECT] === true || at.attrs[CALL_RETURN_OBJECT] !== undefined) {
       return {};
     }
     const off = at.attrs.off as number;
     const roots = new Set<Value>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if (op.opcode === 'laddr' && (op.attrs.off as number) === off && op.attrs[OWN_RETURN_OBJECT] !== true) {
+        if (
+          op.opcode === 'laddr' &&
+          (op.attrs.off as number) === off &&
+          op.attrs[OWN_RETURN_OBJECT] !== true &&
+          op.attrs[CALL_RETURN_OBJECT] === undefined
+        ) {
           roots.add(op.results[0]);
         }
       }

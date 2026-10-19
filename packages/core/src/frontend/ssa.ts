@@ -140,9 +140,18 @@ export interface SsaBuilder {
    *  return register precisely because of the ordering above: the callee's own result is already
    *  written there, so that one register does have a name. A callee that hands a STRUCT back in
    *  that register writes no value a caller may read as a word, so none is written and the
-   *  register is listed here too. Required rather than optional: a call lowered without it would
+   *  register is listed here too — save one whose bytes a local of the struct is read back from,
+   *  which is written as the call's value and noted as an image ({@link noteStructImage}). Required rather than optional: a call lowered without it would
    *  keep resolving a destroyed register to its pre-call value, silently. */
   noteCall(b: number, clobbers: readonly string[]): void;
+  /** The call {@link noteCall} just recorded in `b` left `reg` holding `image`, the bytes of a
+   *  struct its callee is declared to return there (frontend/call-plan.ts `registerStructLocal`).
+   *  A read takes it as the call's value, and the lift re-reads it off the struct's local; a GUESSED
+   *  arity does not count it, as it counts no register a call destroyed: a call nothing declares
+   *  may be handed the struct by value or a member of it, in the same register, and the bytes do
+   *  not say which. So the trim treats `reg` as destroyed, and a guess that still passes the image
+   *  refuses in `finish`. */
+  noteStructImage(b: number, reg: string, image: Value): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
@@ -508,6 +517,10 @@ export function makeSsaBuilder(
   // predecessors.
   const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
+  // `imageLocal[b]`: holding a struct's image a call in `b` handed back, with nothing written since
+  // (`noteStructImage`) — destroyed for a guessed arity alone
+  const imageLocal: Array<Set<string>> = irBlocks.map(() => new Set());
+  const structImages = new Set<Value>();
   const staleCandidates: StaleRead[] = [];
   const staleByValue = new Map<Value, StaleRead[]>();
   /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
@@ -670,6 +683,7 @@ export function makeSsaBuilder(
     }
     writtenSinceCall[b].add(reg);
     clobberedLocal[b].delete(reg);
+    imageLocal[b].delete(reg);
     decidedLocal[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
@@ -989,10 +1003,10 @@ export function makeSsaBuilder(
    *  the UNION, against `trimClobberedCallArgs`'s intersection, and for the opposite reason. That
    *  one proves the caller set a register up, which needs every path to agree; this one proves
    *  nobody can name it, which one path is enough for. Meaningful once every block is filled. */
-  const destroyedOnEntry = (): Array<Set<string>> => {
+  const destroyedOnEntry = (images = false): Array<Set<string>> => {
     const destroyedIn: Array<Set<string>> = irBlocks.map(() => new Set());
     const outOf = (b: number): Set<string> => {
-      const out = new Set(clobberedLocal[b]);
+      const out = new Set([...clobberedLocal[b], ...(images ? imageLocal[b] : [])]);
       for (const r of destroyedIn[b]) {
         if (!decidedLocal[b].has(r)) {
           out.add(r);
@@ -1401,6 +1415,11 @@ export function makeSsaBuilder(
         clobberedLocal[b].add(r);
         decidedLocal[b].add(r);
       }
+      imageLocal[b] = new Set();
+    },
+    noteStructImage: (b: number, reg: string, image: Value) => {
+      imageLocal[b].add(reg);
+      structImages.add(image);
     },
     recordGuessedCall: (
       op: Op,
@@ -1423,11 +1442,12 @@ export function makeSsaBuilder(
         ...(floor ? { floor } : {}),
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
-        returnRegBefore: clobberedLocal[b].has(abi.returnReg)
-          ? 'destroyed'
-          : decidedLocal[b].has(abi.returnReg)
-            ? 'written'
-            : 'inherited',
+        returnRegBefore:
+          clobberedLocal[b].has(abi.returnReg) || imageLocal[b].has(abi.returnReg)
+            ? 'destroyed'
+            : decidedLocal[b].has(abi.returnReg)
+              ? 'written'
+              : 'inherited',
       });
     },
     markFilled: (b: number) => {
@@ -1453,13 +1473,26 @@ export function makeSsaBuilder(
           argRegs: abiSeen.argRegs,
           returnReg: abiSeen.returnReg,
           calleeResults,
-          destroyedIn: destroyedOnEntry(),
+          destroyedIn: destroyedOnEntry(true),
           preds,
           blocks: irBlocks,
           freshAtEnd: writtenSinceCall,
           callsIn,
           sites: guessedCalls,
         });
+        // what the trim leaves a guess passing a struct's image: a copy of it into another argument
+        // register (`add r1, r0, #0`), which is as undecided as the image itself
+        for (const site of guessedCalls) {
+          const at = callArgs(site.op).findIndex((v) => structImages.has(v));
+          if (at >= 0) {
+            // the one refusal `trimClobberedCallArgs` makes of the image in the return register itself
+            const callee = site.op.attrs.target;
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': argument ${at + 1} of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
+                `is a struct an earlier call handed back in ${abiSeen.returnReg}, and nothing here passes one on as an argument — not modelled`,
+            );
+          }
+        }
       }
       irBlocks.forEach((blk, i) => writeOrder.writes.set(blk, writeCount[i]));
       // The phis nothing reads at all — a register two paths leave holding different junk (a loop
@@ -2095,7 +2128,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     if (argRegs[0] === returnReg && !fresh.has(argRegs[0]) && destroyed && setsUpLater(fresh)) {
       const callee = s.op.attrs.target;
       throw new FrontendUnsupportedError(
-        `cannot lift '${inp.name}': argument 1 of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
+        `cannot lift '${inp.name}': argument ${argRegs.indexOf(returnReg) + 1} of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
           `is a struct an earlier call handed back in ${returnReg}, and nothing here passes one on as an argument — not modelled`,
       );
     }

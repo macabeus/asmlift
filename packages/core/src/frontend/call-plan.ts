@@ -23,7 +23,7 @@ import {
   returnsInMemory,
   returnsWithoutHiddenPointer,
 } from '../aggregate';
-import { type Block, type Op, type Value, calleeName, mkOp, mkValue } from '../ir/core';
+import { type Block, type Op, REGISTER_STRUCT, type Value, calleeName, mkOp, mkValue } from '../ir/core';
 import { qualified } from '../ir/discipline';
 import { OPCODES, type OpSig } from '../ir/opcodes';
 import { type IrType, T, structSpelling, typeToString } from '../ir/types';
@@ -115,7 +115,12 @@ export interface CallPlan {
     | { readonly kind: 'word' }
     | { readonly kind: 'void' }
     | { readonly kind: 'pair' }
-    | { readonly kind: 'register-struct' }
+    | {
+        readonly kind: 'register-struct';
+        /** the local the return register's image is read off (`registerStructLocal`), where one
+         *  can be declared; absent, the register holds nothing the caller may read */
+        readonly local?: Extract<IrType, { kind: 'struct' }>;
+      }
     | { readonly kind: 'memory-struct'; readonly type: IrType };
   /** what the call leaves holding nothing this function can name, for `SsaBuilder.noteCall` */
   readonly clobbers: readonly string[];
@@ -317,6 +322,31 @@ export function callDeclarations(
     return declaresAggregateReturn(own) && structReturnOf(name, target, callee!, own!, fail) === 'register'
       ? 'register'
       : undefined;
+  };
+  // A STRUCT RETURNED IN THE RETURN REGISTER IS READ OFF A LOCAL OF IT (frontend/register-struct-call.ts).
+  // The register holds the struct's bytes as the target lays them in a word: from bit 0 up where
+  // the target is little-endian (agbcc's `{u16}` is `strh r0` off the call), from bit 31 down where it
+  // is big-endian (mwcc's is `srwi r0,r3,16`). So the register is the struct's image, which the call
+  // writes and `liftRegisterStructCalls` re-reads as a load of the local the call assigns, and the
+  // member a later read takes out of it is that local's member: `s = mk(x); gV = s.h;`, which is
+  // what every such compiler compiles to these bytes. Only the declaration says the call returns a
+  // struct at all, since the bytes are a scalar callee's, so only a callee the project declares
+  // gets one, and only where the local can be:
+  //   - declared with a type (`structLocalType`): a union or a bitfield has none here;
+  //   - one, two or four bytes, the widths one load reads whole — three bytes, or the second
+  //     register of an eight-byte struct, is an image no load here builds;
+  //   - printed beside its callee's prototype, which the declarations block defines it by.
+  // Otherwise the register still holds nothing the caller may read.
+  const registerStructLocal = (callee: string): Extract<IrType, { kind: 'struct' }> | undefined => {
+    const own = known(prototypes, callee);
+    if (own === undefined) {
+      return undefined;
+    }
+    const type = structLocalType(own, target);
+    if ('refused' in type || ![1, 2, 4].includes(type.size ?? 0)) {
+      return undefined;
+    }
+    return spellableProto(own, target, type) === undefined ? undefined : type;
   };
   // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. A frontend's outgoing-argument
   // analysis and its call lowering both come through here, so the arity that LICENSED a block and
@@ -591,6 +621,7 @@ export function callDeclarations(
     // a runtime helper's return is its table's, whatever a project declares on its name
     const declaredVoid = !isRuntimeHelperName(callee) && declaresVoidReturn(own);
     const voided = lowering.voidReturn && declaredVoid;
+    const local = returned === 'register' ? registerStructLocal(callee) : undefined;
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
@@ -602,13 +633,14 @@ export function callDeclarations(
           : returned === undefined
             ? { kind: 'word' }
             : returned === 'register'
-              ? { kind: 'register-struct' }
+              ? { kind: 'register-struct', ...(local === undefined ? {} : { local }) }
               : { kind: 'memory-struct', type: returned.type },
-      // a struct leaves the return register holding nothing the caller may read as a value, and a
-      // void callee leaves it holding whatever the callee did
+      // a struct leaves the return register holding nothing the caller may read as a value, save
+      // the image of one a local can be read off, and a void callee leaves it holding whatever the
+      // callee did
       clobbers: pair
         ? pairReturnClobbers
-        : returned === undefined && !voided
+        : (returned === undefined && !voided) || local !== undefined
           ? callClobbers
           : [...callClobbers, target.returnReg],
       declaredVoid,
@@ -1020,6 +1052,7 @@ export function callDeclarations(
       attrs: {
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
+        ...(returns.kind === 'register-struct' && returns.local !== undefined ? { [REGISTER_STRUCT]: true } : {}),
         ...(doubles === undefined ? {} : { doubles }),
         ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
@@ -1081,13 +1114,17 @@ export function callDeclarations(
       if (callee !== undefined) {
         pairCallee.set(res, callee);
       }
-    } else if (returns.kind === 'word') {
+    } else if (returns.kind === 'word' || (returns.kind === 'register-struct' && returns.local !== undefined)) {
       site.write(target.returnReg, res); // the callee defines the return register …
     }
     // … and the clobber is recorded after it, so that def is the CALLEE's; a struct, the memory at
     // argument 0 or the return register's bytes, leaves that register holding nothing the caller
-    // may read as a value
+    // may read as a value, save the image of one a local is declared for, which a guessed arity
+    // still does not count (`SsaBuilder.noteStructImage`)
     ssa.noteCall(bi, p.clobbers);
+    if (returns.kind === 'register-struct' && returns.local !== undefined) {
+      ssa.noteStructImage(bi, target.returnReg, res);
+    }
   };
   return {
     callClobbers,
@@ -1105,9 +1142,9 @@ export function callDeclarations(
 // up (on agbcc, thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in
 // the return register is not a value the caller reads (calls.c: the struct is the memory at the
 // address). One the target returns in registers takes its arguments where they are declared, and
-// its registers hold the struct's bytes, which nothing here reads as a struct: the call is
-// `'register'` and a read of the return register after it refuses. Every other struct-returning
-// call refuses, naming why.
+// its registers hold the struct's bytes: the call is `'register'`, and the return register is the
+// struct's image where a local of it can be declared (`registerStructLocal`) and holds nothing the
+// caller may read otherwise. Every other struct-returning call refuses, naming why.
 function structReturnOf(
   name: string,
   target: TargetDescription,

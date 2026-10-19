@@ -17,6 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
+import { liftRegisterStructCalls } from './frontend/register-struct-call';
 import { frontendFor } from './frontend/registry';
 import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
@@ -359,6 +360,9 @@ export function liftStamped(
     split.ownContextProto,
     notes,
   );
+  // a struct a callee returns in a register is the local the call assigns, which the function's own
+  // struct return may then hand back
+  liftRegisterStructCalls(fn, table, target, own ?? split.ownContextProto);
   verify(fn);
   if (ownReturn !== undefined) {
     returnOwnStruct(fn, name, target, ownReturn, notes, deferred);

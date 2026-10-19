@@ -319,6 +319,17 @@ export function foldWriteOrder(order: WriteOrder | undefined, from: Block, into:
  *  its `off` means nothing. */
 export const OWN_RETURN_OBJECT = 'returned';
 
+/** The `call` attribute of L1 that says its result is the IMAGE of a struct its callee is declared
+ *  to return in the return register (frontend/call-plan.ts `registerStructLocal`): a word the
+ *  frontend reads as any call's, which `liftRegisterStructCalls` (frontend/register-struct-call.ts)
+ *  turns into the struct assigned to a local and re-read off it. No call carries it past that. */
+export const REGISTER_STRUCT = 'registerStruct';
+
+/** The `laddr` attribute that marks the local a struct returned in a register is assigned to
+ *  (frontend/register-struct-call.ts), holding the callee's name, which names the local. The struct lives in the return register, not in this frame,
+ *  so no frame offset names it and its `off` means nothing, as for {@link OWN_RETURN_OBJECT}. */
+export const CALL_RETURN_OBJECT = 'callReturned';
+
 /** The `ret` attribute that says it hands back the {@link OWN_RETURN_OBJECT} whole, by value: its
  *  operand is that object's address, and the C returns the object. */
 export const RETURNS_OBJECT = 'returnsObject';
