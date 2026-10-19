@@ -274,8 +274,33 @@ describe("a function returning what a call returned returns the call's struct", 
       'f:\n\tpush\t{lr}\n\tbl\tmk\n\tadd\tr2, r0, #0\n\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
       '\tldr\tr1, .L3\n\tand\tr1, r1, r2\n\torr\tr0, r0, r1\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n';
     expect(() => decompile('f', mod, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } })).toThrow(
-      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, and what it returns is computed from a struct a call returned there/,
+      /it is declared to return struct T by value, which comes back in r0 — it is not one word that is all one integer member, and it reads a struct a call returned there/,
     );
+  });
+
+  test('so does one whose struct reaches the return through a frame slot', () => {
+    const T =
+      /it is declared to return struct T by value, which comes back in r[03] — .* it reads a struct a call returned there/;
+    // agbcc `struct T s = mk(x); takeT(&s); return s;`: the image is stored, its address escapes,
+    // and the return reloads it
+    const esc =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tbl\tmk\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\ttakeT\n' +
+      '\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+    const takeT: FnProto = { params: ['struct T *'], returnsVoid: true };
+    expect(() => decompile('f', esc, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16, takeT } })).toThrow(T);
+    // mwcc_242_81 `if (x) return mk(x); return mk(0);`: each arm homes the member at 8(r1), the
+    // join reloads it
+    const two =
+      '00000000 <f>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tcmpwi   r3,0\n   c:\tstw     r0,20(r1)\n' +
+      '  10:\tbeq-    24 <f+0x24>\n  14:\tbl      14 <f+0x14>\n\t\t\t14: R_PPC_REL24\tmk\n  18:\tsrwi    r0,r3,16\n' +
+      '  1c:\tsth     r0,8(r1)\n  20:\tb       34 <f+0x34>\n  24:\tli      r3,0\n  28:\tbl      28 <f+0x28>\n' +
+      '\t\t\t28: R_PPC_REL24\tmk\n  2c:\tsrwi    r0,r3,16\n  30:\tsth     r0,8(r1)\n  34:\tlhz     r0,8(r1)\n' +
+      '  38:\tslwi    r3,r0,16\n  3c:\tlwz     r0,20(r1)\n  40:\tmtlr    r0\n  44:\taddi    r1,r1,16\n  48:\tblr\n';
+    for (const tc of ['mwcc_242_81', 'mwcc_247_107'] as const) {
+      expect(() =>
+        decompile('f', two, TOOLCHAIN_TARGETS[tc].description, { prototypes: { ...ownT('f'), mk: T16 } }),
+      ).toThrow(T);
+    }
   });
 
   test('mwcc_242_81: the call itself with no home, the local where the source named one', () => {

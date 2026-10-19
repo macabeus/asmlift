@@ -371,7 +371,7 @@ export function liftStamped(
   );
   verify(fn);
   if (ownReturn !== undefined && !calls.handedBack) {
-    returnOwnStruct(fn, name, target, ownReturn, notes, deferred, calls.readsImage);
+    returnOwnStruct(fn, name, target, ownReturn, notes, deferred, calls.readsCallStruct);
     verify(fn);
   }
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
@@ -656,13 +656,14 @@ function returnOwnStruct(
     // a word the struct may not be all of stays the lift's own return, as the machine has it, and
     // the note says why the declared struct is not what it returns
     const kept = liftOwnRegisterStruct(fn, own.type);
-    // … save a word computed from a struct a call returned (frontend/register-struct-call.ts),
-    // which no lift read before that call's struct was one, and which the word return would
-    // print as the scalar the declaration contradicts: that refuses, as it did
+    // … save in a function that reads a struct a call returned (frontend/register-struct-call.ts),
+    // which no lift read before that call's struct was one: the word it returns may be computed
+    // from that struct — through a frame slot as well as an op — and the word return would print
+    // it as the scalar the declaration contradicts, so that refuses, as it did
     if (kept !== undefined && readsCallStruct) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': it is declared to return ${own.type.declared ?? 'a struct'} by value, which comes back in ` +
-          `${target.returnReg} — ${kept}, and what it returns is computed from a struct a call returned there`,
+          `${target.returnReg} — ${kept}, and it reads a struct a call returned there, which what it returns may be computed from`,
       );
     }
     if (kept !== undefined) {

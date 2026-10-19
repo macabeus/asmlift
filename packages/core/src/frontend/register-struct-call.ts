@@ -68,9 +68,13 @@ interface Image {
 export interface OwnReturnOfCalls {
   /** every `ret` hands back a call's struct whole, by value (`return mk(x);`) */
   handedBack: boolean;
-  /** some `ret` returns a word computed from a call's struct, which only the function's own struct
-   *  return (pipeline.ts `returnOwnStruct`) can spell */
-  readsImage: boolean;
+  /** some call's struct is read in this function, so a word the function returns may be computed
+   *  from it: through an op, a join, or a frame slot it is stored to and reloaded from (mwcc's home,
+   *  an array, a local whose address escapes). Only the function's own struct return
+   *  (pipeline.ts `returnOwnStruct`) can spell such a word, and the bytes do not say whether the
+   *  word is one, so the question is not narrowed to the reads this pass can follow: before this
+   *  pass existed, every such read refused. */
+  readsCallStruct: boolean;
 }
 
 /** Rewrites every call `REGISTER_STRUCT` marks into the struct assigned to a local of its declared
@@ -101,7 +105,7 @@ export function liftRegisterStructCalls(
     }
   }
   if (marked.size === 0) {
-    return { handedBack: false, readsImage: false };
+    return { handedBack: false, readsCallStruct: false };
   }
   const defs = defOpMap(fn);
   const isFrameAddress = (v: Value): boolean => {
@@ -253,10 +257,14 @@ export function liftRegisterStructCalls(
     foldFrameHome(fn, image);
   }
   // what the image leaves out must be what no reader reads (`demandedBits`)
+  const structBits = (size: number): number =>
+    size >= 4 ? FULL : bigEndian ? (FULL << (32 - 8 * size)) >>> 0 : (1 << (8 * size)) - 1;
+  const readsPast = ({ word, size }: Image, voidOwn: boolean): boolean =>
+    (demandedBits(fn, word, voidOwn) & ~structBits(size)) >>> 0 !== 0;
   const voidOwn = declaresVoidReturn(ownDeclaration);
-  for (const { word, size, callee } of images) {
-    const struct = size >= 4 ? FULL : bigEndian ? (FULL << (32 - 8 * size)) >>> 0 : (1 << (8 * size)) - 1;
-    if ((demandedBits(fn, word, voidOwn) & ~struct) >>> 0 !== 0) {
+  for (const image of images) {
+    const { size, callee, word } = image;
+    if (readsPast(image, voidOwn)) {
       // a home `foldFrameHome` left — one read outside the call's block (mwcc 2.3.3 stores the
       // word whole in each arm of an `if` and reads the member in the join), or written again
       // before it is read — is no read past the struct, only one this fold does not follow
@@ -273,44 +281,7 @@ export function liftRegisterStructCalls(
       );
     }
   }
-  // read off the local after the home fold too, which re-points a home's loads at it
-  const readsImage = images.some(({ local }) => reaches(fn, local, (op) => op.opcode === 'ret'));
-  return { handedBack, readsImage };
-}
-
-/** Whether a value computed from `root` — through any op's result or a join — is read by an op
- *  `at` accepts. */
-function reaches(fn: Fn, root: Value, at: (op: Op) => boolean): boolean {
-  const seen = new Set<Value>([root]);
-  const work = [root];
-  while (work.length > 0) {
-    const v = work.pop()!;
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        if (op.operands.includes(v)) {
-          if (at(op)) {
-            return true;
-          }
-          for (const r of op.results) {
-            if (!seen.has(r)) {
-              seen.add(r);
-              work.push(r);
-            }
-          }
-        }
-        for (const e of op.successors) {
-          e.args.forEach((a, i) => {
-            const p = e.block.params[i];
-            if (a === v && !seen.has(p)) {
-              seen.add(p);
-              work.push(p);
-            }
-          });
-        }
-      }
-    }
-  }
-  return false;
+  return { handedBack, readsCallStruct: images.length > 0 };
 }
 
 /** THE STRUCT'S FRAME HOME IS THE LOCAL. A compiler that gives the struct a home in the frame stores
