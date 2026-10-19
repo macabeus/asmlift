@@ -2944,14 +2944,22 @@ export function structure(
     // The header's way out is not the loop's exit when it enters an arm that runs code and then
     // joins another exit edge (`codeBreakArm`) whose tail has an effect: that arm is a `break`, and
     // the loop a `while (1)`. Where the tail only returns, the `while` reading copies it into the
-    // other edge as an early `return`, and keeps that spelling.
+    // other edge as an early `return`, and keeps that spelling — unless the tail is a bare `return`
+    // and the arm itself runs code. gcc2.7.2's `for (i = 0; i < n; i++) { if (t[i] == 7) { gHit = 1;
+    // break; } }` keeps the arm inside a guarded bottom-tested loop, so the arm is the one in the
+    // loop, and a bare `return` copies no code: `while (t[i] != 7) { ...; if (i >= n) return; }
+    // gHit = 1;` is the spelling the bytes do not hold (breaknend_code 21/26 against 4/18).
     const runsEffect = (x: Block) => [x, ...reachFrom(x)].some((y) => !nl.body.has(y) && y.ops.some(effectful));
     const hOutIsBreakArm =
       hOut.length === 1 &&
-      nl.exitEdges.some(
-        (e) =>
-          e.to !== hOut[0].block && runsEffect(e.to) && codeBreakArm(preds, h, hOut[0].block, nl.body, e.to) !== null,
-      );
+      nl.exitEdges.some((e) => {
+        if (e.to === hOut[0].block) {
+          return false;
+        }
+        const region = codeBreakArm(preds, h, hOut[0].block, nl.body, e.to);
+        const bareReturn = e.to.ops.length === 1 && e.to.ops[0].opcode === 'ret' && e.to.ops[0].operands.length === 0;
+        return region !== null && (runsEffect(e.to) || (bareReturn && [...region].some((y) => y.ops.some(effectful))));
+      });
     if (
       !nl.selfLoop &&
       hTerm.opcode === 'cond_br' &&
