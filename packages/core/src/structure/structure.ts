@@ -4641,6 +4641,7 @@ export function structure(
         args,
         ...(wide64 ? { wide64: true as const } : {}),
         ...(d.attrs.sret === true ? { sret: d.results[0].type } : {}),
+        ...(d.attrs.sret !== true && d.results[0]?.type.kind === 'struct' ? { returns: d.results[0].type } : {}),
         ...(byValue.length > 0 ? { byValue } : {}),
       };
     }

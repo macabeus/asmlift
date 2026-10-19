@@ -5,8 +5,10 @@
 // to it byte for byte.
 import { describe, expect, test } from 'vitest';
 
+import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
+import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
 const mk = (
@@ -261,6 +263,9 @@ describe("a function returning what a call returned returns the call's struct", 
     expect(decompile('f', fwd, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } }).source).toMatch(
       /struct T f\(s32 a0\) \{\s+return mk\(a0\);\s+\}/,
     );
+    // the call is the struct, so the declarations block still prints its callee's prototype
+    const [c] = enumerateCandidates('f', fwd, ARMV4T_AGBCC, { prototypes: { ...ownT('f'), mk: T16 } });
+    expect(renderDeclarations(c.symbolRefs ?? [])).toContain('struct T mk(s32);');
   });
 
   test('a word computed from the struct and returned as the own `{u16}` declines, as it did', () => {
