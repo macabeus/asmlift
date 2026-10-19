@@ -63,6 +63,11 @@ interface Image {
   size: number;
   word: Value;
   loaded: Value;
+  /** the call as it was before it took the local, and the ops it added (`dropUnreadImage`) */
+  call: Op;
+  operands: Value[];
+  attrs: Op['attrs'];
+  added: Op[];
 }
 
 /** What `liftRegisterStructCalls` did to the function's own return. */
@@ -212,6 +217,7 @@ export function liftRegisterStructCalls(
         ...shifted('byValue', 2),
         ...shifted('byValueWords', 2),
       };
+      const operands = call.operands;
       call.operands = [local, ...call.operands];
       call.results = [mkValue(type)];
       const lift = 32 - 8 * size;
@@ -228,7 +234,7 @@ export function liftRegisterStructCalls(
       if (b === fn.blocks[0]) {
         i++;
       }
-      images.push({ block: b, callee, local, size, word, loaded });
+      images.push({ block: b, callee, local, size, word, loaded, call, operands, attrs, added: [object, ...reads] });
       const ret = returnedWhole.get(word);
       if (ret !== undefined) {
         ret.operands = [local];
@@ -278,6 +284,12 @@ export function liftRegisterStructCalls(
     for (const r of rets) {
       r.operands = [];
     }
+    // …and a struct only that guess read is now one nothing reads: the call's statement alone
+    for (const image of [...images]) {
+      if (dropUnreadImage(fn, image)) {
+        images.splice(images.indexOf(image), 1);
+      }
+    }
   }
   const voidOwn = declaresVoidReturn(ownDeclaration);
   for (const image of images) {
@@ -300,6 +312,26 @@ export function liftRegisterStructCalls(
     }
   }
   return { handedBack, readsCallStruct: images.length > 0 };
+}
+
+/** Put back the call `image` was built from, where nothing outside the ops it added reads its
+ *  word, its load or its local. */
+function dropUnreadImage(fn: Fn, image: Image): boolean {
+  const own = new Set([image.call, ...image.added]);
+  const read = (v: Value): boolean =>
+    fn.blocks.some((b) =>
+      b.ops.some((op) => !own.has(op) && (op.operands.includes(v) || op.successors.some((e) => e.args.includes(v)))),
+    );
+  if (read(image.word) || read(image.loaded) || read(image.local)) {
+    return false;
+  }
+  image.call.operands = image.operands;
+  image.call.attrs = image.attrs;
+  image.call.results = [image.word];
+  for (const b of fn.blocks) {
+    b.ops = b.ops.filter((op) => !image.added.includes(op));
+  }
+  return true;
 }
 
 /** THE STRUCT'S FRAME HOME IS THE LOCAL. A compiler that gives the struct a home in the frame stores

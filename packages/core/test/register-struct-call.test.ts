@@ -170,6 +170,14 @@ describe('mwcc: a struct of up to four bytes comes back in r3, left-justified', 
         /void c_h1\(s32 a0\) \{\s+struct T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.a;\s+\}/,
       );
     }
+    // `mk(x);`: the guess was the struct's one reader, so the call stands alone and has no local
+    const bare = mwcc('c_d', EPILOGUE(0x10));
+    for (const tc of ['mwcc_242_81', 'mwcc_247_107'] as const) {
+      const target = TOOLCHAIN_TARGETS[tc].description;
+      expect(decompile('c_d', bare, target, { prototypes: { mk: mk([{ name: 'a', type: 'u8' }]) } }).source).toMatch(
+        /void c_d\(s32 a0\) \{\s+mk\(a0\);\s+\}/,
+      );
+    }
     // a store of the whole word still reads past the struct, guessed return or not
     const whole = mwcc('c_h1', '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgV\n' + EPILOGUE(0x14));
     expect(() =>
