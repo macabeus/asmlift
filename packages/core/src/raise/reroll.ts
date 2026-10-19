@@ -49,6 +49,7 @@ import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { intWidth } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
+import { foldConstPair } from './const';
 
 /** One loop whose shape admits a re-roll, and the facts its admission reads. */
 export interface PeeledTest {
@@ -292,12 +293,14 @@ export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
   },
 ];
 
-/** Integer opcodes `evalConst` folds, on 32-bit values. */
+/** Integer opcodes `evalConst` folds, on 32-bit values. `add` and `or` are raise/const.ts's own fold
+ *  (`foldConstPair`), whose int32 normalisation is that pass's one decision; the rest are its
+ *  neighbours the exit test reads, wrapped the same way. */
 const EVAL: Readonly<Record<string, (a: number, b: number) => number>> = {
-  add: (a, b) => (a + b) | 0,
+  add: (a, b) => foldConstPair('add', a, b)!,
+  or: (a, b) => foldConstPair('or', a, b)!,
   sub: (a, b) => (a - b) | 0,
   and: (a, b) => a & b,
-  or: (a, b) => a | b,
   xor: (a, b) => a ^ b,
   icmp_eq: (a, b) => +(a === b),
   icmp_ne: (a, b) => +(a !== b),

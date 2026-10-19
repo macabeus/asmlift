@@ -1,10 +1,12 @@
 // asmlift — does a test placed ahead of a loop compute the loop's own test on the loop's entry values?
 //
-// Two passes ask exactly that, at two levels, and both read the answer from this one predicate:
+// Three questions ask exactly that, at two levels, and all read the answer from this one predicate:
 //   • structure's GUARD FUSION (`structure.ts`, through `hazards.ts`): the `if` a rotated loop is
 //     wrapped in is deleted when it is the loop's test at the first iteration, and the loop re-tests;
 //   • raise's RE-ROLL (`raise/reroll.ts`): a loop test the compiler peeled into the loop's entry is
-//     deleted when it is the latch's test at the values the entry hands the loop.
+//     deleted when it is the latch's test at the values the entry hands the loop;
+//   • the re-roll's TOP-TEST RESTORE (`entryGuard`, same file): the guard a restored top test
+//     makes redundant is deleted when it is that test at the entry values, with the same exit args.
 //
 // The reading is STRUCTURAL, never semantic: two values are the same when they are one value, or
 // when their defining ops have one opcode, one set of attributes and operands that are the same in
