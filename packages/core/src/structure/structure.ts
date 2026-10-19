@@ -4241,19 +4241,56 @@ export function structure(
       ? { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: f.name, dot: true }
       : null;
   };
-  // A FLOATING MEMBER READ AS ITS INTEGER BITS has no spelling here: the cast `*(s32 *)&s` reads
-  // the bits, and C converts them wherever a float is what the reader takes (`gF = *(s32 *)&s;`
-  // against `float gF` is `bl __floatsisf` on agbcc, a `cvt` on MIPS), which the bytes never did. A
-  // load of a declared struct's floating member declines rather than print that (a store of bits
-  // into one is the bits, and keeps the cast).
-  const refuseFloatMemberRead = (op: Op, off: number, width: number): void => {
+  // A FLOATING MEMBER READ AS ITS INTEGER BITS is spelled `*(s32 *)&s`, which C converts wherever
+  // a float is what the reader takes (`gF = *(s32 *)&s;` against `float gF` is `bl __floatsisf` on
+  // agbcc, a `cvt` on MIPS), which the bytes never did. So such a read is spelled only where every
+  // reader is a store into an lvalue whose integer type this lift states (`floatBitsStoreTarget`):
+  // a whole-struct copy lowered to words, `((s32 *)&gV3)[1] = ((s32 *)&s)[1];`, passes the bits
+  // through. Any other reader (a named global, a declared member, a call, a return, a join)
+  // declines. A store of bits into such a member is the bits, and keeps the cast.
+  const floatMemberBits = (op: Op): { name: string; width: number } | null => {
+    if (op.opcode !== 'load') {
+      return null;
+    }
+    const width = op.attrs.width as number;
     const t = defs.get(op.operands[0])?.results[0].type;
-    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === off) : undefined;
-    if (f?.type.kind === 'float' && f.type.width === width * 8) {
-      throw new StructureError(
-        `a ${width}-byte read of the floating member '${f.name}' of a struct local is an integer here, and C ` +
-          'would convert it where a float is read — not modelled',
-      );
+    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === op.attrs.off) : undefined;
+    return f?.type.kind === 'float' && f.type.width === width * 8 ? { name: f.name, width } : null;
+  };
+  const floatBitsRefusal = (m: { name: string; width: number }): StructureError =>
+    new StructureError(
+      `a ${m.width}-byte read of the floating member '${m.name}' of a struct local is an integer here, and C ` +
+        'would convert it where a float is read — not modelled',
+    );
+  const refuseFloatMemberRead = (op: Op): void => {
+    const m = floatMemberBits(op);
+    const v = op.results[0];
+    const storedOnly = (useSitesOf.get(v) ?? []).every(
+      ({ op: u }) =>
+        (u.opcode === 'store' && u.operands[1] === v && u.operands[0] !== v) ||
+        (u.opcode === 'astore' && u.operands[2] === v && u.operands[0] !== v && u.operands[1] !== v),
+    );
+    if (m !== null && !storedOnly) {
+      throw floatBitsRefusal(m);
+    }
+  };
+  // …and the store side: the lvalue must be one whose type the lift spells, an integer of the
+  // read's width: a cast cell (`((s32 *)&g)[1]`), or a local's or a parameter's cell. A bare global
+  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is.
+  const floatBitsStoreTarget = (value: Value, lval: Expr): void => {
+    const d = defs.get(value);
+    const m = d === undefined ? null : floatMemberBits(d);
+    if (m === null) {
+      return;
+    }
+    let root: Expr = lval;
+    while (root.k === 'index' || root.k === 'field') {
+      root = root.base;
+    }
+    const t = ctype(lval);
+    const own = root.k !== 'var' || varType.has(root.name);
+    if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
+      throw floatBitsRefusal(m);
     }
   };
   // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
@@ -4702,7 +4739,7 @@ export function structure(
       if (member !== null) {
         return member;
       }
-      refuseFloatMemberRead(d, d.attrs.off as number, d.attrs.width as number);
+      refuseFloatMemberRead(d);
       const access = memAccess(
         d.operands[0],
         e(d.operands[0]),
@@ -5320,11 +5357,13 @@ export function structure(
         const viewed = frameUnionAccess(op.operands[0], off, width, storeView(op, width), true);
         if (viewed !== null) {
           const lval = unqualifiedView(op, viewed);
+          floatBitsStoreTarget(op.operands[1], lval);
           out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
           continue;
         }
         const member = frameStructMember(op, off, width, null);
         if (member !== null) {
+          floatBitsStoreTarget(op.operands[1], member);
           out.push({ k: 'store', lval: member, value: intoPtrCell(member, expr(op.operands[1])) });
           continue;
         }
@@ -5342,6 +5381,7 @@ export function structure(
           advanceStepOf(op.operands[0]),
           qualifiedBy(op) === 'cast',
         );
+        floatBitsStoreTarget(op.operands[1], lval0);
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
@@ -5383,6 +5423,7 @@ export function structure(
           el === null || fieldOff === undefined
             ? lval0
             : stampedStoreLval(lval0, stamp, undefined, { k: 'bin', op: '+', l: el.base, r: el.idx }, fieldOff, ctype);
+        floatBitsStoreTarget(op.operands[2], lval);
         out.push({
           k: 'store',
           lval: pinnedAccess(op, lval),

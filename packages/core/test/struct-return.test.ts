@@ -861,3 +861,23 @@ describe('a function that itself returns a struct', () => {
     );
   });
 });
+
+// `struct V3 { float a; float b; s32 c; }; extern struct V3 gV3; void f(s32 x){ struct V3 s = mkv3(x);
+//  gV3 = s; }` — the copy is `ldmia`/`stmia` words, so each floating member's bits are read as an
+// integer and stored through an integer cell this lift spells, which converts nothing. The kmc row
+// `sretfl`'s `gF = s.f;`, read into a bare global, still declines (mips-struct-return.test.ts).
+test('a struct with floating members copied whole as words reads those members as their bits', () => {
+  const CPV3 =
+    'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmkv3\n\tldr\tr1, .L3\n' +
+    '\tmov\tr0, sp\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n' +
+    '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgV3\n';
+  const members = [
+    { name: 'a', type: 'float' },
+    { name: 'b', type: 'float' },
+    { name: 'c', type: 's32' },
+  ];
+  const mkv3 = { params: ['s32'], returns: 'struct V3', returnLayout: { kind: 'struct' as const, members } };
+  expect(decompile('f', CPV3, ARMV4T_AGBCC, { prototypes: { mkv3 } }).source).toMatch(
+    /p1 = \(s32 \*\)&gV3;\s+sp0 = mkv3\(a0\);\s+v0 = p0\[1\];[^]*p1\[1\] = v0;/,
+  );
+});
