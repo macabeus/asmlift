@@ -4620,9 +4620,27 @@ export function structure(
         r: { k: 'bin', op: far, l: x, r: w },
       };
     }
+    const promotesSigned = (x: Expr): boolean => {
+      if (!['var', 'index', 'field', 'cast'].includes(x.k)) {
+        return false;
+      }
+      const t = ctype(x);
+      return t?.kind === 'int' && (t.width < 32 || (t.width === 32 && t.signed));
+    };
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '-', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
+      // A `signed` negation is the MATHEMATICAL one (ir/opcodes.ts), so it must not be spelled over
+      // an unsigned 32-bit operand: `-(u32)b` wraps, and at b == 0x80000000 a signed compare reads
+      // `(s32)-b` as INT_MIN where the machine's sum was +2^31. Negating the operand as s32 instead
+      // is exact wherever C defines it — it is undefined at exactly that one input.
+      //
+      // The cast is left out only where the operand provably promotes to a signed int: a name, a
+      // member or an access whose C type is `s32` or narrower than a word. NOT judged off the
+      // value's recovered type, which says `s32` of `(u32)a1 >> a2`, nor off `exprCType`'s answer
+      // for an operator, which is `s32` for every one of them, `>>>` and `/u` included. A cast the
+      // operand did not need is the same RTL on every compiler, so erring this way costs no byte.
+      const cast = needsIntSpelling(x) || (d.attrs.signed === true && !promotesSigned(x));
+      return { k: 'un', op: '-', e: cast ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'not') {
       const x = e(d.operands[0]);

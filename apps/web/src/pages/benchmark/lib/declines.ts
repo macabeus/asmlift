@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 278 distinct decline messages (the texts reached by
+// `packages/core/src` throws 279 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -219,15 +219,24 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // THE THUMB FLAGS A NON-COMPARE WROTE (`frontend/thumb.ts`, the reason the reaching-compare
-    // throw interpolates): a conditional branch testing flags that `cmn`, `tst`, flag-setting
-    // arithmetic or a call left, where only a compare's are modelled. The `cmn` inhabitants are
-    // agbcc's spelling of a compare against a negated value (thumb.md `cmnsi`): `cmn_field`,
-    // `cmn_eq` and `cmn_ult` decline here on agbcc and lift on the other three toolchains, which
-    // compare with `cmp`/`slt`. What it names to build is reading `cmn rA, rB` as `rA == -rB`
-    // style compares (and `tst` as `(rA & rB) != 0`), not an edge model.
+    // throw interpolates): a conditional branch testing flags that `tst`, flag-setting arithmetic
+    // or a call left, where only a compare's are modelled. Its first inhabitants were agbcc's
+    // `cmn` compares (`cmn_field`, `cmn_eq`, `cmn_ult`); `cmn` is read as `cmp rA, -rB` now, and
+    // what is left has no compiler behind it: agbcc prints `tstsi` as `cmp %0, #0` (thumb.md) and
+    // never branches on arithmetic flags, so its remaining sites are hand-written asm.
     key: 'non-compare-flags',
-    label: 'Thumb condition flags written by a non-compare (cmn / tst / flag-setting arithmetic / a call)',
+    label: 'Thumb condition flags written by a non-compare (tst / flag-setting arithmetic / a call)',
     pattern: /the flags it tests were written by /,
+  },
+  {
+    // A CORRECT DECLINE, not a missing capability: an unsigned branch over a `cmn`'s carry
+    // (`frontend/thumb.ts`, the throw `CMN_EXACT` leaves). The carry out of a + b is not a >=u -b at b == 0,
+    // so agbcc's `cmn; bcs` for unsigned `a < -b` (`cmn_ult`) is agbcc miscompiling it, and the C
+    // that means what the bytes do (`a + b >= a`) compiles to `add; cmp; bcc`. Lifting it would
+    // MATCH on a spelling that is wrong at b == 0.
+    key: 'cmn-carry',
+    label: "Thumb unsigned branch on a cmn's carry (agbcc miscompiles a < -b)",
+    pattern: /tests the carry of a 'cmn'/,
   },
   {
     // THE LEFTOVERS OF A CAPABILITY THAT LANDED, not a missing one — the reading `branch-likely`
@@ -241,7 +250,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // KEYED ON THE REASON, not on the headline, and that is the whole point. Both frontends' throws
     // interpolate the reason, and the same throw fires for subjects no edge model would move, each
     // in its own words:
-    //   * (Thumb) the flags were written by ARITHMETIC, by `tst`/`cmn` or by a call — the message
+    //   * (Thumb) the flags were written by ARITHMETIC, by `tst` or by a call — the message
     //     names the instruction and its block, and it crosses an edge unchanged. PowerPC names a
     //     field a call or a non-compare took in a different throw (`tests crN, but …`);
     //   * (both) the branch's block has no predecessor at all, so there is no edge to carry

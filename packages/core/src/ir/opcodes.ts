@@ -38,6 +38,10 @@ export const OPCODES = {
   // Effect-free (no `effects` flag) so DCE reaps a dead one.
   mulh: { operands: 2, results: 1 },
   mulhu: { operands: 2, results: 1 },
+  // `signed: true` marks the MATHEMATICAL negation rather than the wrapping one: what Thumb's
+  // `cmn rA, rB` compares rA against when a signed branch reads it (frontend/thumb.ts
+  // `lowerTerminator`). The structurer then never negates an unsigned word, so a signed compare
+  // over it cannot read -0x80000000u as INT_MIN.
   neg: { operands: 1, results: 1 },
   not: { operands: 1, results: 1 }, // bitwise complement (`mvn`) → ~x
   or: { operands: 2, results: 1 },

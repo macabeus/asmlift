@@ -12422,7 +12422,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      FLAG_ONLY / retireFlags), so the branch declines. One row per branch class, since each tests a
   //      different flag of the sum: signed (`bgt`), EQ/NE (`bne`), unsigned (`bcs`, C = carry out).
   //      `a + b <= 0` is not folded (`add ; cmp #0`) and MATCHes: the control. The other three have no
-  //      compare-negative and MATCH all three (controls). Ablation-pinned.
+  //      compare-negative and MATCH all three (controls). Ablation-pinned. Since thumb.ts `lowerCmn`
+  //      reads `cmn` as `cmp rA, -rB`, cmn_field and cmn_eq MATCH on agbcc. cmn_ult still declines, and
+  //      correctly: the carry out of a + b is not a >=u -b at b == 0, so agbcc's `cmn; bcs` for `a < -b`
+  //      is its own miscompile, and the exact C (`a + b >= a`) compiles to `add; cmp; bcc`.
   //   8. jt_pre_midg (EntityCreate). A jump table with PRE's code INSIDE its dispatch: gcse's
   //      `insert_insn_end_bb` (gcse.c:4231-4236) puts a later switch's index computation "just before
   //      the tablejump", between `ldr r0,[r0]` and `mov pc` (thumb.md:979 tablejump is the `mov pc`

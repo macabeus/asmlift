@@ -19,7 +19,7 @@
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
 import { ownArgumentWordsOn } from '../aggregate';
-import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type FnProto, type Prototypes, wordsOf } from '../proto';
@@ -394,16 +394,25 @@ const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12',
  *      the edges of a conditional branch (mwcc's switch dispatch reads one `cmpwi` from a `beq`
  *      and then from the `bge` on its fall-through), and Thumb, with no row inhabiting that shape,
  *      does not. */
-type PendingCmp = { lhs: Value; rhs: Value };
+type PendingCmp = {
+  lhs: Value;
+  rhs: Value;
+  /** The negation `lowerCmn` minted, when the flags came from `cmn rA, rB` rather than a `cmp`.
+   *  It travels with the compare, across an edge too (`inheritFlags` carries the record whole),
+   *  because the terminator is where it matters: a `cmn` is `cmp rA, -rB` for every flag but C,
+   *  and only a signed branch needs the negation to be a signed one. See `CMN_EXACT`. */
+  cmn?: Op;
+};
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
 // Used to invalidate a pending compare: see the decode loop. Loads, stores and push/pop leave the
-// flags alone. Three mnemonics that DO write them are absent, each for its own reason, and lumping
+// flags alone. Three kinds of writer that DO write them are absent, each for its own reason, and lumping
 // them under one was how `cmn`/`tst` came to be described as instructions that set no flags:
-//   * `cmp` seeds the pending compare instead of invalidating it — it is the modelled one;
-//   * `cmn`/`tst` write the flags and define no register, so the membership test below (which
-//     reads a destination) cannot judge them — `FLAG_ONLY` does;
+//   * `cmp` and `cmn` seed the pending compare instead of invalidating it — they are the modelled
+//     ones (`cmn` as `cmp rA, -rB`, `lowerCmn`);
+//   * `tst` writes the flags and defines no register, so the membership test below (which reads a
+//     destination) cannot judge it — `FLAG_ONLY` does;
 //   * a CALL is not an instruction's flag write at all: `bl` writes none itself, but the function
 //     it enters retires compares of its own, and AAPCS lets it. Invalidated separately.
 const FLAG_SETTING = new Set([
@@ -443,20 +452,39 @@ const FLAG_SETTING = new Set([
   'sbcs',
 ]);
 
-// The flag writers with no destination to read. `tst`/`cmn` compute a value they throw away and
-// keep only the flags, so `FLAG_SETTING`'s destination test cannot see them — yet they take the
-// flags from a pending compare exactly as `sub` does, and the branch that follows tests THEIRS.
+// The flag writer with no destination to read. `tst` computes a value it throws away and keeps
+// only the flags, so `FLAG_SETTING`'s destination test cannot see it — yet it takes the flags from
+// a pending compare exactly as `sub` does, and the branch that follows tests ITS.
 //
-// Unconditional, unlike `FLAG_SETTING`: neither has a destination whose width could pick a
-// non-flag-setting encoding, and Thumb-1 encodes both on low registers only.
+// Unconditional, unlike `FLAG_SETTING`: it has no destination whose width could pick a
+// non-flag-setting encoding, and Thumb-1 encodes it on low registers only.
 //
-// They still decode to an `opaque` (the default arm), so a function containing one declines either
+// It still decodes to an `opaque` (the default arm), so a function containing one declines either
 // way and this changes no verdict — only which decline, and the terminator's is the true one.
 // Without it `cmp r0,r1 / tst r2,r3 / bge` FOLDED the stale compare into the condition and was
 // loud solely because the opaque it minted is unresolvable: the right answer resting on an
-// accident of an unrelated model. Making `tst` transparent instead — it defines nothing, so a
-// `tst` no branch reads is dead — is a capability with no row in this corpus to earn it.
-const FLAG_ONLY = new Set(['tst', 'cmn']);
+// accident of an unrelated model. Modelling `tst` is a capability with no inhabitant: agbcc's
+// `tstsi` prints `cmp %0, #0` (gcc/thumb.md:818-821), so every `tst` in the corpus is hand-written.
+//
+// `cmn` used to sit here too. It is a compare now (the decode loop's `cmn` arm): agbcc's `cmnsi`
+// (thumb.md:823-827) is `(compare rA (neg rB))`, which combine makes of `a == -b` and `a <= -b`.
+const FLAG_ONLY = new Set(['tst']);
+
+// The branches that read a `cmn`'s flags as the compare it stands for, and the sentence for the
+// ones that cannot. `cmn rA, rB` sets NZCV from rA + rB, and `cmp rA, -rB` from rA - (-rB):
+//   * N and Z come from the same 32-bit result, so `beq`/`bne` are exact for every input;
+//   * V differs only at rB == INT_MIN, where cmn reports the true sign of rA + 2^31 and the
+//     compare's `-rB` wraps back to INT_MIN. C's `-b` is undefined there for a signed `b`, so the
+//     signed branches are exact for every input C defines — which holds only while the negation is
+//     a SIGNED one (the emitter's job, pinned by thumb-frontend.test.ts);
+//   * C is the carry out of rA + rB, which is NOT rA >=u -rB: at rB == 0 cmn's carry is clear and
+//     the compare's is set. agbcc folds unsigned `a < -b` into `cmn; bcs` regardless — it
+//     miscompiles at b == 0 — and the C that is exact there (`a + b >= a`) compiles to
+//     `add; cmp; bcc` instead. So no C spelling both matches the bytes and means what they do, and
+//     the unsigned branches refuse.
+//     The refusal is spelt out at its throw in `lowerTerminator`, not held in a constant here: the
+//     decline taxonomy (apps/web declines.ts, `cmn-carry`) is checked against throw texts as written.
+const CMN_EXACT = new Set(['beq', 'bne', 'blt', 'ble', 'bgt', 'bge']);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
@@ -4985,6 +5013,10 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
         fill.flags.compared.add(cur.pendingCmp.lhs).add(rhs);
         break;
       }
+      case 'cmn': {
+        lowerCmn(fill, cur, ins);
+        break;
+      }
       case 'ldr':
       case 'ldrb':
       case 'ldrh':
@@ -5026,6 +5058,27 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
   lowerTerminator(fill, cur);
 }
 
+/** `cmn rA, rB` as the compare it stands for, `cmp rA, -rB`: the negation is minted here and the
+ *  terminator decides which branches may read it (`CMN_EXACT`). Thumb-1 has register `cmn` only;
+ *  any other shape takes the flags with nothing modelled, exactly as `tst` does. */
+function lowerCmn(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
+  const { readData } = fill.operands;
+  const [a, b] = ins.ops;
+  if (a === undefined || b === undefined || !/^r[0-7]$/.test(reg(a)) || !/^r[0-7]$/.test(reg(b))) {
+    cur.noCmpWhy = `the flags it tests were written by 'cmn' in '${cur.ab.label}', and only a register 'cmn' is modelled`;
+    cur.pendingCmp = null;
+    emitOpaqueDest(fill, cur, ins);
+    return;
+  }
+  const lhs = readData(reg(a), cur.bi);
+  const negated = readData(reg(b), cur.bi);
+  const rhs = mkValue(T.unk(32));
+  const cmn = mkOp('neg', { operands: [negated], results: [rhs] });
+  cur.irb.ops.push(cmn);
+  cur.pendingCmp = { lhs, rhs, cmn };
+  fill.flags.compared.add(lhs).add(negated);
+}
+
 /** What an instruction does to the flags the block holds: a writer retires the compare, and
  *  `noCmpWhy` names it. */
 function retireFlags(cur: BlockCursor, ins: Instr): void {
@@ -5055,7 +5108,8 @@ function retireFlags(cur: BlockCursor, ins: Instr): void {
   // The inhabitant the guard itself exists for is hand-written asm in the playground, where
   // there is no oracle to catch a lie.
   //
-  // `tst`/`cmn` take them with no destination to read at all (`FLAG_ONLY`, above).
+  // `tst` takes them with no destination to read at all (`FLAG_ONLY`, above). `cmn` is a compare
+  // and seeds its own (`lowerCmn`), as `cmp` does.
   //
   // A CALL takes them too, and this is the one flag writer that is not an instruction: `bl`
   // writes no flags, but the function it enters retires compares of its own, and the ABI lets
@@ -5890,6 +5944,19 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare: ${cur.noCmpWhy}`,
       );
+    }
+    const { cmn } = cur.pendingCmp;
+    if (cmn && !CMN_EXACT.has(last.mnemonic)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': conditional branch '${last.mnemonic}' tests the carry of a 'cmn', and the carry ` +
+          'out of a + b is not a >=u -b (they differ at b == 0)',
+      );
+    }
+    // The signed branches read the TRUE sign of a + b, so the negation they compare against is the
+    // mathematical one (`neg`'s `signed`, ir/opcodes.ts). `beq`/`bne` read the wrapped sum, which
+    // the plain negation already spells exactly, with no input left undefined.
+    if (cmn && last.mnemonic !== 'beq' && last.mnemonic !== 'bne') {
+      cmn.attrs.signed = true;
     }
     const cond = mkValue(T.unk(32));
     irb.ops.push(
