@@ -100,6 +100,9 @@ export function liftRegisterStructCalls(
       marked.set(op.results[0], op);
     }
   }
+  if (marked.size === 0) {
+    return { handedBack: false, readsImage: false };
+  }
   const defs = defOpMap(fn);
   const isFrameAddress = (v: Value): boolean => {
     const d = defs.get(v);
