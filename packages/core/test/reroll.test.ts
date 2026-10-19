@@ -412,6 +412,28 @@ test('an arm that can both return and reach the exit is written inside the resto
   expect(irAgreement(arith, readabilityRewrites(sfn), SEEDS)).toEqual({ judged: 300, disagree: 0 });
 });
 
+/** The arm reads `j = a1 + 3`, computed ahead of the loop: `j = n + 3; for (…) { if (…) { hit(j); break; } }`. */
+const readsInvariant = (ir: string) =>
+  ir
+    .replace(
+      '  %2: s32 = const {value=0}\n',
+      '  %2: s32 = const {value=0}\n  %30: s32 = const {value=3}\n  %31: s32 = add %1, %30\n',
+    )
+    .replace('%13: s32 = call %1 {target="hit"}', '%13: s32 = call %31 {target="hit"}');
+
+test('a value the arm reads, computed ahead of the loop, is named ahead of it', () => {
+  // it crosses the loop in a register; inlined into the arm, every profile computes it there instead
+  const { src } = emitted(readsInvariant(TOP));
+  const named = src.match(/(v\d+) = a1 \+ 3;/);
+  expect(named).not.toBeNull();
+  expect(src.indexOf(named![0])).toBeLessThan(src.indexOf('for ('));
+  expect(src).toContain(`hit(${named![1]});`);
+  expect(irAgreement(readsInvariant(TOP_ARITH), structure(emitted(readsInvariant(TOP_ARITH)).fn), SEEDS)).toEqual({
+    judged: 300,
+    disagree: 0,
+  });
+});
+
 /** `for (i = 0; i < n; i++)`: the copied exit test stays in front as a guard, `0 < a1`, and the
  *  peeled first test sits in the block it enters. */
 const guarded = (ir: string) =>
