@@ -3,7 +3,7 @@
 // testable, AI-addable datum.
 import { expect, test } from 'vitest';
 
-import { NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
+import { NEGATED_FCMP, NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
@@ -94,28 +94,30 @@ test('golden: `cmp ^ 1` folds to the negated comparison and DCE cleans the feede
 });
 
 test('the fold covers every comparison, in BOTH operand orders, and is involutive', () => {
-  // one pattern per icmp — a comparison missing from the table would silently keep the
-  // double-negative spelling, which is exactly the readability bug the fold exists to remove
+  // one pattern per compare, integer and float — a comparison missing from the tables would silently
+  // keep the double-negative spelling, which is exactly the readability bug the fold exists to remove
+  const negated: Record<string, string> = { ...NEGATED_ICMP, ...NEGATED_FCMP };
   expect(NOT_CMP_PATTERNS.map((p) => p.id).sort()).toEqual(
-    Object.keys(NEGATED_ICMP)
+    Object.keys(negated)
       .flatMap((c) => [`not-${c}`, `not-zerotest-${c}`, `is-zerotest-${c}`])
       .sort(),
   );
-  for (const cmp of Object.keys(NEGATED_ICMP)) {
+  for (const cmp of Object.keys(negated)) {
+    const operand = cmp in NEGATED_FCMP ? 'f32' : 's32';
     // xor is commutative — a compiler may emit either operand order (`xori rD,rS,1`
     // lifts one way, a register-register `xor` the other)
     for (const order of ['%2, %3', '%3, %2']) {
       const fn = parse(
-        `fn f {\n^bb0(%0: s32, %1: s32):\n  %2: u32 = ${cmp} %0, %1\n` +
+        `fn f {\n^bb0(%0: ${operand}, %1: ${operand}):\n  %2: u32 = ${cmp} %0, %1\n` +
           `  %3: u32 = const {value=1}\n  %4: u32 = xor ${order}\n  ret %4\n}\n`,
       );
       const hits = NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p, PPC_MWCC), 0);
       dce(fn);
       expect(hits).toBe(1);
-      expect(print(fn)).toContain(NEGATED_ICMP[cmp]);
-      // negating twice is the identity — the table is derived from involutive pairs, and a
+      expect(print(fn)).toContain(negated[cmp]);
+      // negating twice is the identity — the tables are derived from involutive pairs, and a
       // consumer that disagreed about the opposite of a compare would show up here
-      expect(NEGATED_ICMP[NEGATED_ICMP[cmp]]).toBe(cmp);
+      expect(negated[negated[cmp]]).toBe(cmp);
       verify(fn);
     }
   }

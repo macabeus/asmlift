@@ -209,6 +209,18 @@ describe('PowerPC: a float compare in a condition-register field', () => {
     expect(ppc(sym, body)).toBe(`s32 ${sym}(float a0, float a1) {\n    return ${value};\n}\n`);
   });
 
+  // int fcmpngt(float a, float b){ return !(a > b); } — the GT bit, then `cntlzw >> 5`, its zero
+  // test: the negation of the compare, which is the unordered one, never `a <= b`.
+  test('a zero test of an extracted bit is the negated compare', () => {
+    expect(
+      ppc(
+        'fcmpngt',
+        '   0:\tfcmpo   cr0,f1,f2\n   4:\tmfcr    r0\n   8:\trlwinm  r0,r0,2,31,31\n   c:\tcntlzw  r0,r0\n' +
+          '  10:\tsrwi    r3,r0,5\n  14:\tblr\n',
+      ),
+    ).toBe('s32 fcmpngt(float a0, float a1) {\n    return !(a0 > a1);\n}\n');
+  });
+
   // void fbr(float a, float b, int *p){ if (a > b) *p = 1; } — `blelr-` returns when GT is CLEAR,
   // which is `!(a > b)`, true on a NaN; the store is guarded by `a > b`. Declared void, because the
   // bytes are also those of a float function returning `a`.

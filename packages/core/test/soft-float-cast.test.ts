@@ -109,10 +109,12 @@ describe('a compare helper is the compare its test computes', () => {
     expect(lift(name)).toBe(merged(name, 'double a0, double a1', cond));
   });
 
-  // `!(a > b)` is `__gtsf2` tested `> 0` and the 0/1 flipped after; `!(a < b)` the same over `>> 31`.
+  // `!(a > b)` is `__gtsf2` tested `> 0` and the 0/1 flipped after; `!(a < b)` the same over `>> 31`,
+  // whose flip of the folded compare is its negation, the unordered compare (pattern/engine.ts
+  // `NOT_FCMP_PATTERNS`, run again once the helper has folded).
   test('a negation the source wrote stays a negation of the compare', () => {
     expect(lift('fngt')).toContain('return v0 ^ 1;');
-    expect(lift('fnlt')).toBe(`s32 fnlt(${ff}) {\n    return a0 < a1 ^ 1;\n}\n`);
+    expect(lift('fnlt')).toBe(`s32 fnlt(${ff}) {\n    return !(a0 < a1);\n}\n`);
   });
 
   test('a branch on the compare', () => {
