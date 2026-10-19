@@ -10902,6 +10902,21 @@ export const SYNTHETIC: SynthSpec[] = [
           sretfl: { returnsVoid: true },
         },
       },
+      // a member stored through a POINTER global's value: the element is the pointee's, never the
+      // pointer variable's own storage (`&gIP`), which an array global's cast cell would address
+      {
+        sym: 'sretpidx',
+        src:
+          'struct S1p { u32 x; };\nextern struct S1p mkp(s32 x);\nextern s32 *gIP;\n' +
+          'void sretpidx(s32 x, s32 i)\n{\n    struct S1p s = mkp(x);\n    gIP[i] = s.x;\n}',
+        features: ['struct-return', 'pointer'],
+        ...at,
+        ctx: 'struct S1p { u32 x; };\nstruct S1p mkp(s32 x);\nvoid sretpidx(s32 x, s32 i);',
+        proto: {
+          mkp: { params: ['s32'], returns: 'struct S1p', returnLayout: one('x', 'u32') },
+          sretpidx: { returnsVoid: true },
+        },
+      },
     ];
   }),
   // sret1w and sret2h on the two mwcc builds that need their own flags.
