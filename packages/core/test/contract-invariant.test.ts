@@ -151,7 +151,8 @@ const PROBES: Record<string, Probe> = {
     fpu: [
       // A square root: `add.s`/`add.d` and the rest of the plain arithmetic lift through the float homes.
       ['arithmetic', '0:\tsqrt.d\t$f0,$f12\n4:\tjr\tra\n8:\tnop\n'],
-      ['a move out of the file', '0:\tmfc1\tv0,$f12\n4:\tjr\tra\n8:\tnop\n'],
+      // `mfc1`/`mtc1` of an even register move an integer word; an odd one is a double's half.
+      ['a move out of the file', '0:\tmfc1\tv0,$f13\n4:\tjr\tra\n8:\tnop\n'],
       ['an FPU store', '0:\tswc1\t$f0,0(a1)\n4:\tjr\tra\n8:\tnop\n'],
       ['the control register', '0:\tcfc1\tv0,$31\n4:\tjr\tra\n8:\tnop\n'],
     ],

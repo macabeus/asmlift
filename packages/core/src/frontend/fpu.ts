@@ -8,6 +8,8 @@
 // the decode and neither of these, `float fadd(float a, float b){ return a + b; }` lifts on every
 // FPU target as `void fadd(s32 a0, s32 a1) { return; }` — two phantom integer parameters and a dead
 // add. `docs/floating-point.md` §2 measures that.
+import type { Fn, Value } from '../ir/core';
+import { FLOAT_OPS, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP } from '../ir/opcodes';
 import { type IrType, T } from '../ir/types';
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
@@ -143,17 +145,18 @@ export function fpuArgSlots(
  *  the `fmr` past the `blr` is on no path of it.
  *
  *  And then the INTEGER return register is scratch, even where the function writes it. Both halves
- *  rest on one fact: the arithmetic is ALL the decode admits, so a float reaches nothing but another
- *  float op or the return — every move to memory, to the integer file or through a compare or a
- *  conversion is refused. A write to the float return register that did not feed the return would
- *  therefore be dead in the source, and the compiler does not emit dead arithmetic; an integer
- *  result, meanwhile, could only have come from a float by a conversion, which refuses. IDO's
- *  unrolled `float pw(float a, int n)` is the witness for the second half: it counts in `v0`.
+ *  rest on one fact: a float reaches nothing but another float op, the return, or the integer file
+ *  through a conversion or a compare — every move to memory is refused. A write to the float return
+ *  register that did not feed the return would therefore be dead in the source, and the compiler
+ *  does not emit dead arithmetic; an integer result, meanwhile, could only have come from a float by
+ *  a conversion or a compare. IDO's unrolled `float pw(float a, int n)` is the witness for the
+ *  second half: it counts in `v0`. So a frontend that decodes a conversion or a compare into the
+ *  integer file refuses a function that writes both homes (frontend/mips.ts), and `decodes` names
+ *  only the instructions that leave a FLOAT in a register.
  *
  *  THAT FACT IS WHAT HOLDS THIS RULE UP, and the next layer removes it: a layer that lets a float
- *  reach memory, the integer file or a compare must first decide the return from the value that
- *  reaches each `ret`, not from a mnemonic scan (`fpu-lift.test.ts` pins the function that breaks
- *  it, `docs/floating-point.md` §6). */
+ *  reach memory must first decide the return from the value that reaches each `ret`, not from a
+ *  mnemonic scan (`fpu-lift.test.ts` pins the function that breaks it, `docs/floating-point.md` §6). */
 export function writesFloatReturn(
   instrs: readonly { mnemonic: string; ops: string[] }[],
   decodes: ReadonlySet<string>,
@@ -164,4 +167,42 @@ export function writesFloatReturn(
     fpu !== undefined &&
     instrs.some((ins) => decodes.has(ins.mnemonic) && ins.ops[0] !== undefined && destKey(ins.ops[0]) === fpu.returnReg)
   );
+}
+
+/** Refuse a function where an FPU register's INTEGER WORD meets a float, or its float meets an
+ *  integer, across a block boundary. Within a block each read is checked as it is decoded; a read
+ *  that reaches an earlier block comes back as a block parameter, which the builder types as the
+ *  file's float before it knows what flows in (`makeSsaBuilder`'s `keyType`). So the check runs
+ *  again over the finished function: a float op, a compare or a conversion out of a float over
+ *  anything but a float, a conversion into one over a float, and an edge passing a word to a float
+ *  parameter or the reverse. `float g(float a, float b, float c)` on O32 hands `c` over in `a2`,
+ *  which `mtc1` moves in as a word: computing on it as a float is a bit cast this does not model. */
+export function refuseFpWordCrossings(name: string, fn: Fn): void {
+  const fail = (what: string): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': ${what} — an FPU register holds a float or an integer word, and this one meets the other`,
+    );
+  };
+  const isFloat = (v: Value) => v.type.kind === 'float';
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      const takesFloats =
+        (FLOAT_OPS.has(op.opcode) && op.opcode !== 'fconst') ||
+        FLOAT_TO_INT.has(op.opcode) ||
+        NEGATED_FCMP[op.opcode] !== undefined;
+      if (takesFloats && !op.operands.every(isFloat)) {
+        fail(`'${op.opcode}' is handed an integer word`);
+      }
+      if (INT_TO_FLOAT.has(op.opcode) && op.operands.some(isFloat)) {
+        fail(`'${op.opcode}' is handed a float`);
+      }
+      for (const s of op.successors) {
+        s.args.forEach((a, i) => {
+          if (isFloat(a) !== (s.block.params[i]?.type.kind === 'float')) {
+            fail('a block boundary passes one where the other arrives');
+          }
+        });
+      }
+    }
+  }
 }

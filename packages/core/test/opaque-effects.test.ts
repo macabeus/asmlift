@@ -92,9 +92,10 @@ describe('a HARDWIRED-ZERO destination is not evidence either', () => {
   // it first and names the file, which is the capability; the point the list exists to make — loud
   // in BOTH modes — is unchanged and asserted here too.
   test('an FPU move is loud in BOTH modes, named by the file rather than by $zero', () => {
-    const body = withZeroDest('mtc1\tzero,$f4');
+    // An odd register: `mtc1` into an even one is a modelled move of an integer word.
+    const body = withZeroDest('mtc1\tzero,$f5');
     expect(() => decompile('f', body, MIPS_IDO)).toThrow(/unmodelled floating-point instruction 'mtc1'/);
-    expect(() => decompile('f', body, MIPS_IDO)).toThrow(/floating-point register file \(\$f4\)/);
+    expect(() => decompile('f', body, MIPS_IDO)).toThrow(/floating-point register file \(\$f5\)/);
     const res = mips(body);
     expect(res.diagnostics).toHaveLength(1);
     expect(res.source).toContain('ASMLIFT_ERROR');
