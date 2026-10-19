@@ -14,14 +14,9 @@
 // the top of the word, which is where the struct's first byte sits there (mwcc's `{u16}` member is
 // `srwi r0,r3,16` off the call). Whatever the caller then takes out of the word — a truncating
 // store, a shift, a mask — reads the local's bytes, and the member recovery spells it as the
-// member it is: `gV = s.h;`. Save one: a 4-byte read of the local (a `{u32}`'s member, or agbcc's
-// `{u16}`, rounded to four bytes, read whole by an add only a halfword store reads: `gH += s.h;`
-// is `gH = *(s32 *)&s + gH;`) is spelled `*(s32 *)&s`, because
-// structure.ts `frameStructMember` keeps a 4-byte read's own signedness (`spellsAccessType`) rather
-// than the member's. That is the frame-member spelling on every toolchain, the O32 struct returned
-// through memory's too (`gW = *(s32 *)&sp16;`), not something of this file's: the value is right,
-// and only where a reader's operand order or a frame copy depends on it (gcc 2.7.2's `&sp16` adds
-// one) does the cast cost bytes.
+// member it is: `gV = s.h;`. A 4-byte read of the local (a `{u32}`'s member, or agbcc's `{u16}`
+// read whole by an add, `gH = *(s32 *)&s + gH;`) is spelled `*(s32 *)&s`, the frame-member spelling
+// on every toolchain (structure.ts `spellsAccessType`): the value is right.
 //
 // WHAT THE IMAGE LEAVES OUT IS NO VALUE. A struct of one or two bytes — mwcc's; agbcc rounds every
 // struct to four — fills only that much of the register, and the rest holds whatever the callee
@@ -76,10 +71,9 @@ export interface OwnReturnOfCalls {
   handedBack: boolean;
   /** some call's struct is read in this function, so a word the function returns may be computed
    *  from it: through an op, a join, or a frame slot it is stored to and reloaded from (mwcc's home,
-   *  an array, a local whose address escapes). Only the function's own struct return
-   *  (pipeline.ts `returnOwnStruct`) can spell such a word, and the bytes do not say whether the
-   *  word is one, so the question is not narrowed to the reads this pass can follow: before this
-   *  pass existed, every such read refused. */
+   *  an array, a local whose address escapes). The bytes do not say whether it is, and no pass can
+   *  follow every such route through memory, so pipeline.ts `returnOwnStruct` refuses an own word
+   *  return in any function that reads one. */
   readsCallStruct: boolean;
 }
 

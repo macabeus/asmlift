@@ -141,8 +141,9 @@ export interface SsaBuilder {
    *  written there, so that one register does have a name. A callee that hands a STRUCT back in
    *  that register writes no value a caller may read as a word, so none is written and the
    *  register is listed here too — save one whose bytes a local of the struct is read back from,
-   *  which is written as the call's value and noted as an image ({@link noteStructImage}). Required rather than optional: a call lowered without it would
-   *  keep resolving a destroyed register to its pre-call value, silently. */
+   *  which is written as the call's value and noted as an image ({@link noteStructImage}).
+   *  Required rather than optional: a call lowered without it would keep resolving a destroyed
+   *  register to its pre-call value, silently. */
   noteCall(b: number, clobbers: readonly string[]): void;
   /** The call {@link noteCall} just recorded in `b` left `reg` holding `image`, the bytes of a
    *  struct its callee is declared to return there (frontend/call-plan.ts `registerStructLocal`).
@@ -1485,7 +1486,7 @@ export function makeSsaBuilder(
         for (const site of guessedCalls) {
           const at = callArgs(site.op).findIndex((v) => structImages.has(v));
           if (at >= 0) {
-            // the one refusal `trimClobberedCallArgs` makes of the image in the return register itself
+            // worded as `trimClobberedCallArgs` refuses the image left in the return register itself
             const callee = site.op.attrs.target;
             throw new FrontendUnsupportedError(
               `cannot lift '${name}': argument ${at + 1} of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +

@@ -1,8 +1,8 @@
 // A CALLEE DECLARED TO RETURN A STRUCT THE TARGET HANDS BACK IN THE RETURN REGISTER: the caller's
-// read of it (frontend/call-plan.ts `registerStructLocal`, frontend/register-struct-call.ts). Every
-// listing below is compiled from `struct T { <m> }; extern struct T mk(s32 x); void c(s32 x) {
-// struct T s = mk(x); gV = s.<m>; }` at the toolchain's canonical flags, and each lift recompiles
-// to it byte for byte.
+// read of it (frontend/call-plan.ts `registerStructLocal`, frontend/register-struct-call.ts). A
+// listing is the toolchain's output at its canonical flags for `struct T { <m> }; extern struct T
+// mk(s32 x); void c(s32 x) { struct T s = mk(x); gV = s.<m>; }`, or for the C its test's comment
+// names. These tests pin the spelling, not a recompile; the sret* synthetic rows measure that.
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';

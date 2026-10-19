@@ -333,8 +333,9 @@ export const REGISTER_STRUCT = 'registerStruct';
 export const STRUCT_HOMED = 'homed';
 
 /** The `laddr` attribute that marks the local a struct returned in a register is assigned to
- *  (frontend/register-struct-call.ts), holding the callee's name, which names the local. The struct lives in the return register, not in this frame,
- *  so no frame offset names it and its `off` means nothing, as for {@link OWN_RETURN_OBJECT}. */
+ *  (frontend/register-struct-call.ts), holding the callee's name, which names the local. The
+ *  struct lives in the return register, not in this frame, so no frame offset names it and its
+ *  `off` means nothing, as for {@link OWN_RETURN_OBJECT}. */
 export const CALL_RETURN_OBJECT = 'callReturned';
 
 /** The `ret` attribute that says it hands back the {@link OWN_RETURN_OBJECT} whole, by value: its
