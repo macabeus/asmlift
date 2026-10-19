@@ -148,10 +148,24 @@ describe('mwcc: a struct of up to four bytes comes back in r3, left-justified', 
     expect(() =>
       decompile('c_h1', whole, target, { prototypes: { ...own('c_h1'), mk: mk([{ name: 'a', type: 'u16' }]) } }),
     ).toThrow(/`mk` hands back a struct of 2 bytes in r3, and this function reads bits of the register past it/);
-    // where nothing declares the caller void, its return may hand the whole register back
-    expect(() => decompile('c_h1', h1, target, { prototypes: { mk: mk([{ name: 'a', type: 'u16' }]) } })).toThrow(
-      /`mk` hands back a struct of 2 bytes in r3/,
-    );
+  });
+
+  test('a return nothing declares is no reader of the bits below the struct: the caller returns no value', () => {
+    // the same bytes as the declared-void caller; a guessed `ret r3` would hand back what the callee
+    // left below the struct, which no C return can be
+    for (const tc of ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const) {
+      const target = TOOLCHAIN_TARGETS[tc].description;
+      expect(decompile('c_h1', h1, target, { prototypes: { mk: mk([{ name: 'a', type: 'u16' }]) } }).source).toMatch(
+        /void c_h1\(s32 a0\) \{\s+struct T mk_ret;\s+mk_ret = mk\(a0\);\s+gV = mk_ret\.a;\s+\}/,
+      );
+    }
+    // a store of the whole word still reads past the struct, guessed return or not
+    const whole = mwcc('c_h1', '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgV\n' + EPILOGUE(0x14));
+    expect(() =>
+      decompile('c_h1', whole, TOOLCHAIN_TARGETS.mwcc_242_81.description, {
+        prototypes: { mk: mk([{ name: 'a', type: 'u16' }]) },
+      }),
+    ).toThrow(/`mk` hands back a struct of 2 bytes in r3, and this function reads bits of the register past it/);
   });
 });
 

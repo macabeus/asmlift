@@ -10461,7 +10461,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
   //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
-  //      alpha-renamed.
+  //      alpha-renamed. So is sret2h with no declaration of its own, which mwcc lifts void, since
+  //      its guessed return would read r3 below the {u16}: as a row it would be sret2h.
   //   3. break_value (2). A `break` that carries a different value than the normal exit gets its
   //      own empty edge block, so the loop has two exit targets and none is a return. agbcc only:
   //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, so the row would

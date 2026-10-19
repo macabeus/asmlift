@@ -28,7 +28,8 @@
 // left. The load reads it as zero, which is right only where nothing reads it, so every reader of
 // the register must need only the struct's bits (`demandedBits`): a truncating store, a shift that
 // drops the rest, a mask. A function that reads past them — stores the whole word, compares it,
-// returns it — declines.
+// returns it where its own declaration says it returns a value — declines; one whose return
+// nothing declares returns no value instead, where that guessed return is the only such reader.
 import {
   type Block,
   CALL_RETURN_OBJECT,
@@ -261,6 +262,23 @@ export function liftRegisterStructCalls(
     size >= 4 ? FULL : bigEndian ? (FULL << (32 - 8 * size)) >>> 0 : (1 << (8 * size)) - 1;
   const readsPast = ({ word, size }: Image, voidOwn: boolean): boolean =>
     (demandedBits(fn, word, voidOwn) & ~structBits(size)) >>> 0 !== 0;
+  // A RETURN NOTHING DECLARES IS NO READER OF WHAT THE IMAGE LEAVES OUT. With no own declaration,
+  // the `ret` reading the return register is the frontend's guess (a scalar callee's word is
+  // returned the same way, `v0 = g(); return v0;`), and the bytes do not decide it, as they do not
+  // decide a guessed arity (frontend/ssa.ts `noteStructImage`). Where that guess is the only reader
+  // past the struct's bits, and every `ret` hands back a call's image as it came back, the function
+  // returns no value: the register below a struct of one or two bytes holds none, so no C return
+  // can be what it holds, and `void` is the spelling those bytes compile from.
+  if (
+    ownDeclaration === undefined &&
+    images.some((image) => readsPast(image, false)) &&
+    images.every((image) => !readsPast(image, true)) &&
+    rets.every((r) => r.operands.length === 1 && images.some(({ word }) => word === r.operands[0]))
+  ) {
+    for (const r of rets) {
+      r.operands = [];
+    }
+  }
   const voidOwn = declaresVoidReturn(ownDeclaration);
   for (const image of images) {
     const { size, callee, word } = image;
