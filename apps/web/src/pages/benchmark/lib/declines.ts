@@ -335,8 +335,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // purpose, and they carried thirteen rows. None of the failure modes that were real survives a
     // pattern with no list in it.
     //
-    // What it does NOT cover is still decided elsewhere, and correctly: `bc1t`/`bc1f` name no FP
-    // register operand and refuse in `mips.ts` (`fp-cond-branch`, above), and an FPU instruction in
+    // What it does NOT cover is still decided elsewhere, and correctly: a `bc1t`/`bc1f` this
+    // frontend cannot read names no FP register operand and refuses in `mips.ts` (`fp-cond-branch`,
+    // above; the one condition code a `c.cond` sets is read now, and no row is left), and an FPU instruction in
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated

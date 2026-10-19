@@ -973,6 +973,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',
+    'fp-cond-branch',
     'loop-exit-values',
     'pool-word-shape',
     'structs',
@@ -1047,9 +1048,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   //
   // THE STACK PAIR IS ONE THROW, and `stack-frames` says why it loses: an sp-as-data refusal is
-  // keyed on the throw, and its `why` is what names a capability. All four markers are
+  // keyed on the throw, and its `why` is what names a capability. All five markers are
   // `mips.ts`'s spelling, the disjunction the class comment names — `byvalregs` on ido7.1 and
-  // gcc2.7.2kmc, `sret4two` and `af:suMtxMakeSRT` on ido7.1. No Thumb row reaches a stack pair:
+  // gcc2.7.2kmc, `sret4two`, `af:suMtxMakeSRT` and `af:add_calc_short_angle3` on ido7.1. No Thumb row reaches a stack pair:
   // agbcc's `uninitfirst` and `spilldead` lift, as a frame word read before any store and as
   // locals above the lowest loaded word.
   //
@@ -1060,7 +1061,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`).
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > stack-frames', 4],
+    ['address-taken-local > stack-frames', 5],
     ['address-taken-local > outgoing-stack-args', 3],
   ];
 
