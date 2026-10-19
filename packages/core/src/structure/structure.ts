@@ -4241,6 +4241,21 @@ export function structure(
       ? { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: f.name, dot: true }
       : null;
   };
+  // A FLOATING MEMBER READ AS ITS INTEGER BITS has no spelling here: the cast `*(s32 *)&s` reads
+  // the bits, and C converts them wherever a float is what the reader takes (`gF = *(s32 *)&s;`
+  // against `float gF` is `bl __floatsisf` on agbcc, a `cvt` on MIPS), which the bytes never did. A
+  // load of a declared struct's floating member declines rather than print that (a store of bits
+  // into one is the bits, and keeps the cast).
+  const refuseFloatMemberRead = (op: Op, off: number, width: number): void => {
+    const t = defs.get(op.operands[0])?.results[0].type;
+    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === off) : undefined;
+    if (f?.type.kind === 'float' && f.type.width === width * 8) {
+      throw new StructureError(
+        `a ${width}-byte read of the floating member '${f.name}' of a struct local is an integer here, and C ` +
+          'would convert it where a float is read — not modelled',
+      );
+    }
+  };
   // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
   // the audit refuses the union where its accesses would need one (`unionRefusal`)
   const unqualifiedView = (op: Op, viewed: Expr): Expr => {
@@ -4687,6 +4702,7 @@ export function structure(
       if (member !== null) {
         return member;
       }
+      refuseFloatMemberRead(d, d.attrs.off as number, d.attrs.width as number);
       const access = memAccess(
         d.operands[0],
         e(d.operands[0]),

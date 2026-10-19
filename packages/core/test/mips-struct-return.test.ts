@@ -59,6 +59,7 @@ const PROTOS: Prototypes = {
   mkil: returning('S8', S8, ['s32', 'long long']),
   ldiv: returning('QR', layout(['quot', 's32'], ['rem', 's32']), ['s32', 's32']),
   mkf: returning('SF', layout(['f', 'float']), ['float']),
+  mkfl: returning('Fl', layout(['f', 'float']), ['s32']),
   mk: returning('S4', layout(['a', 'u16'], ['b', 'u8'], ['pad', 'u8']), ['u16', 'u16', 'u8']),
   tk3: { ...returning('S8', S8, ['s32', 'struct L']), byValueLayouts: { 1: layout(['v', 's64']) } },
   tk: { ...returning('S8', S8, ['struct L']), byValueLayouts: { 0: layout(['v', 's64']) } },
@@ -574,6 +575,18 @@ describe('what the lowering does not build still declines', () => {
 
   test('a float argument', () => {
     expect(() => lift('sretf', IDO_SRETF, MIPS_IDO)).toThrow(/cannot lift 'sretf': `mkf` returns struct SF/);
+  });
+
+  // `void sretfl(s32 x){ struct Fl s = mkfl(x); gF = s.f; }`, `extern float gF;`: gcc reads the
+  // member as a word (`lw v0,16(sp)`), and `gF = *(s32 *)&sp16;` would convert those bits
+  test('a floating member read as the word it is', () => {
+    const KMC_SRETFL: Fixture = {
+      lines: KMC_SRET1W.lines,
+      rs: [[0xc, 'R_MIPS_26', 'mkfl'], ...KMC_SRET1W.rs.slice(1)],
+    };
+    expect(() => lift('sretfl', KMC_SRETFL, MIPS_GCC)).toThrow(
+      /a 4-byte read of the floating member 'f' of a struct local is an integer here/,
+    );
   });
 });
 

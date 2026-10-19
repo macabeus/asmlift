@@ -10456,7 +10456,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
   //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
   //      no member copy says so); sretfl a {float}, which has no local here and declines on agbcc
-  //      (r0 read as `*(s32 *)&s` would convert the bits) and on mwcc's lfs. A callee declared
+  //      (r0 read as `*(s32 *)&s` would convert the bits), on mwcc's lfs and ido's lwc1, and where
+  //      gcc reads the member back through memory as a word (the same cast). A callee declared
   //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
   //      that control is a core test
   //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
