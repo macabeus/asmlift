@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 256 distinct decline messages (the texts reached by
+// `packages/core/src` throws 262 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -46,14 +46,15 @@
 //                               caller's lr, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  22  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
 //                               the compiler's anonymous constant read other than as the
 //                               initializer of the locals its copies fill,
 //                               an access whose byte offset is not a whole number of its own elements
-//                               (no subscript spells it), and three internal invariants (an ambiguous
+//                               (no subscript spells it), a struct local's bytes stored into an array
+//                               element by a recovered row subscript, and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
 //   frontend/mips.ts        13  a relocation with an addend, a non-numeric immediate, the caller's
@@ -91,14 +92,17 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          3  a register read round a cycle through the entry block with no join,
+//   frontend/ssa.ts          4  a register read round a cycle through the entry block with no join,
 //                               a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument, and an incoming stack
+//                               as the next guessed call's first argument, or copied into another
+//                               of a guessed call's arguments, and an incoming stack
 //                               argument past the words the function's own declaration fills
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
+//   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
+//                               callee handed back in it, where the callee's leftover bits are no value
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
-// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all thirteen of them, and the file
+// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fourteen of them, and the file
 // names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
 // harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
 // then reads THIS FILE back and requires each one to be spelled here. Move a family out of the
@@ -145,7 +149,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 5 of the 20 rows, so a pattern requiring the decided spelling claims 15 of
+    // disjunction is 5 of the 21 rows, so a pattern requiring the decided spelling claims 16 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -336,7 +340,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 61 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 65 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
@@ -506,6 +510,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'structs',
     label: 'Struct layouts (packed / overlapping)',
     pattern: /cannot recover struct|naturally aligned|overlapping fields/,
+  },
+  {
+    // A STRUCT LOCAL'S FLOATING MEMBER READ AS ITS INTEGER BITS (`structure/structure.ts`): a
+    // declared struct's frame object — a call's return storage, a struct passed by value — whose
+    // float member a word load reads. The only spelling here is `*(s32 *)&s`, which C converts
+    // wherever a float is read, so the read declines (gcc 2.7.2's `lw` off a struct returned
+    // through memory, `sretfl`). What it names to build is a float-typed member read.
+    key: 'struct-float-member',
+    label: "A struct local's floating member read as its integer bits",
+    pattern: /floating member/,
   },
   {
     // TWO refusals, in `frontend/thumb.ts`, and the class unions them because both are answered by

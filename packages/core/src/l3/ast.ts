@@ -69,7 +69,9 @@ export type Expr =
   // `sret` is the type of a struct the callee returns BY VALUE through memory. `args[0]` is then the
   // hidden pointer the frontend read from the first argument register — the address of the struct
   // the call fills — and the rest are the declared arguments. The only C spelling is a statement,
-  // `dest = fn(rest)`, so such a call stands alone.
+  // `dest = fn(rest)`, so such a call stands alone. `returns` is the type of a struct the callee
+  // returns BY VALUE in registers, where the call is that value itself, `return mk(x);`
+  // (frontend/register-struct-call.ts); the declarations block prints its prototype by it.
   //
   // `byValue` names the arguments that are a struct passed BY VALUE — a local or a global spelled
   // bare, `take(s)` — by their place in `args` and the declared parameter each is, with the struct
@@ -87,6 +89,7 @@ export type Expr =
       args: Expr[];
       wide64?: true;
       sret?: IrType;
+      returns?: IrType;
       byValue?: readonly { readonly at: number; readonly param: number; readonly type: IrType }[];
     }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
@@ -634,6 +637,9 @@ export function exprEquals(a: Expr, b: Expr): boolean {
         (typeof a.fn === 'string' || typeof bb.fn === 'string' ? a.fn === bb.fn : exprEquals(a.fn, bb.fn)) &&
         (a.wide64 ?? false) === (bb.wide64 ?? false) &&
         (a.sret === undefined ? bb.sret === undefined : bb.sret !== undefined && typeEquals(a.sret, bb.sret)) &&
+        (a.returns === undefined
+          ? bb.returns === undefined
+          : bb.returns !== undefined && typeEquals(a.returns, bb.returns)) &&
         (a.byValue ?? []).map((x) => x.at).join() === (bb.byValue ?? []).map((x) => x.at).join() &&
         a.args.length === bb.args.length &&
         a.args.every((x, i) => exprEquals(x, bb.args[i]))

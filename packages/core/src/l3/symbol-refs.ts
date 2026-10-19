@@ -134,7 +134,7 @@ export function collectSymbolRefs(
   onRefused?: (name: string, reason: 'call-target' | 'self-name') => void,
 ): SymbolRef[] {
   const called = new Set<string>();
-  // the struct a callee returns through memory, as the lift typed it
+  // the struct a callee returns through memory or by value in registers, as the lift typed it
   const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
   // …and the structs it is passed by value, by declared parameter index
   const passedTo = new Map<string, Map<number, Extract<IrType, { kind: 'struct' }>>>();
@@ -145,8 +145,9 @@ export function collectSymbolRefs(
     const named = mentionedName(e);
     if (e.k === 'call' && typeof e.fn === 'string') {
       called.add(e.fn);
-      if (e.sret?.kind === 'struct') {
-        returned.set(e.fn, e.sret);
+      const struct = e.sret ?? e.returns;
+      if (struct?.kind === 'struct') {
+        returned.set(e.fn, struct);
       }
       for (const b of e.byValue ?? []) {
         if (b.type.kind === 'struct') {

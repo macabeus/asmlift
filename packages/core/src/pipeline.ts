@@ -17,6 +17,7 @@ import { returnedStruct, structLocalType } from './frontend/call-plan';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
+import { liftRegisterStructCalls } from './frontend/register-struct-call';
 import { frontendFor } from './frontend/registry';
 import { ABSORBED_KEYS, HOMED_UNDEF } from './frontend/ssa';
 import { type Fn, reachableBlocks } from './ir/core';
@@ -359,9 +360,18 @@ export function liftStamped(
     split.ownContextProto,
     notes,
   );
+  // a struct a callee returns in a register is the local the call assigns, or the function's own
+  // return where every return hands that struct back whole
+  const calls = liftRegisterStructCalls(
+    fn,
+    table,
+    target,
+    own ?? split.ownContextProto,
+    ownReturn?.register === true ? ownReturn.type : undefined,
+  );
   verify(fn);
-  if (ownReturn !== undefined) {
-    returnOwnStruct(fn, name, target, ownReturn, notes, deferred);
+  if (ownReturn !== undefined && !calls.handedBack) {
+    returnOwnStruct(fn, name, target, ownReturn, notes, deferred, calls.readsCallStruct);
     verify(fn);
   }
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
@@ -640,11 +650,21 @@ function returnOwnStruct(
   own: OwnStructReturn,
   notes: string[] | undefined,
   deferred: ((unproved: string) => never) | undefined,
+  readsCallStruct: boolean,
 ): void {
   if (own.register) {
     // a word the struct may not be all of stays the lift's own return, as the machine has it, and
     // the note says why the declared struct is not what it returns
     const kept = liftOwnRegisterStruct(fn, own.type);
+    // … save in a function that reads a struct a call returned (frontend/register-struct-call.ts):
+    // the word it returns may be computed from that struct — through a frame slot as well as an
+    // op — and the word return would print it as the scalar the declaration contradicts
+    if (kept !== undefined && readsCallStruct) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': it is declared to return ${own.type.declared ?? 'a struct'} by value, which comes back in ` +
+          `${target.returnReg} — ${kept}, and it reads a struct a call returned there, which what it returns may be computed from`,
+      );
+    }
     if (kept !== undefined) {
       notes?.push(
         `[own-return] ${name}: its ${own.stated ? '' : 'context '}declaration \`${own.declaration}\` returns ` +

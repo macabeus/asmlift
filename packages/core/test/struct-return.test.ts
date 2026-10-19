@@ -455,10 +455,11 @@ describe('a callee declared to return a struct or union by value', () => {
       'q2:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tbl\tmkw\n\tadd\tr4, r4, #0x1\n\tadd\tr0, r4, #0\n' +
       '\tbl\tusei\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
     expect(decompile('q2', q2, ARMV4T_AGBCC, { prototypes: { mkw } }).source).toContain('mkw(a0);');
-    // r0 is the struct's bytes, which nothing reads as a struct (hand-written: r0 returned as-is)
+    // r0 is the struct's bytes, read off the local the call assigns (hand-written: r0 returned
+    // as-is, by a function nothing declares, so it returns the word)
     const q3 = 'q3:\n\tpush\t{lr}\n\tbl\tmkw\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('q3', q3, ARMV4T_AGBCC, { prototypes: { mkw } })).toThrow(
-      /r0 is read on a path where a call has destroyed it/,
+    expect(decompile('q3', q3, ARMV4T_AGBCC, { prototypes: { mkw } }).source).toMatch(
+      /struct W1 mkw_ret;\s+mkw_ret = mkw\(a0\);\s+return \*\(s32 \*\)&mkw_ret;/,
     );
     // mwcc hands back up to 8 bytes in r3/r3:r4 — `typedef struct { u8 r, g, b, a; } GXColor;`
     const getcol = {
@@ -473,10 +474,11 @@ describe('a callee declared to return a struct or union by value', () => {
       '  28:\tmtlr    r0\n  2c:\taddi    r1,r1,16\n  30:\tblr\n';
     const usei = { params: ['s32'], returnsVoid: true as const };
     expect(decompile('f', f, PPC_MWCC, { prototypes: { getcol, usei } }).source).toContain('getcol(a0);');
-    // …and r3 past it is the struct's bytes (hand-written: the call's result read as a word)
+    // …and r3 past it is the struct's bytes, all four of them (hand-written: the call's result read
+    // as a word)
     const u = f.replace('<f>', '<u>').replace('addi    r3,r31,1', 'addi    r3,r3,1');
-    expect(() => decompile('u', u, PPC_MWCC, { prototypes: { getcol, usei } })).toThrow(
-      /r3 is read on a path where a call has destroyed it/,
+    expect(decompile('u', u, PPC_MWCC, { prototypes: { getcol, usei } }).source).toMatch(
+      /getcol_ret = getcol\(a0\);\s+return usei\(\*\(s32 \*\)&getcol_ret \+ 1\);/,
     );
   });
 
@@ -858,4 +860,24 @@ describe('a function that itself returns a struct', () => {
       /fills 1 argument word, and the body reads r1 past it/,
     );
   });
+});
+
+// `struct V3 { float a; float b; s32 c; }; extern struct V3 gV3; void f(s32 x){ struct V3 s = mkv3(x);
+//  gV3 = s; }` — the copy is `ldmia`/`stmia` words, so each floating member's bits are read as an
+// integer and stored through an integer cell this lift spells, which converts nothing. The kmc row
+// `sretfl`'s `gF = s.f;`, read into a bare global, still declines (mips-struct-return.test.ts).
+test('a struct with floating members copied whole as words reads those members as their bits', () => {
+  const CPV3 =
+    'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmkv3\n\tldr\tr1, .L3\n' +
+    '\tmov\tr0, sp\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n' +
+    '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgV3\n';
+  const members = [
+    { name: 'a', type: 'float' },
+    { name: 'b', type: 'float' },
+    { name: 'c', type: 's32' },
+  ];
+  const mkv3 = { params: ['s32'], returns: 'struct V3', returnLayout: { kind: 'struct' as const, members } };
+  expect(decompile('f', CPV3, ARMV4T_AGBCC, { prototypes: { mkv3 } }).source).toMatch(
+    /p1 = \(s32 \*\)&gV3;\s+sp0 = mkv3\(a0\);\s+v0 = p0\[1\];[^]*p1\[1\] = v0;/,
+  );
 });

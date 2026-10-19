@@ -118,7 +118,7 @@ describe('callDeclarations.plan', () => {
     expect(calls.plan('mv')).toEqual({
       widths: null,
       doubles: new Set(),
-      returns: { kind: 'register-struct' },
+      returns: { kind: 'register-struct', image: false },
       clobbers: [...calls.callClobbers, 'r0'],
       declaredVoid: false,
     });
@@ -182,13 +182,25 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
     expect(() => calls.plan('mk')).toThrow(/^cannot lift 'f': 'mk' is declared to return struct Opaque by value — /);
   });
 
-  test('plans a struct returned in registers as one leaving the return register holding nothing', () => {
+  test('plans a struct returned in registers as its image in the return register, where a local can hold it', () => {
     const calls = ppcCalls({ mv: { params: ['s32'], returns: 'struct One', returnLayout: ONE } });
     expect(calls.plan('mv')).toMatchObject({
       widths: [32],
-      returns: { kind: 'register-struct' },
-      clobbers: [...calls.callClobbers, 'r3'],
+      returns: { kind: 'register-struct', image: true },
+      clobbers: calls.callClobbers,
     });
+    // a union has no local type here, eight bytes come back in two registers, and a float member
+    // has no spelling that reads its bits: each leaves the return register holding nothing
+    const UN = { kind: 'union' as const, members: [{ name: 'a', type: 's32' }] };
+    const TWO = { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 's32' })) };
+    const FL = { kind: 'struct' as const, members: [{ name: 'a', type: 'float' }] };
+    for (const returnLayout of [UN, TWO, FL]) {
+      const other = ppcCalls({ mv: { params: ['s32'], returns: 'struct One', returnLayout } });
+      expect(other.plan('mv')).toMatchObject({
+        returns: { kind: 'register-struct', image: false },
+        clobbers: [...other.callClobbers, 'r3'],
+      });
+    }
   });
 
   test('refuses a parameter declared wider than a register', () => {

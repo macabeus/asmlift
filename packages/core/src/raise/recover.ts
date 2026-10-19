@@ -253,6 +253,10 @@ export function returnType(fn: Fn): IrType {
       if (term.attrs[RETURNS_OBJECT] === true && v.type.kind === 'ptr') {
         return v.type.to;
       }
+      // a struct a call returned by value, handed back whole (frontend/register-struct-call.ts)
+      if (v.type.kind === 'struct') {
+        return v.type;
+      }
       // A NARROW value in the return register does not make the DECLARED return type narrow: the
       // register is a word, and the value's width says how it was COMPUTED, not what the header
       // spelled. The two readings compile alike through agbcc and do NOT through mwcc —

@@ -1184,6 +1184,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
     ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
+    ['struct-float-member', 'floating member', 'packages/core/src/structure/structure.ts'],
     ['unread-data-directive', 'does not read as words', 'packages/core/src/frontend/thumb.ts'],
     ['pooled-literal', 'anonymous constant pool entry', 'packages/core/src/frontend/reloc-symbol.ts'],
     ['tu-scoped-name', 'function-scope static', 'packages/core/src/frontend/reloc-symbol.ts'],
@@ -1287,17 +1288,18 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 30],
-    ['structure/structure.ts', 21],
+    ['structure/structure.ts', 22],
     ['frontend/ppc.ts', 15],
     ['frontend/mips.ts', 13],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/call-plan.ts', 5],
-    ['frontend/ssa.ts', 3],
+    ['frontend/ssa.ts', 4],
     ['frontend/format.ts', 1],
+    ['frontend/register-struct-call.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 104;
+  const RESIDUE_TOTAL = 107;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

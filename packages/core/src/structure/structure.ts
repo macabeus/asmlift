@@ -45,6 +45,7 @@
 import { globalBaseOf } from '../ir/alias';
 import {
   Block,
+  CALL_RETURN_OBJECT,
   Fn,
   OWN_RETURN_OBJECT,
   Op,
@@ -2660,6 +2661,9 @@ export function structure(
         if (op.opcode === 'laddr' && op.attrs[OWN_RETURN_OBJECT] === true) {
           // the function's own return object, which no frame offset names
           names.set(op, mint('ret'));
+        } else if (op.opcode === 'laddr' && typeof op.attrs[CALL_RETURN_OBJECT] === 'string') {
+          // the struct a call returned in a register, which no frame offset names either
+          names.set(op, mint(`${op.attrs[CALL_RETURN_OBJECT]}_ret`));
         } else if (op.opcode === 'laddr') {
           const off = op.attrs.off as number;
           let n = byOff.get(off);
@@ -4237,6 +4241,89 @@ export function structure(
       ? { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: f.name, dot: true }
       : null;
   };
+  // A FLOATING MEMBER READ AS ITS INTEGER BITS is spelled `*(s32 *)&s`, which C converts wherever
+  // a float is what the reader takes (`gF = *(s32 *)&s;` against `float gF` is `bl __floatsisf` on
+  // agbcc, a `cvt` on MIPS), which the bytes never did. So such a read is spelled only where every
+  // reader is a store into an lvalue whose integer type this lift states (`floatBitsStoreTarget`):
+  // a whole-struct copy lowered to words, `((s32 *)&gV3)[1] = ((s32 *)&s)[1];`, passes the bits
+  // through. Any other reader (a named global, a declared member, a call, a return, a join)
+  // declines. A store of bits into such a member is the bits, and keeps the cast.
+  const floatMemberBits = (op: Op): { name: string; width: number } | null => {
+    if (op.opcode !== 'load') {
+      return null;
+    }
+    const width = op.attrs.width as number;
+    const t = defs.get(op.operands[0])?.results[0].type;
+    const f = t?.kind === 'ptr' && t.to.kind === 'struct' ? t.to.fields.find((m) => m.off === op.attrs.off) : undefined;
+    return f?.type.kind === 'float' && f.type.width === width * 8 ? { name: f.name, width } : null;
+  };
+  const refuseFloatBits = (m: { name: string; width: number }): never => {
+    throw new StructureError(
+      `a ${m.width}-byte read of the floating member '${m.name}' of a struct local is an integer here, and C ` +
+        'would convert it where a float is read — not modelled',
+    );
+  };
+  const refuseFloatMemberRead = (op: Op): void => {
+    const m = floatMemberBits(op);
+    const v = op.results[0];
+    const storedOnly = (useSitesOf.get(v) ?? []).every(
+      ({ op: u }) =>
+        (u.opcode === 'store' && u.operands[1] === v && u.operands[0] !== v) ||
+        (u.opcode === 'astore' && u.operands[2] === v && u.operands[0] !== v && u.operands[1] !== v),
+    );
+    if (m !== null && !storedOnly) {
+      refuseFloatBits(m);
+    }
+  };
+  // …and the store side: the lvalue must be one whose type the lift spells, an integer of the
+  // read's width: a cast cell (`((s32 *)&g)[1]`), or a local's or a parameter's cell. A bare global
+  // (`gF = …`, `gA[i] = …`) has the project's type, whatever that is.
+  const floatBitsStoreTarget = (value: Value, lval: Expr): void => {
+    const d = defs.get(value);
+    const m = d === undefined ? null : floatMemberBits(d);
+    if (m === null) {
+      return;
+    }
+    let root: Expr = lval;
+    while (root.k === 'index' || root.k === 'field') {
+      root = root.base;
+    }
+    const t = ctype(lval);
+    const own = root.k !== 'var' || varType.has(root.name);
+    if (!own || (lval.k !== 'index' && lval.k !== 'field') || t?.kind !== 'int' || t.width !== m.width * 8) {
+      refuseFloatBits(m);
+    }
+  };
+  // A STRUCT LOCAL'S BYTES STORED INTO A BARE ARRAY ELEMENT keep the cast cell. The bare `gA[i]`
+  // (globalaccess.ts `bareArrayLead`) checks the element's width, not its kind, and the bytes of
+  // `gA[i] = mk(x);` over `struct S gA[4]` are the bytes of a scalar array's store: `gA[a1] =
+  // *(s32 *)&mk_ret;` assigns an int to the struct element (agbcc: incompatible types in
+  // assignment). `((s32 *)&gA)[a1]` addresses the same bytes under any declaration. A recovered row
+  // subscript (`gA[r][i]`) has no flat index here to put in the cell, so it declines.
+  // ONLY an array-declared symbol: a store through a POINTER global's value (`gIP[i] = s.x`) has
+  // the same `var` base, and `&gIP` would address the pointer variable, not its pointee.
+  const structBytesCell = (value: Value, lval: Expr): Expr => {
+    const d = defs.get(value);
+    const local = d?.opcode === 'load' ? defs.get(d.operands[0]) : undefined;
+    const t = local?.results[0].type;
+    const fromStruct = local?.opcode === 'laddr' && t?.kind === 'ptr' && t.to.kind === 'struct';
+    if (
+      !fromStruct ||
+      lval.k !== 'index' ||
+      lval.base.k !== 'var' ||
+      varType.has(lval.base.name) ||
+      symCtx?.info(lval.base.name)?.shape !== 'array'
+    ) {
+      return lval;
+    }
+    if (lval.lead?.some((l) => l.k !== 'const' || l.value !== 0)) {
+      throw new StructureError(
+        `a struct local's bytes stored into an element of '${lval.base.name}' by a row subscript have no cast cell to spell`,
+      );
+    }
+    const { lead: _lead, ...cell } = lval;
+    return { ...cell, base: { k: 'addr', name: lval.base.name } };
+  };
   // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
   // the audit refuses the union where its accesses would need one (`unionRefusal`)
   const unqualifiedView = (op: Op, viewed: Expr): Expr => {
@@ -4637,6 +4724,7 @@ export function structure(
         args,
         ...(wide64 ? { wide64: true as const } : {}),
         ...(d.attrs.sret === true ? { sret: d.results[0].type } : {}),
+        ...(d.attrs.sret !== true && d.results[0]?.type.kind === 'struct' ? { returns: d.results[0].type } : {}),
         ...(byValue.length > 0 ? { byValue } : {}),
       };
     }
@@ -4682,6 +4770,7 @@ export function structure(
       if (member !== null) {
         return member;
       }
+      refuseFloatMemberRead(d);
       const access = memAccess(
         d.operands[0],
         e(d.operands[0]),
@@ -5299,28 +5388,34 @@ export function structure(
         const viewed = frameUnionAccess(op.operands[0], off, width, storeView(op, width), true);
         if (viewed !== null) {
           const lval = unqualifiedView(op, viewed);
+          floatBitsStoreTarget(op.operands[1], lval);
           out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
           continue;
         }
         const member = frameStructMember(op, off, width, null);
         if (member !== null) {
+          floatBitsStoreTarget(op.operands[1], member);
           out.push({ k: 'store', lval: member, value: intoPtrCell(member, expr(op.operands[1])) });
           continue;
         }
         const baseExpr = expr(op.operands[0]);
-        const lval0 = memAccess(
-          op.operands[0],
-          baseExpr,
-          off,
-          width,
-          storeView(op, width),
-          ctype,
-          scalarGlobals,
-          symCtx,
-          true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
-          advanceStepOf(op.operands[0]),
-          qualifiedBy(op) === 'cast',
+        const lval0 = structBytesCell(
+          op.operands[1],
+          memAccess(
+            op.operands[0],
+            baseExpr,
+            off,
+            width,
+            storeView(op, width),
+            ctype,
+            scalarGlobals,
+            symCtx,
+            true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
+            advanceStepOf(op.operands[0]),
+            qualifiedBy(op) === 'cast',
+          ),
         );
+        floatBitsStoreTarget(op.operands[1], lval0);
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
@@ -5344,16 +5439,19 @@ export function structure(
         const elemSize = op.attrs.elemSize as number;
         const fieldOff = op.attrs.fieldOff as number | undefined;
         const stamp = op.attrs.signed as boolean | undefined;
-        const lval0 = arrayAccess(
-          op.operands[0],
-          expr(op.operands[0]),
-          expr(op.operands[1]),
-          fieldOff,
-          op.attrs.memberOff as number | undefined,
-          elemSize,
-          storeView(op, elemSize),
-          ctype,
-          symCtx,
+        const lval0 = structBytesCell(
+          op.operands[2],
+          arrayAccess(
+            op.operands[0],
+            expr(op.operands[0]),
+            expr(op.operands[1]),
+            fieldOff,
+            op.attrs.memberOff as number | undefined,
+            elemSize,
+            storeView(op, elemSize),
+            ctype,
+            symCtx,
+          ),
         );
         // a struct-array element's field: `base[i].field_K`, whose flat cell is
         // `(base + i)[K / width]` — C scales `base + i` by the element, exactly as `base[i]` does
@@ -5362,6 +5460,7 @@ export function structure(
           el === null || fieldOff === undefined
             ? lval0
             : stampedStoreLval(lval0, stamp, undefined, { k: 'bin', op: '+', l: el.base, r: el.idx }, fieldOff, ctype);
+        floatBitsStoreTarget(op.operands[2], lval);
         out.push({
           k: 'store',
           lval: pinnedAccess(op, lval),
@@ -7441,14 +7540,19 @@ export function structure(
   // `synthetic:dma_fill_uninit` loses its record here, and so did `kleod:ProcessInputAndUpdateEntities`
   // before that row was retired (2026-09-13).
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
-    if (at.attrs[OWN_RETURN_OBJECT] === true) {
+    if (at.attrs[OWN_RETURN_OBJECT] === true || at.attrs[CALL_RETURN_OBJECT] !== undefined) {
       return {};
     }
     const off = at.attrs.off as number;
     const roots = new Set<Value>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if (op.opcode === 'laddr' && (op.attrs.off as number) === off && op.attrs[OWN_RETURN_OBJECT] !== true) {
+        if (
+          op.opcode === 'laddr' &&
+          (op.attrs.off as number) === off &&
+          op.attrs[OWN_RETURN_OBJECT] !== true &&
+          op.attrs[CALL_RETURN_OBJECT] === undefined
+        ) {
           roots.add(op.results[0]);
         }
       }

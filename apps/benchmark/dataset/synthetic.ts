@@ -10444,8 +10444,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //      reaches the jal as a merge naming one local; ido7.1 does not rotate it. A u32 member read
   //      whole spells through an s32 cast (structure.ts `spellsAccessType`), which is what keeps
   //      sret1w off a match on gcc and sret8/sret12 on ido7.1. On agbcc {u32} and {u16} come back
-  //      in r0, 8 and 12 bytes decline on the temp overlapping an SSA slot; mwcc_242_81 returns 8
-  //      bytes or less in r3/r3:r4 and declines, and lowers no hidden pointer for 12.
+  //      in r0 and are read off the local the call assigns (frontend/register-struct-call.ts), 8
+  //      and 12 bytes decline on the temp overlapping an SSA slot; mwcc returns 8 bytes or less in
+  //      r3/r3:r4, reads up to four the same way, folds the frame home it stores r3 to into that
+  //      local, declines on the pair r3:r4 (sret8), and lowers no hidden pointer for 12.
+  //      sret1b and sret2b add {u8} (r0/r3 on both) and {u8, u8} (memory on agbcc, r3 on mwcc,
+  //      read back off its home); sretun a union and sretbf a bitfield, which have no local type
+  //      and decline wherever they come back in a register; sretfwd a function returning such a
+  //      struct straight from such a callee, which returns the call (`return sg(1);`), and
+  //      sretname the same through a named local, which mwcc gives a home the bare call has not;
+  //      sret2fwd the {u16} forwarded the same way, and sret2mod a {u16} modified before it is
+  //      returned, which declines where it comes back in a register (agbcc keeps the pad's bits,
+  //      no member copy says so); sretfl a {float}, which has no local here and declines on agbcc
+  //      (r0 read as `*(s32 *)&s` would convert the bits), on mwcc's lfs and ido's lwc1, and where
+  //      gcc reads the member back through memory as a word (the same cast). A callee declared
+  //      without its struct return stays a scalar call, as the same bytes from a scalar callee do;
+  //      that control is a core test
+  //      (packages/core/test/register-struct-call.test.ts), since as a row it would be sret1w
+  //      alpha-renamed. So is sret2h with no declaration of its own, which mwcc lifts void, since
+  //      its guessed return would read r3 below the {u16}: as a row it would be sret2h.
   //   3. break_value (2). A `break` that carries a different value than the normal exit gets its
   //      own empty edge block, so the loop has two exit targets and none is a return. agbcc only:
   //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, so the row would
@@ -10729,6 +10746,214 @@ export const SYNTHETIC: SynthSpec[] = [
         },
       },
       sretloop: { returnsVoid: true },
+    },
+  },
+  // The register-returned shapes above on every toolchain they compile on, and on the two mwcc
+  // builds that need their own flags.
+  ...(
+    [
+      [[...ALL, 'gcc2.7.2'], undefined],
+      [['mwcc_233_163n', 'mwcc_247_107'], MWCC_O4P],
+    ] as const
+  ).flatMap(([toolchains, cflags]): SynthSpec[] => {
+    const at = { toolchains: [...toolchains], ...(cflags === undefined ? {} : { cflags: [...cflags] }) };
+    const one = (name: string, type: string) => ({ kind: 'struct' as const, members: [{ name, type }] });
+    return [
+      {
+        sym: 'sret1b',
+        src:
+          'struct S1b { u8 b; };\nextern struct S1b mk1b(s32 x);\nextern u8 gB;\n' +
+          'void sret1b(s32 x)\n{\n    struct S1b s = mk1b(x);\n    gB = s.b;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct S1b { u8 b; };\nstruct S1b mk1b(s32 x);\nvoid sret1b(s32 x);',
+        proto: {
+          mk1b: { params: ['s32'], returns: 'struct S1b', returnLayout: one('b', 'u8') },
+          sret1b: { returnsVoid: true },
+        },
+      },
+      {
+        sym: 'sret2b',
+        src:
+          'struct S2b { u8 a; u8 b; };\nextern struct S2b mk2b(s32 x);\nextern u8 gB;\n' +
+          'void sret2b(s32 x)\n{\n    struct S2b s = mk2b(x);\n    gB = s.b;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct S2b { u8 a; u8 b; };\nstruct S2b mk2b(s32 x);\nvoid sret2b(s32 x);',
+        proto: {
+          mk2b: {
+            params: ['s32'],
+            returns: 'struct S2b',
+            returnLayout: {
+              kind: 'struct',
+              members: [
+                { name: 'a', type: 'u8' },
+                { name: 'b', type: 'u8' },
+              ],
+            },
+          },
+          sret2b: { returnsVoid: true },
+        },
+      },
+      {
+        sym: 'sretun',
+        src:
+          'union Un { u32 w; u16 h; };\nextern union Un mkun(s32 x);\nextern u16 gOut;\n' +
+          'void sretun(s32 x)\n{\n    union Un u = mkun(x);\n    gOut = u.h;\n}',
+        features: ['struct-return', 'union'],
+        ...at,
+        ctx: 'union Un { u32 w; u16 h; };\nunion Un mkun(s32 x);\nvoid sretun(s32 x);',
+        proto: {
+          mkun: {
+            params: ['s32'],
+            returns: 'union Un',
+            returnLayout: {
+              kind: 'union',
+              members: [
+                { name: 'w', type: 'u32' },
+                { name: 'h', type: 'u16' },
+              ],
+            },
+          },
+          sretun: { returnsVoid: true },
+        },
+      },
+      {
+        sym: 'sretbf',
+        src:
+          'struct Bf { u32 a : 4; u32 b : 4; };\nextern struct Bf mkbf(s32 x);\nextern u32 gW;\n' +
+          'void sretbf(s32 x)\n{\n    struct Bf s = mkbf(x);\n    gW = s.b;\n}',
+        features: ['struct-return', 'bitfield'],
+        ...at,
+        ctx: 'struct Bf { u32 a : 4; u32 b : 4; };\nstruct Bf mkbf(s32 x);\nvoid sretbf(s32 x);',
+        proto: {
+          mkbf: {
+            params: ['s32'],
+            returns: 'struct Bf',
+            returnLayout: {
+              kind: 'struct',
+              members: [
+                { name: 'a', type: 'u32', bits: 4 },
+                { name: 'b', type: 'u32', bits: 4 },
+              ],
+            },
+          },
+          sretbf: { returnsVoid: true },
+        },
+      },
+      {
+        sym: 'sretfwd',
+        src: 'struct S1f { u32 x; };\nextern struct S1f sg(s32 x);\nstruct S1f sretfwd(void)\n{\n    return sg(1);\n}',
+        features: ['struct-return'],
+        ...at,
+        ctx: 'struct S1f { u32 x; };\nstruct S1f sg(s32 x);\nstruct S1f sretfwd(void);',
+        proto: {
+          sg: { params: ['s32'], returns: 'struct S1f', returnLayout: one('x', 'u32') },
+          sretfwd: { params: [], returns: 'struct S1f', returnLayout: one('x', 'u32') },
+        },
+      },
+      {
+        sym: 'sretname',
+        src:
+          'struct S1n { u32 x; };\nextern struct S1n sn(s32 x);\nstruct S1n sretname(void)\n{\n' +
+          '    struct S1n s = sn(2);\n    return s;\n}',
+        features: ['struct-return', 'value-home'],
+        ...at,
+        ctx: 'struct S1n { u32 x; };\nstruct S1n sn(s32 x);\nstruct S1n sretname(void);',
+        proto: {
+          sn: { params: ['s32'], returns: 'struct S1n', returnLayout: one('x', 'u32') },
+          sretname: { params: [], returns: 'struct S1n', returnLayout: one('x', 'u32') },
+        },
+      },
+      {
+        sym: 'sret2fwd',
+        src: 'struct S2f { u16 h; };\nextern struct S2f sh(s32 x);\nstruct S2f sret2fwd(s32 x)\n{\n    return sh(x + 3);\n}',
+        features: ['struct-return', 'narrow'],
+        ...at,
+        ctx: 'struct S2f { u16 h; };\nstruct S2f sh(s32 x);\nstruct S2f sret2fwd(s32 x);',
+        proto: {
+          sh: { params: ['s32'], returns: 'struct S2f', returnLayout: one('h', 'u16') },
+          sret2fwd: { params: ['s32'], returns: 'struct S2f', returnLayout: one('h', 'u16') },
+        },
+      },
+      {
+        sym: 'sret2mod',
+        src:
+          'struct S2m { u16 h; };\nextern struct S2m sm(s32 x);\nstruct S2m sret2mod(s32 x)\n{\n' +
+          '    struct S2m s = sm(x);\n    s.h += 1;\n    return s;\n}',
+        features: ['struct-return', 'field'],
+        ...at,
+        ctx: 'struct S2m { u16 h; };\nstruct S2m sm(s32 x);\nstruct S2m sret2mod(s32 x);',
+        proto: {
+          sm: { params: ['s32'], returns: 'struct S2m', returnLayout: one('h', 'u16') },
+          sret2mod: { params: ['s32'], returns: 'struct S2m', returnLayout: one('h', 'u16') },
+        },
+      },
+      {
+        sym: 'sretfl',
+        src:
+          'struct Fl { float f; };\nextern struct Fl mkfl(s32 x);\nextern float gF;\n' +
+          'void sretfl(s32 x)\n{\n    struct Fl s = mkfl(x);\n    gF = s.f;\n}',
+        features: ['struct-return', 'float'],
+        ...at,
+        ctx: 'struct Fl { float f; };\nstruct Fl mkfl(s32 x);\nvoid sretfl(s32 x);',
+        proto: {
+          mkfl: { params: ['s32'], returns: 'struct Fl', returnLayout: one('f', 'float') },
+          sretfl: { returnsVoid: true },
+        },
+      },
+      // a member stored through a POINTER global's value: the element is the pointee's, never the
+      // pointer variable's own storage (`&gIP`), which an array global's cast cell would address
+      {
+        sym: 'sretpidx',
+        src:
+          'struct S1p { u32 x; };\nextern struct S1p mkp(s32 x);\nextern s32 *gIP;\n' +
+          'void sretpidx(s32 x, s32 i)\n{\n    struct S1p s = mkp(x);\n    gIP[i] = s.x;\n}',
+        features: ['struct-return', 'pointer'],
+        ...at,
+        ctx: 'struct S1p { u32 x; };\nstruct S1p mkp(s32 x);\nvoid sretpidx(s32 x, s32 i);',
+        proto: {
+          mkp: { params: ['s32'], returns: 'struct S1p', returnLayout: one('x', 'u32') },
+          sretpidx: { returnsVoid: true },
+        },
+      },
+    ];
+  }),
+  // sret1w and sret2h on the two mwcc builds that need their own flags.
+  {
+    sym: 'sret1w',
+    src:
+      'struct S1w { u32 x; };\nextern struct S1w mk1(s32 x);\nextern u32 gW;\n' +
+      'void sret1w(s32 x)\n{\n    struct S1w s = mk1(x);\n    gW = s.x;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'struct S1w { u32 x; };\nstruct S1w mk1(s32 x);\nvoid sret1w(s32 x);',
+    proto: {
+      mk1: {
+        params: ['s32'],
+        returns: 'struct S1w',
+        returnLayout: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] },
+      },
+      sret1w: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sret2h',
+    src:
+      'struct S2 { u16 h; };\nextern struct S2 mk2(s32 x);\nextern u16 gOut;\n' +
+      'void sret2h(s32 x)\n{\n    struct S2 s = mk2(x);\n    gOut = s.h;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['mwcc_233_163n', 'mwcc_247_107'],
+    cflags: MWCC_O4P,
+    ctx: 'struct S2 { u16 h; };\nstruct S2 mk2(s32 x);\nvoid sret2h(s32 x);',
+    proto: {
+      mk2: {
+        params: ['s32'],
+        returns: 'struct S2',
+        returnLayout: { kind: 'struct', members: [{ name: 'h', type: 'u16' }] },
+      },
+      sret2h: { returnsVoid: true },
     },
   },
   {
