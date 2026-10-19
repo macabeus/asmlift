@@ -4300,12 +4300,20 @@ export function structure(
   // *(s32 *)&mk_ret;` assigns an int to the struct element (agbcc: incompatible types in
   // assignment). `((s32 *)&gA)[a1]` addresses the same bytes under any declaration. A recovered row
   // subscript (`gA[r][i]`) has no flat index here to put in the cell, so it declines.
+  // ONLY an array-declared symbol: a store through a POINTER global's value (`gIP[i] = s.x`) has
+  // the same `var` base, and `&gIP` would address the pointer variable, not its pointee.
   const structBytesCell = (value: Value, lval: Expr): Expr => {
     const d = defs.get(value);
     const local = d?.opcode === 'load' ? defs.get(d.operands[0]) : undefined;
     const t = local?.results[0].type;
     const fromStruct = local?.opcode === 'laddr' && t?.kind === 'ptr' && t.to.kind === 'struct';
-    if (!fromStruct || lval.k !== 'index' || lval.base.k !== 'var' || varType.has(lval.base.name)) {
+    if (
+      !fromStruct ||
+      lval.k !== 'index' ||
+      lval.base.k !== 'var' ||
+      varType.has(lval.base.name) ||
+      symCtx?.info(lval.base.name)?.shape !== 'array'
+    ) {
       return lval;
     }
     if (lval.lead?.some((l) => l.k !== 'const' || l.value !== 0)) {

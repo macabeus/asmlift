@@ -9,6 +9,7 @@ import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
 const mk = (
@@ -109,6 +110,26 @@ describe('agbcc: a struct of one member comes back in r0', () => {
     expect(decompile('t', t, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'u32' }]) } }).source).toMatch(
       /mk_ret = mk\(a0\);\s+\(\(s32 \*\)&gA\)\[a1\] = \*\(s32 \*\)&mk_ret;/,
     );
+    // …and the same through a symbol map that declares `gA` an array, whose bare element is `gA[a1]`
+    const mapped = t.replace('.word\tgA', '.word\t0x03000100');
+    const map: SymbolMap = new Map([
+      [0x03000100, [{ name: 'gA', kind: 'data' as const, shape: 'array' as const, elemSize: 4, dims: [4] }]],
+    ]);
+    expect(
+      decompile('t', mapped, ARMV4T_AGBCC, { symbols: map, prototypes: { mk: mk([{ name: 'a', type: 'u32' }]) } })
+        .source,
+    ).toMatch(/\(\(s32 \*\)&gA\)\[a1\] = \*\(s32 \*\)&mk_ret;/);
+  });
+
+  // `extern struct T *gP; void t(s32 x, s32 i) { gP[i] = mk(x); }`: the element is the POINTEE's,
+  // and `&gP` would write the pointer variable itself
+  test("the struct stored through a pointer global's value is not respelled onto the pointer's storage", () => {
+    const t =
+      't:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tbl\tmk\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tlsl\tr4, r4, #0x2\n' +
+      '\tadd\tr4, r4, r1\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgP\n';
+    const src = decompile('t', t, ARMV4T_AGBCC, { prototypes: { mk: mk([{ name: 'a', type: 'u32' }]) } }).source;
+    expect(src).not.toContain('&gP');
+    expect(src).toMatch(/\(\(s32 \*\)gP\)\[a1\] = \*\(s32 \*\)&mk_ret;/);
   });
 });
 
