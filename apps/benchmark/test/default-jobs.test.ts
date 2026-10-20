@@ -16,8 +16,8 @@ describe('defaultJobs', () => {
     expect(defaultJobs(8, 7.5 * GiB, plenty)).toBe(3);
   });
 
-  it('still starts 3 on this host quiet (MemAvailable 5.1 GiB + half of 9.4 GiB free swap)', () => {
-    expect(defaultJobs(8, 7879056 * 1024, avail(5368340 * 1024 + (9899436 * 1024) / 2))).toBe(3);
+  it('still starts 3 on this host quiet (MemAvailable 5.1 GiB + free swap above half of 9.5 GiB)', () => {
+    expect(defaultJobs(8, 7879056 * 1024, avail(5368340 * 1024 + (9899436 - 9975800 / 2) * 1024))).toBe(3);
   });
 
   it('starts fewer beside another heavy job, sized from what is available less the reserve', () => {

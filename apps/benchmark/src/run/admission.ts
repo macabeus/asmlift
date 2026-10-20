@@ -12,16 +12,21 @@
 // command read memory at all.
 //
 // WHAT IS COUNTED AS AVAILABLE. Linux: `MemAvailable` (the kernel's own estimate of what can be
-// allocated without swapping, page cache it can drop included) plus HALF of `SwapFree`. The half is
-// bounded on both sides by what this host has measured:
-//   - ALL of the swap admits the incident. A quiet host here reads MemAvailable ~5.5 GB and SwapFree
-//     ~10.1 GB; counted whole, that is 15.6 GB, which admits the run and the sweep together (11.2 GB
-//     of need) — the pair that died.
-//   - NONE of the swap refuses what has run safely for weeks: a solo `bench run --jobs 3` needs
+// allocated without swapping, page cache it can drop included) plus the free swap ABOVE HALF of
+// `SwapTotal` — swap use is capped at half the device, so `max(0, SwapFree - SwapTotal / 2)`. The
+// cap is bounded on both sides by what this host has measured:
+//   - NO cap admits the incident. A quiet host here reads MemAvailable ~5.5 GB and SwapFree
+//     ~10.1 GB of ~10.2 GB; counted whole, that is 15.6 GB, which admits the run and the sweep
+//     together (11.2 GB of need) — the pair that died.
+//   - NO swap at all refuses what has run safely for weeks: a solo `bench run --jobs 3` needs
 //     3 × SHARD_BYTES = 7.5 GB, and MemAvailable alone is 5.5 GB.
-//   - HALF gives 5.5 + 5.1 = 10.6 GB: the solo run fits, and the sweep beside it (2.6 GB left)
-//     does not. On zram — this host's main swap device — the half also has a physical reading:
-//     compressed pages still occupy RAM, so a swapped byte is not a free byte.
+//   - Capped at half: quiet, 5.5 + 5.0 = 10.5 GB, and the solo run fits. Beside that run at its
+//     peak (measured 2026-10-20: MemAvailable 0.6 GB, SwapFree 6.8 GB) it is 0.6 + 1.7 = 2.3 GB,
+//     so neither the 13:18 sweep nor a 3-worker vitest gate is admitted. Half of what is FREE, the
+//     first cut of this check, read 0.6 + 3.4 = 4.0 GB there and admitted the gate: a discount of
+//     the free swap keeps halving, never reaching the end of the device. On zram, this host's main
+//     swap, the cap also has a physical reading: compressed pages still occupy RAM, so a swapped
+//     byte is not a free byte.
 // macOS and everything else: `os.freemem()`, and no swap. On macOS that is the free-page count,
 // which leaves out inactive and purgeable memory the system would hand over, so it under-reads —
 // the direction to be wrong in. macOS grows its swap on demand, so there is no free-swap figure to
@@ -76,9 +81,10 @@ export const PEAK_BYTES = {
   sweepBase: 2.6e9,
   /** the floor of a SCOPED sweep's pass: one row measured 0.25 GB */
   sweepScopedPass: 0.3e9,
-  /** one published repro script `bench fidelity` runs (an `asmlift` or `m2c` invocation and its
-   *  compile) */
-  fidelityScript: 0.5e9,
+  /** one published repro script `bench fidelity` runs. The asmlift script re-ranks its row as a
+   *  shard does, so it is budgeted as one: the dearest row's script measured 1.53 GB before it
+   *  stopped in this host's shell (exit 127, after building its target), a floor and not a peak */
+  fidelityScript: SHARD_BYTES,
   /** one vitest worker of the root or matching suite, with its share of the main process: the root
    *  suite at 3 workers measured 2.70 GB */
   vitestWorker: 1.0e9,
@@ -87,8 +93,9 @@ export const PEAK_BYTES = {
 /** Held back from what is available for everything that is not a heavy job. */
 export const RESERVE_BYTES = 0.5e9;
 
-/** How much of the free swap counts as available — see the header for the two measured bounds. */
-export const SWAP_DISCOUNT = 0.5;
+/** The share of `SwapTotal` this check lets swap use reach; free swap above it counts as available.
+ *  See the header for the two measured bounds. */
+export const SWAP_USE_CAP = 0.5;
 
 /** The environment variable that turns the check off, and the value that does. */
 export const ADMISSION_ENV = 'ASMLIFT_MEM_ADMISSION';
@@ -105,7 +112,7 @@ const gb = (b: number): string => `${(b / GB).toFixed(1)} GB`;
 
 /** `/proc/meminfo`'s `MemAvailable` and `SwapFree`, in bytes; undefined when `MemAvailable` is not
  *  there (a kernel older than 3.14, or not Linux). */
-export function parseMeminfo(text: string): { memAvailable: number; swapFree: number } | undefined {
+export function parseMeminfo(text: string): { memAvailable: number; swapFree: number; swapTotal: number } | undefined {
   const field = (name: string): number | undefined => {
     const m = new RegExp(`^${name}:\\s+(\\d+)\\s*kB`, 'm').exec(text);
     return m ? Number(m[1]) * 1024 : undefined;
@@ -114,7 +121,7 @@ export function parseMeminfo(text: string): { memAvailable: number; swapFree: nu
   if (memAvailable === undefined) {
     return undefined;
   }
-  return { memAvailable, swapFree: field('SwapFree') ?? 0 };
+  return { memAvailable, swapFree: field('SwapFree') ?? 0, swapTotal: field('SwapTotal') ?? 0 };
 }
 
 export interface MemoryDeps {
@@ -135,10 +142,12 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
       parsed = undefined;
     }
     if (parsed !== undefined) {
-      const swap = Math.floor(parsed.swapFree * SWAP_DISCOUNT);
+      const swap = Math.max(0, parsed.swapFree - Math.floor(parsed.swapTotal * SWAP_USE_CAP));
       return {
         availableBytes: parsed.memAvailable + swap,
-        how: `MemAvailable ${gb(parsed.memAvailable)} + ${SWAP_DISCOUNT * 100}% of SwapFree ${gb(parsed.swapFree)}`,
+        how:
+          `MemAvailable ${gb(parsed.memAvailable)} + ${gb(swap)} of swap (SwapFree ${gb(parsed.swapFree)} ` +
+          `above ${SWAP_USE_CAP * 100}% of SwapTotal ${gb(parsed.swapTotal)})`,
       };
     }
   }

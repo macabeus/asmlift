@@ -38,8 +38,9 @@ const QUIET_MEMINFO = [
   'SwapFree:        9899436 kB',
 ].join('\n');
 
+/** This host's meminfo with the two figures that move; SwapTotal is this host's. */
 const meminfo = (memAvailableKb: number, swapFreeKb: number): string =>
-  `MemTotal: 7879056 kB\nMemAvailable: ${memAvailableKb} kB\nSwapFree: ${swapFreeKb} kB\n`;
+  `MemTotal: 7879056 kB\nMemAvailable: ${memAvailableKb} kB\nSwapTotal: 9975800 kB\nSwapFree: ${swapFreeKb} kB\n`;
 
 const linux = (text: string) => ({ platform: 'linux', meminfo: () => text, freemem: () => 0 });
 
@@ -52,7 +53,11 @@ const runRequest = (shards: number) => ({
 
 describe('parseMeminfo', () => {
   it('reads MemAvailable and SwapFree in bytes', () => {
-    expect(parseMeminfo(QUIET_MEMINFO)).toEqual({ memAvailable: 5368340 * kB, swapFree: 9899436 * kB });
+    expect(parseMeminfo(QUIET_MEMINFO)).toEqual({
+      memAvailable: 5368340 * kB,
+      swapFree: 9899436 * kB,
+      swapTotal: 9975800 * kB,
+    });
   });
 
   it('has no answer without MemAvailable (a kernel before 3.14)', () => {
@@ -60,15 +65,20 @@ describe('parseMeminfo', () => {
   });
 
   it('reads a missing SwapFree as no swap', () => {
-    expect(parseMeminfo('MemAvailable: 1000 kB\n')).toEqual({ memAvailable: 1000 * kB, swapFree: 0 });
+    expect(parseMeminfo('MemAvailable: 1000 kB\n')).toEqual({ memAvailable: 1000 * kB, swapFree: 0, swapTotal: 0 });
   });
 });
 
 describe('readAvailableMemory', () => {
-  it('counts MemAvailable plus half of the free swap on Linux', () => {
+  it('counts MemAvailable plus the free swap above half of SwapTotal on Linux', () => {
     const r = readAvailableMemory(linux(QUIET_MEMINFO));
-    expect(r.availableBytes).toBe(5368340 * kB + Math.floor((9899436 * kB) / 2));
+    expect(r.availableBytes).toBe(5368340 * kB + (9899436 * kB - Math.floor((9975800 * kB) / 2)));
     expect(r.how).toContain('MemAvailable');
+    expect(r.how).toContain('SwapTotal');
+  });
+
+  it('counts no swap once swap use has reached half of the device', () => {
+    expect(readAvailableMemory(linux(meminfo(1000, 4000000))).availableBytes).toBe(1000 * kB);
   });
 
   it('falls back to os.freemem(), counting no swap, where /proc/meminfo has no MemAvailable', () => {
@@ -118,8 +128,17 @@ describe('admissionVerdict', () => {
     const ram = 5368340 * kB;
     const swap = 9899436 * kB - (runHeld - ram);
     const beside = readAvailableMemory(linux(meminfo(0, Math.floor(swap / kB))));
-    const sweepBase = { command: 'bench sweep', needBytes: 2 * PEAK_BYTES.sweepPass, need: '2 passes' };
-    expect(admissionVerdict(sweepBase, beside)).toContain('bench sweep REFUSED');
+    // as it was then, both passes live at once, and as it is now
+    const then = { command: 'bench sweep', needBytes: 2 * PEAK_BYTES.sweepPass, need: '2 passes' };
+    const now = { command: 'bench sweep', needBytes: PEAK_BYTES.sweepBase, need: 'one pass + records' };
+    expect(admissionVerdict(then, beside)).toContain('bench sweep REFUSED');
+    expect(admissionVerdict(now, beside)).toContain('bench sweep REFUSED');
+  });
+
+  it('refuses a 3-worker vitest gate beside a --jobs 3 run at its peak, as measured on this host', () => {
+    // 2026-10-20, MEMGUARD's own gate bench mid-run: MemAvailable 0.6 GB, SwapFree 6.8 GB.
+    const peak = readAvailableMemory(linux(meminfo(Math.round((0.6 * GB) / kB), Math.round((6.8 * GB) / kB))));
+    expect(admissionVerdict(vitestRequest(3), peak)).toContain('REFUSED');
   });
 
   it('names the need, what is available, how it was read, and the way forward', () => {
