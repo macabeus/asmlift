@@ -2388,3 +2388,55 @@ record names a live pid. What is still allowed is the scoped dev loop — a `--t
 If you have a real reason to measure anyway, `--no-lock` says so out loud and leaves every other
 record alone; **never `rm` a record you did not write**, which is the one move that silently
 unprotects someone else's run.
+
+### One heavy job at a time: the memory admission check
+
+On **2026-10-20 at 13:18** this host (7.5 GiB of RAM, 9.5 GiB of swap, most of it zram) ran out of
+both. The kernel's OOM killer then took the user's desktop session, not a job. Its table shows 22
+node processes holding 12.36 GB of rss+swap:
+
+- a `bench run --jobs 3`, ~8.0 GB;
+- a whole-corpus `bench sweep --base`, ~3.7 GB;
+- an orphaned loop of `bench fan --show`, ~0.7 GB.
+
+Each of these is sane alone. Only `bench run` read the register, and nothing read memory.
+
+**Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
+and the vitest gate (`scripts/gate-vitest.sh`) price their own peak and compare it with what the
+machine can give right now. That is Linux `MemAvailable` plus half of `SwapFree`, or
+`os.freemem()` elsewhere, less a 0.5 GB reserve (`apps/benchmark/src/run/admission.ts`, which
+says why it uses half). A command that does not fit is REFUSED with both numbers and the next
+step. It is not queued. `bench run` names the largest `--jobs` that fits. A run without `--jobs`
+already sizes itself to fit (`run/default-jobs.ts`), so on this host, quiet, it starts the same 3
+shards. `ASMLIFT_MEM_ADMISSION=off` skips the check and says so. It exists for a host whose
+reading is wrong, not for running two heavy jobs at once.
+
+**A whole-corpus `bench sweep` takes a record in the register**, so a full bench refuses to start
+beside one, and it refuses to start beside a full bench. A sweep scoped with `--only`,
+`--project` or `--asm-dir` takes no record, as a scoped run takes none. A sweep record never
+blocks an edit: `bench in-flight` lists it but does not count it.
+
+The peaks those checks are priced at were measured one job at a time on this host on
+**2026-10-20**, quiet, at 2e6ba81e's code (the two `--base` rows were measured at the commits they
+name). Each figure is anonymous memory plus swap summed over the job's whole process tree,
+sampled every 0.5 s in its own user cgroup scope
+(`systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=3G`; the cap means a measurement can
+only OOM itself). `/usr/bin/time -v` alone under-reads a multi-process job: its maximum RSS is
+that of the largest single process, shown in the last column.
+
+| command                                                                                                                   | measured   | peak (tree) |  wall | largest process |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------: | ----: | --------------: |
+| `pnpm bench sweep --base origin/main`, head pass in the parent (before 56b68d5f)                                          | 2026-10-20 |     4.06 GB | 660 s |         2.03 GB |
+| `pnpm bench sweep --base origin/main`, head pass in a child (56b68d5f)                                                    | 2026-10-20 |     2.49 GB | 358 s |         2.07 GB |
+| `pnpm bench sweep` (whole corpus, 4,606 records)                                                                          | 2026-10-20 |     2.07 GB | 187 s |         2.02 GB |
+| `pnpm bench sweep --project sa3` (3,864 records)                                                                          | 2026-10-20 |     0.56 GB |  69 s |         0.53 GB |
+| `pnpm bench sweep --only AthleticChallengeScrollUpdate` (1 row)                                                           | 2026-10-20 |     0.25 GB |   2 s |         0.23 GB |
+| `pnpm bench run --tier real --only AthleticChallengeScrollUpdate --jobs 1` (the dearest row, fan 29,600)                  | 2026-10-20 |     1.95 GB | 265 s |         1.53 GB |
+| `pnpm bench fan kleod:AthleticChallengeScrollUpdate:agbcc` (enumerates 29,600, then refuses to compile without `--force`) | 2026-10-20 |     1.77 GB | 293 s |         1.74 GB |
+| `pnpm test:root` (3 workers)                                                                                              | 2026-10-20 |     2.70 GB | 381 s |         1.38 GB |
+
+The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
+(86 moved, the ido `opts` nondeterminism, and 4,520 identical), so moving the head pass into a
+child changed the price and not the answer. A shard is budgeted at 2.5 GB
+(`SHARD_BYTES`): the dearest row measured 1.95 GB, and at the OOM three shards and their compile
+workers held ~7.6 GB, so the budget held. A `bench fan` is budgeted as one shard.
