@@ -5022,6 +5022,46 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     expect(() => dc('f', `\tmov\tr1, #1\n\tlsl\tr1, r1, #31\n\tcmn\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).not.toThrow();
   });
 
+  test('"always INT_MIN" is what a compiler can fold, not which opcodes built it', () => {
+    // Each of these holds 0x80000000 on every call, and agbcc recompiles the lifted C of each to
+    // `cmp r0, INT_MIN; ble`: true for every a0 but INT_MIN, where the machine never branches.
+    const gap = 'the mathematical negation of the constant 0x80000000 has no int spelling';
+    const top = '\tmov\tr1, #1\n\tlsl\tr1, r1, #31\n';
+    const bodies = [
+      `\tldr\tr1, .Lk\n\tsub\tr1, r1, #1\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}.Lk: .word 0x80000001\n`,
+      `${top}\tadd\tr1, #0\n\tcmn\tr0, r1\n\tble\t.Ltrue\n${TAIL}`,
+      `${top}\tmov\tr2, #0\n\torr\tr1, r2\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tmov\tr2, #0\n\teor\tr1, r2\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`,
+      // An annihilated variable: a1 & 0 is 0 whatever a1 is.
+      `\tmov\tr2, #0\n\tand\tr1, r2\n\tmov\tr2, #1\n\tlsl\tr2, r2, #31\n\torr\tr1, r2\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`,
+      // A block param both arms of a diamond set to the pool word.
+      `\tcmp\tr2, #0\n\tbeq\t.La\n\tldr\tr1, .Lk\n\tb\t.Lj\n.La:\n\tldr\tr1, .Lk\n.Lj:\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}.Lk: .word 0x80000000\n`,
+    ];
+    for (const body of bodies) {
+      expect(() => dc('f', body)).toThrow(gap);
+    }
+    // A loop counter that starts at a constant varies, and lifts.
+    expect(
+      dc('f', `\tmov\tr1, #0\n.Ll:\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n\tadd\tr1, #1\n\tcmp\tr1, #9\n\tbne\t.Ll\n${TAIL}`)
+        .source,
+    ).toContain('a0 <= -v0');
+  });
+
+  test('switch recovery never reads a guard against the mathematical negation of INT_MIN as a bound', () => {
+    // `bgt .Lhi` is never taken (a0 - 2^31 is never > 0), so this always returns 0. Folding the
+    // `neg_s` as a wrapping negation made the guard `a0 > INT_MIN`, true for every case, and the
+    // lift a `switch` returning 10 for a0 == 1.
+    const arms =
+      '\tbgt\t.Lhi\n\tb\t.Ldef\n.Lhi:\n\tcmp\tr0, #1\n\tbeq\t.L1\n\tcmp\tr0, #2\n\tbeq\t.L2\n\tcmp\tr0, #3\n\tbeq\t.L3\n' +
+      '\tb\t.Ldef\n.L1:\n\tmov\tr0, #10\n\tbx\tlr\n.L2:\n\tmov\tr0, #20\n\tbx\tlr\n.L3:\n\tmov\tr0, #30\n\tbx\tlr\n' +
+      '.Ldef:\n\tmov\tr0, #0\n\tbx\tlr\n';
+    expect(() => dc('f', `\tldr\tr1, .Lk\n\tcmn\tr0, r1\n${arms}.Lk: .word 0x80000000\n`)).toThrow(
+      'the mathematical negation of the constant 0x80000000 has no int spelling',
+    );
+    // Against any other constant the guard is the bound it reads as: a0 > -5 holds for every case.
+    expect(dc('f', `\tmov\tr1, #5\n\tcmn\tr0, r1\n${arms}`).source).toContain('switch (a0) {');
+  });
+
   test('a `cmn` the parser hands a non-register operand takes the flags unmodelled', () => {
     // Thumb-1 has no such encoding, but the playground's text reaches the decoder unassembled.
     expect(() => dc('f', `\tcmn\tr0, #5\n\tbgt\t.Ltrue\n${TAIL}`)).toThrow(

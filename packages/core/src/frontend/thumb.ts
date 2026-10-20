@@ -483,8 +483,8 @@ const FLAG_ONLY = new Set(['tst']);
 //     defined": agbcc folds the defined `a > (int)(0u - b)` into `cmn; bgt` as well, and so
 //     miscompiles it at b == 0x80000000 exactly as it miscompiles `a < -b` below at b == 0. What
 //     the signed branches have and the carry ones lack is a C spelling that recompiles to the same
-//     bytes AND diverges from them only where it is itself undefined. When rB is the constant
-//     INT_MIN that one input is every input, and the structurer refuses (structure.ts, `neg`);
+//     bytes AND diverges from them only where it is itself undefined. When rB always holds
+//     INT_MIN that one input is every input, and the structurer refuses (structure.ts, `neg_s`);
 //   * C is the carry out of rA + rB, which is NOT rA >=u -rB: at rB == 0 cmn's carry is clear and
 //     the compare's is set. agbcc folds unsigned `a < -b` into `cmn; bcs` regardless — it
 //     miscompiles at b == 0 — and the C that is exact there (`a + b >= a`) compiles to
@@ -5961,12 +5961,11 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
         );
       }
       // The signed branches read the TRUE sign of a + b, so the negation they compare against is
-      // the mathematical one (`neg`'s `signed`, ir/opcodes.ts). `beq`/`bne` read the wrapped sum,
-      // which the plain wrapping negation spells (see `CMN_EXACT` for the one `s32` input it
-      // leaves undefined).
+      // the mathematical one (`neg_s`, ir/opcodes.ts). `beq`/`bne` read the wrapped sum, which the
+      // plain wrapping `neg` spells (see `CMN_EXACT` for the one `s32` input it leaves undefined).
       const negated = mkValue(T.unk(32));
       const signed = last.mnemonic !== 'beq' && last.mnemonic !== 'bne';
-      irb.ops.push(mkOp('neg', { operands: [rhs], results: [negated], attrs: signed ? { signed: true } : {} }));
+      irb.ops.push(mkOp(signed ? 'neg_s' : 'neg', { operands: [rhs], results: [negated] }));
       rhs = negated;
     }
     const cond = mkValue(T.unk(32));

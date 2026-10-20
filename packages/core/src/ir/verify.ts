@@ -65,7 +65,21 @@ const TWO_OR_IMM = new Set(['sdiv', 'shl', 'shr_u', 'shr_s']);
 // `unknown` PARTICIPATES, and that is the whole point: at L1 every value is `unknown`, so a rule
 // that skipped it would be vacuous exactly where this is meant to be red. The shifts count only
 // their SHIFTED operand — a 64-bit shift by a 32-bit count is what the machine does.
-const WIDTH_UNIFORM = new Set(['add', 'sub', 'mul', 'and', 'or', 'xor', 'neg', 'not', 'sdiv', 'udiv', 'smod', 'umod']);
+const WIDTH_UNIFORM = new Set([
+  'add',
+  'sub',
+  'mul',
+  'and',
+  'or',
+  'xor',
+  'neg',
+  'neg_s',
+  'not',
+  'sdiv',
+  'udiv',
+  'smod',
+  'umod',
+]);
 // The shifts count only their SHIFTED operand: a 64-bit value shifted by a 32-bit count is what
 // every one of these machines does. The comparisons count only their OPERANDS: the result of a C
 // comparison is an `int` whatever it compared, which is what `raise/recover.ts` already types it.

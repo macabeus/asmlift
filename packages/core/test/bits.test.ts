@@ -5,7 +5,7 @@
 // through emitted C, one wrong opcode reads as a wrong address in a row nobody is looking at.
 import { describe, expect, test } from 'vitest';
 
-import { type BitsCtx, constMask, constWord, provableBits } from '../src/ir/bits';
+import { type BitsCtx, type WordCtx, constMask, constWord, mayAlwaysHold, provableBits } from '../src/ir/bits';
 import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 
@@ -97,27 +97,106 @@ describe('constMask', () => {
 });
 
 describe('constWord — the word a value always holds', () => {
+  const W = (defs: Map<Value, Op>, over: Partial<WordCtx> = {}): WordCtx => ({ defs, ...over });
+
   test('a pool word, and a shifted `mov`, by an immediate or a register amount', () => {
     const defs = new Map<Value, Op>();
-    expect(constWord(defs, def(defs, 'const', { value: 0x80000000 }))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'const', { value: 0x80000000 }))).toBe(-0x80000000);
     const one = def(defs, 'const', { value: 1 });
-    expect(constWord(defs, def(defs, 'shl', { imm: 31 }, [one]))).toBe(-0x80000000);
-    expect(constWord(defs, def(defs, 'shl', {}, [one, def(defs, 'const', { value: 4 })]))).toBe(16);
-    // A Thumb register shift by 32 or more is 0, not JS's amount-mod-32.
-    expect(constWord(defs, def(defs, 'shl', {}, [one, def(defs, 'const', { value: 32 })]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'shl', { imm: 31 }, [one]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'shl', {}, [one, def(defs, 'const', { value: 4 })]))).toBe(16);
+  });
+
+  test('any integer arithmetic over words, by an immediate or a register operand', () => {
+    const defs = new Map<Value, Op>();
+    const k = (n: number) => def(defs, 'const', { value: n });
+    expect(constWord(W(defs), def(defs, 'sub', { imm: 1 }, [k(0x80000001)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'add', {}, [k(0x7fffffff), k(1)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'or', {}, [k(0x80000000), k(0)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'xor', {}, [k(0x80000000), k(0)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'mul', {}, [k(0x10000), k(0x8000)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'neg', {}, [k(0x80000000)]))).toBe(-0x80000000);
+  });
+
+  test('an annihilator holds its word whatever the other operand is', () => {
+    const defs = new Map<Value, Op>();
+    const x = v();
+    expect(constWord(W(defs), def(defs, 'and', {}, [x, def(defs, 'const', { value: 0 })]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'and', { imm: 0 }, [x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'or', {}, [def(defs, 'const', { value: -1 }), x]))).toBe(-1);
+    expect(constWord(W(defs), def(defs, 'sub', {}, [x, x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'xor', {}, [x, x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'sub', {}, [x, v()]))).toBeNull();
   });
 
   test('reads through a materialized def, which constMask does not', () => {
     const defs = new Map<Value, Op>();
     const k = def(defs, 'const', { value: 7 });
     expect(constMask(ctx(defs, { materialize: new Set([defs.get(k)!]) }), k)).toBeNull();
-    expect(constWord(defs, k)).toBe(7);
+    expect(constWord(W(defs), k)).toBe(7);
   });
 
-  test('a variable anywhere in the chain is no word', () => {
+  test('a variable anywhere in the chain is no word, and nor is a value the caller calls opaque', () => {
     const defs = new Map<Value, Op>();
-    expect(constWord(defs, v())).toBeNull();
-    expect(constWord(defs, def(defs, 'shl', { imm: 1 }, [v()]))).toBeNull();
-    expect(constWord(defs, def(defs, 'add', {}, [def(defs, 'const', { value: 1 }), v()]))).toBeNull();
+    expect(constWord(W(defs), v())).toBeNull();
+    expect(constWord(W(defs), def(defs, 'shl', { imm: 1 }, [v()]))).toBeNull();
+    expect(constWord(W(defs), def(defs, 'add', {}, [def(defs, 'const', { value: 1 }), v()]))).toBeNull();
+    const k = def(defs, 'const', { value: 1 });
+    expect(constWord(W(defs, { opaque: (x) => x === k }), def(defs, 'shl', { imm: 3 }, [k]))).toBeNull();
+  });
+
+  test('the mathematical `neg_s` of INT_MIN is a constant and no word, so it MAY be any word', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const negS = def(defs, 'neg_s', {}, [k]);
+    expect(constWord(W(defs), negS)).toBeNull();
+    expect(mayAlwaysHold(W(defs), negS, 0x80000000)).toBe(true);
+    expect(constWord(W(defs), def(defs, 'neg_s', {}, [def(defs, 'const', { value: 5 })]))).toBe(-5);
+  });
+
+  test('an op it has no rule for is no word, but MAY be one', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const ext = def(defs, 'zext', { width: 16 }, [k]);
+    expect(constWord(W(defs), ext)).toBeNull();
+    expect(mayAlwaysHold(W(defs), ext, 0x80000000)).toBe(true);
+    // A register shift by 32 or more: Thumb gives 0, MIPS masks the amount to five bits.
+    const wide = def(defs, 'shl', {}, [def(defs, 'const', { value: 1 }), def(defs, 'const', { value: 32 })]);
+    expect(constWord(W(defs), wide)).toBeNull();
+    expect(mayAlwaysHold(W(defs), wide, 0x80000000)).toBe(true);
+    expect(mayAlwaysHold(W(defs), def(defs, 'add', {}, [k, v()]), 0x80000000)).toBe(false);
+    expect(mayAlwaysHold(W(defs), def(defs, 'const', { value: 5 }), 0x80000000)).toBe(false);
+  });
+
+  test('a block param holds a word every in-edge passes, itself included', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const k2 = def(defs, 'const', { value: 0x80000000 });
+    const join = v();
+    // A diamond whose two arms each load the pool word.
+    expect(constWord(W(defs, { incoming: new Map([[join, [k, k2]]]) }), join)).toBe(-0x80000000);
+    // A loop that passes the param back to itself keeps the word it entered with...
+    const inv = v();
+    expect(constWord(W(defs, { incoming: new Map([[inv, [k, inv]]]) }), inv)).toBe(-0x80000000);
+    // ...through a second param too...
+    const p = v();
+    const q = v();
+    const twoParams = new Map<Value, (Value | undefined)[]>([
+      [p, [k, q]],
+      [q, [p, q]],
+    ]);
+    expect(constWord(W(defs, { incoming: twoParams }), q)).toBe(-0x80000000);
+    // ...but a counter varies, and so do two arms that disagree or an edge that passes nothing.
+    const i = v();
+    const next = def(defs, 'add', { imm: 1 }, [i]);
+    expect(constWord(W(defs, { incoming: new Map([[i, [def(defs, 'const', { value: 0 }), next]]]) }), i)).toBeNull();
+    const split = v();
+    expect(
+      constWord(W(defs, { incoming: new Map([[split, [k, def(defs, 'const', { value: 5 })]]]) }), split),
+    ).toBeNull();
+    const short = v();
+    expect(constWord(W(defs, { incoming: new Map([[short, [k, undefined]]]) }), short)).toBeNull();
+    // A param nobody describes is an entry param: no word.
+    expect(constWord(W(defs), join)).toBeNull();
   });
 });

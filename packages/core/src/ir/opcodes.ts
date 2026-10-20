@@ -38,11 +38,14 @@ export const OPCODES = {
   // Effect-free (no `effects` flag) so DCE reaps a dead one.
   mulh: { operands: 2, results: 1 },
   mulhu: { operands: 2, results: 1 },
-  // `signed: true` marks the MATHEMATICAL negation rather than the wrapping one: what Thumb's
-  // `cmn rA, rB` compares rA against when a signed branch reads it (frontend/thumb.ts
-  // `lowerTerminator`). The structurer then never negates an unsigned word, so a signed compare
-  // over it cannot read -0x80000000u as INT_MIN.
-  neg: { operands: 1, results: 1 },
+  neg: { operands: 1, results: 1 }, // the wrapping negation, 0 - x as a 32-bit word
+  // The MATHEMATICAL negation: what Thumb's `cmn rA, rB` compares rA against when a signed branch
+  // reads it (frontend/thumb.ts `lowerTerminator`). It differs from `neg` at exactly one operand,
+  // 0x80000000, where its value (+2^31) is no 32-bit word at all. A separate opcode rather than an
+  // attr on `neg` because every word evaluator in core folds `neg` as the wrapping one, and an
+  // attr each of them must remember to read fails OPEN: one that does not know `neg_s` falls to
+  // its default arm and declines. Only the structurer spells it, as `-(s32)x`.
+  neg_s: { operands: 1, results: 1 },
   not: { operands: 1, results: 1 }, // bitwise complement (`mvn`) → ~x
   or: { operands: 2, results: 1 },
   and: { operands: 2, results: 1 },
