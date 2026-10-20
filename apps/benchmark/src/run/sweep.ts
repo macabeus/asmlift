@@ -641,17 +641,16 @@ export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRI
     if (o.tiers.includes('real')) {
       let projects: string[];
       try {
-        projects =
-          !o.only
-            ? [o.project!]
-            : [
-                ...new Set(
-                  rows
-                    .realRows()
-                    .filter((r) => selectsRow(o, r.id, r.aliases))
-                    .map((r) => r.project),
-                ),
-              ];
+        projects = !o.only
+          ? [o.project!]
+          : [
+              ...new Set(
+                rows
+                  .realRows()
+                  .filter((r) => selectsRow(o, r.id, r.aliases))
+                  .map((r) => r.project),
+              ),
+            ];
       } catch {
         // a dataset this cannot read prices every project: what `collect` would have met is unknown
         projects = Object.keys(PEAK_BYTES.sweepRealProject);
