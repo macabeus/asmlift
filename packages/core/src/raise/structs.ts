@@ -296,7 +296,8 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
  *  it two. A union that boundary would move — seated off it, or with the next field inside its
  *  rounded size — is never declared, since it would mislay every access at or after it. Its cell
  *  is a plain field of its widest view instead, read at its other views through casts, where those
- *  casts alias it as the union would (`castViewCell`); otherwise it declines. An UNMEASURED
+ *  casts alias it as the union would (`castViewCell`). Where they would not, it declines — a guard
+ *  no measured compiler reaches (see `castViewCell`), pinned only by a test boundary. An UNMEASURED
  *  compiler (undefined) declines every union, since no boundary is safe to assume: one too small
  *  mislays the fields after the union on agbcc, one too large drops the pad in front of them
  *  everywhere else.
@@ -368,18 +369,27 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
 }
 
 /** The type a union's cell is declared at when the union itself cannot be laid out, or undefined
- *  when its views cannot be spelled as casts of that one field. The field is the widest view (the
- *  unsigned one of two); every other view must be ALIAS-TRANSPARENT to it, so a cast access aliases
- *  the field exactly as a union member would: a 1-byte view (a character type, alias set 0 —
- *  c-common.c `c_get_alias_set`) or the field's own width with the other extension (s16 and u16
- *  share one set). Any other view declines: a `u16` read of a word cell through a cast is reused
- *  across a word store on agbcc, where the union reloads (`synthetic:ureread`). On agbcc only a
- *  cell of 2 bytes or fewer can fail the 4-byte boundary, so this never reaches that shape there. */
+ *  when its views cannot be spelled as casts of that one field. The field is the widest view, the
+ *  unsigned one where that width has two — chosen here, not read off the members' order; every
+ *  other view must be ALIAS-TRANSPARENT to it, so a cast access aliases the field exactly as a
+ *  union member would: a 1-byte view (a character type, alias set 0 — c-common.c
+ *  `c_get_alias_set`) or the field's own width with the other extension (s16 and u16 share one
+ *  set). Any other view is refused: a `u16` read of a word cell through a cast is reused across a
+ *  word store on agbcc, where the union reloads (`synthetic:ureread`).
+ *
+ *  NO MEASURED COMPILER REACHES THE REFUSAL. Every target but agbcc has a 1-byte boundary, where a
+ *  union of aligned views is never larger than its widest one and always fits. On agbcc a cell
+ *  the size of the boundary is aligned and fits, a misaligned one is `refusePacked`'s, so only a
+ *  cell of 2 bytes or fewer gets here — and its views are bytes or its own width. The refusal is
+ *  the guard for a compiler whose boundary is wider, which the test with a boundary of 8 stands in
+ *  for. */
 function castViewCell(members: readonly StructField[]): IrType | undefined {
-  const width = (m: StructField): number | null => intWidth(m.type.kind === 'array' ? m.type.elem : m.type);
-  const cell = members[0];
-  const transparent = members.every((m) => width(m) === 8 || width(m) === width(cell));
-  return transparent && cell.type.kind === 'int' ? cell.type : undefined;
+  const width = (m: StructField): number => intWidth(m.type.kind === 'array' ? m.type.elem : m.type) ?? 0;
+  const widest = Math.max(...members.map(width));
+  const cells = members.filter((m) => width(m) === widest && m.type.kind === 'int');
+  const cell = cells.find((m) => m.type.kind === 'int' && !m.type.signed) ?? cells[0];
+  const transparent = members.every((m) => width(m) === 8 || width(m) === widest);
+  return transparent && cell !== undefined ? cell.type : undefined;
 }
 
 /** Size in bytes of a recovered field's type (int width/8; pointer is word-sized 4; a union the

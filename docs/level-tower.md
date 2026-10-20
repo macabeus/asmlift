@@ -744,7 +744,8 @@ bytes there and two on ido, kmc and mwcc. A union that boundary would move is ne
 it would mislay the fields after it. Where every view is a byte or the cell's own width with the
 other extension — the views a cast aliases exactly as a union member does — the cell is a plain
 field of its widest view (`StructField.castViews`) and every other view is the flat cell,
-`((u8 *)p)[1]`; anything else declines. On a compiler nobody measured every union narrower than a
+`((u8 *)p)[1]`; anything else declines, a guard no measured compiler reaches (agbcc only fails
+the fit on cells of two bytes or fewer, whose views are bytes or their own width). On a compiler nobody measured every union narrower than a
 word declines, since a boundary guessed in either direction mislays something. It has no name — it is only ever declared inline, as the type
 of the struct member holding it — so none of the name-keyed struct machinery (`collectStructs`,
 the `/ptr-field` flip) reaches it. **Structure** reads an access through the view of its own
