@@ -929,9 +929,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // fail here — but the count in the test's NAME is derived from the length alone and would not.
   // Read both when this list moves.
   //
-  // `structs` left the list when `bfstrad` and `unarrow1` on agbcc gave it inhabitants: a
-  // straddling u8 bitfield and a narrow store over a wider member, which raise/structs.ts reads
-  // as a union at offset 0 that does not fit agbcc's 4-byte aggregate boundary.
+  // `structs` joins as `pool-word-shape` did: its inhabitants, `bfstrad` and `unarrow1` on agbcc,
+  // were a union agbcc's 4-byte aggregate boundary would round over the next field, which
+  // raise/structs.ts now declares as one field of the cell's widest view read through casts
+  // (`castViewCell`). The class still takes a packed layout, an overlap with a view a cast does
+  // not alias like the union, and an unmeasured boundary, and no benchmark row reaches any of them.
   //
   // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
   // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
@@ -986,6 +988,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     // (`tst`, arithmetic flags, a call) is hand-written asm.
     'non-compare-flags',
     'pool-word-shape',
+    'structs',
     'tu-scoped-name',
     'unread-data-directive',
     'unstored-slot',
