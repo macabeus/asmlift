@@ -347,8 +347,10 @@ export type Stmt =
   // `ofSwitch` makes the `break` the innermost enclosing SWITCH's instead: it leaves the arm it sits
   // in for the code after the switch (`case 1: if (c) break; case 2: …`). Legal only inside a switch
   // arm with no loop or switch between it and that arm — the producer's contract (structure.ts
-  // `switchBreakAt`). The C family prints both as `break;`, which is why a plain one is refused
-  // between `case` labels (backend/cfamily.ts) and this one is what the arm may carry.
+  // `switchBreakAt`). The C family prints both as `break;`, so its printer refuses each where C
+  // would bind it to the other kind — a plain one between `case` labels, this one in a loop body
+  // (backend/cfamily.ts `refuseMisboundBreak`). A pass that reads `break` as a loop exit must skip
+  // this one (l3/reindex.ts `hasLoopExit`).
   | { k: 'break'; ofSwitch?: true }
   | { k: 'continue' }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or

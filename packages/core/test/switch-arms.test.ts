@@ -542,6 +542,18 @@ test('a loop-scoped `break` inside a case arm is refused, and `continue` is not'
   expect(
     emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [set, { k: 'break' }] }])),
   ).toContain('case 0:');
+  // The other direction: a switch's `break` under a loop the arm opened would bind that loop, and
+  // one in a loop body outside any switch would bind the loop too. Both refused, the same way.
+  const ownBreak: Stmt = { k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break', ofSwitch: true }], else: [] };
+  expect(() =>
+    emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [ownBreak, set] }])),
+  ).toThrow(/switch-scoped `break;`, which C would bind to the loop/);
+  expect(() =>
+    emitCFamily('void f(s32 x)', {
+      ...armed([]),
+      body: [{ k: 'dowhile', cond: { k: 'var', name: 'x' }, body: [ownBreak] }],
+    }),
+  ).toThrow(/switch-scoped `break;`, which C would bind to the loop/);
 });
 
 test('`stmtChildren` lists a mid-placed default where the backend prints it', () => {
