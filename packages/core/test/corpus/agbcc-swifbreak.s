@@ -390,3 +390,164 @@ intodefault:
 	.word	gA
 .Lfe6:
 	.size	 intodefault,.Lfe6-intodefault
+	.align	2, 0
+	.globl	loopleave
+	.type	 loopleave,function
+	.thumb_func
+loopleave:
+	push	{r4, r5, lr}
+	add	r3, r0, #0
+	add	r4, r2, #0x1
+	add	r5, r1, #0
+	mov	r2, #0x0
+.L104:
+	add	r2, r2, #0x1
+	add	r0, r3, r2
+	cmp	r0, #0x1
+	beq	.L106	@cond_branch
+	cmp	r0, #0x3
+	beq	.L110	@cond_branch
+	lsl	r4, r5, #0x1
+	b	.L102
+.L106:
+	ldr	r0, .L115
+	ldr	r0, [r0]
+	cmp	r1, r0
+	ble	.L107	@cond_branch
+	bl	p
+	add	r4, r0, r5
+	b	.L108
+.L116:
+	.align	2, 0
+.L115:
+	.word	gB
+.L107:
+	ldr	r0, .L117
+	ldr	r0, [r0]
+	cmp	r4, r0
+	bne	.L102	@cond_branch
+.L110:
+	add	r0, r5, #0
+	b	.L114
+.L118:
+	.align	2, 0
+.L117:
+	.word	gC
+.L102:
+	cmp	r2, #0x3
+	ble	.L104	@cond_branch
+.L108:
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r4, r0
+.L114:
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.Lfe7:
+	.size	 loopleave,.Lfe7-loopleave
+	.align	2, 0
+	.globl	subret
+	.type	 subret,function
+	.thumb_func
+subret:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r9
+	mov	r6, r8
+	push	{r6, r7}
+	mov	r9, r0
+	add	r6, r1, #0
+	mov	r8, r2
+	mov	r4, r8
+	add	r4, r4, #0x1
+	add	r5, r6, #0
+	mov	r7, #0x0
+.L122:
+	add	r7, r7, #0x1
+	mov	r0, r9
+	add	r1, r0, r7
+	cmp	r1, #0x64
+	beq	.L131	@cond_branch
+	cmp	r1, #0x64
+	bgt	.L136	@cond_branch
+	cmp	r1, #0x3
+	beq	.L126	@cond_branch
+	cmp	r1, #0x11
+	beq	.L124	@cond_branch
+	b	.L120
+.L136:
+	cmp	r1, #0xfa
+	beq	.L132	@cond_branch
+	ldr	r0, .L139
+	cmp	r1, r0
+	beq	.L129	@cond_branch
+	b	.L120
+.L140:
+	.align	2, 0
+.L139:
+	.word	0x3e7
+.L124:
+	ldr	r0, .L141
+	ldr	r0, [r0]
+	cmp	r6, r0
+	ble	.L126	@cond_branch
+	add	r0, r4, #0
+	b	.L138
+.L142:
+	.align	2, 0
+.L141:
+	.word	gB
+.L126:
+	cmp	r4, #0x3
+	bgt	.L129	@cond_branch
+	bl	p
+	add	r4, r0, r5
+	b	.L120
+.L129:
+	lsl	r4, r5, #0x1
+	ldr	r0, .L143
+	ldr	r0, [r0]
+	cmp	r6, r0
+	bne	.L131	@cond_branch
+	ldr	r0, .L143+0x4
+	ldr	r0, [r0]
+	cmp	r8, r0
+	bne	.L120	@cond_branch
+.L131:
+	bl	p
+	add	r4, r0, r5
+.L132:
+	ldr	r0, .L143
+	ldr	r0, [r0]
+	cmp	r6, r0
+	bne	.L120	@cond_branch
+	ldr	r0, .L143+0x4
+	ldr	r0, [r0]
+	cmp	r8, r0
+	beq	.L120	@cond_branch
+	add	r5, r6, #0
+	add	r5, r5, #0x55
+.L120:
+	cmp	r7, #0x3
+	ble	.L122	@cond_branch
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r4, r0
+.L138:
+	pop	{r3, r4}
+	mov	r8, r3
+	mov	r9, r4
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.L144:
+	.align	2, 0
+.L143:
+	.word	gA
+	.word	gC
+.Lfe8:
+	.size	 subret,.Lfe8-subret

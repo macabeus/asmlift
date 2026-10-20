@@ -5826,6 +5826,7 @@ export function structure(
     spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     blockOf,
+    outsideLoop: (blk) => loopCtx !== null && !loopCtx.body.has(blk),
     hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),

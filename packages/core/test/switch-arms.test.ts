@@ -1287,6 +1287,7 @@ test('every withholding on the `default:` position, one call each', () => {
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
     blockOf: () => undefined,
+    outsideLoop: () => false,
     hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
@@ -1561,10 +1562,10 @@ test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if
 // `corpus/agbcc-swifbreak.s`: case bodies that leave the switch on one path and fall into the next
 // case on another, compiled by agbcc. What each test reads is which construct the `break;` binds.
 const ifBreakAsm = () => readFileSync(new URL('corpus/agbcc-swifbreak.s', import.meta.url), 'utf8');
-const ifBreakLift = (sym: string) =>
+const ifBreakLift = (sym: string, ret: { returnsVoid: true } | { returns: 's32' } = { returnsVoid: true }) =>
   decompile(sym, ifBreakAsm(), ARMV4T_AGBCC, {
     prototypes: {
-      [sym]: { returnsVoid: true },
+      [sym]: ret,
       ...Object.fromEntries(['f', 'g', 'h', 'r', 'm'].map((n) => [n, { params: 1, returnsVoid: true }])),
       p: { params: 0, returns: 's32' },
     },
@@ -1609,6 +1610,25 @@ test('an arm that breaks or falls into the `default:` arm is a switch on agbcc',
   const out = ifBreakLift('intodefault');
   expect(out).toMatch(/case 1:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*default:\s*\n\s*f\(a0\);/);
   expect(count(out, 'f(a0)')).toBe(1);
+});
+
+test('a falling arm whose region leaves the loop the dispatch heads goes to if-recovery, not to a loud refusal', () => {
+  // agbcc rotates `while (k < 4) { k++; switch … }` so the dispatch IS the loop header: it
+  // dominates the loop's exit and the code after it, and the merge is the header. Read by
+  // dominance alone, `case 1:`'s `goto out` sits inside the arm, the arm reads as falling with
+  // `break;`, and the loop-exit refusal then fails the whole function.
+  const out = ifBreakLift('loopleave', { returns: 's32' });
+  expect(out).not.toContain('switch');
+  expect(out).toContain('return');
+});
+
+test("a sub-tree whose post-dominator lies past the loop bottom takes no arm `break;`", () => {
+  // In the loop body, the `case 17`/`case 3` sub-tree reaches both the latch and the early
+  // `return t;`, so its post-dominator is the return block, past the region's end. An arm's path
+  // there is a `return`, not a switch `break`.
+  const out = ifBreakLift('subret', { returns: 's32' });
+  expect(out).toContain('return');
+  expect(out).not.toMatch(/break;/);
 });
 
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {

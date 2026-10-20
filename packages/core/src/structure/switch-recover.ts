@@ -49,6 +49,12 @@ export interface SwitchRecoverDeps {
    *  of "where is this defined" `defs` does not answer. Taken from `structure.ts`, which builds
    *  both halves for def-site anchoring, rather than indexing the parameters a second time. */
   blockOf: (v: Value) => Block | undefined;
+  /** Is this block outside the body of the loop the switch is being structured in? False outside
+   *  any loop. Read LIVE: the structurer's loop frame is the one current when the switch is met.
+   *  Where the dispatch is that loop's header it dominates the loop's exit and everything after
+   *  it, so dominance alone cannot tell the switch's region from the code past the loop
+   *  (`analyzeArmExit`). */
+  outsideLoop: (blk: Block) => boolean;
   /** THE DISPATCH HOIST: the copies of every edge the tree walk collapsed, merged and re-emitted
    *  ONCE ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the emission
    *  (suppression, identity elision, `undef`, the write-order sort, `sequentialize`), so this
@@ -333,6 +339,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     spellSwitchFallthrough,
     emitsOwnStatement,
     blockOf,
+    outsideLoop,
     hoistDispatchCopies,
     expr,
     structureRegion,
@@ -491,6 +498,27 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return { x, k, cls, opcode: cmp.opcode, xOnLeft };
   };
 
+  // Can a path from `from` reach `to` without passing `through`? False when `to` is null (the end
+  // of the function) or is `through` itself.
+  const reachesAvoiding = (from: Block, to: Block | null, through: Block | null): boolean => {
+    if (to === null || to === through) {
+      return false;
+    }
+    const seen = new Set<Block>([from]);
+    for (const q = [from]; q.length;) {
+      for (const s of successorsOf(q.pop()!)) {
+        if (s === to) {
+          return true;
+        }
+        if (s !== through && !seen.has(s)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return false;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -501,6 +529,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // switch's region and is not walked. It IS recorded as an escape, because an arm that can leave
   // sideways does not fall into the next case — and only the FALL-THROUGH verdict consults that
   // record, so an arm that reaches no sibling still closes with a plain `break`.
+  //
+  // Membership also stops at the loop the switch sits in: a block outside that loop's body is an
+  // escape too. When the dispatch IS the loop header (agbcc and IDO rotate `while (k < 4) { k++;
+  // switch … }` so), it dominates the loop's exit and all the code after the loop, and the merge
+  // is the header itself; without this stop an arm that falls into a sibling and also leaves the
+  // loop would read as falling with `breaks` (its back edge being the merge edge), the regime
+  // would commit, and the loop-exit refusal in `structure.ts` would then fail the whole function
+  // where if-recovery spells it.
   //
   // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
   // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
@@ -524,7 +560,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         } else if (s !== entry && siblings.has(s)) {
           into.add(s);
         } else if (s !== entry && !seen.has(s)) {
-          if (!dom.get(s)!.has(b)) {
+          if (!dom.get(s)!.has(b) || outsideLoop(s)) {
             escapes = true;
             continue;
           }
@@ -804,6 +840,20 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       [...exitOf.values()].some(
         (e) => e.kind === 'unstructurable' || (e.kind === 'fallthrough' && !spellSwitchFallthrough),
       )
+    ) {
+      return null;
+    }
+    // AN ARM'S `break;` NEEDS THE MERGE TO BE THE SWITCH'S END IN THIS REGION. The code after the
+    // `switch` is `structureRegion(merge, stop)`, which reads as that only where every path from
+    // the dispatch reaches `stop` through the merge. A sub-tree whose post-dominator lies PAST the
+    // region's `stop` breaks that: inside a loop body whose dispatch reaches both the latch (`stop`)
+    // and an early `return` block, ipdom is the return, so an arm's path to it would read as a
+    // switch `break` while a sibling arm runs through the latch and back to the header, which
+    // fails the whole function loud. Declined here, to if-recovery, which spells each edge as the
+    // `return` or the fall to the loop bottom it is.
+    if (
+      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks !== undefined) &&
+      reachesAvoiding(b, stop, merge)
     ) {
       return null;
     }
