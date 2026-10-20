@@ -1604,6 +1604,14 @@ test('a falling arm that leaves through a block of its own still joins inside th
   expect(count(rf, 'h(2)')).toBe(1);
 });
 
+test('a closed arm with a `break;` in its middle joins inside the arm too', () => {
+  const out = ifBreakLift('closedbreak', { returns: 's32' });
+  expect(out).toMatch(
+    /case 1:\s*\n\s*if \(a1 != 0\) \{\s*\n\s*if \(a2 != 0\) break;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*h\(2\);\s*\n\s*break;/,
+  );
+  expect(count(out, 'h(2)')).toBe(1);
+});
+
 test('an arm that leaves its LOOP where the loop exit is the switch merge breaks the switch', () => {
   // `case 1: if (gA) goto out;` with `out` past the loop: the switch's merge is the loop's exit, so
   // the arm's `break;` reaches it and the exit region renders after the switch. The loop's own

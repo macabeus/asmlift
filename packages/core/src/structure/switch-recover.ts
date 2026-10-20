@@ -83,15 +83,20 @@ export interface SwitchRecoverDeps {
  *                    below arranges and both regimes then re-read off the emission array (see the
  *                    l3/ast.ts non-neutrality note). With `breaks`, some paths out reach the
  *                    switch's merge instead: `case 1: if (c) break; case 2: …`, the arm's own
- *                    `break;` on those paths. `breaks` is the arm's region — every block the walk
- *                    below reached, the entry included — which is what the structurer needs to
- *                    find the arm's own joins (`structure.ts` `armJoin`).
+ *                    `break;` on those paths.
  *   - `unstructurable`  anything else: two different siblings, or a sibling beside a block the
  *                    switch does not dominate. C needs a `goto` for those. Regime A declines to
- *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD. */
+ *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD.
+ *
+ *  `region` is the arm's own blocks: every block the walk below reached, the entry included. It is
+ *  what the structurer needs to find the arm's own joins (`structure.ts` `armJoin`) and to spell a
+ *  path to the merge in the middle of the arm as `break;` (`switchBreakAt`), in a closed arm as in a
+ *  falling one: `case 1: if (a) { if (b) break; g(1); } h(2); break;`. A closed arm that leaves
+ *  sideways, into a block the switch does not dominate, has none: its paths through such a block
+ *  are not the arm's, and it structures to the CFG's joins as before. */
 export type ArmExit =
-  | { kind: 'break' }
-  | { kind: 'fallthrough'; to: Block; breaks?: ReadonlySet<Block> }
+  | { kind: 'break'; region?: ReadonlySet<Block> }
+  | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
   | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
@@ -570,13 +575,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     if (into.size === 0) {
-      return { kind: 'break' };
+      return escapes ? { kind: 'break' } : { kind: 'break', region: seen };
     }
     // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
     // spells only where nothing breakable sits between that edge and the arm, which the structurer
     // checks where it emits it (`structure.ts` `switchBreakAt`) and refuses loud otherwise.
     if (into.size === 1 && !escapes) {
-      return { kind: 'fallthrough', to: [...into][0], ...(toMerge ? { breaks: seen } : {}) };
+      return { kind: 'fallthrough', to: [...into][0], breaks: toMerge, region: seen };
     }
     // Name what is actually missing. These are two different facts: the first is a shape C's
     // fall-through cannot spell, the second leaves the switch's region sideways.
@@ -852,7 +857,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // fails the whole function loud. Declined here, to if-recovery, which spells each edge as the
     // `return` or the fall to the loop bottom it is.
     if (
-      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks !== undefined) &&
+      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
       reachesAvoiding(b, stop, merge)
     ) {
       return null;
