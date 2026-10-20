@@ -466,32 +466,30 @@ const FLAG_SETTING = new Set([
 // accident of an unrelated model. Modelling `tst` is a capability with no inhabitant: agbcc's
 // `tstsi` prints `cmp %0, #0` (gcc/thumb.md:818-821), so every `tst` in the corpus is hand-written.
 //
-// `cmn` used to sit here too. It is a compare now (the decode loop's `cmn` arm): agbcc's `cmnsi`
+// `cmn` is not here: it is a compare (the decode loop's `cmn` arm). agbcc's `cmnsi`
 // (thumb.md:823-827) is `(compare rA (neg rB))`, which combine makes of `a == -b` and `a <= -b`.
 const FLAG_ONLY = new Set(['tst']);
 
-// The branches that read a `cmn`'s flags as the compare it stands for, and the sentence for the
-// ones that cannot. `cmn rA, rB` sets NZCV from rA + rB, and `cmp rA, -rB` from rA - (-rB):
+// The branches that read a `cmn`'s flags as the compare it stands for, and why the others cannot.
+// `cmn rA, rB` sets NZCV from rA + rB, and `cmp rA, -rB` from rA - (-rB):
 //   * N and Z come from the same 32-bit result, so `beq`/`bne` read the WRAPPED a + b == 0, which
 //     the plain wrapping negation spells: exactly for an unsigned or narrower `b`, and for an `s32`
 //     one everywhere but b == INT_MIN, where C's `-b` overflows — the spelling every wrapping `neg`
 //     in this frontend already has;
 //   * V differs only at rB == INT_MIN, where cmn reports the true sign of rA + 2^31 and the
-//     compare's `-rB` wraps back to INT_MIN. The lift spells the negation SIGNED (the emitter's
-//     job, pinned by thumb-frontend.test.ts), so the C it prints differs from the bytes at that one
-//     input only, and there its `-b` is undefined. That is NOT "exact for every input the SOURCE
-//     defined": agbcc folds the defined `a > (int)(0u - b)` into `cmn; bgt` as well, and so
-//     miscompiles it at b == 0x80000000 exactly as it miscompiles `a < -b` below at b == 0. What
-//     the signed branches have and the carry ones lack is a C spelling that recompiles to the same
-//     bytes AND diverges from them only where it is itself undefined. When rB always holds
-//     INT_MIN that one input is every input, and the structurer refuses (structure.ts, `neg_s`);
+//     compare's `-rB` wraps back to INT_MIN. The lift spells the negation SIGNED (`neg_s`), so its
+//     C differs from the bytes at that one input only, where its `-b` is undefined. agbcc folds the
+//     defined `a > (int)(0u - b)` into `cmn; bgt` too, and miscompiles it there, so the claim is
+//     narrower than "exact for every source": a C spelling that recompiles to the same bytes AND
+//     diverges from them only where it is itself undefined. When rB always holds INT_MIN that one
+//     input is every input, and the structurer refuses (structure.ts, `neg_s`);
 //   * C is the carry out of rA + rB, which is NOT rA >=u -rB: at rB == 0 cmn's carry is clear and
 //     the compare's is set. agbcc folds unsigned `a < -b` into `cmn; bcs` regardless — it
 //     miscompiles at b == 0 — and the C that is exact there (`a + b >= a`) compiles to
 //     `add; cmp; bcc` instead. Unsigned C defines every input, so no spelling both matches the
-//     bytes and leaves the divergence undefined, and the unsigned branches refuse.
-//     The refusal is spelt out at its throw in `lowerTerminator`, not held in a constant here: the
-//     decline taxonomy (apps/web declines.ts, `cmn-carry`) is checked against throw texts as written.
+//     bytes and leaves the divergence undefined, and the unsigned branches refuse. The sentence
+//     stays literal at its throw in `lowerTerminator`: the decline taxonomy (`cmn-carry`) is
+//     checked against throw texts as written.
 const CMN_EXACT = new Set(['beq', 'bne', 'blt', 'ble', 'bgt', 'bge']);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 function expandRegList(tokens: string[]): string[] {

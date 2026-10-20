@@ -12418,12 +12418,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      past a call, and a store after the switch makes KMC decline first on `arms do not linearize`.
   //   7. cmn_field / cmn_eq / cmn_ult (sub_08022CA0). A compare against a NEGATED operand: agbcc has no
   //      `cmp rA, -rB`, combine folds the `neg` into the compare, and thumb.md `cmnsi` (823-827) spells
-  //      it `cmn rA, rB`, which sets NZCV from a + b. Only a `cmp`'s flags are modelled (thumb.ts
-  //      FLAG_ONLY / retireFlags), so the branch declines. One row per branch class, since each tests a
+  //      it `cmn rA, rB`, which sets NZCV from a + b. One row per branch class, since each tests a
   //      different flag of the sum: signed (`bgt`), EQ/NE (`bne`), unsigned (`bcs`, C = carry out).
   //      `a + b <= 0` is not folded (`add ; cmp #0`) and MATCHes: the control. The other three have no
-  //      compare-negative and MATCH all three (controls). Ablation-pinned. Since thumb.ts `lowerCmn`
-  //      reads `cmn` as `cmp rA, -rB`, cmn_field and cmn_eq MATCH on agbcc. cmn_ult still declines, and
+  //      compare-negative and MATCH all three (controls). Ablation-pinned. thumb.ts `lowerCmn` reads
+  //      `cmn` as `cmp rA, -rB`, so cmn_field and cmn_eq MATCH on agbcc. cmn_ult declines, and
   //      correctly: the carry out of a + b is not a >=u -b at b == 0, so agbcc's `cmn; bcs` for `a < -b`
   //      is its own miscompile, and the exact C (`a + b >= a`) compiles to `add; cmp; bcc`.
   //   8. jt_pre_midg (EntityCreate). A jump table with PRE's code INSIDE its dispatch: gcse's

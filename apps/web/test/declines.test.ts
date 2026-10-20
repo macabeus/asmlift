@@ -331,7 +331,7 @@ describe('a pattern keyed on an English word claims sentences that are not about
         "written by a call in 'f', over the compare that reached it, and only a compare's are modelled",
       'non-compare-flags',
     ],
-    // A `cmn` is a compare now, save for its carry, which refuses with a sentence of its own: a
+    // A `cmn` is a compare, save for its carry, which refuses with a sentence of its own: a
     // correct decline (agbcc miscompiles unsigned `a < -b`), not a flags model left unbuilt.
     [
       "lift: cannot lift 'cmn_ult': conditional branch 'bcs' tests the carry of a 'cmn', and the carry out " +
@@ -982,8 +982,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'far-jump',
     'fp-cond-branch',
     'loop-exit-values',
-    // Emptied by the `cmn` lift: `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under
-    // `cmn-carry` now. What is left (`tst`, arithmetic flags, a call) is hand-written asm.
+    // `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under `cmn-carry`. What is left
+    // (`tst`, arithmetic flags, a call) is hand-written asm.
     'non-compare-flags',
     'pool-word-shape',
     'tu-scoped-name',

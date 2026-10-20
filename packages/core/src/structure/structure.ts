@@ -4628,8 +4628,8 @@ export function structure(
       // operand: `-(u32)b` wraps, and at b == 0x80000000 a signed compare reads `(s32)-b` as INT_MIN
       // where the machine's sum was +2^31. Negating the operand as s32 instead is exact wherever C
       // defines it — it is undefined at exactly that one input. The operand keeps its own spelling
-      // where it already renders signed (`renderedIntSignedness`, the rule the signed compare's
-      // operand pin above uses); a cast it did not need costs no byte.
+      // where it already renders signed (`renderedIntSignedness`, the rule the icmp_s* operand
+      // pin uses); a cast it did not need costs no byte.
       //
       // That one input is a value the operand MIGHT hold. An operand that ALWAYS holds it is a
       // different thing: every call then lands on the undefined input, and the C a compiler makes

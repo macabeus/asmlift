@@ -210,8 +210,8 @@ describe('constWord — the word a value always holds', () => {
 
   test('the params settle to the same words in either order', () => {
     // p: [INT_MIN, p | (q & x)] and q: [0, q | q]. q is always 0, so `q & x` is 0 and p is always
-    // INT_MIN. Read before q settled, `q & x` once answered VAR ahead of its annihilator, and with
-    // p first p dropped to VAR for good: mayAlwaysHold false, the structurer's gap bypassed.
+    // INT_MIN. Read before q settles, `q & x` must answer unseen, not VAR, or with p first p drops to
+    // VAR for good: mayAlwaysHold false, and the structurer's gap bypassed.
     for (const pFirst of [true, false]) {
       const defs = new Map<Value, Op>();
       const p = v();

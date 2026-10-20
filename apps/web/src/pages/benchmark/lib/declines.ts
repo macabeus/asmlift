@@ -220,10 +220,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // THE THUMB FLAGS A NON-COMPARE WROTE (`frontend/thumb.ts`, the reason the reaching-compare
     // throw interpolates): a conditional branch testing flags that `tst`, flag-setting arithmetic
-    // or a call left, where only a compare's are modelled. Its first inhabitants were agbcc's
-    // `cmn` compares (`cmn_field`, `cmn_eq`, `cmn_ult`); `cmn` is read as `cmp rA, -rB` now, and
-    // what is left has no compiler behind it: agbcc prints `tstsi` as `cmp %0, #0` (thumb.md) and
-    // never branches on arithmetic flags, so its remaining sites are hand-written asm.
+    // or a call left, where only a compare's are modelled. `cmn` is not one of them: it is read as
+    // `cmp rA, -rB`, its carry under `cmn-carry` below. No compiler is behind this class: agbcc
+    // prints `tstsi` as `cmp %0, #0` (thumb.md) and never branches on arithmetic flags, so its
+    // sites are hand-written asm.
     key: 'non-compare-flags',
     label: 'Thumb condition flags written by a non-compare (tst / flag-setting arithmetic / a call)',
     pattern: /the flags it tests were written by /,

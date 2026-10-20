@@ -427,7 +427,7 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // the reader to a block that does not exist. Counted over the vendored kleod, sa3, pokeemerald
     // and klonoa checkouts, 115 `.s` sites put a `tst` (99) or a `cmn` (16) on the line immediately
     // before a conditional branch — blank and comment lines skipped or not, the number is the
-    // same. `cmn` is a compare now (the describe below); `tst` has no compiler that emits it.
+    // same. `cmn` is a compare ("`cmn` is a compare against the negation"); no compiler emits `tst`.
     expect(() => dc('flagonly', `\ttst\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).toThrow(
       "conditional branch 'bne' has no reaching compare: the flags it tests were written by 'tst' " +
         "in 'flagonly', and only a compare's are modelled",
@@ -5071,8 +5071,8 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
 
   test('switch recovery never reads a guard against the mathematical negation of INT_MIN as a bound', () => {
     // `bgt .Lhi` is never taken (a0 - 2^31 is never > 0), so this always returns 0. Folding the
-    // `neg_s` as a wrapping negation made the guard `a0 > INT_MIN`, true for every case, and the
-    // lift a `switch` returning 10 for a0 == 1.
+    // `neg_s` as a wrapping negation would make the guard `a0 > INT_MIN`, true for every case, and
+    // the lift a `switch` returning 10 for a0 == 1.
     const arms =
       '\tbgt\t.Lhi\n\tb\t.Ldef\n.Lhi:\n\tcmp\tr0, #1\n\tbeq\t.L1\n\tcmp\tr0, #2\n\tbeq\t.L2\n\tcmp\tr0, #3\n\tbeq\t.L3\n' +
       '\tb\t.Ldef\n.L1:\n\tmov\tr0, #10\n\tbx\tlr\n.L2:\n\tmov\tr0, #20\n\tbx\tlr\n.L3:\n\tmov\tr0, #30\n\tbx\tlr\n' +
