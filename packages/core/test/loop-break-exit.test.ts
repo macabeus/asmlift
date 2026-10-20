@@ -6,7 +6,7 @@
 // read. A `break` from the latch leaves AFTER the latch's update copies, so a header value the region
 // re-derives from an updated name would be computed one iteration on; that break is spelled ahead of
 // the update instead.
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
@@ -949,4 +949,131 @@ test('an arm into an exit that only returns is a `break`, not a copy of the retu
   expect(src.match(/return 5;/g)).toHaveLength(1);
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+// TWO BREAK ARMS THAT SHARE THEIR TAIL (`codeBreakArm`, shared): `if (a) f(1); else if (b) f(2);
+// else continue; hit(i); break;`. Each arm runs its own code and jumps to one `hit(i)` block on the
+// way out, so that block is entered from both arms. Each arm writes it again ahead of its own
+// `break`: the arms run on exclusive paths, so each path runs the tail once.
+//
+// The ido7.1 shape: a top-tested loop, the tail a block of its own with no params.
+const SHARED_TAIL_TOP_TESTED = `fn sharedtop {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb7()
+^bb2():
+  %5: s32 = call %3 {target="a"}
+  %6: u32 = icmp_eq %5, %1
+  cond_br %6, ^bb3(), ^bb4()
+^bb3():
+  %7: s32 = const {value=1}
+  %8: s32 = call %7 {target="f"}
+  br ^bb6()
+^bb4():
+  %9: s32 = call %3 {target="b"}
+  %10: u32 = icmp_eq %9, %1
+  cond_br %10, ^bb5(), ^bb8()
+^bb5():
+  %11: s32 = const {value=2}
+  %12: s32 = call %11 {target="f"}
+  br ^bb6()
+^bb6():
+  %13: s32 = call %3 {target="hit"}
+  br ^bb7()
+^bb8():
+  %14: s32 = const {value=1}
+  %15: s32 = add %3, %14
+  br ^bb1(%15)
+^bb7():
+  %16: s32 = call {target="out"}
+  ret %16
+}`;
+
+/** The agbcc and gcc2.7.2kmc shape: bottom-tested (the latch leaves), and the arms cross-jumped
+ *  further, so each only computes the value it hands the tail's param (agbcc's `mov r1,#0x10` /
+ *  `#0x20` ahead of one `orr; strb`; kmc's `or` in each arm ahead of one `sb`). */
+const SHARED_TAIL_PHI = `fn sharedphi {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %5: s32 = call %3 {target="a"}
+  %6: u32 = icmp_eq %5, %1
+  cond_br %6, ^bb3(), ^bb4()
+^bb3():
+  %7: s32 = const {value=16}
+  br ^bb6(%7)
+^bb4():
+  %9: s32 = call %3 {target="b"}
+  %10: u32 = icmp_eq %9, %1
+  cond_br %10, ^bb5(), ^bb8()
+^bb5():
+  %11: s32 = const {value=32}
+  br ^bb6(%11)
+^bb6(%12: s32):
+  %13: s32 = add %12, %3
+  %17: s32 = call %13 {target="hit"}
+  br ^bb7()
+^bb8():
+  %14: s32 = const {value=1}
+  %15: s32 = add %3, %14
+  %4: u32 = icmp_slt %15, %0
+  cond_br %4, ^bb1(%15), ^bb7()
+^bb7():
+  %16: s32 = call {target="out"}
+  ret %16
+}`;
+
+describe('break arms that share a tail', () => {
+  test('a top-tested loop writes the shared tail in each arm, ahead of its `break`', () => {
+    const { src, agreement, shipped } = judged(SHARED_TAIL_TOP_TESTED);
+    expect(src).toContain('for (v0 = 0; v0 < a0; v0 = v0 + 1) {');
+    expect(src.match(/hit\(v\d\);\n {12}break;/g)).toHaveLength(2);
+    expect(src.match(/f\(1\)/g)).toHaveLength(1);
+    expect(src.match(/f\(2\)/g)).toHaveLength(1);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a bottom-tested loop whose arms hand the shared tail a value each', () => {
+    const { src, agreement, shipped } = judged(SHARED_TAIL_PHI);
+    expect(src).toContain('while (1) {');
+    expect(src.match(/hit\(/g)).toHaveLength(2);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  // Each refusal leaves the loop to decline LOUD, as both fixtures did before the shared tail.
+  const declines = (ir: string) => expect(() => judged(ir)).toThrow(/cannot structure/);
+
+  test('a shared tail also entered from before the loop is refused', () => {
+    declines(
+      SHARED_TAIL_TOP_TESTED.replace(
+        '  br ^bb1(%2)\n',
+        '  %20: u32 = icmp_eq %0, %1\n  cond_br %20, ^bb6(), ^bb1(%2)\n',
+      ).replace('%13: s32 = call %3 {target="hit"}', '%13: s32 = call %0 {target="hit"}'),
+    );
+  });
+
+  test('a shared tail the exit also reaches is refused', () => {
+    declines(
+      SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
+        '^bb7():\n',
+        '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
+      ),
+    );
+  });
+
+  test('a shared tail holding a loop of its own is refused', () => {
+    declines(
+      SHARED_TAIL_TOP_TESTED.replace(
+        '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  br ^bb7()',
+        '^bb6():\n  br ^bb9()\n^bb9():\n  %13: s32 = call %3 {target="hit"}\n  cond_br %13, ^bb9(), ^bb7()',
+      ),
+    );
+  });
 });

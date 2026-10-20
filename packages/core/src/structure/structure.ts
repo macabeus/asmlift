@@ -2247,13 +2247,26 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  for `exit` or by a `ret` of its own. Returns that region, or null. Each region block is then
  *  written once, inside the loop, ahead of the `break` — a `ret` among them as the `return` it is:
  *  `if (t[i] == 7) { if (k) return; gHit = 1; break; }`. The region owns those `ret`s, since no
- *  other edge enters it, so the `return` is written where the asm holds its one copy. */
+ *  other edge enters it, so the `return` is written where the asm holds its one copy.
+ *
+ *  A TAIL SEVERAL BREAKS SHARE, with `shared`: `if (a) f |= 1; else if (b) f |= 2; else continue;
+ *  gHit = i; break;` compiles to two arms that each run their own code and jump to one `gHit = i`
+ *  block on the way out (and agbcc and gcc2.7.2 cross-jump arms written with a tail each into that
+ *  same shape, jump.c). The shared block is then entered from the other arm as well, so it is
+ *  admitted when every edge into the region from outside it comes from the body — a body block, or
+ *  a block every path into which comes from the body without passing `exit`: the other arm's own
+ *  blocks, whose exit edge the loop's classifier then admits as an arm of its own, or the loop
+ *  declines — and the region holds no cycle. Each arm then writes the shared blocks again, ahead of its own
+ *  `break`: the arms run on exclusive paths, so every path still runs the tail once, as the asm does.
+ *  The source's single copy at the arms' join needs a `continue` that runs the latch's update, which
+ *  only a `for` spells, and no loop form here does. */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
   from: Block,
   to: Block,
   body: ReadonlySet<Block>,
   exit: Block,
+  shared = false,
 ): Set<Block> | null {
   if (to === exit || body.has(to)) {
     return null;
@@ -2276,8 +2289,49 @@ function codeBreakArm(
     region.add(x);
     stack.push(...successorsOf(x));
   }
-  const entered = (x: Block) => (preds.get(x) ?? []).every((p) => region.has(p) || (x === to && p === from));
-  return leaves && [...region].every(entered) ? region : null;
+  // Shared: a block outside the region is an entry from another arm when every path into it comes
+  // from the body without passing `exit` — the body block itself, or the other arm's own blocks.
+  const fromBody = new Map<Block, boolean>();
+  const armOfBody = (p: Block): boolean => {
+    if (body.has(p)) {
+      return true;
+    }
+    const known = fromBody.get(p);
+    if (known !== undefined) {
+      return known;
+    }
+    fromBody.set(p, false); // a cycle back to `p` is no path from the body
+    const into = preds.get(p) ?? [];
+    const ok = p !== exit && into.length > 0 && into.every(armOfBody);
+    fromBody.set(p, ok);
+    return ok;
+  };
+  let entersShared = false;
+  const entered = (x: Block) =>
+    (preds.get(x) ?? []).every(
+      (p) => region.has(p) || (x === to && p === from) || (shared && armOfBody(p) && (entersShared = true)),
+    );
+  if (!leaves || ![...region].every(entered)) {
+    return null;
+  }
+  // a region another arm enters is written once per arm, so it must be one a walk writes once: no
+  // cycle. One no other arm enters keeps what it admitted before.
+  return !entersShared || [...region].every((x) => acyclicThrough(x, region)) ? region : null;
+}
+/** Does no path inside `region` lead from `x` back to `x`? */
+function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
+  const seen = new Set<Block>();
+  for (const stack = successorsOf(x); stack.length > 0;) {
+    const y = stack.pop()!;
+    if (y === x) {
+      return false;
+    }
+    if (region.has(y) && !seen.has(y)) {
+      seen.add(y);
+      stack.push(...successorsOf(y));
+    }
+  }
+  return true;
 }
 // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
 // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
@@ -2920,7 +2974,8 @@ export function structure(
   // `earlyReturnArm` would also take the arm and copy that tail into it, where the asm holds one copy.
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
-    const region = codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
+    const region =
+      codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, e.from, e.to, nl.body, exit, true) : null;
     const owned = region === null ? earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit) : null;
     return { region, owned };
   };
