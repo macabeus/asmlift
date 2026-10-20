@@ -2415,7 +2415,7 @@ Either way a 0.5 GB reserve is held back. `apps/benchmark/src/run/admission.ts` 
 measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-20 this host read
 MemAvailable 0.6 GB and SwapFree 6.8 GB, 3.4 GB of it used on zram. The rule leaves 1.2 GB of
 that, so a 3-worker vitest gate is refused beside the run. Every admitted job also takes a record in the register carrying the
-need it was admitted with: a run or a whole-corpus sweep as before, and `bench fan`, `bench fidelity`,
+need it was admitted with: a run or a whole-corpus sweep as a run or sweep record, and `bench fan`, `bench fidelity`,
 a scoped sweep and every vitest run as a `kind: 'job'` record. What such a job has not taken yet,
 its need less what its process tree holds now, is subtracted too. The tree is read from `/proc` on
 Linux and from `ps` on macOS, and a live record whose tree cannot be read counts as holding nothing
