@@ -12446,14 +12446,20 @@ export const SYNTHETIC: SynthSpec[] = [
   //      repeats: agbcc threads the break's jump through that test (jump.c thread_jumps, on from -O1),
   //      so the loop's exit lands on the post-loop `if`'s THEN arm while the other exits land on the
   //      re-test — two exit targets (structure.ts `singleExit`, then `foreverShape`, then `onStack`;
-  //      traced on the real function and the row). gcc2.7.2kmc threads it too (same guard); ido7.1 does
-  //      not and lifts (control); mwcc_242_81 off (frontend `nor` on both siblings).
+  //      traced on the real function and the row). gcc2.7.2kmc threads it too, past the THEN arm into
+  //      its delay slot, but its exits hand the re-test a counter re-masked on each edge, so its decline
+  //      is the shared re-test rather than the threading; ido7.1 does not thread and lifts (control);
+  //      mwcc_242_81 off (frontend `nor` on both siblings). Lifts now: agbcc by pointing the threaded
+  //      exit back at the re-test (raise/unthread.ts), gcc2.7.2kmc by the shared break tail of item 11.
   //  11. brmerge (sub_0801D6B0). Two break arms that run their own code and then share one tail
   //      (`gHit = i; break;`) before leaving the loop: `codeBreakArm` requires an arm's region to be
   //      entered only through its own edge, the shared tail is entered from the other arm, both arms
   //      refuse, and the header re-enters. Declines on agbcc, ido7.1 and gcc2.7.2kmc with lifting
   //      one-arm controls; mwcc_242_81 off (its one-arm control declines at emission of the recovered
-  //      while). The three `continue` tests keep agbcc from peeling the first iteration.
+  //      while). The three `continue` tests keep agbcc from peeling the first iteration. Lifts now on
+  //      all three: `codeBreakArm` admits a tail other arms enter from the body, and each arm writes
+  //      it again ahead of its own `break` (the one copy at the join needs a `continue` that runs the
+  //      latch's update, which no loop form spells).
   //  12. dmasret (sub_080202D4). A `vu16` published to a DMA source register BESIDE a struct-return
   //      temp of a two-field 4-byte struct (thumb.c:1426-1472 returns it in memory), with a store
   //      through a computed pointer AFTER the DMA block. The audit bounds a DMA source read by walking
