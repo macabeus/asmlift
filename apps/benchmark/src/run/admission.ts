@@ -38,7 +38,8 @@
 // the kernel's own growth while the job ramps up.
 //
 // WHAT IS ALREADY PROMISED. Available memory is read NOW, and a job registered a minute ago is
-// still ramping up: a full bench reads ~1 GB in its first minutes and ~8 GB at its peak. So every
+// still ramping up: a `bench run --jobs 3` measured 2.80 GB over its process tree 919 s in, against
+// ~8.0 GB at the 13:18 OOM (docs/bench-cost.md §5). So every
 // live record in `run/lock.ts`'s register carries the need it was admitted with, and what such a
 // job has not taken yet — its need less what its process tree holds now — is subtracted before
 // anything else is admitted. On Linux the tree is read from /proc; where it cannot be read, nothing

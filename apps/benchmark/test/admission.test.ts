@@ -262,7 +262,8 @@ describe('what registered jobs have still to take', () => {
   });
 
   it('refuses a vitest gate beside a full bench still ramping up, which a reading of NOW alone admits', () => {
-    // A --jobs 3 run two minutes in: it holds 1 GB of its 7.5 GB, out of the quiet host's RAM.
+    // A --jobs 3 run early on, holding 1 GB of its 7.5 GB out of the quiet host's RAM (a shape, not a
+    // measurement: docs/bench-cost.md §5 has the measured ramp).
     const deps = { ...linux(meminfo(5368340 - Math.round(GB / kB), 9899436)), env: {} };
     expect(admissionRefusal(vitestRequest(3), { ...deps, lockState: freeRegister })).toBeUndefined();
     const ramping = { ...deps, lockState: () => held(record(1, 3 * SHARD_BYTES)), held: () => 1 * GB };
