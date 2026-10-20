@@ -373,9 +373,7 @@ export function recordedFans(): {
  *
  *  `--project` narrows the REAL tier only, because that is all `collect` passes it to
  *  (`realCases`): `--project sa3` with both tiers lifts every synthetic row too — 1,882 of the 1,932
- *  it lifts on 2026-10-20. Reading `--project` as dropping the synthetic rows priced that sweep
- *  at its 50 sa3 rows, 0.3 GB, against 0.56 GB measured, and `--project pokeemerald` at 0.3 GB
- *  against 1.71 GB.
+ *  it lifted on 2026-10-20.
  *
  *  Exported because it is what lets the `--fan` guard say how much of its own selection the
  *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
@@ -528,10 +526,9 @@ function baseTreeRefusal(dir: string): string | undefined {
 }
 
 /** One tree's pass, run by the driver in a CHILD process, which hands back only its records. The base
- *  side always runs this way (it needs that tree's modules); since 2026-10-20 the head side of a
- *  `--base` comparison does too, so the two passes' heaps are never alive at once. Measured on the
- *  whole corpus at 2e6ba81e: with the head pass in-process, its ~2 GB stayed live in the parent
- *  through the base pass and the sweep peaked at ~4.1 GB; docs/bench-cost.md §5 has both figures. */
+ *  side always runs this way (it needs that tree's modules), and so does the head side of a `--base`
+ *  comparison, so the two passes' heaps are never alive at once: a head pass in the parent keeps
+ *  its ~2 GB live through the base pass (docs/bench-cost.md §5 has the sweep's peak both ways). */
 function collectInChild(
   dir: string,
   sel: SweepSelection,
@@ -555,7 +552,7 @@ function collectInChild(
   } catch (e) {
     return { error: `the ${side} sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
   } finally {
-    // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-base-
+    // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-<side>-
     // <pid>.json` per run is how a scratch directory becomes unreadable.
     rmSync(out, { force: true });
   }
@@ -565,7 +562,7 @@ function collectInChild(
  *  full `bench run`, and is refused beside one. `--tier` alone does not scope it — a whole tier is
  *  most of the price — and `--compare` runs nothing. Nor does `--project` while the synthetic tier
  *  is swept: it narrows the real tier only (`selectsRow`), so `--project pokeemerald` lifts 1,950
- *  of 2,303 rows and peaked at 1.71 GB. Only `--only`, `--asm-dir`, or `--project` with `--tier
+ *  of 2,303 rows. Only `--only`, `--asm-dir`, or `--project` with `--tier
  *  real` scope a sweep — and an EMPTY `--only=` or `--project=` scopes nothing: `collect` passes
  *  each on only when it is non-empty (`sweep-driver.ts`), and `bench run`'s `tierIsFiltered` reads
  *  them the same way, so `--only=` lifts the whole corpus and is whole here too. */
@@ -598,8 +595,8 @@ const DEFAULT_PRICE_ROWS: SweepPriceRows = { artifactIds: () => artifactRowIds()
  *  child are alive at once): the synthetic rows it selects, as their share of the
  *  committed artifact's rows times the whole figure; and, for every real project it lifts a row of,
  *  that project's measured figure (`PEAK_BYTES.sweepRealProject`). A real row is not priced by its
- *  share: one pokeemerald row cost 0.60 GB, and 68 of them (3% of the rows) 1.57 GB against a share
- *  of 0.30 GB, because a real row's cost is its project's context and symbol map. `--base` and
+ *  share: 68 pokeemerald rows (3% of the rows) peaked at 1.55–1.63 GB against a share of 0.07 GB,
+ *  because a real row's cost is its project's context and symbol map. `--base` and
  *  `--repeat` scale the project part by their whole figure over one pass's. `--asm-dir` names no
  *  dataset row and is priced whole; so is a synthetic selection over an artifact that cannot be
  *  read. `--fan` adds one row's enumeration, budgeted as `bench fan` is. docs/bench-cost.md §5 has

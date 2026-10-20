@@ -3,23 +3,20 @@
 // `bench fidelity`, `bench fan`, `bench sweep`, and every vitest run (`vitest.memory-admission.ts`,
 // a globalSetup of both vitest configs).
 //
-// THE INCIDENT. On 2026-10-20 at 13:18 a 7.5 GiB host with 9.5 GiB of swap ran out of both, and the
-// kernel OOM killer took down the user's desktop session along with every job on it. Its table
-// counted 22 node processes holding 12.36 GB of rss+swap: a `bench run --jobs 3` (~8.0 GB), a
-// whole-corpus `bench sweep --base` (~3.7 GB) and an orphaned `bench fan --show` loop (~0.7 GB).
-// Each of the three was a sane command alone; nothing in the harness asked what the others held.
-// `run/lock.ts`'s register refuses a second FULL bench, but only `bench run` read it, and no
-// command read memory at all.
+// WHY. Three heavy jobs, each sane alone, together held 12.36 GB of rss+swap on a 7.5 GiB host with
+// 9.5 GiB of swap, and the kernel OOM killer took the desktop session rather than a job
+// (docs/bench-cost.md §5). `run/lock.ts`'s register only refuses a second FULL bench, and reads no
+// memory.
 //
 // WHAT IS COUNTED AS AVAILABLE. Linux: `MemAvailable` (the kernel's own estimate of what can be
 // allocated without swapping, page cache it can drop included) plus, for each ZRAM device in
 // /proc/swaps, its free space above half of its size — `max(0, Size / 2 - Used)`. Disk swap counts
 // for nothing. Two readings bound the rule:
-//   - Disk swap credited, as a share of `SwapTotal` was at first, makes admission grow with any
-//     swapfile: a 16 GiB host with a 32 GiB disk swapfile admitted a `--jobs 6` run, a 7-worker
-//     vitest, a `bench fan` and a project sweep together, 27 GB of need on 17 GB of RAM. A job
-//     pushed to disk swap stalls the whole host (the rule `default-jobs.ts` already keeps for the
-//     shard count), so the pages a job needs to run are counted in RAM, or not at all.
+//   - Disk swap credited as any share of `SwapTotal` makes admission grow with any swapfile: a
+//     16 GiB host with a 32 GiB disk swapfile would admit a `--jobs 6` run, a 7-worker vitest, a
+//     `bench fan` and a project sweep together, 27 GB of need on 17 GB of RAM. A job pushed to disk
+//     swap stalls the whole host (the rule `default-jobs.ts` keeps for the shard count), so the
+//     pages a job needs to run are counted in RAM, or not at all.
 //   - No swap at all refuses what runs safely: a solo `bench run --jobs 3` needs 3 × SHARD_BYTES =
 //     7.5 GB, and a quiet host here (7.5 GiB of RAM, an 8.1 GB zram device) reads MemAvailable
 //     ~5.5 GB. zram is compressed RAM, so part of a swapped page does come back: with half the
@@ -27,17 +24,17 @@
 //     `--jobs 4` does not, as `default-jobs.ts` would size it. Beside that run at its peak
 //     (measured: MemAvailable 0.6 GB, zram 3.4 GB used) it is 0.6 + 0.62 = 1.22 GB, so neither a
 //     whole-corpus sweep nor a 3-worker vitest gate is admitted. Half the device and not all of it:
-//     all of it reads 5.5 + 8.0 = 13.5 GB quiet, which admits the 13:18 run and `--base` sweep
-//     together (10.1 GB of need); and a compressed page still occupies RAM.
+//     all of it reads 5.5 + 8.0 = 13.5 GB quiet, which admits a `--jobs 3` run and a whole `--base`
+//     sweep together (10.1 GB of need); and a compressed page still occupies RAM.
 // Where /proc/swaps cannot be read, no swap is counted.
 // macOS: `vm_stat`'s free, inactive, purgeable and speculative pages — what the kernel hands to a
 // new allocation without compressing or swapping anything that is in use. `os.freemem()` alone is
-// the free-page count, which on a Mac that is merely in use is a few hundred MB: priced against it,
-// the 3-worker vitest gate and a 1-shard run were both refused (a reading of 1.0 GB), and the door
-// below would have become routine. Counting inactive and purgeable is still an under-read — the
-// compressor gives more — which is the direction to be wrong in; it has not been measured on a real
-// Mac, and where `vm_stat` cannot be read or parsed the reading falls back to `os.freemem()`. No
-// swap: macOS grows its swap on demand, so there is no free-swap figure to discount.
+// the free-page count, a few hundred MB on a Mac that is merely in use: it would refuse a 3-worker
+// vitest gate and a 1-shard run, and make the door below routine. Counting inactive and purgeable
+// is still an under-read — the compressor gives more — which is the direction to be wrong in; it
+// has not been measured on a real Mac, and where `vm_stat` cannot be read or parsed the reading
+// falls back to `os.freemem()`. No swap: macOS grows its swap on demand, so there is no free-swap
+// figure to discount.
 // Everything else: `os.freemem()`, no swap.
 //
 // WHAT IS NEEDED. A per-command peak, as data (`PEAK_BYTES`), each measured one job at a time on an
@@ -47,13 +44,13 @@
 //
 // WHAT IS ALREADY PROMISED. Available memory is read NOW, and a job registered a minute ago is
 // still ramping up: a `bench run --jobs 3` measured 2.80 GB over its process tree 919 s in, against
-// ~8.0 GB at the 13:18 OOM (docs/bench-cost.md §5). So every job this check admits takes a record
+// ~8.0 GB at its peak (docs/bench-cost.md §5). So every job this check admits takes a record
 // in `run/lock.ts`'s register carrying the need it was admitted with — a run or a whole-corpus
-// sweep as before, every other heavy command as a `kind: 'job'` record, a vitest run under vitest's
-// own pid (`vitest.memory-admission.ts`) — and what such a job has not taken yet, its need less what
-// its process tree holds now, is subtracted before anything else is admitted. Every admitted job,
-// and not only runs: a promise only some jobs make protects only the jobs started after them, and
-// whether a gate and a run were admitted together then depended on which started first. The tree
+// sweep as a run or sweep record, every other heavy command as a `kind: 'job'` record, a vitest run
+// under vitest's own pid (`vitest.memory-admission.ts`) — and what such a job has not taken yet, its
+// need less what its process tree holds now, is subtracted before anything else is admitted. Every
+// admitted job, and not only runs: if only some jobs promised, whether a gate and a run are admitted
+// together would depend on which started first. The tree
 // is read from /proc on Linux and from `ps` where there is no /proc (macOS); a live record whose
 // tree cannot be read at all is taken to hold nothing yet, so its whole need is subtracted. A
 // record written before records carried a need (a lane on an older base) promises what that
@@ -75,9 +72,8 @@ import { type BenchLockRecord, type BenchLockState, readBenchLock } from './lock
 
 /** One shard of `bench run`: its 1.3–1.7 GB peak on the largest fans, with headroom for the compile
  *  workers a big fan forks (`eval/asmlift.ts`'s ROW_COMPILE_WORKERS, and on Linux one worker for
- *  every fan of WORKER_FAN or more). At the 13:18 OOM three shards and their workers held ~7.6 GB,
- *  so ~2.5 GB each: this budget held. What failed was the divisor, not the budget (see
- *  `default-jobs.ts`). */
+ *  every fan of WORKER_FAN or more). Three shards and their workers were seen holding ~7.6 GB
+ *  together, ~2.5 GB each (docs/bench-cost.md §5). */
 export const SHARD_BYTES = 2.5e9;
 
 /** The peak of each heavy unit, in bytes of anonymous memory plus swap over the whole process tree,
@@ -95,7 +91,7 @@ export const PEAK_BYTES = {
    *  records, measured 2.49 GB */
   sweepBase: 2.6e9,
   /** a whole-corpus `bench sweep --repeat N`: every later pass in this process while the first
-   *  pass's records stay alive, measured 2.32 GB at `--repeat 2` */
+   *  pass's records stay alive, measured 2.39 GB at `--repeat 2` */
   sweepRepeat: 2.5e9,
   /** the floor of a SCOPED sweep's pass, what its process costs before it lifts much: one
    *  synthetic row measured 0.20 GB, one kleod row 0.23 GB */
@@ -318,8 +314,7 @@ const runPs = (): string => execFileSync('ps', ['-A', '-o', 'pid=,ppid=,rss='], 
 
 /** Bytes of anonymous memory plus swap held by `pid` and every process descended from it, read from
  *  Linux /proc (`VmRSS` + `VmSwap`; VmRSS also counts shared file pages, so this over-reads what a
- *  job holds and under-reads what it has still to take — the lenient side, deliberately, since
- *  the correction is additive to a check that was already sound without it). Where there is no
+ *  job holds and under-reads what it has still to take). Where there is no
  *  /proc (macOS), from `ps`'s resident sizes, which count no swap. Undefined where neither can be
  *  read or the pid is gone. */
 export function processTreeBytes(pid: number, proc: string = '/proc', ps: () => string = runPs): number | undefined {
@@ -524,11 +519,9 @@ export function vitestRequest(workers: number): AdmissionRequest {
     command: `vitest (${workers} worker${workers === 1 ? '' : 's'})`,
     needBytes: workers * PEAK_BYTES.vitestWorker,
     need: `${workers} × ${gb(PEAK_BYTES.vitestWorker)} per worker`,
-    // A one-file run is priced at the workers it is GIVEN, not the file count: a vitest filter is a
-    // substring, and one can name any number of files. So the advice is the worker count, which a
-    // one-file run loses nothing by.
-    // `--maxWorkers` is what vitest reads; `VITEST_MAX_WORKERS` is read by `scripts/gate-vitest.sh`
-    // alone, so naming only it told a direct `vitest run` to change nothing.
+    // Priced at the workers a run is GIVEN, not its file count: a vitest filter is a substring and
+    // can match any number of files. `VITEST_MAX_WORKERS` is read by `scripts/gate-vitest.sh` alone;
+    // vitest itself reads `--maxWorkers`.
     instead:
       'run fewer workers: `--maxWorkers=1` (through `scripts/gate-vitest.sh`, `VITEST_MAX_WORKERS=1`); a run of one test file loses nothing by it',
   };

@@ -2401,15 +2401,15 @@ node processes holding 12.36 GB of rss+swap:
 
 Each of these is sane alone. Only `bench run` read the register, and nothing read memory.
 
-**Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
+**Every heavy command asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
 and every vitest run price their own peak and compare it with what the
 machine can give right now. On Linux that is `MemAvailable` plus, for each zram device in
 `/proc/swaps`, its free space above half its size; disk swap counts for nothing. Counted as a share
-of `SwapTotal`, swap made admission grow with any swapfile: a host with 16 GiB of RAM and a 32 GiB
-disk swapfile admitted 27 GB of jobs at once, and a job pushed to disk stalls the whole host. On
+of `SwapTotal`, swap would make admission grow with any swapfile: a host with 16 GiB of RAM and a
+32 GiB disk swapfile would admit 27 GB of jobs at once, and a job pushed to disk stalls the whole host. On
 this host, quiet, the rule reads 5.5 + 3.96 = 9.45 GB, so a solo `--jobs 3` fits and `--jobs 4`
 does not. On macOS it is `vm_stat`'s free,
-inactive, purgeable and speculative pages (not measured on a real Mac; free pages alone refused a
+inactive, purgeable and speculative pages (not measured on a real Mac; free pages alone would refuse a
 3-worker gate on any Mac in use), falling back to `os.freemem()`, as everywhere else.
 Either way a 0.5 GB reserve is held back. `apps/benchmark/src/run/admission.ts` gives the two
 measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-20 this host read
@@ -2428,11 +2428,10 @@ step of `scripts/gate-vitest.sh`. So it also covers `pnpm test:offline`, CI's ow
 up the tree. It prices the workers vitest will start: `--maxWorkers`, else vitest's own default of
 the CPU count less one, else one for the matching config's single fork. A worker is budgeted at
 1.1 GB: the root suite at 3 workers peaked at 2.71 GB, and the matching suite's one fork at 0.98 GB. Its record is held by
-vitest's own pid. A record held by the gate's shell outlived nothing: a TERM to that shell skipped
-dash's EXIT trap, vitest and its workers kept running as orphans, and the record named a dead pid.
-A refusal starts no test, and the gate exits 2. A
-promise only some jobs made was one-sided: a gate started before a `bench run --jobs 3` was
-invisible to it, while the same pair in the other order was refused. A job record measures no tree
+vitest's own pid, not the gate's shell: a TERM to that shell skips dash's EXIT trap and leaves
+vitest and its workers running under a record that names a dead pid. A refusal starts no test, and
+the gate exits 2. Because every admitted job promises, a gate and a `bench run --jobs 3` are decided
+the same whichever starts first. A job record measures no tree
 and is never whole, so it blocks no edit, no run and no sweep.
 On 2026-10-20 a `bench run --jobs 3` held 2.80 GB of its 7.5 GB budget 919 s in, which is the
 gap a reading of that moment alone would hand to the next job. A command that does not fit is
@@ -2449,8 +2448,8 @@ scoped sweep takes a job record, as above. A sweep record never blocks an edit: 
 lists it but does not count it.
 
 The peaks those checks are priced at were measured one job at a time on this host on
-**2026-10-20**, quiet, at 2e6ba81e's code (the two `--base` rows were measured at the commits they
-name). Each figure is anonymous memory plus swap summed over the job's whole process tree,
+**2026-10-20**, quiet, at 2e6ba81e's code, or at the commits that added this section where a row's
+command behaves differently there (the `--base`, `--repeat`, `--project` and one-row sweeps). Each figure is anonymous memory plus swap summed over the job's whole process tree,
 sampled every 0.5 s in its own user cgroup scope
 (`systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=3G`; the cap means a measurement can
 only OOM itself). `/usr/bin/time -v` alone under-reads a multi-process job: its maximum RSS is
@@ -2458,19 +2457,19 @@ that of the largest single process, shown in the last column.
 
 | command                                                                                                                   | measured   |               peak (tree) |   wall | largest process |
 | ------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------: | -----: | --------------: |
-| `pnpm bench sweep --base origin/main`, head pass in the parent (before 56b68d5f)                                          | 2026-10-20 |                   4.06 GB |  660 s |         2.03 GB |
-| `pnpm bench sweep --base origin/main`, head pass in a child (56b68d5f)                                                    | 2026-10-20 |                   2.49 GB |  358 s |         2.07 GB |
+| `pnpm bench sweep --base origin/main`, head pass in the parent (2e6ba81e)                                                 | 2026-10-20 |                   4.06 GB |  660 s |         2.03 GB |
+| `pnpm bench sweep --base origin/main`, head pass in a child                                                               | 2026-10-20 |                   2.49 GB |  358 s |         2.07 GB |
 | `pnpm bench sweep` (whole corpus, 4,606 records)                                                                          | 2026-10-20 |                   2.07 GB |  187 s |         2.02 GB |
-| `pnpm bench sweep --repeat 2` (whole corpus, 4,606 records × 2; 59205010)                                                 | 2026-10-20 |                   2.39 GB |  363 s |               — |
-| `pnpm bench sweep --project sa3` (1,932 rows: every synthetic row and sa3's 50; 3,864 records; 59205010)                  | 2026-10-20 |                   0.82 GB |   66 s |               — |
-| `pnpm bench sweep --project pokeemerald` (1,950 rows, 3,900 records; 59205010)                                            | 2026-10-20 |                   1.79 GB |   86 s |               — |
+| `pnpm bench sweep --repeat 2` (whole corpus, 4,606 records × 2)                                                           | 2026-10-20 |                   2.39 GB |  363 s |               — |
+| `pnpm bench sweep --project sa3` (1,932 rows: every synthetic row and sa3's 50; 3,864 records)                            | 2026-10-20 |                   0.82 GB |   66 s |               — |
+| `pnpm bench sweep --project pokeemerald` (1,950 rows, 3,900 records)                                                      | 2026-10-20 |                   1.79 GB |   86 s |               — |
 | `pnpm bench sweep --only AthleticChallengeScrollUpdate` (1 row)                                                           | 2026-10-20 |                   0.25 GB |    2 s |         0.23 GB |
-| the same, with the artifact parsed for pricing (ec32a68f) / scanned for ids (863abc59), 0.25 s sampler                    | 2026-10-20 |       0.38–0.43 / 0.23 GB |    2 s |               — |
+| the same, with the artifact parsed for pricing / scanned for ids, 0.25 s sampler                                          | 2026-10-20 |       0.38–0.43 / 0.23 GB |    2 s |               — |
 | `pnpm bench sweep --only armdef` (1 synthetic row)                                                                        | 2026-10-20 |                   0.20 GB |    2 s |               — |
 | `pnpm bench sweep --only CalcCRC16WithTable` (1 pokeemerald row)                                                          | 2026-10-20 |                   0.36 GB |    2 s |               — |
-| `pnpm bench sweep --only bfword --base-dir <the main checkout>` (1 synthetic row, both sides; d3c3664d, 0.05 s sampler)   | 2026-10-20 |             0.41, 0.40 GB |    2 s |               — |
-| `pnpm bench sweep --only bfword` / the same with `--repeat 2` (d3c3664d, 0.05 s sampler)                                  | 2026-10-20 |            0.23 / 0.23 GB |    2 s |               — |
-| `pnpm bench sweep --only CalcCRC16WithTable --tier real --base-dir <the main checkout>` (d3c3664d, 0.05 s sampler)        | 2026-10-20 |                   0.53 GB |    3 s |               — |
+| `pnpm bench sweep --only bfword --base-dir <the main checkout>` (1 synthetic row, both sides; 0.05 s sampler)             | 2026-10-20 |             0.41, 0.40 GB |    2 s |               — |
+| `pnpm bench sweep --only bfword` / the same with `--repeat 2` (0.05 s sampler)                                            | 2026-10-20 |            0.23 / 0.23 GB |    2 s |               — |
+| `pnpm bench sweep --only CalcCRC16WithTable --tier real --base-dir <the main checkout>` (0.05 s sampler)                  | 2026-10-20 |                   0.53 GB |    3 s |               — |
 | `pnpm bench sweep --project pokeemerald --tier real` (68 rows)                                                            | 2026-10-20 |                   1.55 GB |   27 s |               — |
 | the same at origin/main 2e6ba81e                                                                                          | 2026-10-20 |                   1.63 GB |   29 s |               — |
 | the same, `--base-dir` the 2e6ba81e tree                                                                                  | 2026-10-20 |                   1.86 GB |   51 s |               — |
@@ -2491,14 +2490,12 @@ a tenth above the reading below; an unmeasured project at the dearest). A real r
 its share. Its cost is its project's context and symbol map: `--project pokeemerald --tier real` is
 68 rows, 3% of the corpus, and peaked at 1.55-1.63 GB, which the share priced at 0.3 GB. To find
 the synthetic share, the sweep scans the artifact's bytes for its row ids. It does not parse the
-artifact: `JSON.parse` of the 63 MB file had raised every sweep's peak by ~0.2 GB. The first `--project sa3` reading,
-0.56 GB, was not reproduced: the re-measure above gave 0.82 GB for the same 3,864 records. A
+artifact: `JSON.parse` of the 63 MB file raises a one-row sweep's peak by ~0.2 GB. A
 `--repeat` sweep keeps its first pass's records through the next and is budgeted at 2.5 GB. A
 scoped `--base` sweep has a floor of its own, 0.45 GB: its parent and the child lifting one side
 are alive at once, so one row against a base tree peaked at 0.39-0.41 GB, over the 0.3 GB floor a
-single process holds. A one-row `--repeat` stays in one process and under that floor. The
-rows marked 59205010 were measured at that commit with the same sampler, and their largest single
-process was not read. The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
+single process holds. A one-row `--repeat` stays in one process and under that floor. Rows with
+no largest-process figure were measured with a sampler that did not read it. The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
 (86 moved, the ido `opts` nondeterminism, and 4,520 identical), so moving the head pass into a
 child changed the price and not the answer. A shard is budgeted at 2.5 GB
 (`SHARD_BYTES`): the dearest row measured 1.95 GB, and at the OOM three shards and their compile

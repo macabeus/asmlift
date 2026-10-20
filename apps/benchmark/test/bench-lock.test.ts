@@ -371,7 +371,7 @@ describe('a whole-corpus sweep in the register', () => {
     return readBenchLock(reg);
   };
 
-  test('a whole-corpus sweep is refused beside a full bench in ANY worktree — the 13:18 pair', () => {
+  test('a whole-corpus sweep is refused beside a full bench in ANY worktree', () => {
     const msg = concurrentSweepRefusal(live({ command: 'bench run --jobs 3', kind: undefined, root: OTHER_ROOT }));
     expect(msg).toContain('bench sweep REFUSED');
     expect(msg).toContain('a full bench is already running');
@@ -443,9 +443,9 @@ describe('a whole-corpus sweep in the register', () => {
     releaseBenchLock(reg);
   });
 
-  test('a job can be registered under another live pid — the vitest gate’s shell — and reads as held', () => {
+  test('a job can be registered under a pid other than the caller’s, and reads as held while that pid lives', () => {
     const reg = throwawayReg();
-    const path = registerHeavyJob('gate-vitest vitest (3 workers)', 3e9, process.ppid, reg);
+    const path = registerHeavyJob('vitest run (3 workers)', 3e9, process.ppid, reg);
     expect(path).toBe(join(reg, `${process.ppid}.json`));
     const state = readBenchLock(reg);
     expect(state.state === 'held' && state.records[0].pid).toBe(process.ppid);
@@ -600,7 +600,7 @@ describe('the CLI is wired to it', () => {
       expect(switchCase(name), `\`bench ${name}\` does not admit and register`).toContain('admitAndRegister(');
     }
     // every vitest run, gated or not, is checked and recorded by a globalSetup of BOTH configs, under
-    // vitest's own pid: a check in the gate script missed `pnpm test:offline` and every direct run
+    // vitest's own pid: a check in the gate script would miss `pnpm test:offline` and every direct run
     for (const config of ['vitest.config.ts', 'vitest.matching.config.ts']) {
       const text = readFileSync(join(REPO_ROOT, config), 'utf8');
       expect(text, `${config} does not run the memory admission check first`).toMatch(

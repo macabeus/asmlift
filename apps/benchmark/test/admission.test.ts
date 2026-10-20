@@ -124,8 +124,8 @@ describe('readAvailableMemory', () => {
   });
 
   it('does not grow with a disk swapfile: 16 GiB of RAM and 32 GiB of disk swap admit no more than RAM', () => {
-    // The architecture breaker's host: a run at --jobs 6, a 7-worker vitest, a fan and a project
-    // sweep were all admitted together, 27 GB of need on 17.2 GB of RAM.
+    // 16 GiB of RAM and a 32 GiB disk swapfile: crediting disk swap would admit a run at --jobs 6, a
+    // 7-worker vitest, a fan and a project sweep together, 27 GB of need on 17.2 GB of RAM.
     const big = linux(
       'MemTotal: 16777216 kB\nMemAvailable: 13631488 kB\nSwapTotal: 33554432 kB\nSwapFree: 33554432 kB\n',
       'Filename\tType\tSize\tUsed\tPriority\n/swapfile file 33554432 0 -2\n',
@@ -178,7 +178,7 @@ describe('readAvailableMemory', () => {
   });
 
   it('does not refuse the gate on a Mac whose free pages are few but whose inactive pages are many', () => {
-    // free pages alone, 1.0 GB, refused the 3-worker gate and a 1-shard run
+    // free pages alone, 1.0 GB, refuse the 3-worker gate and a 1-shard run
     const mac = { platform: 'darwin', vmStat: () => VM_STAT, freemem: () => 1 * GB, lockState: freeRegister, env: {} };
     expect(admissionRefusal(vitestRequest(3), { ...mac, vmStat: () => 'garbage' })).toContain('REFUSED');
     expect(admissionRefusal(vitestRequest(3), mac)).toBeUndefined();
@@ -220,17 +220,17 @@ describe('admissionVerdict', () => {
 
   it('admits a solo `bench run --jobs 3` on this host quiet, which has run safely for weeks, and not --jobs 4', () => {
     expect(admissionVerdict(runRequest(3), readAvailableMemory(linux(QUIET_MEMINFO)))).toBeUndefined();
-    // what `default-jobs.ts` sizes this host at; swap counted as half of SwapTotal admitted 4
+    // what `default-jobs.ts` sizes this host at; half of SwapTotal credited would admit 4
     expect(admissionVerdict(runRequest(4), readAvailableMemory(linux(QUIET_MEMINFO)))).toContain('REFUSED');
   });
 
-  it('refuses the 13:18 pair: a whole-corpus sweep --base started beside a --jobs 3 run', () => {
-    // The quiet host, less the ~8.0 GB the run held at the OOM, taken out of RAM first and then swap.
+  it('refuses a whole-corpus sweep --base started beside a --jobs 3 run at its peak', () => {
+    // The quiet host, less the ~8.0 GB a --jobs 3 run was seen holding, out of RAM first, then swap.
     const runHeld = 8.0 * GB;
     const ram = 5368340 * kB;
     const swap = 9899436 * kB - (runHeld - ram);
     const beside = readAvailableMemory(linux(meminfo(0, Math.floor(swap / kB))));
-    // as it was then, both passes live at once, and as it is now
+    // both passes live in one process at once, and one pass beside both sides' records
     const then = { command: 'bench sweep', needBytes: 2 * PEAK_BYTES.sweepPass, need: '2 passes' };
     const now = { command: 'bench sweep', needBytes: PEAK_BYTES.sweepBase, need: 'one pass + records' };
     expect(admissionVerdict(then, beside)).toContain('bench sweep REFUSED');
@@ -238,7 +238,7 @@ describe('admissionVerdict', () => {
   });
 
   it('refuses a 3-worker vitest gate beside a --jobs 3 run at its peak, as measured on this host', () => {
-    // 2026-10-20, MEMGUARD's own gate bench mid-run: MemAvailable 0.6 GB, SwapFree 6.8 GB.
+    // 2026-10-20, a --jobs 3 bench mid-run: MemAvailable 0.6 GB, SwapFree 6.8 GB.
     const peak = readAvailableMemory(linux(meminfo(Math.round((0.6 * GB) / kB), Math.round((6.8 * GB) / kB))));
     expect(admissionVerdict(vitestRequest(3), peak)).toContain('REFUSED');
   });
@@ -408,7 +408,7 @@ describe('what registered jobs have still to take', () => {
   });
 
   it('promises a live record’s whole need when its tree cannot be read, and nothing for a free register', () => {
-    // a Mac whose `ps` failed too: before, every promise there was dropped
+    // a Mac whose `ps` failed too: the whole need is still promised
     expect(unspentBudgets(held(record(1, 7.5 * GB)), () => undefined)).toEqual({ bytes: 7.5 * GB, jobs: 1 });
     expect(unspentBudgets(freeRegister(), () => 0)).toEqual({ bytes: 0, jobs: 0 });
   });
@@ -422,7 +422,7 @@ describe('what registered jobs have still to take', () => {
     expect(legacyNeedBytes({ command: 'bench run' }, host)).toBe(3 * SHARD_BYTES);
     expect(legacyNeedBytes({ command: 'bench run' }, { cpus: 2, totalmem: 64e9 })).toBe(2 * SHARD_BYTES);
     expect(legacyNeedBytes({ command: 'bench run', kind: 'sweep' }, host)).toBe(PEAK_BYTES.sweepBase);
-    // an older full run ramping up, as the 13:18 incident's mixed-base lanes ran: it promised 0
+    // a full run from an older base, ramping up: its record carries no need
     const old = record(1);
     expect(unspentBudgets(held(old), () => 2.8 * GB).bytes).toBe(legacyNeedBytes(old) - 2.8 * GB);
   });
@@ -437,10 +437,9 @@ describe('what registered jobs have still to take', () => {
     expect(admissionRefusal(vitestRequest(3), ramping)).toContain('REFUSED');
   });
 
-  it('decides a gate and a run the same in either order, now that the gate promises its need too', () => {
-    // The breaker's probe: MemAvailable 5.1 GB, SwapFree 10.1 of 10.2 GB, the first job's tree
-    // holding 0.4 GB. Before the gate took a record, gate-then-run was ADMITTED and run-then-gate
-    // REFUSED.
+  it('decides a gate and a run the same in either order, since the gate promises its need too', () => {
+    // MemAvailable 5.1 GB, SwapFree 10.1 of 10.2 GB, the first job's tree holding 0.4 GB: refused in
+    // either order, since the gate promises through its record as the run does.
     const deps = { ...linux(meminfo(Math.round((5.1 * GB) / kB), Math.round((10.1 * GB) / kB))), env: {} };
     const gate = vitestRequest(3);
     const gateJob: BenchLockRecord = {
@@ -457,8 +456,8 @@ describe('what registered jobs have still to take', () => {
   });
 
   it('decides them the same on a Mac, where no /proc can say what a job holds', () => {
-    // The breaker's probe: vm_stat reading 9.0 GB, and the first job's tree unreadable. Before, an
-    // unreadable tree promised nothing, and both orders were ADMITTED: 10.5 GB of need on 9.0 GB.
+    // vm_stat reading 9.0 GB, and the first job's tree unreadable: an unreadable tree promises its
+    // whole need, so 10.5 GB of need on 9.0 GB is refused in either order.
     const pages = Math.round((9.0 * GB) / 16384);
     const vmStat = `Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: ${pages}.\n`;
     const mac = { platform: 'darwin', vmStat: () => vmStat, freemem: () => 0, env: {}, held: () => undefined };

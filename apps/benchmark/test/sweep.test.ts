@@ -824,7 +824,7 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(sweepIsWholeCorpus(o({ tiers: ['real'] }))).toBe(true);
     expect(sweepIsWholeCorpus(o({ only: 'add' }))).toBe(false);
     // `--project` lifts every synthetic row too unless the synthetic tier is left out: `--project
-    // pokeemerald` lifted 1,950 of 2,303 rows and peaked at 1.71 GB (docs/bench-cost.md §5)
+    // pokeemerald` lifts 1,950 of 2,303 rows (docs/bench-cost.md §5)
     expect(sweepIsWholeCorpus(o({ project: 'kleod' }))).toBe(true);
     expect(sweepIsWholeCorpus(o({ tiers: ['real'], project: 'kleod' }))).toBe(false);
     expect(sweepIsWholeCorpus(o({ asmDir: '/x' }))).toBe(false);
@@ -832,7 +832,7 @@ describe('what a sweep asks the memory admission check for', () => {
   });
 
   it('reads an EMPTY --only= or --project= as no filter, as collect() and bench run do', () => {
-    // `--only=` lifted the whole corpus while it took only a job record and skipped the register
+    // an empty `--only=` lifts the whole corpus, so it takes the register like any whole sweep
     expect(sweepIsWholeCorpus(o({ only: '' }))).toBe(true);
     expect(sweepIsWholeCorpus(o({ only: '', base: 'origin/main' }))).toBe(true);
     expect(sweepIsWholeCorpus(o({ tiers: ['real'], project: '' }))).toBe(true);
@@ -842,7 +842,7 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(selectsRow(o({ tiers: ['real'], project: '' }), 'pokeemerald:Baz:agbcc')).toBe(true);
   });
 
-  it('prices ONE pass, and with --base one pass plus the records: the two passes no longer share a process', () => {
+  it('prices ONE pass, and with --base one pass plus the records: the two passes never share a process', () => {
     expect(sweepRequest(o(), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass);
     expect(sweepRequest(o({ base: 'origin/main' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
     expect(sweepRequest(o({ baseDir: '/x' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
@@ -859,7 +859,7 @@ describe('what a sweep asks the memory admission check for', () => {
   });
 
   it('prices a real project at its measured figure, not at its share of the rows', () => {
-    // the breakers' case: 68 pokeemerald rows of 2,303 were priced at the 0.3 GB floor and peaked at 1.57-1.63 GB
+    // 68 pokeemerald rows of 2,303 peaked at 1.55-1.63 GB, far above their share
     expect(PEAK_BYTES.sweepRealProject.pokeemerald).toBeGreaterThanOrEqual(1.63e9);
     expect(sweepRequest(o({ tiers: ['real'], project: 'pokeemerald' }), rows)!.needBytes).toBe(project('pokeemerald'));
     expect(sweepRequest(o({ tiers: ['real'], project: 'kleod' }), rows)!.needBytes).toBe(

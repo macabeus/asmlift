@@ -670,8 +670,7 @@ switch (command) {
       console.error(usage);
       process.exit(2);
     }
-    // One row ranked (or enumerated) in one process, which is what a shard does with it — and a
-    // loop of these, orphaned, was the third job in the 2026-10-20 13:18 OOM.
+    // one row ranked (or enumerated) in one process, which is what a shard does with it
     admitAndRegister(
       {
         command: 'bench fan',

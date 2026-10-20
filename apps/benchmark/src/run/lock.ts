@@ -30,18 +30,16 @@
 //
 // A WHOLE-CORPUS `bench sweep` TAKES A RECORD TOO, as `kind: 'sweep'`. It writes no tier file and
 // reads no provenance, so it never blocks an edit or a scoped run; what it shares with a full
-// bench is its size: one lift pass over the corpus held ~2 GB, and a `--base` sweep beside a
-// `--jobs 3` run was two of the three jobs in the 2026-10-20 13:18 OOM. So it is refused beside a
-// whole-tier run, and a whole-tier run beside it — the same whole-against-whole rule, nothing else.
+// bench is its size: one lift pass over the corpus holds ~2 GB, and beside a `--jobs 3` run the two
+// can exhaust memory and swap (docs/bench-cost.md §5). So it is refused beside a whole-tier run,
+// and a whole-tier run beside it — the same whole-against-whole rule, nothing else.
 //
 // EVERY OTHER ADMITTED HEAVY JOB TAKES A RECORD TOO, as `kind: 'job'`: a scoped sweep, `bench fan`,
 // `bench fidelity`, and every vitest run (`vitest.memory-admission.ts`, under vitest's own pid).
 // Such a record is a MEMORY PROMISE and nothing else: it carries the need `admission.ts` admitted
-// it with, so a heavy job started after it subtracts what it has not taken yet. Without it the
-// check was one-sided — a gate started first was invisible to a `bench run --jobs 3` started
-// second, while the reverse order was refused, so which pair was admitted depended on who started
-// first. A job record measures no tree, writes no tier and is never whole, so it blocks no edit,
-// no run and no sweep.
+// it with, so a heavy job started after it subtracts what it has not taken yet — whichever of two
+// jobs starts first, the second sees the first. A job record measures no tree, writes no tier and
+// is never whole, so it blocks no edit, no run and no sweep.
 //
 // ADVISORY: nothing here waits, queues or retries, and `--no-lock` walks past it (see
 // `concurrentRunRefusal`). The register is a name for a fact, not a mutex.
@@ -102,11 +100,12 @@ export interface BenchLockRecord {
    *  "is it slow", is what makes two runs a house-rule violation rather than a dev loop. For a
    *  sweep: does it lift the whole corpus (`sweep.ts`'s `sweepIsWholeCorpus`)? */
   whole: boolean;
-  /** `bench run` (absent in every record written before sweeps took one), or a whole-corpus
-   *  `bench sweep`, which writes no tier file and is measured by nothing. */
+  /** `bench run` (or absent), a whole-corpus `bench sweep`, or any other admitted heavy job (see the
+   *  header); a sweep or a job writes no tier file and is measured by nothing. */
   kind?: 'run' | 'sweep' | 'job';
   /** The peak memory this job was admitted with (`admission.ts`), so a job admitted after it can
-   *  subtract what it has not taken yet. Absent in older records, which promise nothing. */
+   *  subtract what it has not taken yet. Absent in older records, which `admission.ts`'s
+   *  `legacyNeedBytes` prices. */
   needBytes?: number;
 }
 
