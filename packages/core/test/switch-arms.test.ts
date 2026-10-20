@@ -1695,6 +1695,18 @@ test('a switch whose merge is the exit of a loop top-tested ahead of it goes to 
   expect(count(out, 'r(')).toBe(1);
 });
 
+test('a falling arm whose sibling leaves for an inner loop exit that is not the merge goes to if-recovery', () => {
+  // `if (gC == 7) return 5;` above the switch makes the inner loop's bottom the merge, and case 999's
+  // `goto out` leaves for an exit that runs on to the OUTER loop's latch. No arm can spell that
+  // edge (a `break;` would leave only the switch), so the switch the falling `case 3` would admit
+  // is declined, and if-recovery spells the `goto` as the inner loop's `break`.
+  const out = ifBreakLift('innerexit', { returns: 's32' });
+  expect(out).toContain('s32 innerexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 5;');
+  expect(count(out, 'p()')).toBe(1);
+});
+
 test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
   // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
   // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`

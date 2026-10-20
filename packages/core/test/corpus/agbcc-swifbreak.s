@@ -1217,3 +1217,105 @@ topexit:
 	bx	r1
 .Lfe16:
 	.size	 topexit,.Lfe16-topexit
+	.align	2, 0
+	.globl	innerexit
+	.type	 innerexit,function
+	.thumb_func
+innerexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r9
+	mov	r6, r8
+	push	{r6, r7}
+	add	sp, sp, #-0x4
+	mov	r9, r0
+	mov	r8, r1
+	add	r7, r2, #0
+	add	r5, r7, #0x1
+	mov	r6, r8
+	ldr	r1, .L337
+	ldr	r0, [r1]
+	cmp	r0, #0x3
+	beq	.L315	@cond_branch
+	add	r2, r1, #0
+.L316:
+	ldr	r0, [r2]
+	add	r0, r0, #0x1
+	str	r0, [r2]
+	mov	r4, r8
+.L317:
+	ldr	r0, .L337+0x4
+	ldr	r0, [r0]
+	cmp	r0, #0x7
+	bne	.L320	@cond_branch
+	mov	r0, #0x5
+	b	.L336
+.L338:
+	.align	2, 0
+.L337:
+	.word	gB
+	.word	gC
+.L320:
+	mov	r3, r9
+	add	r1, r3, r4
+	cmp	r1, #0x1f
+	beq	.L322	@cond_branch
+	cmp	r1, #0x1f
+	bgt	.L331	@cond_branch
+	cmp	r1, #0x3
+	beq	.L326	@cond_branch
+	b	.L319
+.L331:
+	ldr	r0, .L339
+	cmp	r1, r0
+	beq	.L328	@cond_branch
+	b	.L319
+.L340:
+	.align	2, 0
+.L339:
+	.word	0x3e7
+.L322:
+	cmp	r5, r0
+	bne	.L324	@cond_branch
+	b	.L319
+.L326:
+	cmp	r7, #0
+	bne	.L319	@cond_branch
+	str	r2, [sp]
+	bl	p
+	add	r5, r0, r6
+	ldr	r2, [sp]
+.L328:
+	cmp	r7, #0
+	bne	.L324	@cond_branch
+	add	r6, r5, #0
+.L319:
+	add	r4, r4, #0x1
+	cmp	r4, #0x2
+	ble	.L317	@cond_branch
+.L324:
+	ldr	r0, [r2]
+	cmp	r0, #0x5
+	ble	.L314	@cond_branch
+	mov	r0, #0x1
+	bl	r
+	mov	r0, #0x2
+	b	.L336
+.L314:
+	cmp	r0, #0x3
+	bne	.L316	@cond_branch
+.L315:
+	add	r0, r5, #0
+	bl	r
+	lsl	r0, r6, #0x1
+	add	r0, r0, r6
+	add	r0, r5, r0
+.L336:
+	add	sp, sp, #0x4
+	pop	{r3, r4}
+	mov	r8, r3
+	mov	r9, r4
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe17:
+	.size	 innerexit,.Lfe17-innerexit

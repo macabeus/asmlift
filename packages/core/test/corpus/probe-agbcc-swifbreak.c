@@ -19,7 +19,10 @@
  * loop for an exit that runs on to an OUTER loop's latch: the code after the switch cannot be that
  * exit region, so the tree goes to if-recovery. `topexit` leaves its loop for the same exit from a
  * test ahead of the switch, which makes the loop top-tested on that test: the exit is then the
- * loop's own, not the switch's end, and the tree goes to if-recovery.
+ * loop's own, not the switch's end, and the tree goes to if-recovery. `innerexit` returns from above
+ * its switch, so the merge is the inner loop's bottom, while a sibling of its falling arm leaves for
+ * an exit that runs on to an OUTER loop's latch: no arm can spell that edge, so the tree goes to
+ * if-recovery.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -313,4 +316,27 @@ out:
     u = u + 1;
     r(t);
     return t + u;
+}
+
+s32 innerexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u;
+    t = b + 1; u = a; k = 0;
+    while (gB != 3) {
+        gB = gB + 1;
+        k = a;
+        do {
+            if (gC == 7) return 5;
+            switch (i + k) {
+            case 31: if (t != gC) goto out;
+            default: continue;
+            case 3: if (b != 0) continue; t = p() + u;
+            case 999: if (b != 0) goto out; u = t - b; break;
+            }
+        } while (++k < 3);
+out:
+        if (gB > 5) { r(1); return 2; }
+    }
+    r(t);
+    return t + u * 3;
 }

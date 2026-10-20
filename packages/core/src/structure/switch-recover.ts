@@ -510,6 +510,25 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return loop !== null && loop.exit !== null && succ.includes(loop.exit) && !succ.includes(loop.header);
   };
 
+  // Does a block of some arm edge to `target`? An arm's region is what `analyzeArmExit` walks: the
+  // blocks the dispatch `b` dominates, reached from the arm's entry without stepping through
+  // `merge`.
+  const armsReach = (entries: Iterable<Block>, b: Block, merge: Block | null, target: Block): boolean => {
+    const seen = new Set<Block>(entries);
+    for (const q = [...seen]; q.length;) {
+      for (const s of successorsOf(q.pop()!)) {
+        if (s === target) {
+          return true;
+        }
+        if (s !== merge && !seen.has(s) && dom.get(s)!.has(b)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return false;
+  };
+
   // Can a path from `from` reach `to` without passing `through`? False when `to` is null (the end
   // of the function) or is `through` itself.
   const reachesAvoiding = (from: Block, to: Block | null, through: Block | null): boolean => {
@@ -949,6 +968,26 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
       !(merge === enclosingLoop()?.exit && exitMergeSpells(b, merge)) &&
       reachesAvoiding(b, stop, merge)
+    ) {
+      return null;
+    }
+    // AN ARM'S EDGE TO THE LOOP'S EXIT, WHEN THAT EXIT IS NOT THE MERGE. A switch admitted on a
+    // falling arm's `break;` hands every arm to `structureArm`, where an edge to the enclosing loop's
+    // exit can be spelled only as the switch's own end or as a copied returning tail; any other is
+    // refused there, loud, for the whole function (`structure.ts`, "leaves its switch for a loop
+    // exit"). With an early `return` above the dispatch, the merge is the loop bottom, and a sibling
+    // arm's `goto out` to an exit that runs on to an OUTER loop's latch is such an edge. Declined
+    // here to if-recovery, which spells that `goto` as the inner loop's `break`. The exemption is
+    // the exit that is itself a `ret`; the structurer's other one, an early-return arm owning the
+    // edge, is not asked here, which costs only the `switch` spelling.
+    const loop = enclosingLoop();
+    if (
+      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
+      loop !== null &&
+      loop.exit !== null &&
+      loop.exit !== merge &&
+      loop.exit.ops[loop.exit.ops.length - 1]?.opcode !== 'ret' &&
+      armsReach(siblings, b, merge, loop.exit)
     ) {
       return null;
     }
