@@ -977,13 +977,14 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
-    // `cmn_ult:agbcc` moves here from `non-compare-flags` once the artifact is regenerated.
-    'cmn-carry',
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',
     'fp-cond-branch',
     'loop-exit-values',
+    // Emptied by the `cmn` lift: `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under
+    // `cmn-carry` now. What is left (`tst`, arithmetic flags, a call) is hand-written asm.
+    'non-compare-flags',
     'pool-word-shape',
     'tu-scoped-name',
     'unread-data-directive',
