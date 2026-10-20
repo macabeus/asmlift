@@ -50,6 +50,7 @@ const emit = (fn: Parameters<typeof raiseRecovered>[0]) => {
     structureChecked(fn, {
       ...structureOptionsFor(ARMV4T_AGBCC, false),
       spellSwitchFallthrough: cBackend.spellsSwitchFallthrough,
+      spellSwitchBreak: cBackend.spellsSwitchBreak,
     }),
   );
 };

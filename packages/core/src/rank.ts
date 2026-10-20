@@ -525,6 +525,7 @@ export function enumerateCandidates(
     // be handed a tree carrying one, because its refusal costs the whole candidate (and, when
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+    spellSwitchBreak: backend.spellsSwitchBreak,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
   };

@@ -308,6 +308,9 @@ export const pascalBackend: LanguageBackend = {
   // spells as plain if-nesting, which Pascal prints, so the choice is between a decompiled
   // function and a stub.
   spellsSwitchFallthrough: false,
+  // Nor has Pascal a `break`, so recovery must not mint a switch's mid-arm one either: a closed arm
+  // that leaves early spells as nested `if`s that copy the arm's tail into each path.
+  spellsSwitchBreak: false,
   emit(fn0: SFn): string {
     // The declaration list is put into the target's own frame order HERE, as the C family does it
     // in its shared assembler — owned by `emit`, never by a `.emit(` call site (l3/slotorder.ts).

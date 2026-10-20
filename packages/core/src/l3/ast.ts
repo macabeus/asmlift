@@ -571,6 +571,13 @@ export interface LanguageBackend {
    *  cannot print it turns a whole function that used to decompile into a loud stub. The
    *  structurer reads it through `StructureOptions.spellSwitchFallthrough`. */
   readonly spellsSwitchFallthrough: boolean;
+  /** Can this language spell a `break` that leaves a `switch` arm before its end
+   *  (`{ k: 'break', ofSwitch: true }`)? C and C++ can; Pascal has no `break` at all, and its
+   *  backend loud-fails the node. Asked for the same reason as `spellsSwitchFallthrough`: a
+   *  closed arm with a mid-arm exit (`case 10: if (a) { if (b) break; g(1); } h(2); break;`) also
+   *  spells without one, by copying the code the arm meets at into each path, which Pascal prints.
+   *  The structurer reads it through `StructureOptions.spellSwitchBreak`. */
+  readonly spellsSwitchBreak: boolean;
   emit(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm

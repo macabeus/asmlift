@@ -186,6 +186,7 @@ function probedSource(
     const sfn = structureChecked(clone, {
       ...structureOptionsFor(target, returnsVoid, prototypes),
       spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+      spellSwitchBreak: backend.spellsSwitchBreak,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
       ...(contextGlobals ? { contextGlobals } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),

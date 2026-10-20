@@ -335,6 +335,7 @@ function traceTower(
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, returnsVoid, prototypes),
     spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
+    spellSwitchBreak: (opts.backend ?? cBackend).spellsSwitchBreak,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),

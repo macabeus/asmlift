@@ -1641,6 +1641,13 @@ export interface StructureOptions extends ArithCompilerFacts {
   // that a fall-through switch has a SECOND, behaviourally identical recovery. Regime A declines
   // to if-recovery when it is false; Regime B, having no fallback, fails loud. Default true.
   spellSwitchFallthrough?: boolean;
+  // Does the TARGET LANGUAGE spell a `break` that leaves a `switch` arm before its end? Set from
+  // the caller's LanguageBackend (`spellsSwitchBreak`), for the same reason as the line above. When
+  // false, a CLOSED arm gets no region (`structureArm`), so `switchBreakAt` never mints the
+  // statement and the arm structures to the CFG's joins, copying the tail its early exit skips into
+  // each path. A FALLING arm needs no gate of its own: a language without a mid-arm `break` has no
+  // fall-through either (Pascal), and `spellSwitchFallthrough` keeps those out. Default true.
+  spellSwitchBreak?: boolean;
   // Which way this compiler hands out frame slots against DECLARATION RANK: `ascending` = the
   // earlier-declared spilled local takes the LOWER `[sp,#k]`. A compiler behavior declared
   // in TargetDescription.compilerBehaviors, carried to the backend on `SFn.slotOrder` and applied
@@ -2362,6 +2369,7 @@ export function structure(
     switchArmsFollowLayout = false,
     switchRequiresFrontLoadedTests = false,
     spellSwitchFallthrough = true,
+    spellSwitchBreak = true,
     spillSlotOrder,
     declaredArgs,
     declaredReturns,
@@ -5822,7 +5830,12 @@ export function structure(
   // and nothing here has to be rebuilt against a naming that moves underneath it.
   // One switch arm, from `entry` to `stop`, under its frame (`switchFrames`).
   const structureArm = (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined): Stmt[] => {
-    const region = exit !== undefined && exit.kind !== 'unstructurable' ? (exit.region ?? null) : null;
+    // A backend with no mid-arm `break` (`spellSwitchBreak`) gets no region for a closed arm, and
+    // so no `break;` from `switchBreakAt` and no arm-local join: the CFG's, as before arms had one.
+    const region =
+      exit === undefined || exit.kind === 'unstructurable' || (exit.kind === 'break' && !spellSwitchBreak)
+        ? null
+        : (exit.region ?? null);
     switchFrames.push({ merge, loop: loopCtx, region, fallsTo: exit?.kind === 'fallthrough' ? exit.to : null });
     try {
       return structureRegion(entry, stop);

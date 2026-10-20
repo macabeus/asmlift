@@ -13,6 +13,7 @@ export { cComment }; // re-export: the shared spelling lives in cfamily.ts
 export const cBackend: LanguageBackend = {
   id: 'c',
   spellsSwitchFallthrough: true,
+  spellsSwitchBreak: true,
   emit(fn: SFn): string {
     // The SAME declarator placement the local list and the struct-field printer use, so one
     // function cannot spell the `*` on the type in its signature and on the declarator in its

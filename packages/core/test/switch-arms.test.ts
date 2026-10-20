@@ -1696,6 +1696,26 @@ test('a switch whose merge is its loop exit only through a shared epilogue goes 
   expect(out).not.toContain('switch (');
 });
 
+test('a closed arm with a mid-arm exit prints for Pascal, with no `break` it cannot say', () => {
+  // Pascal has no `break` (`spellsSwitchBreak`), so the arm gets no region and copies `h(2)` into
+  // both paths. The `if` whose `then` is a lone `if` takes begin/end, or Pascal would bind the
+  // `else` to the inner one; and the `case` takes an empty `otherwise`, since a C `switch` with no
+  // `default` runs on past an unlisted value where IDO Pascal raises `caseerror`.
+  const out = decompile('closedbreak', ifBreakAsm(), ARMV4T_AGBCC, {
+    prototypes: {
+      closedbreak: { returns: 's32' },
+      ...Object.fromEntries(['f', 'g', 'h', 'r'].map((n) => [n, { params: 1, returnsVoid: true }])),
+    },
+    backend: pascalBackend,
+  }).source;
+  expect(out).toMatch(
+    /1:\s*\n\s*if \(a1 <> 0\) then\s*\n\s*begin\s*\n\s*if \(a2 = 0\) then\s*\n\s*begin\s*\n\s*g\(1\);\s*\n\s*h\(2\);\s*\n\s*end\s*\n\s*end\s*\n\s*else\s*\n\s*h\(2\);/,
+  );
+  expect(out).toMatch(/otherwise\s*\n\s*end;/);
+  // CONTROL: C keeps the mid-arm `break;`.
+  expect(ifBreakLift('closedbreak', { returns: 's32' })).toContain('if (a2 != 0) break;');
+});
+
 test('an `if` whose `then` is a lone `if` takes begin/end before its `else`, and a `case` always has `otherwise`', () => {
   // Bare, Pascal would bind the `else` to the inner `if` (the dangling else); and a `case` with no
   // `otherwise` raises `caseerror` on an unlisted value, where C's `switch` runs on past it.
