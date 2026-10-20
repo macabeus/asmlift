@@ -16,7 +16,7 @@
 // store, a shift, a mask — reads the local's bytes, and the member recovery spells it as the
 // member it is: `gV = s.h;`. A 4-byte read of the local (a `{u32}`'s member, or agbcc's `{u16}`
 // read whole by an add, `gH = *(s32 *)&s + gH;`) is spelled `*(s32 *)&s`, the frame-member spelling
-// on every toolchain (structure.ts `spellsAccessType`): the value is right.
+// on every toolchain (ir/types.ts `spellsAccessType`): the value is right.
 //
 // WHAT THE IMAGE LEAVES OUT IS NO VALUE. A struct of one or two bytes — mwcc's; agbcc rounds every
 // struct to four — fills only that much of the register, and the rest holds whatever the callee

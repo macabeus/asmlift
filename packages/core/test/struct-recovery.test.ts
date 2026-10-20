@@ -16,7 +16,10 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
+import { type IrType, T, isCastView } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import type { Expr } from '../src/l3/ast';
+import { exprCType } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
@@ -431,6 +434,47 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     expect(c).toContain('v1 = *(s16 *)a0;');
     expect(c).toContain('v2 = ((s8 *)a0)[1];');
     expect(c).toContain('a0->field_0 = a1;');
+  });
+
+  // The type walk reads a cast view as the scalar it is. A recovered struct declares no size, so
+  // without the cast-view rule the dot-form exception (an index on a struct pointer is an array
+  // element) typed `((u8 *)a0)[1]` as the struct, and every consumer asking "is this an int" — the
+  // declaration narrowing, the pointer-cell rules, the store-slot cast — was told no.
+  test('a cast view of a castViews field types as its scalar, a struct element still as the struct', () => {
+    const st = T.struct('Struct0', [
+      { off: 0, type: T.u(16), name: 'field_0', castViews: true },
+      { off: 2, type: T.u(16), name: 'field_2' },
+    ]);
+    const ct = (e: Expr): unknown => exprCType(e, (n) => (n === 'a0' ? T.ptr(st) : undefined));
+    const at = (idx: number, width: number, signed: boolean): Expr => ({
+      k: 'index',
+      base: { k: 'var', name: 'a0' },
+      idx: { k: 'const', value: idx },
+      width,
+      signed,
+    });
+    expect(ct(at(1, 1, false))).toEqual(T.u(8));
+    expect(ct(at(1, 1, true))).toEqual(T.s(8));
+    expect(ct(at(0, 2, true))).toEqual(T.s(16));
+    expect(ct(at(0, 4, true))).toEqual(st);
+  });
+
+  // "An access names the member" is ONE rule (ir/types.ts `spellsAccessType`), asked by the
+  // frame-object and pointee member spellings and by `isCastView` alike. A word access renders s32
+  // whatever its load said, so a word field declared u32 is named by no load — its loads are casts,
+  // as they are a frame struct's — and one declared s32 by both; a store is the field either way.
+  test('isCastView names a word field by the same rule as every other member spelling', () => {
+    const st = (signed: boolean): Extract<IrType, { kind: 'struct' }> => ({
+      kind: 'struct',
+      name: 'Struct0',
+      fields: [{ off: 0, type: T.int(32, signed), name: 'field_0', castViews: true }],
+    });
+    expect(isCastView(st(false), 0, 4, false, false)).toBe(true);
+    expect(isCastView(st(false), 0, 4, true, false)).toBe(true);
+    expect(isCastView(st(false), 0, 4, false, true)).toBe(false);
+    expect(isCastView(st(true), 0, 4, false, false)).toBe(false);
+    expect(isCastView(st(true), 0, 4, true, false)).toBe(false);
+    expect(isCastView(st(true), 2, 2, false, false)).toBe(true);
   });
 
   // A view that is neither a byte nor the field's own width is not alias-transparent to it: a `u16`
