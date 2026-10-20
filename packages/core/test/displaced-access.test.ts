@@ -463,6 +463,22 @@ describe('a cell read with both extensions on agbcc', () => {
     expect(c).toContain('gU = a1->field_0.uhalf;');
     expect(c).toContain('a1->field_0.shalf + a1->field_4');
   });
+
+  // The same function with a store to the cell first (`b->x = v; g();` ahead of the reads): the
+  // store is the access kept for the offset when the `ldrh` arrives, and the cell is still read
+  // both ways. Typed by the `ldrsh` alone, `gU` would be recompiled as an `ldrsh`.
+  test('…also when a store to the cell comes before both reads', () => {
+    const asm =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tadd\tr4, r1, #0\n\tstrh\tr2, [r4]\n\tbl\tg\n' +
+      '\tldr\tr1, .L3\n\tldrh\tr0, [r4]\n\tstr\tr0, [r1]\n\tldr\tr2, .L3+0x4\n\tmov\tr1, #0x0\n' +
+      '\tldrsh\tr0, [r4, r1]\n\tldr\tr1, [r4, #0x4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r2]\n\tldrb\tr0, [r5]\n' +
+      '\tldrh\tr1, [r5]\n\tadd\tr0, r0, r1\n\tldrh\tr5, [r5, #0x2]\n\tadd\tr0, r0, r5\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgU\n\t.word\tgOut\n';
+    const c = lift('f', asm, 'agbcc', false);
+    expect(c).toContain('struct Struct0 { union { u16 uhalf; s16 shalf; } field_0; s32 field_4; };');
+    expect(c).toContain('gU = a1->field_0.uhalf;');
+    expect(c).toContain('a1->field_0.shalf + a1->field_4');
+  });
 });
 
 describe('/far-cast loses a score tie to the member spelling', () => {

@@ -418,6 +418,39 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     }
   });
 
+  // The ORDER of the accesses does not decide it: an unsigned store first, then the `ldrh`, then
+  // the `ldrsh` (`b->x = v; g(); gU = (u16)b->x; gOut = b->x + b->y;`) is the same cell read both
+  // ways, and is the same union. Asking only the access kept for the offset missed it, since the
+  // store is kept over the unsigned load, and typed the cell by the signed load alone.
+  test('a cell stored first and then loaded both ways is a union too, whatever the order', () => {
+    for (const target of [ARMV4T_AGBCC, MIPS_IDO]) {
+      for (const [first, second] of [
+        ['false', 'true'],
+        ['true', 'false'],
+      ]) {
+        const c = emit(
+          `fn storefirst {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=2}
+  %2: unk32 = load %0 {off=0, width=2, signed=${first}}
+  %3: unk32 = load %0 {off=0, width=2, signed=${second}}
+  %4: unk32 = load %0 {off=4, width=4, signed=true}
+  %5: unk32 = add %3, %4
+  %6: unk32 = add %5, %2
+  ret %6
+}
+`,
+          false,
+          undefined,
+          target,
+        );
+        expect(c).toContain('struct Struct0 { union { u16 uhalf; s16 shalf; } field_0; s32 field_4; };');
+        expect(c).toContain('a0->field_0.uhalf');
+        expect(c).toContain('a0->field_0.shalf');
+      }
+    }
+  });
+
   test('…and a word loaded with both signs stays one field, since a word has no extension', () => {
     const c = emit(`fn wordalone {
 ^bb0(%0: unk32):

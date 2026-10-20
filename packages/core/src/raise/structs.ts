@@ -195,8 +195,16 @@ function isArray(accesses: Access[]): boolean {
 function buildStruct(name: string, accesses: Access[], extensionViews = true): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();
+  // The extension of every LOAD seen at an offset, kept apart from `byOff`: the access `byOff`
+  // keeps can be a store (it is kept over an unsigned load), so asking it alone misses a cell read
+  // both ways after a store, and the verdict would hang on the order of the accesses.
+  const loadedSigned = new Map<number, boolean>();
   for (const a of accesses) {
     const prev = byOff.get(a.off);
+    const seen = a.isLoad ? loadedSigned.get(a.off) : undefined;
+    if (a.isLoad && seen === undefined) {
+      loadedSigned.set(a.off, a.signed);
+    }
     if (!prev) {
       byOff.set(a.off, a);
       continue;
@@ -213,7 +221,7 @@ function buildStruct(name: string, accesses: Access[], extensionViews = true): I
     // views, a declared address keeps its per-access casts. A word has no extension to disagree on.
     // `extensionViews` false asks only whether the BYTES lay out (the displaced fold's question:
     // agbcc's `ldrsh` has no immediate form, so every signed halfword read is a displaced one).
-    if (extensionViews && a.isLoad && prev.isLoad && a.signed !== prev.signed && a.width < 4) {
+    if (extensionViews && seen !== undefined && a.signed !== seen && a.width < 4) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': the ${a.width}-byte cell at offset ${a.off} is loaded both sign- and zero-extended — unions not modelled`,
       );
