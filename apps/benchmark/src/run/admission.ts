@@ -27,10 +27,15 @@
 //     the free swap keeps halving, never reaching the end of the device. On zram, this host's main
 //     swap, the cap also has a physical reading: compressed pages still occupy RAM, so a swapped
 //     byte is not a free byte.
-// macOS and everything else: `os.freemem()`, and no swap. On macOS that is the free-page count,
-// which leaves out inactive and purgeable memory the system would hand over, so it under-reads —
-// the direction to be wrong in. macOS grows its swap on demand, so there is no free-swap figure to
-// discount.
+// macOS: `vm_stat`'s free, inactive, purgeable and speculative pages — what the kernel hands to a
+// new allocation without compressing or swapping anything that is in use. `os.freemem()` alone is
+// the free-page count, which on a Mac that is merely in use is a few hundred MB: priced against it,
+// the 3-worker vitest gate and a 1-shard run were both refused (a reading of 1.0 GB), and the door
+// below would have become routine. Counting inactive and purgeable is still an under-read — the
+// compressor gives more — which is the direction to be wrong in; it has not been measured on a real
+// Mac, and where `vm_stat` cannot be read or parsed the reading falls back to `os.freemem()`. No
+// swap: macOS grows its swap on demand, so there is no free-swap figure to discount.
+// Everything else: `os.freemem()`, no swap.
 //
 // WHAT IS NEEDED. A per-command peak, as data (`PEAK_BYTES`), each measured one job at a time on an
 // otherwise idle host; the figures, dates and commands are in docs/bench-cost.md §5. Plus
@@ -57,6 +62,7 @@
 // `--no-lock` in `run/lock.ts` — a refusal nobody can legitimately pass gets passed illegitimately.
 // It is a door for a host whose reading is wrong (a container whose /proc/meminfo is the host's),
 // not for running two heavy jobs at once.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { cpus, freemem, platform } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -132,9 +138,26 @@ export function parseMeminfo(text: string): { memAvailable: number; swapFree: nu
   return { memAvailable, swapFree: field('SwapFree') ?? 0, swapTotal: field('SwapTotal') ?? 0 };
 }
 
+/** `vm_stat`'s free + inactive + purgeable + speculative pages, in bytes; undefined when the page
+ *  size or the free count is not there. */
+export function parseVmStat(text: string): number | undefined {
+  const size = /page size of (\d+) bytes/.exec(text);
+  const pages = (name: string): number | undefined => {
+    const m = new RegExp(`^Pages ${name}:\\s+(\\d+)\\.?\\s*$`, 'm').exec(text);
+    return m ? Number(m[1]) : undefined;
+  };
+  const free = pages('free');
+  if (size === null || free === undefined) {
+    return undefined;
+  }
+  const n = free + (pages('inactive') ?? 0) + (pages('purgeable') ?? 0) + (pages('speculative') ?? 0);
+  return n * Number(size[1]);
+}
+
 export interface MemoryDeps {
   platform?: string;
   meminfo?: () => string;
+  vmStat?: () => string;
   freemem?: () => number;
 }
 
@@ -156,6 +179,20 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
         how:
           `MemAvailable ${gb(parsed.memAvailable)} + ${gb(swap)} of swap (SwapFree ${gb(parsed.swapFree)} ` +
           `above ${SWAP_USE_CAP * 100}% of SwapTotal ${gb(parsed.swapTotal)})`,
+      };
+    }
+  }
+  if (os === 'darwin') {
+    let bytes: number | undefined;
+    try {
+      bytes = parseVmStat((deps.vmStat ?? (() => execFileSync('vm_stat', { encoding: 'utf8', timeout: 5000 })))());
+    } catch {
+      bytes = undefined;
+    }
+    if (bytes !== undefined) {
+      return {
+        availableBytes: bytes,
+        how: `free + inactive + purgeable + speculative ${gb(bytes)} (vm_stat, no swap counted)`,
       };
     }
   }

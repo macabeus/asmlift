@@ -17,6 +17,7 @@ import {
   admissionRefusal,
   admissionVerdict,
   parseMeminfo,
+  parseVmStat,
   processTreeBytes,
   readAdmissibleMemory,
   readAvailableMemory,
@@ -98,15 +99,61 @@ describe('readAvailableMemory', () => {
     expect(r.availableBytes).toBe(2 * GB);
   });
 
-  it('reads os.freemem() and never /proc/meminfo on macOS', () => {
+  it('reads vm_stat and never /proc/meminfo on macOS', () => {
     const r = readAvailableMemory({
       platform: 'darwin',
       meminfo: () => {
         throw new Error('macOS has no /proc/meminfo, and this reader must not be called');
       },
-      freemem: () => 6 * GB,
+      vmStat: () => VM_STAT,
+      freemem: () => 1 * GB,
     });
-    expect(r.availableBytes).toBe(6 * GB);
+    expect(r.availableBytes).toBe((20000 + 300000 + 15000 + 5000) * 16384);
+    expect(r.how).toContain('vm_stat');
+  });
+
+  it('falls back to os.freemem() on macOS where vm_stat cannot be run or read', () => {
+    const fail = () => {
+      throw new Error('ENOENT');
+    };
+    expect(readAvailableMemory({ platform: 'darwin', vmStat: fail, freemem: () => 6 * GB }).availableBytes).toBe(
+      6 * GB,
+    );
+    expect(
+      readAvailableMemory({ platform: 'darwin', vmStat: () => 'garbage', freemem: () => 6 * GB }).availableBytes,
+    ).toBe(6 * GB);
+  });
+
+  it('does not refuse the gate on a Mac whose free pages are few but whose inactive pages are many', () => {
+    // free pages alone, 1.0 GB, refused the 3-worker gate and a 1-shard run
+    const mac = { platform: 'darwin', vmStat: () => VM_STAT, freemem: () => 1 * GB, lockState: freeRegister, env: {} };
+    expect(admissionRefusal(vitestRequest(3), { ...mac, vmStat: () => 'garbage' })).toContain('REFUSED');
+    expect(admissionRefusal(vitestRequest(3), mac)).toBeUndefined();
+    expect(admissionRefusal(runRequest(1), mac)).toBeUndefined();
+  });
+});
+
+/** `vm_stat` output in the shape macOS prints it; 16 KiB pages (Apple silicon). */
+const VM_STAT = [
+  'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+  'Pages free:                               20000.',
+  'Pages active:                            400000.',
+  'Pages inactive:                          300000.',
+  'Pages speculative:                         5000.',
+  'Pages throttled:                              0.',
+  'Pages wired down:                        150000.',
+  'Pages purgeable:                          15000.',
+  '"Translation faults":                 123456789.',
+].join('\n');
+
+describe('parseVmStat', () => {
+  it('reads free + inactive + purgeable + speculative pages at the page size it prints', () => {
+    expect(parseVmStat(VM_STAT)).toBe(340000 * 16384);
+  });
+
+  it('has no answer without the page size or the free count', () => {
+    expect(parseVmStat('Pages free: 10.\n')).toBeUndefined();
+    expect(parseVmStat('Mach Virtual Memory Statistics: (page size of 4096 bytes)\n')).toBeUndefined();
   });
 });
 
