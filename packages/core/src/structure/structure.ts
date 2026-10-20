@@ -71,6 +71,7 @@ import {
   T,
   UNION_VIEW_NAMES,
   intWidth,
+  isCastView,
   scalarTypeForAccess,
   structSpelling,
   typeEquals,
@@ -888,7 +889,10 @@ function memAccess(
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...addressEvidence };
   }
   const bt = base.type;
-  if (bt.kind === 'ptr' && bt.to.kind === 'struct') {
+  // A field declared at its cell's widest view (raise/structs.ts `castViewCell`) is read at any
+  // other view as the flat cell at the same address, `((u8 *)p)[1]`: the cast the union it stands
+  // for would have spelled as a member.
+  if (bt.kind === 'ptr' && bt.to.kind === 'struct' && !isCastView(bt.to, off, width, signed, isStore)) {
     const rt = ctype(baseExpr);
     // `->` requires the base to render as a pointer to THIS struct (field names resolve against
     // its declaration) AND as a non-`index` node (the printer spells an index-node base with `.`,

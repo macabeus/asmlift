@@ -740,9 +740,12 @@ the cast can lose one, so the union is the default and not a variation.
 **Raise decides it, at L1→L2, beside the struct it lives in.** `union` carries its views (every
 one at offset 0) and its SIZE, because the size is the compiler's: agbcc rounds every struct and
 union to four bytes (`compilerBehaviors.aggregateBoundary`), so `union { u16 h; u8 b; }` is four
-bytes there and two on ido, kmc and mwcc. A union that boundary would move declines rather than
-mislaying the fields after it, and on a compiler nobody measured every union narrower than a word
-declines, since a boundary guessed in either direction mislays something. It has no name — it is only ever declared inline, as the type
+bytes there and two on ido, kmc and mwcc. A union that boundary would move is never declared, since
+it would mislay the fields after it. Where every view is a byte or the cell's own width with the
+other extension — the views a cast aliases exactly as a union member does — the cell is a plain
+field of its widest view (`StructField.castViews`) and every other view is the flat cell,
+`((u8 *)p)[1]`; anything else declines. On a compiler nobody measured every union narrower than a
+word declines, since a boundary guessed in either direction mislays something. It has no name — it is only ever declared inline, as the type
 of the struct member holding it — so none of the name-keyed struct machinery (`collectStructs`,
 the `/ptr-field` flip) reaches it. **Structure** reads an access through the view of its own
 width and extension (`p->field_0.half[1]`, `p->field_0.shalf`; `ir/types.ts` `unionViewAt`); the type walk and the

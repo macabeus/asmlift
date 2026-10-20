@@ -51,7 +51,7 @@ import { constAddressOf, constDisplacementOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { placedAt } from '../ir/discipline';
 import { nextStructIndex } from '../ir/struct-names';
-import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess, unionViewSigns } from '../ir/types';
+import { IrType, StructField, T, UNION_VIEW_NAMES, intWidth, scalarTypeForAccess, unionViewSigns } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
@@ -294,7 +294,9 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
  *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateBoundary`):
  *  agbcc makes `union { u16 h; u8 b; }` four bytes, four-aligned, where the other compilers make
  *  it two. A union that boundary would move — seated off it, or with the next field inside its
- *  rounded size — declines rather than mislaying every access at or after it. An UNMEASURED
+ *  rounded size — is never declared, since it would mislay every access at or after it. Its cell
+ *  is a plain field of its widest view instead, read at its other views through casts, where those
+ *  casts alias it as the union would (`castViewCell`); otherwise it declines. An UNMEASURED
  *  compiler (undefined) declines every union, since no boundary is safe to assume: one too small
  *  mislays the fields after the union on agbcc, one too large drops the pad in front of them
  *  everywhere else.
@@ -346,18 +348,38 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
     }
     return { off: start, type: T.union(members, aggregateBoundary), name: `field_${start}` };
   });
-  dataFields.forEach((f, i) => {
+  const fitted = dataFields.map((f, i): StructField => {
     if (f.type.kind !== 'union') {
-      return;
+      return f;
     }
     const next = dataFields[i + 1];
-    if (f.off % f.type.size !== 0 || (next !== undefined && next.off < f.off + f.type.size)) {
+    if (f.off % f.type.size === 0 && (next === undefined || next.off >= f.off + f.type.size)) {
+      return f;
+    }
+    const widest = castViewCell(f.type.members);
+    if (widest === undefined) {
       throw new RaiseUnsupportedError(
         `cannot recover struct '${structName}': the union at offset ${f.off} does not fit this compiler's ${aggregateBoundary}-byte aggregate boundary`,
       );
     }
+    return { off: f.off, type: widest, name: f.name, castViews: true };
   });
-  return placeFields(structName, dataFields);
+  return placeFields(structName, fitted);
+}
+
+/** The type a union's cell is declared at when the union itself cannot be laid out, or undefined
+ *  when its views cannot be spelled as casts of that one field. The field is the widest view (the
+ *  unsigned one of two); every other view must be ALIAS-TRANSPARENT to it, so a cast access aliases
+ *  the field exactly as a union member would: a 1-byte view (a character type, alias set 0 —
+ *  c-common.c `c_get_alias_set`) or the field's own width with the other extension (s16 and u16
+ *  share one set). Any other view declines: a `u16` read of a word cell through a cast is reused
+ *  across a word store on agbcc, where the union reloads (`synthetic:ureread`). On agbcc only a
+ *  cell of 2 bytes or fewer can fail the 4-byte boundary, so this never reaches that shape there. */
+function castViewCell(members: readonly StructField[]): IrType | undefined {
+  const width = (m: StructField): number | null => intWidth(m.type.kind === 'array' ? m.type.elem : m.type);
+  const cell = members[0];
+  const transparent = members.every((m) => width(m) === 8 || width(m) === width(cell));
+  return transparent && cell.type.kind === 'int' ? cell.type : undefined;
 }
 
 /** Size in bytes of a recovered field's type (int width/8; pointer is word-sized 4; a union the

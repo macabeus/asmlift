@@ -339,8 +339,9 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
 
   // agbcc aligns and rounds EVERY struct and union to 4 bytes: `union { u16 h; u8 b; }` is four
   // bytes there and two on ido/kmc/mwcc (target.ts `aggregateBoundary`, compiled). A field inside
-  // the rounded size would be mislaid on agbcc, so it declines there — and lifts where the compiler
-  // lays the union out naturally, and declines where nobody measured the boundary.
+  // the rounded size would be mislaid on agbcc, so no union is declared there: the cell is a field
+  // of its widest view and its byte views are casts (`castViewCell`). It is a union where the
+  // compiler lays one out naturally, and declines where nobody measured the boundary.
   const NARROW_THEN_FIELD = `fn narrowthen {
 ^bb0(%0: unk32, %1: unk32):
   store %0, %1 {off=0, width=2}
@@ -350,10 +351,11 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   ret %4
 }
 `;
-  test('a narrow union with a field inside its rounded size declines on a 4-byte boundary', () => {
-    expect(() => emit(NARROW_THEN_FIELD)).toThrow(
-      /the union at offset 0 does not fit this compiler's 4-byte aggregate boundary/,
-    );
+  test('a narrow union with a field inside its rounded size is a cast-view field on a 4-byte boundary', () => {
+    const c = emit(NARROW_THEN_FIELD);
+    expect(c).toContain('struct Struct0 { u16 field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_0 = a1;');
+    expect(c).toContain('((u8 *)a0)[1] + a0->field_2');
   });
 
   test('…and is laid out naturally where the boundary is 1', () => {
@@ -391,9 +393,10 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     expect(c).toContain('a0->field_4.shalf');
   });
 
-  test('a narrow union off the 4-byte boundary declines there too', () => {
-    expect(() =>
-      emit(`fn narrowoff {
+  // Off the boundary too, and the byte index of a cast view counts from the BASE in memory order,
+  // which no endianness changes.
+  test('a narrow union off the 4-byte boundary is a cast-view field there too', () => {
+    const c = emit(`fn narrowoff {
 ^bb0(%0: unk32, %1: unk32):
   %2: unk32 = load %0 {off=0, width=1, signed=false}
   store %0, %1 {off=2, width=2}
@@ -401,8 +404,58 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   %4: unk32 = add %2, %3
   ret %4
 }
-`),
-    ).toThrow(/the union at offset 2 does not fit this compiler's 4-byte aggregate boundary/);
+`);
+    expect(c).toContain('struct Struct0 { u8 field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_2 = a1;');
+    expect(c).toContain('a0->field_0 + ((u8 *)a0)[3]');
+  });
+
+  // The two extensions of the cell's own width share an alias set, so the signed one is a cast of
+  // the unsigned field; a STORE of that width is the field whatever its extension.
+  test('a halfword cell loaded both ways and read as bytes is one unsigned field, the signed read a cast', () => {
+    const c = emit(`fn twin {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=2, signed=false}
+  %3: unk32 = load %0 {off=0, width=2, signed=true}
+  %4: unk32 = load %0 {off=1, width=1, signed=true}
+  store %0, %1 {off=0, width=2}
+  %5: unk32 = load %0 {off=2, width=2, signed=false}
+  %6: unk32 = add %2, %3
+  %7: unk32 = add %6, %4
+  %8: unk32 = add %7, %5
+  ret %8
+}
+`);
+    expect(c).toContain('struct Struct0 { u16 field_0; u16 field_2; };');
+    expect(c).toContain('v0 = a0->field_0;');
+    expect(c).toContain('v1 = *(s16 *)a0;');
+    expect(c).toContain('v2 = ((s8 *)a0)[1];');
+    expect(c).toContain('a0->field_0 = a1;');
+  });
+
+  // A view that is neither a byte nor the field's own width is not alias-transparent to it: a `u16`
+  // read of a word cell through a cast is reused across a word store on agbcc, where the union
+  // reloads (`synthetic:ureread`). No real compiler here has an 8-byte boundary; one is assumed so
+  // that a word cell can fail the fit.
+  test('a word cell with a halfword view that does not fit still declines', () => {
+    const wide = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, aggregateBoundary: 8 } };
+    expect(() =>
+      emit(
+        `fn wordhalf {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  %2: unk32 = load %0 {off=2, width=2, signed=false}
+  %3: unk32 = load %0 {off=4, width=4, signed=true}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  ret %5
+}
+`,
+        false,
+        undefined,
+        wide,
+      ),
+    ).toThrow(/the union at offset 0 does not fit this compiler's 8-byte aggregate boundary/);
   });
 
   // A width no view is named for keeps the overlap decline.

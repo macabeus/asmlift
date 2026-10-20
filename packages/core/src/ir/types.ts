@@ -7,6 +7,11 @@ export interface StructField {
   off: number;
   type: IrType;
   name: string;
+  /** A cell the function also reads or writes at another width or extension, declared at its
+   *  widest view because the union of its views would not fit the compiler's layout
+   *  (raise/structs.ts `buildUnionStruct`). An access of any other type is a cast of the base
+   *  (structure.ts `memAccess`). */
+  castViews?: true;
 }
 
 export type IrType =
@@ -162,6 +167,23 @@ export function unionViewAt(
     return undefined;
   }
   return { member, ...unionView(member.type, off - member.off, width, signed, isStore) };
+}
+
+/** Does an access of `width` bytes at byte `off` read a `castViews` field of the struct at a view
+ *  other than the field's own type — another width or offset inside it, or a narrow load of the
+ *  other extension? A store carries no extension, so one of the field's width is the field. */
+export function isCastView(
+  st: Extract<IrType, { kind: 'struct' }>,
+  off: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+): boolean {
+  const f = st.fields.find((m) => m.castViews === true && m.off <= off && off < m.off + (intWidth(m.type) ?? 0) / 8);
+  if (f === undefined || f.type.kind !== 'int') {
+    return false;
+  }
+  return off !== f.off || f.type.width !== width * 8 || (width !== 4 && !isStore && f.type.signed !== signed);
 }
 
 /** The view of a union an access of `width` bytes at byte `at` of it reads — the rule
