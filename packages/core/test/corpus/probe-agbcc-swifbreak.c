@@ -22,7 +22,9 @@
  * loop's own, not the switch's end, and the tree goes to if-recovery. `innerexit` returns from above
  * its switch, so the merge is the inner loop's bottom, while a sibling of its falling arm leaves for
  * an exit that runs on to an OUTER loop's latch: no arm can spell that edge, so the tree goes to
- * if-recovery.
+ * if-recovery. `subtreeexit` is the same edge from the code of `case 17`, which the comparison
+ * tree's root tests first: the switch recognised below that root does not dominate it, yet
+ * `case 100` runs on into it.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -336,6 +338,29 @@ s32 innerexit(s32 i, s32 a, s32 b)
         } while (++k < 3);
 out:
         if (gB > 5) { r(1); return 2; }
+    }
+    r(t);
+    return t + u * 3;
+}
+
+s32 subtreeexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u;
+    t = b + 1; u = a; k = 0;
+    while (gB != 3) {
+        gB = gB + 1;
+        for (k = a; k < 3; k++) {
+            if (gC == 7) return 5;
+            switch (i + k) {
+            case 3: if (b != 0) { u = a + 91; break; } g(k);
+            case 250: t = p() + u; g(k); break;
+            case 100: g(t); if (p()) break;
+            case 17: if (u == a) goto out; break;
+            }
+        }
+out:
+        if (gA > 1) r(1);
+        return 2;
     }
     r(t);
     return t + u * 3;

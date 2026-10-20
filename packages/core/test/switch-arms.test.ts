@@ -1707,6 +1707,16 @@ test('a falling arm whose sibling leaves for an inner loop exit that is not the 
   expect(count(out, 'p()')).toBe(1);
 });
 
+test('the same edge from a case the comparison tree tested first, which the sub-tree switch does not dominate', () => {
+  // The tree's root takes `case 17` (`if (u == a) goto out;`), and the switch is recognised on the
+  // sub-tree below it, which does not dominate that code. `case 100` still runs on into it, so the
+  // arm `structureArm` walks carries the `goto out`, and the switch goes to if-recovery.
+  const out = ifBreakLift('subtreeexit', { returns: 's32' });
+  expect(out).toContain('s32 subtreeexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 5;');
+});
+
 test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
   // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
   // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`

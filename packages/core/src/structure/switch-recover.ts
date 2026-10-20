@@ -510,17 +510,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return loop !== null && loop.exit !== null && succ.includes(loop.exit) && !succ.includes(loop.header);
   };
 
-  // Does a block of some arm edge to `target`? An arm's region is what `analyzeArmExit` walks: the
-  // blocks the dispatch `b` dominates, reached from the arm's entry without stepping through
-  // `merge`.
-  const armsReach = (entries: Iterable<Block>, b: Block, merge: Block | null, target: Block): boolean => {
+  // Does a block some arm structures edge to `target`? Walked as `structureArm` walks an arm: every
+  // block reached from the arm's entry without stepping through `merge` or back into `header`. That
+  // is wider than `analyzeArmExit`'s dominated region on purpose: when Regime A recognises a sub-tree
+  // of the comparison tree, an arm can run on into the code of a case the tree's root already took,
+  // which the dispatch does not dominate, and `structureArm` structures that code inside the arm.
+  // A block that also edges back to `header` is the loop's bottom test, which spells as the loop's
+  // condition, not as the arm's (`breaksLoop`).
+  const armsReach = (entries: Iterable<Block>, merge: Block | null, header: Block, target: Block): boolean => {
     const seen = new Set<Block>(entries);
     for (const q = [...seen]; q.length;) {
-      for (const s of successorsOf(q.pop()!)) {
-        if (s === target) {
-          return true;
-        }
-        if (s !== merge && !seen.has(s) && dom.get(s)!.has(b)) {
+      const succ = successorsOf(q.pop()!);
+      if (succ.includes(target) && !succ.includes(header)) {
+        return true;
+      }
+      for (const s of succ) {
+        if (s !== target && s !== merge && s !== header && !seen.has(s)) {
           seen.add(s);
           q.push(s);
         }
@@ -987,7 +992,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       loop.exit !== null &&
       loop.exit !== merge &&
       loop.exit.ops[loop.exit.ops.length - 1]?.opcode !== 'ret' &&
-      armsReach(siblings, b, merge, loop.exit)
+      armsReach(siblings, merge, loop.header, loop.exit)
     ) {
       return null;
     }

@@ -1319,3 +1319,113 @@ innerexit:
 	bx	r1
 .Lfe17:
 	.size	 innerexit,.Lfe17-innerexit
+	.align	2, 0
+	.globl	subtreeexit
+	.type	 subtreeexit,function
+	.thumb_func
+subtreeexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r9
+	mov	r6, r8
+	push	{r6, r7}
+	mov	r9, r0
+	add	r5, r1, #0
+	mov	r8, r2
+	mov	r7, r8
+	add	r7, r7, #0x1
+	add	r6, r5, #0
+	ldr	r1, .L366
+	ldr	r0, [r1]
+	cmp	r0, #0x3
+	beq	.L343	@cond_branch
+	add	r0, r0, #0x1
+	str	r0, [r1]
+	add	r4, r5, #0
+	cmp	r5, #0x2
+	bgt	.L358	@cond_branch
+.L348:
+	ldr	r0, .L366+0x4
+	ldr	r0, [r0]
+	cmp	r0, #0x7
+	bne	.L349	@cond_branch
+	mov	r0, #0x5
+	b	.L365
+.L367:
+	.align	2, 0
+.L366:
+	.word	gB
+	.word	gC
+.L349:
+	mov	r1, r9
+	add	r0, r1, r4
+	cmp	r0, #0x11
+	beq	.L356	@cond_branch
+	cmp	r0, #0x11
+	bgt	.L361	@cond_branch
+	cmp	r0, #0x3
+	beq	.L351	@cond_branch
+	b	.L347
+.L361:
+	cmp	r0, #0x64
+	beq	.L354	@cond_branch
+	cmp	r0, #0xfa
+	beq	.L353	@cond_branch
+	b	.L347
+.L351:
+	mov	r0, r8
+	cmp	r0, #0
+	beq	.L352	@cond_branch
+	add	r6, r5, #0
+	add	r6, r6, #0x5b
+	b	.L347
+.L352:
+	add	r0, r4, #0
+	bl	g
+.L353:
+	bl	p
+	add	r7, r0, r6
+	add	r0, r4, #0
+	bl	g
+	b	.L347
+.L354:
+	add	r0, r7, #0
+	bl	g
+	bl	p
+	cmp	r0, #0
+	bne	.L347	@cond_branch
+.L356:
+	cmp	r6, r5
+	beq	.L358	@cond_branch
+.L347:
+	add	r4, r4, #0x1
+	cmp	r4, #0x2
+	ble	.L348	@cond_branch
+.L358:
+	ldr	r0, .L368
+	ldr	r0, [r0]
+	cmp	r0, #0x1
+	ble	.L363	@cond_branch
+	mov	r0, #0x1
+	bl	r
+.L363:
+	mov	r0, #0x2
+	b	.L365
+.L369:
+	.align	2, 0
+.L368:
+	.word	gA
+.L343:
+	add	r0, r7, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r7, r0
+.L365:
+	pop	{r3, r4}
+	mov	r8, r3
+	mov	r9, r4
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe18:
+	.size	 subtreeexit,.Lfe18-subtreeexit
