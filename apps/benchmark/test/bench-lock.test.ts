@@ -548,6 +548,23 @@ describe('the CLI is wired to it', () => {
     expect(runCase).toContain('runTakesTheBenchLock(');
   });
 
+  test('a whole-corpus `bench sweep` checks the register and takes a record, behind `--no-lock`', () => {
+    const sweepCase = switchCase('sweep');
+    expect(sweepCase).toContain('sweepIsWholeCorpus(');
+    expect(sweepCase).toContain('concurrentSweepRefusal(');
+    expect(sweepCase).toContain('acquireBenchLock(');
+    expect(sweepCase).toContain("kind: 'sweep'");
+    expect(sweepCase).toContain("opts['no-lock']");
+  });
+
+  test('every heavy command asks the memory admission check before it starts', () => {
+    for (const name of ['run', 'fan', 'sweep', 'fidelity']) {
+      expect(switchCase(name), `\`bench ${name}\` does not call the admission check`).toContain('admitOrExit(');
+    }
+    const gate = readFileSync(join(REPO_ROOT, 'scripts', 'gate-vitest.sh'), 'utf8');
+    expect(gate).toContain('apps/benchmark/src/run/admission.ts vitest');
+  });
+
   test('`bench in-flight` is a subcommand and is listed in the usage line', () => {
     expect(switchCase('in-flight')).toContain('benchLockStatus(');
     expect(cli).toMatch(/usage: bench <run\|in-flight\|/);

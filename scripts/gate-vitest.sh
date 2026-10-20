@@ -20,15 +20,32 @@
 #
 # WORKERS. 3 by default (`VITEST_MAX_WORKERS` overrides; an explicit `--maxWorkers` in the args
 # wins) — docs/bench-cost.md §1 has what the root suite costs at that and at vitest's default.
+#
+# MEMORY. Before vitest starts, the workers are priced by the same admission check every heavy
+# bench command calls (apps/benchmark/src/run/admission.ts — one copy of the math, not a shell
+# one): a gate started beside a full bench on a small host is how a host runs out of memory, and the
+# OOM killer takes the desktop, not the gate. A refusal exits 2 with the numbers, and the gate did
+# not run. `ASMLIFT_MEM_ADMISSION=off` skips it, saying so.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2
 trap 'rm -f "$log"' EXIT
 
 workers=--maxWorkers="${VITEST_MAX_WORKERS:-3}"
+count=${VITEST_MAX_WORKERS:-3}
+prev=
 for a in "$@"; do
   case $a in --maxWorkers | --maxWorkers=*) workers= ;; esac
+  case $a in --maxWorkers=*) count=${a#--maxWorkers=} ;; esac
+  [ "$prev" = --maxWorkers ] && count=$a
+  prev=$a
 done
+
+# the admission check; anything but a plain worker count is priced at vitest's own default
+pnpm exec tsx apps/benchmark/src/run/admission.ts vitest "$count" || {
+  echo "gate: FAIL — vitest run $*: not started, refused by the memory admission check above" >&2
+  exit 2
+}
 
 # the pipe's status is tee's, so vitest's is carried out through a file
 status_file="$log.status"
