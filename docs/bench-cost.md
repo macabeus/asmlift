@@ -2404,12 +2404,19 @@ Each of these is sane alone. Only `bench run` read the register, and nothing rea
 **Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
 and the vitest gate (`scripts/gate-vitest.sh`) price their own peak and compare it with what the
 machine can give right now. On Linux that is `MemAvailable` plus the free swap above half of
-`SwapTotal`, so swap use is never planned past half the device. Elsewhere it is `os.freemem()`.
+`SwapTotal`, so swap use is never planned past half the device. On macOS it is `vm_stat`'s free,
+inactive, purgeable and speculative pages (not measured on a real Mac; free pages alone refused a
+3-worker gate on any Mac in use), falling back to `os.freemem()`, as everywhere else.
 Either way a 0.5 GB reserve is held back. `apps/benchmark/src/run/admission.ts` gives the two
 measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-20 this host read
 MemAvailable 0.6 GB and SwapFree 6.8 GB. The cap leaves 2.3 GB of that, so a 3-worker vitest gate
-is refused beside the run. A job in the register also carries the need it was admitted with. What
-such a job has not taken yet, its need less what its process tree holds now, is subtracted too.
+is refused beside the run. Every admitted job also takes a record in the register carrying the
+need it was admitted with: a run or a whole-corpus sweep as before, and `bench fan`, `bench fidelity`,
+a scoped sweep and the vitest gate as a `kind: 'job'` record (the gate's under its shell's pid). What
+such a job has not taken yet, its need less what its process tree holds now, is subtracted too. A
+promise only some jobs made was one-sided: a gate started before a `bench run --jobs 3` was
+invisible to it, while the same pair in the other order was refused. A job record measures no tree
+and is never whole, so it blocks no edit, no run and no sweep.
 On 2026-10-20 a `bench run --jobs 3` held 2.80 GB of its 7.5 GB budget 919 s in, which is the
 gap a reading of that moment alone would hand to the next job. A command that does not fit is
 REFUSED with both numbers and the next step. It is not queued. `bench run` names the largest
@@ -2417,10 +2424,12 @@ REFUSED with both numbers and the next step. It is not queued. `bench run` names
 on this host, quiet, it starts the same 3 shards. `ASMLIFT_MEM_ADMISSION=off` skips the check and says so. It exists for a host whose
 reading is wrong, not for running two heavy jobs at once.
 
-**A whole-corpus `bench sweep` takes a record in the register**, so a full bench refuses to start
-beside one, and it refuses to start beside a full bench. A sweep scoped with `--only`,
-`--project` or `--asm-dir` takes no record, as a scoped run takes none. A sweep record never
-blocks an edit: `bench in-flight` lists it but does not count it.
+**A whole-corpus `bench sweep` takes a sweep record in the register**, so a full bench refuses to
+start beside one, and it refuses to start beside a full bench. Only `--only`, `--asm-dir`, or
+`--project` with `--tier real` scope a sweep: `--project` narrows the real tier alone, so with the
+synthetic tier swept (the default) it lifts every synthetic row too, and is whole for this rule. A
+scoped sweep takes a job record, as above. A sweep record never blocks an edit: `bench in-flight`
+lists it but does not count it.
 
 The peaks those checks are priced at were measured one job at a time on this host on
 **2026-10-20**, quiet, at 2e6ba81e's code (the two `--base` rows were measured at the commits they
@@ -2435,13 +2444,21 @@ that of the largest single process, shown in the last column.
 | `pnpm bench sweep --base origin/main`, head pass in the parent (before 56b68d5f)                                          | 2026-10-20 |     4.06 GB | 660 s |         2.03 GB |
 | `pnpm bench sweep --base origin/main`, head pass in a child (56b68d5f)                                                    | 2026-10-20 |     2.49 GB | 358 s |         2.07 GB |
 | `pnpm bench sweep` (whole corpus, 4,606 records)                                                                          | 2026-10-20 |     2.07 GB | 187 s |         2.02 GB |
-| `pnpm bench sweep --project sa3` (3,864 records)                                                                          | 2026-10-20 |     0.56 GB |  69 s |         0.53 GB |
+| `pnpm bench sweep --repeat 2` (whole corpus, 4,606 records × 2; 59205010)                                                 | 2026-10-20 |     2.39 GB | 363 s |               — |
+| `pnpm bench sweep --project sa3` (1,932 rows: every synthetic row and sa3's 50; 3,864 records; 59205010)                  | 2026-10-20 |     0.82 GB |  66 s |               — |
+| `pnpm bench sweep --project pokeemerald` (1,950 rows, 3,900 records; 59205010)                                            | 2026-10-20 |     1.79 GB |  86 s |               — |
 | `pnpm bench sweep --only AthleticChallengeScrollUpdate` (1 row)                                                           | 2026-10-20 |     0.25 GB |   2 s |         0.23 GB |
 | `pnpm bench run --tier real --only AthleticChallengeScrollUpdate --jobs 1` (the dearest row, fan 29,600)                  | 2026-10-20 |     1.95 GB | 265 s |         1.53 GB |
 | `pnpm bench fan kleod:AthleticChallengeScrollUpdate:agbcc` (enumerates 29,600, then refuses to compile without `--force`) | 2026-10-20 |     1.77 GB | 293 s |         1.74 GB |
 | `pnpm test:root` (3 workers)                                                                                              | 2026-10-20 |     2.70 GB | 381 s |         1.38 GB |
 
-The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
+A `--project` sweep lifts every synthetic row beside the project's, because `--project` narrows
+the real tier only; it is priced by the rows it lifts (1,950 of 2,303 for pokeemerald: 1.86 GB), and
+with the synthetic tier swept it is whole for the register. The first `--project sa3` reading,
+0.56 GB, was not reproduced: the re-measure above gave 0.82 GB for the same 3,864 records. A
+`--repeat` sweep keeps its first pass's records through the next and is budgeted at 2.5 GB. The
+rows marked 59205010 were measured at that commit with the same sampler, and their largest single
+process was not read. The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
 (86 moved, the ido `opts` nondeterminism, and 4,520 identical), so moving the head pass into a
 child changed the price and not the answer. A shard is budgeted at 2.5 GB
 (`SHARD_BYTES`): the dearest row measured 1.95 GB, and at the OOM three shards and their compile
