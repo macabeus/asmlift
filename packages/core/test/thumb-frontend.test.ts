@@ -5066,6 +5066,11 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n\tstrb\tr4, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       `\tmov\tr1, #128\n\tlsl\tr1, r1, #8\n\tstrh\tr1, [r3, #2]\n\tmov\tr1, #0\n\tstrh\tr1, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       `${top}\tstr\tr1, [r3]\n\tstr\tr0, [r2]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      // A block nothing reaches is no path in, whatever it falls into: neither the way in that
+      // wrote nothing nor an edge that empties the forwarded memory.
+      `${top}\tstr\tr1, [r3]\n\tstr\tr1, [r5]\n\tb\t.Lq\n.Ldead:\n\tmov\tr4, #0\n.Lq:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tb\t.Lq\n.Ldead:\n\tmov\tr4, #0\n.Lq:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Lh:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Lh\n\tmov\tr0, #0\n\tbx\tlr\n\tb\t.Lh\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n`,
       // A loop-invariant INT_MIN OR'd with `q & a0`, q a second invariant that is always 0 — in
       // either order the loop reads the two registers.
       ...[

@@ -309,7 +309,16 @@ describe('storeForwards — the store a load must read', () => {
     expect(storeForwards([head, tail]).get(l)).toEqual([c.r]);
     // A second way in is a path the store may not be on.
     const other = blk([mkOp('br', { successors: [{ block: tail, args: [] }] })]);
-    expect(storeForwards([head, other, tail]).has(l)).toBe(false);
+    const entry = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: head, args: [] },
+          { block: other, args: [] },
+        ],
+      }),
+    ]);
+    expect(storeForwards([entry, head, other, tail]).has(l)).toBe(false);
   });
 
   test('one cell however the address is spelled: a base held in another value, an addend in the pool word', () => {
@@ -476,6 +485,16 @@ describe('storeForwards — the store a load must read', () => {
       }),
     ]);
     expect(overwrittenReads([head, left, join]).has(l)).toBe(false);
+    // A block the entry does not reach is no write-free way in, and no edge that empties memory.
+    const lj = ld(base);
+    const joinD = blk([lj, ret()]);
+    const brTo = () => mkOp('br', { successors: [{ block: joinD, args: [] }] });
+    const blocksD = [blk([c.op, st(base, c.r), st(v(), c.r), brTo()]), blk([brTo()]), joinD];
+    expect(overwrittenReads(blocksD).has(lj)).toBe(true);
+    const lf = ld(base);
+    const joinF = blk([lf, ret()]);
+    const toF = () => mkOp('br', { successors: [{ block: joinF, args: [] }] });
+    expect(storeForwards([blk([c.op, st(base, c.r), toF()]), blk([toF()]), joinF]).get(lf)).toEqual([c.r]);
     // The structurer reads an overwritten load as a constant it cannot compute.
     const defs = new Map<Value, Op>();
     const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);

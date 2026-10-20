@@ -272,6 +272,25 @@ interface Cell {
   width: number;
 }
 
+/** The blocks a path from the entry (`blocks[0]`) reaches. A block nothing reaches, and every
+ *  edge out of one, is no path in: a dead block falling into a read must not pass for a way in
+ *  that wrote nothing. */
+function reachable(blocks: readonly Block[]): Set<Block> {
+  const seen = new Set<Block>(blocks.slice(0, 1));
+  const work = blocks.slice(0, 1);
+  while (work.length > 0) {
+    for (const o of work.pop()!.ops) {
+      for (const s of o.successors) {
+        if (!seen.has(s.block)) {
+          seen.add(s.block);
+          work.push(s.block);
+        }
+      }
+    }
+  }
+  return seen;
+}
+
 /** Two cells may be the same memory: on one root when their bytes overlap, and always on two. */
 const overlaps = (x: Cell, y: Cell): boolean =>
   x.root !== y.root || (x.byte < y.byte + y.width && y.byte < x.byte + x.width);
@@ -329,17 +348,21 @@ function cellOf(defs: ReadonlyMap<Value, Op>, addr: Value, off: number, width: n
  *  overwrites reaches a reload in its header. A store sets its cell and forgets every cell it may
  *  overlap (any cell on another root, which may be the same memory); any other op with effects (a
  *  call, an indexed store) forgets everything. A load is forwarded when every path into it knows
- *  its cell, as a whole word; the entry block, and a block nothing reaches, know nothing. */
+ *  its cell, as a whole word; the entry block knows nothing, and a block the entry does not reach
+ *  forwards nothing and is no path into the blocks it jumps to. */
 export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
   const defs = new Map<Value, Op>();
   const preds = new Map<Block, Block[]>();
+  const live = reachable(blocks);
   for (const b of blocks) {
     for (const op of b.ops) {
       for (const r of op.results) {
         defs.set(r, op);
       }
       for (const s of op.successors) {
-        preds.set(s.block, [...(preds.get(s.block) ?? []), b]);
+        if (live.has(b)) {
+          preds.set(s.block, [...(preds.get(s.block) ?? []), b]);
+        }
       }
     }
   }
@@ -405,8 +428,11 @@ export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
   // and values only ever join one, both finite, so this settles.
   const exit = new Map<Block, Mem>();
   const entryOf = (b: Block): Mem | undefined => {
+    if (!live.has(b)) {
+      return undefined; // dead: it records nothing and adds nothing to a block it falls into
+    }
     const from = preds.get(b) ?? [];
-    if (b === blocks[0] || from.length === 0) {
+    if (b === blocks[0]) {
       return new Map();
     }
     let m: Mem | undefined;
@@ -451,18 +477,15 @@ export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
  *  sees is what this function wrote, on every path, and when `storeForwards` cannot say which word
  *  that was — a register-indexed address, two spellings of one sum, narrow stores that compose a
  *  word, a write through another pointer — the read must not pass for one that varies. A read with
- *  one write-free path in sees the caller's memory on it, which varies; so does a read in a block
- *  nothing reaches. An `aload`'s cell is never known, so every write may land on it. */
+ *  one write-free path in from the entry sees the caller's memory on it, which varies; a block the
+ *  entry does not reach is no such path. An `aload`'s cell is never known, so every write may land
+ *  on it. */
 export function overwrittenReads(blocks: readonly Block[]): Set<Op> {
   const defs = new Map<Value, Op>();
-  const preds = new Map<Block, number>();
   for (const b of blocks) {
     for (const op of b.ops) {
       for (const r of op.results) {
         defs.set(r, op);
-      }
-      for (const s of op.successors) {
-        preds.set(s.block, (preds.get(s.block) ?? 0) + 1);
       }
     }
   }
@@ -481,7 +504,7 @@ export function overwrittenReads(blocks: readonly Block[]): Set<Op> {
     const sig = (OPCODES as Record<string, OpSig | undefined>)[op.opcode];
     return (sig === undefined || sig.effects === true) && !sig?.terminator;
   };
-  const roots = blocks.filter((b, i) => i === 0 || !preds.has(b));
+  const roots = blocks.slice(0, 1);
   const out = new Set<Op>();
   for (const b of blocks) {
     b.ops.forEach((op, i) => {
