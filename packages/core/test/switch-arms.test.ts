@@ -1696,6 +1696,66 @@ test('a switch whose merge is its loop exit only through a shared epilogue goes 
   expect(out).not.toContain('switch (');
 });
 
+test('an `if` whose `then` is a lone `if` takes begin/end before its `else`, and a `case` always has `otherwise`', () => {
+  // Bare, Pascal would bind the `else` to the inner `if` (the dangling else); and a `case` with no
+  // `otherwise` raises `caseerror` on an unlisted value, where C's `switch` runs on past it.
+  const set = (v: number): Stmt => ({ k: 'assign', name: 'i', value: { k: 'const', value: v } });
+  const fn: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.u(32) }],
+    locals: [{ name: 'i', type: T.u(32) }],
+    globals: [],
+    retType: T.u(32),
+    body: [
+      {
+        k: 'switch',
+        scrutinee: { k: 'var', name: 'a0' },
+        cases: [
+          {
+            values: [10],
+            body: [
+              {
+                k: 'if',
+                cond: { k: 'var', name: 'a0' },
+                then: [{ k: 'if', cond: { k: 'var', name: 'i' }, then: [set(1)], else: [] }],
+                else: [set(2)],
+              },
+            ],
+            fallsThrough: false,
+          },
+        ],
+        default: undefined,
+      },
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+  };
+  const out = pascalBackend.emit(fn);
+  expect(out).toMatch(/then\s*\n\s*begin\s*\n\s*if i then\s*\n\s*i := 1;\s*\n\s*end\s*\n\s*else/);
+  expect(out).toMatch(/otherwise\s*\n\s*end;/);
+});
+
+test('a `for` is two Pascal statements, so a lone one still takes begin/end', () => {
+  const loop: Stmt = {
+    k: 'for',
+    init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    cond: { k: 'var', name: 'i' },
+    inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    body: [{ k: 'assign', name: 'i', value: { k: 'var', name: 'a0' } }],
+  };
+  const fn: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.u(32) }],
+    locals: [{ name: 'i', type: T.u(32) }],
+    globals: [],
+    retType: T.u(32),
+    body: [
+      { k: 'if', cond: { k: 'var', name: 'a0' }, then: [loop], else: [] },
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+  };
+  expect(pascalBackend.emit(fn)).toMatch(/then\s*\n\s*begin\s*\n\s*i := 0;\s*\n\s*while/);
+});
+
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
   // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
   expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);

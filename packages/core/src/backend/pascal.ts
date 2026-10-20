@@ -202,13 +202,20 @@ function makePrinter(vt: VarTypes) {
         return s.value ? [`${indent}${fnName} := ${pe(s.value)};`] : [];
       case 'if': {
         const cond = pe(s.cond);
-        const block = (stmts: Stmt[], ind: string) =>
-          stmts.length === 1
+        // A branch goes bare only where it is ONE Pascal statement that cannot capture what follows.
+        // A `for` prints as two (its init, then a `while`), so it always takes begin/end. And with an
+        // `else` to come, a then-branch that is itself an `if` or a loop (whose body may end in one)
+        // would take that `else` as its own innermost `if`'s — Pascal's dangling else, which C's
+        // braces had ruled out: `if (a) { if (b) X; } else Y;` printed bare runs Y when b fails.
+        const bare = (stmts: Stmt[], open: boolean) =>
+          stmts.length === 1 && stmts[0].k !== 'for' && !(open && (stmts[0].k === 'if' || isLoop(stmts[0])));
+        const block = (stmts: Stmt[], ind: string, open = false) =>
+          bare(stmts, open)
             ? ps(fnName, stmts[0], ind, tail)
             : [`${ind}begin`, ...list(stmts, ind + '  ', tail), `${ind}end`];
         // Pascal: no `;` before `else`; the branch statements already carry their own.
         const out = [`${indent}if ${cond} then`];
-        out.push(...block(s.then, indent + '  '));
+        out.push(...block(s.then, indent + '  ', s.else.length > 0));
         if (s.else.length) {
           out.push(`${indent}else`);
           out.push(...block(s.else, indent + '  '));
@@ -218,7 +225,7 @@ function makePrinter(vt: VarTypes) {
       case 'while': {
         // loop bodies are NEVER tail position — control returns to the test
         const body =
-          s.body.length === 1
+          s.body.length === 1 && s.body[0].k !== 'for'
             ? ps(fnName, s.body[0], indent + '  ')
             : [`${indent}begin`, ...s.body.flatMap((x) => ps(fnName, x, indent + '  ')), `${indent}end`];
         return [`${indent}while ${pe(s.cond)} do`, ...body];
@@ -253,7 +260,7 @@ function makePrinter(vt: VarTypes) {
         // so a `fallsThrough` arm has no faithful spelling → loud-fail (mirrors the `field`/`cast`/`%`
         // throws above). Each arm's body is a single statement or a begin/end block.
         const arm = (body: Stmt[], ind: string) =>
-          body.length === 1
+          body.length === 1 && body[0].k !== 'for'
             ? ps(fnName, body[0], ind + '  ')
             : [`${ind}  begin`, ...body.flatMap((x) => ps(fnName, x, ind + '  ')), `${ind}  end`];
         // Pascal has no early `return`: a `return v` inside a case renders `fnName := v` and then FALLS
@@ -279,8 +286,11 @@ function makePrinter(vt: VarTypes) {
           }
           out.push(`${indent}  ${c.values.join(', ')}:`, ...arm(c.body, indent + '  '));
         }
-        if (s.default) {
-          out.push(`${indent}  otherwise`);
+        // A C `switch` with no `default` runs on past a value it does not list; IDO Pascal's
+        // `case` raises a run-time `caseerror` there instead. So the clause is always printed, an
+        // empty one when the source had no default.
+        out.push(`${indent}  otherwise`);
+        if (s.default?.length) {
           out.push(...arm(s.default, indent + '  '));
         }
         out.push(`${indent}end;`);
