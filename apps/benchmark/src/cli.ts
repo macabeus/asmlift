@@ -319,6 +319,9 @@ switch (command) {
     // How many shards, read ONCE: `defaultJobs` reads available memory, and the admission below and
     // the orchestrator must agree on the count it priced.
     const jobs = opts.serial ? 1 : Number(opts.jobs ?? defaultJobs());
+    // what the admission check priced this run at, carried into its record so that a job started
+    // after it subtracts what this one has not taken yet
+    let runNeed: number | undefined;
     // MEMORY, for the run as a whole — a shard child is exempt like every verdict above, because its
     // parent priced it. A scoped run starts as many shards as it has rows, up to `jobs`; counting
     // them costs the case load `orchestrate` pays anyway, so only a scoped run pays it here.
@@ -327,10 +330,11 @@ switch (command) {
         ? jobs
         : tiers.reduce((n, t) => n + casesFor(t).length, 0);
       const shards = Math.min(jobs, rows);
+      runNeed = shards * SHARD_BYTES;
       admitOrExit(
         {
           command: 'bench run',
-          needBytes: shards * SHARD_BYTES,
+          needBytes: runNeed,
           need: `${shards} shard${shards === 1 ? '' : 's'} × ${(SHARD_BYTES / 1e9).toFixed(1)} GB`,
           instead:
             unitsThatFit(SHARD_BYTES) >= 1
@@ -415,6 +419,7 @@ switch (command) {
         acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
           tiers,
           whole: runIsWholeTier(runOpts),
+          ...(runNeed !== undefined ? { needBytes: runNeed } : {}),
         });
       }
     }
@@ -740,9 +745,15 @@ switch (command) {
         }
       }
     }
-    admitOrExit(sweepRequest({ tiers, mapModes: [], ...sweepOpts, fan: opts.fan }, artifactRowIds()), 2);
+    const sweepNeed = sweepRequest({ tiers, mapModes: [], ...sweepOpts, fan: opts.fan }, artifactRowIds());
+    admitOrExit(sweepNeed, 2);
     if (sweepIsWholeCorpus(sweepOpts) && !opts['no-lock']) {
-      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, { tiers, whole: true, kind: 'sweep' });
+      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
+        tiers,
+        whole: true,
+        kind: 'sweep',
+        ...(sweepNeed !== undefined ? { needBytes: sweepNeed.needBytes } : {}),
+      });
     }
     process.exit(
       await sweep({

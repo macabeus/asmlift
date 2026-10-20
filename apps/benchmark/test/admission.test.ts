@@ -2,6 +2,8 @@
 // INJECTED: a test that read this machine's /proc/meminfo would pass or fail on whatever else the
 // host happens to be running.
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -15,10 +17,14 @@ import {
   admissionRefusal,
   admissionVerdict,
   parseMeminfo,
+  processTreeBytes,
+  readAdmissibleMemory,
   readAvailableMemory,
   unitsThatFit,
+  unspentBudgets,
   vitestRequest,
 } from '../src/run/admission';
+import type { BenchLockRecord, BenchLockState } from '../src/run/lock';
 
 const kB = 1024;
 const GB = 1e9;
@@ -131,8 +137,11 @@ describe('admissionVerdict', () => {
   });
 });
 
+/** No live record: the register must not depend on what this host happens to be running. */
+const freeRegister = (): BenchLockState => ({ state: 'free', path: '/nowhere' });
+
 describe('admissionRefusal', () => {
-  const starved = { ...linux(meminfo(100_000, 0)) };
+  const starved = { ...linux(meminfo(100_000, 0)), lockState: freeRegister };
 
   it('reads the machine through the injected reader and refuses', () => {
     expect(admissionRefusal(runRequest(1), { ...starved, env: {} })).toContain('bench run REFUSED');
@@ -181,5 +190,64 @@ describe('the vitest gate entry point', () => {
       { encoding: 'utf8' },
     );
     expect(r.status).toBe(2);
+  });
+});
+
+/** A fake /proc: each entry is [pid, ppid, VmRSS kB, VmSwap kB]. */
+function fakeProc(procs: [number, number, number, number][]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-proc-'));
+  for (const [pid, ppid, rss, swap] of procs) {
+    mkdirSync(join(dir, String(pid)));
+    // a comm with a space and a parenthesis, which a split on spaces would misread
+    writeFileSync(join(dir, String(pid), 'stat'), `${pid} (node (x) y) S ${ppid} 1 1 0\n`);
+    writeFileSync(join(dir, String(pid), 'status'), `Name: node\nVmRSS:\t${rss} kB\nVmSwap:\t${swap} kB\n`);
+  }
+  mkdirSync(join(dir, 'self'));
+  return dir;
+}
+
+describe('what registered jobs have still to take', () => {
+  const record = (pid: number, needBytes?: number): BenchLockRecord => ({
+    pid,
+    startedAt: new Date().toISOString(),
+    command: 'bench run --jobs 3',
+    tiers: ['synthetic', 'real'],
+    whole: true,
+    ...(needBytes !== undefined ? { needBytes } : {}),
+  });
+  const held = (...records: BenchLockRecord[]): BenchLockState => ({ state: 'held', path: '/reg', records });
+
+  it('sums rss+swap over a process and every descendant, and nothing else', () => {
+    const proc = fakeProc([
+      [100, 1, 1000, 0],
+      [101, 100, 2000, 500],
+      [102, 101, 3000, 0],
+      [200, 1, 99999, 0],
+    ]);
+    expect(processTreeBytes(100, proc)).toBe((1000 + 2000 + 500 + 3000) * kB);
+    expect(processTreeBytes(102, proc)).toBe(3000 * kB);
+    expect(processTreeBytes(300, proc)).toBeUndefined();
+    expect(processTreeBytes(100, '/no/such/proc')).toBeUndefined();
+  });
+
+  it('subtracts what a live job was admitted with less what its tree holds, never below nothing', () => {
+    const bytes = { 1: 1 * GB, 2: 9 * GB } as Record<number, number>;
+    const r = unspentBudgets(held(record(1, 7.5 * GB), record(2, 2 * GB)), (pid) => bytes[pid]);
+    expect(r).toEqual({ bytes: 6.5 * GB, jobs: 1 });
+  });
+
+  it('promises nothing for a record without a need, a tree it cannot read, or a free register', () => {
+    expect(unspentBudgets(held(record(1)), () => 0)).toEqual({ bytes: 0, jobs: 0 });
+    expect(unspentBudgets(held(record(1, 7.5 * GB)), () => undefined)).toEqual({ bytes: 0, jobs: 0 });
+    expect(unspentBudgets(freeRegister(), () => 0)).toEqual({ bytes: 0, jobs: 0 });
+  });
+
+  it('refuses a vitest gate beside a full bench still ramping up, which a reading of NOW alone admits', () => {
+    // A --jobs 3 run two minutes in: it holds 1 GB of its 7.5 GB, out of the quiet host's RAM.
+    const deps = { ...linux(meminfo(5368340 - Math.round(GB / kB), 9899436)), env: {} };
+    expect(admissionRefusal(vitestRequest(3), { ...deps, lockState: freeRegister })).toBeUndefined();
+    const ramping = { ...deps, lockState: () => held(record(1, 3 * SHARD_BYTES)), held: () => 1 * GB };
+    expect(readAdmissibleMemory(ramping).how).toContain('6.5 GB that 1 registered job has still to take');
+    expect(admissionRefusal(vitestRequest(3), ramping)).toContain('REFUSED');
   });
 });

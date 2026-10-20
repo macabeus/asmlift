@@ -96,6 +96,9 @@ export interface BenchLockRecord {
   /** `bench run` (absent in every record written before sweeps took one), or a whole-corpus
    *  `bench sweep`, which writes no tier file and is measured by nothing. */
   kind?: 'run' | 'sweep';
+  /** The peak memory this job was admitted with (`admission.ts`), so a job admitted after it can
+   *  subtract what it has not taken yet. Absent in older records, which promise nothing. */
+  needBytes?: number;
 }
 
 export type BenchLockState =
@@ -146,6 +149,9 @@ function parseRecord(text: string): BenchLockRecord | undefined {
       // Only the exact word makes a record a sweep: anything else reads as a run, the kind that
       // collides with more.
       ...(r.kind === 'sweep' ? { kind: 'sweep' as const } : {}),
+      ...(typeof r.needBytes === 'number' && Number.isFinite(r.needBytes) && r.needBytes > 0
+        ? { needBytes: r.needBytes }
+        : {}),
     };
   } catch {
     // A half-written or hand-edited record names no process, so no reader can ever clear it by
@@ -266,6 +272,8 @@ export interface BenchRunIdentity {
   root?: string;
   /** A whole-corpus sweep's record; see the header. Absent = a `bench run`. */
   kind?: 'sweep';
+  /** what the admission check priced this job at; see `BenchLockRecord.needBytes` */
+  needBytes?: number;
 }
 
 /** The first line of a whole-against-whole refusal: what the live record is. */
@@ -406,6 +414,7 @@ export function acquireBenchLock(command: string, run: BenchRunIdentity, dir: st
     root: run.root ?? REPO_ROOT,
     whole: run.whole,
     ...(run.kind === 'sweep' ? { kind: 'sweep' as const } : {}),
+    ...(run.needBytes !== undefined ? { needBytes: run.needBytes } : {}),
   };
   const path = recordPath(dir, process.pid);
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);

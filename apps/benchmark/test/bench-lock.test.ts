@@ -416,6 +416,18 @@ describe('a whole-corpus sweep in the register', () => {
     releaseBenchLock(reg);
   });
 
+  test('a record carries the need it was admitted with; a need that is not a positive number is dropped', () => {
+    const reg = throwawayReg();
+    acquireBenchLock('bench run', { ...asRun(), needBytes: 7.5e9 }, reg);
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].needBytes).toBe(7.5e9);
+    releaseBenchLock(reg);
+    for (const bad of [-1, 0, 'lots', null]) {
+      const s = live({ needBytes: bad });
+      expect(s.state === 'held' && s.records[0].needBytes).toBeUndefined();
+    }
+  });
+
   test('a record whose kind is any other word reads as a run — the kind that collides with more', () => {
     const state = live({ kind: 'sweeep' });
     expect(state.state === 'held' && state.records[0].kind).toBeUndefined();

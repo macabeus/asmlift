@@ -1,7 +1,7 @@
 // How many shards `bench run` and `bench fidelity` start when no `--jobs` is given.
 import { cpus, totalmem } from 'node:os';
 
-import { type MemoryReading, SHARD_BYTES, readAvailableMemory, unitsThatFit } from './admission';
+import { type MemoryReading, SHARD_BYTES, readAdmissibleMemory, unitsThatFit } from './admission';
 
 export { SHARD_BYTES };
 
@@ -24,7 +24,7 @@ export const MAX_DEFAULT_JOBS = 8;
 export const defaultJobs = (
   cpuCount = cpus().length,
   memBytes = totalmem(),
-  available: MemoryReading = readAvailableMemory(),
+  available: MemoryReading = readAdmissibleMemory(),
 ): number =>
   Math.max(
     1,

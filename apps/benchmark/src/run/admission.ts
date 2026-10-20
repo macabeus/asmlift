@@ -32,6 +32,13 @@
 // `RESERVE_BYTES`, held back for what is not a heavy job: the session that launched it, an editor,
 // the kernel's own growth while the job ramps up.
 //
+// WHAT IS ALREADY PROMISED. Available memory is read NOW, and a job registered a minute ago is
+// still ramping up: a full bench reads ~1 GB in its first minutes and ~8 GB at its peak. So every
+// live record in `run/lock.ts`'s register carries the need it was admitted with, and what such a
+// job has not taken yet — its need less what its process tree holds now — is subtracted before
+// anything else is admitted. On Linux the tree is read from /proc; where it cannot be read, nothing
+// is subtracted, which is this check without the correction, never a stricter one.
+//
 // REFUSE, NOT WAIT. Like the register, this decides and says why; it does not queue. A waiting job
 // holds a terminal and a lane hostage on a condition nobody can see, while a refusal names the
 // numbers and the next move — wait, lower `--jobs`, or scope the command.
@@ -40,9 +47,11 @@
 // `--no-lock` in `run/lock.ts` — a refusal nobody can legitimately pass gets passed illegitimately.
 // It is a door for a host whose reading is wrong (a container whose /proc/meminfo is the host's),
 // not for running two heavy jobs at once.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { cpus, freemem, platform } from 'node:os';
 import { pathToFileURL } from 'node:url';
+
+import { type BenchLockState, readBenchLock } from './lock';
 
 /** One shard of `bench run`: its 1.3–1.7 GB peak on the largest fans, with headroom for the compile
  *  workers a big fan forks (`eval/asmlift.ts`'s ROW_COMPILE_WORKERS, and on Linux one worker for
@@ -137,6 +146,113 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
   return { availableBytes: f, how: `free memory ${gb(f)} (os.freemem(), no swap counted)` };
 }
 
+/** Bytes of anonymous memory plus swap held by `pid` and every process descended from it, read from
+ *  Linux /proc (`VmRSS` + `VmSwap`; VmRSS also counts shared file pages, so this over-reads what a
+ *  job holds and under-reads what it has still to take — the lenient side, deliberately, since
+ *  the correction is additive to a check that was already sound without it). Undefined where /proc
+ *  cannot be read or the pid is gone. */
+export function processTreeBytes(pid: number, proc: string = '/proc'): number | undefined {
+  let pids: string[];
+  try {
+    pids = readdirSync(proc).filter((n) => /^\d+$/.test(n));
+  } catch {
+    return undefined;
+  }
+  const children = new Map<number, number[]>();
+  for (const p of pids) {
+    let stat: string;
+    try {
+      stat = readFileSync(`${proc}/${p}/stat`, 'utf8');
+    } catch {
+      continue;
+    }
+    // `pid (comm) state ppid …`: comm may hold spaces and parentheses, so read after the LAST `)`.
+    const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+    if (!children.has(ppid)) {
+      children.set(ppid, []);
+    }
+    children.get(ppid)!.push(Number(p));
+  }
+  let total = 0;
+  let found = false;
+  const queue = [pid];
+  const seen = new Set<number>();
+  while (queue.length > 0) {
+    const p = queue.pop()!;
+    if (seen.has(p)) {
+      continue;
+    }
+    seen.add(p);
+    let status: string;
+    try {
+      status = readFileSync(`${proc}/${p}/status`, 'utf8');
+    } catch {
+      continue;
+    }
+    found = true;
+    for (const field of ['VmRSS', 'VmSwap']) {
+      const m = new RegExp(`^${field}:\\s+(\\d+)\\s*kB`, 'm').exec(status);
+      total += m ? Number(m[1]) * 1024 : 0;
+    }
+    queue.push(...(children.get(p) ?? []));
+  }
+  return found ? total : undefined;
+}
+
+/** What the live jobs in the register were admitted with and have not taken yet. A record with no
+ *  `needBytes` (written before records carried one) and a job whose tree cannot be read add
+ *  nothing. */
+export function unspentBudgets(
+  state: BenchLockState,
+  held: (pid: number) => number | undefined = processTreeBytes,
+): { bytes: number; jobs: number } {
+  if (state.state !== 'held') {
+    return { bytes: 0, jobs: 0 };
+  }
+  let bytes = 0;
+  let jobs = 0;
+  for (const r of state.records) {
+    if (r.needBytes === undefined) {
+      continue;
+    }
+    const h = held(r.pid);
+    if (h === undefined) {
+      continue;
+    }
+    const left = Math.max(0, r.needBytes - h);
+    if (left > 0) {
+      bytes += left;
+      jobs++;
+    }
+  }
+  return { bytes, jobs };
+}
+
+export interface AdmissibleDeps extends MemoryDeps {
+  lockState?: () => BenchLockState;
+  held?: (pid: number) => number | undefined;
+}
+
+/** What is available now, less what the registered jobs have still to take: the figure every
+ *  admission decision and the default shard count read. */
+export function readAdmissibleMemory(deps: AdmissibleDeps = {}): MemoryReading {
+  const raw = readAvailableMemory(deps);
+  let promised: { bytes: number; jobs: number };
+  try {
+    promised = unspentBudgets((deps.lockState ?? readBenchLock)(), deps.held);
+  } catch {
+    // an unreadable register is reported by `bench run`'s own lock path; here it promises nothing
+    promised = { bytes: 0, jobs: 0 };
+  }
+  if (promised.bytes === 0) {
+    return raw;
+  }
+  return {
+    availableBytes: raw.availableBytes - promised.bytes,
+    how: `${raw.how}, less ${gb(promised.bytes)} that ${promised.jobs} registered job${promised.jobs === 1 ? ' has' : 's have'} still to take`,
+  };
+}
+
 /** What a command says about itself: its name, its peak need, and how that need was composed. */
 export interface AdmissionRequest {
   command: string;
@@ -170,7 +286,7 @@ export function admissionVerdict(
   ].join('\n');
 }
 
-export interface AdmitDeps extends MemoryDeps {
+export interface AdmitDeps extends AdmissibleDeps {
   env?: NodeJS.ProcessEnv;
   warn?: (s: string) => void;
 }
@@ -185,11 +301,11 @@ export function admissionRefusal(req: AdmissionRequest, deps: AdmitDeps = {}): s
     );
     return undefined;
   }
-  return admissionVerdict(req, readAvailableMemory(deps));
+  return admissionVerdict(req, readAdmissibleMemory(deps));
 }
 
 /** How many units of `perUnit` bytes fit in what is available now, less the reserve. */
-export function unitsThatFit(perUnit: number, reading: MemoryReading = readAvailableMemory()): number {
+export function unitsThatFit(perUnit: number, reading: MemoryReading = readAdmissibleMemory()): number {
   return Math.max(0, Math.floor((reading.availableBytes - RESERVE_BYTES) / perUnit));
 }
 
