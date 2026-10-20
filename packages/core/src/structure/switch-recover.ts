@@ -775,10 +775,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
 
     // PRE2 (arm exits), per SITE. A `break` arm closes; a `fallthrough` arm runs on into the one
-    // sibling it reaches, which `chainArms` then places directly under it. `unstructurable` is a
-    // shape no single linear switch spells — a body reaching two siblings, or a sibling on one path
-    // and the switch's end on another — and Regime A declines to if-recovery, which spells every
-    // one of those edges. (Regime B reads the same verdicts and fails LOUD on either.)
+    // sibling it reaches, which `chainArms` then places directly under it — on every path, or on
+    // some while the others reach the switch's end, which the arm's own `break;` spells (`breaks`).
+    // `unstructurable` is a shape no single linear switch spells — a body reaching two siblings, or
+    // a sibling beside a block the switch does not dominate — and Regime A declines to if-recovery,
+    // which spells every one of those edges. (Regime B reads the same verdicts and fails LOUD on
+    // either.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
     const siblings = new Set([...targets].filter((t) => t !== merge));
@@ -792,19 +794,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // backend because the backend's refusal is terminal (the whole function becomes a stub) while
     // this one costs nothing but the `switch` spelling.
     //
-    // A falling arm that also BREAKS (`case 1: if (c) break; case 2: …`) is a `switch` here only
-    // where it falls into a CASE arm, one the dispatch also enters by its own value. That arm is
-    // what if-recovery cannot spell without copying it into the arm that falls into it, and an
-    // if/else-if ladder writes no such pair. Falling into the `default:` arm is the other way
-    // round: the default is the ladder's `else`, and `if ((x == 3 || x == 5) && y == 100) A; else
-    // B;` compiles to exactly that tree — `synthetic:chainsense:agbcc`, a MATCH through
-    // if-recovery, which a `switch` with `case 3: case 5: if (y == 100) { A; break; } default: B;`
-    // would re-spell. So that one keeps declining to if-recovery, which spells it with no copy.
+    // A falling arm that also breaks is admitted wherever it falls, the `default:` arm included:
+    // which arm it falls into is no fact about the compiler. On agbcc an if/else ladder and
+    // `case 3: case 5: if (c) { A; break; } default: B;` compile to one object
+    // (`synthetic:chainsense:agbcc` matches either way), while for `case 1: if (c) break; default:
+    // f(); break;` the ladder if-recovery writes copies `f()` into the arm and misses the object
+    // the `switch` reaches.
     if (
       [...exitOf.values()].some(
-        (e) =>
-          e.kind === 'unstructurable' ||
-          (e.kind === 'fallthrough' && (!spellSwitchFallthrough || (e.breaks !== undefined && !caseBlocks.has(e.to)))),
+        (e) => e.kind === 'unstructurable' || (e.kind === 'fallthrough' && !spellSwitchFallthrough),
       )
     ) {
       return null;

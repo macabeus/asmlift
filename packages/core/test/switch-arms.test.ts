@@ -1118,10 +1118,9 @@ test('a body reaching a sibling CASE on one path and the switch END on another b
   expect(count(out, '*a1 = 2;')).toBe(1);
 });
 
-test('…but one that breaks or falls into the DEFAULT arm declines to if-recovery', () => {
-  // The `default:` is a ladder's `else`: `if ((x == 3 || x == 5) && y == 100) A; else B;` compiles
-  // to this tree (`synthetic:chainsense:agbcc`, which MATCHes through if-recovery), and if-recovery
-  // spells it with no copy, so the `switch` would only re-spell it.
+test('…and so does one that breaks or falls into the DEFAULT arm', () => {
+  // Where the arm falls is no fact about the compiler: `case 1: if (c) break; default: B;` is a
+  // `switch` as much as falling into a case is, and if-recovery would copy B into the arm.
   const asm =
     'f:\n' +
     '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -1134,8 +1133,8 @@ test('…but one that breaks or falls into the DEFAULT arm declines to if-recove
     '.Ldef:\n\tmov\tr0, #0x4\n\tstr\tr0, [r1]\n' +
     '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
   const out = of(asm);
-  expect(out).not.toContain('switch (');
-  expect(count(out, '*a1 = 4;')).toBeGreaterThan(1);
+  expect(out).toMatch(/if \(a1 == 0\) break;\s*\n\s*default:\s*\n\s*\*a1 = 4;/);
+  expect(count(out, '*a1 = 4;')).toBe(1);
 });
 
 // ── what the TARGET LANGUAGE can spell is a recovery input ───────────────────────────────────────
@@ -1604,6 +1603,12 @@ test('an arm that breaks twice before it falls joins after each guard rather tha
     /case 0:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*h\(a0\);\s*\n\s*if \(a0 == gB\) break;\s*\n\s*m\(a0\);\s*\n\s*case 1:/,
   );
   expect(out).not.toContain('else');
+});
+
+test('an arm that breaks or falls into the `default:` arm is a switch on agbcc', () => {
+  const out = ifBreakLift('intodefault');
+  expect(out).toMatch(/case 1:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*default:\s*\n\s*f\(a0\);/);
+  expect(count(out, 'f(a0)')).toBe(1);
 });
 
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
