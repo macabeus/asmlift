@@ -2502,9 +2502,12 @@ function recoverJumpTable(
 // the ones `mayWriteReg` knows write their first operand — the data-processing ops and the single
 // loads — less the two that read the carry; anything else refuses:
 //   - a store, a call, a transfer, a flag READ (`adc`/`sbc`), or any other mnemonic;
-//   - a write to the loaded target (it is what `mov pc` jumps through), or to sp/pc. A write to the
-//     scrutinee is admitted: the switch does not read it after the extras, and the case blocks read
-//     what the extras left there on the hardware too;
+//   - a write to the loaded target (it is what `mov pc` jumps through), or to sp/pc/lr. A write to
+//     the scrutinee is admitted: the switch does not read it after the extras, and the case blocks
+//     read what the extras left there on the hardware too. lr is refused because the lifter reads
+//     `bx lr` as a return by the register's name (`refuseReturnsNotThroughCallersLr`'s NOT ASKED):
+//     a case's `bx lr` after `mov lr, r3` would lift as `return`, where the hardware jumps to r3.
+//     PRE never inserts an lr write, so the refusal costs no compiled dispatch;
 //   - a read of a register the idiom wrote (index, table pointer, target) before an extra rewrote it:
 //     the idiom is not lifted, so such a read would see the value from before the dispatch.
 // The reason is returned so the decline can name it (`readThumbText`'s indirect-jump refusal).
@@ -2524,7 +2527,7 @@ function dispatchExtraRefusal(
       return `${say} is not a register computation or a load`;
     }
     const dest = ins.ops[0];
-    if ([targetReg, 'sp', 'r13', 'pc', 'r15'].includes(dest)) {
+    if ([targetReg, 'sp', 'r13', 'pc', 'r15', 'lr', 'r14'].includes(dest)) {
       return `${say} writes the register the dispatch needs, '${dest}'`;
     }
     const reads = ins.ops.length > 2 || SINGLE_LOAD.test(mn) || DEST_ONLY.test(mn) ? ins.ops.slice(1) : ins.ops;
