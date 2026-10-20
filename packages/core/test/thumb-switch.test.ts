@@ -361,6 +361,29 @@ test('dispatch code may overwrite the scrutinee: the switch reads it as the disp
   expect(out).toMatch(/else \{\s*\n\s*return a1;/);
 });
 
+test('a case reading a register the kept dispatch idiom wrote DECLINES', () => {
+  // The idiom (`lsl`, the pointer load, `add`, the target load) is not lifted, so a case reading what
+  // it left would see the value from before the dispatch: on the hardware r1 holds the table's
+  // address and r0 the case's own code address. A register the dispatch code rewrites is not stale.
+  const reading = (c0: string, c1: string) =>
+    withExtra('\tadd\tr2, r3, #0x1\n').replace(
+      /\.Lc0:[\s\S]*$/,
+      `.Lc0:\n${c0}\tbx\tlr\n.Lc1:\n${c1}\tbx\tlr\n.Ldef:\n\tmov\tr0, #9\n\tbx\tlr\n`,
+    );
+  const stale = /a case of the kept jump table reads (r0|r1), which the unlifted dispatch idiom wrote/;
+  expect(() => decompile('f', reading('\tadd\tr0, r1, #0\n', '\tmov\tr0, #4\n'), ARMV4T_AGBCC)).toThrow(stale);
+  expect(() => decompile('f', reading('\tmov\tr0, #4\n', '\tadd\tr0, r0, #3\n'), ARMV4T_AGBCC)).toThrow(stale);
+  // r0 left holding the code address at a `bx lr`: an inferred return reads it, a declared void one does not
+  const leaves = reading('\tmov\tr0, #4\n', '\tstr\tr2, [r3]\n');
+  expect(() => decompile('f', leaves, ARMV4T_AGBCC)).toThrow(stale);
+  const voidOut = decompile('f', leaves, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(voidOut).toContain('switch (a0)');
+  // what the dispatch code wrote is not stale
+  expect(decompile('f', reading('\tadd\tr0, r2, #0\n', '\tmov\tr0, #4\n'), ARMV4T_AGBCC).source).toMatch(
+    /case 0:\s*\n\s*return a3 \+ 1;/,
+  );
+});
+
 test('a table entry naming a dispatch block DECLINES — it jumps through a code address, not a case', () => {
   // A table case is an edge the branch counts never saw. A kept dispatch would lift it as a second
   // switch on the unscaled scrutinee (a `while (1)` re-dispatch); the asm jumps through r0, which

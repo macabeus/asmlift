@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -2288,6 +2288,9 @@ interface JumpTable {
   defaultLabel: string;
   /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
   extras: Instr[];
+  /** The registers the unlifted idiom wrote (index, table pointer, target) that no extra rewrote: a
+   *  kept dispatch leaves them holding values the lift does not model (`refuseStaleIdiomReads`). */
+  stale: string[];
 }
 
 // Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
@@ -2491,7 +2494,10 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  return { scrutReg, caseLabels, defaultLabel, extras };
+  // Only a kept dispatch (one carrying extras) has a block for them to be stale after.
+  const rewritten = new Set(extras.map((ins) => ins.ops[0]));
+  const stale = extras.length === 0 ? [] : [...new Set([idxReg, ptrReg, ldrV.ops[0]])].filter((r) => !rewritten.has(r));
+  return { scrutReg, caseLabels, defaultLabel, extras, stale };
 }
 
 // The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
@@ -2539,6 +2545,61 @@ function dispatchExtraRefusal(
     stale.delete(dest);
   }
   return null;
+}
+
+/** A KEPT DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom (`lsl`, the table
+ *  pointer's load, `add`, the target's load) is not lifted, so the registers it wrote and no extra
+ *  rewrote hold the scaled index, the table's address and the case's code address on the hardware,
+ *  and the marker `lowerTerminator` put in each stands for none of them. Run on the filled SSA, before
+ *  `finish` collapses a join of an undefined value into its other argument: a marker some operand
+ *  demands, directly or through the joins that carry it, declines. A `ret` operand demands nothing
+ *  under a declared `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). */
+function refuseStaleIdiomReads(
+  name: string,
+  irBlocks: readonly Block[],
+  stale: ReadonlyMap<Value, string>,
+  own: FnProto | undefined,
+): void {
+  if (stale.size === 0) {
+    return;
+  }
+  const incoming = new Map<Value, Value[]>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      for (const s of op.successors) {
+        s.args.forEach((a, i) => {
+          const p = s.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  const demanded = new Set<Value>();
+  const work: Value[] = [];
+  const demand = (v: Value) => {
+    if (!demanded.has(v)) {
+      demanded.add(v);
+      work.push(v);
+    }
+  };
+  const voidReturn = declaresVoidReturn(own);
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if (!(op.opcode === 'ret' && voidReturn)) {
+        op.operands.forEach(demand);
+      }
+    }
+  }
+  while (work.length > 0) {
+    (incoming.get(work.pop()!) ?? []).forEach(demand);
+  }
+  const read = [...stale].find(([v]) => demanded.has(v));
+  if (read !== undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': a case of the kept jump table reads ${read[1]}, which the unlifted dispatch idiom ` +
+        `wrote — the lift would read the value from before the dispatch, not the table's index, address or target`,
+    );
+  }
 }
 
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
@@ -2595,6 +2656,7 @@ function liftOnce(
     fillThumbBlock(fill, ab, bi);
     ssa.markFilled(bi);
   });
+  refuseStaleIdiomReads(name, irBlocks, fill.staleIdiomValues, prototypes[name] ?? options.contextOwnProto?.proto);
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
   refuseReturnsNotThroughCallersLr(name, cfg);
@@ -4855,6 +4917,8 @@ interface ThumbFill {
   /** the function-scope statics the operands define, finished into the lifted function's objects */
   readonly statics: LocalStatics;
   readonly frameUses: ThumbFrameUses;
+  /** A kept dispatch's stale idiom registers, by the marker value each holds after it. */
+  readonly staleIdiomValues: Map<Value, string>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -4941,6 +5005,7 @@ function thumbFillOf(
       movedCaptures: new Set(),
       offEntryArgReads: new Set(),
     },
+    staleIdiomValues: new Map(),
   };
 }
 
@@ -6034,6 +6099,18 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // idiom read it first, and the extras after it may overwrite the register. Its bounds test stays
     // a branch and already sent every value past N-1 to the default, so its switch is `exhaustive`.
     const scrut = cur.dispatchScrutinee ?? readVar(reg(jt.scrutReg), bi);
+    // What the unlifted idiom left in the registers no extra rewrote is no value the lift models: on
+    // the hardware the case blocks see the scaled index, the table's address and the case's own code
+    // address. Each is a marker here, and a read of one declines (`refuseStaleIdiomReads`). The
+    // elided form cannot carry them: its bounds block's default path never ran the idiom.
+    if (cur.dispatchScrutinee !== null) {
+      for (const r of jt.stale) {
+        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg(r) } });
+        irb.ops.push(op);
+        ssa.writeVar(reg(r), bi, op.results[0]);
+        fill.staleIdiomValues.set(op.results[0], r);
+      }
+    }
     pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)], cur.dispatchScrutinee !== null);
   } else if (!last) {
     // an EMPTY block is only ever the synthetic entry preheader (decoded blocks are non-empty):
