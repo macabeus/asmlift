@@ -751,3 +751,278 @@ closedbreak:
 	bx	r1
 .Lfe11:
 	.size	 closedbreak,.Lfe11-closedbreak
+	.align	2, 0
+	.globl	defaultexit
+	.type	 defaultexit,function
+	.thumb_func
+defaultexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r9
+	mov	r6, r8
+	push	{r6, r7}
+	mov	r9, r0
+	add	r6, r1, #0
+	add	r4, r2, #0
+	mov	r8, r4
+	add	r5, r6, #0
+	mov	r7, #0x28
+.L189:
+	sub	r7, r7, #0x1
+	cmp	r7, #0
+	bge	.L192	@cond_branch
+	mov	r0, #0x7
+	neg	r0, r0
+	b	.L203
+.L192:
+	mov	r1, r9
+	add	r0, r1, r4
+	cmp	r0, #0x1
+	beq	.L194	@cond_branch
+	cmp	r0, #0x3
+	beq	.L197	@cond_branch
+	b	.L196
+.L194:
+	mov	r0, #0x4b
+	bl	g
+	add	r5, r6, #0
+	add	r5, r5, #0x37
+	b	.L189
+.L197:
+	ldr	r0, .L204
+	ldr	r0, [r0]
+	cmp	r6, r0
+	bne	.L198	@cond_branch
+	bl	p
+	cmp	r0, #0
+	bne	.L196	@cond_branch
+	mov	r0, #0x3e
+	bl	g
+.L198:
+	mov	r0, r8
+	sub	r5, r4, r0
+	add	r4, r4, #0x1
+	cmp	r4, #0x14
+	ble	.L189	@cond_branch
+.L196:
+	add	r5, r5, #0x1
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r4, r0
+.L203:
+	pop	{r3, r4}
+	mov	r8, r3
+	mov	r9, r4
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.L205:
+	.align	2, 0
+.L204:
+	.word	gA
+.Lfe12:
+	.size	 defaultexit,.Lfe12-defaultexit
+	.align	2, 0
+	.globl	closedexit
+	.type	 closedexit,function
+	.thumb_func
+closedexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, sl
+	mov	r6, r9
+	mov	r5, r8
+	push	{r5, r6, r7}
+	mov	r9, r0
+	add	r6, r1, #0
+	add	r4, r2, #0
+	mov	r8, r4
+	add	r5, r6, #0
+	mov	r7, #0x28
+	mov	r0, #0x0
+	mov	sl, r0
+.L211:
+	sub	r7, r7, #0x1
+	cmp	r7, #0
+	bge	.L214	@cond_branch
+	mov	r0, #0x7
+	neg	r0, r0
+	b	.L235
+.L214:
+	mov	r0, r9
+	add	r1, r0, r4
+	cmp	r1, #0x64
+	beq	.L216	@cond_branch
+	cmp	r1, #0x64
+	bgt	.L230	@cond_branch
+	cmp	r1, #0x3
+	beq	.L225	@cond_branch
+	b	.L219
+.L230:
+	ldr	r0, .L236
+	cmp	r1, r0
+	beq	.L220	@cond_branch
+	cmp	r1, r0
+	bgt	.L231	@cond_branch
+	cmp	r1, #0xfa
+	beq	.L226	@cond_branch
+	b	.L219
+.L237:
+	.align	2, 0
+.L236:
+	.word	0x3e7
+.L231:
+	mov	r0, #0xfa
+	lsl	r0, r0, #0x4
+	cmp	r1, r0
+	beq	.L228	@cond_branch
+	b	.L219
+.L216:
+	ldr	r0, .L238
+	ldr	r0, [r0]
+	cmp	r6, r0
+	bne	.L217	@cond_branch
+	ldr	r0, .L238+0x4
+	ldr	r0, [r0]
+	cmp	r8, r0
+	bne	.L219	@cond_branch
+	add	r0, r5, #0
+	bl	f
+.L217:
+	add	r4, r4, #0x3
+	b	.L215
+.L239:
+	.align	2, 0
+.L238:
+	.word	gA
+	.word	gC
+.L220:
+	ldr	r0, .L240
+	ldr	r0, [r0]
+	cmp	r6, r0
+	bgt	.L219	@cond_branch
+	add	r5, r6, #0
+	add	r5, r5, #0x5f
+	b	.L215
+.L241:
+	.align	2, 0
+.L240:
+	.word	gB
+.L225:
+	add	r0, r5, #0
+	bl	f
+	add	r5, r6, #0
+	add	r5, r5, #0x5c
+	b	.L211
+.L226:
+.L228:
+	add	r0, r4, #0
+	b	.L235
+.L215:
+	add	r4, r4, #0x1
+	cmp	r4, #0x14
+	ble	.L211	@cond_branch
+.L219:
+	add	r5, r5, #0x1
+	add	r4, r4, #0x5
+	mov	r0, #0x1
+	add	sl, sl, r0
+	mov	r0, sl
+	cmp	r0, #0x1
+	ble	.L211	@cond_branch
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r4, r0
+.L235:
+	pop	{r3, r4, r5}
+	mov	r8, r3
+	mov	r9, r4
+	mov	sl, r5
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe13:
+	.size	 closedexit,.Lfe13-closedexit
+	.align	2, 0
+	.globl	latchexit
+	.type	 latchexit,function
+	.thumb_func
+latchexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, sl
+	mov	r6, r9
+	mov	r5, r8
+	push	{r5, r6, r7}
+	mov	sl, r0
+	mov	r8, r1
+	add	r7, r2, #0
+	add	r4, r7, #0x1
+	mov	r6, r8
+	mov	r5, #0x0
+	ldr	r0, .L261
+	mov	r9, r0
+.L246:
+	mov	r0, sl
+	add	r1, r0, r5
+	cmp	r1, #0x64
+	beq	.L256	@cond_branch
+	cmp	r1, #0x64
+	bgt	.L259	@cond_branch
+	cmp	r1, #0x3
+	beq	.L248	@cond_branch
+	b	.L247
+.L262:
+	.align	2, 0
+.L261:
+	.word	gC
+.L259:
+	mov	r0, #0xfa
+	lsl	r0, r0, #0x4
+	cmp	r1, r0
+	beq	.L251	@cond_branch
+	b	.L247
+.L248:
+	sub	r6, r4, r7
+	bl	p
+	cmp	r0, #0
+	bne	.L250	@cond_branch
+.L251:
+	ldr	r0, .L263
+	ldr	r0, [r0]
+	cmp	r8, r0
+	bne	.L245	@cond_branch
+	cmp	r7, #0
+	beq	.L245	@cond_branch
+.L256:
+	bl	p
+	add	r4, r0, r6
+.L247:
+	mov	r1, r9
+	ldr	r0, [r1]
+	add	r0, r0, r4
+	str	r0, [r1]
+.L245:
+	add	r5, r5, #0x1
+	cmp	r5, #0x2
+	ble	.L246	@cond_branch
+.L250:
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r6, #0x1
+	add	r0, r0, r6
+	add	r0, r4, r0
+	pop	{r3, r4, r5}
+	mov	r8, r3
+	mov	r9, r4
+	mov	sl, r5
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.L264:
+	.align	2, 0
+.L263:
+	.word	gB
+.Lfe14:
+	.size	 latchexit,.Lfe14-latchexit

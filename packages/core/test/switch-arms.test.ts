@@ -1287,7 +1287,7 @@ test('every withholding on the `default:` position, one call each', () => {
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
     blockOf: () => undefined,
-    outsideLoop: () => false,
+    enclosingLoop: () => null,
     hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
@@ -1654,6 +1654,26 @@ test('a sub-tree whose post-dominator lies past the loop bottom takes no arm `br
   const out = ifBreakLift('subret', { returns: 's32' });
   expect(out).toContain('return');
   expect(out).not.toMatch(/break;/);
+});
+
+test('a falling arm into a `default:` that is the loop exit goes to if-recovery', () => {
+  // `case 3:` breaks, and falls on its `goto out` into `default: goto out;`, the loop's own exit:
+  // C's `break;` there would leave the switch, not the loop.
+  const out = ifBreakLift('defaultexit', { returns: 's32' });
+  expect(out).not.toContain('switch');
+  expect(out).toContain('return');
+});
+
+test('closed arms that leave for a loop exit whose tail returns copy that tail, as outside a switch', () => {
+  const out = ifBreakLift('closedexit', { returns: 's32' });
+  expect(out).toContain('switch (');
+  expect(out).toMatch(/r\(v1 \+ 5\);\s*\n\s*return/);
+});
+
+test('an arm that `continue`s to the loop bottom test is no loop break: the `switch` stays', () => {
+  const out = ifBreakLift('latchexit', { returns: 's32' });
+  expect(out).toContain('switch (');
+  expect(out).toContain('continue;');
 });
 
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {

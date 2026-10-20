@@ -5828,7 +5828,7 @@ export function structure(
     spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     blockOf,
-    outsideLoop: (blk) => loopCtx !== null && !loopCtx.body.has(blk),
+    enclosingLoop: () => loopCtx,
     hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
@@ -6662,10 +6662,16 @@ export function structure(
     // where that exit is the switch's own merge (a block the switch does not dominate is refused by
     // `analyzeArmExit` in both regimes): the code after the switch then IS the exit region, and the
     // edge structures as any other edge to the merge — the arm's `break;` (`switchBreakAt`), or
-    // nothing in a closed arm, which stops there. Any other exit is refused here, loud, rather than
-    // handed to the printer as a `break` it would rebind.
+    // nothing in a closed arm, which stops there. An exit whose tail returns is copied into the arm
+    // (below). Any other exit is refused here, loud, rather than handed to the printer as a `break`
+    // it would rebind.
     if (loopCtx && loopCtx.breaks.has(b) && armCapturesBreak) {
-      if (loopCtx.exit === null || armFrame!.merge !== loopCtx.exit) {
+      // Where the exit ends in a `return` (or an early-return arm owns it), no `break` is needed:
+      // if-recovery below copies the exit's tail into the arm and returns there, as it does outside
+      // a switch when the break rule refuses. Only the remaining exits are refused.
+      const exit = loopCtx.exit;
+      const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
+      if ((exit === null || armFrame!.merge !== exit) && !tailReturns) {
         throw new StructureError(
           `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
             `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,

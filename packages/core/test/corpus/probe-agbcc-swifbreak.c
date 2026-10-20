@@ -12,7 +12,10 @@
  * cannot take a switch `break;`, so the tree goes to if-recovery, never to a loud refusal.
  * `codebreak` and `retfall` leave a falling arm through a block of their own (code before the
  * `break;`, a `return` through the shared epilogue), and `closedbreak` is a closed arm with a
- * `break;` in its middle: each joins inside the arm rather than copying its tail.
+ * `break;` in its middle: each joins inside the arm rather than copying its tail. `defaultexit`
+ * falls into a `default:` that is the loop's own exit and goes to if-recovery; `closedexit`'s closed
+ * arms leave for an exit whose tail returns, which is copied into them; `latchexit` falls into an
+ * arm that `continue`s to the loop's bottom test and stays a `switch`.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -196,4 +199,68 @@ s32 closedbreak(s32 i, s32 a, s32 b)
     }
     r(0);
     return 0;
+}
+
+s32 defaultexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u, w;
+    t = b; u = a; w = 40;
+    for (;;) {
+        w = w - 1; if (w < 0) return -7;
+        switch (i + t) {
+        case 1: g(75); u = a + 55; continue;
+        default: goto out;
+        case 3: if (a == gA) { if (p()) goto out; g(62); } u = t - b; break;
+        }
+        t = t + 1;
+        if (t > 20) break;
+    }
+out:
+    u = u + 1;
+    r(t);
+    return t + u * 3;
+}
+
+s32 closedexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u, w;
+    t = b; u = a; w = 40;
+    for (k = 0; k < 2; k++) {
+    for (;;) {
+        w = w - 1; if (w < 0) return -7;
+        switch (i + t) {
+        case 100: if (a == gA) { if (a == gA && b != gC) goto out; f(u); } t = t + 3; break;
+        case 999: if (a > gB) { if (a != gB || b == 0) goto out; g(42); } u = a + 95; break;
+        case 31: goto out;
+        case 3: f(u); u = a + 92; continue;
+        case 250: return t;
+        default: goto out;
+        case 4000: return t;
+        }
+        t = t + 1;
+        if (t > 20) break;
+    }
+out:
+    u = u + 1;
+    t = t + 5;
+    }
+    r(t);
+    return t + u * 3;
+}
+
+s32 latchexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u;
+    t = b + 1; u = a;
+    for (k = 0; k < 3; k++) {
+    switch (i + k) {
+    case 3: u = t - b; if (p()) goto out;
+    case 4000: if (a != gB || b == 0) continue; t = 57; if (a != gB || b == 0) break;
+    case 100: t = p() + u; break;
+    }
+        gC = gC + t;
+    }
+out:
+    r(t);
+    return t + u * 3;
 }
