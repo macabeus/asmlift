@@ -1429,3 +1429,66 @@ subtreeexit:
 	bx	r1
 .Lfe18:
 	.size	 subtreeexit,.Lfe18-subtreeexit
+	.align	2, 0
+	.globl	toptestexit
+	.type	 toptestexit,function
+	.thumb_func
+toptestexit:
+	push	{r4, r5, r6, lr}
+	add	r6, r0, #0
+	add	r4, r2, #0x1
+	add	r5, r1, #0
+	mov	r3, #0x0
+	ldr	r0, .L386
+	ldr	r0, [r0]
+	add	r0, r0, #0x3
+.L385:
+	cmp	r3, r0
+	bge	.L380	@cond_branch
+	add	r3, r3, #0x1
+	add	r1, r6, r3
+	cmp	r1, #0x1f
+	beq	.L375	@cond_branch
+	cmp	r1, #0x64
+	beq	.L378	@cond_branch
+	b	.L377
+.L387:
+	.align	2, 0
+.L386:
+	.word	gC
+.L375:
+	cmp	r2, #0
+	bne	.L385	@cond_branch
+.L377:
+	mov	r0, #0x1
+	b	.L384
+.L378:
+	cmp	r4, #0x9
+	ble	.L385	@cond_branch
+.L380:
+	ldr	r0, .L388
+	ldr	r0, [r0]
+	cmp	r0, #0x5
+	bgt	.L383	@cond_branch
+	add	r0, r5, #0
+	bl	h
+	add	r0, r4, #0
+	bl	r
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r4, r0
+	b	.L384
+.L389:
+	.align	2, 0
+.L388:
+	.word	gB
+.L383:
+	mov	r0, #0x1
+	bl	r
+	mov	r0, #0x2
+.L384:
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+.Lfe19:
+	.size	 toptestexit,.Lfe19-toptestexit

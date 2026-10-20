@@ -1717,6 +1717,16 @@ test('the same edge from a case the comparison tree tested first, which the sub-
   expect(out).toContain('return 5;');
 });
 
+test('the same edge in a top-tested loop, whose header is the merge, goes to if-recovery', () => {
+  // `while (k < gC + 3)` is tested at the top, so the switch's merge is the loop header, and
+  // `case 100: if (t > 9) goto out;` is a block that edges to the exit and straight back into the
+  // header. That is no bottom test, and the switch goes to if-recovery rather than refusing loud.
+  const out = ifBreakLift('toptestexit', { returns: 's32' });
+  expect(out).toContain('s32 toptestexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 1;');
+});
+
 test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
   // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
   // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`

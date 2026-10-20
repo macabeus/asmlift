@@ -516,12 +516,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // of the comparison tree, an arm can run on into the code of a case the tree's root already took,
   // which the dispatch does not dominate, and `structureArm` structures that code inside the arm.
   // A block that also edges back to `header` is the loop's bottom test, which spells as the loop's
-  // condition, not as the arm's (`breaksLoop`).
+  // condition, not as the arm's (`breaksLoop`) — save where `header` IS the merge (a top-tested
+  // loop): no bottom test is then reachable without passing the merge, and an arm's
+  // `if (c) goto out;` is a block that edges to the exit and straight back into the header.
   const armsReach = (entries: Iterable<Block>, merge: Block | null, header: Block, target: Block): boolean => {
     const seen = new Set<Block>(entries);
     for (const q = [...seen]; q.length;) {
       const succ = successorsOf(q.pop()!);
-      if (succ.includes(target) && !succ.includes(header)) {
+      if (succ.includes(target) && (header === merge || !succ.includes(header))) {
         return true;
       }
       for (const s of succ) {

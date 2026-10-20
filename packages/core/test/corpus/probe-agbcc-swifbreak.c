@@ -24,7 +24,8 @@
  * an exit that runs on to an OUTER loop's latch: no arm can spell that edge, so the tree goes to
  * if-recovery. `subtreeexit` is the same edge from the code of `case 17`, which the comparison
  * tree's root tests first: the switch recognised below that root does not dominate it, yet
- * `case 100` runs on into it.
+ * `case 100` runs on into it. `toptestexit` is top-tested, so the switch's merge is the loop header
+ * and `case 100`'s `goto out` edges to the exit and back into the header.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -362,6 +363,25 @@ out:
         if (gA > 1) r(1);
         return 2;
     }
+    r(t);
+    return t + u * 3;
+}
+
+s32 toptestexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u;
+    t = b + 1; u = a; k = 0;
+    while (k < gC + 3) {
+        k++;
+        switch (i + k) {
+        case 31: if (b != 0) break; t = t + 2;
+        default: return 1;
+        case 100: if (t > 9) goto out; break;
+        }
+    }
+out:
+    if (gB > 5) { r(1); return 2; }
+    h(u);
     r(t);
     return t + u * 3;
 }
