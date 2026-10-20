@@ -18,6 +18,7 @@ import {
   benchInFlightRefusal,
   benchLockStatus,
   concurrentRunRefusal,
+  concurrentSweepRefusal,
   readBenchLock,
   releaseBenchLock,
 } from '../src/run/lock';
@@ -350,6 +351,75 @@ describe('what a SECOND bench run is told', () => {
     const state = readBenchLock(reg);
     expect(state.state === 'held' && state.records[0].pid).toBe(process.pid);
     releaseBenchLock(reg);
+  });
+});
+
+describe('a whole-corpus sweep in the register', () => {
+  /** A live record of the given shape, with this test process's pid so it reads as live. */
+  const live = (over: Record<string, unknown>) => {
+    const reg = throwawayReg();
+    writeRecord(reg, process.pid, {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      command: 'bench sweep --base origin/main',
+      tiers: ['synthetic', 'real'],
+      root: MY_ROOT,
+      whole: true,
+      ...over,
+    });
+    return readBenchLock(reg);
+  };
+
+  test('a whole-corpus sweep is refused beside a full bench in ANY worktree — the 13:18 pair', () => {
+    const msg = concurrentSweepRefusal(live({ command: 'bench run --jobs 3', kind: undefined, root: OTHER_ROOT }));
+    expect(msg).toContain('bench sweep REFUSED');
+    expect(msg).toContain('a full bench is already running');
+    expect(msg).toContain(OTHER_ROOT);
+    expect(msg).toContain('--only');
+    expect(msg).toContain('--no-lock');
+  });
+
+  test('…and beside another whole-corpus sweep', () => {
+    expect(concurrentSweepRefusal(live({ kind: 'sweep' }))).toContain('a whole-corpus sweep is already running');
+  });
+
+  test('…but not beside a scoped run, nor on a free or stale register', () => {
+    expect(
+      concurrentSweepRefusal(live({ command: 'bench run --only x', kind: undefined, whole: false })),
+    ).toBeUndefined();
+    expect(concurrentSweepRefusal(readBenchLock(throwawayReg()))).toBeUndefined();
+    const reg = throwawayReg();
+    writeRecord(reg, deadPid());
+    expect(concurrentSweepRefusal(readBenchLock(reg))).toBeUndefined();
+  });
+
+  test('a full bench run is refused beside a live whole-corpus sweep, which it names as one', () => {
+    const msg = concurrentRunRefusal(live({ kind: 'sweep', root: OTHER_ROOT }), asRun());
+    expect(msg).toContain('bench run REFUSED: a whole-corpus sweep is already running');
+  });
+
+  test('a sweep writes no tier file: a scoped run in the SAME worktree is not refused beside it', () => {
+    expect(concurrentRunRefusal(live({ kind: 'sweep' }), asRun({ whole: false }))).toBeUndefined();
+  });
+
+  test('a sweep measures nothing, so it never blocks an edit to the tree it lifts', () => {
+    expect(benchInFlightRefusal(live({ kind: 'sweep' }), MY_ROOT)).toBeUndefined();
+  });
+
+  test('acquire writes `kind: sweep`, and the record reads back as one', () => {
+    const reg = throwawayReg();
+    acquireBenchLock('bench sweep', { tiers: ['synthetic', 'real'], whole: true, root: MY_ROOT, kind: 'sweep' }, reg);
+    const rec = JSON.parse(readFileSync(join(reg, `${process.pid}.json`), 'utf8')) as BenchLockRecord;
+    expect(rec.kind).toBe('sweep');
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].kind).toBe('sweep');
+    releaseBenchLock(reg);
+  });
+
+  test('a record whose kind is any other word reads as a run — the kind that collides with more', () => {
+    const state = live({ kind: 'sweeep' });
+    expect(state.state === 'held' && state.records[0].kind).toBeUndefined();
+    expect(benchInFlightRefusal(state, MY_ROOT)).toBeDefined();
   });
 });
 
