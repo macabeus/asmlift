@@ -249,6 +249,7 @@ function runTower(
     // shape are behaviourally identical and only one of them is printable (switch fall-through
     // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+    spellSwitchBreak: backend.spellsSwitchBreak,
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),

@@ -533,9 +533,27 @@ test('a loop-scoped `break` inside a case arm is refused, and `continue` is not'
   expect(emitCFamily('void f(s32 x)', armed(nested([{ k: 'continue' }])))).toContain('continue;');
   // CONTROL: an ordinary arm, and a loop OPENED INSIDE the arm, which captures its own `break`.
   expect(emitCFamily('void f(s32 x)', armed([set]))).toContain('case 0:');
+  // …and the SWITCH's own `break` (`ofSwitch`), which means between the labels what C makes of it.
+  const own = emitCFamily(
+    'void f(s32 x)',
+    armed([{ k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break', ofSwitch: true }], else: [] }]),
+  );
+  expect(own).toMatch(/case 0:\s*\n\s*if \(x\) break;/);
   expect(
     emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [set, { k: 'break' }] }])),
   ).toContain('case 0:');
+  // The other direction: a switch's `break` under a loop the arm opened would bind that loop, and
+  // one in a loop body outside any switch would bind the loop too. Both refused, the same way.
+  const ownBreak: Stmt = { k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break', ofSwitch: true }], else: [] };
+  expect(() =>
+    emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [ownBreak, set] }])),
+  ).toThrow(/switch-scoped `break;`, which C would bind to the loop/);
+  expect(() =>
+    emitCFamily('void f(s32 x)', {
+      ...armed([]),
+      body: [{ k: 'dowhile', cond: { k: 'var', name: 'x' }, body: [ownBreak] }],
+    }),
+  ).toThrow(/switch-scoped `break;`, which C would bind to the loop/);
 });
 
 test('`stmtChildren` lists a mid-placed default where the backend prints it', () => {
@@ -1042,7 +1060,9 @@ test('a chain elsewhere does not delete the evidence for where `default:` was wr
 // Regime A's fallback is if-recovery, which spells every edge the assembly has — so each of these
 // comes back as if-nesting rather than as a `switch` that guesses. What the assertions read is that
 // the arm at the far end of the offending edge never gets a `case` label of the recovered switch,
-// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling.
+// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling. One
+// shape here recovers — a body reaching a sibling CASE and the switch's END, spelled with a
+// switch-scoped `break;` — and stays beside the near-miss it is told apart from.
 const threeCase = (c0: string, c1: string, c2: string) =>
   'f:\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -1082,10 +1102,10 @@ test('a body reaching TWO sibling arms declines — C fall-through reaches only 
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
 });
 
-test('a body reaching a sibling on one path and the switch END on another declines', () => {
-  // The shape that needs a switch-scoped `break;` inside a case body, which l3 does not emit
-  // (`{k:'break'}` is loop-scoped). Widening fall-through to swallow it would divert the exiting
-  // path into the next arm.
+test('a body reaching a sibling CASE on one path and the switch END on another breaks on that path', () => {
+  // `case 0: if (c) break; case 1: …` — the arm's own switch-scoped `break;` on the path to the
+  // END, the fall-through on the other. Case 1 keeps its own label and is emitted once, where
+  // if-recovery would copy it into case 0.
   const out = of(
     threeCase(
       '\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Lc1\n',
@@ -1093,8 +1113,28 @@ test('a body reaching a sibling on one path and the switch END on another declin
       '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
     ),
   );
-  expect(armOrder(out)).not.toContain(1);
-  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(out).toMatch(/case 0:\s*\n\s*if \(a1 == 0\) break;\s*\n\s*case 1:\s*\n\s*\*a1 = 2;/);
+  expect(count(out, '*a1 = 2;')).toBe(1);
+});
+
+test('…and so does one that breaks or falls into the DEFAULT arm', () => {
+  // `case 1: if (c) break; default: B;` is a `switch` as much as falling into a case is, and
+  // if-recovery would copy B into the arm.
+  const asm =
+    'f:\n' +
+    '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+    '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+    '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lc0:\n\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lc1:\n\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n' +
+    '.Lc2:\n\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n' +
+    '.Ldef:\n\tmov\tr0, #0x4\n\tstr\tr0, [r1]\n' +
+    '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+  const out = of(asm);
+  expect(out).toMatch(/if \(a1 == 0\) break;\s*\n\s*default:\s*\n\s*\*a1 = 4;/);
+  expect(count(out, '*a1 = 4;')).toBe(1);
 });
 
 // ── what the TARGET LANGUAGE can spell is a recovery input ───────────────────────────────────────
@@ -1247,9 +1287,11 @@ test('every withholding on the `default:` position, one call each', () => {
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
     blockOf: () => undefined,
+    enclosingLoop: () => null,
     hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
+    structureArm: () => [],
   };
   const rec = makeSwitchRecovery(deps);
   const arms = (falls: number) => [a0, a1, a2].map((entry, i) => ({ entry, fallsThrough: i === falls }));
@@ -1514,6 +1556,271 @@ test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if
   const withdrawn = at(notDeclared);
   expect(count(withdrawn, 'switch (')).toBe(1);
   expect([...withdrawn.matchAll(/case (-?\d+):/g)].map((m) => m[1])).toEqual(['98', '6', '99', '7', '8', '9']);
+});
+
+// ── the switch-scoped `break;` ───────────────────────────────────────────────────────────────────
+// `corpus/agbcc-swifbreak.s`: case bodies that leave the switch on one path and fall into the next
+// case on another, compiled by agbcc. What each test reads is which construct the `break;` binds.
+const ifBreakAsm = () => readFileSync(new URL('corpus/agbcc-swifbreak.s', import.meta.url), 'utf8');
+const ifBreakLift = (sym: string, ret: { returnsVoid: true } | { returns: 's32' } = { returnsVoid: true }) =>
+  decompile(sym, ifBreakAsm(), ARMV4T_AGBCC, {
+    prototypes: {
+      [sym]: ret,
+      ...Object.fromEntries(['f', 'g', 'h', 'r', 'm'].map((n) => [n, { params: 1, returnsVoid: true }])),
+      p: { params: 0, returns: 's32' },
+    },
+  }).source;
+
+test('a switch-scoped `break;` inside a loop leaves the SWITCH, and the loop update still runs', () => {
+  // Klonoa's shape: the `switch` sits in a `for`. Printed, `break;` binds the innermost loop OR
+  // switch, so the statement that leaves the arm must sit inside the switch and the loop's update
+  // after it — a `break;` that left the loop would end the walk at the first such entity.
+  const out = ifBreakLift('inloop');
+  expect(out).toMatch(/case 0:\s*\n\s*if \(v0 != gA && v0 != gB\) break;\s*\n\s*case 1:\s*\n\s*f\(v0\);/);
+  expect(out).toMatch(/\}\s*\n\s*v0 = v0 \+ 1;\s*\n\s*\} while/);
+  expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('an arm whose `then` breaks and whose `else` falls into the next case keeps both', () => {
+  // The `then` runs code before its `break;`, so its block can no longer fall: it is a jump, and
+  // the `else` is what the arm runs on with. `if (gA) { h(2); break; } g(3);` and the source's
+  // `… break; } else { g(3); }` compile to one object on agbcc, IDO, KMC gcc and mwcc.
+  const out = ifBreakLift('elsearm');
+  expect(out).toMatch(/if \(gA != 0\) \{\s*\n\s*h\(2\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*g\(3\);\s*\n\s*case 2:/);
+  expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('a falling arm that leaves through a block of its own still joins inside the arm', () => {
+  // `if (b) { g(7); break; }` and `if (b) return 3;` (through the shared epilogue) leave by a block
+  // that keeps no edge in the arm. Read as an end of its own, it would leave the guard above it no
+  // join and copy `h(2)` into both sides.
+  const cb = ifBreakLift('codebreak', { returns: 's32' });
+  expect(cb).toMatch(
+    /case 1:\s*\n\s*if \(a1 != 0\) \{\s*\n\s*if \(a2 != 0\) \{\s*\n\s*g\(7\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*h\(2\);\s*\n\s*case 2:/,
+  );
+  expect(count(cb, 'h(2)')).toBe(1);
+  const rf = ifBreakLift('retfall', { returns: 's32' });
+  expect(rf).toMatch(
+    /if \(a2 != 0\) return 3;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*if \(gA != 0\) break;\s*\n\s*h\(2\);\s*\n\s*case 2:/,
+  );
+  expect(count(rf, 'h(2)')).toBe(1);
+});
+
+test('a closed arm with a `break;` in its middle joins inside the arm too', () => {
+  const out = ifBreakLift('closedbreak', { returns: 's32' });
+  expect(out).toMatch(
+    /case 1:\s*\n\s*if \(a1 != 0\) \{\s*\n\s*if \(a2 != 0\) break;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*h\(2\);\s*\n\s*break;/,
+  );
+  expect(count(out, 'h(2)')).toBe(1);
+});
+
+test('an arm that leaves its LOOP where the loop exit is the switch merge breaks the switch', () => {
+  // `case 1: if (gA) goto out;` with `out` past the loop: the switch's merge is the loop's exit, so
+  // the arm's `break;` reaches it and the exit region renders after the switch. The loop's own
+  // `break` would be bound to the switch by C, so it is never minted inside the arm.
+  const out = ifBreakLift('exitloop');
+  expect(out).toMatch(/case 0:\s*\n\s*if \(gA != 0\) break;\s*\n\s*case 1:/);
+  expect(out).toMatch(/\}\s*\n\s*r\(9\);\s*\n\s*return;/);
+});
+
+test('an arm that breaks twice before it falls joins after each guard rather than nesting', () => {
+  const out = ifBreakLift('twoguards');
+  expect(out).toMatch(
+    /case 0:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*h\(a0\);\s*\n\s*if \(a0 == gB\) break;\s*\n\s*m\(a0\);\s*\n\s*case 1:/,
+  );
+  expect(out).not.toContain('else');
+});
+
+test('an arm that breaks or falls into the `default:` arm is a switch on agbcc', () => {
+  const out = ifBreakLift('intodefault');
+  expect(out).toMatch(/case 1:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*default:\s*\n\s*f\(a0\);/);
+  expect(count(out, 'f(a0)')).toBe(1);
+});
+
+test('a falling arm whose region leaves the loop the dispatch heads goes to if-recovery, not to a loud refusal', () => {
+  // agbcc rotates `while (k < 4) { k++; switch … }` so the dispatch IS the loop header: it
+  // dominates the loop's exit and the code after it, and the merge is the header. Read by
+  // dominance alone, `case 1:`'s `goto out` sits inside the arm, the arm reads as falling with
+  // `break;`, and the loop-exit refusal then fails the whole function.
+  const out = ifBreakLift('loopleave', { returns: 's32' });
+  expect(out).not.toContain('switch');
+  expect(out).toContain('return');
+});
+
+test('a sub-tree whose post-dominator lies past the loop bottom takes no arm `break;`', () => {
+  // In the loop body, the `case 17`/`case 3` sub-tree reaches both the latch and the early
+  // `return t;`, so its post-dominator is the return block, past the region's end. An arm's path
+  // there is a `return`, not a switch `break`.
+  const out = ifBreakLift('subret', { returns: 's32' });
+  expect(out).toContain('return');
+  expect(out).not.toMatch(/break;/);
+});
+
+test('a falling arm into a `default:` that is the loop exit goes to if-recovery', () => {
+  // `case 3:` breaks, and falls on its `goto out` into `default: goto out;`, the loop's own exit:
+  // C's `break;` there would leave the switch, not the loop.
+  const out = ifBreakLift('defaultexit', { returns: 's32' });
+  expect(out).not.toContain('switch');
+  expect(out).toContain('return');
+});
+
+test('closed arms that leave for a loop exit whose tail returns copy that tail, as outside a switch', () => {
+  const out = ifBreakLift('closedexit', { returns: 's32' });
+  expect(out).toContain('switch (');
+  expect(out).toMatch(/r\(v1 \+ 5\);\s*\n\s*return/);
+});
+
+test('an arm that `continue`s to the loop bottom test is no loop break: the `switch` stays', () => {
+  const out = ifBreakLift('latchexit', { returns: 's32' });
+  expect(out).toContain('switch (');
+  expect(out).toContain('continue;');
+});
+
+test('a switch whose merge is its loop exit, where that exit runs on to an OUTER latch, goes to if-recovery', () => {
+  // The code after the switch would be the exit region, rendered inside the inner loop's body, and
+  // from there it reaches the outer loop's header: that back edge has no spelling there, so the
+  // tree goes to if-recovery rather than failing the whole function loud.
+  const out = ifBreakLift('outerexit', { returns: 's32' });
+  expect(out).not.toContain('switch (');
+  expect(count(out, 'r(')).toBe(1);
+});
+
+test('a switch whose merge is the exit of a loop top-tested ahead of it goes to if-recovery', () => {
+  // `if (gC == 7) goto out;` ahead of the switch leaves for the merge from the loop header, so the
+  // loop is `while (gC != 7)` with the merge as its own exit. The exit region rendered after the
+  // switch inside the body would leave that exit nothing to reach and fail the function loud.
+  const out = ifBreakLift('topexit', { returns: 's32' });
+  expect(out).toContain('s32 topexit(');
+  expect(out).not.toContain('switch (');
+  expect(count(out, 'r(')).toBe(1);
+});
+
+test('a falling arm whose sibling leaves for an inner loop exit that is not the merge goes to if-recovery', () => {
+  // `if (gC == 7) return 5;` above the switch makes the inner loop's bottom the merge, and case 999's
+  // `goto out` leaves for an exit that runs on to the OUTER loop's latch. No arm can spell that
+  // edge (a `break;` would leave only the switch), so the switch the falling `case 3` would admit
+  // is declined, and if-recovery spells the `goto` as the inner loop's `break`.
+  const out = ifBreakLift('innerexit', { returns: 's32' });
+  expect(out).toContain('s32 innerexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 5;');
+  expect(count(out, 'p()')).toBe(1);
+});
+
+test('the same edge from a case the comparison tree tested first, which the sub-tree switch does not dominate', () => {
+  // The tree's root takes `case 17` (`if (u == a) goto out;`), and the switch is recognised on the
+  // sub-tree below it, which does not dominate that code. `case 100` still runs on into it, so the
+  // arm `structureArm` walks carries the `goto out`, and the switch goes to if-recovery.
+  const out = ifBreakLift('subtreeexit', { returns: 's32' });
+  expect(out).toContain('s32 subtreeexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 5;');
+});
+
+test('the same edge in a top-tested loop, whose header is the merge, goes to if-recovery', () => {
+  // `while (k < gC + 3)` is tested at the top, so the switch's merge is the loop header, and
+  // `case 100: if (t > 9) goto out;` is a block that edges to the exit and straight back into the
+  // header. That is no bottom test, and the switch goes to if-recovery rather than refusing loud.
+  const out = ifBreakLift('toptestexit', { returns: 's32' });
+  expect(out).toContain('s32 toptestexit(');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('return 1;');
+});
+
+test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
+  // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
+  // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`
+  // leaves for the code before it. An arm structured against that merge would cross the bottom
+  // test, so the merge does not spell the switch's end.
+  const asm = readFileSync(new URL('corpus/gcc272kmc-swepiexit.asm', import.meta.url), 'utf8');
+  const out = decompile('epiexit', asm, MIPS_GCC, { prototypes: { epiexit: { returns: 's32' } } }).source;
+  expect(out).toContain('s32 epiexit(');
+  expect(out).not.toContain('switch (');
+});
+
+test('a closed arm with a mid-arm exit prints for Pascal, with no `break` it cannot say', () => {
+  // Pascal has no `break` (`spellsSwitchBreak`), so the arm gets no region and copies `h(2)` into
+  // both paths. The `if` whose `then` is a lone `if` takes begin/end, or Pascal would bind the
+  // `else` to the inner one; and the `case` takes an empty `otherwise`, since a C `switch` with no
+  // `default` runs on past an unlisted value where IDO Pascal raises `caseerror`.
+  const out = decompile('closedbreak', ifBreakAsm(), ARMV4T_AGBCC, {
+    prototypes: {
+      closedbreak: { returns: 's32' },
+      ...Object.fromEntries(['f', 'g', 'h', 'r'].map((n) => [n, { params: 1, returnsVoid: true }])),
+    },
+    backend: pascalBackend,
+  }).source;
+  expect(out).toMatch(
+    /1:\s*\n\s*if \(a1 <> 0\) then\s*\n\s*begin\s*\n\s*if \(a2 = 0\) then\s*\n\s*begin\s*\n\s*g\(1\);\s*\n\s*h\(2\);\s*\n\s*end\s*\n\s*end\s*\n\s*else\s*\n\s*h\(2\);/,
+  );
+  expect(out).toMatch(/otherwise\s*\n\s*end;/);
+  // CONTROL: C keeps the mid-arm `break;`.
+  expect(ifBreakLift('closedbreak', { returns: 's32' })).toContain('if (a2 != 0) break;');
+});
+
+test('an `if` whose `then` is a lone `if` takes begin/end before its `else`, and a `case` always has `otherwise`', () => {
+  // Bare, Pascal would bind the `else` to the inner `if` (the dangling else); and a `case` with no
+  // `otherwise` raises `caseerror` on an unlisted value, where C's `switch` runs on past it.
+  const set = (v: number): Stmt => ({ k: 'assign', name: 'i', value: { k: 'const', value: v } });
+  const fn: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.u(32) }],
+    locals: [{ name: 'i', type: T.u(32) }],
+    globals: [],
+    retType: T.u(32),
+    body: [
+      {
+        k: 'switch',
+        scrutinee: { k: 'var', name: 'a0' },
+        cases: [
+          {
+            values: [10],
+            body: [
+              {
+                k: 'if',
+                cond: { k: 'var', name: 'a0' },
+                then: [{ k: 'if', cond: { k: 'var', name: 'i' }, then: [set(1)], else: [] }],
+                else: [set(2)],
+              },
+            ],
+            fallsThrough: false,
+          },
+        ],
+        default: undefined,
+      },
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+  };
+  const out = pascalBackend.emit(fn);
+  expect(out).toMatch(/then\s*\n\s*begin\s*\n\s*if i then\s*\n\s*i := 1;\s*\n\s*end\s*\n\s*else/);
+  expect(out).toMatch(/otherwise\s*\n\s*end;/);
+});
+
+test('a `for` is two Pascal statements, so a lone one still takes begin/end', () => {
+  const loop: Stmt = {
+    k: 'for',
+    init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    cond: { k: 'var', name: 'i' },
+    inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+    body: [{ k: 'assign', name: 'i', value: { k: 'var', name: 'a0' } }],
+  };
+  const fn: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.u(32) }],
+    locals: [{ name: 'i', type: T.u(32) }],
+    globals: [],
+    retType: T.u(32),
+    body: [
+      { k: 'if', cond: { k: 'var', name: 'a0' }, then: [loop], else: [] },
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+  };
+  expect(pascalBackend.emit(fn)).toMatch(/then\s*\n\s*begin\s*\n\s*i := 0;\s*\n\s*while/);
+});
+
+test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
+  // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
+  expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);
 });
 
 test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {

@@ -49,6 +49,11 @@ export interface SwitchRecoverDeps {
    *  of "where is this defined" `defs` does not answer. Taken from `structure.ts`, which builds
    *  both halves for def-site anchoring, rather than indexing the parameters a second time. */
   blockOf: (v: Value) => Block | undefined;
+  /** The header and exit of the loop the switch is being structured in, or null outside any loop.
+   *  Read LIVE: the structurer's loop frame is the one current when the switch is met. An edge to
+   *  the exit from inside a case arm is a `break` of that loop, which C binds to the switch instead
+   *  (`analyzeArmExit`), save where the exit is the switch's own merge. */
+  enclosingLoop: () => { header: Block; exit: Block | null } | null;
   /** THE DISPATCH HOIST: the copies of every edge the tree walk collapsed, merged and re-emitted
    *  ONCE ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the emission
    *  (suppression, identity elision, `undef`, the write-order sort, `sequentialize`), so this
@@ -61,6 +66,10 @@ export interface SwitchRecoverDeps {
   ) => Stmt[] | null;
   expr: (v: Value) => Expr;
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
+  /** One arm's body, from `entry` to `stop`, inside the switch whose code resumes at `merge`. The
+   *  structurer owns what `break;` means there (structure.ts `structureArm`), so both regimes hand
+   *  it every arm and the exit verdict they read for it. */
+  structureArm: (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined) => Stmt[];
 }
 
 /** Where ONE switch arm's region leaves it — the fact that decides whether the arm can be spelled
@@ -71,18 +80,30 @@ export interface SwitchRecoverDeps {
  *   - `fallthrough`  every path out leaves into exactly ONE sibling arm's entry: C's fall-through.
  *                    Only spellable when that sibling is the arm emitted NEXT, which `chainArms`
  *                    below arranges and both regimes then re-read off the emission array (see the
- *                    l3/ast.ts non-neutrality note).
- *   - `unstructurable`  anything else: two different siblings, or a mix of "into a sibling" and
- *                    "out to the merge". C needs a `goto` for those. Regime A declines to
- *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD. */
-export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | { kind: 'unstructurable'; why: string };
+ *                    l3/ast.ts non-neutrality note). With `breaks`, some paths out reach the
+ *                    switch's merge instead: `case 1: if (c) break; case 2: …`, the arm's own
+ *                    `break;` on those paths.
+ *   - `unstructurable`  anything else: two different siblings, or a sibling beside a block the
+ *                    switch does not dominate. C needs a `goto` for those. Regime A declines to
+ *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD.
+ *
+ *  `region` is the arm's own blocks: every block the walk below reached, the entry included. It is
+ *  what the structurer needs to find the arm's own joins (`structure.ts` `armJoin`) and to spell a
+ *  path to the merge in the middle of the arm as `break;` (`switchBreakAt`), in a closed arm as in a
+ *  falling one: `case 1: if (a) { if (b) break; g(1); } h(2); break;`. A closed arm that leaves
+ *  sideways, into a block the switch does not dominate, has none: its paths through such a block
+ *  are not the arm's, and it structures to the CFG's joins. */
+export type ArmExit =
+  | { kind: 'break'; region?: ReadonlySet<Block> }
+  | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
+  | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
   recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
   /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
    *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
    *  Regime B, which has no fallback, fails loud. */
-  analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
+  analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>, stopAtLoop?: boolean) => ArmExit;
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
@@ -322,9 +343,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     spellSwitchFallthrough,
     emitsOwnStatement,
     blockOf,
+    enclosingLoop,
     hoistDispatchCopies,
     expr,
     structureRegion,
+    structureArm,
   } = deps;
 
   // A block's index in `fn.blocks` as its position in the ASSEMBLY — the warrant for every reading
@@ -479,6 +502,123 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return { x, k, cls, opcode: cmp.opcode, xOnLeft };
   };
 
+  // Does `blk` leave the enclosing loop for its exit, other than by the loop's own bottom test (a
+  // block that also edges back to the header, which spells as the loop's condition)?
+  const breaksLoop = (blk: Block): boolean => {
+    const loop = enclosingLoop();
+    const succ = successorsOf(blk);
+    return loop !== null && loop.exit !== null && succ.includes(loop.exit) && !succ.includes(loop.header);
+  };
+
+  // Does a block some arm structures edge to `target`? Walked as `structureArm` walks an arm: every
+  // block reached from the arm's entry without stepping through `merge` or back into `header`. That
+  // is wider than `analyzeArmExit`'s dominated region on purpose: when Regime A recognises a sub-tree
+  // of the comparison tree, an arm can run on into the code of a case the tree's root already took,
+  // which the dispatch does not dominate, and `structureArm` structures that code inside the arm.
+  // A block that also edges back to `header` is the loop's bottom test, which spells as the loop's
+  // condition, not as the arm's (`breaksLoop`) — save where `header` IS the merge (a top-tested
+  // loop): no bottom test is then reachable without passing the merge, and an arm's
+  // `if (c) goto out;` is a block that edges to the exit and straight back into the header.
+  const armsReach = (entries: Iterable<Block>, merge: Block | null, header: Block, target: Block): boolean => {
+    const seen = new Set<Block>(entries);
+    for (const q = [...seen]; q.length;) {
+      const succ = successorsOf(q.pop()!);
+      if (succ.includes(target) && (header === merge || !succ.includes(header))) {
+        return true;
+      }
+      for (const s of succ) {
+        if (s !== target && s !== merge && s !== header && !seen.has(s)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return false;
+  };
+
+  // Can a path from `from` reach `to` without passing `through`? False when `to` is null (the end
+  // of the function) or is `through` itself.
+  const reachesAvoiding = (from: Block, to: Block | null, through: Block | null): boolean => {
+    if (to === null || to === through) {
+      return false;
+    }
+    const seen = new Set<Block>([from]);
+    for (const q = [from]; q.length;) {
+      for (const s of successorsOf(q.pop()!)) {
+        if (s === to) {
+          return true;
+        }
+        if (s !== through && !seen.has(s)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return false;
+  };
+
+  // THE LOOP-EXIT MERGE, WHERE IT SPELLS. A switch whose merge is its enclosing loop's exit puts
+  // the exit region after the `switch`, INSIDE the loop body, and reaches the loop bottom only
+  // through the arms that do not break. That is the source's text on two conditions, both read off
+  // the CFG here, and on either failing the merge-past-stop gate below declines to if-recovery:
+  //   - the exit region RETURNS: no path from `merge` reaches a block that dominates it (other
+  //     than `merge` itself, a loop of the exit region's own) — the enclosing loop's header, or an
+  //     OUTER loop's, whose back edge the inner body cannot spell
+  //     (`for (j...) { for (;;) { switch ... } out: u += prev; }` runs on to the outer latch);
+  //   - every loop-bottom TEST the arms reach (a block that edges back to the header) leaves for
+  //     the merge itself, which the arm then spells as its `break;` (`latchexit`). One that leaves
+  //     for any other block outside the loop is past what an arm structured against `merge` can
+  //     say: the merge is then the loop's exit only because an early `return` made a shared
+  //     epilogue the dispatch's post-dominator, while the code the bottom test leaves for runs
+  //     before it (`for (w = 0; w < 4; w++) { if (c) return w; switch ... } r(t);` on
+  //     gcc2.7.2kmc).
+  // And the loop's HEADER must not leave for the merge itself. One that does makes the loop
+  // top-tested on it, with the merge as the loop's own exit, which the exit region rendered after
+  // the switch inside the body would leave nothing to reach
+  // (`for (k = 0; k < 3; k++) { if (gC == 7) goto out; switch ... }` becomes `while (gC != 7)`).
+  // A test lower in the body that leaves for the merge ahead of the dispatch spells as its own
+  // `goto` or `break`, and keeps the switch.
+  const exitMergeSpells = (from: Block, merge: Block | null): boolean => {
+    if (merge === null) {
+      return false;
+    }
+    const above = dom.get(merge)!;
+    const exitSeen = new Set<Block>([merge]);
+    for (const q = [merge]; q.length;) {
+      for (const s of successorsOf(q.pop()!)) {
+        if (s !== merge && above.has(s)) {
+          return false;
+        }
+        if (!exitSeen.has(s)) {
+          exitSeen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    const header = enclosingLoop()?.header ?? null;
+    if (header !== null && successorsOf(header).includes(merge)) {
+      return false;
+    }
+    const seen = new Set<Block>([from]);
+    for (const q = [from]; q.length;) {
+      const succ = successorsOf(q.pop()!);
+      if (
+        header !== null &&
+        succ.includes(header) &&
+        succ.some((s) => s !== header && s !== merge && !reachesAvoiding(s, header, merge))
+      ) {
+        return false;
+      }
+      for (const s of succ) {
+        if (s !== header && s !== merge && !seen.has(s)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return true;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -490,22 +630,44 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // sideways does not fall into the next case — and only the FALL-THROUGH verdict consults that
   // record, so an arm that reaches no sibling still closes with a plain `break`.
   //
+  // With `stopAtLoop` (Regime A), a FALLING arm that also reaches the merge must not break the loop
+  // the switch sits in. When the dispatch IS the loop header (agbcc and IDO rotate
+  // `while (k < 4) { k++; switch … }` so), it dominates the loop's exit and all the code after the
+  // loop, and the merge is the header itself, so dominance cannot tell the arm's region from the
+  // code past the loop. Such an arm that falls into a sibling, reaches the merge by the back edge,
+  // and leaves for the loop's exit on a third path (a `goto out`, or a sibling that IS the exit, as
+  // a `default: goto out;` makes it) would read as falling with `breaks`, Regime A would commit,
+  // and the loop-exit refusal in `structure.ts` would fail the whole function where if-recovery
+  // spells it. So it is `unstructurable`. What counts is the block the refusal fires on
+  // (`breaksLoop`): the loop's own bottom test, reached after a `continue`, exits too but is the
+  // loop's condition, and a block that also edges to the merge is the switch's own end. Regime B,
+  // which has no fallback, does not ask: it lifts a jump table whose arms share the rotated latch
+  // and its exit (`do { … switch … t++; } while (t < 15)`).
+  //
   // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
   // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
   // under this arm. That is duplication, not a wrong dispatch — the same duplication the structurer
   // already does for any tail two arms share, and how the case bodies agbcc tail-merged are put
   // back. Costly for matching, correct to run.
-  const analyzeArmExit = (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>): ArmExit => {
+  const analyzeArmExit = (
+    entry: Block,
+    b: Block,
+    merge: Block | null,
+    siblings: Set<Block>,
+    stopAtLoop = false,
+  ): ArmExit => {
     if (entry === merge) {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
     }
     const into = new Set<Block>(); // sibling entries this arm flows into
     let toMerge = false,
-      escapes = false;
+      escapes = false,
+      leavesLoop = false;
     const seen = new Set<Block>([entry]);
     const q = [entry];
     while (q.length) {
       const cur = q.pop()!;
+      leavesLoop ||= !successorsOf(cur).includes(merge as Block) && breaksLoop(cur);
       for (const s of successorsOf(cur)) {
         if (s === merge) {
           toMerge = true;
@@ -522,13 +684,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     if (into.size === 0) {
-      return { kind: 'break' };
+      return escapes ? { kind: 'break' } : { kind: 'break', region: seen };
     }
-    if (into.size === 1 && !toMerge && !escapes) {
-      return { kind: 'fallthrough', to: [...into][0] };
+    // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
+    // spells only where nothing breakable sits between that edge and the arm, which the structurer
+    // checks where it emits it (`structure.ts` `switchBreakAt`) and refuses loud otherwise.
+    if (into.size === 1 && toMerge && leavesLoop && stopAtLoop) {
+      return {
+        kind: 'unstructurable',
+        why: `a case body falls into sibling case ${[...into].map((x) => `#${layoutIndex(x)}`).join(', ')}, reaches the end of the switch, and leaves the loop the switch sits in`,
+      };
     }
-    // Name what is actually missing. These three are different facts, and only the first is a shape
-    // C has no spelling for — the other two are asmlift's own limits, so say so rather than blame C.
+    if (into.size === 1 && !escapes) {
+      return { kind: 'fallthrough', to: [...into][0], breaks: toMerge, region: seen };
+    }
+    // Name what is actually missing. These are two different facts: the first is a shape C's
+    // fall-through cannot spell, the second leaves the switch's region sideways.
     const names = () => [...into].map((x) => `#${layoutIndex(x)}`).join(', ');
     if (into.size > 1) {
       return {
@@ -536,18 +707,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
       };
     }
-    if (escapes) {
-      return {
-        kind: 'unstructurable',
-        why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
-      };
-    }
     return {
       kind: 'unstructurable',
-      // `case 0: if (c) { …; break; } /* fall through */ case 1:` is the C for this, and the reason
-      // asmlift cannot write it is its own: `{k:'break'}` is emitted only for the innermost LOOP
-      // (l3/ast.ts), never switch-scoped. That is the capability this shape is waiting on.
-      why: `a case body reaches sibling case ${names()} on one path and the end of the switch on another — a switch-scoped \`break\` inside a case body is not emitted yet`,
+      why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
     };
   };
 
@@ -769,26 +931,70 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
 
     // PRE2 (arm exits), per SITE. A `break` arm closes; a `fallthrough` arm runs on into the one
-    // sibling it reaches, which `chainArms` then places directly under it. `unstructurable` is a
-    // shape no single linear switch spells — a body reaching two siblings, or a sibling on one path
-    // and the switch's end on another — and Regime A declines to if-recovery, which spells every
-    // one of those edges. (Regime B reads the same verdicts and fails LOUD on either.)
+    // sibling it reaches, which `chainArms` then places directly under it — on every path, or on
+    // some while the others reach the switch's end, which the arm's own `break;` spells (`breaks`).
+    // `unstructurable` is a shape no single linear switch spells — a body reaching two siblings, or
+    // a sibling beside a block the switch does not dominate — and Regime A declines to if-recovery,
+    // which spells every one of those edges. (Regime B reads the same verdicts and fails LOUD on
+    // either.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
     const siblings = new Set([...targets].filter((t) => t !== merge));
     const exitOf = new Map<Block, ArmExit>();
     for (const t of siblings) {
-      exitOf.set(t, analyzeArmExit(t, b, merge, siblings));
+      exitOf.set(t, analyzeArmExit(t, b, merge, siblings, true));
     }
     // A language with no fall-through in its `case` (Pascal) cannot print a falling arm at all, so
     // for it a falling arm is exactly as unspellable as an `unstructurable` one — and takes the
     // same exit: if-recovery, which that backend prints fine. Asked HERE rather than left to the
     // backend because the backend's refusal is terminal (the whole function becomes a stub) while
     // this one costs nothing but the `switch` spelling.
+    //
+    // A falling arm that also breaks is admitted wherever it falls, the `default:` arm included:
+    // for `case 1: if (c) break; default: f(); break;` the ladder if-recovery writes copies `f()`
+    // into the arm and misses the object the `switch` reaches.
     if (
       [...exitOf.values()].some(
-        (e) => e.kind === 'unstructurable' || (!spellSwitchFallthrough && e.kind === 'fallthrough'),
+        (e) => e.kind === 'unstructurable' || (e.kind === 'fallthrough' && !spellSwitchFallthrough),
       )
+    ) {
+      return null;
+    }
+    // AN ARM'S `break;` NEEDS THE MERGE TO BE THE SWITCH'S END IN THIS REGION. The code after the
+    // `switch` is `structureRegion(merge, stop)`, which reads as that only where every path from
+    // the dispatch reaches `stop` through the merge. A sub-tree whose post-dominator lies PAST the
+    // region's `stop` breaks that: inside a loop body whose dispatch reaches both the latch (`stop`)
+    // and an early `return` block, ipdom is the return, so an arm's path to it would read as a
+    // switch `break` while a sibling arm runs through the latch and back to the header, which
+    // fails the whole function loud. Declined here, to if-recovery, which spells each edge as the
+    // `return` or the fall to the loop bottom it is. A merge that is the enclosing loop's EXIT is
+    // the exception the structurer spells (`exitMergeSpells`): the code after the switch is then
+    // the exit region, and an arm's path to it is the arm's `break;` (`structure.ts`, the loop-exit
+    // rules).
+    if (
+      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
+      !(merge === enclosingLoop()?.exit && exitMergeSpells(b, merge)) &&
+      reachesAvoiding(b, stop, merge)
+    ) {
+      return null;
+    }
+    // AN ARM'S EDGE TO THE LOOP'S EXIT, WHEN THAT EXIT IS NOT THE MERGE. A switch admitted on a
+    // falling arm's `break;` hands every arm to `structureArm`, where an edge to the enclosing loop's
+    // exit can be spelled only as the switch's own end or as a copied returning tail; any other is
+    // refused there, loud, for the whole function (`structure.ts`, "leaves its switch for a loop
+    // exit"). With an early `return` above the dispatch, the merge is the loop bottom, and a sibling
+    // arm's `goto out` to an exit that runs on to an OUTER loop's latch is such an edge. Declined
+    // here to if-recovery, which spells that `goto` as the inner loop's `break`. The exemption is
+    // the exit that is itself a `ret`; the structurer's other one, an early-return arm owning the
+    // edge, is not asked here, which costs only the `switch` spelling.
+    const loop = enclosingLoop();
+    if (
+      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
+      loop !== null &&
+      loop.exit !== null &&
+      loop.exit !== merge &&
+      loop.exit.ops[loop.exit.ops.length - 1]?.opcode !== 'ret' &&
+      armsReach(siblings, merge, loop.header, loop.exit)
     ) {
       return null;
     }
@@ -1023,13 +1229,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
-        body: structureRegion(blk, to ?? merge),
+        body: structureArm(blk, to ?? merge, merge, exitOf.get(blk)),
         fallsThrough: to !== null,
       });
     }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
-    const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
+    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, exitOf.get(defaultBlk)) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
     // into it and no other subtree jumps there — the two references the tree walk can count.

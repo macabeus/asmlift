@@ -1045,6 +1045,28 @@ describe('v4 — the unguarded constant-trip countdown re-spells as a counted fo
     expect(reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'break' })))).toBeNull();
   });
 
+  test("…but a SWITCH's own break is no exit of the loop: the tail still runs after it", () => {
+    // `switch (v0) { case 1: if (v0) break; case 2: f(); }` at the top of the body. The `break`
+    // leaves the switch, and the walk's step and the counter's decrement run on every iteration.
+    const arm = (ofSwitch: boolean): Stmt => ({
+      k: 'switch',
+      scrutinee: v('v0'),
+      cases: [
+        {
+          values: [1],
+          body: [
+            { k: 'if', cond: v('v0'), then: [ofSwitch ? { k: 'break', ofSwitch: true } : { k: 'break' }], else: [] },
+          ],
+          fallsThrough: true,
+        },
+        { values: [2], body: [{ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [] } }], fallsThrough: false },
+      ],
+    });
+    expect(reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift(arm(true))))).not.toBeNull();
+    // CONTROL: the loop's own `break` inside the arm still refuses.
+    expect(reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift(arm(false))))).toBeNull();
+  });
+
   test('refused: the counter is read a fifth time (`*p = k`)', () => {
     expect(
       reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: v('v2') }))),

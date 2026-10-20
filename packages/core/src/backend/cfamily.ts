@@ -536,6 +536,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return out;
     }
     case 'while': {
+      refuseMisboundBreak(s.body, 'loop');
       const out = [`${indent}while (${pe(s.cond, 99)}) {`];
       for (const t of s.body) {
         out.push(...printStmt(t, indent + '    ', vt, leaf));
@@ -544,6 +545,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return out;
     }
     case 'dowhile': {
+      refuseMisboundBreak(s.body, 'loop');
       const out = [`${indent}do {`];
       for (const t of s.body) {
         out.push(...printStmt(t, indent + '    ', vt, leaf));
@@ -556,6 +558,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       // `recognizeForLoops` and l3/reindex.ts): init/inc are each a SINGLE-LINE `assign` statement. `clause` renders one
       // and strips its trailing `;` so it sits inside the header (`i = 0; c; i = i + 1`). A multi-line
       // statement (an `if`/nested loop) would render mangled — but the recognizer never builds one here.
+      refuseMisboundBreak(s.body, 'loop');
       const clause = (st: Stmt) => printStmt(st, '', vt, leaf).join(' ').replace(/;\s*$/, '').trim();
       const out = [`${indent}for (${clause(s.init)}; ${pe(s.cond, 99)}; ${clause(s.inc)}) {`];
       for (const t of s.body) {
@@ -579,11 +582,12 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
  *  is one call. */
 function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
-  // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
-  // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
+  // A plain `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in
+  // C, so printing one between `case` labels rebinds it — a changed program that reads as ordinary
   // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
-  // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
-  // arm first, loudly), so it is a contract on the next one.
+  // the two switch regimes (`refuseMisboundBreak`, which checks a loop body the same way for a
+  // `break` marked `ofSwitch`). The structurer spells a loop exit inside an arm as the switch's
+  // own `break` or refuses it, so no recovery reaches either today: a contract on the next one.
   //
   // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
   // statement, which a `switch` is not, so it already means what L3 means. What a pass that re-spells
@@ -592,9 +596,7 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
   // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
   // before firing, and a fourth must too.
   for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
-    if (switchBoundBreakIn(body)) {
-      throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
-    }
+    refuseMisboundBreak(body, 'switch');
   }
   const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
   const ci = indent + '    '; // case-label indent
@@ -653,13 +655,26 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
   return out;
 }
 
-/** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
- *  L3 meant? A loop opened inside the arm captures its own, so its body is not walked; a nested
- *  `switch` captures one too and is checked when it is printed. */
-function switchBoundBreakIn(body: Stmt[]): boolean {
-  return body.some(
-    (s) => s.k === 'break' || (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),
-  );
+/** L3 has two `break`s (l3/ast.ts) and C one: C binds `break;` to the innermost enclosing loop OR
+ *  switch, so a `break` prints as what L3 meant only where its own kind is that innermost
+ *  statement. `body` is a loop body or a switch arm (`owner`); a loop or switch opened inside it
+ *  captures its own breaks and is checked when it is printed, so it is not walked. Refused loud on
+ *  either mismatch — a plain (loop) `break` in an arm, a switch's `break` in a loop body — since
+ *  each prints as ordinary C that leaves a different statement. */
+function refuseMisboundBreak(body: Stmt[], owner: 'loop' | 'switch'): void {
+  const misbound = (ss: Stmt[]): boolean =>
+    ss.some(
+      (s) =>
+        (s.k === 'break' && (s.ofSwitch === true) !== (owner === 'switch')) ||
+        (s.k === 'if' && (misbound(s.then) || misbound(s.else))),
+    );
+  if (misbound(body)) {
+    throw new Error(
+      owner === 'switch'
+        ? 'c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch'
+        : 'c backend: a loop body carries a switch-scoped `break;`, which C would bind to the loop',
+    );
+  }
 }
 
 // Does a statement list end in a control-flow terminator (so a trailing `break;` would be dead)?

@@ -6,6 +6,7 @@
 // output looks entirely ordinary and runs the wrong code.
 import { expect, test } from 'vitest';
 
+import { pascalBackend } from '../src/backend/pascal';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 import { count } from './helpers';
@@ -175,14 +176,25 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
-  // (b) reaches a sibling on one path and the switch's end on another. C CAN spell this — with a
-  // switch-scoped `break` in the case body — so the decline names asmlift's own missing piece
-  // rather than blaming C.
-  expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + CALL_A + LEAVE, armB])).toThrow(
-    /a switch-scoped `break` inside a case body is not emitted yet/,
-  );
   // (c) reaches two different siblings.
   expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
+});
+
+test('an arm reaching a sibling on one path and the switch END on another breaks on that path', () => {
+  // `case 0: if (c) { sideA(); break; } case 1: sideB(); break;` — the arm's own `break;` leaves
+  // the SWITCH on the path that reaches its end, and the other path falls into case 1. agbcc and
+  // gcc 2.7.2 cross-jump `if (c) f(); break;` into this very shape, so it is also how those come
+  // back. Neither path may be closed or duplicated: sideB() runs once, under its own label.
+  const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
+  const arms = ['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + CALL_A + LEAVE, '\tbl\tsideB\n' + LEAVE];
+  const out = lift(conv(arms, tail));
+  expect(out).toMatch(/case 0:\s*\n\s*if \(a2 != 0\) \{\s*\n\s*sideA\(\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*case 1:/);
+  expect(out.match(/sideB\(/g)).toHaveLength(1);
+  expect(out.match(/sideZ\(/g)).toHaveLength(1);
+  // …and a language with no fall-through in its `case` still has no spelling for it, loudly.
+  expect(() => decompile('f', conv(arms, tail), ARMV4T_AGBCC, { prototypes: SIDES, backend: pascalBackend })).toThrow(
+    /no fall-through in its case statement/,
+  );
 });
 
 test('an arm falling into a case the table does not put next is CHAINED, not declined', () => {

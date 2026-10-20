@@ -302,11 +302,13 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
 ];
 
 /** A `break`/`continue` that would target the ENCLOSING loop: found at if/switch depth, but not
- *  inside a nested loop (whose own exits target itself). */
+ *  inside a nested loop (whose own exits target itself). A switch's own `break` (`ofSwitch`)
+ *  leaves only its switch, and the loop's tail still runs after it, so it is not one. */
 function hasLoopExit(stmts: Stmt[]): boolean {
   return stmts.some((s) => {
     switch (s.k) {
       case 'break':
+        return s.ofSwitch !== true;
       case 'continue':
         return true;
       case 'if':

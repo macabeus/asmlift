@@ -343,7 +343,15 @@ export type Stmt =
   // `break;` / `continue;` — a loop early-exit / next-iteration jump. Emitted ONLY when the target is
   // the innermost enclosing loop (bare C break/continue cannot express a multi-level exit; a deeper
   // target declines). SGI/IDO Pascal has neither, so its backend loud-fails them (like `field`/`cast`).
-  | { k: 'break' }
+  //
+  // `ofSwitch` makes the `break` the innermost enclosing SWITCH's instead: it leaves the arm it sits
+  // in for the code after the switch (`case 1: if (c) break; case 2: …`). Legal only inside a switch
+  // arm with no loop or switch between it and that arm — the producer's contract (structure.ts
+  // `switchBreakAt`). The C family prints both as `break;`, so its printer refuses each where C
+  // would bind it to the other kind — a plain one between `case` labels, this one in a loop body
+  // (backend/cfamily.ts `refuseMisboundBreak`). A pass that reads `break` as a loop exit must skip
+  // this one (l3/reindex.ts `hasLoopExit`).
+  | { k: 'break'; ofSwitch?: true }
   | { k: 'continue' }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
@@ -563,6 +571,13 @@ export interface LanguageBackend {
    *  cannot print it turns a whole function that used to decompile into a loud stub. The
    *  structurer reads it through `StructureOptions.spellSwitchFallthrough`. */
   readonly spellsSwitchFallthrough: boolean;
+  /** Can this language spell a `break` that leaves a `switch` arm before its end
+   *  (`{ k: 'break', ofSwitch: true }`)? C and C++ can; Pascal has no `break` at all, and its
+   *  backend loud-fails the node. Asked for the same reason as `spellsSwitchFallthrough`: a
+   *  closed arm with a mid-arm exit (`case 10: if (a) { if (b) break; g(1); } h(2); break;`) also
+   *  spells without one, by copying the code the arm meets at into each path, which Pascal prints.
+   *  The structurer reads it through `StructureOptions.spellSwitchBreak`. */
+  readonly spellsSwitchBreak: boolean;
   emit(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm
