@@ -287,6 +287,8 @@ test('dispatch code that is not a register computation, or that disturbs the dis
   expect(refused('\tbl\tg\n')).toThrow(jump); // a call
   expect(refused('\tadc\tr2, r3\n')).toThrow(jump); // reads the carry
   expect(refused('\tadd\tsp, #0x8\n')).toThrow(jump); // moves the stack
+  // writes lr: a case's `bx lr` would lift as a return where the hardware jumps to r3
+  expect(refused('\tmov\tlr, r3\n')).toThrow(/'mov lr, r3' writes the register the dispatch needs, 'lr'/);
   // reads the table pointer the unlifted idiom loaded into r1
   expect(refused('\tadd\tr2, r1, #0\n')).toThrow(jump);
   // the decline names the reason the recognised table was refused, not "jump tables unsupported"
@@ -296,6 +298,23 @@ test('dispatch code that is not a register computation, or that disturbs the dis
     /'add r2, r1, #0' reads 'r1', which the unlifted dispatch idiom wrote/,
   );
   expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(/writes the register the dispatch needs, 'r0'/);
+});
+
+test('a case may fall into the default when the dispatch code writes what the default reads', () => {
+  // The default edge of a kept dispatch is never taken, so the copies it carries (here r2 = a3, which
+  // the default reads) never run: they are neither emitted nor a reason to refuse the fall-through.
+  const fallInto = (extra: string) =>
+    withExtra(extra).replace(
+      /\.Lc0:[\s\S]*$/,
+      '.Lc0:\n\tmov\tr0, #5\n\tb\t.Lj\n.Lc1:\n\tadd\tr2, #1\n.Ldef:\n\tlsl\tr0, r2, #1\n.Lj:\n\tadd\tr0, r0, r2\n\tbx\tlr\n',
+    );
+  const out = decompile('f', fallInto('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC).source;
+  // case 0 sees the dispatch's r2 = a3; case 1 adds one to it and runs on into the default
+  expect(out).toMatch(/case 0:\s*\n\s*v0 = 5;\s*\n\s*break;/);
+  expect(out).toMatch(/case 1:\s*\n\s*a2 = a3 \+ 1;\s*\n\s*default:\s*\n\s*a3 = a2;/);
+  expect(out).toMatch(/return v0 \+ a3;/);
+  // the bounds test's own default path reads the incoming a2
+  expect(out).toMatch(/else \{\s*\n\s*a3 = a2;\s*\n\s*v0 = a2 << 1;/);
 });
 
 test('every data-processing op that writes only its destination is admitted, rotate included', () => {
