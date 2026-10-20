@@ -11,6 +11,7 @@ import {
   constMask,
   constWord,
   mayAlwaysHold,
+  overwrittenReads,
   provableBits,
   storeForwards,
 } from '../src/ir/bits';
@@ -431,6 +432,55 @@ describe('storeForwards — the store a load must read', () => {
       }),
     );
     expect(storeForwards([blk([a.op, st(base, a.r), br(loopC)]), loopC, exitB]).has(lc)).toBe(false);
+  });
+
+  test('a forwarded load is a loop-carried param: storing it back keeps the word it entered with', () => {
+    const defs = new Map<Value, Op>();
+    const m = def(defs, 'const', { value: 0x80000000 });
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    const forwarded = new Map([[defs.get(load)!, [m, load]]]);
+    expect(mayAlwaysHold({ defs, forwarded }, load, 0x80000000)).toBe(true);
+    // Stored back through an `or 0`, it still holds it; plus 1, it varies.
+    const or0 = def(defs, 'or', { imm: 0 }, [load]);
+    expect(mayAlwaysHold({ defs, forwarded: new Map([[defs.get(load)!, [m, or0]]]) }, load, 0x80000000)).toBe(true);
+    const inc = def(defs, 'add', { imm: 1 }, [load]);
+    expect(mayAlwaysHold({ defs, forwarded: new Map([[defs.get(load)!, [m, inc]]]) }, load, 0x80000000)).toBe(false);
+  });
+
+  test('a read every path reaches past a write that may land on it is a constant nobody can name', () => {
+    const base = v();
+    const c = k(0x80000000);
+    // Another root (a pointer that may be this one), an unknown cell, a call: overwritten.
+    for (const write of [st(v(), c.r), mkOp('astore', { operands: [base, v(), c.r], attrs: { elemSize: 4 } })]) {
+      const l = ld(base);
+      expect(overwrittenReads([blk([c.op, write, l, ret()])]).has(l)).toBe(true);
+    }
+    const al = mkOp('aload', { operands: [base, v()], results: [v()], attrs: { elemSize: 4, signed: true } });
+    expect(overwrittenReads([blk([c.op, st(base, c.r), al, ret()])]).has(al)).toBe(true);
+    // A disjoint cell on the same root, no write before it, or one path in without the write: the
+    // caller's memory, which varies.
+    const disjoint = ld(base, 4);
+    expect(overwrittenReads([blk([c.op, st(base, c.r), disjoint, ret()])]).has(disjoint)).toBe(false);
+    const first = ld(base);
+    expect(overwrittenReads([blk([first, st(base, c.r), ret()])]).has(first)).toBe(false);
+    const l = ld(base);
+    const join = blk([l, ret()]);
+    const left = blk([c.op, st(base, c.r), mkOp('br', { successors: [{ block: join, args: [] }] })]);
+    const head = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: left, args: [] },
+          { block: join, args: [] },
+        ],
+      }),
+    ]);
+    expect(overwrittenReads([head, left, join]).has(l)).toBe(false);
+    // The structurer reads an overwritten load as a constant it cannot compute.
+    const defs = new Map<Value, Op>();
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    expect(mayAlwaysHold({ defs }, load, 0x80000000)).toBe(false);
+    expect(mayAlwaysHold({ defs, overwritten: new Set([defs.get(load)!]) }, load, 0x80000000)).toBe(true);
   });
 
   test('a load every path reaches with INT_MIN always holds it; one path with another word does not', () => {

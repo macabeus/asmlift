@@ -43,7 +43,7 @@
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
 // into the `default:` — refuse in `chainArms`, which answers null.
 import { globalBaseOf } from '../ir/alias';
-import { type WordCtx, incomingArgs, mayAlwaysHold, storeForwards } from '../ir/bits';
+import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
   Block,
   CALL_RETURN_OBJECT,
@@ -4636,12 +4636,18 @@ export function structure(
       // of `-(s32)0x80000000` (INT_MIN again) is not the machine's +2^31. Whether it always does is
       // what the compiler can FOLD, not which opcodes built it — a pool word, `1 << 31`, a
       // `sub`/`orr`/`eor` of constants, a param both arms of a diamond set, a reload of a store
-      // nothing can have overwritten — so the question goes to the shared word evaluator, and
-      // fails closed: a constant it cannot compute refuses too.
+      // nothing can have overwritten, a reload of memory this function wrote on every path through
+      // an address it cannot match — so the question goes to the shared word evaluator, and fails
+      // closed: a constant it cannot compute refuses too.
       // An operand that is INT_MIN on some paths only still lifts; that is the "might hold" case.
       // Only hand-written asm reaches the refusal — agbcc folds the negation of a constant.
       const x = e(d.operands[0]);
-      wordCtx ??= { defs, incoming: incomingArgs(fn.blocks), forwarded: storeForwards(fn.blocks) };
+      wordCtx ??= {
+        defs,
+        incoming: incomingArgs(fn.blocks),
+        forwarded: storeForwards(fn.blocks),
+        overwritten: overwrittenReads(fn.blocks),
+      };
       if (mayAlwaysHold(wordCtx, d.operands[0], 0x80000000)) {
         return mkGap('the mathematical negation of the constant 0x80000000 has no int spelling', [x]);
       }

@@ -5050,6 +5050,22 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `${top}\tcmp\tr2, #0\n\tbeq\t.La\n\tstr\tr1, [r3]\n\tb\t.Lj\n.La:\n\tstr\tr1, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       `${top}\tcmp\tr2, #0\n\tbeq\t.La\n\tstr\tr1, [r3]\n\tb\t.Lj\n.La:\n\tmov\tr4, #1\n\tlsl\tr4, r4, #31\n\tstr\tr4, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
+      // …and round a loop that stores the reload back: directly, through a second reload, across
+      // two cells that swap, or in agbcc's rotated layout. The memory is a loop-carried param.
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tstr\tr2, [r3]\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tldr\tr5, [r3]\n\tstr\tr5, [r3]\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tstr\tr1, [r3, #4]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tldr\tr5, [r3, #4]\n\tstr\tr5, [r3]\n\tldr\tr5, [r3]\n\tstr\tr5, [r3, #4]\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n\tb\t.Lt\n.Lb:\n\tstr\tr2, [r3]\n\tadd\tr4, #1\n.Lt:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tcmp\tr4, #9\n\tble\t.Lb\n${TAIL}`,
+      // A reload every path reaches only past a write that may land on its cell, when which word
+      // that left cannot be said: a register-indexed address (the array pass's `astore`/`aload`
+      // too), one sum spelled in two orders, narrow stores that compose the word, or a store
+      // through another pointer — which, whenever the two pointers differ, leaves INT_MIN.
+      `${top}\tstr\tr1, [r3, r4]\n\tldr\tr2, [r3, r4]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tlsl\tr4, r4, #2\n\tstr\tr1, [r3, r4]\n\tldr\tr2, [r3, r4]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tadd\tr5, r3, r4\n\tstr\tr1, [r5]\n\tadd\tr6, r4, r3\n\tldr\tr2, [r6]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n\tstrb\tr4, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `\tmov\tr1, #128\n\tlsl\tr1, r1, #8\n\tstrh\tr1, [r3, #2]\n\tmov\tr1, #0\n\tstrh\tr1, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tstr\tr0, [r2]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       // A loop-invariant INT_MIN OR'd with `q & a0`, q a second invariant that is always 0 — in
       // either order the loop reads the two registers.
       ...[
@@ -5063,13 +5079,10 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     for (const body of bodies) {
       expect(() => dc('f', body)).toThrow(gap);
     }
-    // A reload of a store of 5, or of a store something may have overwritten since, lifts.
+    // A reload of a store of 5 lifts.
     expect(
       ifOf(dc('f', `\tmov\tr1, #5\n\tstr\tr1, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`).source),
     ).toBe('if (a0 <= -*a3) {');
-    expect(
-      dc('f', `${top}\tstr\tr1, [r3]\n\tstr\tr0, [r2]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`).source,
-    ).toContain('<= -');
     // A store on one arm only, another word on the other arm, a different cell, or a loop body
     // that writes the cell: INT_MIN on some paths only, which lifts.
     for (const body of [

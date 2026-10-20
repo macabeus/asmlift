@@ -59,6 +59,11 @@ export interface WordCtx {
    *  the structurer's `neg_s`, to whom a store and a reload of INT_MIN is INT_MIN as surely as a
    *  compiler that forwards the store makes it. Without it every load varies. */
   forwarded?: ReadonlyMap<Op, readonly Value[]>;
+  /** A read every path into which passes a write this function made that may land on its cell
+   *  (`overwrittenReads`). Unless `forwarded` names what that write left, it reads a constant this
+   *  evaluator cannot compute: the memory the function wrote, through an address it cannot match
+   *  to the read's, may be every word that read sees. Passed only beside `forwarded`. */
+  overwritten?: ReadonlySet<Op>;
 }
 
 /** A value's word, over a lattice: not yet seen (`top`, a loop-carried param before its back
@@ -164,10 +169,19 @@ function opWord(d: Op, of: (v: Value) => Word): Word {
  *  ever passes itself back keeps the word it entered with, and a counter (`0`, then `i + 1`)
  *  varies. A param's new state is met with its old one, so it only ever drops, and drops at most
  *  three times; with `opWord` monotone (an unseen operand is TOP before a varying one is VAR)
- *  that meet changes nothing, and the fixpoint is the same in every param order. */
+ *  that meet changes nothing, and the fixpoint is the same in every param order.
+ *
+ *  A forwarded load is solved the same way, its forwarded stores as its in-edges: memory carried
+ *  round a loop is a param the frontend did not name, and a loop that stores a reload back
+ *  (`ldr r2, [r3]; …; str r2, [r3]`) passes it itself, which must keep the word it entered with. */
 function solveParams(ctx: WordCtx): Map<Value, Word> {
   const state = new Map<Value, Word>();
-  const incoming = ctx.incoming ?? new Map<Value, readonly (Value | undefined)[]>();
+  const incoming = new Map<Value, readonly (Value | undefined)[]>(ctx.incoming ?? []);
+  for (const [load, vals] of ctx.forwarded ?? []) {
+    if (load.results.length === 1) {
+      incoming.set(load.results[0], vals);
+    }
+  }
   for (const p of incoming.keys()) {
     state.set(p, TOP);
   }
@@ -207,16 +221,10 @@ function evalWord(ctx: WordCtx, params: ReadonlyMap<Value, Word>, memo: Map<Valu
     return seen;
   }
   const d = ctx.defs.get(v);
-  const stored = d === undefined ? undefined : ctx.forwarded?.get(d);
-  // In progress reads VAR: SSA has no cycle but through a param, and this keeps it that way should
-  // a forwarded store ever lead back to its own load.
+  // In progress reads VAR: SSA has no cycle but through a param, and a forwarded load is one
+  // (`solveParams`), so nothing reaches this mark but malformed IR.
   memo.set(v, VAR);
-  const w =
-    d === undefined
-      ? VAR
-      : stored !== undefined
-        ? stored.reduce<Word>((w, x) => meet(w, evalWord(ctx, params, memo, x)), TOP)
-        : opWord(d, (x) => evalWord(ctx, params, memo, x));
+  const w = d === undefined ? VAR : ctx.overwritten?.has(d) ? KONST : opWord(d, (x) => evalWord(ctx, params, memo, x));
   memo.set(v, w);
   return w;
 }
@@ -243,13 +251,14 @@ export function constWord(ctx: WordCtx, v: Value): number | null {
   return w.k === 'word' ? w.w : null;
 }
 
-/** Whether a value MAY hold `w` on every execution — it is that constant, or a constant this
- *  evaluator cannot compute. The fail-closed reading of `constWord`, for a caller to whom a
- *  constant it cannot name is as bad as the one it is looking for. A value that varies, or that is
- *  `w` on some paths only, answers false. */
+/** Whether a value MAY hold `w` on every execution — it is that constant, a constant this
+ *  evaluator cannot compute, or a value the solver never settled (a param no executed edge
+ *  feeds). The fail-closed reading of `constWord`, for a caller to whom a constant it cannot name
+ *  is as bad as the one it is looking for. A value that varies, or that is `w` on some paths only,
+ *  answers false. */
 export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
   const x = wordOf(ctx, v);
-  return x.k === 'konst' || (x.k === 'word' && x.w === (w | 0));
+  return x.k === 'konst' || x.k === 'top' || (x.k === 'word' && x.w === (w | 0));
 }
 
 /** Where an access lands, normalised: a ROOT (one SSA value, one symbol, or the absolute address
@@ -262,6 +271,10 @@ interface Cell {
   byte: number;
   width: number;
 }
+
+/** Two cells may be the same memory: on one root when their bytes overlap, and always on two. */
+const overlaps = (x: Cell, y: Cell): boolean =>
+  x.root !== y.root || (x.byte < y.byte + y.width && y.byte < x.byte + x.width);
 
 function cellOf(defs: ReadonlyMap<Value, Op>, addr: Value, off: number, width: number): Cell {
   let root: Value | string = addr;
@@ -334,8 +347,6 @@ export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
   const ids = new Map<Value, number>();
   const keyOf = (c: Cell): string =>
     `${typeof c.root === 'string' ? c.root : `v${ids.get(c.root) ?? ids.set(c.root, ids.size).get(c.root)!}`}@${c.byte}:${c.width}`;
-  const overlaps = (x: Cell, y: Cell): boolean =>
-    x.root !== y.root || (x.byte < y.byte + y.width && y.byte < x.byte + x.width);
   const cells = new Map<Op, Cell>();
   for (const b of blocks) {
     for (const op of b.ops) {
@@ -430,6 +441,75 @@ export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
     if (at !== undefined) {
       run(b, at, true);
     }
+  }
+  return out;
+}
+
+/** Every read (`load`, `aload`) that each path from the function's entry reaches only past a write
+ *  that may land on its cell, for `WordCtx.overwritten`: a store to an overlapping cell or to
+ *  another root (which may be the same memory), and any other op with effects. What such a read
+ *  sees is what this function wrote, on every path, and when `storeForwards` cannot say which word
+ *  that was — a register-indexed address, two spellings of one sum, narrow stores that compose a
+ *  word, a write through another pointer — the read must not pass for one that varies. A read with
+ *  one write-free path in sees the caller's memory on it, which varies; so does a read in a block
+ *  nothing reaches. An `aload`'s cell is never known, so every write may land on it. */
+export function overwrittenReads(blocks: readonly Block[]): Set<Op> {
+  const defs = new Map<Value, Op>();
+  const preds = new Map<Block, number>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      for (const r of op.results) {
+        defs.set(r, op);
+      }
+      for (const s of op.successors) {
+        preds.set(s.block, (preds.get(s.block) ?? 0) + 1);
+      }
+    }
+  }
+  const cellAt = (op: Op): Cell | undefined =>
+    (op.opcode === 'load' || op.opcode === 'store') && typeof op.attrs.width === 'number'
+      ? cellOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0, op.attrs.width)
+      : undefined;
+  const writesOver = (op: Op, cell: Cell | undefined): boolean => {
+    if (op.opcode === 'load' || op.opcode === 'aload') {
+      return false;
+    }
+    if (op.opcode === 'store') {
+      const at = cellAt(op);
+      return at === undefined || cell === undefined || overlaps(at, cell);
+    }
+    const sig = (OPCODES as Record<string, OpSig | undefined>)[op.opcode];
+    return (sig === undefined || sig.effects === true) && !sig?.terminator;
+  };
+  const roots = blocks.filter((b, i) => i === 0 || !preds.has(b));
+  const out = new Set<Op>();
+  for (const b of blocks) {
+    b.ops.forEach((op, i) => {
+      if (op.opcode !== 'load' && op.opcode !== 'aload') {
+        return;
+      }
+      const cell = cellAt(op);
+      // The blocks whose entry a write-free path reaches.
+      const clean = new Set<Block>(roots);
+      const work = [...roots];
+      while (work.length > 0) {
+        const x = work.pop()!;
+        if (x.ops.some((o) => writesOver(o, cell))) {
+          continue;
+        }
+        for (const o of x.ops) {
+          for (const s of o.successors) {
+            if (!clean.has(s.block)) {
+              clean.add(s.block);
+              work.push(s.block);
+            }
+          }
+        }
+      }
+      if (!clean.has(b) || b.ops.slice(0, i).some((o) => writesOver(o, cell))) {
+        out.add(op);
+      }
+    });
   }
   return out;
 }
