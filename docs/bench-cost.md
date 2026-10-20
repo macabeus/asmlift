@@ -2406,9 +2406,9 @@ and the vitest gate (`scripts/gate-vitest.sh`) price their own peak and compare 
 machine can give right now. That is Linux `MemAvailable` plus half of `SwapFree`, or
 `os.freemem()` elsewhere, less a 0.5 GB reserve (`apps/benchmark/src/run/admission.ts`, which
 says why it uses half). A job in the register also carries the need it was admitted with. What
-such a job has not taken yet, its need less what its process tree holds now, is subtracted too. A
-full bench two minutes in holds ~1 GB of its ~7.5 GB, and a reading of that moment alone would
-admit a gate beside it. A command that does not fit is REFUSED with both numbers and the next
+such a job has not taken yet, its need less what its process tree holds now, is subtracted too.
+On 2026-10-20 a `bench run --jobs 3` held 2.80 GB of its 7.5 GB budget 919 s in, which is the
+gap a reading of that moment alone would hand to the next job. A command that does not fit is REFUSED with both numbers and the next
 step. It is not queued. `bench run` names the largest `--jobs` that fits. A run without `--jobs`
 already sizes itself to fit (`run/default-jobs.ts`), so on this host, quiet, it starts the same 3
 shards. `ASMLIFT_MEM_ADMISSION=off` skips the check and says so. It exists for a host whose
