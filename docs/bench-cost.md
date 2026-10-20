@@ -2403,14 +2403,18 @@ Each of these is sane alone. Only `bench run` read the register, and nothing rea
 
 **Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
 and every vitest run price their own peak and compare it with what the
-machine can give right now. On Linux that is `MemAvailable` plus the free swap above half of
-`SwapTotal`, so swap use is never planned past half the device. On macOS it is `vm_stat`'s free,
+machine can give right now. On Linux that is `MemAvailable` plus, for each zram device in
+`/proc/swaps`, its free space above half its size; disk swap counts for nothing. Counted as a share
+of `SwapTotal`, swap made admission grow with any swapfile: a host with 16 GiB of RAM and a 32 GiB
+disk swapfile admitted 27 GB of jobs at once, and a job pushed to disk stalls the whole host. On
+this host, quiet, the rule reads 5.5 + 3.96 = 9.45 GB, so a solo `--jobs 3` fits and `--jobs 4`
+does not. On macOS it is `vm_stat`'s free,
 inactive, purgeable and speculative pages (not measured on a real Mac; free pages alone refused a
 3-worker gate on any Mac in use), falling back to `os.freemem()`, as everywhere else.
 Either way a 0.5 GB reserve is held back. `apps/benchmark/src/run/admission.ts` gives the two
 measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-20 this host read
-MemAvailable 0.6 GB and SwapFree 6.8 GB. The cap leaves 2.3 GB of that, so a 3-worker vitest gate
-is refused beside the run. Every admitted job also takes a record in the register carrying the
+MemAvailable 0.6 GB and SwapFree 6.8 GB, 3.4 GB of it used on zram. The rule leaves 1.2 GB of
+that, so a 3-worker vitest gate is refused beside the run. Every admitted job also takes a record in the register carrying the
 need it was admitted with: a run or a whole-corpus sweep as before, and `bench fan`, `bench fidelity`,
 a scoped sweep and every vitest run as a `kind: 'job'` record. What such a job has not taken yet,
 its need less what its process tree holds now, is subtracted too. The tree is read from `/proc` on

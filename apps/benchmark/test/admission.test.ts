@@ -18,6 +18,7 @@ import {
   legacyNeedBytes,
   parseMeminfo,
   parsePsTable,
+  parseSwaps,
   parseVmStat,
   processTreeBytes,
   readAdmissibleMemory,
@@ -26,6 +27,7 @@ import {
   unitsThatFit,
   unspentBudgets,
   vitestRequest,
+  zramCredit,
 } from '../src/run/admission';
 import type { BenchLockRecord, BenchLockState } from '../src/run/lock';
 
@@ -45,39 +47,92 @@ const QUIET_MEMINFO = [
 const meminfo = (memAvailableKb: number, swapFreeKb: number): string =>
   `MemTotal: 7879056 kB\nMemAvailable: ${memAvailableKb} kB\nSwapTotal: 9975800 kB\nSwapFree: ${swapFreeKb} kB\n`;
 
-const linux = (text: string) => ({ platform: 'linux', meminfo: () => text, freemem: () => 0 });
+/** This host's /proc/swaps (a 2 GB swapfile at priority -1, an 8.1 GB zram device at 100) with the
+ *  swap in use that `SwapFree` says, taken by zram first as the kernel's priorities do. */
+const hostSwaps = (swapFreeKb: number): string => {
+  const used = 9975800 - swapFreeKb;
+  const zram = Math.min(used, 7878652);
+  return [
+    'Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority',
+    `/swapfile                               file\t\t2097148\t\t${used - zram}\t\t-1`,
+    `/dev/zram0                              partition\t7878652\t\t${zram}\t\t100`,
+  ].join('\n');
+};
+
+const linux = (text: string, swaps?: string) => {
+  const free = /^SwapFree:\s+(\d+)/m.exec(text);
+  return {
+    platform: 'linux',
+    meminfo: () => text,
+    swaps: () => swaps ?? hostSwaps(free ? Number(free[1]) : 9975800),
+    freemem: () => 0,
+  };
+};
 
 /** The shipped `bench run` request at `shards` shards over a whole tier, with no live reading. */
 const runRequest = (shards: number) => shippedRunRequest(shards, undefined, () => 0);
 
 describe('parseMeminfo', () => {
-  it('reads MemAvailable and SwapFree in bytes', () => {
-    expect(parseMeminfo(QUIET_MEMINFO)).toEqual({
-      memAvailable: 5368340 * kB,
-      swapFree: 9899436 * kB,
-      swapTotal: 9975800 * kB,
-    });
+  it('reads MemAvailable in bytes', () => {
+    expect(parseMeminfo(QUIET_MEMINFO)).toBe(5368340 * kB);
   });
 
   it('has no answer without MemAvailable (a kernel before 3.14)', () => {
     expect(parseMeminfo('MemTotal: 1000 kB\nMemFree: 500 kB\n')).toBeUndefined();
   });
+});
 
-  it('reads a missing SwapFree as no swap', () => {
-    expect(parseMeminfo('MemAvailable: 1000 kB\n')).toEqual({ memAvailable: 1000 * kB, swapFree: 0, swapTotal: 0 });
+describe('the swap admission counts', () => {
+  it('reads /proc/swaps as this host prints it', () => {
+    expect(parseSwaps(hostSwaps(9899436))).toEqual([
+      { name: '/swapfile', type: 'file', sizeBytes: 2097148 * kB, usedBytes: 0 },
+      { name: '/dev/zram0', type: 'partition', sizeBytes: 7878652 * kB, usedBytes: 76364 * kB },
+    ]);
+  });
+
+  it('credits each zram device above half its size, and disk swap not at all', () => {
+    const zram = { name: '/dev/zram0', type: 'partition', sizeBytes: 8 * GB, usedBytes: 1 * GB };
+    expect(zramCredit([zram]).bytes).toBe(3 * GB);
+    expect(zramCredit([{ ...zram, usedBytes: 5 * GB }]).bytes).toBe(0);
+    expect(zramCredit([{ ...zram, name: '/dev/zram1' }, zram]).bytes).toBe(6 * GB);
+    expect(zramCredit([{ name: '/swapfile', type: 'file', sizeBytes: 32 * GB, usedBytes: 0 }]).bytes).toBe(0);
+    expect(zramCredit([{ name: '/dev/sda2', type: 'partition', sizeBytes: 16 * GB, usedBytes: 0 }]).bytes).toBe(0);
   });
 });
 
 describe('readAvailableMemory', () => {
-  it('counts MemAvailable plus the free swap above half of SwapTotal on Linux', () => {
+  it('counts MemAvailable plus the zram free above half its size on Linux, and no disk swap', () => {
     const r = readAvailableMemory(linux(QUIET_MEMINFO));
-    expect(r.availableBytes).toBe(5368340 * kB + (9899436 * kB - Math.floor((9975800 * kB) / 2)));
+    expect(r.availableBytes).toBe(5368340 * kB + Math.floor((7878652 * kB) / 2) - 76364 * kB);
     expect(r.how).toContain('MemAvailable');
-    expect(r.how).toContain('SwapTotal');
+    expect(r.how).toContain('zram');
+    expect(r.how).toContain('disk swap not counted');
   });
 
-  it('counts no swap once swap use has reached half of the device', () => {
+  it('counts no swap once zram use has reached half of the device', () => {
     expect(readAvailableMemory(linux(meminfo(1000, 4000000))).availableBytes).toBe(1000 * kB);
+  });
+
+  it('counts no swap where /proc/swaps cannot be read', () => {
+    const r = readAvailableMemory({
+      ...linux(QUIET_MEMINFO),
+      swaps: () => {
+        throw new Error('ENOENT');
+      },
+    });
+    expect(r.availableBytes).toBe(5368340 * kB);
+  });
+
+  it('does not grow with a disk swapfile: 16 GiB of RAM and 32 GiB of disk swap admit no more than RAM', () => {
+    // The architecture breaker's host: a run at --jobs 6, a 7-worker vitest, a fan and a project
+    // sweep were all admitted together, 27 GB of need on 17.2 GB of RAM.
+    const big = linux(
+      'MemTotal: 16777216 kB\nMemAvailable: 13631488 kB\nSwapTotal: 33554432 kB\nSwapFree: 33554432 kB\n',
+      'Filename\tType\tSize\tUsed\tPriority\n/swapfile file 33554432 0 -2\n',
+    );
+    const r = readAvailableMemory(big);
+    expect(r.availableBytes).toBe(13631488 * kB);
+    expect(admissionVerdict(runRequest(6), r)).toContain('REFUSED');
   });
 
   it('falls back to os.freemem(), counting no swap, where /proc/meminfo has no MemAvailable', () => {
@@ -163,8 +218,10 @@ describe('admissionVerdict', () => {
     expect(admissionVerdict(runRequest(1), reading(SHARD_BYTES + RESERVE_BYTES - 1))).toContain('REFUSED');
   });
 
-  it('admits a solo `bench run --jobs 3` on this host quiet, which has run safely for weeks', () => {
+  it('admits a solo `bench run --jobs 3` on this host quiet, which has run safely for weeks, and not --jobs 4', () => {
     expect(admissionVerdict(runRequest(3), readAvailableMemory(linux(QUIET_MEMINFO)))).toBeUndefined();
+    // what `default-jobs.ts` sizes this host at; swap counted as half of SwapTotal admitted 4
+    expect(admissionVerdict(runRequest(4), readAvailableMemory(linux(QUIET_MEMINFO)))).toContain('REFUSED');
   });
 
   it('refuses the 13:18 pair: a whole-corpus sweep --base started beside a --jobs 3 run', () => {

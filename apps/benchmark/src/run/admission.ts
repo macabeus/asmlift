@@ -12,21 +12,24 @@
 // command read memory at all.
 //
 // WHAT IS COUNTED AS AVAILABLE. Linux: `MemAvailable` (the kernel's own estimate of what can be
-// allocated without swapping, page cache it can drop included) plus the free swap ABOVE HALF of
-// `SwapTotal` — swap use is capped at half the device, so `max(0, SwapFree - SwapTotal / 2)`. The
-// cap is bounded on both sides by what this host has measured:
-//   - NO cap admits the incident. A quiet host here reads MemAvailable ~5.5 GB and SwapFree
-//     ~10.1 GB of ~10.2 GB; counted whole, that is 15.6 GB, which admits the run and the sweep
-//     together (11.2 GB of need) — the pair that died.
-//   - NO swap at all refuses what has run safely for weeks: a solo `bench run --jobs 3` needs
-//     3 × SHARD_BYTES = 7.5 GB, and MemAvailable alone is 5.5 GB.
-//   - Capped at half: quiet, 5.5 + 5.0 = 10.5 GB, and the solo run fits. Beside that run at its
-//     peak (measured 2026-10-20: MemAvailable 0.6 GB, SwapFree 6.8 GB) it is 0.6 + 1.7 = 2.3 GB,
-//     so neither the 13:18 sweep nor a 3-worker vitest gate is admitted. Half of what is FREE, the
-//     first cut of this check, read 0.6 + 3.4 = 4.0 GB there and admitted the gate: a discount of
-//     the free swap keeps halving, never reaching the end of the device. On zram, this host's main
-//     swap, the cap also has a physical reading: compressed pages still occupy RAM, so a swapped
-//     byte is not a free byte.
+// allocated without swapping, page cache it can drop included) plus, for each ZRAM device in
+// /proc/swaps, its free space above half of its size — `max(0, Size / 2 - Used)`. Disk swap counts
+// for nothing. Two readings bound the rule:
+//   - Disk swap credited, as a share of `SwapTotal` was at first, makes admission grow with any
+//     swapfile: a 16 GiB host with a 32 GiB disk swapfile admitted a `--jobs 6` run, a 7-worker
+//     vitest, a `bench fan` and a project sweep together, 27 GB of need on 17 GB of RAM. A job
+//     pushed to disk swap stalls the whole host (the rule `default-jobs.ts` already keeps for the
+//     shard count), so the pages a job needs to run are counted in RAM, or not at all.
+//   - No swap at all refuses what runs safely: a solo `bench run --jobs 3` needs 3 × SHARD_BYTES =
+//     7.5 GB, and a quiet host here (7.5 GiB of RAM, an 8.1 GB zram device) reads MemAvailable
+//     ~5.5 GB. zram is compressed RAM, so part of a swapped page does come back: with half the
+//     device credited the quiet reading is 5.5 + 3.96 = 9.45 GB — a solo `--jobs 3` fits and a
+//     `--jobs 4` does not, as `default-jobs.ts` would size it. Beside that run at its peak
+//     (measured: MemAvailable 0.6 GB, zram 3.4 GB used) it is 0.6 + 0.62 = 1.22 GB, so neither a
+//     whole-corpus sweep nor a 3-worker vitest gate is admitted. Half the device and not all of it:
+//     all of it reads 5.5 + 8.0 = 13.5 GB quiet, which admits the 13:18 run and `--base` sweep
+//     together (10.1 GB of need); and a compressed page still occupies RAM.
+// Where /proc/swaps cannot be read, no swap is counted.
 // macOS: `vm_stat`'s free, inactive, purgeable and speculative pages — what the kernel hands to a
 // new allocation without compressing or swapping anything that is in use. `os.freemem()` alone is
 // the free-page count, which on a Mac that is merely in use is a few hundred MB: priced against it,
@@ -133,8 +136,8 @@ export const PEAK_BYTES = {
 /** Held back from what is available for everything that is not a heavy job. */
 export const RESERVE_BYTES = 0.5e9;
 
-/** The share of `SwapTotal` this check lets swap use reach; free swap above it counts as available.
- *  See the header for the two measured bounds. */
+/** The share of each zram device this check lets swap use reach; its free space above that counts
+ *  as available. Disk swap counts for nothing. See the header for the two bounds. */
 export const SWAP_USE_CAP = 0.5;
 
 /** The environment variable that turns the check off, and the value that does. */
@@ -150,18 +153,47 @@ export interface MemoryReading {
 const GB = 1e9;
 const gb = (b: number): string => `${(b / GB).toFixed(1)} GB`;
 
-/** `/proc/meminfo`'s `MemAvailable` and `SwapFree`, in bytes; undefined when `MemAvailable` is not
- *  there (a kernel older than 3.14, or not Linux). */
-export function parseMeminfo(text: string): { memAvailable: number; swapFree: number; swapTotal: number } | undefined {
-  const field = (name: string): number | undefined => {
-    const m = new RegExp(`^${name}:\\s+(\\d+)\\s*kB`, 'm').exec(text);
-    return m ? Number(m[1]) * 1024 : undefined;
-  };
-  const memAvailable = field('MemAvailable');
-  if (memAvailable === undefined) {
-    return undefined;
+/** `/proc/meminfo`'s `MemAvailable` in bytes; undefined when it is not there (a kernel older than
+ *  3.14, or not Linux). */
+export function parseMeminfo(text: string): number | undefined {
+  const m = /^MemAvailable:\s+(\d+)\s*kB/m.exec(text);
+  return m ? Number(m[1]) * 1024 : undefined;
+}
+
+export interface SwapDevice {
+  name: string;
+  type: string;
+  sizeBytes: number;
+  usedBytes: number;
+}
+
+/** `/proc/swaps`' devices, sizes in bytes. */
+export function parseSwaps(text: string): SwapDevice[] {
+  const out: SwapDevice[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+-?\d+\s*$/.exec(line);
+    if (m) {
+      out.push({ name: m[1], type: m[2], sizeBytes: Number(m[3]) * 1024, usedBytes: Number(m[4]) * 1024 });
+    }
   }
-  return { memAvailable, swapFree: field('SwapFree') ?? 0, swapTotal: field('SwapTotal') ?? 0 };
+  return out;
+}
+
+/** The swap this check counts as available: each zram device's free space above `SWAP_USE_CAP` of
+ *  its size, and nothing for disk swap (see the header). */
+export function zramCredit(devices: readonly SwapDevice[]): { bytes: number; zramBytes: number; diskBytes: number } {
+  let bytes = 0;
+  let zramBytes = 0;
+  let diskBytes = 0;
+  for (const d of devices) {
+    if (/^\/dev\/zram\d+$/.test(d.name)) {
+      zramBytes += d.sizeBytes;
+      bytes += Math.max(0, Math.floor(d.sizeBytes * (1 - SWAP_USE_CAP)) - d.usedBytes);
+    } else {
+      diskBytes += d.sizeBytes;
+    }
+  }
+  return { bytes, zramBytes, diskBytes };
 }
 
 /** `vm_stat`'s free + inactive + purgeable + speculative pages, in bytes; undefined when the page
@@ -183,6 +215,7 @@ export function parseVmStat(text: string): number | undefined {
 export interface MemoryDeps {
   platform?: string;
   meminfo?: () => string;
+  swaps?: () => string;
   vmStat?: () => string;
   freemem?: () => number;
 }
@@ -192,19 +225,24 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
   const os = deps.platform ?? platform();
   const free = deps.freemem ?? freemem;
   if (os === 'linux') {
-    let parsed: ReturnType<typeof parseMeminfo>;
+    let memAvailable: number | undefined;
     try {
-      parsed = parseMeminfo((deps.meminfo ?? (() => readFileSync('/proc/meminfo', 'utf8')))());
+      memAvailable = parseMeminfo((deps.meminfo ?? (() => readFileSync('/proc/meminfo', 'utf8')))());
     } catch {
-      parsed = undefined;
+      memAvailable = undefined;
     }
-    if (parsed !== undefined) {
-      const swap = Math.max(0, parsed.swapFree - Math.floor(parsed.swapTotal * SWAP_USE_CAP));
+    if (memAvailable !== undefined) {
+      let swap = { bytes: 0, zramBytes: 0, diskBytes: 0 };
+      try {
+        swap = zramCredit(parseSwaps((deps.swaps ?? (() => readFileSync('/proc/swaps', 'utf8')))()));
+      } catch {
+        // unreadable: no swap counted
+      }
       return {
-        availableBytes: parsed.memAvailable + swap,
+        availableBytes: memAvailable + swap.bytes,
         how:
-          `MemAvailable ${gb(parsed.memAvailable)} + ${gb(swap)} of swap (SwapFree ${gb(parsed.swapFree)} ` +
-          `above ${SWAP_USE_CAP * 100}% of SwapTotal ${gb(parsed.swapTotal)})`,
+          `MemAvailable ${gb(memAvailable)} + ${gb(swap.bytes)} of zram swap (free above ${SWAP_USE_CAP * 100}% of ` +
+          `${gb(swap.zramBytes)} of zram; ${gb(swap.diskBytes)} of disk swap not counted)`,
       };
     }
   }
