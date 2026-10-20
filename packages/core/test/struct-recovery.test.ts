@@ -16,7 +16,10 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
+import { type IrType, T, isCastView } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import type { Expr } from '../src/l3/ast';
+import { exprCType } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
@@ -339,8 +342,9 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
 
   // agbcc aligns and rounds EVERY struct and union to 4 bytes: `union { u16 h; u8 b; }` is four
   // bytes there and two on ido/kmc/mwcc (target.ts `aggregateBoundary`, compiled). A field inside
-  // the rounded size would be mislaid on agbcc, so it declines there — and lifts where the compiler
-  // lays the union out naturally, and declines where nobody measured the boundary.
+  // the rounded size would be mislaid on agbcc, so no union is declared there: the cell is a field
+  // of its widest view and its byte views are casts (`castViewCell`). It is a union where the
+  // compiler lays one out naturally, and declines where nobody measured the boundary.
   const NARROW_THEN_FIELD = `fn narrowthen {
 ^bb0(%0: unk32, %1: unk32):
   store %0, %1 {off=0, width=2}
@@ -350,10 +354,11 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   ret %4
 }
 `;
-  test('a narrow union with a field inside its rounded size declines on a 4-byte boundary', () => {
-    expect(() => emit(NARROW_THEN_FIELD)).toThrow(
-      /the union at offset 0 does not fit this compiler's 4-byte aggregate boundary/,
-    );
+  test('a narrow union with a field inside its rounded size is a cast-view field on a 4-byte boundary', () => {
+    const c = emit(NARROW_THEN_FIELD);
+    expect(c).toContain('struct Struct0 { u16 field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_0 = a1;');
+    expect(c).toContain('((u8 *)a0)[1] + a0->field_2');
   });
 
   test('…and is laid out naturally where the boundary is 1', () => {
@@ -391,9 +396,78 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     expect(c).toContain('a0->field_4.shalf');
   });
 
-  test('a narrow union off the 4-byte boundary declines there too', () => {
-    expect(() =>
-      emit(`fn narrowoff {
+  // …and on a base with NO other overlap: one field would type the cell by one of its loads and
+  // spell the other read through the wrong extension (`ldrh` read as `s16` sign-extends), so the
+  // both-extension cell is an overlap `buildStruct` hands to the union on its own.
+  const CELL_EXTS_ALONE = `fn cellalone {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=2, signed=false}
+  %2: unk32 = load %0 {off=0, width=2, signed=true}
+  %3: unk32 = load %0 {off=4, width=4, signed=true}
+  %4: unk32 = add %2, %3
+  %5: unk32 = add %4, %1
+  ret %5
+}
+`;
+  test('a single-width cell loaded both ways on a base with no other overlap is a union', () => {
+    for (const target of [ARMV4T_AGBCC, MIPS_IDO]) {
+      const c = emit(CELL_EXTS_ALONE, false, undefined, target);
+      expect(c).toContain('struct Struct0 { union { u16 uhalf; s16 shalf; } field_0; s32 field_4; };');
+      expect(c).toContain('a0->field_0.uhalf');
+      expect(c).toContain('a0->field_0.shalf');
+    }
+  });
+
+  // The ORDER of the accesses does not decide it: an unsigned store first, then the `ldrh`, then
+  // the `ldrsh` (`b->x = v; g(); gU = (u16)b->x; gOut = b->x + b->y;`) is the same cell read both
+  // ways, and is the same union, though the store is the access kept for the offset.
+  test('a cell stored first and then loaded both ways is a union too, whatever the order', () => {
+    for (const target of [ARMV4T_AGBCC, MIPS_IDO]) {
+      for (const [first, second] of [
+        ['false', 'true'],
+        ['true', 'false'],
+      ]) {
+        const c = emit(
+          `fn storefirst {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=2}
+  %2: unk32 = load %0 {off=0, width=2, signed=${first}}
+  %3: unk32 = load %0 {off=0, width=2, signed=${second}}
+  %4: unk32 = load %0 {off=4, width=4, signed=true}
+  %5: unk32 = add %3, %4
+  %6: unk32 = add %5, %2
+  ret %6
+}
+`,
+          false,
+          undefined,
+          target,
+        );
+        expect(c).toContain('struct Struct0 { union { u16 uhalf; s16 shalf; } field_0; s32 field_4; };');
+        expect(c).toContain('a0->field_0.uhalf');
+        expect(c).toContain('a0->field_0.shalf');
+      }
+    }
+  });
+
+  test('…and a word loaded with both signs stays one field, since a word has no extension', () => {
+    const c = emit(`fn wordalone {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=false}
+  %2: unk32 = load %0 {off=0, width=4, signed=true}
+  %3: unk32 = load %0 {off=4, width=2, signed=true}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  ret %5
+}
+`);
+    expect(c).not.toContain('union');
+  });
+
+  // Off the boundary too, and the byte index of a cast view counts from the BASE in memory order,
+  // which no endianness changes.
+  test('a narrow union off the 4-byte boundary is a cast-view field there too', () => {
+    const c = emit(`fn narrowoff {
 ^bb0(%0: unk32, %1: unk32):
   %2: unk32 = load %0 {off=0, width=1, signed=false}
   store %0, %1 {off=2, width=2}
@@ -401,8 +475,98 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   %4: unk32 = add %2, %3
   ret %4
 }
-`),
-    ).toThrow(/the union at offset 2 does not fit this compiler's 4-byte aggregate boundary/);
+`);
+    expect(c).toContain('struct Struct0 { u8 field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_2 = a1;');
+    expect(c).toContain('a0->field_0 + ((u8 *)a0)[3]');
+  });
+
+  // The two extensions of the cell's own width share an alias set, so the signed one is a cast of
+  // the unsigned field; a STORE of that width is the field whatever its extension.
+  test('a halfword cell loaded both ways and read as bytes is one unsigned field, the signed read a cast', () => {
+    const c = emit(`fn twin {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=2, signed=false}
+  %3: unk32 = load %0 {off=0, width=2, signed=true}
+  %4: unk32 = load %0 {off=1, width=1, signed=true}
+  store %0, %1 {off=0, width=2}
+  %5: unk32 = load %0 {off=2, width=2, signed=false}
+  %6: unk32 = add %2, %3
+  %7: unk32 = add %6, %4
+  %8: unk32 = add %7, %5
+  ret %8
+}
+`);
+    expect(c).toContain('struct Struct0 { u16 field_0; u16 field_2; };');
+    expect(c).toContain('v0 = a0->field_0;');
+    expect(c).toContain('v1 = *(s16 *)a0;');
+    expect(c).toContain('v2 = ((s8 *)a0)[1];');
+    expect(c).toContain('a0->field_0 = a1;');
+  });
+
+  // The type walk reads a cast view as the scalar it is. A recovered struct declares no size, so
+  // the dot-form exception (an index on a struct pointer is an array element) would type
+  // `((u8 *)a0)[1]` as the struct, and every consumer asking "is this an int" would be told no.
+  test('a cast view of a castViews field types as its scalar, a struct element still as the struct', () => {
+    const st = T.struct('Struct0', [
+      { off: 0, type: T.u(16), name: 'field_0', castViews: true },
+      { off: 2, type: T.u(16), name: 'field_2' },
+    ]);
+    const ct = (e: Expr): unknown => exprCType(e, (n) => (n === 'a0' ? T.ptr(st) : undefined));
+    const at = (idx: number, width: number, signed: boolean): Expr => ({
+      k: 'index',
+      base: { k: 'var', name: 'a0' },
+      idx: { k: 'const', value: idx },
+      width,
+      signed,
+    });
+    expect(ct(at(1, 1, false))).toEqual(T.u(8));
+    expect(ct(at(1, 1, true))).toEqual(T.s(8));
+    expect(ct(at(0, 2, true))).toEqual(T.s(16));
+    expect(ct(at(0, 4, true))).toEqual(st);
+  });
+
+  // "An access names the member" is ONE rule (ir/types.ts `spellsAccessType`), asked by the
+  // frame-object and pointee member spellings and by `isCastView` alike. A word access renders s32
+  // whatever its load said, so a word field declared u32 is named by no load — its loads are casts,
+  // as they are a frame struct's — and one declared s32 by both; a store is the field either way.
+  test('isCastView names a word field by the same rule as every other member spelling', () => {
+    const st = (signed: boolean): Extract<IrType, { kind: 'struct' }> => ({
+      kind: 'struct',
+      name: 'Struct0',
+      fields: [{ off: 0, type: T.int(32, signed), name: 'field_0', castViews: true }],
+    });
+    expect(isCastView(st(false), 0, 4, false, false)).toBe(true);
+    expect(isCastView(st(false), 0, 4, true, false)).toBe(true);
+    expect(isCastView(st(false), 0, 4, false, true)).toBe(false);
+    expect(isCastView(st(true), 0, 4, false, false)).toBe(false);
+    expect(isCastView(st(true), 0, 4, true, false)).toBe(false);
+    expect(isCastView(st(true), 2, 2, false, false)).toBe(true);
+  });
+
+  // A view that is neither a byte nor the field's own width is not alias-transparent to it: a `u16`
+  // read of a word cell through a cast is reused across a word store on agbcc, where the union
+  // reloads (`synthetic:ureread`). No real compiler here has an 8-byte boundary; one is assumed so
+  // that a word cell can fail the fit.
+  test('a word cell with a halfword view that does not fit still declines', () => {
+    const wide = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, aggregateBoundary: 8 } };
+    expect(() =>
+      emit(
+        `fn wordhalf {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  %2: unk32 = load %0 {off=2, width=2, signed=false}
+  %3: unk32 = load %0 {off=4, width=4, signed=true}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  ret %5
+}
+`,
+        false,
+        undefined,
+        wide,
+      ),
+    ).toThrow(/the union at offset 0 does not fit this compiler's 8-byte aggregate boundary/);
   });
 
   // A width no view is named for keeps the overlap decline.

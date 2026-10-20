@@ -71,7 +71,9 @@ import {
   T,
   UNION_VIEW_NAMES,
   intWidth,
+  isCastView,
   scalarTypeForAccess,
+  spellsAccessType,
   structSpelling,
   typeEquals,
   unionView,
@@ -269,21 +271,6 @@ function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalB
   visit(e);
   const idx = terms.length === 0 ? null : terms.reduce((l, r): Expr => ({ k: 'bin', op: '+', l, r }));
   return name !== null ? { name, byte, idx } : null;
-}
-
-/** Does a member declared at signedness `declared` read as EXACTLY the type the cast spelling this
- *  replaces would have produced — `scalarTypeForAccess(width, signed)`? That is the whole
- *  byte-exactness argument for naming a member instead of casting: same address, same read width,
- *  same C type, so every operator downstream compiles identically. A 4-byte access renders s32
- *  whatever the load said (the ISA has one word load), so only a SIGNED member may take its place;
- *  narrower accesses carry their own signedness and must match it. An undeclared signedness (the
- *  member is not a base type — a nested struct, an enum, a pointer) is never assumed to match.
- *  Compared against THE one copy of that rule (ir/types.ts) rather than restating it. */
-function spellsAccessType(declared: boolean | undefined, width: number, signed: boolean): boolean {
-  if (declared === undefined) {
-    return false;
-  }
-  return typeEquals(T.int(width * 8, declared), scalarTypeForAccess(width, signed));
 }
 
 /** The declared type of a frame-local object, from the three facts its `laddr` carries: `count`
@@ -888,7 +875,10 @@ function memAccess(
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...addressEvidence };
   }
   const bt = base.type;
-  if (bt.kind === 'ptr' && bt.to.kind === 'struct') {
+  // A field declared at its cell's widest view (raise/structs.ts `castViewCell`) is read at any
+  // other view as the flat cell at the same address, `((u8 *)p)[1]`: the cast the union it stands
+  // for would have spelled as a member.
+  if (bt.kind === 'ptr' && bt.to.kind === 'struct' && !isCastView(bt.to, off, width, signed, isStore)) {
     const rt = ctype(baseExpr);
     // `->` requires the base to render as a pointer to THIS struct (field names resolve against
     // its declaration) AND as a non-`index` node (the printer spells an index-node base with `.`,

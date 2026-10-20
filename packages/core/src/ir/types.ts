@@ -7,6 +7,11 @@ export interface StructField {
   off: number;
   type: IrType;
   name: string;
+  /** A cell the function also reads or writes at another width or extension, declared at its
+   *  widest view because the union of its views would not fit the compiler's layout
+   *  (raise/structs.ts `buildUnionStruct`). An access of any other type is a cast of the base
+   *  (structure.ts `memAccess`). */
+  castViews?: true;
 }
 
 export type IrType =
@@ -162,6 +167,42 @@ export function unionViewAt(
     return undefined;
   }
   return { member, ...unionView(member.type, off - member.off, width, signed, isStore) };
+}
+
+/** Does a member declared at signedness `declared` read as EXACTLY the type the cast spelling this
+ *  replaces would have produced — `scalarTypeForAccess(width, signed)`? That is the whole
+ *  byte-exactness argument for naming a member instead of casting: same address, same read width,
+ *  same C type, so every operator downstream compiles identically. A 4-byte access renders s32
+ *  whatever the load said (the ISA has one word load), so only a SIGNED member may take its place;
+ *  narrower accesses carry their own signedness and must match it. An undeclared signedness (the
+ *  member is not a base type — a nested struct, an enum, a pointer) is never assumed to match.
+ *  THE one copy of "an access names the member": structure.ts's member spellings and `isCastView`
+ *  below all ask it, so they cannot drift apart. */
+export function spellsAccessType(declared: boolean | undefined, width: number, signed: boolean): boolean {
+  if (declared === undefined) {
+    return false;
+  }
+  return typeEquals(T.int(width * 8, declared), scalarTypeForAccess(width, signed));
+}
+
+/** Does an access of `width` bytes at byte `off`, inside a `castViews` field of the struct, read it
+ *  at a view other than the field's own type — another width or offset, or a load whose type the
+ *  field does not spell (`spellsAccessType`)? A store carries no extension (it truncates to the
+ *  field's bytes whatever their type), so one of the field's width at its offset is the field. */
+export function isCastView(
+  st: Extract<IrType, { kind: 'struct' }>,
+  off: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+): boolean {
+  const f = st.fields.find(
+    (m) => m.castViews === true && m.off <= off && off + width <= m.off + (intWidth(m.type) ?? 0) / 8,
+  );
+  if (f === undefined || f.type.kind !== 'int') {
+    return false;
+  }
+  return off !== f.off || f.type.width !== width * 8 || (!isStore && !spellsAccessType(f.type.signed, width, signed));
 }
 
 /** The view of a union an access of `width` bytes at byte `at` of it reads — the rule
