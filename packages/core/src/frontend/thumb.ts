@@ -3341,6 +3341,10 @@ interface ThumbFrame {
   readonly partition: Readonly<Pick<FrameObjectAudit, 'ownedLocals' | 'declaredLocals'>>;
   isFrameObjectAccess(base: string, off: number, regOff: string | undefined, width: number): boolean;
   isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
+  /** the word slot each narrow reload through a copy of sp reads the low-order part of
+   *  (`narrowSlotReloads`), and the copies those reloads consume, which name no object */
+  readonly narrowReloadOf: ReadonlyMap<Instr, number>;
+  readonly narrowReloadCopies: ReadonlySet<Instr>;
 }
 
 /** The frame offset of each word of a declared call's outgoing block, or null where it stages none.
@@ -3683,11 +3687,6 @@ function measureThumbFrame({
       return declared !== null && outgoingBlock(declared.widths, target) === null;
     }),
   );
-  const constantCaptureOffsets: ReadonlySet<number> = new Set(
-    [...captureOffsetOf.values()].filter(
-      (o) => o > 0 || (o === 0 && frameBaseIsReturnStorage && noCallTakesAStackWord),
-    ),
-  );
 
   // A STRUCT PASSED BY VALUE, LOADED OFF THE FRAME A WORD AT A TIME. agbcc builds the argument in
   // the frame — through a copy of sp, Thumb having no sp-relative halfword or byte store — and
@@ -3726,6 +3725,80 @@ function measureThumbFrame({
   const inByValueBlock = (off: number, width: number): boolean =>
     byValueBlocks.some((r) => off >= r.from && off + width <= r.to);
 
+  // THE NARROW RELOADS OF A WORD SLOT (`narrowSlotReloads`), kept only where the word is a slot
+  // and no object's: a word `str` to [sp,#slot] in live code writes it — without one the bytes are
+  // a sub-word local's (`mov r3, sp / strh r2, [r3, #4]`), which the object model owns — no other
+  // copy of sp names the slot's offset, and neither a by-value block, the one-word frame object nor
+  // the one object covers it.
+  //
+  // …AND THE WORD IS NOT AN INCOMING ARGUMENT'S HOME. A by-value struct parameter is the other
+  // producer of these instructions: agbcc stores its argument registers word by word on entry and
+  // reads each member at its width through a copy of sp (`struct P { u16 a, b, c, d; s8 e; }; int
+  // b2(struct P p){ return p.a + p.c - p.e; }` is `str r0, [sp] / … / mov r0, sp / ldrh r0, [r0]`),
+  // and there the frame is the parameter, one object whose union recompiles byte-exact
+  // (cli/test/matching/frame-union.test.ts) where the words narrowed recompile with no frame at
+  // all. A word the entry block stores straight from an argument register it has not written is
+  // that home, and its reloads keep the object model. A spilled promoted local is stored from the
+  // value it was computed as. A copy kept here is no capture, so its
+  // offset leaves `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one
+  // dropped is the capture it always was, and keeps today's decline.
+  const narrowCandidates = narrowSlotReloads(
+    asmBlocks,
+    entryReachable,
+    localArea,
+    target.capabilities.endianness === 'little',
+  );
+  const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
+  const otherCaptureOffsets = new Set(
+    [...captureOffsetOf].filter(([ins]) => !candidateCopies.has(ins)).map(([, off]) => off),
+  );
+  const wordStoredSlots = new Set(
+    [...entryReachable].flatMap((b) =>
+      asmBlocks[b].instrs.flatMap((ins) => {
+        const a = spMemAccess(ins);
+        return ins.mnemonic === 'str' && a !== null && !a.regOff ? [a.off] : [];
+      }),
+    ),
+  );
+  const argumentHomes = new Set<number>();
+  {
+    const written = new Set<string>();
+    for (const ins of asmBlocks[0].instrs) {
+      const a = spMemAccess(ins);
+      const src = reg(ins.ops[0] ?? '');
+      if (ins.mnemonic === 'str' && a !== null && !a.regOff && target.argRegs.includes(src) && !written.has(src)) {
+        argumentHomes.add(a.off);
+      }
+      for (const r of target.argRegs) {
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx' || mayWriteReg(ins, r)) {
+          written.add(r);
+        }
+      }
+    }
+  }
+  const narrowReloadOf = new Map<Instr, number>();
+  for (const [load, { slot }] of narrowCandidates) {
+    if (
+      wordStoredSlots.has(slot) &&
+      !argumentHomes.has(slot) &&
+      !otherCaptureOffsets.has(slot) &&
+      !inByValueBlock(slot, 4) &&
+      !(capturedObjectIsTheWholeFrame && slot === 0) &&
+      !(oneObject !== undefined && slot < oneObject.to && slot + 4 > oneObject.from)
+    ) {
+      narrowReloadOf.set(load, slot);
+    }
+  }
+  const narrowReloadCopies: ReadonlySet<Instr> = new Set(
+    [...narrowCandidates].filter(([load]) => narrowReloadOf.has(load)).map(([, n]) => n.copy),
+  );
+  const constantCaptureOffsets: ReadonlySet<number> = new Set(
+    [...captureOffsetOf]
+      .filter(([ins]) => !narrowReloadCopies.has(ins))
+      .map(([, o]) => o)
+      .filter((o) => o > 0 || (o === 0 && frameBaseIsReturnStorage && noCallTakesAStackWord)),
+  );
+
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
   // slots, which instructions are calls, and what each callee's DECLARATION asks for. `blx rN`
@@ -3753,7 +3826,8 @@ function measureThumbFrame({
       if (escaped.length > 0 && ins.mnemonic === 'str') {
         return escaped;
       }
-      const off = slotAcc(ins);
+      // …and a narrow reload of a word slot is that slot's reload, as its word reload would be
+      const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? null;
       if (off !== null && !constantCaptureOffsets.has(off) && !inByValueBlock(off, 4)) {
         return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
       }
@@ -3940,6 +4014,8 @@ function measureThumbFrame({
     partition,
     isFrameObjectAccess,
     isOwnFrameWordSlot,
+    narrowReloadOf,
+    narrowReloadCopies,
   };
 }
 
@@ -4045,6 +4121,72 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
     return from === undefined ? null : [reg(d), from + imm(by)];
   }
   return null;
+}
+
+// A NARROW RELOAD OF A WORD SLOT, read through a copy of sp. agbcc promotes a `u8`/`u16` local to
+// a word (thumb.h PROMOTE_MODE), spills it with `str`, and where a use is narrow it reloads only
+// the narrow part. Thumb has no sp-relative `ldrb`/`ldrh`, so that reload goes through a copy of
+// sp made for it alone: `add r3, sp, #0x28 / ldrb r3, [r3]` (a byte slot past the `ldrb` offset
+// range), `mov r2, sp / ldrh r2, [r2, #0x4]`. The narrow bytes are the slot's LOW-ORDER part —
+// on a little-endian target its own address, on a big-endian one its last `width` bytes — so the
+// load reads the stored word's value narrowed, `zext(sp@<slot>)`, and the copy names no object.
+//
+// What this finds is a shape and not yet a licence; the copy is a capture everywhere it fails:
+//   * the copy is `mov rD, sp` or `add rD, sp, #c`, entry-reachable, and in ONE block it is read
+//     by exactly one instruction, a zero-extending `ldrb`/`ldrh` at an immediate offset from rD
+//     that writes rD itself, so the address dies at that load. Anything else that mentions rD
+//     before it (a second load, a store through it, an escape), a call, a control transfer or a
+//     write of sp ends the search, and the copy stays a capture.
+//   * the load's bytes are the low-order part of a whole aligned word of the reserved local area.
+//     A load at any other byte of the word is not that word's value narrowed, whatever it reads.
+//   * `ldrsb`/`ldrsh` exist only register-offset in Thumb-1, and agbcc's signed use reloads a word
+//     and shifts (measured), so no signed shape is taken.
+// What the caller then adds, because it needs the frame model: the slot named by no other
+// capture, outside a by-value block and outside the one object (`measureThumbFrame`), and at the
+// lowering a slot the word model keys with a store reaching it (`lowerLoad`). A narrow STORE into
+// the slot through any other address is the frame-object audit's: it sees that slot used and the
+// object overlapping it, the "one byte, two models" refusal.
+function narrowSlotReloads(
+  asmBlocks: readonly AsmBlock[],
+  entryReachable: ReadonlySet<number>,
+  localArea: number,
+  littleEndian: boolean,
+): Map<Instr, { copy: Instr; slot: number }> {
+  const found = new Map<Instr, { copy: Instr; slot: number }>();
+  for (const b of entryReachable) {
+    const instrs = asmBlocks[b].instrs;
+    instrs.forEach((copy, at) => {
+      const [d, s1, s2] = copy.ops;
+      const from = capturesSp(copy)
+        ? 0
+        : /^adds?$/.test(copy.mnemonic) && isSpReg(s1) && s2 !== undefined && IMM_LITERAL.test(s2)
+          ? imm(s2)
+          : null;
+      if (from === null || d === undefined || isSpReg(d)) {
+        return;
+      }
+      const rD = reg(d);
+      for (const ins of instrs.slice(at + 1)) {
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx' || classifyXfer(ins) !== null || modifiesSp(ins)) {
+          return;
+        }
+        if (!mentionsReg(ins, rD)) {
+          continue;
+        }
+        const width = ins.mnemonic === 'ldrb' ? 1 : ins.mnemonic === 'ldrh' ? 2 : 0;
+        const addr = ins.ops[1] === undefined ? null : parseAddr(ins.ops[1]);
+        if (width === 0 || reg(ins.ops[0] ?? '') !== rD || addr === null || reg(addr.base) !== rD || addr.regOff) {
+          return;
+        }
+        const slot = from + addr.off - (littleEndian ? 0 : 4 - width);
+        if (slot % 4 === 0 && slot >= 0 && slot + 4 <= localArea) {
+          found.set(ins, { copy, slot });
+        }
+        return;
+      }
+    });
+  }
+  return found;
 }
 
 // Every register that holds a frame address at some instruction of live code — the shapes
@@ -5497,6 +5639,10 @@ function lowerMov(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // a reserved local area for the object to live in.
   if (!b?.startsWith('#') && isSpReg(b ?? '') && !isSpReg(a ?? '')) {
     if (frame.slotsOk && frame.localArea > 0) {
+      // a copy only a narrow slot reload reads names no object; the reload reads the slot
+      if (frame.narrowReloadCopies.has(ins)) {
+        return;
+      }
       const res = mkValue(T.unk(32));
       irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
       writeData(reg(a), bi, res);
@@ -5531,6 +5677,9 @@ function lowerAdd(fill: ThumbFill, cur: BlockCursor, ins: Instr, ii: number): vo
   // audit; only the offset differs.
   if (isSpReg(b ?? '') && !isSpReg(a ?? '') && c !== undefined && IMM_LITERAL.test(c)) {
     if (frame.slotsOk && frame.localArea > 0) {
+      if (frame.narrowReloadCopies.has(ins)) {
+        return; // see lowerMov
+      }
       const res = mkValue(T.unk(32));
       irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));
       writeData(reg(a), bi, res);
@@ -5851,6 +6000,32 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         fill.frameUses.offEntryArgReads.add(bi);
       }
       writeData(reg(a), bi, readVar(stackArgKey(index), bi));
+      return;
+    }
+  }
+  // A NARROW RELOAD OF A WORD SLOT through a copy of sp nothing else reads (`narrowSlotReloads`):
+  // the low-order part of the word the slot holds, so the slot's value narrowed — under the same
+  // terms as the word reload below, the slot keyed and reached by a store. Its copy was not lifted,
+  // so a reload this cannot take refuses here rather than reading through a register never set.
+  {
+    const slot = frame.narrowReloadOf.get(ins);
+    if (slot !== undefined) {
+      if (
+        !frame.isOwnFrameWordSlot('sp', slot, undefined, 4) ||
+        frame.isFrameObjectAccess('sp', slot, undefined, 4) ||
+        !(ssa.hasReachingDef(stackSlotKey(slot), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
+      ) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': narrow reload of a stack local through a copy of sp — ` +
+            `'${ins.mnemonic} ${ins.ops.join(', ')}' reads the word slot [sp,#${slot}], which the word-slot model does not key here`,
+        );
+      }
+      usedSlotOffsets.add(slot);
+      const res = mkValue(T.unk(32));
+      irb.ops.push(
+        mkOp('zext', { operands: [readVar(stackSlotKey(slot), bi)], results: [res], attrs: { width: 8 * width } }),
+      );
+      writeData(reg(a), bi, res);
       return;
     }
   }
