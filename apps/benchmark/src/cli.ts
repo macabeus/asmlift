@@ -721,6 +721,8 @@ switch (command) {
       ...(opts.project !== undefined ? { project: opts.project } : {}),
       ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
       ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),
+      ...(opts.base !== undefined ? { base: opts.base } : {}),
+      ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
     };
     // A WHOLE-CORPUS sweep is a full bench for the machine-wide register (run/lock.ts): refused
     // beside a whole-tier run or another whole sweep, and recorded so that they are refused beside
@@ -745,18 +747,13 @@ switch (command) {
     process.exit(
       await sweep({
         tiers,
-        ...(opts.only !== undefined ? { only: opts.only } : {}),
-        ...(opts.project !== undefined ? { project: opts.project } : {}),
+        ...sweepOpts,
         mapModes: opts['map-modes'].split(',').filter((a) => a !== ''),
         allowUnmeasured: opts['allow-unmeasured'],
         fan: opts.fan,
         force: opts.force,
         ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
         ...(opts.json !== undefined ? { json: opts.json } : {}),
-        ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
-        ...(opts.base !== undefined ? { base: opts.base } : {}),
-        ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
-        ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),
         ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
         ...(opts['asm-project'] !== undefined ? { asmProject: opts['asm-project'] } : {}),
       }),

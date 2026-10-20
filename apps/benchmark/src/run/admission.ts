@@ -51,23 +51,27 @@ import { pathToFileURL } from 'node:url';
  *  `default-jobs.ts`). */
 export const SHARD_BYTES = 2.5e9;
 
-/** The measured peak of each heavy unit, in bytes of anonymous memory plus swap over the whole
- *  process tree. docs/bench-cost.md §5 carries the date and command behind each one. */
+/** The peak of each heavy unit, in bytes of anonymous memory plus swap over the whole process tree,
+ *  each a little above what was measured. docs/bench-cost.md §5 carries the measured figure, its
+ *  date and the command behind each one. */
 export const PEAK_BYTES = {
-  /** a `bench run` shard ranking the corpus's dearest row */
+  /** a `bench run` shard; one shard ranking the corpus's dearest row measured 1.95 GB */
   shard: SHARD_BYTES,
-  /** `bench fan <row>`: one row ranked or enumerated in one process, exactly what a shard does with
-   *  it — so budgeted as one shard rather than as a second, smaller figure that would have to be
-   *  re-measured every time the largest fan grows */
+  /** `bench fan <row>`: one row ranked or enumerated in one process, which is what a shard does
+   *  with it, so it is budgeted as one shard. The dearest row's fan measured 1.77 GB */
   fan: SHARD_BYTES,
-  /** one lift pass of `bench sweep` over the whole corpus, both map modes */
-  sweepPass: 2.1e9,
-  /** one lift pass of a SCOPED `bench sweep` (`--only`/`--project`/`--asm-dir`) */
+  /** one lift pass of `bench sweep` over the whole corpus, both map modes: measured 2.07 GB */
+  sweepPass: 2.2e9,
+  /** a whole-corpus `bench sweep --base`: one pass in a child while the parent holds both sides'
+   *  records, measured 2.49 GB */
+  sweepBase: 2.6e9,
+  /** the floor of a SCOPED sweep's pass: one row measured 0.25 GB */
   sweepScopedPass: 0.3e9,
   /** one published repro script `bench fidelity` runs (an `asmlift` or `m2c` invocation and its
    *  compile) */
   fidelityScript: 0.5e9,
-  /** one vitest worker of the root or matching suite, plus its share of the main process */
+  /** one vitest worker of the root or matching suite, with its share of the main process: the root
+   *  suite at 3 workers measured 2.70 GB */
   vitestWorker: 1.0e9,
 } as const;
 

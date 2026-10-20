@@ -811,9 +811,11 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(sweepIsWholeCorpus(o({ compare: ['a.json', 'b.json'] }))).toBe(false);
   });
 
-  it('prices ONE pass, with or without --base: the two passes no longer share a process', () => {
+  it('prices ONE pass, and with --base one pass plus the records: the two passes no longer share a process', () => {
     expect(sweepRequest(o(), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
-    expect(sweepRequest(o({ base: 'origin/main' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ base: 'origin/main' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepBase);
+    expect(sweepRequest(o({ baseDir: '/x' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepBase);
+    expect(PEAK_BYTES.sweepBase).toBeLessThan(2 * PEAK_BYTES.sweepPass);
   });
 
   it('scales a scoped pass by the share of the artifact it selects, never below the one-row figure', () => {

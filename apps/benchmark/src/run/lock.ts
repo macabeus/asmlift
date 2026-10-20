@@ -447,7 +447,7 @@ export function benchLockStatus(dir: string = BENCH_LOCK_DIR, root: string = REP
     note();
     return 0;
   }
-  console.log(`no bench run is measuring this worktree (no live record in \`${dir}\`) — it is yours to edit.`);
+  console.log(`no bench run is measuring this worktree (no live record in \`${dir}\` names it) — it is yours to edit.`);
   note();
   return 0;
 }

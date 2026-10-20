@@ -565,9 +565,10 @@ export function sweepIsWholeCorpus(o: Pick<SweepOptions, 'only' | 'project' | 'a
  *
  *  ONE PASS AT A TIME: the passes of `--base` run in children one after the other (`collectInChild`)
  *  and `--repeat`'s run in this process one after the other, so the peak is one pass plus the
- *  records already held, which are small beside it. A pass is priced at the measured whole-corpus
- *  figure, scaled by the share of the committed artifact's rows the selection names, and never
- *  below the measured one-row figure. Scaling linearly over-reads every scoped pass measured
+ *  records already held. Those records are what `--base` adds: the parent holds both sides' while
+ *  a child lifts, which is the measured difference between `sweepBase` and `sweepPass`. The
+ *  whole-corpus figure is scaled by the share of the committed artifact's rows the selection
+ *  names, and never priced below the measured one-row figure. Scaling linearly over-reads every scoped pass measured
  *  (docs/bench-cost.md §5), which is the direction to be wrong in; `--asm-dir` names no dataset row
  *  and is priced whole. `--fan` adds one row's enumeration, budgeted as `bench fan` is. */
 export function sweepRequest(
@@ -578,12 +579,15 @@ export function sweepRequest(
     return undefined;
   }
   const gb = (b: number): string => `${(b / 1e9).toFixed(1)} GB`;
-  let pass: number = PEAK_BYTES.sweepPass;
-  let what = `one lift pass over the whole corpus (${gb(pass)})`;
+  const based = o.base !== undefined || o.baseDir !== undefined;
+  const whole: number = based ? PEAK_BYTES.sweepBase : PEAK_BYTES.sweepPass;
+  const passes = based ? "one lift pass at a time, both sides' records held," : 'one lift pass';
+  let pass = whole;
+  let what = `${passes} over the whole corpus (${gb(pass)})`;
   if (!sweepIsWholeCorpus(o) && o.asmDir === undefined && artifactIds !== undefined && artifactIds.length > 0) {
     const n = artifactIds.filter((id) => selectsRow(o, id)).length;
-    pass = Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil((PEAK_BYTES.sweepPass * n) / artifactIds.length));
-    what = `one lift pass over ${n} of ${artifactIds.length} rows (${gb(pass)})`;
+    pass = Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil((whole * n) / artifactIds.length));
+    what = `${passes} over ${n} of ${artifactIds.length} rows (${gb(pass)})`;
   }
   const fan = o.fan === true ? PEAK_BYTES.fan : 0;
   return {
