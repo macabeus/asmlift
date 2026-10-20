@@ -90,13 +90,22 @@ describe('the swap admission counts', () => {
     ]);
   });
 
-  it('credits each zram device above half its size, and disk swap not at all', () => {
+  it('credits the zram devices above half their size, and disk swap not at all', () => {
     const zram = { name: '/dev/zram0', type: 'partition', sizeBytes: 8 * GB, usedBytes: 1 * GB };
-    expect(zramCredit([zram]).bytes).toBe(3 * GB);
-    expect(zramCredit([{ ...zram, usedBytes: 5 * GB }]).bytes).toBe(0);
-    expect(zramCredit([{ ...zram, name: '/dev/zram1' }, zram]).bytes).toBe(6 * GB);
-    expect(zramCredit([{ name: '/swapfile', type: 'file', sizeBytes: 32 * GB, usedBytes: 0 }]).bytes).toBe(0);
-    expect(zramCredit([{ name: '/dev/sda2', type: 'partition', sizeBytes: 16 * GB, usedBytes: 0 }]).bytes).toBe(0);
+    expect(zramCredit([zram], 16 * GB).bytes).toBe(3 * GB);
+    expect(zramCredit([{ ...zram, usedBytes: 5 * GB }], 16 * GB).bytes).toBe(0);
+    expect(zramCredit([{ ...zram, name: '/dev/zram1' }, zram], 16 * GB).bytes).toBe(6 * GB);
+    expect(zramCredit([{ name: '/swapfile', type: 'file', sizeBytes: 32 * GB, usedBytes: 0 }], 16 * GB).bytes).toBe(0);
+    expect(
+      zramCredit([{ name: '/dev/sda2', type: 'partition', sizeBytes: 16 * GB, usedBytes: 0 }], 16 * GB).bytes,
+    ).toBe(0);
+  });
+
+  it('counts the zram size only up to RAM, however large the devices are set', () => {
+    const zram = { name: '/dev/zram0', type: 'partition', sizeBytes: 16 * GB, usedBytes: 1 * GB };
+    expect(zramCredit([zram], 8 * GB).bytes).toBe(3 * GB);
+    expect(zramCredit([zram, { ...zram, name: '/dev/zram1' }], 8 * GB).bytes).toBe(2 * GB);
+    expect(zramCredit([zram], 8 * GB).zramBytes).toBe(16 * GB);
   });
 });
 
@@ -133,6 +142,26 @@ describe('readAvailableMemory', () => {
     const r = readAvailableMemory(big);
     expect(r.availableBytes).toBe(13631488 * kB);
     expect(admissionVerdict(runRequest(6), r)).toContain('REFUSED');
+  });
+
+  it('does not grow with the zram size: a zram device of 2 x RAM on this host reads as one of RAM', () => {
+    // zram-generator's `zram-size = ram * 2` on this host's RAM: half the device would read 13.6 GB
+    // quiet and admit a --jobs 5 run (12.5 GB), above the 12.36 GB this host OOMed holding.
+    const r = readAvailableMemory(
+      linux(QUIET_MEMINFO, `Filename\tType\tSize\tUsed\tPriority\n/dev/zram0 partition ${2 * 7879056} 0 100\n`),
+    );
+    expect(r.availableBytes).toBe(5368340 * kB + Math.floor((7879056 * kB) / 2));
+    expect(admissionVerdict(runRequest(5), r)).toContain('REFUSED');
+  });
+
+  it('bounds the zram size by os.totalmem() where /proc/meminfo has no MemTotal', () => {
+    const r = readAvailableMemory({
+      platform: 'linux',
+      meminfo: () => 'MemAvailable: 1048576 kB\n',
+      swaps: () => 'Filename\tType\tSize\tUsed\tPriority\n/dev/zram0 partition 16777216 0 100\n',
+      totalmem: () => 4 * GB,
+    });
+    expect(r.availableBytes).toBe(1048576 * kB + 2 * GB);
   });
 
   it('falls back to os.freemem(), counting no swap, where /proc/meminfo has no MemAvailable', () => {

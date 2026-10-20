@@ -2403,8 +2403,9 @@ Each of these is sane alone. Only `bench run` read the register, and nothing rea
 
 **Every heavy command asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
 and every vitest run price their own peak and compare it with what the
-machine can give right now. On Linux that is `MemAvailable` plus, for each zram device in
-`/proc/swaps`, its free space above half its size; disk swap counts for nothing. Counted as a share
+machine can give right now. On Linux that is `MemAvailable` plus the zram swap in
+`/proc/swaps` free above half its size, that size counted only up to `MemTotal` (a device set to
+2 × RAM would otherwise admit a `--jobs 5` run here); disk swap counts for nothing. Counted as a share
 of `SwapTotal`, swap would make admission grow with any swapfile: a host with 16 GiB of RAM and a
 32 GiB disk swapfile would admit 27 GB of jobs at once, and a job pushed to disk stalls the whole host. On
 this host, quiet, the rule reads 5.5 + 3.96 = 9.45 GB, so a solo `--jobs 3` fits and `--jobs 4`

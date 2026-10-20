@@ -9,9 +9,9 @@
 // memory.
 //
 // WHAT IS COUNTED AS AVAILABLE. Linux: `MemAvailable` (the kernel's own estimate of what can be
-// allocated without swapping, page cache it can drop included) plus, for each ZRAM device in
-// /proc/swaps, its free space above half of its size — `max(0, Size / 2 - Used)`. Disk swap counts
-// for nothing. Two readings bound the rule:
+// allocated without swapping, page cache it can drop included) plus the zram swap's free space
+// above half of its size — `max(0, min(Size, MemTotal) / 2 - Used)`, Size and Used summed over the
+// ZRAM devices in /proc/swaps. Disk swap counts for nothing. Three readings bound the rule:
 //   - Disk swap credited as any share of `SwapTotal` makes admission grow with any swapfile: a
 //     16 GiB host with a 32 GiB disk swapfile would admit a `--jobs 6` run, a 7-worker vitest, a
 //     `bench fan` and a project sweep together, 27 GB of need on 17 GB of RAM. A job pushed to disk
@@ -26,6 +26,11 @@
 //     whole-corpus sweep nor a 3-worker vitest gate is admitted. Half the device and not all of it:
 //     all of it reads 5.5 + 8.0 = 13.5 GB quiet, which admits a `--jobs 3` run and a whole `--base`
 //     sweep together (10.1 GB of need); and a compressed page still occupies RAM.
+//   - The device's size is a setting, not memory: zram-generator takes `zram-size = ram * 2`, and
+//     half of a 2 × RAM device on this host's RAM reads 13.6 GB quiet, which admits a `--jobs 5`
+//     run (12.5 GB of need, above the 12.36 GB this host OOMed holding) and the run + `--base`
+//     sweep pair. What compressed pages can take back is bounded by RAM, so the size counted is
+//     at most MemTotal; a device no larger than RAM, as here, reads the same.
 // Where /proc/swaps cannot be read, no swap is counted.
 // macOS: `vm_stat`'s free, inactive, purgeable and speculative pages — what the kernel hands to a
 // new allocation without compressing or swapping anything that is in use. `os.freemem()` alone is
@@ -158,6 +163,12 @@ export function parseMeminfo(text: string): number | undefined {
   return m ? Number(m[1]) * 1024 : undefined;
 }
 
+/** `/proc/meminfo`'s `MemTotal` in bytes; undefined when it is not there. */
+export function parseMemTotal(text: string): number | undefined {
+  const m = /^MemTotal:\s+(\d+)\s*kB/m.exec(text);
+  return m ? Number(m[1]) * 1024 : undefined;
+}
+
 export interface SwapDevice {
   name: string;
   type: string;
@@ -177,20 +188,26 @@ export function parseSwaps(text: string): SwapDevice[] {
   return out;
 }
 
-/** The swap this check counts as available: each zram device's free space above `SWAP_USE_CAP` of
- *  its size, and nothing for disk swap (see the header). */
-export function zramCredit(devices: readonly SwapDevice[]): { bytes: number; zramBytes: number; diskBytes: number } {
-  let bytes = 0;
+/** The swap this check counts as available: the zram devices' free space above `SWAP_USE_CAP` of
+ *  their summed size, that size taken as at most `memTotalBytes` (RAM bounds what compressed pages
+ *  can take back, whatever the devices are set to), and nothing for disk swap (see the header). */
+export function zramCredit(
+  devices: readonly SwapDevice[],
+  memTotalBytes: number,
+): { bytes: number; zramBytes: number; diskBytes: number } {
   let zramBytes = 0;
+  let zramUsed = 0;
   let diskBytes = 0;
   for (const d of devices) {
     if (/^\/dev\/zram\d+$/.test(d.name)) {
       zramBytes += d.sizeBytes;
-      bytes += Math.max(0, Math.floor(d.sizeBytes * (1 - SWAP_USE_CAP)) - d.usedBytes);
+      zramUsed += d.usedBytes;
     } else {
       diskBytes += d.sizeBytes;
     }
   }
+  const counted = Math.min(zramBytes, memTotalBytes);
+  const bytes = Math.max(0, Math.floor(counted * (1 - SWAP_USE_CAP)) - zramUsed);
   return { bytes, zramBytes, diskBytes };
 }
 
@@ -216,6 +233,8 @@ export interface MemoryDeps {
   swaps?: () => string;
   vmStat?: () => string;
   freemem?: () => number;
+  /** RAM in bytes where /proc/meminfo has no `MemTotal` */
+  totalmem?: () => number;
 }
 
 /** What this machine has to give a new job, read now. */
@@ -224,15 +243,21 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
   const free = deps.freemem ?? freemem;
   if (os === 'linux') {
     let memAvailable: number | undefined;
+    let memTotal: number | undefined;
     try {
-      memAvailable = parseMeminfo((deps.meminfo ?? (() => readFileSync('/proc/meminfo', 'utf8')))());
+      const text = (deps.meminfo ?? (() => readFileSync('/proc/meminfo', 'utf8')))();
+      memAvailable = parseMeminfo(text);
+      memTotal = parseMemTotal(text);
     } catch {
       memAvailable = undefined;
     }
     if (memAvailable !== undefined) {
       let swap = { bytes: 0, zramBytes: 0, diskBytes: 0 };
       try {
-        swap = zramCredit(parseSwaps((deps.swaps ?? (() => readFileSync('/proc/swaps', 'utf8')))()));
+        swap = zramCredit(
+          parseSwaps((deps.swaps ?? (() => readFileSync('/proc/swaps', 'utf8')))()),
+          memTotal ?? (deps.totalmem ?? totalmem)(),
+        );
       } catch {
         // unreadable: no swap counted
       }
@@ -240,7 +265,7 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
         availableBytes: memAvailable + swap.bytes,
         how:
           `MemAvailable ${gb(memAvailable)} + ${gb(swap.bytes)} of zram swap (free above ${SWAP_USE_CAP * 100}% of ` +
-          `${gb(swap.zramBytes)} of zram; ${gb(swap.diskBytes)} of disk swap not counted)`,
+          `${gb(swap.zramBytes)} of zram, counted up to RAM; ${gb(swap.diskBytes)} of disk swap not counted)`,
       };
     }
   }
