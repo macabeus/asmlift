@@ -2464,6 +2464,9 @@ that of the largest single process, shown in the last column.
 | the same, with the artifact parsed for pricing (ec32a68f) / scanned for ids (863abc59), 0.25 s sampler                    | 2026-10-20 |       0.38–0.43 / 0.23 GB |    2 s |               — |
 | `pnpm bench sweep --only armdef` (1 synthetic row)                                                                        | 2026-10-20 |                   0.20 GB |    2 s |               — |
 | `pnpm bench sweep --only CalcCRC16WithTable` (1 pokeemerald row)                                                          | 2026-10-20 |                   0.36 GB |    2 s |               — |
+| `pnpm bench sweep --only bfword --base-dir <the main checkout>` (1 synthetic row, both sides; d3c3664d, 0.05 s sampler)   | 2026-10-20 |             0.41, 0.40 GB |    2 s |               — |
+| `pnpm bench sweep --only bfword` / the same with `--repeat 2` (d3c3664d, 0.05 s sampler)                                  | 2026-10-20 |            0.23 / 0.23 GB |    2 s |               — |
+| `pnpm bench sweep --only CalcCRC16WithTable --tier real --base-dir <the main checkout>` (d3c3664d, 0.05 s sampler)        | 2026-10-20 |                   0.53 GB |    3 s |               — |
 | `pnpm bench sweep --project pokeemerald --tier real` (68 rows)                                                            | 2026-10-20 |                   1.55 GB |   27 s |               — |
 | the same at origin/main 2e6ba81e                                                                                          | 2026-10-20 |                   1.63 GB |   29 s |               — |
 | the same, `--base-dir` the 2e6ba81e tree                                                                                  | 2026-10-20 |                   1.86 GB |   51 s |               — |
@@ -2486,7 +2489,10 @@ its share. Its cost is its project's context and symbol map: `--project pokeemer
 the synthetic share, the sweep scans the artifact's bytes for its row ids. It does not parse the
 artifact: `JSON.parse` of the 63 MB file had raised every sweep's peak by ~0.2 GB. The first `--project sa3` reading,
 0.56 GB, was not reproduced: the re-measure above gave 0.82 GB for the same 3,864 records. A
-`--repeat` sweep keeps its first pass's records through the next and is budgeted at 2.5 GB. The
+`--repeat` sweep keeps its first pass's records through the next and is budgeted at 2.5 GB. A
+scoped `--base` sweep has a floor of its own, 0.45 GB: its parent and the child lifting one side
+are alive at once, so one row against a base tree peaked at 0.39-0.41 GB, over the 0.3 GB floor a
+single process holds. A one-row `--repeat` stays in one process and under that floor. The
 rows marked 59205010 were measured at that commit with the same sampler, and their largest single
 process was not read. The `--base` wall clocks include provisioning the base tree. Both runs printed the same verdict
 (86 moved, the ido `opts` nondeterminism, and 4,520 identical), so moving the head pass into a

@@ -594,7 +594,8 @@ const DEFAULT_PRICE_ROWS: SweepPriceRows = { artifactIds: () => artifactRowIds()
  *  `--repeat` adds: the first pass's records stay alive through every later pass, `sweepRepeat`.
  *
  *  A SCOPED pass (`--only`, or `--project`) is priced by what it lifts, in two parts, and never
- *  above the whole pass nor below the floor: the synthetic rows it selects, as their share of the
+ *  above the whole pass nor below the floor (`sweepScopedBasedPass` with a base, whose parent and
+ *  child are alive at once): the synthetic rows it selects, as their share of the
  *  committed artifact's rows times the whole figure; and, for every real project it lifts a row of,
  *  that project's measured figure (`PEAK_BYTES.sweepRealProject`). A real row is not priced by its
  *  share: one pokeemerald row cost 0.60 GB, and 68 of them (3% of the rows) 1.57 GB against a share
@@ -662,7 +663,8 @@ export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRI
         parts.push(`${p}'s real rows (${gb(fig)})`);
       }
     }
-    pass = Math.min(whole, Math.max(PEAK_BYTES.sweepScopedPass, synthetic + real));
+    const floor = based ? PEAK_BYTES.sweepScopedBasedPass : PEAK_BYTES.sweepScopedPass;
+    pass = Math.min(whole, Math.max(floor, synthetic + real));
     what = `${passes} over ${parts.length > 0 ? parts.join(' + ') : 'no row'} (${gb(pass)})`;
   }
   const fan = o.fan === true ? PEAK_BYTES.fan : 0;

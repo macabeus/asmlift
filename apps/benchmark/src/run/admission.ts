@@ -97,6 +97,11 @@ export const PEAK_BYTES = {
   /** the floor of a SCOPED sweep's pass, what its process costs before it lifts much: one
    *  synthetic row measured 0.20 GB, one kleod row 0.23 GB */
   sweepScopedPass: 0.3e9,
+  /** the same floor with `--base` or `--base-dir`: the parent and the child lifting one side are
+   *  alive at once, so the floor is paid twice. One synthetic row against a base tree measured
+   *  0.39, 0.41, 0.41 and 0.40 GB, against 0.23 GB without a base. `--repeat` stays in one process:
+   *  one row at `--repeat 2` measured 0.23 GB, under the plain floor */
+  sweepScopedBasedPass: 0.45e9,
   /** what a SCOPED sweep's pass costs for each real project it lifts a row of: `bench sweep
    *  --project <p> --tier real`, measured per project, plus a tenth. Not a share of the rows: a
    *  real row's price is its project's — the context and symbol map its rows load — so 68

@@ -875,6 +875,19 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(sweepRequest(o({ tiers: ['real'], only: 'OldBar' }), rows)!.need).toContain("sa3's real rows");
   });
 
+  it('prices a one-row --base sweep at the based floor: its parent and its child are alive at once', () => {
+    // one synthetic row against a base tree peaked at 0.39-0.41 GB, over the 0.3 GB one-process floor
+    expect(PEAK_BYTES.sweepScopedBasedPass).toBeGreaterThanOrEqual(0.41e9);
+    expect(sweepRequest(o({ tiers: ['synthetic'], only: 'add', baseDir: '/x' }), rows)!.needBytes).toBe(
+      Math.max(PEAK_BYTES.sweepScopedBasedPass, Math.ceil(PEAK_BYTES.sweepBase / 4)),
+    );
+    expect(sweepRequest(o({ only: 'nothing-matches', base: 'origin/main' }), rows)!.needBytes).toBe(
+      PEAK_BYTES.sweepScopedBasedPass,
+    );
+    // `--repeat` stays in one process: the plain floor
+    expect(sweepRequest(o({ only: 'nothing-matches', repeat: 2 }), rows)!.needBytes).toBe(PEAK_BYTES.sweepScopedPass);
+  });
+
   it('scales the project figure by --base’s whole figure over one pass', () => {
     expect(sweepRequest(o({ tiers: ['real'], project: 'pokeemerald', base: 'x' }), rows)!.needBytes).toBe(
       Math.min(PEAK_BYTES.sweepBase, Math.ceil((project('pokeemerald') * PEAK_BYTES.sweepBase) / PEAK_BYTES.sweepPass)),
