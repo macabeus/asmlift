@@ -12428,17 +12428,20 @@ export const SYNTHETIC: SynthSpec[] = [
   //   8. jt_pre_midg (EntityCreate). A jump table with PRE's code INSIDE its dispatch: gcse's
   //      `insert_insn_end_bb` (gcse.c:4231-4236) puts a later switch's index computation "just before
   //      the tablejump", between `ldr r0,[r0]` and `mov pc` (thumb.md:979 tablejump is the `mov pc`
-  //      alone); `recoverJumpTable` wants exactly five instructions and the loud indirect-jump refusal
-  //      fires. EntityCreate's second table carries four such values. Give `case 4` a body or drop the
-  //      `if` path and the insertion moves to the join: MATCH (controls, not rows). ido7.1 and
-  //      gcc2.7.2kmc decline the control too, on their own second table (frontend/mips.ts `jr` after
-  //      `lw t7,32(at)`), off; mwcc_242_81 lifts it. Instrumented on every `return null`.
+  //      alone), so it runs on every dispatched case and on no other path. thumb.ts `recoverJumpTable`
+  //      takes those instructions as the table's `extras` (`dispatchExtraRefusal` says which it
+  //      refuses), and the dispatch block stays, cut to them, under its bounds test: agbcc lifts,
+  //      nonmatch. EntityCreate's second table carries four such values. Give `case 4` a body or drop
+  //      the `if` path and the insertion moves to the join: MATCH (controls, not rows). ido7.1 and
+  //      gcc2.7.2kmc decline the control on their own second table, for an unrelated reason: the
+  //      table's `%lo` folds into its load (`lw t7,32(at)`), which frontend/mips.ts refuses on a
+  //      non-zero offset, as it does for sw_jtloop2:ido7.1; mwcc_242_81 lifts it.
   //   9. jt_dupdef (VisionSelectInputAndMovement). A table entry naming a label that ALIASES the
   //      default: `case 8` and `default` have identical arms, jump.c cross-jumps case 8's, and its
-  //      label is left on the default's first instruction. `decode` aliases branches, but
-  //      `recoverJumpTable` matches `.word` entries as written and the same refusal fires. One label
-  //      for both (`case 8: default:`) MATCHes. ido7.1 and gcc2.7.2kmc MATCH and mwcc_242_81 lifts it
-  //      (their tables are object data). The family above's "table case aliasing `default`" set-aside.
+  //      label is left on the default's first instruction. `recoverJumpTable` reads a `.word` entry
+  //      through `decode`'s label aliases, as a branch is read, so agbcc MATCHes. ido7.1 and
+  //      gcc2.7.2kmc MATCH and mwcc_242_81 lifts it (their tables are object data). The family
+  //      above's "table case aliasing `default`" set-aside.
   //  10. thrbreak (sub_0801C82C). A `break` on `x == t[i].a` whose test the code after the loop
   //      repeats: agbcc threads the break's jump through that test (jump.c thread_jumps, on from -O1),
   //      so the loop's exit lands on the post-loop `if`'s THEN arm while the other exits land on the
