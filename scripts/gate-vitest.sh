@@ -25,11 +25,15 @@
 # bench command calls (apps/benchmark/src/run/admission.ts — one copy of the math, not a shell
 # one): a gate started beside a full bench on a small host is how a host runs out of memory, and the
 # OOM killer takes the desktop, not the gate. A refusal exits 2 with the numbers, and the gate did
-# not run. `ASMLIFT_MEM_ADMISSION=off` skips it, saying so.
+# not run. `ASMLIFT_MEM_ADMISSION=off` skips it, saying so. An admitted run takes a record in the
+# machine-wide bench register under THIS shell's pid ($$), carrying its price, so a heavy job started
+# while vitest runs subtracts what the gate has still to take; the trap removes it on exit, and a
+# killed shell leaves a record naming a dead pid, which reads stale.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2
-trap 'rm -f "$log"' EXIT
+record=
+trap 'rm -f "$log" ${record:+"$record"}' EXIT
 
 workers=--maxWorkers="${VITEST_MAX_WORKERS:-3}"
 count=${VITEST_MAX_WORKERS:-3}
@@ -42,10 +46,13 @@ for a in "$@"; do
 done
 
 # the admission check; anything but a plain worker count is priced at vitest's own default
-pnpm exec tsx apps/benchmark/src/run/admission.ts vitest "$count" || {
+record=$(pnpm exec tsx apps/benchmark/src/run/admission.ts vitest "$count" $$) || {
+  record=
   echo "gate: FAIL — vitest run $*: not started, refused by the memory admission check above" >&2
   exit 2
 }
+# the record's path is the check's one line of stdout; keep only the last line in case a wrapper adds one
+record=$(printf '%s\n' "$record" | tail -n 1)
 
 # the pipe's status is tee's, so vitest's is carried out through a file
 status_file="$log.status"

@@ -39,11 +39,15 @@
 //
 // WHAT IS ALREADY PROMISED. Available memory is read NOW, and a job registered a minute ago is
 // still ramping up: a `bench run --jobs 3` measured 2.80 GB over its process tree 919 s in, against
-// ~8.0 GB at the 13:18 OOM (docs/bench-cost.md §5). So every
-// live record in `run/lock.ts`'s register carries the need it was admitted with, and what such a
-// job has not taken yet — its need less what its process tree holds now — is subtracted before
-// anything else is admitted. On Linux the tree is read from /proc; where it cannot be read, nothing
-// is subtracted, which is this check without the correction, never a stricter one.
+// ~8.0 GB at the 13:18 OOM (docs/bench-cost.md §5). So every job this check admits takes a record
+// in `run/lock.ts`'s register carrying the need it was admitted with — a run or a whole-corpus
+// sweep as before, every other heavy command as a `kind: 'job'` record, the vitest gate under its
+// shell's pid — and what such a job has not taken yet, its need less what its process tree holds
+// now, is subtracted before anything else is admitted. Every admitted job, and not only runs: a
+// promise only some jobs make protects only the jobs started after them, and whether a gate and a
+// run were admitted together then depended on which started first. On Linux the tree is read
+// from /proc; where it cannot be read, nothing is subtracted, which is this check without the
+// correction, never a stricter one.
 //
 // REFUSE, NOT WAIT. Like the register, this decides and says why; it does not queue. A waiting job
 // holds a terminal and a lane hostage on a condition nobody can see, while a refusal names the
@@ -57,7 +61,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { cpus, freemem, platform } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
-import { type BenchLockState, readBenchLock } from './lock';
+import { type BenchLockState, readBenchLock, registerHeavyJob } from './lock';
 
 /** One shard of `bench run`: its 1.3–1.7 GB peak on the largest fans, with headroom for the compile
  *  workers a big fan forks (`eval/asmlift.ts`'s ROW_COMPILE_WORKERS, and on Linux one worker for
@@ -328,25 +332,37 @@ export function vitestRequest(workers: number): AdmissionRequest {
     command: `vitest (${workers} worker${workers === 1 ? '' : 's'})`,
     needBytes: workers * PEAK_BYTES.vitestWorker,
     need: `${workers} × ${gb(PEAK_BYTES.vitestWorker)} per worker`,
-    instead: 'run fewer workers (`VITEST_MAX_WORKERS=1`), or one test file',
+    // A one-file run is priced at the workers it is GIVEN, not the file count: a vitest filter is a
+    // substring, and one can name any number of files. So the advice is the worker count, which a
+    // one-file run loses nothing by.
+    instead: 'run fewer workers (`VITEST_MAX_WORKERS=1`; a run of one test file loses nothing by it)',
   };
 }
 
-/** `scripts/gate-vitest.sh`'s entry point: `admission.ts vitest <workers|default>`. Exit 0 = go,
- *  2 = refused (the gate script's own "did not run" code). One copy of the math, here. */
+/** `scripts/gate-vitest.sh`'s entry point: `admission.ts vitest <workers|default> [<pid>]`. Exit 0 =
+ *  go, 2 = refused (the gate script's own "did not run" code). One copy of the math, here.
+ *
+ *  With `<pid>` — the gate's own shell, which lives as long as its vitest run — an admitted run
+ *  takes a `kind: 'job'` record under that pid, and its path is the one line printed on stdout,
+ *  for the gate to remove when it exits. This process exits before vitest starts, so a record under
+ *  its own pid would read stale at once and promise nothing. */
 function main(argv: readonly string[]): number {
-  const [what, n] = argv;
-  if (what !== 'vitest') {
-    console.error('usage: admission.ts vitest <workers|default>');
+  const [what, n, pidArg] = argv;
+  if (what !== 'vitest' || (pidArg !== undefined && !/^[1-9]\d*$/.test(pidArg))) {
+    console.error('usage: admission.ts vitest <workers|default> [<pid>]');
     return 2;
   }
   // vitest's own default is (cpus - 1); anything that is not a plain integer (a `50%`) is priced at
   // that, the most it can mean.
   const workers = /^\d+$/.test(n ?? '') ? Math.max(1, Number(n)) : Math.max(1, cpus().length - 1);
-  const refusal = admissionRefusal(vitestRequest(workers));
+  const req = vitestRequest(workers);
+  const refusal = admissionRefusal(req);
   if (refusal !== undefined) {
     console.error(refusal);
     return 2;
+  }
+  if (pidArg !== undefined) {
+    console.log(registerHeavyJob(`gate-vitest ${req.command}`, req.needBytes, Number(pidArg)));
   }
   return 0;
 }

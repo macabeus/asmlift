@@ -202,13 +202,20 @@ describe('the vitest gate entry point', () => {
     expect(r.stderr).toContain(`${ADMISSION_ENV}=off`);
   });
 
-  it('exits 2 on an argument it does not know', () => {
-    const r = spawnSync(
-      join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
-      [join(REPO_ROOT, 'apps/benchmark/src/run/admission.ts'), 'bogus'],
-      { encoding: 'utf8' },
-    );
-    expect(r.status).toBe(2);
+  it('exits 2 on an argument it does not know, and on a pid that is not one', () => {
+    for (const args of [['bogus'], ['vitest', '3', 'abc'], ['vitest', '3', '0']]) {
+      const r = spawnSync(
+        join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
+        [join(REPO_ROOT, 'apps/benchmark/src/run/admission.ts'), ...args],
+        { encoding: 'utf8' },
+      );
+      expect(r.status, args.join(' ')).toBe(2);
+    }
+  });
+
+  it('advises the worker count, the one thing that lowers its price — not the file count', () => {
+    expect(vitestRequest(3).instead).toContain('VITEST_MAX_WORKERS=1');
+    expect(vitestRequest(3).instead).not.toMatch(/^.*, or one test file$/);
   });
 });
 
@@ -269,5 +276,24 @@ describe('what registered jobs have still to take', () => {
     const ramping = { ...deps, lockState: () => held(record(1, 3 * SHARD_BYTES)), held: () => 1 * GB };
     expect(readAdmissibleMemory(ramping).how).toContain('6.5 GB that 1 registered job has still to take');
     expect(admissionRefusal(vitestRequest(3), ramping)).toContain('REFUSED');
+  });
+
+  it('decides a gate and a run the same in either order, now that the gate promises its need too', () => {
+    // The breaker's probe: MemAvailable 5.1 GB, SwapFree 10.1 of 10.2 GB, the first job's tree
+    // holding 0.4 GB. Before the gate took a record, gate-then-run was ADMITTED and run-then-gate
+    // REFUSED.
+    const deps = { ...linux(meminfo(Math.round((5.1 * GB) / kB), Math.round((10.1 * GB) / kB))), env: {} };
+    const gate = vitestRequest(3);
+    const gateJob: BenchLockRecord = {
+      ...record(7, gate.needBytes),
+      command: 'gate-vitest vitest (3 workers)',
+      tiers: [],
+      whole: false,
+      kind: 'job',
+    };
+    const runFirst = { ...deps, lockState: () => held(record(7, 3 * SHARD_BYTES)), held: () => 0.4 * GB };
+    const gateFirst = { ...deps, lockState: () => held(gateJob), held: () => 0.4 * GB };
+    expect(admissionRefusal(gate, runFirst)).toContain('REFUSED');
+    expect(admissionRefusal(runRequest(3), gateFirst)).toContain('REFUSED');
   });
 });

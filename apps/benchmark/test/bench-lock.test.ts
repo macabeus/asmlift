@@ -20,6 +20,7 @@ import {
   concurrentRunRefusal,
   concurrentSweepRefusal,
   readBenchLock,
+  registerHeavyJob,
   releaseBenchLock,
 } from '../src/run/lock';
 
@@ -428,6 +429,29 @@ describe('a whole-corpus sweep in the register', () => {
     }
   });
 
+  test('every other admitted heavy job writes a `kind: job` promise that blocks no edit, run or sweep', () => {
+    const reg = throwawayReg();
+    registerHeavyJob('bench fan kleod:X:agbcc', 2.5e9, process.pid, reg);
+    const rec = JSON.parse(readFileSync(join(reg, `${process.pid}.json`), 'utf8')) as BenchLockRecord;
+    expect(rec).toMatchObject({ kind: 'job', whole: false, tiers: [], needBytes: 2.5e9 });
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].kind).toBe('job');
+    expect(benchInFlightRefusal(state, MY_ROOT)).toBeUndefined();
+    expect(concurrentRunRefusal(state, asRun())).toBeUndefined();
+    expect(concurrentRunRefusal(state, asRun({ whole: false }))).toBeUndefined();
+    expect(concurrentSweepRefusal(state)).toBeUndefined();
+    releaseBenchLock(reg);
+  });
+
+  test('a job can be registered under another live pid — the vitest gate’s shell — and reads as held', () => {
+    const reg = throwawayReg();
+    const path = registerHeavyJob('gate-vitest vitest (3 workers)', 3e9, process.ppid, reg);
+    expect(path).toBe(join(reg, `${process.ppid}.json`));
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].pid).toBe(process.ppid);
+    releaseBenchLock(reg, process.ppid);
+  });
+
   test('a record whose kind is any other word reads as a run — the kind that collides with more', () => {
     const state = live({ kind: 'sweeep' });
     expect(state.state === 'held' && state.records[0].kind).toBeUndefined();
@@ -569,12 +593,15 @@ describe('the CLI is wired to it', () => {
     expect(sweepCase).toContain("opts['no-lock']");
   });
 
-  test('every heavy command asks the memory admission check before it starts', () => {
-    for (const name of ['run', 'fan', 'sweep', 'fidelity']) {
-      expect(switchCase(name), `\`bench ${name}\` does not call the admission check`).toContain('admitOrExit(');
+  test('every heavy command asks the memory admission check before it starts, and promises what it was admitted with', () => {
+    expect(switchCase('run'), '`bench run` does not call the admission check').toContain('admitOrExit(');
+    for (const name of ['fan', 'sweep', 'fidelity']) {
+      // a run and a whole sweep promise through their own register record; everything else through a job record
+      expect(switchCase(name), `\`bench ${name}\` does not admit and register`).toContain('admitAndRegister(');
     }
     const gate = readFileSync(join(REPO_ROOT, 'scripts', 'gate-vitest.sh'), 'utf8');
-    expect(gate).toContain('apps/benchmark/src/run/admission.ts vitest');
+    // the gate's record is held by its own shell, which outlives the tsx check
+    expect(gate).toContain('apps/benchmark/src/run/admission.ts vitest "$count" $$');
   });
 
   test('`bench in-flight` is a subcommand and is listed in the usage line', () => {

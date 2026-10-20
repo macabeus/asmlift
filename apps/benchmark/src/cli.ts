@@ -113,7 +113,7 @@ import { merge } from './report/merge';
 import { publish } from './report/publish';
 import { type AdmissionRequest, PEAK_BYTES, SHARD_BYTES, admissionRefusal, unitsThatFit } from './run/admission';
 import { defaultJobs } from './run/default-jobs';
-import { acquireBenchLock, benchLockStatus, concurrentSweepRefusal, readBenchLock } from './run/lock';
+import { acquireBenchLock, benchLockStatus, concurrentSweepRefusal, readBenchLock, registerHeavyJob } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
 import { claimer, partPath, planCases, runDir } from './run/queue';
@@ -281,6 +281,16 @@ function admitOrExit(req: AdmissionRequest | undefined, code: number): void {
   if (refusal !== undefined) {
     console.error(refusal);
     process.exit(code);
+  }
+}
+
+/** Admit a heavy command that takes no run or sweep record, and then record what it was admitted
+ *  with as a `kind: 'job'` record for as long as this process lives (run/lock.ts's header): a job
+ *  that promises nothing is invisible to every heavy job started after it. */
+function admitAndRegister(req: AdmissionRequest | undefined, code: number): void {
+  admitOrExit(req, code);
+  if (req !== undefined) {
+    registerHeavyJob(`bench ${process.argv.slice(2).join(' ')}`, req.needBytes);
   }
 }
 
@@ -673,7 +683,7 @@ switch (command) {
     }
     // One row ranked (or enumerated) in one process, which is what a shard does with it — and a
     // loop of these, orphaned, was the third job in the 2026-10-20 13:18 OOM.
-    admitOrExit(
+    admitAndRegister(
       {
         command: 'bench fan',
         needBytes: PEAK_BYTES.fan,
@@ -755,14 +765,18 @@ switch (command) {
       },
       artifactRowIds(),
     );
-    admitOrExit(sweepNeed, 2);
-    if (sweepIsWholeCorpus(sweepOpts) && !opts['no-lock']) {
-      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
-        tiers,
-        whole: true,
-        kind: 'sweep',
-        ...(sweepNeed !== undefined ? { needBytes: sweepNeed.needBytes } : {}),
-      });
+    if (!sweepIsWholeCorpus(sweepOpts)) {
+      admitAndRegister(sweepNeed, 2);
+    } else {
+      admitOrExit(sweepNeed, 2);
+      if (!opts['no-lock']) {
+        acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
+          tiers,
+          whole: true,
+          kind: 'sweep',
+          ...(sweepNeed !== undefined ? { needBytes: sweepNeed.needBytes } : {}),
+        });
+      }
     }
     process.exit(
       await sweep({
@@ -803,7 +817,7 @@ switch (command) {
       console.error(`bad --jobs ${opts.jobs}`);
       process.exit(2);
     }
-    admitOrExit(
+    admitAndRegister(
       {
         command: 'bench fidelity',
         needBytes: jobs * PEAK_BYTES.fidelityScript,

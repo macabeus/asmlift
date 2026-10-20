@@ -34,6 +34,15 @@
 // `--jobs 3` run was two of the three jobs in the 2026-10-20 13:18 OOM. So it is refused beside a
 // whole-tier run, and a whole-tier run beside it — the same whole-against-whole rule, nothing else.
 //
+// EVERY OTHER ADMITTED HEAVY JOB TAKES A RECORD TOO, as `kind: 'job'`: a scoped sweep, `bench fan`,
+// `bench fidelity`, and the vitest gate (`scripts/gate-vitest.sh`, under the gate shell's own pid).
+// Such a record is a MEMORY PROMISE and nothing else: it carries the need `admission.ts` admitted
+// it with, so a heavy job started after it subtracts what it has not taken yet. Without it the
+// check was one-sided — a gate started first was invisible to a `bench run --jobs 3` started
+// second, while the reverse order was refused, so which pair was admitted depended on who started
+// first. A job record measures no tree, writes no tier and is never whole, so it blocks no edit,
+// no run and no sweep.
+//
 // ADVISORY: nothing here waits, queues or retries, and `--no-lock` walks past it (see
 // `concurrentRunRefusal`). The register is a name for a fact, not a mutex.
 //
@@ -95,7 +104,7 @@ export interface BenchLockRecord {
   whole: boolean;
   /** `bench run` (absent in every record written before sweeps took one), or a whole-corpus
    *  `bench sweep`, which writes no tier file and is measured by nothing. */
-  kind?: 'run' | 'sweep';
+  kind?: 'run' | 'sweep' | 'job';
   /** The peak memory this job was admitted with (`admission.ts`), so a job admitted after it can
    *  subtract what it has not taken yet. Absent in older records, which promise nothing. */
   needBytes?: number;
@@ -146,9 +155,9 @@ function parseRecord(text: string): BenchLockRecord | undefined {
       // Unknown is not a clearance, on this question too: a record that does not say gets treated as
       // the run that collides.
       whole: r.whole !== false,
-      // Only the exact word makes a record a sweep: anything else reads as a run, the kind that
-      // collides with more.
-      ...(r.kind === 'sweep' ? { kind: 'sweep' as const } : {}),
+      // Only the exact words make a record a sweep or a job: anything else reads as a run, the kind
+      // that collides with more.
+      ...(r.kind === 'sweep' || r.kind === 'job' ? { kind: r.kind } : {}),
       ...(typeof r.needBytes === 'number' && Number.isFinite(r.needBytes) && r.needBytes > 0
         ? { needBytes: r.needBytes }
         : {}),
@@ -217,10 +226,10 @@ export function readBenchLock(dir: string = BENCH_LOCK_DIR): BenchLockState {
 }
 
 /** Does this record measure that worktree? A record that does not say which tree it measures
- *  matches every one: unknown is not a clearance. A sweep measures nothing — it writes no tier
- *  file and no provenance stamp — so it is never a run "measuring this worktree". */
+ *  matches every one: unknown is not a clearance. A sweep or a job measures nothing — neither
+ *  writes a tier file or a provenance stamp — so neither is ever a run "measuring this worktree". */
 function measures(r: BenchLockRecord, root: string): boolean {
-  return r.kind !== 'sweep' && (r.root === undefined || r.root === root);
+  return r.kind !== 'sweep' && r.kind !== 'job' && (r.root === undefined || r.root === root);
 }
 
 function elapsed(startedAt: string): string {
@@ -270,8 +279,9 @@ export interface BenchRunIdentity {
   /** Does it rewrite a tier file whole? `preflight.ts`'s `runIsWholeTier`. */
   whole: boolean;
   root?: string;
-  /** A whole-corpus sweep's record; see the header. Absent = a `bench run`. */
-  kind?: 'sweep';
+  /** A whole-corpus sweep's record, or any other admitted heavy job's; see the header. Absent = a
+   *  `bench run`. */
+  kind?: 'sweep' | 'job';
   /** what the admission check priced this job at; see `BenchLockRecord.needBytes` */
   needBytes?: number;
 }
@@ -367,7 +377,7 @@ export function concurrentSweepRefusal(state: BenchLockState): string | undefine
     "the user's desktop session down with them.",
     'Wait for it (`ls` the register; a dead pid there is stale and blocks nothing), or scope this',
     'sweep with `--only`, or `--project` with `--tier real` (`--project` alone still lifts every',
-    'synthetic row): a scoped sweep takes no record and is not refused here.',
+    'synthetic row): a scoped sweep is not refused here, and only memory admission weighs it.',
     'If you have a reason to sweep anyway, `--no-lock` says so out loud and leaves every other',
     'record alone.',
   ].join('\n');
@@ -391,6 +401,26 @@ export function concurrentSweepRefusal(state: BenchLockState): string | undefine
  *  pair only DUPLICATES work, where the single-slot shape had the second run EVICT the first's
  *  protection, and real launches are seconds apart. */
 export function acquireBenchLock(command: string, run: BenchRunIdentity, dir: string = BENCH_LOCK_DIR): string {
+  return writeRecord(command, run, dir, process.pid);
+}
+
+/** Record an admitted heavy job that is not a run and not a whole-corpus sweep (see the header):
+ *  a memory promise of `needBytes`, held by `pid` for as long as that process lives.
+ *
+ *  `pid` defaults to this process, whose exit removes the record as `acquireBenchLock`'s does. Any
+ *  other pid is a job that outlives the writer — the vitest gate's shell, which prices its run in a
+ *  `tsx` child that exits before vitest starts — and then the record is left for that job to
+ *  remove (the gate's `trap`); if it never does, the pid dies and the record reads stale. */
+export function registerHeavyJob(
+  command: string,
+  needBytes: number,
+  pid: number = process.pid,
+  dir: string = BENCH_LOCK_DIR,
+): string {
+  return writeRecord(command, { tiers: [], whole: false, kind: 'job', needBytes }, dir, pid);
+}
+
+function writeRecord(command: string, run: BenchRunIdentity, dir: string, pid: number): string {
   const { dead } = scan(dir);
   if (dead.length === 1 && dead[0] === dir) {
     // Something that is not a directory where the register belongs. It names no live run.
@@ -408,18 +438,20 @@ export function acquireBenchLock(command: string, run: BenchRunIdentity, dir: st
     rmSync(path, { recursive: true, force: true });
   }
   const record: BenchLockRecord = {
-    pid: process.pid,
+    pid,
     startedAt: new Date().toISOString(),
     command,
     tiers: [...run.tiers],
     root: run.root ?? REPO_ROOT,
     whole: run.whole,
-    ...(run.kind === 'sweep' ? { kind: 'sweep' as const } : {}),
+    ...(run.kind !== undefined ? { kind: run.kind } : {}),
     ...(run.needBytes !== undefined ? { needBytes: run.needBytes } : {}),
   };
-  const path = recordPath(dir, process.pid);
+  const path = recordPath(dir, pid);
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);
-  process.on('exit', () => releaseBenchLock(dir, record.pid));
+  if (pid === process.pid) {
+    process.on('exit', () => releaseBenchLock(dir, record.pid));
+  }
   return path;
 }
 
@@ -437,6 +469,12 @@ export function benchLockStatus(dir: string = BENCH_LOCK_DIR, root: string = REP
   const elsewhere = state.state === 'held' ? state.records.filter((r) => !measures(r, root)) : [];
   const note = (): void => {
     for (const r of elsewhere) {
+      if (r.kind === 'job') {
+        console.log(
+          `(a heavy job is also running in ${r.root} — ${describe(r, state.path)}; it blocks no edit and no run, and admission counts what it has still to take)`,
+        );
+        continue;
+      }
       console.log(
         `(${r.kind === 'sweep' ? 'a whole-corpus sweep' : 'a bench'} is also running in ${r.root} — ${describe(r, state.path)}; it does not block an edit here,`,
       );
