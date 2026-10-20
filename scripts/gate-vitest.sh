@@ -21,38 +21,20 @@
 # WORKERS. 3 by default (`VITEST_MAX_WORKERS` overrides; an explicit `--maxWorkers` in the args
 # wins) — docs/bench-cost.md §1 has what the root suite costs at that and at vitest's default.
 #
-# MEMORY. Before vitest starts, the workers are priced by the same admission check every heavy
-# bench command calls (apps/benchmark/src/run/admission.ts — one copy of the math, not a shell
-# one): a gate started beside a full bench on a small host is how a host runs out of memory, and the
-# OOM killer takes the desktop, not the gate. A refusal exits 2 with the numbers, and the gate did
-# not run. `ASMLIFT_MEM_ADMISSION=off` skips it, saying so. An admitted run takes a record in the
-# machine-wide bench register under THIS shell's pid ($$), carrying its price, so a heavy job started
-# while vitest runs subtracts what the gate has still to take; the trap removes it on exit, and a
-# killed shell leaves a record naming a dead pid, which reads stale.
+# MEMORY. The admission check is not here: it is a globalSetup of both vitest configs
+# (vitest.memory-admission.ts), so it prices every way vitest starts — this gate, `pnpm test:offline`,
+# a one-file `pnpm exec vitest run` — and records the admitted run under vitest's own pid, which
+# lives exactly as long as the job. A refusal there starts no test; this gate then exits 2 with
+# the check's numbers above, as it does for any run that did not start.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2
-record=
-trap 'rm -f "$log" ${record:+"$record"}' EXIT
+trap 'rm -f "$log"' EXIT
 
 workers=--maxWorkers="${VITEST_MAX_WORKERS:-3}"
-count=${VITEST_MAX_WORKERS:-3}
-prev=
 for a in "$@"; do
   case $a in --maxWorkers | --maxWorkers=*) workers= ;; esac
-  case $a in --maxWorkers=*) count=${a#--maxWorkers=} ;; esac
-  [ "$prev" = --maxWorkers ] && count=$a
-  prev=$a
 done
-
-# the admission check; anything but a plain worker count is priced at vitest's own default
-record=$(pnpm exec tsx apps/benchmark/src/run/admission.ts vitest "$count" $$) || {
-  record=
-  echo "gate: FAIL — vitest run $*: not started, refused by the memory admission check above" >&2
-  exit 2
-}
-# the record's path is the check's one line of stdout; keep only the last line in case a wrapper adds one
-record=$(printf '%s\n' "$record" | tail -n 1)
 
 # the pipe's status is tee's, so vitest's is carried out through a file
 status_file="$log.status"
@@ -75,6 +57,10 @@ fail() {
   exit 1
 }
 
+if [ -z "$files" ] && printf '%s\n' "$plain" | grep -q '\[memory admission\]'; then
+  echo "gate: FAIL — $what: not started, refused by the memory admission check above" >&2
+  exit 2
+fi
 [ -n "$files" ] || fail "no 'Test Files' summary line, so the run did not finish (exit $status)"
 case $files in *failed* | *skipped* | *todo*) fail "not every collected file passed" ;; esac
 case $tests in *failed* | *skipped* | *todo*) fail "not every collected test passed — a skip is a gate that did not run" ;; esac

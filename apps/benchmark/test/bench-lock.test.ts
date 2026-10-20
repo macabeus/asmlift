@@ -599,9 +599,17 @@ describe('the CLI is wired to it', () => {
       // a run and a whole sweep promise through their own register record; everything else through a job record
       expect(switchCase(name), `\`bench ${name}\` does not admit and register`).toContain('admitAndRegister(');
     }
-    const gate = readFileSync(join(REPO_ROOT, 'scripts', 'gate-vitest.sh'), 'utf8');
-    // the gate's record is held by its own shell, which outlives the tsx check
-    expect(gate).toContain('apps/benchmark/src/run/admission.ts vitest "$count" $$');
+    // every vitest run, gated or not, is checked and recorded by a globalSetup of BOTH configs, under
+    // vitest's own pid: a check in the gate script missed `pnpm test:offline` and every direct run
+    for (const config of ['vitest.config.ts', 'vitest.matching.config.ts']) {
+      const text = readFileSync(join(REPO_ROOT, config), 'utf8');
+      expect(text, `${config} does not run the memory admission check first`).toMatch(
+        /globalSetup: \[\s*'\.\/vitest\.memory-admission\.ts'/,
+      );
+    }
+    const setup = readFileSync(join(REPO_ROOT, 'vitest.memory-admission.ts'), 'utf8');
+    expect(setup).toContain('registerHeavyJob(');
+    expect(setup).toContain('process.pid');
   });
 
   test('`bench in-flight` is a subcommand and is listed in the usage line', () => {

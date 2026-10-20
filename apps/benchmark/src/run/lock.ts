@@ -35,7 +35,7 @@
 // whole-tier run, and a whole-tier run beside it — the same whole-against-whole rule, nothing else.
 //
 // EVERY OTHER ADMITTED HEAVY JOB TAKES A RECORD TOO, as `kind: 'job'`: a scoped sweep, `bench fan`,
-// `bench fidelity`, and the vitest gate (`scripts/gate-vitest.sh`, under the gate shell's own pid).
+// `bench fidelity`, and every vitest run (`vitest.memory-admission.ts`, under vitest's own pid).
 // Such a record is a MEMORY PROMISE and nothing else: it carries the need `admission.ts` admitted
 // it with, so a heavy job started after it subtracts what it has not taken yet. Without it the
 // check was one-sided — a gate started first was invisible to a `bench run --jobs 3` started
@@ -407,10 +407,9 @@ export function acquireBenchLock(command: string, run: BenchRunIdentity, dir: st
 /** Record an admitted heavy job that is not a run and not a whole-corpus sweep (see the header):
  *  a memory promise of `needBytes`, held by `pid` for as long as that process lives.
  *
- *  `pid` defaults to this process, whose exit removes the record as `acquireBenchLock`'s does. Any
- *  other pid is a job that outlives the writer — the vitest gate's shell, which prices its run in a
- *  `tsx` child that exits before vitest starts — and then the record is left for that job to
- *  remove (the gate's `trap`); if it never does, the pid dies and the record reads stale. */
+ *  `pid` defaults to this process, whose exit removes the record as `acquireBenchLock`'s does.
+ *  Whatever the pid, it must be the job's own: a record outlived by its job promises nothing while
+ *  the job still holds memory, which is why a vitest run registers from its own main process. */
 export function registerHeavyJob(
   command: string,
   needBytes: number,
