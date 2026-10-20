@@ -2330,9 +2330,10 @@ interface JumpTable {
 // Inside the dispatch block the distinction is additionally UNOBSERVABLE: the block computes
 // `table_base + index*4`, loads the target and writes `pc`. Nothing between the `lsl` and the
 // `mov pc` reads NZCV, no path leaves the block by falling through, and on a successful recovery the
-// idiom is never lifted (the block is elided, or keeps only the code `dispatchExtraRefusal` admits) — the bounds test that does feed a conditional branch lives
-// in `bounds`, whose `cmp`/`bhi`/`bls` this function matches by exact name. Doubly moot in fact,
-// since `lsl rD, rS, #imm` is low-register-only, so the add here is always the low-register form.
+// idiom is never lifted (the block is elided, or keeps only the code `dispatchExtraRefusal` admits)
+// — the bounds test that does feed a conditional branch lives in `bounds`, whose `cmp`/`bhi`/`bls`
+// this function matches by exact name. Doubly moot in fact, since `lsl rD, rS, #imm` is
+// low-register-only, so the add here is always the low-register form.
 const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
 
 function recoverJumpTable(
@@ -2512,7 +2513,7 @@ function recoverJumpTable(
 //     the idiom is not lifted, so such a read would see the value from before the dispatch.
 // The reason is returned so the decline can name it (`readThumbText`'s indirect-jump refusal).
 const READS_CARRY = /^(?:adc|sbc)s?$/;
-/** The forms that write their destination without reading it: a load, and the two-operand moves. */
+/** Besides a load (`SINGLE_LOAD`), the forms that write their destination without reading it. */
 const DEST_ONLY = /^(?:mov|mvn|neg)s?$/;
 function dispatchExtraRefusal(
   extras: readonly Instr[],
@@ -2652,8 +2653,8 @@ function liftOnce(
 }
 
 /** THE TEXT A LIFT READS: the decoded blocks with every recovered jump table's dispatch elided
- *  or, where it carries code of its own, cut down to that code, and the data its pool loads read. Every control transfer the CFG cannot model is refused by the
- *  time this exists. */
+ *  (or, where it carries code of its own, cut down to that code), and the data its pool loads
+ *  read. Every control transfer the CFG cannot model is refused by the time this exists. */
 interface ThumbText {
   /** The blocks the CFG is built from — read by `thumbCfg` alone; every later stage indexes
    *  `ThumbCfg.asmBlocks`. */
