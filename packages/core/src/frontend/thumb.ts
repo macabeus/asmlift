@@ -6013,12 +6013,13 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
   const succ = (label: string): Successor => ({ block: irBlocks[cfg.labelIndex.get(label)!], args: [] });
   const jt = text.tables.get(ab);
   if (jt) {
-    // Regime B: the bounds block dispatches a `switch_br` over the scrutinee — N case blocks (values
-    // 0..N-1, dense) followed by the default block (last successor). The `cmp`/`bhi` are subsumed.
-    // A kept dispatch (`JumpTable.extras`) switches on the scrutinee its block was entered with: the
-    // idiom read it first, and the extras after it may overwrite the register.
+    // Regime B: a `switch_br` over the scrutinee — N case blocks (values 0..N-1, dense) followed by
+    // the default block (last successor). From the bounds block, the `cmp`/`bhi` are subsumed. A
+    // kept dispatch (`JumpTable.extras`) switches on the scrutinee its block was entered with: the
+    // idiom read it first, and the extras after it may overwrite the register. Its bounds test stays
+    // a branch and already sent every value past N-1 to the default, so its switch is `exhaustive`.
     const scrut = cur.dispatchScrutinee ?? readVar(reg(jt.scrutReg), bi);
-    pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)]);
+    pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)], cur.dispatchScrutinee !== null);
   } else if (!last) {
     // an EMPTY block is only ever the synthetic entry preheader (decoded blocks are non-empty):
     // fall through to the real entry, whose loop-header phis take their entry operand from here.

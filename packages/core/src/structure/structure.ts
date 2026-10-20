@@ -6203,12 +6203,21 @@ export function structure(
       // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
       // output (the same reason emitDoWhile reuses its `updates`).
       const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
+      // A default edge the dispatch never takes (the op's `exhaustive` attr) gets no arm: its block
+      // runs under whatever the dispatch path left in the registers, a state the machine never gives
+      // it there. Unless a case runs on into that block — then the label is where that case goes.
+      const deadDefault =
+        term.attrs.exhaustive === true &&
+        ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block);
       const bodies = emitOrder.map((a, i) => {
         // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
         // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
         // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
         if (read.refusal !== null && read.refusal.at === i) {
           read.refusal.raise();
+        }
+        if (deadDefault && i === emitOrder.length - 1) {
+          return { body: [], fallsThrough: false };
         }
         const exit = exitOf.get(a.entry)!;
         const ft = exit.kind === 'fallthrough';

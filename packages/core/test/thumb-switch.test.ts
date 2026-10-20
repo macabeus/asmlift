@@ -271,6 +271,14 @@ test('code PRE put inside the dispatch is lifted on the dispatched path only', (
   );
 });
 
+test("a kept dispatch's switch has no `default:` arm: its bounds test already took every other value", () => {
+  // The default edge the dispatch still names is never taken; an arm for it would run the default's
+  // code under the registers the dispatch code wrote (here r2 = a3 - 5, not the incoming a2).
+  const out = decompile('f', withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n'), ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).not.toContain('default:');
+});
+
 test('dispatch code that is not a register computation, or that disturbs the dispatch, DECLINES', () => {
   const jump = /indirect\/computed jump/;
   const refused = (extra: string) => () => decompile('f', withExtra(extra), ARMV4T_AGBCC);

@@ -45,13 +45,14 @@ export function mkEmitKit(ops: Op[], write: (reg: string, v: Value) => void): Em
 
 /** Emit a recovered jump-table dispatch: N case successors followed by the default (LAST), with
  *  the dense 0..N-1 `cases` list derived here — the single home of the case/successor
- *  alignment invariant. */
-export function pushSwitchBr(ops: Op[], scrut: Value, successors: Successor[]): void {
+ *  alignment invariant. `exhaustive`: the scrutinee is already known to be in 0..N-1 here (see
+ *  the opcode's attr). */
+export function pushSwitchBr(ops: Op[], scrut: Value, successors: Successor[], exhaustive = false): void {
   ops.push(
     mkOp('switch_br', {
       operands: [scrut],
       successors,
-      attrs: { cases: successors.slice(0, -1).map((_, k) => k) },
+      attrs: { cases: successors.slice(0, -1).map((_, k) => k), ...(exhaustive ? { exhaustive: true } : {}) },
     }),
   );
 }
