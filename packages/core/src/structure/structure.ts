@@ -5614,8 +5614,15 @@ export function structure(
   // in). `breaks` is set only on an arm the exit analysis found falling into its sibling on some
   // paths and reaching the switch's `merge` on others (`ArmExit`); a closed arm stops AT the merge
   // and never needs the statement. A closed arm's frame still matters: it is what tells a
-  // `break;` reached inside a nested switch that it would bind the inner one.
-  type SwitchFrame = { merge: Block | null; loop: LoopFrame | null; breaks: ReadonlySet<Block> | null };
+  // `break;` reached inside a nested switch that it would bind the inner one, and the loop-exit
+  // rules that a loop's `break` cannot be minted here. `fallsTo` is the sibling a falling arm runs
+  // into (`armJoin` reads it).
+  type SwitchFrame = {
+    merge: Block | null;
+    loop: LoopFrame | null;
+    breaks: ReadonlySet<Block> | null;
+    fallsTo: Block | null;
+  };
   const switchFrames: SwitchFrame[] = [];
   // Is `b` a breaking arm's merge, and may `break;` say so from here? Undefined when no breaking
   // arm ends at `b`. Throws when one does but a nested loop or switch would capture the statement.
@@ -5637,11 +5644,15 @@ export function structure(
   };
   // THE JOIN OF A BRANCH INSIDE A BREAKING ARM. The CFG's join for `if (c) break;` lies past the
   // switch — the fall-through path reaches the merge too, through the next arm — so structuring to
-  // it would copy the next arm into this one. Inside the arm, both the sibling it falls into and
-  // the merge END the arm's paths, as a `ret` does: post-dominance over the arm's own region with
-  // those edges sent to EXIT. Null ⇒ the paths meet only at the arm's end, which is the caller's
-  // `stop`. Asked only in the innermost arm frame and outside any loop entered since, which is where
-  // `switchBreakAt` would spell the `break;`.
+  // it would copy the next arm into this one. Inside the arm, an edge to the merge is a `break;`
+  // and a `ret` a `return`: jumps, which end their path wherever they sit, so those edges are
+  // DELETED, as `loopJoin` deletes a loop body's exits (`regionJoins`). The edge into the sibling
+  // the arm falls into is no jump: its path runs to the arm's END, so it goes to EXIT, the
+  // caller's `stop`. Sent to EXIT too, a guard whose one side breaks would be post-dominated by
+  // EXIT alone and every statement after it would nest in its `else`; deleted, a guard whose one
+  // side falls would join on the other side's path, which the falling path cannot jump over.
+  // Null ⇒ the paths meet only at the arm's end. Asked only in the innermost arm frame and outside
+  // any loop entered since, which is where `switchBreakAt` would spell the `break;`.
   const armJoins = new Map<ReadonlySet<Block>, Map<Block, Block | null>>();
   const armJoin = (b: Block): Block | null | undefined => {
     const f = switchFrames[switchFrames.length - 1];
@@ -5651,12 +5662,7 @@ export function structure(
     const region = f.breaks;
     let pd = armJoins.get(region);
     if (pd === undefined) {
-      pd = postDominators(fn, region, (n) => {
-        if (n.ops[n.ops.length - 1].opcode === 'ret') {
-          return [null];
-        }
-        return [...new Set(successorsOf(n).map((x) => (region.has(x) ? x : null)))];
-      });
+      pd = regionJoins(region, null, false, f.fallsTo);
       armJoins.set(region, pd);
     }
     return pd.get(b) ?? null;
@@ -5798,7 +5804,7 @@ export function structure(
   // One switch arm, from `entry` to `stop`, under its frame (`switchFrames`).
   const structureArm = (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined): Stmt[] => {
     const breaks = exit?.kind === 'fallthrough' ? (exit.breaks ?? null) : null;
-    switchFrames.push({ merge, loop: loopCtx, breaks });
+    switchFrames.push({ merge, loop: loopCtx, breaks, fallsTo: exit?.kind === 'fallthrough' ? exit.to : null });
     try {
       return structureRegion(entry, stop);
     } finally {
@@ -7107,38 +7113,52 @@ export function structure(
     const cache = loopJoins[endsCut ? 1 : 0];
     let ipdom = cache.get(loop.header);
     if (ipdom === undefined) {
-      const inBody = (n: Block): Block[] =>
-        [...new Set(successorsOf(n))].filter((x) => loop.body.has(x) && x !== loop.header);
-      const ends = (n: Block): boolean =>
-        endsCut &&
-        inBody(n).length === 0 &&
-        n.ops[n.ops.length - 1].opcode === 'br' &&
-        n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
-        !(successorsOf(n)[0] === loop.header && new Set(preds.get(n)?.filter((q) => loop.body.has(q))).size > 1);
-      const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x));
-      // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
-      // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
-      // to the header and to the ends are deleted, so its paths never end and post-dominance
-      // over it is undefined: no branch above it would find a join, and each would re-emit the rest
-      // of the body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle
-      // by. A block that reaches an end keeps its edges as they are, so no defined join moves.
-      const reachesEnd = new Set<Block>();
-      for (let grew = true; grew;) {
-        grew = false;
-        for (const n of loop.body) {
-          if (!reachesEnd.has(n) && (onward(n).length === 0 || onward(n).some((x) => reachesEnd.has(x)))) {
-            reachesEnd.add(n);
-            grew = true;
-          }
-        }
-      }
-      ipdom = postDominators(fn, loop.body, (n) =>
-        reachesEnd.has(n) || successorsOf(n).every((x) => onward(n).includes(x)) ? onward(n) : [...onward(n), null],
-      );
+      ipdom = regionJoins(loop.body, loop.header, endsCut);
       cache.set(loop.header, ipdom);
     }
     return ipdom.get(b) ?? null;
   };
+  // The post-dominators `loopJoin` reads, over `body` with every edge out of it and every edge back
+  // to `header` (when there is one) deleted — save an edge to `toExit`, which goes to EXIT. Also
+  // the join inside a switch arm that breaks (`armJoin`), whose `toExit` is the sibling it falls
+  // into.
+  function regionJoins(
+    body: ReadonlySet<Block>,
+    header: Block | null,
+    endsCut: boolean,
+    toExit: Block | null = null,
+  ): Map<Block, Block | null> {
+    const inBody = (n: Block): Block[] => [...new Set(successorsOf(n))].filter((x) => body.has(x) && x !== header);
+    const ends = (n: Block): boolean =>
+      endsCut &&
+      inBody(n).length === 0 &&
+      n.ops[n.ops.length - 1].opcode === 'br' &&
+      n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
+      !(successorsOf(n)[0] === header && new Set(preds.get(n)?.filter((q) => body.has(q))).size > 1);
+    const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x));
+    const exits = (n: Block): boolean => toExit !== null && successorsOf(n).includes(toExit);
+    // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
+    // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
+    // to the header and to the ends are deleted, so its paths never end and post-dominance
+    // over it is undefined: no branch above it would find a join, and each would re-emit the rest
+    // of the body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle
+    // by. A block that reaches an end keeps its edges as they are, so no defined join moves.
+    const reachesEnd = new Set<Block>();
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const n of body) {
+        if (!reachesEnd.has(n) && (onward(n).length === 0 || exits(n) || onward(n).some((x) => reachesEnd.has(x)))) {
+          reachesEnd.add(n);
+          grew = true;
+        }
+      }
+    }
+    return postDominators(fn, body, (n) =>
+      !exits(n) && (reachesEnd.has(n) || successorsOf(n).every((x) => onward(n).includes(x)))
+        ? onward(n)
+        : [...onward(n), null],
+    );
+  }
 
   // Does rendering `root` under `map` re-derive one of `targets`: reach it through the def tree
   // without passing a mapped or a named value, either of which renders as a name?

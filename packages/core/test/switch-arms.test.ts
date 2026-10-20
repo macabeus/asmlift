@@ -1598,6 +1598,14 @@ test('an arm that leaves its LOOP where the loop exit is the switch merge breaks
   expect(out).toMatch(/\}\s*\n\s*r\(9\);\s*\n\s*return;/);
 });
 
+test('an arm that breaks twice before it falls joins after each guard rather than nesting', () => {
+  const out = ifBreakLift('twoguards');
+  expect(out).toMatch(
+    /case 0:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*h\(a0\);\s*\n\s*if \(a0 == gB\) break;\s*\n\s*m\(a0\);\s*\n\s*case 1:/,
+  );
+  expect(out).not.toContain('else');
+});
+
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
   // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
   expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);
