@@ -245,6 +245,24 @@ test('two labels on ONE instruction are aliases — a branch to either reaches t
   expect(control).toContain('return 2;'); // the branch target's body is reached, not skipped
 });
 
+test('a TABLE entry naming a label that shares its instruction dispatches to that instruction', () => {
+  // jump.c cross-jumps a case arm identical to the default's onto the default's first instruction
+  // and leaves the case label standing on it (`.Lc1:` `.Ldef:` `mov r0,#99`): the table names
+  // `.Lc1`, the bounds branch `.Ldef`. Asserted against the table naming `.Ldef` itself.
+  const table = (entry: string, labels: string, after = '') =>
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n${labels}\tmov\tr0, #99\n\tbx\tlr\n${after}` +
+    `.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t${entry}\n`;
+  const control = decompile('f', table('.Ldef', '.Ldef:\n'), ARMV4T_AGBCC).source;
+  expect(control).toContain('switch (a1)');
+  expect(decompile('f', table('.Lc1', '.Lc1:\n.Ldef:\n'), ARMV4T_AGBCC).source).toBe(control);
+  // A label standing on DATA is not an alias of the code after it, and one left trailing names no
+  // instruction at all: both entries still decline.
+  const jump = /indirect\/computed jump/;
+  expect(() => decompile('f', table('.Lc1', '.Ldef:\n', '.Lc1:\n'), ARMV4T_AGBCC)).toThrow(jump);
+  expect(() => decompile('f', `${table('.Lc1', '.Ldef:\n')}.Lc1:\n`, ARMV4T_AGBCC)).toThrow(jump);
+});
+
 // ── Regime A (comparison trees) ───────────────────────────────────────────────────────────────────
 test('a comparison tree whose default is the merge recovers as a switch, not an if-chain', () => {
   // Regime A shares the arm analysis. Before it, the merge counted as a fall-through target, so the

@@ -1040,6 +1040,8 @@ function decode(
   dataWords: Map<string, string[]>;
   nonWordData: Map<string, string>;
   funcLabels: Set<string>;
+  /** Each label that shares its instruction with a later one, to the label whose block was kept. */
+  aliasOf: ReadonlyMap<string, string>;
 } {
   // Flatten to (label | instr | data) items, then split into blocks at labels / after branches.
   // `.word LABEL` directives are captured into dataWords keyed by the most recent label (the
@@ -1952,7 +1954,7 @@ function decode(
       boundaryIdx++;
       continue;
     }
-    return { blocks: live, dataWords, nonWordData, funcLabels: new Set(funcLabels) };
+    return { blocks: live, dataWords, nonWordData, funcLabels: new Set(funcLabels), aliasOf };
   }
 }
 
@@ -2336,6 +2338,7 @@ function recoverJumpTable(
   dataWords: Map<string, string[]>,
   nonWordData: Map<string, string>,
   blockLabels: Set<string>,
+  aliasOf: ReadonlyMap<string, string>,
   longDefault?: string,
 ): JumpTable | null {
   // bounds: last two instrs are `cmp rX,#M` then the out-of-range guard, in one of two spellings.
@@ -2436,10 +2439,6 @@ function recoverJumpTable(
   }
 
   // Read the table: the ldr loads a POINTER word (PTR: .word TABLE); the table is TABLE: .word C0…
-  // Note the case labels are matched against `blockLabels` as WRITTEN: the adjacent-label aliasing in
-  // `decode` rewrites branch operands, not `.word` entries, so a table naming an aliased label would
-  // decline here rather than dispatch anywhere. Loud, and no corpus instance — left as a known edge
-  // rather than fixed speculatively.
   //
   // The pointer word is addressed the same way every other pool load in this frontend is —
   // `LABEL[+N]`, selecting word N/4 — because a literal pool is a POOL: agbcc packs the dispatch
@@ -2463,10 +2462,17 @@ function recoverJumpTable(
   if (ptrOff % 4 !== 0 || ptrOff / 4 >= ptrWords.length) {
     return null; // misaligned or past the end of the pool — not a word this pool holds
   }
-  const caseLabels = recordedWords(ptrWords[ptrOff / 4].trim(), dataWords, nonWordData);
-  if (!caseLabels || caseLabels.length !== n) {
+  const written = recordedWords(ptrWords[ptrOff / 4].trim(), dataWords, nonWordData);
+  if (!written || written.length !== n) {
     return null;
   } // table length must equal the bound
+  // An entry naming a label that shares its instruction with a later one dispatches to that one, as
+  // a branch to it does (`decode`'s `aliasOf`): jump.c cross-jumps a case arm identical to the
+  // default's onto the default's first instruction and leaves the case's label standing on it. Only
+  // the TABLE's entries are read through it — a pool word naming a code label elsewhere is an
+  // address constant, not a transfer — and `aliasOf` already holds no data label on either side, so
+  // an entry naming a label that fronts data, or one left trailing, still declines below.
+  const caseLabels = written.map((l) => aliasOf.get(l) ?? l);
   // Every case target and the default must resolve to a real decoded block; a label that is an
   // expression (`.L4+4`) or points outside the function would otherwise crash later — decline cleanly.
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
@@ -2888,7 +2894,7 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
  *  relay, and one to a label of this function declines below. */
 function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm, farJumpMark);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark);
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.
   const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
@@ -2924,7 +2930,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     // Direct form: the dispatch is reached ONLY by falling through from its bounds predecessor. A
     // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
     if (prev && refs === 0) {
-      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels);
+      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels, aliasOf);
       if (jt) {
         tables.set(prev, jt);
         elided.add(d);
@@ -2939,7 +2945,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     const boundsB = rawBlocks[i - 2];
     const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
     if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
-      const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, prev.instrs[0].ops[0]);
+      const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, aliasOf, prev.instrs[0].ops[0]);
       if (jt) {
         tables.set(boundsB, jt);
         elided.add(d);
