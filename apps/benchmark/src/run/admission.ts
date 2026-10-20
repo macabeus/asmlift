@@ -278,28 +278,40 @@ export function parsePsTable(text: string): Map<number, [number, number]> {
   return out;
 }
 
-/** The bytes `pid` and its descendants hold in a `parsePsTable` table; undefined when `pid` is not in it. */
-function psTreeBytes(pid: number, table: Map<number, [number, number]>): number | undefined {
-  if (!table.has(pid)) {
+/** The bytes `pid` and every process descended from it hold: `parents` maps each pid to its
+ *  parent, `bytesOf` reads one process. Undefined when `pid` is not in `parents`, or when no
+ *  process of the tree could be read (it exited between the two reads). The one walker for both
+ *  sources, /proc and `ps`. */
+function treeBytes(
+  pid: number,
+  parents: ReadonlyMap<number, number>,
+  bytesOf: (pid: number) => number | undefined,
+): number | undefined {
+  if (!parents.has(pid)) {
     return undefined;
   }
   const children = new Map<number, number[]>();
-  for (const [p, [ppid]] of table) {
+  for (const [p, ppid] of parents) {
     children.set(ppid, [...(children.get(ppid) ?? []), p]);
   }
   let total = 0;
+  let found = false;
   const seen = new Set<number>();
   const queue = [pid];
   while (queue.length > 0) {
     const p = queue.pop()!;
-    if (seen.has(p) || !table.has(p)) {
+    if (seen.has(p)) {
       continue;
     }
     seen.add(p);
-    total += table.get(p)![1];
+    const b = bytesOf(p);
+    if (b !== undefined) {
+      found = true;
+      total += b;
+    }
     queue.push(...(children.get(p) ?? []));
   }
-  return total;
+  return found ? total : undefined;
 }
 
 const runPs = (): string => execFileSync('ps', ['-A', '-o', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 5000 });
@@ -316,12 +328,13 @@ export function processTreeBytes(pid: number, proc: string = '/proc', ps: () => 
     pids = readdirSync(proc).filter((n) => /^\d+$/.test(n));
   } catch {
     try {
-      return psTreeBytes(pid, parsePsTable(ps()));
+      const table = parsePsTable(ps());
+      return treeBytes(pid, new Map([...table].map(([p, [ppid]]) => [p, ppid])), (p) => table.get(p)?.[1]);
     } catch {
       return undefined;
     }
   }
-  const children = new Map<number, number[]>();
+  const parents = new Map<number, number>();
   for (const p of pids) {
     let stat: string;
     try {
@@ -330,36 +343,22 @@ export function processTreeBytes(pid: number, proc: string = '/proc', ps: () => 
       continue;
     }
     // `pid (comm) state ppid …`: comm may hold spaces and parentheses, so read after the LAST `)`.
-    const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-    if (!children.has(ppid)) {
-      children.set(ppid, []);
-    }
-    children.get(ppid)!.push(Number(p));
+    parents.set(Number(p), Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]));
   }
-  let total = 0;
-  let found = false;
-  const queue = [pid];
-  const seen = new Set<number>();
-  while (queue.length > 0) {
-    const p = queue.pop()!;
-    if (seen.has(p)) {
-      continue;
-    }
-    seen.add(p);
+  return treeBytes(pid, parents, (p) => {
     let status: string;
     try {
       status = readFileSync(`${proc}/${p}/status`, 'utf8');
     } catch {
-      continue;
+      return undefined;
     }
-    found = true;
+    let bytes = 0;
     for (const field of ['VmRSS', 'VmSwap']) {
       const m = new RegExp(`^${field}:\\s+(\\d+)\\s*kB`, 'm').exec(status);
-      total += m ? Number(m[1]) * 1024 : 0;
+      bytes += m ? Number(m[1]) * 1024 : 0;
     }
-    queue.push(...(children.get(p) ?? []));
-  }
-  return found ? total : undefined;
+    return bytes;
+  });
 }
 
 /** What a record written WITHOUT a need promises: one from a lane on a base older than records that
