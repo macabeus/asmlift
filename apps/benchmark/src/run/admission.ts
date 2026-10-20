@@ -120,8 +120,9 @@ export const PEAK_BYTES = {
    *  stopped in this host's shell (exit 127, after building its target), a floor and not a peak */
   fidelityScript: SHARD_BYTES,
   /** one vitest worker of the root or matching suite, with its share of the main process: the root
-   *  suite at 3 workers measured 2.70 GB */
-  vitestWorker: 1.0e9,
+   *  suite at 3 workers measured 2.70 and 2.71 GB, the matching suite at its single fork 0.98 GB
+   *  (the Docker containers it starts are not in that tree) */
+  vitestWorker: 1.1e9,
 } as const;
 
 /** Held back from what is available for everything that is not a heavy job. */

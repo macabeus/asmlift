@@ -2402,7 +2402,7 @@ node processes holding 12.36 GB of rss+swap:
 Each of these is sane alone. Only `bench run` read the register, and nothing read memory.
 
 **Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
-and the vitest gate (`scripts/gate-vitest.sh`) price their own peak and compare it with what the
+and every vitest run price their own peak and compare it with what the
 machine can give right now. On Linux that is `MemAvailable` plus the free swap above half of
 `SwapTotal`, so swap use is never planned past half the device. On macOS it is `vm_stat`'s free,
 inactive, purgeable and speculative pages (not measured on a real Mac; free pages alone refused a
@@ -2412,8 +2412,21 @@ measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-2
 MemAvailable 0.6 GB and SwapFree 6.8 GB. The cap leaves 2.3 GB of that, so a 3-worker vitest gate
 is refused beside the run. Every admitted job also takes a record in the register carrying the
 need it was admitted with: a run or a whole-corpus sweep as before, and `bench fan`, `bench fidelity`,
-a scoped sweep and the vitest gate as a `kind: 'job'` record (the gate's under its shell's pid). What
-such a job has not taken yet, its need less what its process tree holds now, is subtracted too. A
+a scoped sweep and every vitest run as a `kind: 'job'` record. What such a job has not taken yet,
+its need less what its process tree holds now, is subtracted too. The tree is read from `/proc` on
+Linux and from `ps` on macOS, and a live record whose tree cannot be read counts as holding nothing
+yet. A record with no need, written by a lane on an older base, is priced as the `bench run` that
+base started (its `--jobs`, or its default), never as nothing.
+
+**The vitest check is a globalSetup of both vitest configs** (`vitest.memory-admission.ts`), not a
+step of `scripts/gate-vitest.sh`. So it also covers `pnpm test:offline`, CI's own runs, a one-file
+`pnpm exec vitest run`, and `pnpm --filter <pkg> exec vitest run`, since vitest finds the root config
+up the tree. It prices the workers vitest will start: `--maxWorkers`, else vitest's own default of
+the CPU count less one, else one for the matching config's single fork. A worker is budgeted at
+1.1 GB: the root suite at 3 workers peaked at 2.71 GB, and the matching suite's one fork at 0.98 GB. Its record is held by
+vitest's own pid. A record held by the gate's shell outlived nothing: a TERM to that shell skipped
+dash's EXIT trap, vitest and its workers kept running as orphans, and the record named a dead pid.
+A refusal starts no test, and the gate exits 2. A
 promise only some jobs made was one-sided: a gate started before a `bench run --jobs 3` was
 invisible to it, while the same pair in the other order was refused. A job record measures no tree
 and is never whole, so it blocks no edit, no run and no sweep.
@@ -2439,22 +2452,39 @@ sampled every 0.5 s in its own user cgroup scope
 only OOM itself). `/usr/bin/time -v` alone under-reads a multi-process job: its maximum RSS is
 that of the largest single process, shown in the last column.
 
-| command                                                                                                                   | measured   | peak (tree) |  wall | largest process |
-| ------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------: | ----: | --------------: |
-| `pnpm bench sweep --base origin/main`, head pass in the parent (before 56b68d5f)                                          | 2026-10-20 |     4.06 GB | 660 s |         2.03 GB |
-| `pnpm bench sweep --base origin/main`, head pass in a child (56b68d5f)                                                    | 2026-10-20 |     2.49 GB | 358 s |         2.07 GB |
-| `pnpm bench sweep` (whole corpus, 4,606 records)                                                                          | 2026-10-20 |     2.07 GB | 187 s |         2.02 GB |
-| `pnpm bench sweep --repeat 2` (whole corpus, 4,606 records × 2; 59205010)                                                 | 2026-10-20 |     2.39 GB | 363 s |               — |
-| `pnpm bench sweep --project sa3` (1,932 rows: every synthetic row and sa3's 50; 3,864 records; 59205010)                  | 2026-10-20 |     0.82 GB |  66 s |               — |
-| `pnpm bench sweep --project pokeemerald` (1,950 rows, 3,900 records; 59205010)                                            | 2026-10-20 |     1.79 GB |  86 s |               — |
-| `pnpm bench sweep --only AthleticChallengeScrollUpdate` (1 row)                                                           | 2026-10-20 |     0.25 GB |   2 s |         0.23 GB |
-| `pnpm bench run --tier real --only AthleticChallengeScrollUpdate --jobs 1` (the dearest row, fan 29,600)                  | 2026-10-20 |     1.95 GB | 265 s |         1.53 GB |
-| `pnpm bench fan kleod:AthleticChallengeScrollUpdate:agbcc` (enumerates 29,600, then refuses to compile without `--force`) | 2026-10-20 |     1.77 GB | 293 s |         1.74 GB |
-| `pnpm test:root` (3 workers)                                                                                              | 2026-10-20 |     2.70 GB | 381 s |         1.38 GB |
+| command                                                                                                                   | measured   |               peak (tree) |   wall | largest process |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------: | -----: | --------------: |
+| `pnpm bench sweep --base origin/main`, head pass in the parent (before 56b68d5f)                                          | 2026-10-20 |                   4.06 GB |  660 s |         2.03 GB |
+| `pnpm bench sweep --base origin/main`, head pass in a child (56b68d5f)                                                    | 2026-10-20 |                   2.49 GB |  358 s |         2.07 GB |
+| `pnpm bench sweep` (whole corpus, 4,606 records)                                                                          | 2026-10-20 |                   2.07 GB |  187 s |         2.02 GB |
+| `pnpm bench sweep --repeat 2` (whole corpus, 4,606 records × 2; 59205010)                                                 | 2026-10-20 |                   2.39 GB |  363 s |               — |
+| `pnpm bench sweep --project sa3` (1,932 rows: every synthetic row and sa3's 50; 3,864 records; 59205010)                  | 2026-10-20 |                   0.82 GB |   66 s |               — |
+| `pnpm bench sweep --project pokeemerald` (1,950 rows, 3,900 records; 59205010)                                            | 2026-10-20 |                   1.79 GB |   86 s |               — |
+| `pnpm bench sweep --only AthleticChallengeScrollUpdate` (1 row)                                                           | 2026-10-20 |                   0.25 GB |    2 s |         0.23 GB |
+| the same, with the artifact parsed for pricing (ec32a68f) / scanned for ids (863abc59), 0.25 s sampler                    | 2026-10-20 |       0.38–0.43 / 0.23 GB |    2 s |               — |
+| `pnpm bench sweep --only armdef` (1 synthetic row)                                                                        | 2026-10-20 |                   0.20 GB |    2 s |               — |
+| `pnpm bench sweep --only CalcCRC16WithTable` (1 pokeemerald row)                                                          | 2026-10-20 |                   0.36 GB |    2 s |               — |
+| `pnpm bench sweep --project pokeemerald --tier real` (68 rows)                                                            | 2026-10-20 |                   1.55 GB |   27 s |               — |
+| the same at origin/main 2e6ba81e                                                                                          | 2026-10-20 |                   1.63 GB |   29 s |               — |
+| the same, `--base-dir` the 2e6ba81e tree                                                                                  | 2026-10-20 |                   1.86 GB |   51 s |               — |
+| `pnpm bench sweep --project <p> --tier real`: ac-decomp, pikmin, marioparty4, marioparty3                                 | 2026-10-20 | 0.65, 0.56, 0.54, 0.53 GB | 5–17 s |               — |
+| the same: af, snowboardkids2, kleod, sa3                                                                                  | 2026-10-20 | 0.49, 0.47, 0.42, 0.39 GB |  5–6 s |               — |
+| `pnpm bench run --tier real --only AthleticChallengeScrollUpdate --jobs 1` (the dearest row, fan 29,600)                  | 2026-10-20 |                   1.95 GB |  265 s |         1.53 GB |
+| `pnpm bench fan kleod:AthleticChallengeScrollUpdate:agbcc` (enumerates 29,600, then refuses to compile without `--force`) | 2026-10-20 |                   1.77 GB |  293 s |         1.74 GB |
+| `pnpm test:root` (3 workers)                                                                                              | 2026-10-20 |                   2.70 GB |  381 s |         1.38 GB |
+| `pnpm test:root` (3 workers), every vitest run checked by the globalSetup                                                 | 2026-10-20 |                   2.71 GB |  383 s |               — |
+| `pnpm test:matching` (one fork; the Docker containers it starts are not in the tree)                                      | 2026-10-20 |                   0.98 GB |  206 s |               — |
 
 A `--project` sweep lifts every synthetic row beside the project's, because `--project` narrows
-the real tier only; it is priced by the rows it lifts (1,950 of 2,303 for pokeemerald: 1.86 GB), and
-with the synthetic tier swept it is whole for the register. The first `--project sa3` reading,
+the real tier only; with the synthetic tier swept it is whole for the register, and priced whole.
+A SCOPED sweep (`--only`, or `--project` with `--tier real`) is priced by what it lifts: its
+synthetic rows as their share of the artifact's rows times the whole-pass figure, plus, for every
+real project it lifts a row of, that project's measured figure (`PEAK_BYTES.sweepRealProject`, each
+a tenth above the reading below; an unmeasured project at the dearest). A real row is not priced by
+its share. Its cost is its project's context and symbol map: `--project pokeemerald --tier real` is
+68 rows, 3% of the corpus, and peaked at 1.55-1.63 GB, which the share priced at 0.3 GB. To find
+the synthetic share, the sweep scans the artifact's bytes for its row ids. It does not parse the
+artifact: `JSON.parse` of the 63 MB file had raised every sweep's peak by ~0.2 GB. The first `--project sa3` reading,
 0.56 GB, was not reproduced: the re-measure above gave 0.82 GB for the same 3,864 records. A
 `--repeat` sweep keeps its first pass's records through the next and is budgeted at 2.5 GB. The
 rows marked 59205010 were measured at that commit with the same sampler, and their largest single
