@@ -5656,7 +5656,7 @@ export function structure(
   // at the arm's end. Asked only in the innermost arm frame and outside any loop entered since,
   // which is where `switchBreakAt` would spell the `break;`.
   const armJoins = new Map<ReadonlySet<Block>, Map<Block, Block | null>>();
-  const armJoin = (b: Block): Block | null | undefined => {
+  const armJoin = (b: Block, stop: Block | null): Block | null | undefined => {
     const f = switchFrames[switchFrames.length - 1];
     if (f === undefined || f.region === null || !f.region.has(b) || f.loop !== loopCtx) {
       return undefined;
@@ -5667,7 +5667,24 @@ export function structure(
       pd = regionJoins(region, null, false, f.fallsTo);
       armJoins.set(region, pd);
     }
-    return pd.get(b) ?? null;
+    const join = pd.get(b) ?? null;
+    // IN A CLOSED ARM, AN EDGE TO THE MERGE IS USUALLY THE ARM'S OWN END, not a `break;`: in
+    // `case 7: s *= 2; if (s > 100) s = 1; break;` the guard's edge past `s = 1` is where the arm
+    // runs off, and deleting it makes `s = 1` the join and spells `if (!(s > 100)) break; s = 1;`.
+    // What the deletion is for is a TAIL two of the arm's paths share behind a mid-arm `break;`
+    // (`if (a) { if (b) break; g(1); } h(2); break;`, where `h(2)` is the join). So a closed arm
+    // takes its own join only where the join is such a meeting point, two of the arm's blocks
+    // entering it, or where the region being structured already ends INSIDE the arm (`stop` is one
+    // of its blocks: an enclosing guard found such a tail, and a path to the merge from here jumps
+    // over it). Otherwise it reads the CFG, as it did before it had a region.
+    if (
+      f.fallsTo === null &&
+      !(stop !== null && region.has(stop)) &&
+      (join === null || new Set(preds.get(join)?.filter((p) => region.has(p))).size < 2)
+    ) {
+      return undefined;
+    }
+    return join;
   };
 
   // THE IMPLICIT CONTINUE. A branch with one edge back to the loop header spells that edge as
@@ -6780,7 +6797,7 @@ export function structure(
         : undefined;
     // Inside a switch arm, the arm's own join wins over every reading above: each of them reads the
     // CFG, where the arm's paths meet past the switch.
-    const inArmJoin = armJoin(b);
+    const inArmJoin = armJoin(b, stop);
     const merge =
       inArmJoin !== undefined
         ? (inArmJoin ?? stop)
