@@ -15,7 +15,9 @@
  * `break;` in its middle: each joins inside the arm rather than copying its tail. `defaultexit`
  * falls into a `default:` that is the loop's own exit and goes to if-recovery; `closedexit`'s closed
  * arms leave for an exit whose tail returns, which is copied into them; `latchexit` falls into an
- * arm that `continue`s to the loop's bottom test and stays a `switch`.
+ * arm that `continue`s to the loop's bottom test and stays a `switch`. `outerexit` leaves an inner
+ * loop for an exit that runs on to an OUTER loop's latch: the code after the switch cannot be that
+ * exit region, so the tree goes to if-recovery.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -263,4 +265,30 @@ s32 latchexit(s32 i, s32 a, s32 b)
 out:
     r(t);
     return t + u * 3;
+}
+
+s32 outerexit(s32 i, s32 a, s32 b)
+{
+    s32 x, k, prev, t, j, u;
+    k = b; t = a; prev = 0; u = 0;
+    for (j = 0; j < 3; j++) {
+        k = k - 4;
+        for (;;) {
+            if (gC == 7) h(0);
+            prev = k; k = k + 1; x = i + k;
+            switch (x) {
+            case 3: if (a == gA) goto out;
+            case 17: f(x); break;
+            case 100: f(3); break;
+            case 250: g(t); break;
+            case 999: if (b != 0) goto out; f(5); break;
+            default: goto out;
+            }
+            t = t + 2;
+        }
+    out:
+        u = u + prev;
+    }
+    r(u);
+    return prev * 3 + t + u;
 }

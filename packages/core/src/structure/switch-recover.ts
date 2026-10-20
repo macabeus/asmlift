@@ -531,6 +531,59 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return false;
   };
 
+  // THE LOOP-EXIT MERGE, WHERE IT SPELLS. A switch whose merge is its enclosing loop's exit puts
+  // the exit region after the `switch`, INSIDE the loop body, and reaches the loop bottom only
+  // through the arms that do not break. That is the source's text on two conditions, both read off
+  // the CFG here, and on either failing the merge-past-stop gate below declines to if-recovery:
+  //   - the exit region RETURNS: no path from `merge` reaches a block that dominates it (other
+  //     than `merge` itself, a loop of the exit region's own) — the enclosing loop's header, or an
+  //     OUTER loop's, whose back edge the inner body cannot spell
+  //     (`for (j...) { for (;;) { switch ... } out: u += prev; }` runs on to the outer latch);
+  //   - every loop-bottom TEST the arms reach (a block that edges back to the header) leaves for
+  //     the merge itself, which the arm then spells as its `break;` (`latchexit`). One that leaves
+  //     for any other block outside the loop is past what an arm structured against `merge` can
+  //     say: the merge is then the loop's exit only because an early `return` made a shared
+  //     epilogue the dispatch's post-dominator, while the code the bottom test leaves for runs
+  //     before it (`for (w = 0; w < 4; w++) { if (c) return w; switch ... } r(t);` on
+  //     gcc2.7.2kmc).
+  const exitMergeSpells = (from: Block, merge: Block | null): boolean => {
+    if (merge === null) {
+      return false;
+    }
+    const above = dom.get(merge)!;
+    const exitSeen = new Set<Block>([merge]);
+    for (const q = [merge]; q.length;) {
+      for (const s of successorsOf(q.pop()!)) {
+        if (s !== merge && above.has(s)) {
+          return false;
+        }
+        if (!exitSeen.has(s)) {
+          exitSeen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    const header = enclosingLoop()?.header ?? null;
+    const seen = new Set<Block>([from]);
+    for (const q = [from]; q.length;) {
+      const succ = successorsOf(q.pop()!);
+      if (
+        header !== null &&
+        succ.includes(header) &&
+        succ.some((s) => s !== header && s !== merge && !reachesAvoiding(s, header, merge))
+      ) {
+        return false;
+      }
+      for (const s of succ) {
+        if (s !== header && s !== merge && !seen.has(s)) {
+          seen.add(s);
+          q.push(s);
+        }
+      }
+    }
+    return true;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -885,11 +938,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // switch `break` while a sibling arm runs through the latch and back to the header, which
     // fails the whole function loud. Declined here, to if-recovery, which spells each edge as the
     // `return` or the fall to the loop bottom it is. A merge that is the enclosing loop's EXIT is
-    // the exception the structurer spells: the code after the switch is then the exit region, and
-    // an arm's path to it is the arm's `break;` (`structure.ts`, the loop-exit rules).
+    // the exception the structurer spells (`exitMergeSpells`): the code after the switch is then
+    // the exit region, and an arm's path to it is the arm's `break;` (`structure.ts`, the loop-exit
+    // rules).
     if (
       [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
-      merge !== enclosingLoop()?.exit &&
+      !(merge === enclosingLoop()?.exit && exitMergeSpells(b, merge)) &&
       reachesAvoiding(b, stop, merge)
     ) {
       return null;

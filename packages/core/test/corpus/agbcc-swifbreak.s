@@ -1026,3 +1026,114 @@ latchexit:
 	.word	gB
 .Lfe14:
 	.size	 latchexit,.Lfe14-latchexit
+	.align	2, 0
+	.globl	outerexit
+	.type	 outerexit,function
+	.thumb_func
+outerexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, sl
+	mov	r6, r9
+	mov	r5, r8
+	push	{r5, r6, r7}
+	add	sp, sp, #-0x4
+	mov	sl, r0
+	mov	r8, r1
+	add	r7, r2, #0
+	add	r5, r7, #0
+	mov	r6, r8
+	mov	r0, #0x0
+	str	r0, [sp]
+.L269:
+	sub	r5, r5, #0x4
+	add	r0, r0, #0x1
+	mov	r9, r0
+.L270:
+	ldr	r0, .L287
+	ldr	r0, [r0]
+	cmp	r0, #0x7
+	bne	.L273	@cond_branch
+	mov	r0, #0x0
+	bl	h
+.L273:
+	add	r4, r5, #0
+	add	r5, r4, #0x1
+	mov	r0, sl
+	add	r1, r0, r5
+	cmp	r1, #0x64
+	beq	.L279	@cond_branch
+	cmp	r1, #0x64
+	bgt	.L285	@cond_branch
+	cmp	r1, #0x3
+	beq	.L275	@cond_branch
+	cmp	r1, #0x11
+	beq	.L278	@cond_branch
+	b	.L277
+.L288:
+	.align	2, 0
+.L287:
+	.word	gC
+.L285:
+	cmp	r1, #0xfa
+	beq	.L280	@cond_branch
+	ldr	r0, .L289
+	cmp	r1, r0
+	beq	.L281	@cond_branch
+	b	.L277
+.L290:
+	.align	2, 0
+.L289:
+	.word	0x3e7
+.L275:
+	ldr	r0, .L291
+	ldr	r0, [r0]
+	cmp	r8, r0
+	beq	.L277	@cond_branch
+.L278:
+	add	r0, r1, #0
+	bl	f
+	b	.L274
+.L292:
+	.align	2, 0
+.L291:
+	.word	gA
+.L279:
+	mov	r0, #0x3
+	bl	f
+	b	.L274
+.L280:
+	add	r0, r6, #0
+	bl	g
+	b	.L274
+.L281:
+	cmp	r7, #0
+	bne	.L277	@cond_branch
+	mov	r0, #0x5
+	bl	f
+.L274:
+	add	r6, r6, #0x2
+	b	.L270
+.L277:
+	ldr	r1, [sp]
+	add	r1, r1, r4
+	str	r1, [sp]
+	mov	r0, r9
+	cmp	r0, #0x2
+	ble	.L269	@cond_branch
+	add	r0, r1, #0
+	bl	r
+	lsl	r0, r4, #0x1
+	add	r0, r0, r4
+	add	r0, r0, r6
+	ldr	r1, [sp]
+	add	r0, r0, r1
+	add	sp, sp, #0x4
+	pop	{r3, r4, r5}
+	mov	r8, r3
+	mov	r9, r4
+	mov	sl, r5
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe15:
+	.size	 outerexit,.Lfe15-outerexit

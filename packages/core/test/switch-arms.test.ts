@@ -1676,6 +1676,26 @@ test('an arm that `continue`s to the loop bottom test is no loop break: the `swi
   expect(out).toContain('continue;');
 });
 
+test('a switch whose merge is its loop exit, where that exit runs on to an OUTER latch, goes to if-recovery', () => {
+  // The code after the switch would be the exit region, rendered inside the inner loop's body, and
+  // from there it reaches the outer loop's header: that back edge has no spelling there, so the
+  // tree goes to if-recovery rather than failing the whole function loud.
+  const out = ifBreakLift('outerexit', { returns: 's32' });
+  expect(out).not.toContain('switch (');
+  expect(count(out, 'r(')).toBe(1);
+});
+
+test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
+  // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
+  // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`
+  // leaves for the code before it. An arm structured against that merge would cross the bottom
+  // test, so the merge does not spell the switch's end.
+  const asm = readFileSync(new URL('corpus/gcc272kmc-swepiexit.asm', import.meta.url), 'utf8');
+  const out = decompile('epiexit', asm, MIPS_GCC, { prototypes: { epiexit: { returns: 's32' } } }).source;
+  expect(out).toContain('s32 epiexit(');
+  expect(out).not.toContain('switch (');
+});
+
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
   // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
   expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);
