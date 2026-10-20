@@ -518,11 +518,12 @@ function projectSymbols(m: Awaited<ReturnType<typeof treeModules>>, project: str
   return map;
 }
 
-/** Subprocess entry: `tsx sweep-driver.ts <root> <out.json> <selection.json>`. Used only for the
- *  BASE side; the head side calls `collect` in-process. */
+/** Subprocess entry: `tsx sweep-driver.ts <root> <out.json> <selection.json>`. Used for the BASE
+ *  side, and for the head side of a `--base` comparison; any other sweep calls `collect`
+ *  in-process. */
 if (process.argv[1] !== undefined && process.argv[1].endsWith('sweep-driver.ts')) {
   const [root, out, selJson] = process.argv.slice(2);
   const records = await collect(root, JSON.parse(selJson) as SweepSelection);
   writeFileSync(out, JSON.stringify(records));
-  console.error(`asmlift: [sweep] base tree ${root}: ${records.length} record(s)`);
+  console.error(`asmlift: [sweep] tree ${root}: ${records.length} record(s)`);
 }
