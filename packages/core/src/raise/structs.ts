@@ -179,7 +179,7 @@ function isArray(accesses: Access[]): boolean {
  *  A THROW IS NOT THE FUNCTION'S VERDICT, AND WHICH THROW IT IS DECIDES THAT. Four throw sites
  *  below reject a layout and they fall into two CLASSES, which is the split a caller reads:
  *    • `StructOverlapError` — two accesses whose byte ranges collide. THREE of the four sites raise
- *      it, and they carry the same "unions not modelled" text at different offsets: a second access
+ *      it, each message ending "unions not modelled": a second access
  *      at an offset already taken with a different width, a second LOAD of a narrow cell with the
  *      other extension (one field would spell one of the two reads wrong), and one whose range
  *      straddles the field before it (the `aligned > f.off` arm, which is the only one that can see
@@ -187,7 +187,8 @@ function isArray(accesses: Access[]): boolean {
  *      Each access alone is spellable at its own offset and width, so a base whose ADDRESS is
  *      declared outside this function's access set can keep its untyped spelling and lift
  *      (`recognizeStructs` below). There is no struct to synthesize, and nothing is lost by not
- *      synthesizing one. Any other base is declared with a union member (`buildUnionStruct`).
+ *      synthesizing one. Any other base is declared with a union member, or a `castViews` field
+ *      where the union would not fit (`buildUnionStruct`).
  *    • `RaiseUnsupportedError` — a field at an offset its own natural alignment could not place it
  *      at. This one has NO per-access spelling downstream: an access at `off` under a wider access's
  *      width folds to the element index `off / width` (structure/structure.ts), which for a
@@ -195,9 +196,8 @@ function isArray(accesses: Access[]): boolean {
 function buildStruct(name: string, accesses: Access[], extensionViews = true): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();
-  // The extension of every LOAD seen at an offset, kept apart from `byOff`: the access `byOff`
-  // keeps can be a store (it is kept over an unsigned load), so asking it alone misses a cell read
-  // both ways after a store, and the verdict would hang on the order of the accesses.
+  // The extension of every LOAD seen at an offset, kept apart from `byOff`, whose access can be a
+  // store (kept over an unsigned load): the verdict must not hang on the order of the accesses.
   const loadedSigned = new Map<number, boolean>();
   for (const a of accesses) {
     const prev = byOff.get(a.off);
@@ -219,8 +219,7 @@ function buildStruct(name: string, accesses: Access[], extensionViews = true): I
     // extension, a silent wrong (`u16` read as `s16` sign-extends). It is the same overlap class as
     // two widths at one offset, so it goes the same way: `buildUnionStruct` declares the cell's two
     // views, a declared address keeps its per-access casts. A word has no extension to disagree on.
-    // `extensionViews` false switches off this one overlap class and no other: a width overlap
-    // still throws (the displaced fold's no-layout gate, which says why it asks only this).
+    // `extensionViews` false switches off this overlap class alone (the no-layout gate says why).
     if (extensionViews && seen !== undefined && a.signed !== seen && a.width < 4) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': the ${a.width}-byte cell at offset ${a.off} is loaded both sign- and zero-extended — unions not modelled`,
@@ -317,8 +316,7 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
  *  it two. A union that boundary would move — seated off it, or with the next field inside its
  *  rounded size — is never declared, since it would mislay every access at or after it. Its cell
  *  is a plain field of its widest view instead, read at its other views through casts, where those
- *  casts alias it as the union would (`castViewCell`). Where they would not, it declines — a guard
- *  no measured compiler reaches (see `castViewCell`), pinned only by a test boundary. An UNMEASURED
+ *  casts alias it as the union would, and otherwise it declines (`castViewCell`). An UNMEASURED
  *  compiler (undefined) declines every union, since no boundary is safe to assume: one too small
  *  mislays the fields after the union on agbcc, one too large drops the pad in front of them
  *  everywhere else.
@@ -391,8 +389,7 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
 
 /** The type a union's cell is declared at when the union itself cannot be laid out, or undefined
  *  when its views cannot be spelled as casts of that one field. The field is the widest view, the
- *  unsigned one where that width has two — chosen here, not read off the members' order; every
- *  other view must be ALIAS-TRANSPARENT to it, so a cast access aliases the field exactly as a
+ *  unsigned one where that width has two; every other view must be ALIAS-TRANSPARENT to it, so a cast access aliases the field exactly as a
  *  union member would: a 1-byte view (a character type, alias set 0 — c-common.c
  *  `c_get_alias_set`) or the field's own width with the other extension (s16 and u16 share one
  *  set). Any other view is refused: a `u16` read of a word cell through a cast is reused across a
@@ -545,12 +542,9 @@ export const DISPLACED_ROOT_GATES: readonly Gate<DisplacedRoot>[] = [
     // cell by its unfolded `ldrh` alone (agbcc's `ldrsh` has no immediate form, so every signed
     // halfword read is a displaced one). Not for an array-shaped set, which the fold types itself,
     // as one plain struct.
-    // RESIDUE, KNOWN AND CORRECT: a WIDTH overlap still rejects the root, though `recognizeStructs`
-    // would lay it out too (a union, or a `castViews` field). `ldrb [r0]` beside agbcc's
-    // `mov r3, #0; ldrsh [r0, r3]` keeps the halfword on its address, `*(s16 *)((u8 *)a0 + 0)`,
-    // which reads the right bytes with the right extension. Asking the union here instead is one
-    // layout function for both callers, and it moves rows on every toolchain, so it is its own
-    // measured change, not this gate's carve-out.
+    // KNOWN GAP (correct C): a WIDTH overlap still rejects the root, though `recognizeStructs`
+    // would lay it out too. `ldrb [r0]` beside agbcc's `mov r3, #0; ldrsh [r0, r3]` keeps the
+    // halfword on its address, `*(s16 *)((u8 *)a0 + 0)`: the right bytes, the right extension.
     rejects: ({ merged }) => {
       try {
         buildStruct('Struct', [...merged], isArray([...merged]));

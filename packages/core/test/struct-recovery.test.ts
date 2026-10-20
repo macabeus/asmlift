@@ -420,8 +420,7 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
 
   // The ORDER of the accesses does not decide it: an unsigned store first, then the `ldrh`, then
   // the `ldrsh` (`b->x = v; g(); gU = (u16)b->x; gOut = b->x + b->y;`) is the same cell read both
-  // ways, and is the same union. Asking only the access kept for the offset missed it, since the
-  // store is kept over the unsigned load, and typed the cell by the signed load alone.
+  // ways, and is the same union, though the store is the access kept for the offset.
   test('a cell stored first and then loaded both ways is a union too, whatever the order', () => {
     for (const target of [ARMV4T_AGBCC, MIPS_IDO]) {
       for (const [first, second] of [
@@ -506,9 +505,8 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   });
 
   // The type walk reads a cast view as the scalar it is. A recovered struct declares no size, so
-  // without the cast-view rule the dot-form exception (an index on a struct pointer is an array
-  // element) typed `((u8 *)a0)[1]` as the struct, and every consumer asking "is this an int" — the
-  // declaration narrowing, the pointer-cell rules, the store-slot cast — was told no.
+  // the dot-form exception (an index on a struct pointer is an array element) would type
+  // `((u8 *)a0)[1]` as the struct, and every consumer asking "is this an int" would be told no.
   test('a cast view of a castViews field types as its scalar, a struct element still as the struct', () => {
     const st = T.struct('Struct0', [
       { off: 0, type: T.u(16), name: 'field_0', castViews: true },
