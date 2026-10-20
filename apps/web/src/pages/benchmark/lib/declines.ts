@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 283 distinct decline messages (the texts reached by
+// `packages/core/src` throws 284 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -527,11 +527,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // (`frontend/jump-table.ts`): a dispatch whose base some path does not bring, and a base read as
     // a value, are a recovered jump table the lift then refuses. So is a dispatch block the built
     // CFG still reaches (`refuseReachableDispatch`): a branch or a table case enters it past the
-    // bounds check. Thumb words its own table-case check (`readThumbText`) the same way.
+    // bounds check. Thumb words its own table-case check (`readThumbText`) the same way, and its
+    // kept dispatch's case that reads a register the unlifted idiom wrote (`refuseStaleIdiomReads`).
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '|a case of the kept jump table reads/,
   },
   {
     key: 'structs',
