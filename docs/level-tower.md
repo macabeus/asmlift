@@ -737,7 +737,10 @@ whose value is reused, and through a union the read after the store is reloaded,
 the union was compiled from (`synthetic:ureread`). The union keeps every access the asm performed,
 the cast can lose one, so the union is the default and not a variation.
 
-**Raise decides it, at L1→L2, beside the struct it lives in.** `union` carries its views (every
+**Raise decides it, at L1→L2, beside the struct it lives in.** A cell read at two widths is one
+overlap; a narrow cell LOADED with both extensions (`ldrh` and `ldrsh`) is another, even on a base
+with nothing else overlapping, because one field would spell one of the two reads through the
+wrong extension. `union` carries its views (every
 one at offset 0) and its SIZE, because the size is the compiler's: agbcc rounds every struct and
 union to four bytes (`compilerBehaviors.aggregateBoundary`), so `union { u16 h; u8 b; }` is four
 bytes there and two on ido, kmc and mwcc. A union that boundary would move is never declared, since

@@ -176,12 +176,14 @@ function isArray(accesses: Access[]): boolean {
  *  not settle — a narrow STORE, a read above the low-order end, a cell at a constant address, and a
  *  cover on a path the narrow read does not run — and every one of them throws here.
  *
- *  A THROW IS NOT THE FUNCTION'S VERDICT, AND WHICH THROW IT IS DECIDES THAT. Three throw sites
+ *  A THROW IS NOT THE FUNCTION'S VERDICT, AND WHICH THROW IT IS DECIDES THAT. Four throw sites
  *  below reject a layout and they fall into two CLASSES, which is the split a caller reads:
- *    • `StructOverlapError` — two accesses whose byte ranges collide. TWO of the three sites raise
+ *    • `StructOverlapError` — two accesses whose byte ranges collide. THREE of the four sites raise
  *      it, and they carry the same "unions not modelled" text at different offsets: a second access
- *      at an offset already taken with a different width, and one whose range straddles the field
- *      before it (the `aligned > f.off` arm, which is the only one that can see `{s32@0, s16@2}`).
+ *      at an offset already taken with a different width, a second LOAD of a narrow cell with the
+ *      other extension (one field would spell one of the two reads wrong), and one whose range
+ *      straddles the field before it (the `aligned > f.off` arm, which is the only one that can see
+ *      `{s32@0, s16@2}`).
  *      Each access alone is spellable at its own offset and width, so a base whose ADDRESS is
  *      declared outside this function's access set can keep its untyped spelling and lift
  *      (`recognizeStructs` below). There is no struct to synthesize, and nothing is lost by not
@@ -190,7 +192,7 @@ function isArray(accesses: Access[]): boolean {
  *      at. This one has NO per-access spelling downstream: an access at `off` under a wider access's
  *      width folds to the element index `off / width` (structure/structure.ts), which for a
  *      misaligned pair is a FRACTION and not C. It declines whatever the base is. */
-function buildStruct(name: string, accesses: Access[]): IrType {
+function buildStruct(name: string, accesses: Access[], extensionViews = true): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();
   for (const a of accesses) {
@@ -202,6 +204,18 @@ function buildStruct(name: string, accesses: Access[]): IrType {
     if (prev.width !== a.width) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': overlapping fields at offset ${a.off} (widths ${prev.width} and ${a.width}) — unions not modelled`,
+      );
+    }
+    // Two LOADS of one narrow cell with different extensions (`ldrh` and `ldrsh`) are two views of
+    // it, and one field types only one of them: the other read would be spelled through the wrong
+    // extension, a silent wrong (`u16` read as `s16` sign-extends). It is the same overlap class as
+    // two widths at one offset, so it goes the same way: `buildUnionStruct` declares the cell's two
+    // views, a declared address keeps its per-access casts. A word has no extension to disagree on.
+    // `extensionViews` false asks only whether the BYTES lay out (the displaced fold's question:
+    // agbcc's `ldrsh` has no immediate form, so every signed halfword read is a displaced one).
+    if (extensionViews && a.isLoad && prev.isLoad && a.signed !== prev.signed && a.width < 4) {
+      throw new StructOverlapError(
+        `cannot recover struct '${name}': the ${a.width}-byte cell at offset ${a.off} is loaded both sign- and zero-extended — unions not modelled`,
       );
     }
     // A load reads its signedness, and a stamped store only stands in for one: a load replaces a
@@ -287,8 +301,7 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
  *  one element at the cell's start is a scalar; any other is an array reaching the furthest
  *  element accessed (`u16 half[2]` for the halfword at +2). A cell with ONE view is a plain field;
  *  any other is a member `field_<off>` holding a union of its views — including a single-width cell
- *  loaded both ways. KNOWN GAP: on a base with no overlap anywhere, `buildStruct` never hands over,
- *  and that same cell there is one field typed by its signed load, so its unsigned read is spelled sign-extended.
+ *  loaded both ways, which `buildStruct` hands over as an overlap even on a base with no other one.
  *
  *  THE COMPILER DECIDES THE UNION'S SIZE, not its widest view. `aggregateBoundary` is the size it
  *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateBoundary`):
@@ -519,9 +532,12 @@ export const DISPLACED_ROOT_GATES: readonly Gate<DisplacedRoot>[] = [
     id: 'no-layout',
     why: 'the accesses overlap or misalign, so no plain struct lays them out',
     sound: false,
+    // A cell loaded with both extensions lays out: `recognizeStructs` gives it a view per extension
+    // once the fold has put its reads on one base. Not for an array-shaped set, which the fold
+    // types itself, as one plain struct.
     rejects: ({ merged }) => {
       try {
-        buildStruct('Struct', [...merged]);
+        buildStruct('Struct', [...merged], isArray([...merged]));
         return false;
       } catch {
         return true;

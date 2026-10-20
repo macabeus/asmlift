@@ -396,6 +396,42 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     expect(c).toContain('a0->field_4.shalf');
   });
 
+  // …and on a base with NO other overlap: one field would type the cell by one of its loads and
+  // spell the other read through the wrong extension (`ldrh` read as `s16` sign-extends), so the
+  // both-extension cell is an overlap `buildStruct` hands to the union on its own.
+  const CELL_EXTS_ALONE = `fn cellalone {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=2, signed=false}
+  %2: unk32 = load %0 {off=0, width=2, signed=true}
+  %3: unk32 = load %0 {off=4, width=4, signed=true}
+  %4: unk32 = add %2, %3
+  %5: unk32 = add %4, %1
+  ret %5
+}
+`;
+  test('a single-width cell loaded both ways on a base with no other overlap is a union', () => {
+    for (const target of [ARMV4T_AGBCC, MIPS_IDO]) {
+      const c = emit(CELL_EXTS_ALONE, false, undefined, target);
+      expect(c).toContain('struct Struct0 { union { u16 uhalf; s16 shalf; } field_0; s32 field_4; };');
+      expect(c).toContain('a0->field_0.uhalf');
+      expect(c).toContain('a0->field_0.shalf');
+    }
+  });
+
+  test('…and a word loaded with both signs stays one field, since a word has no extension', () => {
+    const c = emit(`fn wordalone {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=false}
+  %2: unk32 = load %0 {off=0, width=4, signed=true}
+  %3: unk32 = load %0 {off=4, width=2, signed=true}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  ret %5
+}
+`);
+    expect(c).not.toContain('union');
+  });
+
   // Off the boundary too, and the byte index of a cast view counts from the BASE in memory order,
   // which no endianness changes.
   test('a narrow union off the 4-byte boundary is a cast-view field there too', () => {
