@@ -2403,15 +2403,18 @@ Each of these is sane alone. Only `bench run` read the register, and nothing rea
 
 **Every heavy command now asks first.** `bench run`, `bench fidelity`, `bench fan`, `bench sweep`
 and the vitest gate (`scripts/gate-vitest.sh`) price their own peak and compare it with what the
-machine can give right now. That is Linux `MemAvailable` plus half of `SwapFree`, or
-`os.freemem()` elsewhere, less a 0.5 GB reserve (`apps/benchmark/src/run/admission.ts`, which
-says why it uses half). A job in the register also carries the need it was admitted with. What
+machine can give right now. On Linux that is `MemAvailable` plus the free swap above half of
+`SwapTotal`, so swap use is never planned past half the device. Elsewhere it is `os.freemem()`.
+Either way a 0.5 GB reserve is held back. `apps/benchmark/src/run/admission.ts` gives the two
+measured bounds on that cap. Mid-way through a `bench run --jobs 3` on 2026-10-20 this host read
+MemAvailable 0.6 GB and SwapFree 6.8 GB. The cap leaves 2.3 GB of that, so a 3-worker vitest gate
+is refused beside the run. A job in the register also carries the need it was admitted with. What
 such a job has not taken yet, its need less what its process tree holds now, is subtracted too.
 On 2026-10-20 a `bench run --jobs 3` held 2.80 GB of its 7.5 GB budget 919 s in, which is the
-gap a reading of that moment alone would hand to the next job. A command that does not fit is REFUSED with both numbers and the next
-step. It is not queued. `bench run` names the largest `--jobs` that fits. A run without `--jobs`
-already sizes itself to fit (`run/default-jobs.ts`), so on this host, quiet, it starts the same 3
-shards. `ASMLIFT_MEM_ADMISSION=off` skips the check and says so. It exists for a host whose
+gap a reading of that moment alone would hand to the next job. A command that does not fit is
+REFUSED with both numbers and the next step. It is not queued. `bench run` names the largest
+`--jobs` that fits. A run without `--jobs` already sizes itself to fit (`run/default-jobs.ts`), so
+on this host, quiet, it starts the same 3 shards. `ASMLIFT_MEM_ADMISSION=off` skips the check and says so. It exists for a host whose
 reading is wrong, not for running two heavy jobs at once.
 
 **A whole-corpus `bench sweep` takes a record in the register**, so a full bench refuses to start
@@ -2442,4 +2445,7 @@ The `--base` wall clocks include provisioning the base tree. Both runs printed t
 (86 moved, the ido `opts` nondeterminism, and 4,520 identical), so moving the head pass into a
 child changed the price and not the answer. A shard is budgeted at 2.5 GB
 (`SHARD_BYTES`): the dearest row measured 1.95 GB, and at the OOM three shards and their compile
-workers held ~7.6 GB, so the budget held. A `bench fan` is budgeted as one shard.
+workers held ~7.6 GB, so the budget held. A `bench fan` is budgeted as one shard. So is a
+`bench fidelity` script, because the asmlift script re-ranks its row. On 2026-10-20, run with
+`--only AthleticChallengeScrollUpdate --jobs 1`, that script peaked at 1.53 GB (24 s) and then
+exited 127 in this host's shell after building its target. That figure is a floor, not a peak.
