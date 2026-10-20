@@ -18,7 +18,9 @@ import {
   benchInFlightRefusal,
   benchLockStatus,
   concurrentRunRefusal,
+  concurrentSweepRefusal,
   readBenchLock,
+  registerHeavyJob,
   releaseBenchLock,
 } from '../src/run/lock';
 
@@ -353,6 +355,110 @@ describe('what a SECOND bench run is told', () => {
   });
 });
 
+describe('a whole-corpus sweep in the register', () => {
+  /** A live record of the given shape, with this test process's pid so it reads as live. */
+  const live = (over: Record<string, unknown>) => {
+    const reg = throwawayReg();
+    writeRecord(reg, process.pid, {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      command: 'bench sweep --base origin/main',
+      tiers: ['synthetic', 'real'],
+      root: MY_ROOT,
+      whole: true,
+      ...over,
+    });
+    return readBenchLock(reg);
+  };
+
+  test('a whole-corpus sweep is refused beside a full bench in ANY worktree', () => {
+    const msg = concurrentSweepRefusal(live({ command: 'bench run --jobs 3', kind: undefined, root: OTHER_ROOT }));
+    expect(msg).toContain('bench sweep REFUSED');
+    expect(msg).toContain('a full bench is already running');
+    expect(msg).toContain(OTHER_ROOT);
+    expect(msg).toContain('--only');
+    expect(msg).toContain('--no-lock');
+  });
+
+  test('…and beside another whole-corpus sweep', () => {
+    expect(concurrentSweepRefusal(live({ kind: 'sweep' }))).toContain('a whole-corpus sweep is already running');
+  });
+
+  test('…but not beside a scoped run, nor on a free or stale register', () => {
+    expect(
+      concurrentSweepRefusal(live({ command: 'bench run --only x', kind: undefined, whole: false })),
+    ).toBeUndefined();
+    expect(concurrentSweepRefusal(readBenchLock(throwawayReg()))).toBeUndefined();
+    const reg = throwawayReg();
+    writeRecord(reg, deadPid());
+    expect(concurrentSweepRefusal(readBenchLock(reg))).toBeUndefined();
+  });
+
+  test('a full bench run is refused beside a live whole-corpus sweep, which it names as one', () => {
+    const msg = concurrentRunRefusal(live({ kind: 'sweep', root: OTHER_ROOT }), asRun());
+    expect(msg).toContain('bench run REFUSED: a whole-corpus sweep is already running');
+  });
+
+  test('a sweep writes no tier file: a scoped run in the SAME worktree is not refused beside it', () => {
+    expect(concurrentRunRefusal(live({ kind: 'sweep' }), asRun({ whole: false }))).toBeUndefined();
+  });
+
+  test('a sweep measures nothing, so it never blocks an edit to the tree it lifts', () => {
+    expect(benchInFlightRefusal(live({ kind: 'sweep' }), MY_ROOT)).toBeUndefined();
+  });
+
+  test('acquire writes `kind: sweep`, and the record reads back as one', () => {
+    const reg = throwawayReg();
+    acquireBenchLock('bench sweep', { tiers: ['synthetic', 'real'], whole: true, root: MY_ROOT, kind: 'sweep' }, reg);
+    const rec = JSON.parse(readFileSync(join(reg, `${process.pid}.json`), 'utf8')) as BenchLockRecord;
+    expect(rec.kind).toBe('sweep');
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].kind).toBe('sweep');
+    releaseBenchLock(reg);
+  });
+
+  test('a record carries the need it was admitted with; a need that is not a positive number is dropped', () => {
+    const reg = throwawayReg();
+    acquireBenchLock('bench run', { ...asRun(), needBytes: 7.5e9 }, reg);
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].needBytes).toBe(7.5e9);
+    releaseBenchLock(reg);
+    for (const bad of [-1, 0, 'lots', null]) {
+      const s = live({ needBytes: bad });
+      expect(s.state === 'held' && s.records[0].needBytes).toBeUndefined();
+    }
+  });
+
+  test('every other admitted heavy job writes a `kind: job` promise that blocks no edit, run or sweep', () => {
+    const reg = throwawayReg();
+    registerHeavyJob('bench fan kleod:X:agbcc', 2.5e9, process.pid, reg);
+    const rec = JSON.parse(readFileSync(join(reg, `${process.pid}.json`), 'utf8')) as BenchLockRecord;
+    expect(rec).toMatchObject({ kind: 'job', whole: false, tiers: [], needBytes: 2.5e9 });
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].kind).toBe('job');
+    expect(benchInFlightRefusal(state, MY_ROOT)).toBeUndefined();
+    expect(concurrentRunRefusal(state, asRun())).toBeUndefined();
+    expect(concurrentRunRefusal(state, asRun({ whole: false }))).toBeUndefined();
+    expect(concurrentSweepRefusal(state)).toBeUndefined();
+    releaseBenchLock(reg);
+  });
+
+  test('a job can be registered under a pid other than the caller’s, and reads as held while that pid lives', () => {
+    const reg = throwawayReg();
+    const path = registerHeavyJob('vitest run (3 workers)', 3e9, process.ppid, reg);
+    expect(path).toBe(join(reg, `${process.ppid}.json`));
+    const state = readBenchLock(reg);
+    expect(state.state === 'held' && state.records[0].pid).toBe(process.ppid);
+    releaseBenchLock(reg, process.ppid);
+  });
+
+  test('a record whose kind is any other word reads as a run — the kind that collides with more', () => {
+    const state = live({ kind: 'sweeep' });
+    expect(state.state === 'held' && state.records[0].kind).toBeUndefined();
+    expect(benchInFlightRefusal(state, MY_ROOT)).toBeDefined();
+  });
+});
+
 describe('the marker survives the ways a run actually ends', () => {
   // Nothing in-process can check this: these spawn a real child, so `process.on('exit')` and the
   // ABSENCE of signal handlers are what is under test.
@@ -476,6 +582,34 @@ describe('the CLI is wired to it', () => {
     expect(runCase).toContain('acquireBenchLock(');
     // Eight shard children's records would say eight runs are in flight.
     expect(runCase).toContain('runTakesTheBenchLock(');
+  });
+
+  test('a whole-corpus `bench sweep` checks the register and takes a record, behind `--no-lock`', () => {
+    const sweepCase = switchCase('sweep');
+    expect(sweepCase).toContain('sweepIsWholeCorpus(');
+    expect(sweepCase).toContain('concurrentSweepRefusal(');
+    expect(sweepCase).toContain('acquireBenchLock(');
+    expect(sweepCase).toContain("kind: 'sweep'");
+    expect(sweepCase).toContain("opts['no-lock']");
+  });
+
+  test('every heavy command asks the memory admission check before it starts, and promises what it was admitted with', () => {
+    expect(switchCase('run'), '`bench run` does not call the admission check').toContain('admitOrExit(');
+    for (const name of ['fan', 'sweep', 'fidelity']) {
+      // a run and a whole sweep promise through their own register record; everything else through a job record
+      expect(switchCase(name), `\`bench ${name}\` does not admit and register`).toContain('admitAndRegister(');
+    }
+    // every vitest run, gated or not, is checked and recorded by a globalSetup of BOTH configs, under
+    // vitest's own pid: a check in the gate script would miss `pnpm test:offline` and every direct run
+    for (const config of ['vitest.config.ts', 'vitest.matching.config.ts']) {
+      const text = readFileSync(join(REPO_ROOT, config), 'utf8');
+      expect(text, `${config} does not run the memory admission check first`).toMatch(
+        /globalSetup: \[\s*'\.\/vitest\.memory-admission\.ts'/,
+      );
+    }
+    const setup = readFileSync(join(REPO_ROOT, 'vitest.memory-admission.ts'), 'utf8');
+    expect(setup).toContain('registerHeavyJob(');
+    expect(setup).toContain('process.pid');
   });
 
   test('`bench in-flight` is a subcommand and is listed in the usage line', () => {

@@ -45,7 +45,8 @@ export default defineConfig({
       ASMLIFT_CANDCACHE_SAMPLE: '0',
       ASMLIFT_CANDCACHE_DIR: VITEST_CANDCACHE_DIR,
     },
-    globalSetup: ['./vitest.candcache-store.ts'],
+    // the memory admission check first: a refused run starts nothing (vitest.memory-admission.ts)
+    globalSetup: ['./vitest.memory-admission.ts', './vitest.candcache-store.ts'],
     setupFiles: ['./vitest.worker-yield.ts'],
     include: [
       'packages/core/test/**/*.test.ts',

@@ -111,8 +111,9 @@ import { REPO_ROOT, RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
+import { type AdmissionRequest, PEAK_BYTES, admissionRefusal, runRequest } from './run/admission';
 import { defaultJobs } from './run/default-jobs';
-import { acquireBenchLock, benchLockStatus, readBenchLock } from './run/lock';
+import { acquireBenchLock, benchLockStatus, concurrentSweepRefusal, readBenchLock, registerHeavyJob } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
 import { claimer, partPath, planCases, runDir } from './run/queue';
@@ -270,6 +271,29 @@ function reportCandCache(): void {
   }
 }
 
+/** The memory admission check (run/admission.ts), answered here and now: a refusal prints its text
+ *  and exits with `code`, the command's own "did not start" status. */
+function admitOrExit(req: AdmissionRequest | undefined, code: number): void {
+  if (req === undefined) {
+    return;
+  }
+  const refusal = admissionRefusal(req);
+  if (refusal !== undefined) {
+    console.error(refusal);
+    process.exit(code);
+  }
+}
+
+/** Admit a heavy command that takes no run or sweep record, and then record what it was admitted
+ *  with as a `kind: 'job'` record for as long as this process lives (run/lock.ts's header): a job
+ *  that promises nothing is invisible to every heavy job started after it. */
+function admitAndRegister(req: AdmissionRequest | undefined, code: number): void {
+  admitOrExit(req, code);
+  if (req !== undefined) {
+    registerHeavyJob(`bench ${process.argv.slice(2).join(' ')}`, req.needBytes);
+  }
+}
+
 switch (command) {
   case 'run': {
     // `--claim` and `--shard` are the shard child's argv (orchestrate.ts), and only together: a
@@ -301,6 +325,23 @@ switch (command) {
     if (preflight.refusals.length > 0) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
+    }
+    // How many shards, read ONCE: `defaultJobs` reads available memory, and the admission below and
+    // the orchestrator must agree on the count it priced.
+    const jobs = opts.serial ? 1 : Number(opts.jobs ?? defaultJobs());
+    // what the admission check priced this run at, carried into its record so that a job started
+    // after it subtracts what this one has not taken yet
+    let runNeed: number | undefined;
+    // MEMORY, for the run as a whole — a shard child is exempt like every verdict above, because its
+    // parent priced it. A scoped run starts as many shards as it has rows, up to `jobs`; counting
+    // them costs the case load `orchestrate` pays anyway, so only a scoped run pays it here.
+    if (runTakesTheBenchLock(runOpts) && Number.isInteger(jobs) && jobs >= 1) {
+      const rows = tiers.some((t) => !tierIsFiltered(t, opts))
+        ? undefined
+        : tiers.reduce((n, t) => n + casesFor(t).length, 0);
+      const req = runRequest(jobs, rows);
+      runNeed = req.needBytes;
+      admitOrExit(req, 1);
     }
     // DETACHED: the same argv minus `--detach`, in its own process group with its output in a log.
     // After the preflight, so a refusal is still answered here and now. This process returns only
@@ -377,6 +418,7 @@ switch (command) {
         acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
           tiers,
           whole: runIsWholeTier(runOpts),
+          ...(runNeed !== undefined ? { needBytes: runNeed } : {}),
         });
       }
     }
@@ -438,7 +480,6 @@ switch (command) {
       }
       reportCandCache();
     } else {
-      const jobs = Number(opts.jobs ?? defaultJobs());
       if (!Number.isInteger(jobs) || jobs < 1) {
         console.error(`bad --jobs ${opts.jobs}; want a positive integer`);
         process.exit(2);
@@ -629,6 +670,15 @@ switch (command) {
       console.error(usage);
       process.exit(2);
     }
+    // one row ranked (or enumerated) in one process, which is what a shard does with it
+    admitAndRegister(
+      {
+        command: 'bench fan',
+        needBytes: PEAK_BYTES.fan,
+        need: `one row's fan, budgeted as one shard (${(PEAK_BYTES.fan / 1e9).toFixed(1)} GB)`,
+      },
+      2,
+    );
     const { fan, fanOfAsm } = await import('./run/fan');
     // `!== undefined` and not truthiness: `--base=` parses as the EMPTY STRING, and dropping it
     // ran the whole command with no comparison at exit 0 — the same silence the refusals here
@@ -668,22 +718,60 @@ switch (command) {
     // the lift, which is why it is a flag. Scope it with `--tier`/`--project`/`--only` when the
     // question is scoped. The figures are dated rows of `docs/bench-cost.md` §1 and live only
     // there; run/sweep.ts's header carries the SHAPE of the price.
-    const { sweep } = await import('./run/sweep');
+    const { sweep, sweepIsWholeCorpus, sweepRequest } = await import('./run/sweep');
+    const sweepOpts = {
+      tiers,
+      ...(opts.only !== undefined ? { only: opts.only } : {}),
+      ...(opts.project !== undefined ? { project: opts.project } : {}),
+      ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
+      ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),
+      ...(opts.base !== undefined ? { base: opts.base } : {}),
+      ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
+    };
+    // A WHOLE-CORPUS sweep is a full bench for the machine-wide register (run/lock.ts): refused
+    // beside a whole-tier run or another whole sweep, and recorded so that they are refused beside
+    // it. `--no-lock` is the same door it is for `bench run`. Then memory, for every sweep that lifts.
+    if (sweepIsWholeCorpus(sweepOpts)) {
+      if (opts['no-lock']) {
+        console.error(
+          '[bench lock] --no-lock: this whole-corpus sweep takes NO record and checks none. You said so.\n',
+        );
+      } else {
+        const refusal = concurrentSweepRefusal(readBenchLock());
+        if (refusal !== undefined) {
+          console.error(refusal);
+          process.exit(2);
+        }
+      }
+    }
+    const sweepNeed = sweepRequest({
+      mapModes: [],
+      ...sweepOpts,
+      fan: opts.fan,
+      ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
+    });
+    if (!sweepIsWholeCorpus(sweepOpts)) {
+      admitAndRegister(sweepNeed, 2);
+    } else {
+      admitOrExit(sweepNeed, 2);
+      if (!opts['no-lock']) {
+        acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
+          tiers,
+          whole: true,
+          kind: 'sweep',
+          ...(sweepNeed !== undefined ? { needBytes: sweepNeed.needBytes } : {}),
+        });
+      }
+    }
     process.exit(
       await sweep({
-        tiers,
-        ...(opts.only !== undefined ? { only: opts.only } : {}),
-        ...(opts.project !== undefined ? { project: opts.project } : {}),
+        ...sweepOpts,
         mapModes: opts['map-modes'].split(',').filter((a) => a !== ''),
         allowUnmeasured: opts['allow-unmeasured'],
         fan: opts.fan,
         force: opts.force,
         ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
         ...(opts.json !== undefined ? { json: opts.json } : {}),
-        ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
-        ...(opts.base !== undefined ? { base: opts.base } : {}),
-        ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
-        ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),
         ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
         ...(opts['asm-project'] !== undefined ? { asmProject: opts['asm-project'] } : {}),
       }),
@@ -714,6 +802,15 @@ switch (command) {
       console.error(`bad --jobs ${opts.jobs}`);
       process.exit(2);
     }
+    admitAndRegister(
+      {
+        command: 'bench fidelity',
+        needBytes: jobs * PEAK_BYTES.fidelityScript,
+        need: `${jobs} script${jobs === 1 ? '' : 's'} at once × ${(PEAK_BYTES.fidelityScript / 1e9).toFixed(1)} GB`,
+        instead: 'run fewer at once (`--jobs`)',
+      },
+      1,
+    );
     const { fidelity } = await import('./run/fidelity');
     await fidelity(jobs, { project: opts.project, only: opts.only });
     break;

@@ -34,7 +34,12 @@ export default defineConfig({
     // cover — today the suite compiles almost entirely through @asmlift/toolchains, which does not
     // use the cache at all, so this is forward defence rather than a gate over the match
     // assertions.
-    globalSetup: ['packages/cli/test/matching/global-setup.ts', 'packages/cli/test/matching/candcache-gate.ts'],
+    // the memory admission check first: a refused run starts nothing (vitest.memory-admission.ts)
+    globalSetup: [
+      './vitest.memory-admission.ts',
+      'packages/cli/test/matching/global-setup.ts',
+      'packages/cli/test/matching/candcache-gate.ts',
+    ],
     setupFiles: ['./vitest.worker-yield.ts'],
     fileParallelism: false,
     poolOptions: { forks: { singleFork: true } },

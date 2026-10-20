@@ -15,11 +15,13 @@
 //     cases/real.ts` reaches `${root}/packages/core` through `${root}/node_modules` no matter
 //     where this file sits. The driver needs nothing but node builtins of its own.
 //
-// This is the second. `bench sweep` runs it in-process for this tree and spawns it (through this
-// tree's `tsx`) for the base tree, so the base side needs only `pnpm install` — no checkouts, no
-// toolchain symlinks, and no `sweep` subcommand of its own. `cases/real.ts` reads VENDORED
-// preprocessed TUs, not project checkouts (`manifests.ts`: "the runtime shape — no checkout"), so
-// a bare `git worktree add` plus `pnpm install` is a complete base tree for this purpose.
+// This is the second. `bench sweep` spawns it (through this tree's `tsx`) for the base tree — and,
+// in a `--base` comparison, for this tree too, so the two passes' heaps are never alive in one
+// process at once (`collectInChild`); a sweep with no base runs it in-process. The base side
+// needs only `pnpm install` — no checkouts, no toolchain symlinks, and no `sweep` subcommand of
+// its own. `cases/real.ts` reads VENDORED preprocessed TUs, not project checkouts (`manifests.ts`:
+// "the runtime shape — no checkout"), so a bare `git worktree add` plus `pnpm install` is a
+// complete base tree for this purpose.
 //
 // THE HAZARD THIS SHAPE HAS, said out loud: the base tree's modules are loaded into a process whose
 // entry came from the head tree. Nothing static crosses at runtime (see the imports below — `node:`
@@ -516,11 +518,12 @@ function projectSymbols(m: Awaited<ReturnType<typeof treeModules>>, project: str
   return map;
 }
 
-/** Subprocess entry: `tsx sweep-driver.ts <root> <out.json> <selection.json>`. Used only for the
- *  BASE side; the head side calls `collect` in-process. */
+/** Subprocess entry: `tsx sweep-driver.ts <root> <out.json> <selection.json>`. Used for the BASE
+ *  side, and for the head side of a `--base` comparison; any other sweep calls `collect`
+ *  in-process. */
 if (process.argv[1] !== undefined && process.argv[1].endsWith('sweep-driver.ts')) {
   const [root, out, selJson] = process.argv.slice(2);
   const records = await collect(root, JSON.parse(selJson) as SweepSelection);
   writeFileSync(out, JSON.stringify(records));
-  console.error(`asmlift: [sweep] base tree ${root}: ${records.length} record(s)`);
+  console.error(`asmlift: [sweep] tree ${root}: ${records.length} record(s)`);
 }

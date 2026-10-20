@@ -49,14 +49,15 @@
 // the other one once.
 import { type Identifiable, onlySelects } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { realRowIdentities } from '../cases/manifests';
-import { REPO_ROOT } from '../config';
+import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { readWorktreeArtifact, rekeyToCurrent } from '../report/committed';
 import { TOOLCHAINS } from '../toolchains';
+import { type AdmissionRequest, PEAK_BYTES } from './admission';
 import { estimatedScoreTime, recordedRankRates, secondsPerCandidate } from './price';
 import { MAP_MODES, type SweepSelection, TREE_MODULES } from './sweep-driver';
 
@@ -370,6 +371,10 @@ export function recordedFans(): {
  *  is `synthetic`. Pass the row's `aliases`, or a renamed row reads as unselected here while
  *  `collect` sweeps it.
  *
+ *  `--project` narrows the REAL tier only, because that is all `collect` passes it to
+ *  (`realCases`): `--project sa3` with both tiers lifts every synthetic row too — 1,882 of the 1,932
+ *  it lifted on 2026-10-20.
+ *
  *  Exported because it is what lets the `--fan` guard say how much of its own selection the
  *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
 export function selectsRow(
@@ -386,7 +391,8 @@ export function selectsRow(
   if (!o.tiers.includes(project === 'synthetic' ? 'synthetic' : 'real')) {
     return false;
   }
-  if (o.project !== undefined && project !== o.project) {
+  // an EMPTY `--project` filters nothing, as `cases/real.ts` reads it (`!filter.project`)
+  if (o.project && project !== 'synthetic' && project !== o.project) {
     return false;
   }
   return onlySelects(o.only, sym, aliases);
@@ -519,8 +525,16 @@ function baseTreeRefusal(dir: string): string | undefined {
   return moduleFloorRefusal(dir);
 }
 
-function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[] } | { error: string } {
-  const out = join(tmpdir(), `asmlift-sweep-base-${process.pid}.json`);
+/** One tree's pass, run by the driver in a CHILD process, which hands back only its records. The base
+ *  side always runs this way (it needs that tree's modules), and so does the head side of a `--base`
+ *  comparison, so the two passes' heaps are never alive at once: a head pass in the parent keeps
+ *  its ~2 GB live through the base pass (docs/bench-cost.md §5 has the sweep's peak both ways). */
+function collectInChild(
+  dir: string,
+  sel: SweepSelection,
+  side: string,
+): { records: SweepRecord[] } | { error: string } {
+  const out = join(tmpdir(), `asmlift-sweep-${side === 'base' ? 'base' : 'head'}-${process.pid}.json`);
   const driver = join(import.meta.dirname, 'sweep-driver.ts');
   const tsx = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
   const r = spawnSync(tsx, [driver, dir, out, JSON.stringify(sel)], {
@@ -531,16 +545,194 @@ function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[]
   });
   if (r.status !== 0) {
     rmSync(out, { force: true });
-    return { error: `the base sweep exited ${r.status ?? 'on a signal'} — nothing was compared` };
+    return { error: `the ${side} sweep exited ${r.status ?? 'on a signal'} — nothing was compared` };
   }
   try {
     return { records: JSON.parse(readFileSync(out, 'utf8')) as SweepRecord[] };
   } catch (e) {
-    return { error: `the base sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
+    return { error: `the ${side} sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
   } finally {
-    // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-base-
+    // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-<side>-
     // <pid>.json` per run is how a scratch directory becomes unreadable.
     rmSync(out, { force: true });
+  }
+}
+
+/** Does this sweep lift a WHOLE tier? Then it takes a sweep record in `run/lock.ts`'s register like a
+ *  full `bench run`, and is refused beside one. `--tier` alone does not scope it — a whole tier is
+ *  most of the price — and `--compare` runs nothing. Nor does `--project` while the synthetic tier
+ *  is swept: it narrows the real tier only (`selectsRow`), so `--project pokeemerald` lifts 1,950
+ *  of 2,303 rows. Only `--only`, `--asm-dir`, or `--project` with `--tier
+ *  real` scope a sweep — and an EMPTY `--only=` or `--project=` scopes nothing: `collect` passes
+ *  each on only when it is non-empty (`sweep-driver.ts`), and `bench run`'s `tierIsFiltered` reads
+ *  them the same way, so `--only=` lifts the whole corpus and is whole here too. */
+export function sweepIsWholeCorpus(
+  o: Pick<SweepOptions, 'tiers' | 'only' | 'project' | 'asmDir' | 'compare'>,
+): boolean {
+  return o.compare === undefined && !o.only && o.asmDir === undefined && (!o.project || o.tiers.includes('synthetic'));
+}
+
+/** Where `sweepRequest` reads which rows a scoped selection names, each read only when the price
+ *  needs it: the committed artifact's row ids (for the synthetic share) and the current dataset's
+ *  real rows (for the projects touched, former names included, as `collect` reads them). */
+export interface SweepPriceRows {
+  artifactIds: () => readonly string[] | undefined;
+  realRows: () => readonly Pick<Identifiable, 'id' | 'project' | 'aliases'>[];
+}
+
+const DEFAULT_PRICE_ROWS: SweepPriceRows = { artifactIds: () => artifactRowIds(), realRows: realRowIdentities };
+
+/** What this sweep asks `admission.ts` for, or undefined when it lifts nothing (`--compare`).
+ *
+ *  ONE PASS AT A TIME: the passes of `--base` run in children one after the other (`collectInChild`)
+ *  and `--repeat`'s run in this process one after the other, so the peak is one pass plus the
+ *  records already held. Those records are what `--base` adds — the parent holds both sides' while
+ *  a child lifts, which is the measured difference between `sweepBase` and `sweepPass` — and what
+ *  `--repeat` adds: the first pass's records stay alive through every later pass, `sweepRepeat`.
+ *
+ *  A SCOPED pass (`--only`, or `--project`) is priced by what it lifts, in two parts, and never
+ *  above the whole pass nor below the floor (`sweepScopedBasedPass` with a base, whose parent and
+ *  child are alive at once): the synthetic rows it selects, as their share of the
+ *  committed artifact's rows times the whole figure; and, for every real project it lifts a row of,
+ *  that project's measured figure (`PEAK_BYTES.sweepRealProject`). A real row is not priced by its
+ *  share: 68 pokeemerald rows (3% of the rows) peaked at 1.55–1.63 GB against a share of 0.07 GB,
+ *  because a real row's cost is its project's context and symbol map. `--base` and
+ *  `--repeat` scale the project part by their whole figure over one pass's. `--asm-dir` names no
+ *  dataset row and is priced whole; so is a synthetic selection over an artifact that cannot be
+ *  read. `--fan` adds one row's enumeration, budgeted as `bench fan` is. docs/bench-cost.md §5 has
+ *  each figure against its price. */
+export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRICE_ROWS): AdmissionRequest | undefined {
+  if (o.compare !== undefined) {
+    return undefined;
+  }
+  const gb = (b: number): string => `${(b / 1e9).toFixed(1)} GB`;
+  const based = o.base !== undefined || o.baseDir !== undefined;
+  const repeated = !based && o.repeat !== undefined;
+  const whole: number = based ? PEAK_BYTES.sweepBase : repeated ? PEAK_BYTES.sweepRepeat : PEAK_BYTES.sweepPass;
+  const passes = based
+    ? "one lift pass at a time, both sides' records held,"
+    : repeated
+      ? "one lift pass at a time, the first pass's records held,"
+      : 'one lift pass';
+  let pass = whole;
+  let what = `${passes} over the whole corpus (${gb(pass)})`;
+  if ((o.only || o.project) && o.asmDir === undefined) {
+    const parts: string[] = [];
+    let synthetic = 0;
+    // `--project` narrows the real tier only (`selectsRow`), so the synthetic tier is read in full
+    // under it: whole, not a share — which is also what an unreadable artifact gives
+    if (o.tiers.includes('synthetic')) {
+      const ids = o.only ? rows.artifactIds() : undefined;
+      if (ids === undefined || ids.length === 0) {
+        synthetic = whole;
+        parts.push('every synthetic row');
+      } else {
+        const n = ids.filter((id) => id.startsWith('synthetic:') && selectsRow(o, id)).length;
+        synthetic = Math.ceil((whole * n) / ids.length);
+        if (n > 0) {
+          parts.push(`${n} synthetic of ${ids.length} rows (${gb(synthetic)})`);
+        }
+      }
+    }
+    let real = 0;
+    if (o.tiers.includes('real')) {
+      let projects: string[];
+      try {
+        projects = !o.only
+          ? [o.project!]
+          : [
+              ...new Set(
+                rows
+                  .realRows()
+                  .filter((r) => selectsRow(o, r.id, r.aliases))
+                  .map((r) => r.project),
+              ),
+            ];
+      } catch {
+        // a dataset this cannot read prices every project: what `collect` would have met is unknown
+        projects = Object.keys(PEAK_BYTES.sweepRealProject);
+      }
+      const scale = whole / PEAK_BYTES.sweepPass;
+      for (const p of projects.sort()) {
+        const fig = Math.ceil((PEAK_BYTES.sweepRealProject[p] ?? PEAK_BYTES.sweepRealProjectUnmeasured) * scale);
+        real += fig;
+        parts.push(`${p}'s real rows (${gb(fig)})`);
+      }
+    }
+    const floor = based ? PEAK_BYTES.sweepScopedBasedPass : PEAK_BYTES.sweepScopedPass;
+    pass = Math.min(whole, Math.max(floor, synthetic + real));
+    what = `${passes} over ${parts.length > 0 ? parts.join(' + ') : 'no row'} (${gb(pass)})`;
+  }
+  const fan = o.fan === true ? PEAK_BYTES.fan : 0;
+  return {
+    command: 'bench sweep',
+    needBytes: pass + fan,
+    need: fan > 0 ? `${what} + one row's enumeration (${gb(fan)})` : what,
+    instead: sweepIsWholeCorpus(o)
+      ? 'scope it with `--only`, or `--project` with `--tier real`'
+      : 'narrow the selection',
+  };
+}
+
+/** The row ids of this worktree's committed artifact, for `sweepRequest`'s synthetic share;
+ *  undefined when it cannot be read, which prices the synthetic tier whole. READ, NOT PARSED: the
+ *  artifact is ~63 MB, and `JSON.parse` of it in a sweep's parent made a one-row sweep peak at
+ *  0.41–0.45 GB against 0.21–0.29 GB without it. Decoding it to text in chunks cost as much, in
+ *  garbage the heap had not yet collected (0.38–0.43 GB). So this searches the file's BYTES, 1 MiB
+ *  at a time, for each `"id": "` key as `JSON.stringify(…, null, 2)` writes it, decodes only the id,
+ *  keeps those shaped like a row id, and answers only when it found as many as `meta.counts.total`
+ *  says: a truncated or reshaped file reads as unreadable. */
+export function artifactRowIds(path: string = join(RESULTS_DIR, 'results.json')): string[] | undefined {
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return undefined;
+  }
+  try {
+    const KEY = Buffer.from('"id": "');
+    const QUOTE = 0x22;
+    const CHUNK = 1 << 20;
+    const KEEP = 4096;
+    const buf = Buffer.alloc(CHUNK + KEEP);
+    const ids: string[] = [];
+    let total: number | undefined;
+    let kept = 0;
+    let first = true;
+    for (;;) {
+      const n = readSync(fd, buf, kept, CHUNK, null);
+      const view = buf.subarray(0, kept + n);
+      if (first) {
+        const t = /"counts":\s*\{[^}]*?"total":\s*(\d+)/.exec(view.toString('utf8', 0, Math.min(view.length, KEEP)));
+        total = t ? Number(t[1]) : undefined;
+        first = false;
+      }
+      let done = 0;
+      for (let at = view.indexOf(KEY); at >= 0; at = view.indexOf(KEY, done)) {
+        const end = view.indexOf(QUOTE, at + KEY.length);
+        if (end < 0) {
+          break;
+        }
+        const id = view.toString('utf8', at + KEY.length, end);
+        // a row id has at least three `:`-separated segments (a REL row's has four)
+        if (/^[^:]+:.+:[^:]+$/.test(id)) {
+          ids.push(id);
+        }
+        done = end + 1;
+      }
+      if (n === 0) {
+        break;
+      }
+      // a key cut by the chunk edge is read whole next time; one already read is not read again
+      const from = Math.max(done, view.length - KEEP);
+      buf.copy(buf, 0, from, view.length);
+      kept = view.length - from;
+    }
+    return total !== undefined && ids.length === total ? ids : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -840,7 +1032,20 @@ export async function sweep(o: SweepOptions): Promise<number> {
 
   const { collect } = await import('./sweep-driver');
   const t0 = Date.now();
-  const head = await collect(REPO_ROOT, sel);
+  // A `--base` comparison lifts this tree in a child too, so this process holds records, never a
+  // pass's heap, while the base pass runs (`collectInChild`). `--repeat` stays in-process: its
+  // passes run one after the other here, and it is the in-process state it exists to test.
+  let head: SweepRecord[];
+  if (baseTree !== undefined && o.repeat === undefined) {
+    const mine = collectInChild(REPO_ROOT, sel, 'this tree');
+    if ('error' in mine) {
+      note(`asmlift: [sweep] ${mine.error}`);
+      return 2;
+    }
+    head = mine.records;
+  } else {
+    head = await collect(REPO_ROOT, sel);
+  }
   const secs = (t: number): string => ((Date.now() - t) / 1000).toFixed(1);
   const un = unmeasuredCounts(head);
   note(
@@ -892,7 +1097,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
 
   const dir = baseTree;
   const t1 = Date.now();
-  const base = collectBase(dir, sel);
+  const base = collectInChild(dir, sel, 'base');
   if ('error' in base) {
     note(`asmlift: [sweep] ${base.error}`);
     return 2;

@@ -20,6 +20,12 @@
 #
 # WORKERS. 3 by default (`VITEST_MAX_WORKERS` overrides; an explicit `--maxWorkers` in the args
 # wins) — docs/bench-cost.md §1 has what the root suite costs at that and at vitest's default.
+#
+# MEMORY. The admission check is not here: it is a globalSetup of both vitest configs
+# (vitest.memory-admission.ts), so it prices every way vitest starts — this gate, `pnpm test:offline`,
+# a one-file `pnpm exec vitest run` — and records the admitted run under vitest's own pid, which
+# lives exactly as long as the job. A refusal there starts no test; this gate then exits 2 with
+# the check's numbers above, as it does for any run that did not start.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2
@@ -51,6 +57,10 @@ fail() {
   exit 1
 }
 
+if [ -z "$files" ] && printf '%s\n' "$plain" | grep -q '\[memory admission\]'; then
+  echo "gate: FAIL — $what: not started, refused by the memory admission check above" >&2
+  exit 2
+fi
 [ -n "$files" ] || fail "no 'Test Files' summary line, so the run did not finish (exit $status)"
 case $files in *failed* | *skipped* | *todo*) fail "not every collected file passed" ;; esac
 case $tests in *failed* | *skipped* | *todo*) fail "not every collected test passed — a skip is a gate that did not run" ;; esac
