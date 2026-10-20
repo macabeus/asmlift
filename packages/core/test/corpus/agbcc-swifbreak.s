@@ -551,3 +551,203 @@ subret:
 	.word	gC
 .Lfe8:
 	.size	 subret,.Lfe8-subret
+	.align	2, 0
+	.globl	codebreak
+	.type	 codebreak,function
+	.thumb_func
+codebreak:
+	push	{r4, lr}
+	add	r4, r0, #0
+	add	r3, r1, #0
+	cmp	r4, #0x4
+	bhi	.L146	@cond_branch
+	lsl	r0, r4, #0x2
+	ldr	r1, .L156
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L157:
+	.align	2, 0
+.L156:
+	.word	.L154
+	.align	2, 0
+	.align	2, 0
+.L154:
+	.word	.L147
+	.word	.L148
+	.word	.L151
+	.word	.L152
+	.word	.L153
+.L147:
+	add	r0, r4, #0
+	bl	g
+	b	.L146
+.L148:
+	cmp	r3, #0
+	beq	.L149	@cond_branch
+	cmp	r2, #0
+	beq	.L150	@cond_branch
+	mov	r0, #0x7
+	bl	g
+	b	.L146
+.L150:
+	mov	r0, #0x1
+	bl	g
+.L149:
+	mov	r0, #0x2
+	bl	h
+.L151:
+	add	r0, r4, #0
+	bl	f
+	b	.L146
+.L152:
+	add	r0, r4, #0
+	bl	h
+	b	.L146
+.L153:
+	mov	r0, #0x1
+	bl	r
+.L146:
+	mov	r0, #0x0
+	bl	r
+	mov	r0, #0x0
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.Lfe9:
+	.size	 codebreak,.Lfe9-codebreak
+	.align	2, 0
+	.globl	retfall
+	.type	 retfall,function
+	.thumb_func
+retfall:
+	push	{r4, lr}
+	add	r4, r0, #0
+	add	r3, r1, #0
+	cmp	r4, #0x4
+	bhi	.L159	@cond_branch
+	lsl	r0, r4, #0x2
+	ldr	r1, .L171
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L172:
+	.align	2, 0
+.L171:
+	.word	.L168
+	.align	2, 0
+	.align	2, 0
+.L168:
+	.word	.L160
+	.word	.L161
+	.word	.L165
+	.word	.L166
+	.word	.L167
+.L160:
+	add	r0, r4, #0
+	bl	g
+	b	.L159
+.L161:
+	cmp	r3, #0
+	beq	.L162	@cond_branch
+	cmp	r2, #0
+	beq	.L163	@cond_branch
+	mov	r0, #0x3
+	b	.L170
+.L163:
+	mov	r0, #0x1
+	bl	g
+.L162:
+	ldr	r0, .L173
+	ldr	r0, [r0]
+	cmp	r0, #0
+	bne	.L159	@cond_branch
+	mov	r0, #0x2
+	bl	h
+.L165:
+	add	r0, r4, #0
+	bl	f
+	b	.L159
+.L174:
+	.align	2, 0
+.L173:
+	.word	gA
+.L166:
+	add	r0, r4, #0
+	bl	h
+	b	.L159
+.L167:
+	mov	r0, #0x1
+	bl	r
+.L159:
+	mov	r0, #0x0
+	bl	r
+	mov	r0, #0x0
+.L170:
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.Lfe10:
+	.size	 retfall,.Lfe10-retfall
+	.align	2, 0
+	.globl	closedbreak
+	.type	 closedbreak,function
+	.thumb_func
+closedbreak:
+	push	{r4, lr}
+	add	r3, r0, #0
+	add	r4, r1, #0
+	cmp	r3, #0x4
+	bhi	.L176	@cond_branch
+	lsl	r0, r3, #0x2
+	ldr	r1, .L186
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L187:
+	.align	2, 0
+.L186:
+	.word	.L184
+	.align	2, 0
+	.align	2, 0
+.L184:
+	.word	.L177
+	.word	.L178
+	.word	.L181
+	.word	.L182
+	.word	.L183
+.L177:
+	add	r0, r3, #0
+	bl	g
+	b	.L176
+.L178:
+	cmp	r4, #0
+	beq	.L179	@cond_branch
+	cmp	r2, #0
+	bne	.L176	@cond_branch
+	mov	r0, #0x1
+	bl	g
+.L179:
+	mov	r0, #0x2
+	bl	h
+	b	.L176
+.L181:
+	add	r0, r3, #0
+	bl	f
+	b	.L176
+.L182:
+	add	r0, r3, #0
+	bl	h
+	b	.L176
+.L183:
+	mov	r0, #0x1
+	bl	r
+.L176:
+	mov	r0, #0x0
+	bl	r
+	mov	r0, #0x0
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.Lfe11:
+	.size	 closedbreak,.Lfe11-closedbreak

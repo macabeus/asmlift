@@ -10,6 +10,9 @@
  * falls, and `intodefault` breaks or falls into the `default:` arm. `loopleave` and `subret` are
  * loops whose dispatch reaches code past the loop or past the loop bottom: their falling arms
  * cannot take a switch `break;`, so the tree goes to if-recovery, never to a loud refusal.
+ * `codebreak` and `retfall` leave a falling arm through a block of their own (code before the
+ * `break;`, a `return` through the shared epilogue), and `closedbreak` is a closed arm with a
+ * `break;` in its middle: each joins inside the arm rather than copying its tail.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -154,4 +157,43 @@ s32 subret(s32 i, s32 a, s32 b)
     }
     r(t);
     return t + u * 3;
+}
+
+s32 codebreak(s32 i, s32 a, s32 b)
+{
+    switch (i) {
+    case 0: g(i); break;
+    case 1: if (a) { if (b) { g(7); break; } g(1); } h(2);
+    case 2: f(i); break;
+    case 3: h(i); break;
+    case 4: r(1); break;
+    }
+    r(0);
+    return 0;
+}
+
+s32 retfall(s32 i, s32 a, s32 b)
+{
+    switch (i) {
+    case 0: g(i); break;
+    case 1: if (a) { if (b) return 3; g(1); } if (gA) break; h(2);
+    case 2: f(i); break;
+    case 3: h(i); break;
+    case 4: r(1); break;
+    }
+    r(0);
+    return 0;
+}
+
+s32 closedbreak(s32 i, s32 a, s32 b)
+{
+    switch (i) {
+    case 0: g(i); break;
+    case 1: if (a) { if (b) break; g(1); } h(2); break;
+    case 2: f(i); break;
+    case 3: h(i); break;
+    case 4: r(1); break;
+    }
+    r(0);
+    return 0;
 }

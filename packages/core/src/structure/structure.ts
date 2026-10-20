@@ -7136,8 +7136,29 @@ export function structure(
       n.ops[n.ops.length - 1].opcode === 'br' &&
       n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
       !(successorsOf(n)[0] === header && new Set(preds.get(n)?.filter((q) => body.has(q))).size > 1);
-    const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x));
     const exits = (n: Block): boolean => toExit !== null && successorsOf(n).includes(toExit);
+    // IN A FALLING ARM, A PATH THAT CANNOT FALL ENDS WHERE IT LEAVES THE FALLING PATHS. Deleting the
+    // edge to the merge or a `ret` covers only a jump straight off the branch (`if (b) break;`).
+    // When the leaving path runs code first — `if (b) { g(7); break; }`, or a `return k` through a
+    // shared epilogue — its block keeps no edge on, and a block with none is post-dominated only by
+    // itself, so the guard above it would find no join and copy the rest of the arm into both sides.
+    // Such a block is a jump all the same: an edge into a block that can no longer reach the
+    // fall-through is deleted too.
+    let falls: Set<Block> | null = null;
+    if (toExit !== null) {
+      const live = new Set<Block>();
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const n of body) {
+          if (!live.has(n) && (exits(n) || inBody(n).some((x) => live.has(x) && !ends(x)))) {
+            live.add(n);
+            grew = true;
+          }
+        }
+      }
+      falls = live;
+    }
+    const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x) && (falls === null || falls.has(x)));
     // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
     // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
     // to the header and to the ends are deleted, so its paths never end and post-dominance

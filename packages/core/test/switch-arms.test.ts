@@ -1582,11 +1582,26 @@ test('a switch-scoped `break;` inside a loop leaves the SWITCH, and the loop upd
 });
 
 test('an arm whose `then` breaks and whose `else` falls into the next case keeps both', () => {
+  // The `then` runs code before its `break;`, so its block can no longer fall: it is a jump, and
+  // the `else` is what the arm runs on with. `if (gA) { h(2); break; } g(3);` and the source's
+  // `… break; } else { g(3); }` compile to one object on agbcc, IDO, KMC gcc and mwcc.
   const out = ifBreakLift('elsearm');
-  expect(out).toMatch(
-    /if \(gA != 0\) \{\s*\n\s*h\(2\);\s*\n\s*break;\s*\n\s*\} else \{\s*\n\s*g\(3\);\s*\n\s*\}\s*\n\s*case 2:/,
-  );
+  expect(out).toMatch(/if \(gA != 0\) \{\s*\n\s*h\(2\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*g\(3\);\s*\n\s*case 2:/);
   expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('a falling arm that leaves through a block of its own still joins inside the arm', () => {
+  // `if (b) { g(7); break; }` and `if (b) return 3;` (through the shared epilogue) leave by a block
+  // that keeps no edge in the arm; read as an end of its own it left the guard above it no join,
+  // and `h(2)` was copied into both sides.
+  const cb = ifBreakLift('codebreak', { returns: 's32' });
+  expect(cb).toMatch(
+    /case 1:\s*\n\s*if \(a1 != 0\) \{\s*\n\s*if \(a2 != 0\) \{\s*\n\s*g\(7\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*h\(2\);\s*\n\s*case 2:/,
+  );
+  expect(count(cb, 'h(2)')).toBe(1);
+  const rf = ifBreakLift('retfall', { returns: 's32' });
+  expect(rf).toMatch(/if \(a2 != 0\) return 3;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*if \(gA != 0\) break;\s*\n\s*h\(2\);\s*\n\s*case 2:/);
+  expect(count(rf, 'h(2)')).toBe(1);
 });
 
 test('an arm that leaves its LOOP where the loop exit is the switch merge breaks the switch', () => {
