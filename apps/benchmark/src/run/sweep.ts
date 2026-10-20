@@ -393,7 +393,8 @@ export function selectsRow(
   if (!o.tiers.includes(project === 'synthetic' ? 'synthetic' : 'real')) {
     return false;
   }
-  if (o.project !== undefined && project !== 'synthetic' && project !== o.project) {
+  // an EMPTY `--project` filters nothing, as `cases/real.ts` reads it (`!filter.project`)
+  if (o.project && project !== 'synthetic' && project !== o.project) {
     return false;
   }
   return onlySelects(o.only, sym, aliases);
@@ -565,16 +566,13 @@ function collectInChild(
  *  most of the price — and `--compare` runs nothing. Nor does `--project` while the synthetic tier
  *  is swept: it narrows the real tier only (`selectsRow`), so `--project pokeemerald` lifts 1,950
  *  of 2,303 rows and peaked at 1.71 GB. Only `--only`, `--asm-dir`, or `--project` with `--tier
- *  real` scope a sweep. */
+ *  real` scope a sweep — and an EMPTY `--only=` or `--project=` scopes nothing: `collect` passes
+ *  each on only when it is non-empty (`sweep-driver.ts`), and `bench run`'s `tierIsFiltered` reads
+ *  them the same way, so `--only=` lifts the whole corpus and is whole here too. */
 export function sweepIsWholeCorpus(
   o: Pick<SweepOptions, 'tiers' | 'only' | 'project' | 'asmDir' | 'compare'>,
 ): boolean {
-  return (
-    o.compare === undefined &&
-    o.only === undefined &&
-    o.asmDir === undefined &&
-    (o.project === undefined || o.tiers.includes('synthetic'))
-  );
+  return o.compare === undefined && !o.only && o.asmDir === undefined && (!o.project || o.tiers.includes('synthetic'));
 }
 
 /** Where `sweepRequest` reads which rows a scoped selection names, each read only when the price
@@ -620,13 +618,13 @@ export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRI
       : 'one lift pass';
   let pass = whole;
   let what = `${passes} over the whole corpus (${gb(pass)})`;
-  if ((o.only !== undefined || o.project !== undefined) && o.asmDir === undefined) {
+  if ((o.only || o.project) && o.asmDir === undefined) {
     const parts: string[] = [];
     let synthetic = 0;
     // `--project` narrows the real tier only (`selectsRow`), so the synthetic tier is read in full
     // under it: whole, not a share — which is also what an unreadable artifact gives
     if (o.tiers.includes('synthetic')) {
-      const ids = o.only !== undefined ? rows.artifactIds() : undefined;
+      const ids = o.only ? rows.artifactIds() : undefined;
       if (ids === undefined || ids.length === 0) {
         synthetic = whole;
         parts.push('every synthetic row');
@@ -643,7 +641,7 @@ export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRI
       let projects: string[];
       try {
         projects =
-          o.only === undefined
+          !o.only
             ? [o.project!]
             : [
                 ...new Set(

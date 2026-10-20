@@ -831,6 +831,17 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(sweepIsWholeCorpus(o({ compare: ['a.json', 'b.json'] }))).toBe(false);
   });
 
+  it('reads an EMPTY --only= or --project= as no filter, as collect() and bench run do', () => {
+    // `--only=` lifted the whole corpus while it took only a job record and skipped the register
+    expect(sweepIsWholeCorpus(o({ only: '' }))).toBe(true);
+    expect(sweepIsWholeCorpus(o({ only: '', base: 'origin/main' }))).toBe(true);
+    expect(sweepIsWholeCorpus(o({ tiers: ['real'], project: '' }))).toBe(true);
+    expect(sweepRequest(o({ only: '', base: 'origin/main' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
+    expect(sweepRequest(o({ tiers: ['real'], project: '' }), rows)!.need).toContain('the whole corpus');
+    // and `--project=` keeps every real row, as `cases/real.ts` does
+    expect(selectsRow(o({ tiers: ['real'], project: '' }), 'pokeemerald:Baz:agbcc')).toBe(true);
+  });
+
   it('prices ONE pass, and with --base one pass plus the records: the two passes no longer share a process', () => {
     expect(sweepRequest(o(), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass);
     expect(sweepRequest(o({ base: 'origin/main' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
