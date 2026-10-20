@@ -2341,6 +2341,7 @@ function recoverJumpTable(
   nonWordData: Map<string, string>,
   blockLabels: Set<string>,
   aliasOf: ReadonlyMap<string, string>,
+  refused: (why: string) => void,
   longDefault?: string,
 ): JumpTable | null {
   // bounds: last two instrs are `cmp rX,#M` then the out-of-range guard, in one of two spellings.
@@ -2442,7 +2443,9 @@ function recoverJumpTable(
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {
     return null;
   }
-  if (dispatchExtraRefusal(extras, scrutReg, ldrV.ops[0], [idxReg, ptrReg, ldrV.ops[0]]) !== null) {
+  const extraRefusal = dispatchExtraRefusal(extras, ldrV.ops[0], [idxReg, ptrReg, ldrV.ops[0]]);
+  if (extraRefusal !== null) {
+    refused(extraRefusal);
     return null;
   }
 
@@ -2493,56 +2496,37 @@ function recoverJumpTable(
 // PRE (`insert_insn_end_bb`, gcse.c:4231-4236) places an expression a later block needs "just before
 // the tablejump" — thumb.md's `tablejump` is the `mov pc` alone, so after the load. They run on every
 // dispatch and on nothing else, so they stay in a block of their own between the bounds test and the
-// switch (`readThumbText`). PRE inserts `reg = expr` and nothing more, so the instructions accepted are
-// register computations and loads; anything else refuses:
-//   - a mnemonic outside DISPATCH_EXTRA_OPS: a store, a call, a transfer, a flag READ (`adc`/`sbc`);
-//   - a write to the loaded target (it is what `mov pc` jumps through), to the scrutinee (the switch
-//     reads it after them), or to sp/pc;
+// switch (`readThumbText`), which switches on the scrutinee as the dispatch's first instruction read
+// it (`lowerTerminator`). PRE inserts `reg = expr` and nothing more, so the instructions accepted are
+// the ones `mayWriteReg` knows write their first operand — the data-processing ops and the single
+// loads — less the two that read the carry; anything else refuses:
+//   - a store, a call, a transfer, a flag READ (`adc`/`sbc`), or any other mnemonic;
+//   - a write to the loaded target (it is what `mov pc` jumps through), or to sp/pc. A write to the
+//     scrutinee is admitted: the switch does not read it after the extras, and the case blocks read
+//     what the extras left there on the hardware too;
 //   - a read of a register the idiom wrote (index, table pointer, target) before an extra rewrote it:
 //     the idiom is not lifted, so such a read would see the value from before the dispatch.
-const DISPATCH_EXTRA_OPS = new Set([
-  'mov',
-  'add',
-  'sub',
-  'neg',
-  'mvn',
-  'lsl',
-  'lsr',
-  'asr',
-  'and',
-  'orr',
-  'eor',
-  'bic',
-  'mul',
-  'ldr',
-  'ldrb',
-  'ldrh',
-  'ldrsb',
-  'ldrsh',
-]);
-/** The two-operand forms that write their destination without reading it. */
-const DEST_ONLY_OPS = new Set(['mov', 'neg', 'mvn', 'ldr', 'ldrb', 'ldrh', 'ldrsb', 'ldrsh']);
+// The reason is returned so the decline can name it (`readThumbText`'s indirect-jump refusal).
+const READS_CARRY = /^(?:adc|sbc)s?$/;
+/** The forms that write their destination without reading it: a load, and the two-operand moves. */
+const DEST_ONLY = /^(?:mov|mvn|neg)s?$/;
 function dispatchExtraRefusal(
   extras: readonly Instr[],
-  scrutReg: string,
   targetReg: string,
   idiomRegs: readonly string[],
 ): string | null {
   const stale = new Set(idiomRegs);
   for (const ins of extras) {
-    const mn =
-      ins.mnemonic.endsWith('s') && DISPATCH_EXTRA_OPS.has(ins.mnemonic.slice(0, -1))
-        ? ins.mnemonic.slice(0, -1)
-        : ins.mnemonic;
-    const say = `'${ins.mnemonic} ${ins.ops.join(', ')}'`;
-    if (!DISPATCH_EXTRA_OPS.has(mn) || ins.ops.length < 2) {
+    const mn = ins.mnemonic;
+    const say = `'${mn} ${ins.ops.join(', ')}'`;
+    if (!(SINGLE_LOAD.test(mn) || WRITES_OPERAND_0.test(mn)) || READS_CARRY.test(mn) || ins.ops.length < 2) {
       return `${say} is not a register computation or a load`;
     }
     const dest = ins.ops[0];
-    if ([targetReg, scrutReg, 'sp', 'r13', 'pc', 'r15'].includes(dest)) {
-      return `${say} writes the dispatch's own register '${dest}'`;
+    if ([targetReg, 'sp', 'r13', 'pc', 'r15'].includes(dest)) {
+      return `${say} writes the register the dispatch needs, '${dest}'`;
     }
-    const reads = ins.ops.length > 2 || DEST_ONLY_OPS.has(mn) ? ins.ops.slice(1) : ins.ops;
+    const reads = ins.ops.length > 2 || SINGLE_LOAD.test(mn) || DEST_ONLY.test(mn) ? ins.ops.slice(1) : ins.ops;
     const read = [...stale].find((r) => mentionsReg({ ops: reads }, r));
     if (read !== undefined) {
       return `${say} reads '${read}', which the unlifted dispatch idiom wrote`;
@@ -3005,6 +2989,8 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     tables.set(own, jt);
     return true;
   };
+  // Why a dispatch's table was recognised and then refused, for the indirect-jump decline below.
+  const tableRefusals = new Map<AsmBlock, string>();
   rawBlocks.forEach((d, i) => {
     const last = d.instrs[d.instrs.length - 1];
     if (!last || last.mnemonic !== 'mov' || last.ops[0] !== 'pc' || last.ops[1] === 'lr') {
@@ -3015,7 +3001,9 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     // Direct form: the dispatch is reached ONLY by falling through from its bounds predecessor. A
     // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
     if (prev && refs === 0) {
-      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels, aliasOf);
+      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels, aliasOf, (why) =>
+        tableRefusals.set(d, why),
+      );
       if (jt && keepDispatch(d, jt)) {
         return;
       }
@@ -3033,7 +3021,16 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     const boundsB = rawBlocks[i - 2];
     const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
     if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
-      const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, aliasOf, prev.instrs[0].ops[0]);
+      const jt = recoverJumpTable(
+        boundsB,
+        d,
+        dataWords,
+        nonWordData,
+        blockLabels,
+        aliasOf,
+        (why) => tableRefusals.set(d, why),
+        prev.instrs[0].ops[0],
+      );
       if (jt && !keepDispatch(d, jt)) {
         tables.set(boundsB, jt);
         elided.add(d);
@@ -3042,6 +3039,22 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     }
   });
   const asmBlocks = rawBlocks.filter((b) => !elided.has(b)).map((b) => kept.get(b) ?? b);
+  // The branch counts above vouch that a recovered dispatch is entered only from its bounds test, but
+  // a TABLE entry is an edge too, and no table existed while they were counted — the rule MIPS and
+  // PowerPC check on their built CFG (jump-table.ts `refuseReachableDispatch`). An entry naming a
+  // dispatch block jumps through the code address the idiom loaded; a kept dispatch would instead
+  // switch again on the unscaled scrutinee, and an elided one names no block at all. Both decline.
+  const dispatchLabels = new Set([...elided, ...kept.keys()].map((b) => b.label));
+  for (const [at, t] of tables) {
+    const entered = [...t.caseLabels, t.defaultLabel].find((l) => dispatchLabels.has(l));
+    if (entered !== undefined) {
+      const movpc = rawBlocks.find((b) => b.label === entered)!.instrs.at(-1)!;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the recovered jump table's '${movpc.mnemonic} ${movpc.ops.join(', ')}' at '${entered}' ` +
+          `is still reachable — a case of the table dispatched at '${at.label}' enters its dispatch block past the bounds check`,
+      );
+    }
+  }
   // The far-jump lowering's last question, askable only now: a recovered table dispatching to the
   // entry would re-run the lr save after a relay clobbered lr (see `lowerFarJumpRelays`).
   const entryLabel = rawBlocks[0]?.label;
@@ -3091,9 +3104,12 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
         );
       }
       if (classifyXfer(ins) === 'indirect') {
+        const why = tableRefusals.get(ab);
+        const detail =
+          why === undefined ? '' : ` — this one is a jump table whose dispatch carries code it refuses: ${why}`;
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
-            `— jump tables / computed gotos / register tail calls not supported`,
+            `— jump tables / computed gotos / register tail calls not supported${detail}`,
         );
       }
       const callee = (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && ins.ops.length === 1 ? ins.ops[0] : undefined;
@@ -4926,9 +4942,11 @@ interface BlockCursor {
   pendingCmp: PendingCmp | null;
   noCmpWhy: string;
   consumed: Instr | null;
+  /** A kept jump-table dispatch's scrutinee, read at the block's entry (`lowerTerminator`). */
+  readonly dispatchScrutinee: Value | null;
 }
 
-function openBlockCursor({ target, cfg, ssa, flags, frame }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
+function openBlockCursor({ target, text, cfg, ssa, flags, frame }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
   const irb = ssa.irBlocks[bi];
   // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
   // judged by the in-block clear (`retireFlags`) exactly as one this block made itself would be: a
@@ -4945,7 +4963,9 @@ function openBlockCursor({ target, cfg, ssa, flags, frame }: ThumbFill, ab: AsmB
   // (`ThumbFrame.settledDepth`). Elsewhere a `[sp,#N]` access declines.
   const start = bi === 0 ? (cfg.preds[0].length > 0 ? null : 0) : frame.settledDepth;
   const walk = makeFrameWalk({ argRegs: target.argRegs, start });
-  return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null };
+  const jt = text.tables.get(ab);
+  const dispatchScrutinee = jt && jt.extras.length > 0 ? ssa.readVar(reg(jt.scrutReg), bi) : null;
+  return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null, dispatchScrutinee };
 }
 
 /** Fill block `bi`: lower each instruction in order, record what the block leaves in the flags,
@@ -5995,7 +6015,10 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
   if (jt) {
     // Regime B: the bounds block dispatches a `switch_br` over the scrutinee — N case blocks (values
     // 0..N-1, dense) followed by the default block (last successor). The `cmp`/`bhi` are subsumed.
-    pushSwitchBr(irb.ops, readVar(reg(jt.scrutReg), bi), [...jt.caseLabels.map(succ), succ(jt.defaultLabel)]);
+    // A kept dispatch (`JumpTable.extras`) switches on the scrutinee its block was entered with: the
+    // idiom read it first, and the extras after it may overwrite the register.
+    const scrut = cur.dispatchScrutinee ?? readVar(reg(jt.scrutReg), bi);
+    pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)]);
   } else if (!last) {
     // an EMPTY block is only ever the synthetic entry preheader (decoded blocks are non-empty):
     // fall through to the real entry, whose loop-header phis take their entry operand from here.

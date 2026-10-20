@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 282 distinct decline messages (the texts reached by
+// `packages/core/src` throws 283 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -527,7 +527,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // (`frontend/jump-table.ts`): a dispatch whose base some path does not bring, and a base read as
     // a value, are a recovered jump table the lift then refuses. So is a dispatch block the built
     // CFG still reaches (`refuseReachableDispatch`): a branch or a table case enters it past the
-    // bounds check.
+    // bounds check. Thumb words its own table-case check (`readThumbText`) the same way.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
@@ -831,9 +831,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // and so does the label, dispatch side first. Its first row is IDO's second table in one
     // function, read at `lw t9,32(at)` (`sw_jtloop2:ido7.1`), which the recognizer does not take.
     // Thumb's "indirect/computed jump … — jump tables / computed gotos / register tail calls" is the
-    // same refusal (`frontend/thumb.ts`), and its rows are agbcc's `mov pc, r0` dispatches the
-    // Thumb recognizer leaves unclaimed: `jt_pre_midg` (a guard between the bounds check and the
-    // table load) and `jt_dupdef` (a case label aliasing the default block). Thumb's other
+    // same refusal (`frontend/thumb.ts`): an agbcc `mov pc, r0` dispatch the Thumb recognizer leaves
+    // unclaimed, including one whose dispatch code between the table load and the `mov pc` it
+    // refuses (the message then names that instruction after the phrase). Thumb's other
     // "indirect/computed jump" throw is a return that does not jump through the caller's lr, which
     // is not a dispatch, so the Thumb half keys on the phrase only the dispatch refusal carries.
     key: 'indirect-jump',

@@ -281,6 +281,47 @@ test('dispatch code that is not a register computation, or that disturbs the dis
   expect(refused('\tadd\tsp, #0x8\n')).toThrow(jump); // moves the stack
   // reads the table pointer the unlifted idiom loaded into r1
   expect(refused('\tadd\tr2, r1, #0\n')).toThrow(jump);
+  // the decline names the reason the recognised table was refused, not "jump tables unsupported"
+  expect(refused('\tstr\tr3, [r2]\n')).toThrow(/'str r3, \[r2\]' is not a register computation or a load/);
+  expect(refused('\tadc\tr2, r3\n')).toThrow(/'adc r2, r3' is not a register computation/);
+  expect(refused('\tadd\tr2, r1, #0\n')).toThrow(
+    /'add r2, r1, #0' reads 'r1', which the unlifted dispatch idiom wrote/,
+  );
+  expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(/writes the register the dispatch needs, 'r0'/);
+});
+
+test('every data-processing op that writes only its destination is admitted, rotate included', () => {
+  // The admitted set is `mayWriteReg`'s operand-0 writers less the carry readers, so a mnemonic is
+  // corrected in one place: `ror` reads no flag and lifts like `lsl`.
+  expect(decompile('f', withExtra('\tror\tr2, r3\n'), ARMV4T_AGBCC).source).toContain('switch (a0)');
+});
+
+test('dispatch code may overwrite the scrutinee: the switch reads it as the dispatch was entered', () => {
+  // agbcc's own shape: the scrutinee r1 is also the table-pointer register, so the idiom has already
+  // overwritten it, and PRE then reuses r1 for its value. The cases read that value.
+  const asm =
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n` +
+    '\tadd\tr1, r3, #0\n\tsub\tr1, r1, #0x25\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n' +
+    '.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n.Lc0:\n\tadd\tr0, r1, #0\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n' +
+    '.Ldef:\n\tmov\tr0, r1\n\tbx\tlr\n';
+  const out = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a1)');
+  expect(out).toMatch(/case 0:\s*\n\s*return a3 - 37;/);
+  // the bounds test's default path never ran the dispatch: it returns the incoming scrutinee
+  expect(out).toMatch(/else \{\s*\n\s*return a1;/);
+});
+
+test('a table entry naming a dispatch block DECLINES — it jumps through a code address, not a case', () => {
+  // A table case is an edge the branch counts never saw. A kept dispatch would lift it as a second
+  // switch on the unscaled scrutinee (a `while (1)` re-dispatch); the asm jumps through r0, which
+  // then holds the table entry's code address.
+  const entering = (extra: string) =>
+    withExtra(extra)
+      .replace('\tbhi\t.Ldef\n', '\tbhi\t.Ldef\n.Ldisp:\n')
+      .replace('\t.word\t.Lc1\n', '\t.word\t.Ldisp\n');
+  const why = /the recovered jump table's 'mov pc, r0' at '\.Ldisp' is still reachable/;
+  expect(() => decompile('f', entering('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC)).toThrow(why);
+  expect(() => decompile('f', entering(''), ARMV4T_AGBCC)).toThrow(why);
 });
 
 test('a TABLE entry naming a label that shares its instruction dispatches to that instruction', () => {
