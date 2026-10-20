@@ -43,6 +43,7 @@
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
 // into the `default:` — refuse in `chainArms`, which answers null.
 import { globalBaseOf } from '../ir/alias';
+import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
   Block,
   CALL_RETURN_OBJECT,
@@ -2497,6 +2498,8 @@ export function structure(
     assertDefaultAccepts(fn, opts, hooks, memo);
   }
   const defs = defOpMap(fn);
+  // The word evaluator's view of `fn`, built at the first `neg_s` (no other rule asks it).
+  let wordCtx: WordCtx | undefined;
   const preds = predecessorBlocks(fn);
   const dom = dominators(fn);
   // --- loop discovery (ir/loops.ts): natural loops via dominator back-edges + the nesting forest ---
@@ -4619,6 +4622,37 @@ export function structure(
         l: { k: 'bin', op: near, l: x, r: n },
         r: { k: 'bin', op: far, l: x, r: w },
       };
+    }
+    if (d.opcode === 'neg_s') {
+      // The MATHEMATICAL negation (ir/opcodes.ts), so it must not be spelled over an unsigned 32-bit
+      // operand: `-(u32)b` wraps, and at b == 0x80000000 a signed compare reads `(s32)-b` as INT_MIN
+      // where the machine's sum was +2^31. Negating the operand as s32 instead is exact wherever C
+      // defines it — it is undefined at exactly that one input. The operand keeps its own spelling
+      // where it already renders signed (`renderedIntSignedness`, the rule the icmp_s* operand
+      // pin uses); a cast it did not need costs no byte.
+      //
+      // That one input is a value the operand MIGHT hold. An operand that ALWAYS holds it is a
+      // different thing: every call then lands on the undefined input, and the C a compiler makes
+      // of `-(s32)0x80000000` (INT_MIN again) is not the machine's +2^31. Whether it always does is
+      // what the compiler can FOLD, not which opcodes built it — a pool word, `1 << 31`, a
+      // `sub`/`orr`/`eor` of constants, a param both arms of a diamond set, a reload of a store
+      // nothing can have overwritten, a reload of memory this function wrote on every path through
+      // an address it cannot match — so the question goes to the shared word evaluator, and fails
+      // closed: a constant it cannot compute refuses too.
+      // An operand that is INT_MIN on some paths only still lifts; that is the "might hold" case.
+      // Only hand-written asm reaches the refusal — agbcc folds the negation of a constant.
+      const x = e(d.operands[0]);
+      wordCtx ??= {
+        defs,
+        incoming: incomingArgs(fn.blocks),
+        forwarded: storeForwards(fn.blocks),
+        overwritten: overwrittenReads(fn.blocks),
+      };
+      if (mayAlwaysHold(wordCtx, d.operands[0], 0x80000000)) {
+        return mkGap('the mathematical negation of the constant 0x80000000 has no int spelling', [x]);
+      }
+      const cast = needsIntSpelling(x) || renderedIntSignedness(x, vtEnv) !== true;
+      return { k: 'un', op: '-', e: cast ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);

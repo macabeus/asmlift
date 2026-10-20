@@ -314,7 +314,7 @@ describe('a pattern keyed on an English word claims sentences that are not about
     ],
     // `cross-block-flags` must not reach the bare headline `no reaching compare: `. Thumb
     // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
-    // inheritance model left over; flags written by arithmetic, by `tst`/`cmn` or by a call, which
+    // inheritance model left over; flags written by arithmetic, by `tst` or by a call, which
     // no edge model would move; and a block with no predecessor, where there is no edge to carry
     // anything. The arithmetic one has 97 sites in kleod's and sa3's hand-written asm and 2 in
     // their built `.s`, so filing it under a label that reads "across an edge" would send a roadmap
@@ -330,6 +330,13 @@ describe('a pattern keyed on an English word claims sentences that are not about
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
         "written by a call in 'f', over the compare that reached it, and only a compare's are modelled",
       'non-compare-flags',
+    ],
+    // A `cmn` is a compare, save for its carry, which refuses with a sentence of its own: a
+    // correct decline (agbcc miscompiles unsigned `a < -b`), not a flags model left unbuilt.
+    [
+      "lift: cannot lift 'cmn_ult': conditional branch 'bcs' tests the carry of a 'cmn', and the carry out " +
+        'of a + b is not a >=u -b (they differ at b == 0)',
+      'cmn-carry',
     ],
     // …INCLUDING when the writer is a block away, which is the shape that used to be filed as an
     // edge problem. The sentence the predecessor wrote is what crosses, so one gap reads the same
@@ -975,6 +982,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'far-jump',
     'fp-cond-branch',
     'loop-exit-values',
+    // `cmn_field`/`cmn_eq` MATCH on agbcc, and `cmn_ult` declines under `cmn-carry`. What is left
+    // (`tst`, arithmetic flags, a call) is hand-written asm.
+    'non-compare-flags',
     'pool-word-shape',
     'tu-scoped-name',
     'unread-data-directive',
@@ -1232,6 +1242,7 @@ describe('a class may not outlive the message it classifies', () => {
       'packages/core/src/frontend/thumb.ts',
     ],
     ['non-compare-flags', 'the flags it tests were written by ', 'packages/core/src/frontend/thumb.ts'],
+    ['cmn-carry', "tests the carry of a 'cmn'", 'packages/core/src/frontend/thumb.ts'],
     ['local-image', "reads the compiler's anonymous constant", 'packages/core/src/structure/structure.ts'],
     ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],

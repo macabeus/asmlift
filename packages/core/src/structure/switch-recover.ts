@@ -4,6 +4,7 @@
 // factory takes its dependencies EXPLICITLY (`SwitchRecoverDeps`); `expr`/`structureRegion` are
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
+import { constWord } from '../ir/bits';
 import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from '../ir/core';
 import { orderSensitive } from '../ir/discipline';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
@@ -427,75 +428,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // has declared that its layout answers it — which SPELLING the source wrote.
 
   // Fold a value that is a compile-time constant (a `const`, or a synthesized immediate like agbcc's
-  // `250 << 2` for a large sparse case) to a number — else null.
-  const evalConst = (v: Value): number | null => {
-    if (isNamed(v)) {
-      return null;
-    } // a named variable is not a constant
-    const d = defs.get(v);
-    if (!d) {
-      return null;
-    }
-    if (d.opcode === 'const') {
-      return (d.attrs.value as number) | 0;
-    }
-    // Resolve the two operands of a binary op to constants (2-operand → both; 1-operand → operand +
-    // `imm` attr, which MUST be present, else decline — a missing imm would wrongly fold `and x` to 0).
-    const operands2 = (): [number, number] | null => {
-      const a = evalConst(d.operands[0]);
-      if (a === null) {
-        return null;
-      }
-      let c: number | null;
-      if (d.operands.length === 2) {
-        c = evalConst(d.operands[1]);
-      } else if (typeof d.attrs.imm === 'number') {
-        c = d.attrs.imm | 0;
-      } else {
-        return null;
-      }
-      return c === null ? null : [a, c];
-    };
-    const bin = (f: (a: number, c: number) => number): number | null => {
-      const p = operands2();
-      return p === null ? null : f(p[0], p[1]) | 0;
-    };
-    const shift = (f: (a: number, c: number) => number): number | null => {
-      const p = operands2();
-      if (p === null || p[1] < 0 || p[1] >= 32) {
-        return null;
-      } // out-of-range shift amount → decline
-      return f(p[0], p[1]) | 0;
-    };
-    switch (d.opcode) {
-      case 'shl':
-        return shift((a, c) => a << c);
-      case 'shr_u':
-        return shift((a, c) => a >>> c);
-      case 'shr_s':
-        return shift((a, c) => a >> c);
-      case 'or':
-        return bin((a, c) => a | c);
-      case 'and':
-        return bin((a, c) => a & c);
-      case 'xor':
-        return bin((a, c) => a ^ c);
-      case 'add':
-        return bin((a, c) => a + c);
-      case 'sub':
-        return bin((a, c) => a - c);
-      case 'neg': {
-        const a = evalConst(d.operands[0]);
-        return a === null ? null : -a | 0;
-      }
-      case 'not': {
-        const a = evalConst(d.operands[0]);
-        return a === null ? null : ~a | 0;
-      }
-      default:
-        return null;
-    }
-  };
+  // `250 << 2` for a large sparse case) to a number — else null. The shared word evaluator
+  // (ir/bits.ts), which declines an opcode it has no rule for: a `neg_s` (Thumb `cmn` under a signed
+  // branch) is no word, so a guard against it is never read as a case bound. A named variable is
+  // not a constant, whatever set it.
+  const words = { defs, opaque: isNamed };
+  const evalConst = (v: Value): number | null => constWord(words, v);
 
   // TWO QUESTIONS about a block, asked separately because the answers diverge and the walk needs
   // both: WHAT does it test (`testInfo`), and may this recovery DISCARD it (`collapsible`)?

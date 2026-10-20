@@ -5,8 +5,17 @@
 // through emitted C, one wrong opcode reads as a wrong address in a row nobody is looking at.
 import { describe, expect, test } from 'vitest';
 
-import { type BitsCtx, constMask, provableBits } from '../src/ir/bits';
-import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
+import {
+  type BitsCtx,
+  type WordCtx,
+  constMask,
+  constWord,
+  mayAlwaysHold,
+  overwrittenReads,
+  provableBits,
+  storeForwards,
+} from '../src/ir/bits';
+import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 
 const v = (): Value => mkValue(T.s(32));
@@ -93,5 +102,414 @@ describe('constMask', () => {
     const defs = new Map<Value, Op>();
     expect(constMask(ctx(defs), def(defs, 'add', {}, [v(), v()]))).toBeNull();
     expect(constMask(ctx(defs), v())).toBeNull();
+  });
+});
+
+describe('constWord — the word a value always holds', () => {
+  const W = (defs: Map<Value, Op>, over: Partial<WordCtx> = {}): WordCtx => ({ defs, ...over });
+
+  test('a pool word, and a shifted `mov`, by an immediate or a register amount', () => {
+    const defs = new Map<Value, Op>();
+    expect(constWord(W(defs), def(defs, 'const', { value: 0x80000000 }))).toBe(-0x80000000);
+    const one = def(defs, 'const', { value: 1 });
+    expect(constWord(W(defs), def(defs, 'shl', { imm: 31 }, [one]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'shl', {}, [one, def(defs, 'const', { value: 4 })]))).toBe(16);
+  });
+
+  test('any integer arithmetic over words, by an immediate or a register operand', () => {
+    const defs = new Map<Value, Op>();
+    const k = (n: number) => def(defs, 'const', { value: n });
+    expect(constWord(W(defs), def(defs, 'sub', { imm: 1 }, [k(0x80000001)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'add', {}, [k(0x7fffffff), k(1)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'or', {}, [k(0x80000000), k(0)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'xor', {}, [k(0x80000000), k(0)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'mul', {}, [k(0x10000), k(0x8000)]))).toBe(-0x80000000);
+    expect(constWord(W(defs), def(defs, 'neg', {}, [k(0x80000000)]))).toBe(-0x80000000);
+  });
+
+  test('an annihilator holds its word whatever the other operand is', () => {
+    const defs = new Map<Value, Op>();
+    const x = v();
+    expect(constWord(W(defs), def(defs, 'and', {}, [x, def(defs, 'const', { value: 0 })]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'and', { imm: 0 }, [x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'or', {}, [def(defs, 'const', { value: -1 }), x]))).toBe(-1);
+    expect(constWord(W(defs), def(defs, 'sub', {}, [x, x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'xor', {}, [x, x]))).toBe(0);
+    expect(constWord(W(defs), def(defs, 'sub', {}, [x, v()]))).toBeNull();
+  });
+
+  test('reads through a materialized def, which constMask does not', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 7 });
+    expect(constMask(ctx(defs, { materialize: new Set([defs.get(k)!]) }), k)).toBeNull();
+    expect(constWord(W(defs), k)).toBe(7);
+  });
+
+  test('a variable anywhere in the chain is no word, and nor is a value the caller calls opaque', () => {
+    const defs = new Map<Value, Op>();
+    expect(constWord(W(defs), v())).toBeNull();
+    expect(constWord(W(defs), def(defs, 'shl', { imm: 1 }, [v()]))).toBeNull();
+    expect(constWord(W(defs), def(defs, 'add', {}, [def(defs, 'const', { value: 1 }), v()]))).toBeNull();
+    const k = def(defs, 'const', { value: 1 });
+    expect(constWord(W(defs, { opaque: (x) => x === k }), def(defs, 'shl', { imm: 3 }, [k]))).toBeNull();
+  });
+
+  test('the mathematical `neg_s` of INT_MIN is a constant and no word, so it MAY be any word', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const negS = def(defs, 'neg_s', {}, [k]);
+    expect(constWord(W(defs), negS)).toBeNull();
+    expect(mayAlwaysHold(W(defs), negS, 0x80000000)).toBe(true);
+    expect(constWord(W(defs), def(defs, 'neg_s', {}, [def(defs, 'const', { value: 5 })]))).toBe(-5);
+  });
+
+  test('an op it has no rule for is no word, but MAY be one', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const ext = def(defs, 'zext', { width: 16 }, [k]);
+    expect(constWord(W(defs), ext)).toBeNull();
+    expect(mayAlwaysHold(W(defs), ext, 0x80000000)).toBe(true);
+    // A register shift by 32 or more: Thumb gives 0, MIPS masks the amount to five bits.
+    const wide = def(defs, 'shl', {}, [def(defs, 'const', { value: 1 }), def(defs, 'const', { value: 32 })]);
+    expect(constWord(W(defs), wide)).toBeNull();
+    expect(mayAlwaysHold(W(defs), wide, 0x80000000)).toBe(true);
+    expect(mayAlwaysHold(W(defs), def(defs, 'add', {}, [k, v()]), 0x80000000)).toBe(false);
+    expect(mayAlwaysHold(W(defs), def(defs, 'const', { value: 5 }), 0x80000000)).toBe(false);
+  });
+
+  test('a block param holds a word every in-edge passes, itself included', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const k2 = def(defs, 'const', { value: 0x80000000 });
+    const join = v();
+    // A diamond whose two arms each load the pool word.
+    expect(constWord(W(defs, { incoming: new Map([[join, [k, k2]]]) }), join)).toBe(-0x80000000);
+    // A loop that passes the param back to itself keeps the word it entered with...
+    const inv = v();
+    expect(constWord(W(defs, { incoming: new Map([[inv, [k, inv]]]) }), inv)).toBe(-0x80000000);
+    // ...through a second param too...
+    const p = v();
+    const q = v();
+    const twoParams = new Map<Value, (Value | undefined)[]>([
+      [p, [k, q]],
+      [q, [p, q]],
+    ]);
+    expect(constWord(W(defs, { incoming: twoParams }), q)).toBe(-0x80000000);
+    // ...but a counter varies, and so do two arms that disagree or an edge that passes nothing.
+    const i = v();
+    const next = def(defs, 'add', { imm: 1 }, [i]);
+    expect(constWord(W(defs, { incoming: new Map([[i, [def(defs, 'const', { value: 0 }), next]]]) }), i)).toBeNull();
+    const split = v();
+    expect(
+      constWord(W(defs, { incoming: new Map([[split, [k, def(defs, 'const', { value: 5 })]]]) }), split),
+    ).toBeNull();
+    const short = v();
+    expect(constWord(W(defs, { incoming: new Map([[short, [k, undefined]]]) }), short)).toBeNull();
+    // A param nobody describes is an entry param: no word.
+    expect(constWord(W(defs), join)).toBeNull();
+  });
+
+  test('the params settle to the same words in either order', () => {
+    // p: [INT_MIN, p | (q & x)] and q: [0, q | q]. q is always 0, so `q & x` is 0 and p is always
+    // INT_MIN. Read before q settles, `q & x` must answer unseen, not VAR, or with p first p drops to
+    // VAR for good: mayAlwaysHold false, and the structurer's gap bypassed.
+    for (const pFirst of [true, false]) {
+      const defs = new Map<Value, Op>();
+      const p = v();
+      const q = v();
+      const pArgs = [
+        def(defs, 'const', { value: 0x80000000 }),
+        def(defs, 'or', {}, [p, def(defs, 'and', {}, [q, v()])]),
+      ];
+      const qArgs = [def(defs, 'const', { value: 0 }), def(defs, 'or', {}, [q, q])];
+      const incoming = new Map<Value, (Value | undefined)[]>(
+        pFirst
+          ? [
+              [p, pArgs],
+              [q, qArgs],
+            ]
+          : [
+              [q, qArgs],
+              [p, pArgs],
+            ],
+      );
+      expect(mayAlwaysHold(W(defs, { incoming }), p, 0x80000000)).toBe(true);
+      expect(constWord(W(defs, { incoming }), p)).toBe(-0x80000000);
+      expect(constWord(W(defs, { incoming }), q)).toBe(0);
+    }
+  });
+
+  test('a load reads the word a forwarded store wrote, and varies without one', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 0x80000000 });
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    expect(mayAlwaysHold(W(defs), load, 0x80000000)).toBe(false);
+    const forwarded = new Map([[defs.get(load)!, [k]]]);
+    expect(mayAlwaysHold(W(defs, { forwarded }), load, 0x80000000)).toBe(true);
+    expect(constWord(W(defs, { forwarded }), def(defs, 'or', { imm: 0 }, [load]))).toBe(-0x80000000);
+  });
+});
+
+describe('storeForwards — the store a load must read', () => {
+  const blk = (ops: Op[]): Block => ({ params: [], ops });
+  const k = (n: number) => {
+    const r = v();
+    return { r, op: mkOp('const', { results: [r], attrs: { value: n } }) };
+  };
+  const st = (base: Value, val: Value, off = 0, width = 4) =>
+    mkOp('store', { operands: [base, val], attrs: { off, width } });
+  const ld = (base: Value, off = 0, width = 4) =>
+    mkOp('load', { operands: [base], results: [v()], attrs: { off, width, signed: true } });
+  const ret = () => mkOp('ret', {});
+
+  test('the last store to the same address, with nothing between that writes memory', () => {
+    const base = v();
+    const c = k(5);
+    const l = ld(base);
+    expect(storeForwards([blk([c.op, st(base, c.r), l, ret()])]).get(l)).toEqual([c.r]);
+    const later = k(6);
+    const l2 = ld(base);
+    expect(storeForwards([blk([c.op, later.op, st(base, c.r), st(base, later.r), l2, ret()])]).get(l2)).toEqual([
+      later.r,
+    ]);
+  });
+
+  test('another address, another width, a store elsewhere or a call between: no forward', () => {
+    const base = v();
+    const c = k(5);
+    for (const [ops, l] of (() => {
+      const a = ld(base, 4);
+      const b = ld(base, 0, 2);
+      const d = ld(base);
+      const e = ld(base);
+      return [
+        [[st(base, c.r), a], a],
+        [[st(base, c.r), b], b],
+        [[st(base, c.r), st(v(), c.r), d], d],
+        [[st(base, c.r), mkOp('call', { operands: [], results: [v()], attrs: { target: 'g' } }), e], e],
+      ] as [Op[], Op][];
+    })()) {
+      expect(storeForwards([blk([c.op, ...ops, ret()])]).has(l)).toBe(false);
+    }
+  });
+
+  test("two `gaddr`s of one symbol are one base, and a block's only predecessor is every path", () => {
+    const g1 = v();
+    const g2 = v();
+    const c = k(5);
+    const l = ld(g2, 4);
+    const tail = blk([l, ret()]);
+    const head = blk([
+      c.op,
+      mkOp('gaddr', { results: [g1], attrs: { sym: 'gX' } }),
+      mkOp('gaddr', { results: [g2], attrs: { sym: 'gX' } }),
+      st(g1, c.r, 4),
+      mkOp('br', { successors: [{ block: tail, args: [] }] }),
+    ]);
+    expect(storeForwards([head, tail]).get(l)).toEqual([c.r]);
+    // A second way in is a path the store may not be on.
+    const other = blk([mkOp('br', { successors: [{ block: tail, args: [] }] })]);
+    const entry = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: head, args: [] },
+          { block: other, args: [] },
+        ],
+      }),
+    ]);
+    expect(storeForwards([entry, head, other, tail]).has(l)).toBe(false);
+  });
+
+  test('one cell however the address is spelled: a base held in another value, an addend in the pool word', () => {
+    // `str r1, [r3, #4]; add r2, r3, #4; ldr r2, [r2]` — and its mirror through `.word gX+4`.
+    const base = v();
+    const c = k(5);
+    const four = k(4);
+    const moved = v();
+    const l = ld(moved);
+    const ops = [c.op, four.op, st(base, c.r, 4), mkOp('add', { operands: [base, four.r], results: [moved] }), l];
+    expect(storeForwards([blk([...ops, ret()])]).get(l)).toEqual([c.r]);
+    const g1 = v();
+    const g2 = v();
+    const sum = v();
+    const lg = ld(g2, 4);
+    const gops = [
+      c.op,
+      four.op,
+      mkOp('gaddr', { results: [g1], attrs: { sym: 'gX' } }),
+      mkOp('add', { operands: [g1, four.r], results: [sum] }),
+      st(sum, c.r),
+      mkOp('gaddr', { results: [g2], attrs: { sym: 'gX' } }),
+      lg,
+    ];
+    expect(storeForwards([blk([...gops, ret()])]).get(lg)).toEqual([c.r]);
+    // `sub` of the same constant walks back to the root; a byte-overlapping narrow store forgets it.
+    const back = v();
+    const lb = ld(back, 4);
+    const subOps = [c.op, st(base, c.r, 4), mkOp('sub', { operands: [moved], results: [back], attrs: { imm: 4 } })];
+    expect(
+      storeForwards([
+        blk([four.op, mkOp('add', { operands: [base, four.r], results: [moved] }), ...subOps, lb, ret()]),
+      ]).get(lb),
+    ).toEqual([c.r]);
+    const lh = ld(base, 4);
+    expect(storeForwards([blk([c.op, st(base, c.r, 4), st(base, c.r, 6, 1), lh, ret()])]).has(lh)).toBe(false);
+    // A disjoint cell on the same root is no write to it.
+    const ld2 = ld(base, 4);
+    expect(storeForwards([blk([c.op, st(base, c.r, 4), st(base, c.r, 8), ld2, ret()])]).get(ld2)).toEqual([c.r]);
+  });
+
+  test('a join meets its in-edges, and a back edge that writes nothing keeps the word a loop entered with', () => {
+    const base = v();
+    const a = k(5);
+    const b = k(5);
+    const l = ld(base);
+    const join = blk([l, ret()]);
+    const br = (to: Block) => mkOp('br', { successors: [{ block: to, args: [] }] });
+    const left = blk([a.op, st(base, a.r), br(join)]);
+    const right = blk([b.op, st(base, b.r), br(join)]);
+    const head = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: left, args: [] },
+          { block: right, args: [] },
+        ],
+      }),
+    ]);
+    expect(storeForwards([head, left, right, join]).get(l)).toEqual([a.r, b.r]);
+    // One arm without the store: the join does not know the cell.
+    const l2 = ld(base);
+    const join2 = blk([l2, ret()]);
+    const left2 = blk([a.op, st(base, a.r), br(join2)]);
+    const head2 = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: left2, args: [] },
+          { block: join2, args: [] },
+        ],
+      }),
+    ]);
+    expect(storeForwards([head2, left2, join2]).has(l2)).toBe(false);
+
+    // entry: store; loop: reload, then back to itself or out.
+    const ll = ld(base);
+    const exitB = blk([ret()]);
+    const loop: Block = { params: [], ops: [] };
+    loop.ops.push(
+      ll,
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: loop, args: [] },
+          { block: exitB, args: [] },
+        ],
+      }),
+    );
+    const entry = blk([a.op, st(base, a.r), br(loop)]);
+    expect(storeForwards([entry, loop, exitB]).get(ll)).toEqual([a.r]);
+    // The body stores another value: the header reads either.
+    const lw = ld(base);
+    const other = v();
+    const loopW: Block = { params: [], ops: [] };
+    loopW.ops.push(
+      lw,
+      st(base, other),
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: loopW, args: [] },
+          { block: exitB, args: [] },
+        ],
+      }),
+    );
+    expect(storeForwards([blk([a.op, st(base, a.r), br(loopW)]), loopW, exitB]).get(lw)).toEqual([a.r, other]);
+    // The body calls out: the header knows nothing.
+    const lc = ld(base);
+    const loopC: Block = { params: [], ops: [] };
+    loopC.ops.push(
+      lc,
+      mkOp('call', { operands: [], results: [v()], attrs: { target: 'g' } }),
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: loopC, args: [] },
+          { block: exitB, args: [] },
+        ],
+      }),
+    );
+    expect(storeForwards([blk([a.op, st(base, a.r), br(loopC)]), loopC, exitB]).has(lc)).toBe(false);
+  });
+
+  test('a forwarded load is a loop-carried param: storing it back keeps the word it entered with', () => {
+    const defs = new Map<Value, Op>();
+    const m = def(defs, 'const', { value: 0x80000000 });
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    const forwarded = new Map([[defs.get(load)!, [m, load]]]);
+    expect(mayAlwaysHold({ defs, forwarded }, load, 0x80000000)).toBe(true);
+    // Stored back through an `or 0`, it still holds it; plus 1, it varies.
+    const or0 = def(defs, 'or', { imm: 0 }, [load]);
+    expect(mayAlwaysHold({ defs, forwarded: new Map([[defs.get(load)!, [m, or0]]]) }, load, 0x80000000)).toBe(true);
+    const inc = def(defs, 'add', { imm: 1 }, [load]);
+    expect(mayAlwaysHold({ defs, forwarded: new Map([[defs.get(load)!, [m, inc]]]) }, load, 0x80000000)).toBe(false);
+  });
+
+  test('a read every path reaches past a write that may land on it is a constant nobody can name', () => {
+    const base = v();
+    const c = k(0x80000000);
+    // Another root (a pointer that may be this one), an unknown cell, a call: overwritten.
+    for (const write of [st(v(), c.r), mkOp('astore', { operands: [base, v(), c.r], attrs: { elemSize: 4 } })]) {
+      const l = ld(base);
+      expect(overwrittenReads([blk([c.op, write, l, ret()])]).has(l)).toBe(true);
+    }
+    const al = mkOp('aload', { operands: [base, v()], results: [v()], attrs: { elemSize: 4, signed: true } });
+    expect(overwrittenReads([blk([c.op, st(base, c.r), al, ret()])]).has(al)).toBe(true);
+    // A disjoint cell on the same root, no write before it, or one path in without the write: the
+    // caller's memory, which varies.
+    const disjoint = ld(base, 4);
+    expect(overwrittenReads([blk([c.op, st(base, c.r), disjoint, ret()])]).has(disjoint)).toBe(false);
+    const first = ld(base);
+    expect(overwrittenReads([blk([first, st(base, c.r), ret()])]).has(first)).toBe(false);
+    const l = ld(base);
+    const join = blk([l, ret()]);
+    const left = blk([c.op, st(base, c.r), mkOp('br', { successors: [{ block: join, args: [] }] })]);
+    const head = blk([
+      mkOp('cond_br', {
+        operands: [v()],
+        successors: [
+          { block: left, args: [] },
+          { block: join, args: [] },
+        ],
+      }),
+    ]);
+    expect(overwrittenReads([head, left, join]).has(l)).toBe(false);
+    // A block the entry does not reach is no write-free way in, and no edge that empties memory.
+    const lj = ld(base);
+    const joinD = blk([lj, ret()]);
+    const brTo = () => mkOp('br', { successors: [{ block: joinD, args: [] }] });
+    const blocksD = [blk([c.op, st(base, c.r), st(v(), c.r), brTo()]), blk([brTo()]), joinD];
+    expect(overwrittenReads(blocksD).has(lj)).toBe(true);
+    const lf = ld(base);
+    const joinF = blk([lf, ret()]);
+    const toF = () => mkOp('br', { successors: [{ block: joinF, args: [] }] });
+    expect(storeForwards([blk([c.op, st(base, c.r), toF()]), blk([toF()]), joinF]).get(lf)).toEqual([c.r]);
+    // The structurer reads an overwritten load as a constant it cannot compute.
+    const defs = new Map<Value, Op>();
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    expect(mayAlwaysHold({ defs }, load, 0x80000000)).toBe(false);
+    expect(mayAlwaysHold({ defs, overwritten: new Set([defs.get(load)!]) }, load, 0x80000000)).toBe(true);
+  });
+
+  test('a load every path reaches with INT_MIN always holds it; one path with another word does not', () => {
+    const defs = new Map<Value, Op>();
+    const m1 = def(defs, 'const', { value: 0x80000000 });
+    const m2 = def(defs, 'shl', { imm: 31 }, [def(defs, 'const', { value: 1 })]);
+    const five = def(defs, 'const', { value: 5 });
+    const load = def(defs, 'load', { off: 0, width: 4, signed: true }, [v()]);
+    const at = (vals: Value[]): WordCtx => ({ defs, forwarded: new Map([[defs.get(load)!, vals]]) });
+    expect(mayAlwaysHold(at([m1, m2]), load, 0x80000000)).toBe(true);
+    expect(mayAlwaysHold(at([m1, five]), load, 0x80000000)).toBe(false);
   });
 });

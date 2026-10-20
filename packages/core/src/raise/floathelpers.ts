@@ -8,6 +8,7 @@
 // (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer
 // helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
 // as floats, which only data flow may justify — see the function below.
+import { constWord } from '../ir/bits';
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { type Opcode, fcmpOfTruth } from '../ir/opcodes';
@@ -125,17 +126,9 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
   // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
   // -255..-1 as `mov`+`neg` (thumb.md:88), so the high word of 2.0 reaches r3 as `0x80 << 23`. Its
-  // value, or undefined where `v` is no constant.
-  const wordOf = (v: Value): number | undefined => {
-    const d = def.get(v);
-    if (d?.opcode === 'const') {
-      return Number(d.attrs.value);
-    }
-    const shift = d?.opcode === 'shl' ? d.attrs.imm : undefined;
-    const w =
-      d?.operands.length === 1 && (d.opcode === 'neg' || typeof shift === 'number') ? wordOf(d.operands[0]) : undefined;
-    return w === undefined ? undefined : d!.opcode === 'neg' ? -w | 0 : (w << (shift as number)) | 0;
-  };
+  // value, or undefined where `v` is no constant — the shared word evaluator's answer (ir/bits.ts).
+  const words = { defs: def };
+  const wordOf = (v: Value): number | undefined => constWord(words, v) ?? undefined;
   // A LITERAL IS TWO CONSTANT WORDS, HIGH WORD FIRST on a target whose double crosses a call in
   // general words (`TargetDescription.doubleArgWords`) — the order that makes the long long naming
   // of the same pair another number. Its bits, or undefined where the pair is no literal, the target
