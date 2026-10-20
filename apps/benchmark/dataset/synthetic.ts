@@ -12385,13 +12385,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //   3. spillu8byte / spillu8word (sub_0800D188, sub_08016EEC; one site, instrumented on both). A
   //      `u8` local agbcc gives no register is promoted to SImode (thumb.h:344 PROMOTE_MODE), spilled
   //      as a word (reload1.c:2274 → `str`), and a QImode use of it is alter_subreg's `(mem:QI slot)`
-  //      (final.c:2153-2159 → `ldrb`), which Thumb addresses at a slot >= 0x20 only through a copy of
-  //      sp (thumb.h:884, :786): `add r3, sp, #0x28 / ldrb r3, [r3]`. The capture taints the slot, the
-  //      direct str/ldr fold into the same object, and frame-objects.ts `objectShapes` refuses the
-  //      widths (4 vs 1) — a decline, not the one-object fallback, because the frame also holds a
-  //      struct-return temp (a bounded escape, `chooseFrameModel`). spillu8word reads the slot back as
-  //      a word: MATCH. agbcc only: ido7.1 and gcc2.7.2kmc spill the u8 as a byte and mwcc_242_81
-  //      keeps it in r16, so none compiles the shape (all three lift both at the same score).
+  //      (final.c:2153-2159 → `ldrb`), which Thumb addresses only through a copy of sp (thumb.h:884,
+  //      :786): `add r3, sp, #0x28 / ldrb r3, [r3]`. That copy used to be a capture: it tainted the
+  //      slot, folded the direct str/ldr into the same object, and frame-objects.ts `objectShapes`
+  //      refused the widths (4 vs 1) — a decline rather than the one-object fallback, because the
+  //      frame also holds a struct-return temp. LIFTED since the Thumb frontend reads a narrow load at
+  //      a word slot's low-order bytes, through a copy that dies at it, as the slot narrowed
+  //      (thumb.ts `narrowSlotReloads`): MATCH. spillu8word reads the slot back as a word (control,
+  //      MATCH); spillu8half reads the u8's slot as a halfword (`mov r3, sp / ldrh r3, [r3, #0x28]`);
+  //      spillu8nosret has a scalar-returning callee instead, so nothing escapes and it used to lift as
+  //      one `u8 sp0[44]` that recompiles 114 lines off. agbcc only: ido7.1 and gcc2.7.2kmc spill the
+  //      u8 as a byte and mwcc_242_81 keeps it in r16, so none compiles the shape.
   //   4. bfstrad (SetUpRoomInfo). A u8 bitfield straddling a byte: agbcc packs bitfields contiguously
   //      (thumb.h has no PCC_BITFIELD_TYPE_MATTERS, stor-layout.c:404-405), so `c:7` sits in bits 5-11
   //      and is read as a HALFWORD (expmed.c:1153) beside the byte reads of `a` and `d`; the raise
@@ -12473,11 +12477,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //  13. spillhsret (sub_0803D4AC). A spilled local READ BACK NARROWER than it was stored, beside a
   //      struct-return temp: a promoted `u16` spilled as a word (a slot the SSA model keys) and reloaded
   //      `mov r2, sp / ldrh r2, [r2, #4]` because Thumb admits an sp-relative offset only at word size
-  //      (thumb.h:886-891) — an object of width 2 over the slot, "one byte, two models"
-  //      (`failIfSlotKeysIt`); the one-object answer is off because the hidden return pointer is an
-  //      escape. Word reload MATCHes. gcc2.7.2kmc MATCHes (control); ido7.1 and mwcc_242_81 lift the
-  //      row and its controls to one residual, off. The real function's by-value parameter read as
-  //      `ldrb` over its home is the same site and did not reproduce small. Instrument-pinned.
+  //      (thumb.h:886-891). It used to be an object of width 2 over the slot, "one byte, two models"
+  //      (`failIfSlotKeysIt`), with the one-object answer off because the hidden return pointer is an
+  //      escape. LIFTED by item 3's narrow slot reload: MATCH. spillhsword reloads the word (control,
+  //      MATCH). gcc2.7.2kmc MATCHes (control); ido7.1 and mwcc_242_81 lift the row and its controls
+  //      to one residual, off. The real function's by-value parameter read as `ldrb` over its home is
+  //      the same site and did not reproduce small. Instrument-pinned.
   //  14. sretloop2ret / sretloop1ret (sub_08014230), break_elsetail / break_noelsetail (TextBoxInit),
   //      retarm2_tail / retarm1_tail (sub_0801DFC4): one guard chain (`singleExit` → `foreverShape` →
   //      `onStack`, traced on all three), three cross-jumped exit shapes. sretloop2ret: the function's
