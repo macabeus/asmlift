@@ -92,7 +92,7 @@ export interface SwitchRecoverDeps {
  *  path to the merge in the middle of the arm as `break;` (`switchBreakAt`), in a closed arm as in a
  *  falling one: `case 1: if (a) { if (b) break; g(1); } h(2); break;`. A closed arm that leaves
  *  sideways, into a block the switch does not dominate, has none: its paths through such a block
- *  are not the arm's, and it structures to the CFG's joins as before. */
+ *  are not the arm's, and it structures to the CFG's joins. */
 export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
@@ -603,13 +603,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // and leaves for the loop's exit on a third path (a `goto out`, or a sibling that IS the exit, as
   // a `default: goto out;` makes it) would read as falling with `breaks`, Regime A would commit,
   // and the loop-exit refusal in `structure.ts` would fail the whole function where if-recovery
-  // spells it. Such an arm is `unstructurable`, exactly what it was before the switch-scoped
-  // `break;` existed. What counts is the block the refusal fires on (`breaksLoop`): the loop's own
-  // bottom test, reached after a `continue`, exits too but is the loop's condition, and a block
-  // that also edges to the merge is the switch's own end. Every other verdict reads as before: a
-  // falling arm into a sibling that returns is still a `switch`, and Regime B, which has no
-  // fallback, lifts a jump table whose arms share the rotated latch and its exit
-  // (`do { … switch … t++; } while (t < 15)`) by exactly that reading.
+  // spells it. So it is `unstructurable`. What counts is the block the refusal fires on
+  // (`breaksLoop`): the loop's own bottom test, reached after a `continue`, exits too but is the
+  // loop's condition, and a block that also edges to the merge is the switch's own end. Regime B,
+  // which has no fallback, does not ask: it lifts a jump table whose arms share the rotated latch
+  // and its exit (`do { … switch … t++; } while (t < 15)`).
   //
   // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
   // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
@@ -918,11 +916,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // this one costs nothing but the `switch` spelling.
     //
     // A falling arm that also breaks is admitted wherever it falls, the `default:` arm included:
-    // which arm it falls into is no fact about the compiler. On agbcc an if/else ladder and
-    // `case 3: case 5: if (c) { A; break; } default: B;` compile to one object
-    // (`synthetic:chainsense:agbcc` matches either way), while for `case 1: if (c) break; default:
-    // f(); break;` the ladder if-recovery writes copies `f()` into the arm and misses the object
-    // the `switch` reaches.
+    // for `case 1: if (c) break; default: f(); break;` the ladder if-recovery writes copies `f()`
+    // into the arm and misses the object the `switch` reaches.
     if (
       [...exitOf.values()].some(
         (e) => e.kind === 'unstructurable' || (e.kind === 'fallthrough' && !spellSwitchFallthrough),

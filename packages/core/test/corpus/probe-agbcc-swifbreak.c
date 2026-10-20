@@ -1,5 +1,5 @@
 /* A CASE BODY THAT BREAKS ON ONE PATH AND FALLS INTO THE NEXT CASE ON ANOTHER — the switch-scoped
- * `break;` both switch regimes now spell (switch-recover.ts `ArmExit`, structure.ts
+ * `break;` both switch regimes spell (switch-recover.ts `ArmExit`, structure.ts
  * `switchFrames`).
  *
  * `inloop` is the shape inside a loop, as Klonoa writes it: the `break;` must leave the SWITCH and

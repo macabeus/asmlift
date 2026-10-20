@@ -5634,7 +5634,8 @@ export function structure(
   const switchFrames: SwitchFrame[] = [];
   // Is `b` the merge of an arm with a region, reached before that arm's end, and may `break;` say so
   // from here? Undefined when no such arm ends at `b`. (At an arm's own end, `stop` is the merge and
-  // `structureRegion` returns before asking.) Throws when one does but a nested loop or switch would capture the statement.
+  // `structureRegion` returns before asking.) Throws when one does but a nested loop or switch would
+  // capture the statement.
   const switchBreakAt = (b: Block): Stmt[] | undefined => {
     let i = switchFrames.length - 1;
     while (i >= 0 && (switchFrames[i].region === null || switchFrames[i].merge !== b)) {
@@ -5684,7 +5685,7 @@ export function structure(
     // takes its own join only where the join is such a meeting point, two of the arm's blocks
     // entering it, or where the region being structured already ends INSIDE the arm (`stop` is one
     // of its blocks: an enclosing guard found such a tail, and a path to the merge from here jumps
-    // over it). Otherwise it reads the CFG, as it did before it had a region.
+    // over it). Otherwise it reads the CFG.
     if (
       f.fallsTo === null &&
       !(stop !== null && region.has(stop)) &&
@@ -5831,7 +5832,7 @@ export function structure(
   // One switch arm, from `entry` to `stop`, under its frame (`switchFrames`).
   const structureArm = (entry: Block, stop: Block | null, merge: Block | null, exit: ArmExit | undefined): Stmt[] => {
     // A backend with no mid-arm `break` (`spellSwitchBreak`) gets no region for a closed arm, and
-    // so no `break;` from `switchBreakAt` and no arm-local join: the CFG's, as before arms had one.
+    // so no `break;` from `switchBreakAt` and no arm-local join: it structures to the CFG's.
     const region =
       exit === undefined || exit.kind === 'unstructurable' || (exit.kind === 'break' && !spellSwitchBreak)
         ? null
@@ -6688,17 +6689,14 @@ export function structure(
     // unless an arm owns the edge or the exit ends in a `ret`: then if-recovery below copies the
     // exit's tail into the arm and returns.
     // Inside a switch arm opened in THIS loop (no loop entered since), C binds `break;` to the
-    // switch, so the loop's `break` cannot be spelled here. The arm reaches the loop's exit only
-    // where that exit is the switch's own merge (a block the switch does not dominate is refused by
-    // `analyzeArmExit` in both regimes): the code after the switch then IS the exit region, and the
-    // edge structures as any other edge to the merge — the arm's `break;` (`switchBreakAt`), or
-    // nothing in a closed arm, which stops there. An exit whose tail returns is copied into the arm
-    // (below). Any other exit is refused here, loud, rather than handed to the printer as a `break`
-    // it would rebind.
+    // switch, so the loop's `break` cannot be spelled here. An arm spells an edge to the loop's exit
+    // only where that exit is the switch's own merge: the code after the switch then IS the exit
+    // region, and the edge structures as any other edge to the merge — the arm's `break;`
+    // (`switchBreakAt`), or nothing in a closed arm, which stops there. An exit whose tail returns
+    // (or that an early-return arm owns) needs no `break`: if-recovery below copies the tail into the
+    // arm, as it does outside a switch when the break rule refuses. Any other exit is refused here,
+    // loud, rather than handed to the printer as a `break` it would rebind.
     if (loopCtx && loopCtx.breaks.has(b) && armCapturesBreak) {
-      // Where the exit ends in a `return` (or an early-return arm owns it), no `break` is needed:
-      // if-recovery below copies the exit's tail into the arm and returns there, as it does outside
-      // a switch when the break rule refuses. Only the remaining exits are refused.
       const exit = loopCtx.exit;
       const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
       if ((exit === null || armFrame!.merge !== exit) && !tailReturns) {

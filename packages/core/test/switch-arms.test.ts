@@ -1061,7 +1061,7 @@ test('a chain elsewhere does not delete the evidence for where `default:` was wr
 // comes back as if-nesting rather than as a `switch` that guesses. What the assertions read is that
 // the arm at the far end of the offending edge never gets a `case` label of the recovered switch,
 // and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling. One
-// shape here recovers now — a body reaching a sibling CASE and the switch's END, spelled with a
+// shape here recovers — a body reaching a sibling CASE and the switch's END, spelled with a
 // switch-scoped `break;` — and stays beside the near-miss it is told apart from.
 const threeCase = (c0: string, c1: string, c2: string) =>
   'f:\n' +
@@ -1105,7 +1105,7 @@ test('a body reaching TWO sibling arms declines — C fall-through reaches only 
 test('a body reaching a sibling CASE on one path and the switch END on another breaks on that path', () => {
   // `case 0: if (c) break; case 1: …` — the arm's own switch-scoped `break;` on the path to the
   // END, the fall-through on the other. Case 1 keeps its own label and is emitted once, where
-  // if-recovery would have had to copy it into case 0.
+  // if-recovery would copy it into case 0.
   const out = of(
     threeCase(
       '\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Lc1\n',
@@ -1119,8 +1119,8 @@ test('a body reaching a sibling CASE on one path and the switch END on another b
 });
 
 test('…and so does one that breaks or falls into the DEFAULT arm', () => {
-  // Where the arm falls is no fact about the compiler: `case 1: if (c) break; default: B;` is a
-  // `switch` as much as falling into a case is, and if-recovery would copy B into the arm.
+  // `case 1: if (c) break; default: B;` is a `switch` as much as falling into a case is, and
+  // if-recovery would copy B into the arm.
   const asm =
     'f:\n' +
     '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -1592,8 +1592,8 @@ test('an arm whose `then` breaks and whose `else` falls into the next case keeps
 
 test('a falling arm that leaves through a block of its own still joins inside the arm', () => {
   // `if (b) { g(7); break; }` and `if (b) return 3;` (through the shared epilogue) leave by a block
-  // that keeps no edge in the arm; read as an end of its own it left the guard above it no join,
-  // and `h(2)` was copied into both sides.
+  // that keeps no edge in the arm. Read as an end of its own, it would leave the guard above it no
+  // join and copy `h(2)` into both sides.
   const cb = ifBreakLift('codebreak', { returns: 's32' });
   expect(cb).toMatch(
     /case 1:\s*\n\s*if \(a1 != 0\) \{\s*\n\s*if \(a2 != 0\) \{\s*\n\s*g\(7\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*h\(2\);\s*\n\s*case 2:/,
