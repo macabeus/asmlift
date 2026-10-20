@@ -148,6 +148,8 @@ export interface MemoryReading {
   availableBytes: number;
   /** how that figure was arrived at, for the refusal text */
   how: string;
+  /** how many heavy jobs the register holds now; the refusal says to wait only when there is one */
+  registeredJobs?: number;
 }
 
 const GB = 1e9;
@@ -418,18 +420,22 @@ export interface AdmissibleDeps extends MemoryDeps {
 export function readAdmissibleMemory(deps: AdmissibleDeps = {}): MemoryReading {
   const raw = readAvailableMemory(deps);
   let promised: { bytes: number; jobs: number };
+  let registeredJobs = 0;
   try {
-    promised = unspentBudgets((deps.lockState ?? readBenchLock)(), deps.held);
+    const state = (deps.lockState ?? readBenchLock)();
+    registeredJobs = state.state === 'held' ? state.records.length : 0;
+    promised = unspentBudgets(state, deps.held);
   } catch {
     // an unreadable register is reported by `bench run`'s own lock path; here it promises nothing
     promised = { bytes: 0, jobs: 0 };
   }
   if (promised.bytes === 0) {
-    return raw;
+    return { ...raw, registeredJobs };
   }
   return {
     availableBytes: raw.availableBytes - promised.bytes,
     how: `${raw.how}, less ${gb(promised.bytes)} that ${promised.jobs} registered job${promised.jobs === 1 ? ' has' : 's have'} still to take`,
+    registeredJobs,
   };
 }
 
@@ -453,14 +459,20 @@ export function admissionVerdict(
   if (req.needBytes <= usable) {
     return undefined;
   }
+  const jobs = reading.registeredJobs ?? 0;
+  const next =
+    jobs > 0
+      ? `Wait for the ${jobs === 1 ? 'heavy job' : `${jobs} heavy jobs`} registered on this machine to finish ` +
+        '(`pnpm bench in-flight`)'
+      : 'No heavy job is registered on this machine, so what holds the memory is outside the bench register ' +
+        '(`ps -eo pid,rss,args --sort=-rss | head`); free it';
   return [
     `${req.command} REFUSED: it needs ~${gb(req.needBytes)} of memory at its peak (${req.need}),`,
     `and this machine has ${gb(Math.max(0, usable))} to give: ${reading.how}, less a ${gb(reserve)} reserve.`,
+    'A job started past what memory and swap can hold is not the one the kernel OOM killer picks:',
+    'it can take any process on the machine.',
     '',
-    'Starting it anyway is how the 2026-10-20 13:18 OOM happened: three heavy jobs, each sane alone,',
-    "and the kernel's OOM killer took the user's desktop session, not one of them.",
-    'Wait for the other heavy job on this machine to finish (`pnpm bench in-flight`; `ps -eo pid,rss,args',
-    '--sort=-rss | head`)' + (req.instead ? `, or ${req.instead}` : '') + '.',
+    next + (req.instead ? `, or ${req.instead}` : '') + '.',
     `If this reading is wrong for this host (a container reading the host's /proc/meminfo), ${ADMISSION_ENV}=off`,
     'skips the check and says so — never to run two heavy jobs at once.',
   ].join('\n');
@@ -516,7 +528,9 @@ export function vitestRequest(workers: number): AdmissionRequest {
     // A one-file run is priced at the workers it is GIVEN, not the file count: a vitest filter is a
     // substring, and one can name any number of files. So the advice is the worker count, which a
     // one-file run loses nothing by.
+    // `--maxWorkers` is what vitest reads; `VITEST_MAX_WORKERS` is read by `scripts/gate-vitest.sh`
+    // alone, so naming only it told a direct `vitest run` to change nothing.
     instead:
-      'run fewer workers (`VITEST_MAX_WORKERS=1`, or `--maxWorkers=1`; a run of one test file loses nothing by it)',
+      'run fewer workers: `--maxWorkers=1` (through `scripts/gate-vitest.sh`, `VITEST_MAX_WORKERS=1`); a run of one test file loses nothing by it',
   };
 }

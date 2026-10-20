@@ -251,6 +251,20 @@ describe('admissionVerdict', () => {
     expect(text).toContain('MemAvailable 4.0 GB');
     expect(text).toContain('scope it with `--only`');
     expect(text).toContain(`${ADMISSION_ENV}=off`);
+    // the rule and the numbers, not one host's incident
+    expect(text).not.toContain('13:18');
+    expect(text).not.toContain('desktop');
+  });
+
+  it('says to wait only when the register holds a heavy job', () => {
+    const solo = admissionVerdict(runRequest(3), { availableBytes: 4 * GB, how: 'x', registeredJobs: 0 })!;
+    expect(solo).not.toContain('Wait');
+    expect(solo).toContain('No heavy job is registered');
+    const beside = admissionVerdict(runRequest(3), { availableBytes: 4 * GB, how: 'x', registeredJobs: 2 })!;
+    expect(beside).toContain('Wait for the 2 heavy jobs registered on this machine');
+    expect(
+      admissionRefusal(runRequest(3), { ...linux(meminfo(100_000, 9975800)), lockState: freeRegister, env: {} }),
+    ).toContain('No heavy job is registered');
   });
 
   it('never prints a negative amount to give', () => {
@@ -329,7 +343,9 @@ describe('what a vitest run asks for (vitest.memory-admission.ts)', () => {
   });
 
   it('advises the worker count, the one thing that lowers its price — not the file count', () => {
-    expect(vitestRequest(3).instead).toContain('VITEST_MAX_WORKERS=1');
+    // vitest itself reads `--maxWorkers`; `VITEST_MAX_WORKERS` only through the gate script
+    expect(vitestRequest(3).instead).toContain('`--maxWorkers=1`');
+    expect(vitestRequest(3).instead).toContain('gate-vitest.sh');
     expect(vitestRequest(3).instead).not.toMatch(/^.*, or one test file$/);
   });
 });
