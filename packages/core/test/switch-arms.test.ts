@@ -1600,7 +1600,9 @@ test('a falling arm that leaves through a block of its own still joins inside th
   );
   expect(count(cb, 'h(2)')).toBe(1);
   const rf = ifBreakLift('retfall', { returns: 's32' });
-  expect(rf).toMatch(/if \(a2 != 0\) return 3;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*if \(gA != 0\) break;\s*\n\s*h\(2\);\s*\n\s*case 2:/);
+  expect(rf).toMatch(
+    /if \(a2 != 0\) return 3;\s*\n\s*g\(1\);\s*\n\s*\}\s*\n\s*if \(gA != 0\) break;\s*\n\s*h\(2\);\s*\n\s*case 2:/,
+  );
   expect(count(rf, 'h(2)')).toBe(1);
 });
 
@@ -1645,7 +1647,7 @@ test('a falling arm whose region leaves the loop the dispatch heads goes to if-r
   expect(out).toContain('return');
 });
 
-test("a sub-tree whose post-dominator lies past the loop bottom takes no arm `break;`", () => {
+test('a sub-tree whose post-dominator lies past the loop bottom takes no arm `break;`', () => {
   // In the loop body, the `case 17`/`case 3` sub-tree reaches both the latch and the early
   // `return t;`, so its post-dominator is the return block, past the region's end. An arm's path
   // there is a `return`, not a switch `break`.

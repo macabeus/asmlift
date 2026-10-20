@@ -856,10 +856,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // switch `break` while a sibling arm runs through the latch and back to the header, which
     // fails the whole function loud. Declined here, to if-recovery, which spells each edge as the
     // `return` or the fall to the loop bottom it is.
-    if (
-      [...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) &&
-      reachesAvoiding(b, stop, merge)
-    ) {
+    if ([...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.breaks) && reachesAvoiding(b, stop, merge)) {
       return null;
     }
 
