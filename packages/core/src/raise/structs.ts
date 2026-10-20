@@ -219,8 +219,8 @@ function buildStruct(name: string, accesses: Access[], extensionViews = true): I
     // extension, a silent wrong (`u16` read as `s16` sign-extends). It is the same overlap class as
     // two widths at one offset, so it goes the same way: `buildUnionStruct` declares the cell's two
     // views, a declared address keeps its per-access casts. A word has no extension to disagree on.
-    // `extensionViews` false asks only whether the BYTES lay out (the displaced fold's question:
-    // agbcc's `ldrsh` has no immediate form, so every signed halfword read is a displaced one).
+    // `extensionViews` false switches off this one overlap class and no other: a width overlap
+    // still throws (the displaced fold's no-layout gate, which says why it asks only this).
     if (extensionViews && seen !== undefined && a.signed !== seen && a.width < 4) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': the ${a.width}-byte cell at offset ${a.off} is loaded both sign- and zero-extended — unions not modelled`,
@@ -541,8 +541,16 @@ export const DISPLACED_ROOT_GATES: readonly Gate<DisplacedRoot>[] = [
     why: 'the accesses overlap or misalign, so no plain struct lays them out',
     sound: false,
     // A cell loaded with both extensions lays out: `recognizeStructs` gives it a view per extension
-    // once the fold has put its reads on one base. Not for an array-shaped set, which the fold
-    // types itself, as one plain struct.
+    // once the fold has put its reads on one base, and leaving the root unfolded would type the
+    // cell by its unfolded `ldrh` alone (agbcc's `ldrsh` has no immediate form, so every signed
+    // halfword read is a displaced one). Not for an array-shaped set, which the fold types itself,
+    // as one plain struct.
+    // RESIDUE, KNOWN AND CORRECT: a WIDTH overlap still rejects the root, though `recognizeStructs`
+    // would lay it out too (a union, or a `castViews` field). `ldrb [r0]` beside agbcc's
+    // `mov r3, #0; ldrsh [r0, r3]` keeps the halfword on its address, `*(s16 *)((u8 *)a0 + 0)`,
+    // which reads the right bytes with the right extension. Asking the union here instead is one
+    // layout function for both callers, and it moves rows on every toolchain, so it is its own
+    // measured change, not this gate's carve-out.
     rejects: ({ merged }) => {
       try {
         buildStruct('Struct', [...merged], isArray([...merged]));
