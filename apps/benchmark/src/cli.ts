@@ -722,6 +722,7 @@ switch (command) {
     // there; run/sweep.ts's header carries the SHAPE of the price.
     const { artifactRowIds, sweep, sweepIsWholeCorpus, sweepRequest } = await import('./run/sweep');
     const sweepOpts = {
+      tiers,
       ...(opts.only !== undefined ? { only: opts.only } : {}),
       ...(opts.project !== undefined ? { project: opts.project } : {}),
       ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
@@ -745,7 +746,15 @@ switch (command) {
         }
       }
     }
-    const sweepNeed = sweepRequest({ tiers, mapModes: [], ...sweepOpts, fan: opts.fan }, artifactRowIds());
+    const sweepNeed = sweepRequest(
+      {
+        mapModes: [],
+        ...sweepOpts,
+        fan: opts.fan,
+        ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
+      },
+      artifactRowIds(),
+    );
     admitOrExit(sweepNeed, 2);
     if (sweepIsWholeCorpus(sweepOpts) && !opts['no-lock']) {
       acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
@@ -757,7 +766,6 @@ switch (command) {
     }
     process.exit(
       await sweep({
-        tiers,
         ...sweepOpts,
         mapModes: opts['map-modes'].split(',').filter((a) => a !== ''),
         allowUnmeasured: opts['allow-unmeasured'],

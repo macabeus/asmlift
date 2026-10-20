@@ -371,6 +371,12 @@ export function recordedFans(): {
  *  is `synthetic`. Pass the row's `aliases`, or a renamed row reads as unselected here while
  *  `collect` sweeps it.
  *
+ *  `--project` narrows the REAL tier only, because that is all `collect` passes it to
+ *  (`realCases`): `--project sa3` with both tiers lifts every synthetic row too — 1,882 of the 1,932
+ *  it lifts on 2026-10-20. Reading `--project` as dropping the synthetic rows priced that sweep
+ *  at its 50 sa3 rows, 0.3 GB, against 0.56 GB measured, and `--project pokeemerald` at 0.3 GB
+ *  against 1.71 GB.
+ *
  *  Exported because it is what lets the `--fan` guard say how much of its own selection the
  *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
 export function selectsRow(
@@ -387,7 +393,7 @@ export function selectsRow(
   if (!o.tiers.includes(project === 'synthetic' ? 'synthetic' : 'real')) {
     return false;
   }
-  if (o.project !== undefined && project !== o.project) {
+  if (o.project !== undefined && project !== 'synthetic' && project !== o.project) {
     return false;
   }
   return onlySelects(o.only, sym, aliases);
@@ -554,23 +560,35 @@ function collectInChild(
   }
 }
 
-/** Does this sweep lift the WHOLE corpus? Then it takes a record in `run/lock.ts`'s register like a
+/** Does this sweep lift a WHOLE tier? Then it takes a sweep record in `run/lock.ts`'s register like a
  *  full `bench run`, and is refused beside one. `--tier` alone does not scope it — a whole tier is
- *  most of the price — and `--compare` runs nothing. */
-export function sweepIsWholeCorpus(o: Pick<SweepOptions, 'only' | 'project' | 'asmDir' | 'compare'>): boolean {
-  return o.compare === undefined && o.only === undefined && o.project === undefined && o.asmDir === undefined;
+ *  most of the price — and `--compare` runs nothing. Nor does `--project` while the synthetic tier
+ *  is swept: it narrows the real tier only (`selectsRow`), so `--project pokeemerald` lifts 1,950
+ *  of 2,303 rows and peaked at 1.71 GB. Only `--only`, `--asm-dir`, or `--project` with `--tier
+ *  real` scope a sweep. */
+export function sweepIsWholeCorpus(
+  o: Pick<SweepOptions, 'tiers' | 'only' | 'project' | 'asmDir' | 'compare'>,
+): boolean {
+  return (
+    o.compare === undefined &&
+    o.only === undefined &&
+    o.asmDir === undefined &&
+    (o.project === undefined || o.tiers.includes('synthetic'))
+  );
 }
 
 /** What this sweep asks `admission.ts` for, or undefined when it lifts nothing (`--compare`).
  *
  *  ONE PASS AT A TIME: the passes of `--base` run in children one after the other (`collectInChild`)
  *  and `--repeat`'s run in this process one after the other, so the peak is one pass plus the
- *  records already held. Those records are what `--base` adds: the parent holds both sides' while
- *  a child lifts, which is the measured difference between `sweepBase` and `sweepPass`. The
- *  whole-corpus figure is scaled by the share of the committed artifact's rows the selection
- *  names, and never priced below the measured one-row figure. Scaling linearly over-reads every scoped pass measured
- *  (docs/bench-cost.md §5), which is the direction to be wrong in; `--asm-dir` names no dataset row
- *  and is priced whole. `--fan` adds one row's enumeration, budgeted as `bench fan` is. */
+ *  records already held. Those records are what `--base` adds — the parent holds both sides' while
+ *  a child lifts, which is the measured difference between `sweepBase` and `sweepPass` — and what
+ *  `--repeat` adds: the first pass's records stay alive through every later pass, `sweepRepeat`.
+ *  The whole-corpus figure is scaled by the share of the committed artifact's rows the selection
+ *  names (`selectsRow`, which reads `--project` as `collect` does), and never priced below the
+ *  measured one-row figure; docs/bench-cost.md §5 has each figure against its price. `--asm-dir`
+ *  names no dataset row and is priced whole. `--fan` adds one row's enumeration, budgeted as
+ *  `bench fan` is. */
 export function sweepRequest(
   o: SweepOptions,
   artifactIds: readonly string[] | undefined,
@@ -580,11 +598,17 @@ export function sweepRequest(
   }
   const gb = (b: number): string => `${(b / 1e9).toFixed(1)} GB`;
   const based = o.base !== undefined || o.baseDir !== undefined;
-  const whole: number = based ? PEAK_BYTES.sweepBase : PEAK_BYTES.sweepPass;
-  const passes = based ? "one lift pass at a time, both sides' records held," : 'one lift pass';
+  const repeated = !based && o.repeat !== undefined;
+  const whole: number = based ? PEAK_BYTES.sweepBase : repeated ? PEAK_BYTES.sweepRepeat : PEAK_BYTES.sweepPass;
+  const passes = based
+    ? "one lift pass at a time, both sides' records held,"
+    : repeated
+      ? "one lift pass at a time, the first pass's records held,"
+      : 'one lift pass';
   let pass = whole;
   let what = `${passes} over the whole corpus (${gb(pass)})`;
-  if (!sweepIsWholeCorpus(o) && o.asmDir === undefined && artifactIds !== undefined && artifactIds.length > 0) {
+  const narrowed = o.only !== undefined || o.project !== undefined;
+  if (narrowed && o.asmDir === undefined && artifactIds !== undefined && artifactIds.length > 0) {
     const n = artifactIds.filter((id) => selectsRow(o, id)).length;
     pass = Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil((whole * n) / artifactIds.length));
     what = `${passes} over ${n} of ${artifactIds.length} rows (${gb(pass)})`;
@@ -594,7 +618,9 @@ export function sweepRequest(
     command: 'bench sweep',
     needBytes: pass + fan,
     need: fan > 0 ? `${what} + one row's enumeration (${gb(fan)})` : what,
-    instead: sweepIsWholeCorpus(o) ? 'scope it with `--only` or `--project`' : 'narrow the selection',
+    instead: sweepIsWholeCorpus(o)
+      ? 'scope it with `--only`, or `--project` with `--tier real`'
+      : 'narrow the selection',
   };
 }
 

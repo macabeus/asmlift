@@ -366,7 +366,8 @@ export function concurrentSweepRefusal(state: BenchLockState): string | undefine
     'sweep beside a `--jobs 3` run was two of the three jobs in the 2026-10-20 13:18 OOM, which took',
     "the user's desktop session down with them.",
     'Wait for it (`ls` the register; a dead pid there is stale and blocks nothing), or scope this',
-    'sweep with `--only` or `--project`: a scoped sweep takes no record and is not refused here.',
+    'sweep with `--only`, or `--project` with `--tier real` (`--project` alone still lifts every',
+    'synthetic row): a scoped sweep takes no record and is not refused here.',
     'If you have a reason to sweep anyway, `--no-lock` says so out loud and leaves every other',
     'record alone.',
   ].join('\n');

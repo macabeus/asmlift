@@ -80,6 +80,9 @@ export const PEAK_BYTES = {
   /** a whole-corpus `bench sweep --base`: one pass in a child while the parent holds both sides'
    *  records, measured 2.49 GB */
   sweepBase: 2.6e9,
+  /** a whole-corpus `bench sweep --repeat N`: every later pass in this process while the first
+   *  pass's records stay alive, measured 2.32 GB at `--repeat 2` */
+  sweepRepeat: 2.5e9,
   /** the floor of a SCOPED sweep's pass: one row measured 0.25 GB */
   sweepScopedPass: 0.3e9,
   /** one published repro script `bench fidelity` runs. The asmlift script re-ranks its row as a

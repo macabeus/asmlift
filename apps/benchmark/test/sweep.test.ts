@@ -636,6 +636,10 @@ describe('which rows a selection names', () => {
     expect(selectsRow({ tiers: ['real'] }, 'synthetic:mini:agbcc')).toBe(false);
     expect(selectsRow({ tiers: ['synthetic'] }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
     expect(selectsRow({ ...both, project: 'kleod' }, 'sa3:GetInput:agbcc')).toBe(false);
+    // `--project` narrows the REAL tier only: `collect` passes it to `realCases` alone, and lifts
+    // every synthetic row beside it while the synthetic tier is swept
+    expect(selectsRow({ ...both, project: 'kleod' }, 'synthetic:mini:agbcc')).toBe(true);
+    expect(selectsRow({ tiers: ['real'], project: 'kleod' }, 'synthetic:mini:agbcc')).toBe(false);
     expect(selectsRow({ ...both, only: 'Gems' }, 'kleod:CountCollectedGems:agbcc')).toBe(true);
     // the substring matches the SYM, not the project or the toolchain
     expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
@@ -802,11 +806,14 @@ describe('what a sweep asks the memory admission check for', () => {
     ...over,
   });
 
-  it('a sweep with no --only, --project, --asm-dir or --compare is whole-corpus — `--tier` alone does not scope it', () => {
+  it('a sweep with no --only, --asm-dir or --compare is whole-corpus — `--tier` alone does not scope it', () => {
     expect(sweepIsWholeCorpus(o())).toBe(true);
     expect(sweepIsWholeCorpus(o({ tiers: ['real'] }))).toBe(true);
     expect(sweepIsWholeCorpus(o({ only: 'add' }))).toBe(false);
-    expect(sweepIsWholeCorpus(o({ project: 'kleod' }))).toBe(false);
+    // `--project` lifts every synthetic row too unless the synthetic tier is left out: `--project
+    // pokeemerald` lifted 1,950 of 2,303 rows and peaked at 1.71 GB (docs/bench-cost.md §5)
+    expect(sweepIsWholeCorpus(o({ project: 'kleod' }))).toBe(true);
+    expect(sweepIsWholeCorpus(o({ tiers: ['real'], project: 'kleod' }))).toBe(false);
     expect(sweepIsWholeCorpus(o({ asmDir: '/x' }))).toBe(false);
     expect(sweepIsWholeCorpus(o({ compare: ['a.json', 'b.json'] }))).toBe(false);
   });
@@ -818,10 +825,23 @@ describe('what a sweep asks the memory admission check for', () => {
     expect(PEAK_BYTES.sweepBase).toBeLessThan(2 * PEAK_BYTES.sweepPass);
   });
 
+  it('prices --repeat as one pass plus the first pass’s records, which stay alive through the next', () => {
+    expect(sweepRequest(o({ repeat: 2 }), ids)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
+    expect(sweepRequest(o({ repeat: 5 }), ids)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
+    expect(PEAK_BYTES.sweepRepeat).toBeGreaterThan(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ only: 'add', repeat: 2 }), ids)!.needBytes).toBe(
+      Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepRepeat / 4)),
+    );
+  });
+
   it('scales a scoped pass by the share of the artifact it selects, never below the one-row figure', () => {
-    expect(sweepRequest(o({ project: 'kleod' }), ids)!.needBytes).toBe(
+    expect(sweepRequest(o({ tiers: ['real'], project: 'kleod' }), ids)!.needBytes).toBe(
       Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepPass / 4)),
     );
+    // with the synthetic tier swept, `--project` selects every synthetic row as well — the rows
+    // `collect` lifts, not the project's alone
+    expect(sweepRequest(o({ project: 'kleod' }), ids)!.need).toContain('3 of 4 rows');
+    expect(sweepRequest(o({ project: 'kleod' }), ids)!.needBytes).toBe(Math.ceil((PEAK_BYTES.sweepPass * 3) / 4));
     expect(sweepRequest(o({ only: 'add' }), ids)!.need).toContain('1 of 4 rows');
     expect(sweepRequest(o({ only: 'nothing-matches' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepScopedPass);
   });
