@@ -2273,7 +2273,8 @@ function poolNamesASymbol(
 // and its unique bounds predecessor `bounds` ending in `cmp rX,#(N-1); bhi DEF`, verify the exact
 // idiom and read the inline table — else return null (→ the indirect-jump loud-fail fires). The
 // recovered switch REPLACES both blocks: `bounds` emits a `switch_br` (scrutinee rX; successors =
-// case blocks + DEF).
+// case blocks + DEF) — unless the dispatch carries code of its own (`extras`), which keeps it as
+// the block that emits the switch, with the bounds test left as an ordinary branch.
 //
 //   bounds:  cmp rX,#(N-1); bhi DEF          disp: lsl rY,rX,#2 ; ldr rP,=PTR ; add rA,rY,rP
 //                                                  ; ldr rV,[rA] ; mov pc,rV
@@ -2647,14 +2648,15 @@ function liftOnce(
   return fn;
 }
 
-/** THE TEXT A LIFT READS: the decoded blocks with every recovered jump table's dispatch elided,
- *  and the data its pool loads read. Every control transfer the CFG cannot model is refused by the
+/** THE TEXT A LIFT READS: the decoded blocks with every recovered jump table's dispatch elided
+ *  or, where it carries code of its own, cut down to that code, and the data its pool loads read. Every control transfer the CFG cannot model is refused by the
  *  time this exists. */
 interface ThumbText {
   /** The blocks the CFG is built from — read by `thumbCfg` alone; every later stage indexes
    *  `ThumbCfg.asmBlocks`. */
   readonly blocks: readonly AsmBlock[];
-  /** A recovered jump table, by its bounds block. */
+  /** A recovered jump table, by the block that emits its switch: the bounds block, or a kept
+   *  dispatch block. */
   readonly tables: ReadonlyMap<AsmBlock, JumpTable>;
   readonly dataWords: ReadonlyMap<string, string[]>;
   readonly nonWordData: ReadonlyMap<string, string>;
@@ -2956,8 +2958,8 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
-  // dispatch block is ELIDED from the CFG. A `mov pc` that is NOT a recognised table falls through
-  // to the loud-fail below.
+  // dispatch block is ELIDED from the CFG — or kept, when it carries code (below). A `mov pc` that
+  // is NOT a recognised table falls through to the loud-fail below.
   const blockLabels = new Set(rawBlocks.map((b) => b.label));
   const poolNamesSymbols = poolNamesASymbol(dataWords, nonWordData, blockLabels);
   // Any label referenced as a branch target (so we can tell if an elided dispatch block has a SECOND
@@ -3079,7 +3081,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   // `ldmia rN!,{…,pc}` with rN≠sp) is a jump table / computed goto / register tail call — decode
   // ends the block at it, but it has no static successor, so it must be a catchable "out of scope"
   // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
-  // dispatch block is already elided above, so it is not scanned here.)
+  // dispatch block is already elided or cut to its extras above, so it is not scanned here.)
   //
   // The same rule for a `bl` whose target is inside this function's own text. agbcc relays a
   // conditional branch past Thumb's ±256-byte reach through an unconditional one, and past THAT
@@ -3195,8 +3197,9 @@ function buildCfg(
   const labelIndex = new Map<string, number>();
   blocks.forEach((b, i) => labelIndex.set(b.label, i));
   const succLabels: string[][] = blocks.map((b, i) => {
-    // A recovered jump-table BOUNDS block dispatches to its case blocks + default (the elided
-    // dispatch block's targets); its `bhi`/fall-through successors are replaced entirely.
+    // The block emitting a recovered table's switch dispatches to its case blocks + default. For a
+    // BOUNDS block (the dispatch elided) that replaces its `bhi`/fall-through successors entirely; a
+    // kept dispatch block had no static successor of its own.
     const jt = tables.get(b);
     if (jt) {
       return [...jt.caseLabels, jt.defaultLabel];

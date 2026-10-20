@@ -53,6 +53,15 @@ describe('readThumbText', () => {
     expect(text.tables.get(text.blocks[0])?.defaultLabel).toBe('.Ldef');
   });
 
+  test('keeps a dispatch carrying code as its own block, cut to that code, and keys the table to it', () => {
+    const text = readThumbText('f', SWITCH(DIRECT).replace('\tmov\tpc, r0\n', '\tadd\tr2, r3, #0\n\tmov\tpc, r0\n'));
+    const [bounds, disp] = text.blocks;
+    expect(bounds.instrs.map((i) => i.mnemonic)).toEqual(['cmp', 'bhi']);
+    expect(disp.instrs.map((i) => `${i.mnemonic} ${i.ops.join(', ')}`)).toEqual(['add r2, r3, #0']);
+    expect([...text.tables.keys()]).toEqual([disp]);
+    expect(text.tables.get(disp)?.extras).toBe(disp.instrs);
+  });
+
   test("keeps a long-jump form's `b DEF` block that a table entry names", () => {
     const named = SWITCH('\tcmp\tr1, #0x1\n\tbls\t.LCB\n.Lrelay:\n\tb\t.Ldef\n.LCB:\n').replace(
       '\t.word\t.Lc1\n',
