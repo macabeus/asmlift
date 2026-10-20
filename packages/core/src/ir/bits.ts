@@ -42,6 +42,37 @@ export function constMask(ctx: BitsCtx, v: Value): number | null {
   return null;
 }
 
+/** The 32-bit word a value ALWAYS holds, when the instructions computing it are constants all the
+ *  way down (a pool word, a `mov` and a shift of it), or null. Unlike `constMask` it reads THROUGH
+ *  a materialized def: it answers what the machine holds, not whether a spelling may fold it — a
+ *  named temp that always holds INT_MIN is INT_MIN at every use. Its reader is the structurer's
+ *  signed `neg`, whose mathematical negation has no `int` spelling at exactly one operand. */
+export function constWord(defs: Map<Value, Op>, v: Value): number | null {
+  const d = defs.get(v);
+  if (!d) {
+    return null;
+  }
+  if (d.opcode === 'const') {
+    return typeof d.attrs.value === 'number' ? (d.attrs.value as number) | 0 : null;
+  }
+  if ((d.opcode === 'neg' || d.opcode === 'not') && d.operands.length === 1) {
+    const a = constWord(defs, d.operands[0]);
+    return a === null ? null : (d.opcode === 'neg' ? -a : ~a) | 0;
+  }
+  if (d.opcode === 'shl') {
+    const a = d.operands.length >= 1 ? constWord(defs, d.operands[0]) : null;
+    const n =
+      d.operands.length === 2
+        ? constWord(defs, d.operands[1])
+        : typeof d.attrs.imm === 'number'
+          ? (d.attrs.imm as number)
+          : null;
+    // Thumb's register shift by 32 or more yields 0; JS would take the amount mod 32.
+    return a === null || n === null || n < 0 ? null : n >= 32 ? 0 : (a << n) | 0;
+  }
+  return null;
+}
+
 /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every answer
  *  below 32 comes from an instruction or from a caller's declaration-backed `bound`:
  *    · a zero-fill shift right by n leaves 32 - n;

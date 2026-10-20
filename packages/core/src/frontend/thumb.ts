@@ -19,7 +19,7 @@
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
 import { ownArgumentWordsOn } from '../aggregate';
-import { Block, Fn, Op, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type FnProto, type Prototypes, wordsOf } from '../proto';
@@ -397,11 +397,11 @@ const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12',
 type PendingCmp = {
   lhs: Value;
   rhs: Value;
-  /** The negation `lowerCmn` minted, when the flags came from `cmn rA, rB` rather than a `cmp`.
-   *  It travels with the compare, across an edge too (`inheritFlags` carries the record whole),
-   *  because the terminator is where it matters: a `cmn` is `cmp rA, -rB` for every flag but C,
-   *  and only a signed branch needs the negation to be a signed one. See `CMN_EXACT`. */
-  cmn?: Op;
+  /** The flags came from `cmn lhs, rhs`, which stands for `cmp lhs, -rhs`. Nothing is minted for
+   *  the negation until a branch reads it: the tag travels with the compare, across an edge too
+   *  (`inheritFlags` carries the record whole), and the terminator mints the `neg` in the READING
+   *  block with the attrs that branch needs, or refuses. See `CMN_EXACT`. */
+  cmn?: true;
 };
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
@@ -472,16 +472,24 @@ const FLAG_ONLY = new Set(['tst']);
 
 // The branches that read a `cmn`'s flags as the compare it stands for, and the sentence for the
 // ones that cannot. `cmn rA, rB` sets NZCV from rA + rB, and `cmp rA, -rB` from rA - (-rB):
-//   * N and Z come from the same 32-bit result, so `beq`/`bne` are exact for every input;
+//   * N and Z come from the same 32-bit result, so `beq`/`bne` read the WRAPPED a + b == 0, which
+//     the plain wrapping negation spells: exactly for an unsigned or narrower `b`, and for an `s32`
+//     one everywhere but b == INT_MIN, where C's `-b` overflows — the spelling every wrapping `neg`
+//     in this frontend already has;
 //   * V differs only at rB == INT_MIN, where cmn reports the true sign of rA + 2^31 and the
-//     compare's `-rB` wraps back to INT_MIN. C's `-b` is undefined there for a signed `b`, so the
-//     signed branches are exact for every input C defines — which holds only while the negation is
-//     a SIGNED one (the emitter's job, pinned by thumb-frontend.test.ts);
+//     compare's `-rB` wraps back to INT_MIN. The lift spells the negation SIGNED (the emitter's
+//     job, pinned by thumb-frontend.test.ts), so the C it prints differs from the bytes at that one
+//     input only, and there its `-b` is undefined. That is NOT "exact for every input the SOURCE
+//     defined": agbcc folds the defined `a > (int)(0u - b)` into `cmn; bgt` as well, and so
+//     miscompiles it at b == 0x80000000 exactly as it miscompiles `a < -b` below at b == 0. What
+//     the signed branches have and the carry ones lack is a C spelling that recompiles to the same
+//     bytes AND diverges from them only where it is itself undefined. When rB is the constant
+//     INT_MIN that one input is every input, and the structurer refuses (structure.ts, `neg`);
 //   * C is the carry out of rA + rB, which is NOT rA >=u -rB: at rB == 0 cmn's carry is clear and
 //     the compare's is set. agbcc folds unsigned `a < -b` into `cmn; bcs` regardless — it
 //     miscompiles at b == 0 — and the C that is exact there (`a + b >= a`) compiles to
-//     `add; cmp; bcc` instead. So no C spelling both matches the bytes and means what they do, and
-//     the unsigned branches refuse.
+//     `add; cmp; bcc` instead. Unsigned C defines every input, so no spelling both matches the
+//     bytes and leaves the divergence undefined, and the unsigned branches refuse.
 //     The refusal is spelt out at its throw in `lowerTerminator`, not held in a constant here: the
 //     decline taxonomy (apps/web declines.ts, `cmn-carry`) is checked against throw texts as written.
 const CMN_EXACT = new Set(['beq', 'bne', 'blt', 'ble', 'bgt', 'bge']);
@@ -5058,9 +5066,10 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
   lowerTerminator(fill, cur);
 }
 
-/** `cmn rA, rB` as the compare it stands for, `cmp rA, -rB`: the negation is minted here and the
- *  terminator decides which branches may read it (`CMN_EXACT`). Thumb-1 has register `cmn` only;
- *  any other shape takes the flags with nothing modelled, exactly as `tst` does. */
+/** `cmn rA, rB` as the compare it stands for, `cmp rA, -rB`: it records both registers' values and
+ *  the terminator mints the negation once it knows which branch reads it (`CMN_EXACT`). Thumb-1
+ *  encodes `cmn` on low registers only; hand-written text with any other operand takes the flags
+ *  with nothing modelled, exactly as `tst` does. */
 function lowerCmn(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { readData } = fill.operands;
   const [a, b] = ins.ops;
@@ -5071,12 +5080,9 @@ function lowerCmn(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     return;
   }
   const lhs = readData(reg(a), cur.bi);
-  const negated = readData(reg(b), cur.bi);
-  const rhs = mkValue(T.unk(32));
-  const cmn = mkOp('neg', { operands: [negated], results: [rhs] });
-  cur.irb.ops.push(cmn);
-  cur.pendingCmp = { lhs, rhs, cmn };
-  fill.flags.compared.add(lhs).add(negated);
+  const rhs = readData(reg(b), cur.bi);
+  cur.pendingCmp = { lhs, rhs, cmn: true };
+  fill.flags.compared.add(lhs).add(rhs);
 }
 
 /** What an instruction does to the flags the block holds: a writer retires the compare, and
@@ -5945,23 +5951,26 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
         `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare: ${cur.noCmpWhy}`,
       );
     }
-    const { cmn } = cur.pendingCmp;
-    if (cmn && !CMN_EXACT.has(last.mnemonic)) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': conditional branch '${last.mnemonic}' tests the carry of a 'cmn', and the carry ` +
-          'out of a + b is not a >=u -b (they differ at b == 0)',
-      );
-    }
-    // The signed branches read the TRUE sign of a + b, so the negation they compare against is the
-    // mathematical one (`neg`'s `signed`, ir/opcodes.ts). `beq`/`bne` read the wrapped sum, which
-    // the plain negation already spells exactly, with no input left undefined.
-    if (cmn && last.mnemonic !== 'beq' && last.mnemonic !== 'bne') {
-      cmn.attrs.signed = true;
+    const { lhs, cmn } = cur.pendingCmp;
+    let { rhs } = cur.pendingCmp;
+    if (cmn) {
+      if (!CMN_EXACT.has(last.mnemonic)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': conditional branch '${last.mnemonic}' tests the carry of a 'cmn', and the carry ` +
+            'out of a + b is not a >=u -b (they differ at b == 0)',
+        );
+      }
+      // The signed branches read the TRUE sign of a + b, so the negation they compare against is
+      // the mathematical one (`neg`'s `signed`, ir/opcodes.ts). `beq`/`bne` read the wrapped sum,
+      // which the plain wrapping negation spells (see `CMN_EXACT` for the one `s32` input it
+      // leaves undefined).
+      const negated = mkValue(T.unk(32));
+      const signed = last.mnemonic !== 'beq' && last.mnemonic !== 'bne';
+      irb.ops.push(mkOp('neg', { operands: [rhs], results: [negated], attrs: signed ? { signed: true } : {} }));
+      rhs = negated;
     }
     const cond = mkValue(T.unk(32));
-    irb.ops.push(
-      mkOp(COND_OPCODE[last.mnemonic], { operands: [cur.pendingCmp.lhs, cur.pendingCmp.rhs], results: [cond] }),
-    );
+    irb.ops.push(mkOp(COND_OPCODE[last.mnemonic], { operands: [lhs, rhs], results: [cond] }));
     irb.ops.push(
       mkOp('cond_br', { operands: [cond], successors: [succ(last.ops[0]), succ(fallLabel(cfg.asmBlocks, name, bi))] }),
     );

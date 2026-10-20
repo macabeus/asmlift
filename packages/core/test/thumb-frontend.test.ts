@@ -4981,7 +4981,7 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     expect(src).toContain('a0 <= -(s32)a1');
     expect(src).not.toContain('(s32)-');
     // …and only a SIGNED branch needs it: `beq`/`bne` read the wrapped sum, which the plain
-    // negation spells exactly, with no input left undefined.
+    // wrapping negation spells (undefined only for an `s32` operand at INT_MIN, as any `neg` is).
     expect(dc('f', `\tcmp\tr1, r2\n\tbhi\t.Ltrue\n\tcmn\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`).source).not.toContain(
       '-(s32)',
     );
@@ -4991,9 +4991,41 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     );
     // A halfword promotes to a signed int on its own: no cast (cmn_field's `-gMag`).
     expect(ifOf(dc('f', `\tldrh\tr1, [r1]\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`).source)).toBe('if (a0 <= -*a1) {');
+    // So do a literal that fits an int and a signed sum: one rule (`renderedIntSignedness`) with
+    // the signed compare's own operand pin.
+    expect(ifOf(dc('f', `\tmov\tr1, #5\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`).source)).toBe('if (a0 <= -5) {');
+    expect(ifOf(dc('f', `\tadd\tr1, r1, r2\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`).source)).toBe(
+      'if (a0 <= -(a1 + a2)) {',
+    );
     // A plain `neg` WRAPS on the machine, so `(s32)-` is its exact spelling and stays.
     expect(
       dc('f', `\tneg\tr1, r1\n\tcmp\tr1, r2\n\tbhi\t.Ltrue\n\tcmp\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`).source,
     ).not.toContain('-(s32)');
+  });
+
+  test('a signed branch over the CONSTANT INT_MIN refuses: its one undefined input is every input', () => {
+    // a0 + (-2^31) is never > 0, so `bgt` is never taken; `a0 <= -(s32)0x80000000` folds the
+    // negation back to INT_MIN and is false for every a0 but INT_MIN. agbcc folds the negation of
+    // a constant, so only hand-written asm reaches it — as a pool word or as a shifted `mov`.
+    const gap = 'the mathematical negation of the constant 0x80000000 has no int spelling';
+    expect(() => dc('f', `\tldr\tr1, .Lk\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}.Lk: .word 0x80000000\n`)).toThrow(gap);
+    expect(() => dc('f', `\tmov\tr1, #1\n\tlsl\tr1, r1, #31\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`)).toThrow(gap);
+    // …across the edge between the `cmn` and its branch too: the negation is minted where it is read.
+    expect(() =>
+      dc('f', `\tmov\tr1, #128\n\tlsl\tr1, r1, #24\n\tcmn\tr0, r1\n\tb\t.L2\n.L2:\n\tbgt\t.Ltrue\n${TAIL}`),
+    ).toThrow(gap);
+    // One past it negates to INT_MAX, which an int spells.
+    expect(ifOf(dc('f', `\tldr\tr1, .Lk\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}.Lk: .word 0x80000001\n`).source)).toBe(
+      'if (a0 <= -(s32)2147483649) {',
+    );
+    // `beq`/`bne` read the wrapped sum, which the wrapping negation of the same constant spells.
+    expect(() => dc('f', `\tmov\tr1, #1\n\tlsl\tr1, r1, #31\n\tcmn\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).not.toThrow();
+  });
+
+  test('a `cmn` the parser hands a non-register operand takes the flags unmodelled', () => {
+    // Thumb-1 has no such encoding, but the playground's text reaches the decoder unassembled.
+    expect(() => dc('f', `\tcmn\tr0, #5\n\tbgt\t.Ltrue\n${TAIL}`)).toThrow(
+      "the flags it tests were written by 'cmn' in 'f', and only a register 'cmn' is modelled",
+    );
   });
 });

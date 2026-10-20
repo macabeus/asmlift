@@ -5,7 +5,7 @@
 // through emitted C, one wrong opcode reads as a wrong address in a row nobody is looking at.
 import { describe, expect, test } from 'vitest';
 
-import { type BitsCtx, constMask, provableBits } from '../src/ir/bits';
+import { type BitsCtx, constMask, constWord, provableBits } from '../src/ir/bits';
 import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 
@@ -93,5 +93,31 @@ describe('constMask', () => {
     const defs = new Map<Value, Op>();
     expect(constMask(ctx(defs), def(defs, 'add', {}, [v(), v()]))).toBeNull();
     expect(constMask(ctx(defs), v())).toBeNull();
+  });
+});
+
+describe('constWord — the word a value always holds', () => {
+  test('a pool word, and a shifted `mov`, by an immediate or a register amount', () => {
+    const defs = new Map<Value, Op>();
+    expect(constWord(defs, def(defs, 'const', { value: 0x80000000 }))).toBe(-0x80000000);
+    const one = def(defs, 'const', { value: 1 });
+    expect(constWord(defs, def(defs, 'shl', { imm: 31 }, [one]))).toBe(-0x80000000);
+    expect(constWord(defs, def(defs, 'shl', {}, [one, def(defs, 'const', { value: 4 })]))).toBe(16);
+    // A Thumb register shift by 32 or more is 0, not JS's amount-mod-32.
+    expect(constWord(defs, def(defs, 'shl', {}, [one, def(defs, 'const', { value: 32 })]))).toBe(0);
+  });
+
+  test('reads through a materialized def, which constMask does not', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: 7 });
+    expect(constMask(ctx(defs, { materialize: new Set([defs.get(k)!]) }), k)).toBeNull();
+    expect(constWord(defs, k)).toBe(7);
+  });
+
+  test('a variable anywhere in the chain is no word', () => {
+    const defs = new Map<Value, Op>();
+    expect(constWord(defs, v())).toBeNull();
+    expect(constWord(defs, def(defs, 'shl', { imm: 1 }, [v()]))).toBeNull();
+    expect(constWord(defs, def(defs, 'add', {}, [def(defs, 'const', { value: 1 }), v()]))).toBeNull();
   });
 });
