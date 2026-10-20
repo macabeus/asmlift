@@ -5042,6 +5042,14 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `${top}\tldr\tr3, .Lg\n\tstr\tr1, [r3, #4]\n\tldr\tr2, [r3, #4]\n\tcmn\tr0, r2\n\tble\t.Ltrue\n${TAIL}.Lg: .word gX\n`,
       `${top}\tldr\tr3, .Lg\n\tstr\tr1, [r3]\n\tldr\tr3, .Lh\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tble\t.Ltrue\n${TAIL}.Lg: .word gX\n.Lh: .word gX\n`,
       `${top}\tstr\tr1, [r3]\n\tb\t.L2\n.L2:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      // …however the address is spelled: a base held in another register, an addend in the pool word.
+      `${top}\tstr\tr1, [r3, #4]\n\tadd\tr2, r3, #4\n\tldr\tr2, [r2]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tldr\tr2, .Lh\n\tstr\tr1, [r2]\n\tldr\tr3, .Lg\n\tldr\tr2, [r3, #4]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}.Lg: .word gX\n.Lh: .word gX+4\n`,
+      // …and over every path in: both arms of a diamond store it (one value, or two), or a store
+      // before a loop that writes nothing reaches the reload in its header.
+      `${top}\tcmp\tr2, #0\n\tbeq\t.La\n\tstr\tr1, [r3]\n\tb\t.Lj\n.La:\n\tstr\tr1, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tcmp\tr2, #0\n\tbeq\t.La\n\tstr\tr1, [r3]\n\tb\t.Lj\n.La:\n\tmov\tr4, #1\n\tlsl\tr4, r4, #31\n\tstr\tr4, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
       // A loop-invariant INT_MIN OR'd with `q & a0`, q a second invariant that is always 0 — in
       // either order the loop reads the two registers.
       ...[
@@ -5062,6 +5070,16 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     expect(
       dc('f', `${top}\tstr\tr1, [r3]\n\tstr\tr0, [r2]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`).source,
     ).toContain('<= -');
+    // A store on one arm only, another word on the other arm, a different cell, or a loop body
+    // that writes the cell: INT_MIN on some paths only, which lifts.
+    for (const body of [
+      `${top}\tcmp\tr2, #0\n\tbeq\t.Lj\n\tstr\tr1, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tmov\tr4, #5\n\tcmp\tr2, #0\n\tbeq\t.La\n\tstr\tr1, [r3]\n\tb\t.Lj\n.La:\n\tstr\tr4, [r3]\n.Lj:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3, #4]\n\tadd\tr2, r3, #8\n\tldr\tr2, [r2]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tstr\tr4, [r3]\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
+    ]) {
+      expect(dc('f', body).source).toContain('<= -');
+    }
     // A loop counter that starts at a constant varies, and lifts.
     expect(
       dc('f', `\tmov\tr1, #0\n.Ll:\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n\tadd\tr1, #1\n\tcmp\tr1, #9\n\tbne\t.Ll\n${TAIL}`)

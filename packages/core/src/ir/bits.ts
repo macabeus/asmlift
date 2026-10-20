@@ -53,11 +53,12 @@ export interface WordCtx {
   /** A value the caller says is no constant, whatever computes it: switch recovery's named
    *  variables, whose every use reads the variable rather than the expression that set it. */
   opaque?: (v: Value) => boolean;
-  /** A whole-word load -> the value the store it must read wrote (`storeForwards`). The machine
+  /** A whole-word load -> every value a store this function made may have left there, one per
+   *  path in (`storeForwards`), met like a block param's in-edges. The machine
    *  reads that word back unless the address is I/O, so only a reader that fails closed passes it:
    *  the structurer's `neg_s`, to whom a store and a reload of INT_MIN is INT_MIN as surely as a
    *  compiler that forwards the store makes it. Without it every load varies. */
-  forwarded?: ReadonlyMap<Op, Value>;
+  forwarded?: ReadonlyMap<Op, readonly Value[]>;
 }
 
 /** A value's word, over a lattice: not yet seen (`top`, a loop-carried param before its back
@@ -214,7 +215,7 @@ function evalWord(ctx: WordCtx, params: ReadonlyMap<Value, Word>, memo: Map<Valu
     d === undefined
       ? VAR
       : stored !== undefined
-        ? evalWord(ctx, params, memo, stored)
+        ? stored.reduce<Word>((w, x) => meet(w, evalWord(ctx, params, memo, x)), TOP)
         : opWord(d, (x) => evalWord(ctx, params, memo, x));
   memo.set(v, w);
   return w;
@@ -251,72 +252,184 @@ export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
   return x.k === 'konst' || (x.k === 'word' && x.w === (w | 0));
 }
 
-/** Whole-word load -> the value it must read, for `WordCtx.forwarded`: the last store before it
- *  to the SAME address (one base value, or two `gaddr`s of one symbol; the same `off`; both a whole
- *  word), with nothing between that could write memory. The walk goes back through the load's
- *  block and on into a block's only predecessor, which is every path into it; it stops at the
- *  first other op with effects (a store elsewhere may alias, a call may write anything), at a
- *  block with two in-edges or none, and at a block it has already seen. */
-export function storeForwards(blocks: readonly Block[]): Map<Op, Value> {
+/** Where an access lands, normalised: a ROOT (one SSA value, one symbol, or the absolute address
+ *  space) and a byte offset from it. `add`/`sub` of a constant move along the root, so a base held
+ *  in another register (`add r2, r3, #4`), an addend in the pool word (`.word gX+4`) and the same
+ *  offset carried by the access all name one cell. Two keys on one root overlap exactly when their
+ *  byte ranges do; keys on two roots are two pointers nothing here can tell apart. */
+interface Cell {
+  root: Value | string;
+  byte: number;
+  width: number;
+}
+
+function cellOf(defs: ReadonlyMap<Value, Op>, addr: Value, off: number, width: number): Cell {
+  let root: Value | string = addr;
+  let byte = off;
+  for (let hops = 0; hops < 64 && typeof root !== 'string'; hops++) {
+    const d = defs.get(root);
+    if (d === undefined) {
+      break;
+    }
+    if (d.opcode === 'gaddr') {
+      root = `sym:${d.attrs.sym as string}`;
+      break;
+    }
+    if (d.opcode === 'const' && typeof d.attrs.value === 'number') {
+      root = 'abs';
+      byte += d.attrs.value;
+      break;
+    }
+    const imm = typeof d.attrs.imm === 'number' ? d.attrs.imm : null;
+    if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 1 && imm !== null) {
+      root = d.operands[0];
+      byte += d.opcode === 'add' ? imm : -imm;
+      continue;
+    }
+    if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
+      const k = (v: Value): number | null => {
+        const c = defs.get(v);
+        return c?.opcode === 'const' && typeof c.attrs.value === 'number' ? c.attrs.value : null;
+      };
+      const [a, b] = d.operands;
+      if (k(b) !== null) {
+        root = a;
+        byte += d.opcode === 'add' ? k(b)! : -k(b)!;
+        continue;
+      }
+      if (d.opcode === 'add' && k(a) !== null) {
+        root = b;
+        byte += k(a)!;
+        continue;
+      }
+    }
+    break;
+  }
+  return { root, byte: byte | 0, width };
+}
+
+/** Whole-word load -> every value it may read, for `WordCtx.forwarded`: a forward MUST-analysis of
+ *  the words this function's own stores leave in memory. Each block starts from the meet of what
+ *  its predecessors leave — a cell survives a join only if every in-edge knows it, and then carries
+ *  each in-edge's stored value — and a predecessor not yet reached (a loop's back edge, on the
+ *  first pass) is optimistic and adds nothing, so a store before a loop that nothing in the loop
+ *  overwrites reaches a reload in its header. A store sets its cell and forgets every cell it may
+ *  overlap (any cell on another root, which may be the same memory); any other op with effects (a
+ *  call, an indexed store) forgets everything. A load is forwarded when every path into it knows
+ *  its cell, as a whole word; the entry block, and a block nothing reaches, know nothing. */
+export function storeForwards(blocks: readonly Block[]): Map<Op, Value[]> {
+  const defs = new Map<Value, Op>();
   const preds = new Map<Block, Block[]>();
   for (const b of blocks) {
     for (const op of b.ops) {
+      for (const r of op.results) {
+        defs.set(r, op);
+      }
       for (const s of op.successors) {
         preds.set(s.block, [...(preds.get(s.block) ?? []), b]);
       }
     }
   }
-  const baseOf = new Map<Value, Op>();
+  type Mem = Map<string, { cell: Cell; vals: Value[] }>;
+  const ids = new Map<Value, number>();
+  const keyOf = (c: Cell): string =>
+    `${typeof c.root === 'string' ? c.root : `v${ids.get(c.root) ?? ids.set(c.root, ids.size).get(c.root)!}`}@${c.byte}:${c.width}`;
+  const overlaps = (x: Cell, y: Cell): boolean =>
+    x.root !== y.root || (x.byte < y.byte + y.width && y.byte < x.byte + x.width);
+  const cells = new Map<Op, Cell>();
   for (const b of blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'gaddr' && op.results.length === 1) {
-        baseOf.set(op.results[0], op);
+      if ((op.opcode === 'load' || op.opcode === 'store') && typeof op.attrs.width === 'number') {
+        cells.set(op, cellOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0, op.attrs.width));
       }
     }
   }
-  const sameBase = (x: Value, y: Value): boolean => {
-    if (x === y) {
-      return true;
+  const out = new Map<Op, Value[]>();
+  // One pass over a block: from its entry state, record each whole-word load's forward (when
+  // `record`) and return its exit state.
+  const run = (b: Block, mem: Mem, record: boolean): Mem => {
+    const m: Mem = new Map(mem);
+    for (const op of b.ops) {
+      const cell = cells.get(op);
+      if (op.opcode === 'load') {
+        const known = cell === undefined || cell.width !== 4 ? undefined : m.get(keyOf(cell));
+        if (record && known !== undefined) {
+          out.set(op, known.vals);
+        }
+        continue;
+      }
+      if (op.opcode === 'store' && cell !== undefined) {
+        for (const [k, e] of m) {
+          if (overlaps(e.cell, cell)) {
+            m.delete(k);
+          }
+        }
+        m.set(keyOf(cell), { cell, vals: [op.operands[1]] });
+        continue;
+      }
+      const sig = (OPCODES as Record<string, OpSig | undefined>)[op.opcode];
+      if ((sig === undefined || sig.effects) && !sig?.terminator) {
+        m.clear();
+      }
     }
-    const gx = baseOf.get(x);
-    const gy = baseOf.get(y);
-    return gx !== undefined && gy !== undefined && JSON.stringify(gx.attrs) === JSON.stringify(gy.attrs);
+    return m;
   };
-  const out = new Map<Op, Value>();
-  for (const b of blocks) {
-    b.ops.forEach((load, at) => {
-      if (load.opcode !== 'load' || load.attrs.width !== 4) {
-        return;
+  const meetMem = (a: Mem, b: Mem): Mem => {
+    const m: Mem = new Map();
+    for (const [k, x] of a) {
+      const y = b.get(k);
+      if (y !== undefined) {
+        m.set(k, { cell: x.cell, vals: [...new Set([...x.vals, ...y.vals])] });
       }
-      const seen = new Set<Block>([b]);
-      let block = b;
-      let i = at - 1;
-      for (;;) {
-        for (; i >= 0; i--) {
-          const op = block.ops[i];
-          if (
-            op.opcode === 'store' &&
-            op.attrs.width === 4 &&
-            op.attrs.off === load.attrs.off &&
-            sameBase(op.operands[0], load.operands[0])
-          ) {
-            out.set(load, op.operands[1]);
-            return;
-          }
-          const sig = (OPCODES as Record<string, OpSig | undefined>)[op.opcode];
-          if ((sig === undefined || sig.effects) && !sig?.terminator) {
-            return;
-          }
-        }
-        const from = preds.get(block) ?? [];
-        if (from.length !== 1 || seen.has(from[0])) {
-          return;
-        }
-        block = from[0];
-        seen.add(block);
-        i = block.ops.length - 1;
-      }
+    }
+    return m;
+  };
+  const sameMem = (a: Mem, b: Mem): boolean =>
+    a.size === b.size &&
+    [...a].every(([k, x]) => {
+      const y = b.get(k);
+      return y !== undefined && y.vals.length === x.vals.length && x.vals.every((v) => y.vals.includes(v));
     });
+  // Exit states; a block absent from it is not reached yet (TOP). Cells only ever leave a state
+  // and values only ever join one, both finite, so this settles.
+  const exit = new Map<Block, Mem>();
+  const entryOf = (b: Block): Mem | undefined => {
+    const from = preds.get(b) ?? [];
+    if (b === blocks[0] || from.length === 0) {
+      return new Map();
+    }
+    let m: Mem | undefined;
+    for (const p of from) {
+      const e = exit.get(p);
+      if (e !== undefined) {
+        m = m === undefined ? e : meetMem(m, e);
+      }
+    }
+    return m;
+  };
+  for (let moved = true, round = 0; moved; round++) {
+    if (round > 4 * blocks.length + 64) {
+      throw new Error('storeForwards: memory states did not settle');
+    }
+    moved = false;
+    for (const b of blocks) {
+      const at = entryOf(b);
+      if (at === undefined) {
+        continue;
+      }
+      const e = run(b, at, false);
+      const old = exit.get(b);
+      if (old === undefined || !sameMem(old, e)) {
+        exit.set(b, e);
+        moved = true;
+      }
+    }
+  }
+  for (const b of blocks) {
+    const at = entryOf(b);
+    if (at !== undefined) {
+      run(b, at, true);
+    }
   }
   return out;
 }
