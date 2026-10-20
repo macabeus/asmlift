@@ -57,6 +57,7 @@ import { realRowIdentities } from '../cases/manifests';
 import { REPO_ROOT } from '../config';
 import { readWorktreeArtifact, rekeyToCurrent } from '../report/committed';
 import { TOOLCHAINS } from '../toolchains';
+import { type AdmissionRequest, PEAK_BYTES } from './admission';
 import { estimatedScoreTime, recordedRankRates, secondsPerCandidate } from './price';
 import { MAP_MODES, type SweepSelection, TREE_MODULES } from './sweep-driver';
 
@@ -519,8 +520,17 @@ function baseTreeRefusal(dir: string): string | undefined {
   return moduleFloorRefusal(dir);
 }
 
-function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[] } | { error: string } {
-  const out = join(tmpdir(), `asmlift-sweep-base-${process.pid}.json`);
+/** One tree's pass, run by the driver in a CHILD process, which hands back only its records. The base
+ *  side always runs this way (it needs that tree's modules); since 2026-10-20 the head side of a
+ *  `--base` comparison does too, so the two passes' heaps are never alive at once. Measured on the
+ *  whole corpus at 2e6ba81e: with the head pass in-process, its ~2 GB stayed live in the parent
+ *  through the base pass and the sweep peaked at ~4.1 GB; docs/bench-cost.md §5 has both figures. */
+function collectInChild(
+  dir: string,
+  sel: SweepSelection,
+  side: string,
+): { records: SweepRecord[] } | { error: string } {
+  const out = join(tmpdir(), `asmlift-sweep-${side === 'base' ? 'base' : 'head'}-${process.pid}.json`);
   const driver = join(import.meta.dirname, 'sweep-driver.ts');
   const tsx = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
   const r = spawnSync(tsx, [driver, dir, out, JSON.stringify(sel)], {
@@ -531,17 +541,64 @@ function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[]
   });
   if (r.status !== 0) {
     rmSync(out, { force: true });
-    return { error: `the base sweep exited ${r.status ?? 'on a signal'} — nothing was compared` };
+    return { error: `the ${side} sweep exited ${r.status ?? 'on a signal'} — nothing was compared` };
   }
   try {
     return { records: JSON.parse(readFileSync(out, 'utf8')) as SweepRecord[] };
   } catch (e) {
-    return { error: `the base sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
+    return { error: `the ${side} sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
   } finally {
     // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-base-
     // <pid>.json` per run is how a scratch directory becomes unreadable.
     rmSync(out, { force: true });
   }
+}
+
+/** Does this sweep lift the WHOLE corpus? Then it takes a record in `run/lock.ts`'s register like a
+ *  full `bench run`, and is refused beside one. `--tier` alone does not scope it — a whole tier is
+ *  most of the price — and `--compare` runs nothing. */
+export function sweepIsWholeCorpus(o: Pick<SweepOptions, 'only' | 'project' | 'asmDir' | 'compare'>): boolean {
+  return o.compare === undefined && o.only === undefined && o.project === undefined && o.asmDir === undefined;
+}
+
+/** What this sweep asks `admission.ts` for, or undefined when it lifts nothing (`--compare`).
+ *
+ *  ONE PASS AT A TIME: the passes of `--base` run in children one after the other (`collectInChild`)
+ *  and `--repeat`'s run in this process one after the other, so the peak is one pass plus the
+ *  records already held, which are small beside it. A pass is priced at the measured whole-corpus
+ *  figure, scaled by the share of the committed artifact's rows the selection names, and never
+ *  below the measured one-row figure. Scaling linearly over-reads every scoped pass measured
+ *  (docs/bench-cost.md §5), which is the direction to be wrong in; `--asm-dir` names no dataset row
+ *  and is priced whole. `--fan` adds one row's enumeration, budgeted as `bench fan` is. */
+export function sweepRequest(
+  o: SweepOptions,
+  artifactIds: readonly string[] | undefined,
+): AdmissionRequest | undefined {
+  if (o.compare !== undefined) {
+    return undefined;
+  }
+  const gb = (b: number): string => `${(b / 1e9).toFixed(1)} GB`;
+  let pass: number = PEAK_BYTES.sweepPass;
+  let what = `one lift pass over the whole corpus (${gb(pass)})`;
+  if (!sweepIsWholeCorpus(o) && o.asmDir === undefined && artifactIds !== undefined && artifactIds.length > 0) {
+    const n = artifactIds.filter((id) => selectsRow(o, id)).length;
+    pass = Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil((PEAK_BYTES.sweepPass * n) / artifactIds.length));
+    what = `one lift pass over ${n} of ${artifactIds.length} rows (${gb(pass)})`;
+  }
+  const fan = o.fan === true ? PEAK_BYTES.fan : 0;
+  return {
+    command: 'bench sweep',
+    needBytes: pass + fan,
+    need: fan > 0 ? `${what} + one row's enumeration (${gb(fan)})` : what,
+    instead: sweepIsWholeCorpus(o) ? 'scope it with `--only` or `--project`' : 'narrow the selection',
+  };
+}
+
+/** The row ids of this worktree's committed artifact, for `sweepRequest` to scale by; undefined
+ *  when it cannot be read, which prices the pass whole. */
+export function artifactRowIds(): string[] | undefined {
+  const { results } = readWorktreeArtifact();
+  return results?.map((r) => r.id);
 }
 
 /** Every way this command refuses to run, in one place and before anything is paid for. */
@@ -840,7 +897,20 @@ export async function sweep(o: SweepOptions): Promise<number> {
 
   const { collect } = await import('./sweep-driver');
   const t0 = Date.now();
-  const head = await collect(REPO_ROOT, sel);
+  // A `--base` comparison lifts this tree in a child too, so this process holds records, never a
+  // pass's heap, while the base pass runs (`collectInChild`). `--repeat` stays in-process: its
+  // passes run one after the other here, and it is the in-process state it exists to test.
+  let head: SweepRecord[];
+  if (baseTree !== undefined && o.repeat === undefined) {
+    const mine = collectInChild(REPO_ROOT, sel, 'this tree');
+    if ('error' in mine) {
+      note(`asmlift: [sweep] ${mine.error}`);
+      return 2;
+    }
+    head = mine.records;
+  } else {
+    head = await collect(REPO_ROOT, sel);
+  }
   const secs = (t: number): string => ((Date.now() - t) / 1000).toFixed(1);
   const un = unmeasuredCounts(head);
   note(
@@ -892,7 +962,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
 
   const dir = baseTree;
   const t1 = Date.now();
-  const base = collectBase(dir, sel);
+  const base = collectInChild(dir, sel, 'base');
   if ('error' in base) {
     note(`asmlift: [sweep] ${base.error}`);
     return 2;

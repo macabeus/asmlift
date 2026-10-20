@@ -24,9 +24,11 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import { rankOptionsFor } from '../src/eval/asmlift';
+import { PEAK_BYTES } from '../src/run/admission';
 import {
   FIELDS,
   SWEEP_FAN_LIMIT,
+  type SweepOptions,
   type SweepRecord,
   compareSweeps,
   fanGuard,
@@ -36,7 +38,9 @@ import {
   rekeyFans,
   renderDiff,
   selectsRow,
+  sweepIsWholeCorpus,
   sweepRefusal,
+  sweepRequest,
   unmeasuredCounts,
 } from '../src/run/sweep';
 import {
@@ -787,5 +791,46 @@ describe('a base that cannot be resolved is refused before the head sweep is pai
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('what a sweep asks the memory admission check for', () => {
+  const ids = ['synthetic:add:agbcc', 'synthetic:sub:agbcc', 'kleod:Foo:agbcc', 'sa3:Bar:agbcc'];
+  const o = (over: Partial<SweepOptions> = {}): SweepOptions => ({
+    tiers: ['synthetic', 'real'],
+    mapModes: ['harness', 'nomap'],
+    ...over,
+  });
+
+  it('a sweep with no --only, --project, --asm-dir or --compare is whole-corpus — `--tier` alone does not scope it', () => {
+    expect(sweepIsWholeCorpus(o())).toBe(true);
+    expect(sweepIsWholeCorpus(o({ tiers: ['real'] }))).toBe(true);
+    expect(sweepIsWholeCorpus(o({ only: 'add' }))).toBe(false);
+    expect(sweepIsWholeCorpus(o({ project: 'kleod' }))).toBe(false);
+    expect(sweepIsWholeCorpus(o({ asmDir: '/x' }))).toBe(false);
+    expect(sweepIsWholeCorpus(o({ compare: ['a.json', 'b.json'] }))).toBe(false);
+  });
+
+  it('prices ONE pass, with or without --base: the two passes no longer share a process', () => {
+    expect(sweepRequest(o(), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ base: 'origin/main' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+  });
+
+  it('scales a scoped pass by the share of the artifact it selects, never below the one-row figure', () => {
+    expect(sweepRequest(o({ project: 'kleod' }), ids)!.needBytes).toBe(
+      Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepPass / 4)),
+    );
+    expect(sweepRequest(o({ only: 'add' }), ids)!.need).toContain('1 of 4 rows');
+    expect(sweepRequest(o({ only: 'nothing-matches' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepScopedPass);
+  });
+
+  it('prices --asm-dir, and a scope over an unreadable artifact, as a whole pass', () => {
+    expect(sweepRequest(o({ asmDir: '/x', toolchain: 'agbcc' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ only: 'add' }), undefined)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+  });
+
+  it('adds one row’s enumeration for --fan, and asks for nothing on --compare', () => {
+    expect(sweepRequest(o({ fan: true }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass + PEAK_BYTES.fan);
+    expect(sweepRequest(o({ compare: ['a.json', 'b.json'] }), ids)).toBeUndefined();
   });
 });
