@@ -332,6 +332,16 @@ test('a table entry naming a dispatch block DECLINES — it jumps through a code
   expect(() => decompile('f', entering(''), ARMV4T_AGBCC)).toThrow(why);
 });
 
+test("a table entry naming the long-jump form's `b DEF` relay is an edge to the default", () => {
+  // The relay is not a dispatch block: entering it runs the default, with or without dispatch code.
+  const relay = (extra: string) =>
+    withExtra(extra)
+      .replace('\tbhi\t.Ldef\n', '\tbls\t.LCB\n.Lrelay:\n\tb\t.Ldef\n.LCB:\n')
+      .replace('\t.word\t.Lc1\n', '\t.word\t.Lrelay\n');
+  expect(decompile('f', relay(''), ARMV4T_AGBCC).source).toMatch(/case 1:\s*\n\s*default:\s*\n\s*return a2;/);
+  expect(decompile('f', relay('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC).source).toMatch(/case 1:\s*\n\s*a2 = a3;/);
+});
+
 test('a TABLE entry naming a label that shares its instruction dispatches to that instruction', () => {
   // jump.c cross-jumps a case arm identical to the default's onto the default's first instruction
   // and leaves the case label standing on it (`.Lc1:` `.Ldef:` `mov r0,#99`): the table names

@@ -2974,7 +2974,8 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     }
   }
   const tables = new Map<AsmBlock, JumpTable>(); // the block emitting the switch → recovered table
-  const elided = new Set<AsmBlock>(); // dispatch (and long-jump default) blocks removed from the CFG
+  const elided = new Set<AsmBlock>(); // dispatch blocks removed from the CFG
+  const relays = new Set<AsmBlock>(); // long-jump `b DEF` blocks removed with an elided dispatch
   // A dispatch carrying code of its own (`JumpTable.extras`) is not elided: it stays as the block the
   // bounds test leads to, holding only that code, and the switch is emitted from it. The bounds test
   // and the long-jump `b DEF` keep their ordinary edges, so the code runs on the dispatched path and
@@ -3014,10 +3015,12 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
       }
     }
     // Long-jump form: `bounds` (cmp; bls DISP), then a lone `b DEF` block, then the dispatch. The
-    // dispatch is entered by exactly that one `bls` and nothing else, and the `b DEF` block —
-    // synthetically labelled, so unnameable and unreachable once the bounds block dispatches — is
-    // elided WITH it. Leaving it would make it a parameterless predecessor of the default block,
-    // and wiring a phi through it fabricates an entry parameter (the phantom-param miscompile).
+    // dispatch is entered by exactly that one `bls` and nothing else. When the dispatch is elided,
+    // the `b DEF` block — named by no branch, so unreachable once the bounds block dispatches — is
+    // elided WITH it unless a table entry names it. Leaving an unreachable one would make it a
+    // parameterless predecessor of the default block, and wiring a phi through it fabricates an
+    // entry parameter (the phantom-param miscompile). A kept dispatch keeps it as the bounds test's
+    // fall-through.
     const boundsB = rawBlocks[i - 2];
     const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
     if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
@@ -3034,11 +3037,16 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
       if (jt && !keepDispatch(d, jt)) {
         tables.set(boundsB, jt);
         elided.add(d);
-        elided.add(prev);
+        relays.add(prev);
       }
     }
   });
-  const asmBlocks = rawBlocks.filter((b) => !elided.has(b)).map((b) => kept.get(b) ?? b);
+  // A table entry naming a relay is an edge to the default through it, so that relay stays: it is
+  // reachable, and the kept form's relay is the same block.
+  const named = new Set([...tables.values()].flatMap((t) => [...t.caseLabels, t.defaultLabel]));
+  const asmBlocks = rawBlocks
+    .filter((b) => !elided.has(b) && !(relays.has(b) && !named.has(b.label)))
+    .map((b) => kept.get(b) ?? b);
   // The branch counts above vouch that a recovered dispatch is entered only from its bounds test, but
   // a TABLE entry is an edge too, and no table existed while they were counted — the rule MIPS and
   // PowerPC check on their built CFG (jump-table.ts `refuseReachableDispatch`). An entry naming a

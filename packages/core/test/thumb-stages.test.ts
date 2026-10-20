@@ -53,6 +53,14 @@ describe('readThumbText', () => {
     expect(text.tables.get(text.blocks[0])?.defaultLabel).toBe('.Ldef');
   });
 
+  test("keeps a long-jump form's `b DEF` block that a table entry names", () => {
+    const named = SWITCH('\tcmp\tr1, #0x1\n\tbls\t.LCB\n.Lrelay:\n\tb\t.Ldef\n.LCB:\n').replace(
+      '\t.word\t.Lc1\n',
+      '\t.word\t.Lrelay\n',
+    );
+    expect(labels(readThumbText('f', named).blocks)).toEqual(['f', '.Lrelay', '.Lc0', '.Lc1', '.Ldef']);
+  });
+
   test('refuses a `mov pc` it recovers no table from', () => {
     // the pool word the dispatch loads is an unrelated global, not the table
     expect(() => readThumbText('f', SWITCH(DIRECT, '.Lp:\n\t.word\tgOther\n'))).toThrow(/indirect\/computed jump/);
