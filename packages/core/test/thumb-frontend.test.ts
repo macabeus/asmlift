@@ -5036,10 +5036,32 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `\tmov\tr2, #0\n\tand\tr1, r2\n\tmov\tr2, #1\n\tlsl\tr2, r2, #31\n\torr\tr1, r2\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}`,
       // A block param both arms of a diamond set to the pool word.
       `\tcmp\tr2, #0\n\tbeq\t.La\n\tldr\tr1, .Lk\n\tb\t.Lj\n.La:\n\tldr\tr1, .Lk\n.Lj:\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n${TAIL}.Lk: .word 0x80000000\n`,
+      // A reload of a store nothing can have overwritten: agbcc forwards the store, through a
+      // pointer, a global (one pool word or two), or across an edge that is the only way in.
+      `${top}\tstr\tr1, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      `${top}\tldr\tr3, .Lg\n\tstr\tr1, [r3, #4]\n\tldr\tr2, [r3, #4]\n\tcmn\tr0, r2\n\tble\t.Ltrue\n${TAIL}.Lg: .word gX\n`,
+      `${top}\tldr\tr3, .Lg\n\tstr\tr1, [r3]\n\tldr\tr3, .Lh\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tble\t.Ltrue\n${TAIL}.Lg: .word gX\n.Lh: .word gX\n`,
+      `${top}\tstr\tr1, [r3]\n\tb\t.L2\n.L2:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
+      // A loop-invariant INT_MIN OR'd with `q & a0`, q a second invariant that is always 0 — in
+      // either order the loop reads the two registers.
+      ...[
+        '\tmov\tr5, r1\n\tmov\tr3, r2\n\tand\tr3, r0\n\torr\tr5, r3\n\tmov\tr1, r5\n\torr\tr2, r2\n',
+        '\torr\tr2, r2\n\tmov\tr5, r1\n\tmov\tr3, r2\n\tand\tr3, r0\n\torr\tr5, r3\n\tmov\tr1, r5\n',
+      ].map(
+        (body) =>
+          `\tldr\tr1, .Lk\n\tmov\tr2, #0\n\tmov\tr4, #0\n.Ll:\n${body}\tcmn\tr0, r1\n\tbgt\t.Ltrue\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}.Lk: .word 0x80000000\n`,
+      ),
     ];
     for (const body of bodies) {
       expect(() => dc('f', body)).toThrow(gap);
     }
+    // A reload of a store of 5, or of a store something may have overwritten since, lifts.
+    expect(
+      ifOf(dc('f', `\tmov\tr1, #5\n\tstr\tr1, [r3]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`).source),
+    ).toBe('if (a0 <= -*a3) {');
+    expect(
+      dc('f', `${top}\tstr\tr1, [r3]\n\tstr\tr0, [r2]\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`).source,
+    ).toContain('<= -');
     // A loop counter that starts at a constant varies, and lifts.
     expect(
       dc('f', `\tmov\tr1, #0\n.Ll:\n\tcmn\tr0, r1\n\tbgt\t.Ltrue\n\tadd\tr1, #1\n\tcmp\tr1, #9\n\tbne\t.Ll\n${TAIL}`)

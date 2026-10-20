@@ -53,6 +53,11 @@ export interface WordCtx {
   /** A value the caller says is no constant, whatever computes it: switch recovery's named
    *  variables, whose every use reads the variable rather than the expression that set it. */
   opaque?: (v: Value) => boolean;
+  /** A whole-word load -> the value the store it must read wrote (`storeForwards`). The machine
+   *  reads that word back unless the address is I/O, so only a reader that fails closed passes it:
+   *  the structurer's `neg_s`, to whom a store and a reload of INT_MIN is INT_MIN as surely as a
+   *  compiler that forwards the store makes it. Without it every load varies. */
+  forwarded?: ReadonlyMap<Op, Value>;
 }
 
 /** A value's word, over a lattice: not yet seen (`top`, a loop-carried param before its back
@@ -122,11 +127,15 @@ function opWord(d: Op, of: (v: Value) => Word): Word {
     return word(-1);
   }
   const all = d.operands.length === 1 && imm !== null ? [a, c] : ws;
-  if (all.some((x) => x.k === 'var')) {
-    return VAR;
-  }
+  // An operand not yet seen comes BEFORE one that varies. Once it settles it may be the word an
+  // annihilator above needs (`q & x` with q a param that settles to 0), and an answer of VAR now
+  // would drop a param that reads it for good: the solver below would then reach whichever
+  // fixpoint the param order made, and the imprecise one answers `mayAlwaysHold` false.
   if (all.some((x) => x.k === 'top')) {
     return TOP;
+  }
+  if (all.some((x) => x.k === 'var')) {
+    return VAR;
   }
   if (all.some((x) => x.k !== 'word')) {
     return KONST;
@@ -152,7 +161,9 @@ function opWord(d: Op, of: (v: Value) => Word): Word {
 /** Solve every block param `ctx.incoming` names, optimistically: each starts unseen and drops to
  *  the meet of what its in-edges pass, until nothing moves — so a loop-carried param that only
  *  ever passes itself back keeps the word it entered with, and a counter (`0`, then `i + 1`)
- *  varies. Each param drops at most three times. */
+ *  varies. A param's new state is met with its old one, so it only ever drops, and drops at most
+ *  three times; with `opWord` monotone (an unseen operand is TOP before a varying one is VAR)
+ *  that meet changes nothing, and the fixpoint is the same in every param order. */
 function solveParams(ctx: WordCtx): Map<Value, Word> {
   const state = new Map<Value, Word>();
   const incoming = ctx.incoming ?? new Map<Value, readonly (Value | undefined)[]>();
@@ -170,6 +181,7 @@ function solveParams(ctx: WordCtx): Map<Value, Word> {
       for (const x of args) {
         w = meet(w, x === undefined ? VAR : x === p ? TOP : evalWord(ctx, state, memo, x));
       }
+      w = meet(state.get(p)!, w);
       if (!sameWord(w, state.get(p)!)) {
         state.set(p, w);
         moved = true;
@@ -194,7 +206,16 @@ function evalWord(ctx: WordCtx, params: ReadonlyMap<Value, Word>, memo: Map<Valu
     return seen;
   }
   const d = ctx.defs.get(v);
-  const w = d === undefined ? VAR : opWord(d, (x) => evalWord(ctx, params, memo, x));
+  const stored = d === undefined ? undefined : ctx.forwarded?.get(d);
+  // In progress reads VAR: SSA has no cycle but through a param, and this keeps it that way should
+  // a forwarded store ever lead back to its own load.
+  memo.set(v, VAR);
+  const w =
+    d === undefined
+      ? VAR
+      : stored !== undefined
+        ? evalWord(ctx, params, memo, stored)
+        : opWord(d, (x) => evalWord(ctx, params, memo, x));
   memo.set(v, w);
   return w;
 }
@@ -228,6 +249,76 @@ export function constWord(ctx: WordCtx, v: Value): number | null {
 export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
   const x = wordOf(ctx, v);
   return x.k === 'konst' || (x.k === 'word' && x.w === (w | 0));
+}
+
+/** Whole-word load -> the value it must read, for `WordCtx.forwarded`: the last store before it
+ *  to the SAME address (one base value, or two `gaddr`s of one symbol; the same `off`; both a whole
+ *  word), with nothing between that could write memory. The walk goes back through the load's
+ *  block and on into a block's only predecessor, which is every path into it; it stops at the
+ *  first other op with effects (a store elsewhere may alias, a call may write anything), at a
+ *  block with two in-edges or none, and at a block it has already seen. */
+export function storeForwards(blocks: readonly Block[]): Map<Op, Value> {
+  const preds = new Map<Block, Block[]>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        preds.set(s.block, [...(preds.get(s.block) ?? []), b]);
+      }
+    }
+  }
+  const baseOf = new Map<Value, Op>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'gaddr' && op.results.length === 1) {
+        baseOf.set(op.results[0], op);
+      }
+    }
+  }
+  const sameBase = (x: Value, y: Value): boolean => {
+    if (x === y) {
+      return true;
+    }
+    const gx = baseOf.get(x);
+    const gy = baseOf.get(y);
+    return gx !== undefined && gy !== undefined && JSON.stringify(gx.attrs) === JSON.stringify(gy.attrs);
+  };
+  const out = new Map<Op, Value>();
+  for (const b of blocks) {
+    b.ops.forEach((load, at) => {
+      if (load.opcode !== 'load' || load.attrs.width !== 4) {
+        return;
+      }
+      const seen = new Set<Block>([b]);
+      let block = b;
+      let i = at - 1;
+      for (;;) {
+        for (; i >= 0; i--) {
+          const op = block.ops[i];
+          if (
+            op.opcode === 'store' &&
+            op.attrs.width === 4 &&
+            op.attrs.off === load.attrs.off &&
+            sameBase(op.operands[0], load.operands[0])
+          ) {
+            out.set(load, op.operands[1]);
+            return;
+          }
+          const sig = (OPCODES as Record<string, OpSig | undefined>)[op.opcode];
+          if ((sig === undefined || sig.effects) && !sig?.terminator) {
+            return;
+          }
+        }
+        const from = preds.get(block) ?? [];
+        if (from.length !== 1 || seen.has(from[0])) {
+          return;
+        }
+        block = from[0];
+        seen.add(block);
+        i = block.ops.length - 1;
+      }
+    });
+  }
+  return out;
 }
 
 /** Block param -> the values its in-edges pass, for `WordCtx.incoming`. */
