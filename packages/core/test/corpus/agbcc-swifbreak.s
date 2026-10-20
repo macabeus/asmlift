@@ -1137,3 +1137,83 @@ outerexit:
 	bx	r1
 .Lfe15:
 	.size	 outerexit,.Lfe15-outerexit
+	.align	2, 0
+	.globl	topexit
+	.type	 topexit,function
+	.thumb_func
+topexit:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r9
+	mov	r6, r8
+	push	{r6, r7}
+	mov	r9, r0
+	add	r7, r1, #0
+	add	r4, r2, #0
+	add	r6, r7, #0
+	mov	r5, #0x0
+	ldr	r0, .L309
+	mov	r8, r0
+.L297:
+	mov	r1, r8
+	ldr	r0, [r1]
+	cmp	r0, #0x7
+	beq	.L299	@cond_branch
+	mov	r1, r9
+	add	r0, r1, r5
+	cmp	r0, #0x1f
+	beq	.L304	@cond_branch
+	cmp	r0, #0x1f
+	bgt	.L307	@cond_branch
+	cmp	r0, #0x3
+	beq	.L301	@cond_branch
+	b	.L305
+.L310:
+	.align	2, 0
+.L309:
+	.word	gC
+.L307:
+	cmp	r0, #0x64
+	beq	.L303	@cond_branch
+	b	.L305
+.L301:
+	add	r4, r4, #0x3
+	ldr	r0, .L311
+	ldr	r0, [r0]
+	cmp	r7, r0
+	beq	.L299	@cond_branch
+.L303:
+	add	r0, r6, #0
+	bl	h
+	b	.L296
+.L312:
+	.align	2, 0
+.L311:
+	.word	gA
+.L304:
+	mov	r0, #0x2
+	bl	h
+	b	.L296
+.L305:
+	mov	r0, #0x62
+	bl	h
+	mov	r1, r8
+	ldr	r0, [r1]
+	add	r0, r0, r4
+	str	r0, [r1]
+.L296:
+	add	r5, r5, #0x1
+	cmp	r5, #0x2
+	ble	.L297	@cond_branch
+.L299:
+	add	r6, r6, #0x1
+	add	r0, r4, #0
+	bl	r
+	add	r0, r4, r6
+	pop	{r3, r4}
+	mov	r8, r3
+	mov	r9, r4
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe16:
+	.size	 topexit,.Lfe16-topexit

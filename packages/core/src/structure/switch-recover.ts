@@ -546,6 +546,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     epilogue the dispatch's post-dominator, while the code the bottom test leaves for runs
   //     before it (`for (w = 0; w < 4; w++) { if (c) return w; switch ... } r(t);` on
   //     gcc2.7.2kmc).
+  // And the loop's HEADER must not leave for the merge itself. One that does makes the loop
+  // top-tested on it, with the merge as the loop's own exit, which the exit region rendered after
+  // the switch inside the body would leave nothing to reach
+  // (`for (k = 0; k < 3; k++) { if (gC == 7) goto out; switch ... }` becomes `while (gC != 7)`).
+  // A test lower in the body that leaves for the merge ahead of the dispatch spells as its own
+  // `goto` or `break`, and keeps the switch.
   const exitMergeSpells = (from: Block, merge: Block | null): boolean => {
     if (merge === null) {
       return false;
@@ -564,6 +570,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     const header = enclosingLoop()?.header ?? null;
+    if (header !== null && successorsOf(header).includes(merge)) {
+      return false;
+    }
     const seen = new Set<Block>([from]);
     for (const q = [from]; q.length;) {
       const succ = successorsOf(q.pop()!);

@@ -1685,6 +1685,16 @@ test('a switch whose merge is its loop exit, where that exit runs on to an OUTER
   expect(count(out, 'r(')).toBe(1);
 });
 
+test('a switch whose merge is the exit of a loop top-tested ahead of it goes to if-recovery', () => {
+  // `if (gC == 7) goto out;` ahead of the switch leaves for the merge from the loop header, so the
+  // loop is `while (gC != 7)` with the merge as its own exit. The exit region rendered after the
+  // switch inside the body would leave that exit nothing to reach and fail the function loud.
+  const out = ifBreakLift('topexit', { returns: 's32' });
+  expect(out).toContain('s32 topexit(');
+  expect(out).not.toContain('switch (');
+  expect(count(out, 'r(')).toBe(1);
+});
+
 test('a switch whose merge is its loop exit only through a shared epilogue goes to if-recovery', () => {
   // gcc2.7.2kmc: the loop's early `return w` and the code after the loop meet in one epilogue,
   // which is the dispatch's post-dominator and the loop's exit, while the bottom test `w < 4`

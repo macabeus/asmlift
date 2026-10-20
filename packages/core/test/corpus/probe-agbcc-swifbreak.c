@@ -17,7 +17,9 @@
  * arms leave for an exit whose tail returns, which is copied into them; `latchexit` falls into an
  * arm that `continue`s to the loop's bottom test and stays a `switch`. `outerexit` leaves an inner
  * loop for an exit that runs on to an OUTER loop's latch: the code after the switch cannot be that
- * exit region, so the tree goes to if-recovery.
+ * exit region, so the tree goes to if-recovery. `topexit` leaves its loop for the same exit from a
+ * test ahead of the switch, which makes the loop top-tested on that test: the exit is then the
+ * loop's own, not the switch's end, and the tree goes to if-recovery.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */
@@ -291,4 +293,24 @@ s32 outerexit(s32 i, s32 a, s32 b)
     }
     r(u);
     return prev * 3 + t + u;
+}
+
+s32 topexit(s32 i, s32 a, s32 b)
+{
+    s32 k, t, u;
+    t = b; u = a;
+    for (k = 0; k < 3; k++) {
+        if (gC == 7) goto out;
+        switch (i + k) {
+        case 3: t = t + 3; if (a == gA) goto out;
+        case 100: h(u); continue;
+        case 31: h(2); continue;
+        default: h(98); break;
+        }
+        gC = gC + t;
+    }
+out:
+    u = u + 1;
+    r(t);
+    return t + u;
 }
