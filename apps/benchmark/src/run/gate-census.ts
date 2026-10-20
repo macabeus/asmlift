@@ -24,10 +24,10 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Twelve passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
+// holding the call. Thirteen passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the three loop folds
-// in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `reroll`), whose
+// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the four loop folds
+// in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
 // `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
@@ -96,6 +96,7 @@ import {
   foldDisplacedAccesses,
 } from '@asmlift/core/raise/structs';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
+import { type ThreadedExit, UNTHREAD_GATES, unthreadLoopExits } from '@asmlift/core/raise/unthread';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
@@ -283,6 +284,13 @@ export const PASSES: Record<string, CensusablePass> = {
     // are blocks that were never trampolines (`trampoline-not-a-second-exit`).
     tables: [['trampoline', EXIT_TRAMPOLINE_GATES as readonly Gate<never>[]]],
     install: (w) => installFold('trampoline', (fn) => foldExitTrampolines(fn, w[0] as readonly Gate<ExitTrampoline>[])),
+  },
+  unthread: {
+    // raise/unthread.ts's `UNTHREAD_GATES` — which jump-threaded loop exits go back to the re-test they
+    // skipped. Asked once per (exit edge, other exit target) pair whose shape admits one — the target
+    // ends in a `cond_br` and the loop hands each of its params one value — on every round.
+    tables: [['unthread', UNTHREAD_GATES as readonly Gate<never>[]]],
+    install: (w) => installFold('unthread', (fn) => unthreadLoopExits(fn, w[0] as readonly Gate<ThreadedExit>[])),
   },
   reroll: {
     // raise/reroll.ts's `REROLL_GATES` — which loops with a peeled entry test rotate back. Asked once per

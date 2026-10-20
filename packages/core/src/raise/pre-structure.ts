@@ -8,6 +8,7 @@
 import { Fn } from '../ir/core';
 import { foldEmptyLatches, foldExitTrampolines } from './latch';
 import { rerollPeeledTests } from './reroll';
+import { unthreadLoopExits } from './unthread';
 
 export interface PreStructureFold {
   /** stable; the trace stage is `stage:<id>` */
@@ -35,6 +36,11 @@ export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
     id: 'trampoline',
     title: 'Exit-trampoline folding (an empty block on a loop exit becomes that edge)',
     run: (fn) => foldExitTrampolines(fn),
+  },
+  {
+    id: 'unthread',
+    title: 'Loop-exit un-threading (an exit jump-threaded past the re-test after the loop goes back to it)',
+    run: (fn) => unthreadLoopExits(fn),
   },
   {
     id: 'reroll',

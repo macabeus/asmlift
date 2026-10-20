@@ -55,6 +55,7 @@ describe('the gate census seam', () => {
       'offsetnames',
       'latchfold',
       'trampoline',
+      'unthread',
       'reroll',
       'frame-objects',
     ]);
