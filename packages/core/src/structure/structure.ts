@@ -6213,8 +6213,12 @@ export function structure(
       // A default edge the dispatch never takes (the op's `exhaustive` attr) gets no arm: its block
       // runs under whatever the dispatch path left in the registers, a state the machine never gives
       // it there. Unless a case runs on into that block — then the label is where that case goes.
+      // A table whose hole names that block already gives it a case arm (`dflt` is null in
+      // `readArms`), and a fall into the block lands under that arm's labels, never the default's.
       const deadDefault =
-        deadDefaultEdge && ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block);
+        deadDefaultEdge &&
+        (armOf.has(defEdge.block) ||
+          ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block));
       const bodies = emitOrder.map((a, i) => {
         // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
         // earlier arm's own refusal speaks first. Its order is this emission array, so "the next

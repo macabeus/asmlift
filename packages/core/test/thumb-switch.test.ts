@@ -317,6 +317,29 @@ test('a case may fall into the default when the dispatch code writes what the de
   expect(out).toMatch(/else \{\s*\n\s*a3 = a2;\s*\n\s*v0 = a2 << 1;/);
 });
 
+test('a case falling into a table hole that names the default leaves no dead default arm', () => {
+  // The hole (slot 0) names .Ldef, so that block is case 0's arm, and case 2 falling into it lands
+  // under `case 0:`. The default edge is never taken, so the `default:` label would head a dead copy.
+  const holeFall = (ents: string[]) =>
+    'f:\n\tcmp\tr0, #0x2\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+    `\tadd\tr1, r3, #0\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n${ents.map((e) => `\t.word\t${e}\n`).join('')}` +
+    '.Lc0:\n\tmov\tr0, #5\n\tb\t.Lj\n.Lc1:\n\tadd\tr2, #1\n.Ldef:\n\tlsl\tr0, r2, #1\n.Lj:\n\tadd\tr0, r0, r2\n\tbx\tlr\n';
+  for (const [ents, hole, falls] of [
+    [['.Ldef', '.Lc0', '.Lc1'], 0, 2],
+    [['.Lc0', '.Ldef', '.Lc1'], 1, 2],
+    [['.Lc1', '.Lc0', '.Ldef'], 2, 0],
+    [['.Lc0', '.Lc1', '.Ldef'], 2, 1],
+  ] as const) {
+    const out = decompile('f', holeFall([...ents]), ARMV4T_AGBCC).source;
+    expect(out).toMatch(
+      new RegExp(`case ${falls}:\\s*\\n\\s*a2 = a2 \\+ 1;\\s*\\n\\s*case ${hole}:\\s*\\n\\s*v0 = a2 << 1;`),
+    );
+    expect(out).not.toContain('default:');
+    // the bounds test's own default path still runs the default's body
+    expect(out).toMatch(/else \{\s*\n\s*v0 = a2 << 1;/);
+  }
+});
+
 test('every data-processing op that writes only its destination is admitted, rotate included', () => {
   // The admitted set is `mayWriteReg`'s operand-0 writers less the carry readers, so a mnemonic is
   // corrected in one place: `ror` reads no flag and lifts like `lsl`.
