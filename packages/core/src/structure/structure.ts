@@ -6572,7 +6572,16 @@ export function structure(
     //
     // Taken only where the implicit continue holds (`continueFallsToBottom`). Where it does not, a
     // break edge is refused by name below, and an arm re-enters the header and declines loud.
-    if (loopCtx && continueFallsToBottom(loopCtx, stop) && (takenB === loopCtx.header || fallB === loopCtx.header)) {
+    // A switch arm opened in this loop, with no loop entered since: C binds a `break;` here to the
+    // switch, so neither rule below may mint the loop's (see the second).
+    const armFrame = switchFrames.length > 0 ? switchFrames[switchFrames.length - 1] : undefined;
+    const armCapturesBreak = loopCtx !== null && armFrame !== undefined && armFrame.loop === loopCtx;
+    if (
+      loopCtx &&
+      continueFallsToBottom(loopCtx, stop) &&
+      (takenB === loopCtx.header || fallB === loopCtx.header) &&
+      !(armCapturesBreak && (takenB === loopCtx.exit || fallB === loopCtx.exit))
+    ) {
       const contIsTaken = takenB === loopCtx.header;
       const exitB = contIsTaken ? fallB : takenB;
       const isBreak = exitB === loopCtx.exit;
@@ -6639,9 +6648,21 @@ export function structure(
     // always loud. The others are loud, since the loop was admitted on the promise of this spelling,
     // unless an arm owns the edge or the exit ends in a `ret`: then if-recovery below copies the
     // exit's tail into the arm and returns.
-    // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
-    // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
-    if (loopCtx && loopCtx.breaks.has(b)) {
+    // Inside a switch arm opened in THIS loop (no loop entered since), C binds `break;` to the
+    // switch, so the loop's `break` cannot be spelled here. The arm reaches the loop's exit only
+    // where that exit is the switch's own merge (a block the switch does not dominate is refused by
+    // `analyzeArmExit` in both regimes): the code after the switch then IS the exit region, and the
+    // edge structures as any other edge to the merge — the arm's `break;` (`switchBreakAt`), or
+    // nothing in a closed arm, which stops there. Any other exit is refused here, loud, rather than
+    // handed to the printer as a `break` it would rebind.
+    if (loopCtx && loopCtx.breaks.has(b) && armCapturesBreak) {
+      if (loopCtx.exit === null || armFrame!.merge !== loopCtx.exit) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
+            `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
+        );
+      }
+    } else if (loopCtx && loopCtx.breaks.has(b)) {
       const frame = loopCtx;
       // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
       // the `break`, and its last block's copies into the exit are the break's.

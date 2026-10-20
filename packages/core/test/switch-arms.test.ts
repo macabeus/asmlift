@@ -1566,7 +1566,7 @@ const ifBreakLift = (sym: string) =>
   decompile(sym, ifBreakAsm(), ARMV4T_AGBCC, {
     prototypes: {
       [sym]: { returnsVoid: true },
-      ...Object.fromEntries(['f', 'g', 'h', 'r'].map((n) => [n, { params: 1, returnsVoid: true }])),
+      ...Object.fromEntries(['f', 'g', 'h', 'r', 'm'].map((n) => [n, { params: 1, returnsVoid: true }])),
       p: { params: 0, returns: 's32' },
     },
   }).source;
@@ -1587,6 +1587,15 @@ test('an arm whose `then` breaks and whose `else` falls into the next case keeps
     /if \(gA != 0\) \{\s*\n\s*h\(2\);\s*\n\s*break;\s*\n\s*\} else \{\s*\n\s*g\(3\);\s*\n\s*\}\s*\n\s*case 2:/,
   );
   expect(count(out, 'f(v0)')).toBe(1);
+});
+
+test('an arm that leaves its LOOP where the loop exit is the switch merge breaks the switch', () => {
+  // `case 1: if (gA) goto out;` with `out` past the loop: the switch's merge is the loop's exit, so
+  // the arm's `break;` reaches it and the exit region renders after the switch. The loop's own
+  // `break` would be bound to the switch by C, so it is never minted inside the arm.
+  const out = ifBreakLift('exitloop');
+  expect(out).toMatch(/case 0:\s*\n\s*if \(gA != 0\) break;\s*\n\s*case 1:/);
+  expect(out).toMatch(/\}\s*\n\s*r\(9\);\s*\n\s*return;/);
 });
 
 test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {

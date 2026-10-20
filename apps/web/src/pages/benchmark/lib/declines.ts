@@ -511,7 +511,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // through into one that is not the next emitted, and the arm fallen into taking a value from
     // the switch edge that the fall-through path would re-run. Same capability, same site, so the
     // pattern carries a phrase for each rather than the one the corpus happened to print. A sixth
-    // is the switch-scoped `break;` it refuses where a nested loop or switch would capture it.
+    // is the switch-scoped `break;` it refuses where a nested loop or switch would capture it, and
+    // a seventh a case body that leaves its loop for an exit that is not the switch's own end.
     //
     // The fall-through-POSITION one is keyed on the clause that opens its sentence, not on the one
     // that ends it. This file opens with the rule that a class is decided inside the first 200

@@ -218,3 +218,175 @@ elsearm:
 	bx	r0
 .Lfe3:
 	.size	 elsearm,.Lfe3-elsearm
+	.align	2, 0
+	.globl	exitloop
+	.type	 exitloop,function
+	.thumb_func
+exitloop:
+	push	{r4, lr}
+	add	r4, r0, #0
+.L59:
+	ldr	r0, .L73
+	ldr	r0, [r0]
+	cmp	r0, #0
+	beq	.L62	@cond_branch
+	mov	r0, #0x0
+	bl	h
+.L62:
+	ldr	r2, [r4]
+	sub	r0, r2, #0x1
+	cmp	r0, #0x4
+	bhi	.L66	@cond_branch
+	lsl	r0, r0, #0x2
+	ldr	r1, .L73+0x4
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L74:
+	.align	2, 0
+.L73:
+	.word	gC
+	.word	.L72
+	.align	2, 0
+	.align	2, 0
+.L72:
+	.word	.L64
+	.word	.L67
+	.word	.L68
+	.word	.L69
+	.word	.L70
+.L64:
+	ldr	r0, .L75
+	ldr	r0, [r0]
+	cmp	r0, #0
+	bne	.L66	@cond_branch
+.L67:
+	add	r0, r2, #0
+	bl	f
+	b	.L63
+.L76:
+	.align	2, 0
+.L75:
+	.word	gA
+.L68:
+	mov	r0, #0x3
+	bl	f
+	b	.L63
+.L69:
+	mov	r0, #0x4
+	bl	g
+	b	.L63
+.L70:
+	mov	r0, #0x5
+	bl	f
+.L63:
+	add	r4, r4, #0x4
+	b	.L59
+.L66:
+	mov	r0, #0x9
+	bl	r
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.Lfe4:
+	.size	 exitloop,.Lfe4-exitloop
+	.align	2, 0
+	.globl	twoguards
+	.type	 twoguards,function
+	.thumb_func
+twoguards:
+	push	{r4, lr}
+	add	r4, r0, #0
+	sub	r0, r4, #0x1
+	cmp	r0, #0x4
+	bhi	.L78	@cond_branch
+	lsl	r0, r0, #0x2
+	ldr	r1, .L88
+	add	r0, r0, r1
+	ldr	r0, [r0]
+	mov	pc, r0
+.L89:
+	.align	2, 0
+.L88:
+	.word	.L86
+	.align	2, 0
+	.align	2, 0
+.L86:
+	.word	.L79
+	.word	.L82
+	.word	.L83
+	.word	.L84
+	.word	.L85
+.L79:
+	ldr	r0, .L90
+	ldr	r0, [r0]
+	cmp	r4, r0
+	beq	.L78	@cond_branch
+	add	r0, r4, #0
+	bl	h
+	ldr	r0, .L90+0x4
+	ldr	r0, [r0]
+	cmp	r4, r0
+	beq	.L78	@cond_branch
+	add	r0, r4, #0
+	bl	m
+.L82:
+	add	r0, r4, #0
+	bl	f
+	b	.L78
+.L91:
+	.align	2, 0
+.L90:
+	.word	gA
+	.word	gB
+.L83:
+	add	r0, r4, #0
+	bl	g
+	b	.L78
+.L84:
+	mov	r0, #0x4
+	bl	g
+	b	.L78
+.L85:
+	mov	r0, #0x5
+	bl	h
+.L78:
+	mov	r0, #0x0
+	bl	r
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.Lfe5:
+	.size	 twoguards,.Lfe5-twoguards
+	.align	2, 0
+	.globl	intodefault
+	.type	 intodefault,function
+	.thumb_func
+intodefault:
+	push	{lr}
+	add	r2, r0, #0
+	cmp	r1, #0x1
+	beq	.L95	@cond_branch
+	cmp	r1, #0x3
+	bne	.L97	@cond_branch
+	bl	g
+	b	.L93
+.L95:
+	ldr	r0, .L99
+	ldr	r0, [r0]
+	cmp	r2, r0
+	beq	.L93	@cond_branch
+.L97:
+	add	r0, r2, #0
+	bl	f
+.L93:
+	mov	r0, #0x0
+	bl	r
+	pop	{r0}
+	bx	r0
+.L100:
+	.align	2, 0
+.L99:
+	.word	gA
+.Lfe6:
+	.size	 intodefault,.Lfe6-intodefault
