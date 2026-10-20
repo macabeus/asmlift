@@ -12591,6 +12591,72 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
   {
+    sym: 'spillu8half',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u32 mk2(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8half(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' s = mk(k, 0, 0x10); gOut16 = s.a;\n' +
+      ' gOut16 = m; return v0; }',
+    features: ['narrow', 'promotion', 'struct-return', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nu32 mk2(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8half(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk2: { params: ['u16', 'u16', 'u8'], returns: 'u32' },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'spillu8nosret',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u32 mk2(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8nosret(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' gOut16 = mk2(k, 0, 0x10);\n' +
+      ' gOut8 = m; return v0; }',
+    features: ['narrow', 'promotion', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nu32 mk2(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8nosret(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk2: { params: ['u16', 'u16', 'u8'], returns: 'u32' },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
     sym: 'bfstrad',
     src:
       'struct S { u8 a:2; u8 b:3; u8 c:7; u8 d:3; u16 e; u32 w; };\n' +
@@ -12801,6 +12867,33 @@ export const SYNTHETIC: SynthSpec[] = [
         },
       },
       spillhsret: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'spillhsword',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u32 w; };\n#define gEnts ((struct Ent *)0x03003440)\nextern u8 gFlags;\n' +
+      'extern struct S4 mk(u16 x);\n' +
+      'void spillhsword(u8 i)\n{\n    struct S4 s;\n    u16 k0, k1, k2, k3, k4; u32 k5;\n' +
+      '    k0 = gEnts[i + 0].x;\n    k1 = gEnts[i + 1].x;\n    k2 = gEnts[i + 2].x;\n    k3 = gEnts[i + 3].x;\n    k4 = gEnts[i + 4].x;\n    k5 = gEnts[i + 5].x;\n' +
+      '    if (gFlags & 0x10) {\n        s = mk(gEnts[i].y);\n        if (s.a != 0xFFFF) {\n            gFlags |= 4;\n        } else {\n            gFlags &= ~4;\n        }\n    }\n' +
+      '    gEnts[i + 0].y = k0;\n    gEnts[i + 1].y = k1;\n    gEnts[i + 2].y = k2;\n    gEnts[i + 3].y = k3;\n    gEnts[i + 4].y = k4;\n    gEnts[i + 5].w = k5;\n}',
+    features: ['struct-return', 'value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nextern u8 gFlags;\nstruct S4 mk(u16 x);\nvoid spillhsword(u8 i);',
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      spillhsword: { returnsVoid: true },
     },
   },
   {
