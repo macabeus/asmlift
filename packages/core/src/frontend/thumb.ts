@@ -2285,6 +2285,8 @@ interface JumpTable {
   scrutReg: string;
   caseLabels: string[];
   defaultLabel: string;
+  /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
+  extras: Instr[];
 }
 
 // Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
@@ -2327,7 +2329,7 @@ interface JumpTable {
 // Inside the dispatch block the distinction is additionally UNOBSERVABLE: the block computes
 // `table_base + index*4`, loads the target and writes `pc`. Nothing between the `lsl` and the
 // `mov pc` reads NZCV, no path leaves the block by falling through, and on a successful recovery the
-// block is ELIDED from the CFG entirely — the bounds test that does feed a conditional branch lives
+// idiom is never lifted (the block is elided, or keeps only the code `dispatchExtraRefusal` admits) — the bounds test that does feed a conditional branch lives
 // in `bounds`, whose `cmp`/`bhi`/`bls` this function matches by exact name. Doubly moot in fact,
 // since `lsl rD, rS, #imm` is low-register-only, so the add here is always the low-register form.
 const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
@@ -2383,12 +2385,15 @@ function recoverJumpTable(
     return null; // a bound that admits no case at all is not a dispatch — fail closed
   }
 
-  // disp: exactly the 5-op idiom, threading a single index register from `lsl rY,rX,#2`.
+  // disp: the 5-op idiom, threading a single index register from `lsl rY,rX,#2`, with any
+  // instructions between the table load and the `mov pc` (`extras`, judged below).
   const d = disp.instrs;
-  if (d.length !== 5) {
+  if (d.length < 5) {
     return null;
   }
-  const [lsl, ldrP, add, ldrV, movpc] = d;
+  const [lsl, ldrP, add, ldrV] = d;
+  const movpc = d[d.length - 1];
+  const extras = d.slice(4, -1);
   if (!isDataOp(lsl.mnemonic, 'lsl') || lsl.ops[1] !== scrutReg || !immEq(lsl.ops[2], 2)) {
     return null;
   }
@@ -2437,6 +2442,9 @@ function recoverJumpTable(
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {
     return null;
   }
+  if (dispatchExtraRefusal(extras, scrutReg, ldrV.ops[0], [idxReg, ptrReg, ldrV.ops[0]]) !== null) {
+    return null;
+  }
 
   // Read the table: the ldr loads a POINTER word (PTR: .word TABLE); the table is TABLE: .word C0…
   //
@@ -2478,7 +2486,70 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  return { scrutReg, caseLabels, defaultLabel };
+  return { scrutReg, caseLabels, defaultLabel, extras };
+}
+
+// The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
+// PRE (`insert_insn_end_bb`, gcse.c:4231-4236) places an expression a later block needs "just before
+// the tablejump" — thumb.md's `tablejump` is the `mov pc` alone, so after the load. They run on every
+// dispatch and on nothing else, so they stay in a block of their own between the bounds test and the
+// switch (`readThumbText`). PRE inserts `reg = expr` and nothing more, so the instructions accepted are
+// register computations and loads; anything else refuses:
+//   - a mnemonic outside DISPATCH_EXTRA_OPS: a store, a call, a transfer, a flag READ (`adc`/`sbc`);
+//   - a write to the loaded target (it is what `mov pc` jumps through), to the scrutinee (the switch
+//     reads it after them), or to sp/pc;
+//   - a read of a register the idiom wrote (index, table pointer, target) before an extra rewrote it:
+//     the idiom is not lifted, so such a read would see the value from before the dispatch.
+const DISPATCH_EXTRA_OPS = new Set([
+  'mov',
+  'add',
+  'sub',
+  'neg',
+  'mvn',
+  'lsl',
+  'lsr',
+  'asr',
+  'and',
+  'orr',
+  'eor',
+  'bic',
+  'mul',
+  'ldr',
+  'ldrb',
+  'ldrh',
+  'ldrsb',
+  'ldrsh',
+]);
+/** The two-operand forms that write their destination without reading it. */
+const DEST_ONLY_OPS = new Set(['mov', 'neg', 'mvn', 'ldr', 'ldrb', 'ldrh', 'ldrsb', 'ldrsh']);
+function dispatchExtraRefusal(
+  extras: readonly Instr[],
+  scrutReg: string,
+  targetReg: string,
+  idiomRegs: readonly string[],
+): string | null {
+  const stale = new Set(idiomRegs);
+  for (const ins of extras) {
+    const mn =
+      ins.mnemonic.endsWith('s') && DISPATCH_EXTRA_OPS.has(ins.mnemonic.slice(0, -1))
+        ? ins.mnemonic.slice(0, -1)
+        : ins.mnemonic;
+    const say = `'${ins.mnemonic} ${ins.ops.join(', ')}'`;
+    if (!DISPATCH_EXTRA_OPS.has(mn) || ins.ops.length < 2) {
+      return `${say} is not a register computation or a load`;
+    }
+    const dest = ins.ops[0];
+    if ([targetReg, scrutReg, 'sp', 'r13', 'pc', 'r15'].includes(dest)) {
+      return `${say} writes the dispatch's own register '${dest}'`;
+    }
+    const reads = ins.ops.length > 2 || DEST_ONLY_OPS.has(mn) ? ins.ops.slice(1) : ins.ops;
+    const read = [...stale].find((r) => mentionsReg({ ops: reads }, r));
+    if (read !== undefined) {
+      return `${say} reads '${read}', which the unlifted dispatch idiom wrote`;
+    }
+    stale.delete(dest);
+  }
+  return null;
 }
 
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
@@ -2918,8 +2989,22 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
       }
     }
   }
-  const tables = new Map<AsmBlock, JumpTable>(); // bounds block → recovered table
+  const tables = new Map<AsmBlock, JumpTable>(); // the block emitting the switch → recovered table
   const elided = new Set<AsmBlock>(); // dispatch (and long-jump default) blocks removed from the CFG
+  // A dispatch carrying code of its own (`JumpTable.extras`) is not elided: it stays as the block the
+  // bounds test leads to, holding only that code, and the switch is emitted from it. The bounds test
+  // and the long-jump `b DEF` keep their ordinary edges, so the code runs on the dispatched path and
+  // on no other.
+  const kept = new Map<AsmBlock, AsmBlock>();
+  const keepDispatch = (d: AsmBlock, jt: JumpTable): boolean => {
+    if (jt.extras.length === 0) {
+      return false;
+    }
+    const own = { ...d, instrs: jt.extras };
+    kept.set(d, own);
+    tables.set(own, jt);
+    return true;
+  };
   rawBlocks.forEach((d, i) => {
     const last = d.instrs[d.instrs.length - 1];
     if (!last || last.mnemonic !== 'mov' || last.ops[0] !== 'pc' || last.ops[1] === 'lr') {
@@ -2931,6 +3016,9 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
     if (prev && refs === 0) {
       const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels, aliasOf);
+      if (jt && keepDispatch(d, jt)) {
+        return;
+      }
       if (jt) {
         tables.set(prev, jt);
         elided.add(d);
@@ -2946,14 +3034,14 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
     const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
     if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
       const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, aliasOf, prev.instrs[0].ops[0]);
-      if (jt) {
+      if (jt && !keepDispatch(d, jt)) {
         tables.set(boundsB, jt);
         elided.add(d);
         elided.add(prev);
       }
     }
   });
-  const asmBlocks = rawBlocks.filter((b) => !elided.has(b));
+  const asmBlocks = rawBlocks.filter((b) => !elided.has(b)).map((b) => kept.get(b) ?? b);
   // The far-jump lowering's last question, askable only now: a recovered table dispatching to the
   // entry would re-run the lr save after a relay clobbered lr (see `lowerFarJumpRelays`).
   const entryLabel = rawBlocks[0]?.label;

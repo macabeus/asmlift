@@ -245,6 +245,44 @@ test('two labels on ONE instruction are aliases — a branch to either reaches t
   expect(control).toContain('return 2;'); // the branch target's body is reached, not skipped
 });
 
+// ── code between the table load and the `mov pc` ──────────────────────────────────────────────────
+// agbcc's PRE inserts `reg = expr` "just before the tablejump" (gcse.c:4231-4236), so the dispatch
+// runs it on every case and on no other path. The default reads r2 too: it must see the incoming a2.
+const withExtra = (extra: string) =>
+  'f:\n\tcmp\tr0, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+  `${extra}\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +
+  '.Lc0:\n\tmov\tr0, r2\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, r2\n\tbx\tlr\n';
+
+test('code PRE put inside the dispatch is lifted on the dispatched path only', () => {
+  const out = decompile('f', withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n'), ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
+  // the bounds test's own default path still returns the incoming a2
+  expect(out).toMatch(/else \{\s*\n\s*return a2;/);
+  // the long-jump bounds form keeps its `b DEF` as the default path
+  const long = withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n').replace(
+    '\tbhi\t.Ldef\n',
+    '\tbls\t.LCB\n\tb\t.Ldef\t@long jump\n.LCB:\n',
+  );
+  expect(decompile('f', long, ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
+  // a load is a computation PRE may insert too
+  expect(decompile('f', withExtra('\tldr\tr2, [r3, #0x4]\n'), ARMV4T_AGBCC).source).toMatch(
+    /case 0:\s*\n\s*return a3\[1\];/,
+  );
+});
+
+test('dispatch code that is not a register computation, or that disturbs the dispatch, DECLINES', () => {
+  const jump = /indirect\/computed jump/;
+  const refused = (extra: string) => () => decompile('f', withExtra(extra), ARMV4T_AGBCC);
+  expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(jump); // writes the register `mov pc` jumps through
+  expect(refused('\tstr\tr3, [r2]\n')).toThrow(jump); // a store
+  expect(refused('\tbl\tg\n')).toThrow(jump); // a call
+  expect(refused('\tadc\tr2, r3\n')).toThrow(jump); // reads the carry
+  expect(refused('\tadd\tsp, #0x8\n')).toThrow(jump); // moves the stack
+  // reads the table pointer the unlifted idiom loaded into r1
+  expect(refused('\tadd\tr2, r1, #0\n')).toThrow(jump);
+});
+
 test('a TABLE entry naming a label that shares its instruction dispatches to that instruction', () => {
   // jump.c cross-jumps a case arm identical to the default's onto the default's first instruction
   // and leaves the case label standing on it (`.Lc1:` `.Ldef:` `mov r0,#99`): the table names
