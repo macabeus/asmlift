@@ -49,12 +49,12 @@
 // the other one once.
 import { type Identifiable, onlySelects } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { realRowIdentities } from '../cases/manifests';
-import { REPO_ROOT } from '../config';
+import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { readWorktreeArtifact, rekeyToCurrent } from '../report/committed';
 import { TOOLCHAINS } from '../toolchains';
 import { type AdmissionRequest, PEAK_BYTES } from './admission';
@@ -577,6 +577,16 @@ export function sweepIsWholeCorpus(
   );
 }
 
+/** Where `sweepRequest` reads which rows a scoped selection names, each read only when the price
+ *  needs it: the committed artifact's row ids (for the synthetic share) and the current dataset's
+ *  real rows (for the projects touched, former names included, as `collect` reads them). */
+export interface SweepPriceRows {
+  artifactIds: () => readonly string[] | undefined;
+  realRows: () => readonly Pick<Identifiable, 'id' | 'project' | 'aliases'>[];
+}
+
+const DEFAULT_PRICE_ROWS: SweepPriceRows = { artifactIds: () => artifactRowIds(), realRows: realRowIdentities };
+
 /** What this sweep asks `admission.ts` for, or undefined when it lifts nothing (`--compare`).
  *
  *  ONE PASS AT A TIME: the passes of `--base` run in children one after the other (`collectInChild`)
@@ -584,15 +594,18 @@ export function sweepIsWholeCorpus(
  *  records already held. Those records are what `--base` adds — the parent holds both sides' while
  *  a child lifts, which is the measured difference between `sweepBase` and `sweepPass` — and what
  *  `--repeat` adds: the first pass's records stay alive through every later pass, `sweepRepeat`.
- *  The whole-corpus figure is scaled by the share of the committed artifact's rows the selection
- *  names (`selectsRow`, which reads `--project` as `collect` does), and never priced below the
- *  measured one-row figure; docs/bench-cost.md §5 has each figure against its price. `--asm-dir`
- *  names no dataset row and is priced whole. `--fan` adds one row's enumeration, budgeted as
- *  `bench fan` is. */
-export function sweepRequest(
-  o: SweepOptions,
-  artifactIds: readonly string[] | undefined,
-): AdmissionRequest | undefined {
+ *
+ *  A SCOPED pass (`--only`, or `--project`) is priced by what it lifts, in two parts, and never
+ *  above the whole pass nor below the floor: the synthetic rows it selects, as their share of the
+ *  committed artifact's rows times the whole figure; and, for every real project it lifts a row of,
+ *  that project's measured figure (`PEAK_BYTES.sweepRealProject`). A real row is not priced by its
+ *  share: one pokeemerald row cost 0.60 GB, and 68 of them (3% of the rows) 1.57 GB against a share
+ *  of 0.30 GB, because a real row's cost is its project's context and symbol map. `--base` and
+ *  `--repeat` scale the project part by their whole figure over one pass's. `--asm-dir` names no
+ *  dataset row and is priced whole; so is a synthetic selection over an artifact that cannot be
+ *  read. `--fan` adds one row's enumeration, budgeted as `bench fan` is. docs/bench-cost.md §5 has
+ *  each figure against its price. */
+export function sweepRequest(o: SweepOptions, rows: SweepPriceRows = DEFAULT_PRICE_ROWS): AdmissionRequest | undefined {
   if (o.compare !== undefined) {
     return undefined;
   }
@@ -607,11 +620,52 @@ export function sweepRequest(
       : 'one lift pass';
   let pass = whole;
   let what = `${passes} over the whole corpus (${gb(pass)})`;
-  const narrowed = o.only !== undefined || o.project !== undefined;
-  if (narrowed && o.asmDir === undefined && artifactIds !== undefined && artifactIds.length > 0) {
-    const n = artifactIds.filter((id) => selectsRow(o, id)).length;
-    pass = Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil((whole * n) / artifactIds.length));
-    what = `${passes} over ${n} of ${artifactIds.length} rows (${gb(pass)})`;
+  if ((o.only !== undefined || o.project !== undefined) && o.asmDir === undefined) {
+    const parts: string[] = [];
+    let synthetic = 0;
+    // `--project` narrows the real tier only (`selectsRow`), so the synthetic tier is read in full
+    // under it: whole, not a share — which is also what an unreadable artifact gives
+    if (o.tiers.includes('synthetic')) {
+      const ids = o.only !== undefined ? rows.artifactIds() : undefined;
+      if (ids === undefined || ids.length === 0) {
+        synthetic = whole;
+        parts.push('every synthetic row');
+      } else {
+        const n = ids.filter((id) => id.startsWith('synthetic:') && selectsRow(o, id)).length;
+        synthetic = Math.ceil((whole * n) / ids.length);
+        if (n > 0) {
+          parts.push(`${n} synthetic of ${ids.length} rows (${gb(synthetic)})`);
+        }
+      }
+    }
+    let real = 0;
+    if (o.tiers.includes('real')) {
+      let projects: string[];
+      try {
+        projects =
+          o.only === undefined
+            ? [o.project!]
+            : [
+                ...new Set(
+                  rows
+                    .realRows()
+                    .filter((r) => selectsRow(o, r.id, r.aliases))
+                    .map((r) => r.project),
+                ),
+              ];
+      } catch {
+        // a dataset this cannot read prices every project: what `collect` would have met is unknown
+        projects = Object.keys(PEAK_BYTES.sweepRealProject);
+      }
+      const scale = whole / PEAK_BYTES.sweepPass;
+      for (const p of projects.sort()) {
+        const fig = Math.ceil((PEAK_BYTES.sweepRealProject[p] ?? PEAK_BYTES.sweepRealProjectUnmeasured) * scale);
+        real += fig;
+        parts.push(`${p}'s real rows (${gb(fig)})`);
+      }
+    }
+    pass = Math.min(whole, Math.max(PEAK_BYTES.sweepScopedPass, synthetic + real));
+    what = `${passes} over ${parts.length > 0 ? parts.join(' + ') : 'no row'} (${gb(pass)})`;
   }
   const fan = o.fan === true ? PEAK_BYTES.fan : 0;
   return {
@@ -624,11 +678,66 @@ export function sweepRequest(
   };
 }
 
-/** The row ids of this worktree's committed artifact, for `sweepRequest` to scale by; undefined
- *  when it cannot be read, which prices the pass whole. */
-export function artifactRowIds(): string[] | undefined {
-  const { results } = readWorktreeArtifact();
-  return results?.map((r) => r.id);
+/** The row ids of this worktree's committed artifact, for `sweepRequest`'s synthetic share;
+ *  undefined when it cannot be read, which prices the synthetic tier whole. READ, NOT PARSED: the
+ *  artifact is ~63 MB, and `JSON.parse` of it in a sweep's parent made a one-row sweep peak at
+ *  0.41–0.45 GB against 0.21–0.29 GB without it. Decoding it to text in chunks cost as much, in
+ *  garbage the heap had not yet collected (0.38–0.43 GB). So this searches the file's BYTES, 1 MiB
+ *  at a time, for each `"id": "` key as `JSON.stringify(…, null, 2)` writes it, decodes only the id,
+ *  keeps those shaped like a row id, and answers only when it found as many as `meta.counts.total`
+ *  says: a truncated or reshaped file reads as unreadable. */
+export function artifactRowIds(path: string = join(RESULTS_DIR, 'results.json')): string[] | undefined {
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return undefined;
+  }
+  try {
+    const KEY = Buffer.from('"id": "');
+    const QUOTE = 0x22;
+    const CHUNK = 1 << 20;
+    const KEEP = 4096;
+    const buf = Buffer.alloc(CHUNK + KEEP);
+    const ids: string[] = [];
+    let total: number | undefined;
+    let kept = 0;
+    let first = true;
+    for (;;) {
+      const n = readSync(fd, buf, kept, CHUNK, null);
+      const view = buf.subarray(0, kept + n);
+      if (first) {
+        const t = /"counts":\s*\{[^}]*?"total":\s*(\d+)/.exec(view.toString('utf8', 0, Math.min(view.length, KEEP)));
+        total = t ? Number(t[1]) : undefined;
+        first = false;
+      }
+      let done = 0;
+      for (let at = view.indexOf(KEY); at >= 0; at = view.indexOf(KEY, done)) {
+        const end = view.indexOf(QUOTE, at + KEY.length);
+        if (end < 0) {
+          break;
+        }
+        const id = view.toString('utf8', at + KEY.length, end);
+        // a row id has at least three `:`-separated segments (a REL row's has four)
+        if (/^[^:]+:.+:[^:]+$/.test(id)) {
+          ids.push(id);
+        }
+        done = end + 1;
+      }
+      if (n === 0) {
+        break;
+      }
+      // a key cut by the chunk edge is read whole next time; one already read is not read again
+      const from = Math.max(done, view.length - KEEP);
+      buf.copy(buf, 0, from, view.length);
+      kept = view.length - from;
+    }
+    return total !== undefined && ids.length === total ? ids : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Every way this command refuses to run, in one place and before anything is paid for. */

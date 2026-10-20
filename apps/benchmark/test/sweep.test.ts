@@ -21,6 +21,9 @@
 // assertion on a hand-built record is blind to what the producer actually emits, so a sweep that
 // collapsed its two map modes onto one key would pass a suite made only of those.
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { rankOptionsFor } from '../src/eval/asmlift';
@@ -30,6 +33,7 @@ import {
   SWEEP_FAN_LIMIT,
   type SweepOptions,
   type SweepRecord,
+  artifactRowIds,
   compareSweeps,
   fanGuard,
   newlyRanked,
@@ -800,6 +804,15 @@ describe('a base that cannot be resolved is refused before the head sweep is pai
 
 describe('what a sweep asks the memory admission check for', () => {
   const ids = ['synthetic:add:agbcc', 'synthetic:sub:agbcc', 'kleod:Foo:agbcc', 'sa3:Bar:agbcc'];
+  const realRows = [
+    { id: 'kleod:Foo:agbcc', project: 'kleod' },
+    { id: 'sa3:Bar:agbcc', project: 'sa3', aliases: ['OldBar'] },
+    { id: 'pokeemerald:Baz:agbcc', project: 'pokeemerald' },
+    { id: 'newproj:Qux:agbcc', project: 'newproj' },
+  ];
+  const rows = { artifactIds: () => ids, realRows: () => realRows };
+  const unread = { artifactIds: () => undefined, realRows: () => realRows };
+  const project = (p: string): number => PEAK_BYTES.sweepRealProject[p] ?? PEAK_BYTES.sweepRealProjectUnmeasured;
   const o = (over: Partial<SweepOptions> = {}): SweepOptions => ({
     tiers: ['synthetic', 'real'],
     mapModes: ['harness', 'nomap'],
@@ -819,40 +832,105 @@ describe('what a sweep asks the memory admission check for', () => {
   });
 
   it('prices ONE pass, and with --base one pass plus the records: the two passes no longer share a process', () => {
-    expect(sweepRequest(o(), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
-    expect(sweepRequest(o({ base: 'origin/main' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepBase);
-    expect(sweepRequest(o({ baseDir: '/x' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepBase);
+    expect(sweepRequest(o(), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ base: 'origin/main' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
+    expect(sweepRequest(o({ baseDir: '/x' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepBase);
     expect(PEAK_BYTES.sweepBase).toBeLessThan(2 * PEAK_BYTES.sweepPass);
   });
 
   it('prices --repeat as one pass plus the first pass’s records, which stay alive through the next', () => {
-    expect(sweepRequest(o({ repeat: 2 }), ids)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
-    expect(sweepRequest(o({ repeat: 5 }), ids)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
+    expect(sweepRequest(o({ repeat: 2 }), rows)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
+    expect(sweepRequest(o({ repeat: 5 }), rows)!.needBytes).toBe(PEAK_BYTES.sweepRepeat);
     expect(PEAK_BYTES.sweepRepeat).toBeGreaterThan(PEAK_BYTES.sweepPass);
-    expect(sweepRequest(o({ only: 'add', repeat: 2 }), ids)!.needBytes).toBe(
+    expect(sweepRequest(o({ tiers: ['synthetic'], only: 'add', repeat: 2 }), rows)!.needBytes).toBe(
       Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepRepeat / 4)),
     );
   });
 
-  it('scales a scoped pass by the share of the artifact it selects, never below the one-row figure', () => {
-    expect(sweepRequest(o({ tiers: ['real'], project: 'kleod' }), ids)!.needBytes).toBe(
-      Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepPass / 4)),
+  it('prices a real project at its measured figure, not at its share of the rows', () => {
+    // the breakers' case: 68 pokeemerald rows of 2,303 were priced at the 0.3 GB floor and peaked at 1.57-1.63 GB
+    expect(PEAK_BYTES.sweepRealProject.pokeemerald).toBeGreaterThanOrEqual(1.63e9);
+    expect(sweepRequest(o({ tiers: ['real'], project: 'pokeemerald' }), rows)!.needBytes).toBe(project('pokeemerald'));
+    expect(sweepRequest(o({ tiers: ['real'], project: 'kleod' }), rows)!.needBytes).toBe(
+      Math.max(PEAK_BYTES.sweepScopedPass, project('kleod')),
     );
-    // with the synthetic tier swept, `--project` selects every synthetic row as well — the rows
-    // `collect` lifts, not the project's alone
-    expect(sweepRequest(o({ project: 'kleod' }), ids)!.need).toContain('3 of 4 rows');
-    expect(sweepRequest(o({ project: 'kleod' }), ids)!.needBytes).toBe(Math.ceil((PEAK_BYTES.sweepPass * 3) / 4));
-    expect(sweepRequest(o({ only: 'add' }), ids)!.need).toContain('1 of 4 rows');
-    expect(sweepRequest(o({ only: 'nothing-matches' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepScopedPass);
+    // one row of a project costs its project, whatever its share
+    expect(sweepRequest(o({ only: 'Baz' }), rows)!.needBytes).toBe(project('pokeemerald'));
+    expect(sweepRequest(o({ only: 'Baz' }), rows)!.need).toContain("pokeemerald's real rows");
+    // a project with no measured figure is priced at the dearest measured one
+    expect(sweepRequest(o({ only: 'Qux' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepRealProjectUnmeasured);
+    expect(PEAK_BYTES.sweepRealProjectUnmeasured).toBe(Math.max(...Object.values(PEAK_BYTES.sweepRealProject)));
+    // a former name selects its row, as `collect` reads it
+    expect(sweepRequest(o({ tiers: ['real'], only: 'OldBar' }), rows)!.need).toContain("sa3's real rows");
   });
 
-  it('prices --asm-dir, and a scope over an unreadable artifact, as a whole pass', () => {
-    expect(sweepRequest(o({ asmDir: '/x', toolchain: 'agbcc' }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass);
-    expect(sweepRequest(o({ only: 'add' }), undefined)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+  it('scales the project figure by --base’s whole figure over one pass', () => {
+    expect(sweepRequest(o({ tiers: ['real'], project: 'pokeemerald', base: 'x' }), rows)!.needBytes).toBe(
+      Math.min(PEAK_BYTES.sweepBase, Math.ceil((project('pokeemerald') * PEAK_BYTES.sweepBase) / PEAK_BYTES.sweepPass)),
+    );
+  });
+
+  it('prices synthetic rows by their share of the artifact, never below the floor nor above a whole pass', () => {
+    expect(sweepRequest(o({ only: 'add' }), rows)!.need).toContain('1 synthetic of 4 rows');
+    expect(sweepRequest(o({ tiers: ['synthetic'], only: 'add' }), rows)!.needBytes).toBe(
+      Math.max(PEAK_BYTES.sweepScopedPass, Math.ceil(PEAK_BYTES.sweepPass / 4)),
+    );
+    expect(sweepRequest(o({ only: 'nothing-matches' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepScopedPass);
+    // with the synthetic tier swept, `--project` reads every synthetic row: a whole pass
+    expect(sweepRequest(o({ project: 'kleod' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+  });
+
+  it('reads the artifact only for a synthetic --only, and the dataset only for a real --only', () => {
+    const touched: string[] = [];
+    const spy = {
+      artifactIds: () => (touched.push('artifact'), ids),
+      realRows: () => (touched.push('dataset'), realRows),
+    };
+    sweepRequest(o(), spy);
+    sweepRequest(o({ tiers: ['real'], project: 'kleod' }), spy);
+    sweepRequest(o({ compare: ['a.json', 'b.json'] }), spy);
+    expect(touched).toEqual([]);
+    sweepRequest(o({ tiers: ['synthetic'], only: 'add' }), spy);
+    expect(touched).toEqual(['artifact']);
+  });
+
+  it('prices --asm-dir, and a synthetic scope over an unreadable artifact, as a whole pass', () => {
+    expect(sweepRequest(o({ asmDir: '/x', toolchain: 'agbcc' }), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass);
+    expect(sweepRequest(o({ tiers: ['synthetic'], only: 'add' }), unread)!.needBytes).toBe(PEAK_BYTES.sweepPass);
   });
 
   it('adds one row’s enumeration for --fan, and asks for nothing on --compare', () => {
-    expect(sweepRequest(o({ fan: true }), ids)!.needBytes).toBe(PEAK_BYTES.sweepPass + PEAK_BYTES.fan);
-    expect(sweepRequest(o({ compare: ['a.json', 'b.json'] }), ids)).toBeUndefined();
+    expect(sweepRequest(o({ fan: true }), rows)!.needBytes).toBe(PEAK_BYTES.sweepPass + PEAK_BYTES.fan);
+    expect(sweepRequest(o({ compare: ['a.json', 'b.json'] }), rows)).toBeUndefined();
+  });
+});
+
+describe('artifactRowIds reads the row ids without parsing the artifact', () => {
+  const write = (text: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-ids-'));
+    writeFileSync(join(dir, 'results.json'), text);
+    return join(dir, 'results.json');
+  };
+  const artifact = (n: number, total = n): string =>
+    JSON.stringify(
+      {
+        meta: { counts: { total, synthetic: n, real: 0 } },
+        results: Array.from({ length: n }, (_, i) => ({ id: `synthetic:s${i}:agbcc`, sym: `s${i}`, asmlift: {} })),
+      },
+      null,
+      2,
+    );
+
+  it('finds every id, across the 1 MiB chunk edges', () => {
+    const ids = artifactRowIds(write(artifact(30000)));
+    expect(ids).toHaveLength(30000);
+    expect(new Set(ids).size).toBe(30000);
+    expect(ids![29999]).toBe('synthetic:s29999:agbcc');
+  });
+
+  it('reads a file whose id count is not its meta total, or that is cut short or missing, as unreadable', () => {
+    expect(artifactRowIds(write(artifact(10, 11)))).toBeUndefined();
+    expect(artifactRowIds(write(artifact(10).slice(0, 400)))).toBeUndefined();
+    expect(artifactRowIds('/no/such/results.json')).toBeUndefined();
   });
 });

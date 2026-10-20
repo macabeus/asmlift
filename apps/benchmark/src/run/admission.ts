@@ -1,7 +1,7 @@
 // May this heavy command START on this machine NOW, given the memory it will need at its peak and the
 // memory the machine has to give? One check, called by every heavy entry point: `bench run`,
-// `bench fidelity`, `bench fan`, `bench sweep`, and the vitest gate (`scripts/gate-vitest.sh`,
-// through this file's `main`).
+// `bench fidelity`, `bench fan`, `bench sweep`, and every vitest run (`vitest.memory-admission.ts`,
+// a globalSetup of both vitest configs).
 //
 // THE INCIDENT. On 2026-10-20 at 13:18 a 7.5 GiB host with 9.5 GiB of swap ran out of both, and the
 // kernel OOM killer took down the user's desktop session along with every job on it. Its table
@@ -46,13 +46,15 @@
 // still ramping up: a `bench run --jobs 3` measured 2.80 GB over its process tree 919 s in, against
 // ~8.0 GB at the 13:18 OOM (docs/bench-cost.md §5). So every job this check admits takes a record
 // in `run/lock.ts`'s register carrying the need it was admitted with — a run or a whole-corpus
-// sweep as before, every other heavy command as a `kind: 'job'` record, the vitest gate under its
-// shell's pid — and what such a job has not taken yet, its need less what its process tree holds
-// now, is subtracted before anything else is admitted. Every admitted job, and not only runs: a
-// promise only some jobs make protects only the jobs started after them, and whether a gate and a
-// run were admitted together then depended on which started first. On Linux the tree is read
-// from /proc; where it cannot be read, nothing is subtracted, which is this check without the
-// correction, never a stricter one.
+// sweep as before, every other heavy command as a `kind: 'job'` record, a vitest run under vitest's
+// own pid (`vitest.memory-admission.ts`) — and what such a job has not taken yet, its need less what
+// its process tree holds now, is subtracted before anything else is admitted. Every admitted job,
+// and not only runs: a promise only some jobs make protects only the jobs started after them, and
+// whether a gate and a run were admitted together then depended on which started first. The tree
+// is read from /proc on Linux and from `ps` where there is no /proc (macOS); a live record whose
+// tree cannot be read at all is taken to hold nothing yet, so its whole need is subtracted. A
+// record written before records carried a need (a lane on an older base) promises what that
+// older `bench run` would have started: unknown is not a clearance, as in `run/lock.ts`.
 //
 // REFUSE, NOT WAIT. Like the register, this decides and says why; it does not queue. A waiting job
 // holds a terminal and a lane hostage on a condition nobody can see, while a refusal names the
@@ -64,10 +66,9 @@
 // not for running two heavy jobs at once.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
-import { cpus, freemem, platform } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { cpus, freemem, platform, totalmem } from 'node:os';
 
-import { type BenchLockState, readBenchLock, registerHeavyJob } from './lock';
+import { type BenchLockRecord, type BenchLockState, readBenchLock } from './lock';
 
 /** One shard of `bench run`: its 1.3–1.7 GB peak on the largest fans, with headroom for the compile
  *  workers a big fan forks (`eval/asmlift.ts`'s ROW_COMPILE_WORKERS, and on Linux one worker for
@@ -93,8 +94,27 @@ export const PEAK_BYTES = {
   /** a whole-corpus `bench sweep --repeat N`: every later pass in this process while the first
    *  pass's records stay alive, measured 2.32 GB at `--repeat 2` */
   sweepRepeat: 2.5e9,
-  /** the floor of a SCOPED sweep's pass: one row measured 0.25 GB */
+  /** the floor of a SCOPED sweep's pass, what its process costs before it lifts much: one
+   *  synthetic row measured 0.20 GB, one kleod row 0.23 GB */
   sweepScopedPass: 0.3e9,
+  /** what a SCOPED sweep's pass costs for each real project it lifts a row of: `bench sweep
+   *  --project <p> --tier real`, measured per project, plus a tenth. Not a share of the rows: a
+   *  real row's price is its project's — the context and symbol map its rows load — so 68
+   *  pokeemerald rows (3% of the corpus) cost three quarters of a whole pass. A project not in
+   *  this table is priced at `sweepRealProjectUnmeasured`. */
+  sweepRealProject: {
+    pokeemerald: 1.8e9, // 1.55 / 1.57 / 1.63 GB
+    'ac-decomp': 0.75e9, // 0.65 GB
+    pikmin: 0.65e9, // 0.56 GB
+    marioparty3: 0.6e9, // 0.53 GB
+    marioparty4: 0.6e9, // 0.54 GB
+    af: 0.55e9, // 0.49 GB
+    snowboardkids2: 0.55e9, // 0.47 GB
+    kleod: 0.5e9, // 0.42 GB
+    sa3: 0.45e9, // 0.39 GB
+  } as Readonly<Record<string, number>>,
+  /** a real project `sweepRealProject` has no figure for: the dearest one measured */
+  sweepRealProjectUnmeasured: 1.8e9,
   /** one published repro script `bench fidelity` runs. The asmlift script re-ranks its row as a
    *  shard does, so it is budgeted as one: the dearest row's script measured 1.53 GB before it
    *  stopped in this host's shell (exit 127, after building its target), a floor and not a peak */
@@ -200,17 +220,60 @@ export function readAvailableMemory(deps: MemoryDeps = {}): MemoryReading {
   return { availableBytes: f, how: `free memory ${gb(f)} (os.freemem(), no swap counted)` };
 }
 
+/** `ps -A -o pid=,ppid=,rss=` (rss in KiB on Linux and macOS alike) as pid → [ppid, bytes]. */
+export function parsePsTable(text: string): Map<number, [number, number]> {
+  const out = new Map<number, [number, number]>();
+  for (const line of text.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line);
+    if (m) {
+      out.set(Number(m[1]), [Number(m[2]), Number(m[3]) * 1024]);
+    }
+  }
+  return out;
+}
+
+/** The bytes `pid` and its descendants hold in a `parsePsTable` table; undefined when `pid` is not in it. */
+function psTreeBytes(pid: number, table: Map<number, [number, number]>): number | undefined {
+  if (!table.has(pid)) {
+    return undefined;
+  }
+  const children = new Map<number, number[]>();
+  for (const [p, [ppid]] of table) {
+    children.set(ppid, [...(children.get(ppid) ?? []), p]);
+  }
+  let total = 0;
+  const seen = new Set<number>();
+  const queue = [pid];
+  while (queue.length > 0) {
+    const p = queue.pop()!;
+    if (seen.has(p) || !table.has(p)) {
+      continue;
+    }
+    seen.add(p);
+    total += table.get(p)![1];
+    queue.push(...(children.get(p) ?? []));
+  }
+  return total;
+}
+
+const runPs = (): string => execFileSync('ps', ['-A', '-o', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 5000 });
+
 /** Bytes of anonymous memory plus swap held by `pid` and every process descended from it, read from
  *  Linux /proc (`VmRSS` + `VmSwap`; VmRSS also counts shared file pages, so this over-reads what a
  *  job holds and under-reads what it has still to take — the lenient side, deliberately, since
- *  the correction is additive to a check that was already sound without it). Undefined where /proc
- *  cannot be read or the pid is gone. */
-export function processTreeBytes(pid: number, proc: string = '/proc'): number | undefined {
+ *  the correction is additive to a check that was already sound without it). Where there is no
+ *  /proc (macOS), from `ps`'s resident sizes, which count no swap. Undefined where neither can be
+ *  read or the pid is gone. */
+export function processTreeBytes(pid: number, proc: string = '/proc', ps: () => string = runPs): number | undefined {
   let pids: string[];
   try {
     pids = readdirSync(proc).filter((n) => /^\d+$/.test(n));
   } catch {
-    return undefined;
+    try {
+      return psTreeBytes(pid, parsePsTable(ps()));
+    } catch {
+      return undefined;
+    }
   }
   const children = new Map<number, number[]>();
   for (const p of pids) {
@@ -253,9 +316,34 @@ export function processTreeBytes(pid: number, proc: string = '/proc'): number | 
   return found ? total : undefined;
 }
 
-/** What the live jobs in the register were admitted with and have not taken yet. A record with no
- *  `needBytes` (written before records carried one) and a job whose tree cannot be read add
- *  nothing. */
+/** What a record written WITHOUT a need promises: one from a lane on a base older than records that
+ *  carry one. Only `bench run` took a record there, so it is priced as that `bench run` started —
+ *  its `--jobs N`, 1 for `--serial`, and otherwise the default that base computed from physical
+ *  memory alone (`min(8, cpus, totalmem / SHARD_BYTES)`), a shard each. A scoped run started fewer
+ *  shards, which its record does not say: unknown is not a clearance (`run/lock.ts`), so it is
+ *  priced as the most it could have started. */
+export function legacyNeedBytes(
+  r: Pick<BenchLockRecord, 'command' | 'kind'>,
+  host: { cpus: number; totalmem: number } = { cpus: cpus().length, totalmem: totalmem() },
+): number {
+  if (r.kind === 'sweep') {
+    return PEAK_BYTES.sweepBase;
+  }
+  if (r.kind === 'job') {
+    return SHARD_BYTES;
+  }
+  const jobs = /(?:^|\s)--jobs(?:=|\s+)(\d+)(?=\s|$)/.exec(r.command);
+  const n = /(?:^|\s)--serial(?=\s|$)/.test(r.command)
+    ? 1
+    : jobs
+      ? Number(jobs[1])
+      : Math.min(8, host.cpus, Math.floor(host.totalmem / SHARD_BYTES));
+  return Math.max(1, n) * SHARD_BYTES;
+}
+
+/** What the live jobs in the register were admitted with and have not taken yet: each record's
+ *  need (`legacyNeedBytes` for one that carries none) less what its process tree holds now. A live
+ *  record whose tree cannot be read is taken to hold nothing yet. */
 export function unspentBudgets(
   state: BenchLockState,
   held: (pid: number) => number | undefined = processTreeBytes,
@@ -266,14 +354,8 @@ export function unspentBudgets(
   let bytes = 0;
   let jobs = 0;
   for (const r of state.records) {
-    if (r.needBytes === undefined) {
-      continue;
-    }
-    const h = held(r.pid);
-    if (h === undefined) {
-      continue;
-    }
-    const left = Math.max(0, r.needBytes - h);
+    const need = r.needBytes ?? legacyNeedBytes(r);
+    const left = Math.max(0, need - (held(r.pid) ?? 0));
     if (left > 0) {
       bytes += left;
       jobs++;
@@ -363,7 +445,25 @@ export function unitsThatFit(perUnit: number, reading: MemoryReading = readAdmis
   return Math.max(0, Math.floor((reading.availableBytes - RESERVE_BYTES) / perUnit));
 }
 
-/** The request of the vitest gate at `workers` workers. */
+/** The request of `bench run` at `jobs` shards over `rows` rows (undefined for a whole tier, which
+ *  has more rows than any `--jobs`): one shard per row up to `jobs`. `fitsNow` is how many shards
+ *  the machine could take now, read only when the advice is built. */
+export function runRequest(
+  jobs: number,
+  rows?: number,
+  fitsNow: () => number = () => unitsThatFit(SHARD_BYTES),
+): AdmissionRequest {
+  const shards = Math.max(1, rows === undefined ? jobs : Math.min(jobs, rows));
+  const fit = fitsNow();
+  return {
+    command: 'bench run',
+    needBytes: shards * SHARD_BYTES,
+    need: `${shards} shard${shards === 1 ? '' : 's'} × ${gb(SHARD_BYTES)}`,
+    instead: fit >= 1 ? `run \`--jobs ${fit}\`, which fits now` : 'scope it with `--only`',
+  };
+}
+
+/** The request of a vitest run at `workers` workers (`vitest.memory-admission.ts`). */
 export function vitestRequest(workers: number): AdmissionRequest {
   return {
     command: `vitest (${workers} worker${workers === 1 ? '' : 's'})`,
@@ -372,38 +472,7 @@ export function vitestRequest(workers: number): AdmissionRequest {
     // A one-file run is priced at the workers it is GIVEN, not the file count: a vitest filter is a
     // substring, and one can name any number of files. So the advice is the worker count, which a
     // one-file run loses nothing by.
-    instead: 'run fewer workers (`VITEST_MAX_WORKERS=1`; a run of one test file loses nothing by it)',
+    instead:
+      'run fewer workers (`VITEST_MAX_WORKERS=1`, or `--maxWorkers=1`; a run of one test file loses nothing by it)',
   };
-}
-
-/** `scripts/gate-vitest.sh`'s entry point: `admission.ts vitest <workers|default> [<pid>]`. Exit 0 =
- *  go, 2 = refused (the gate script's own "did not run" code). One copy of the math, here.
- *
- *  With `<pid>` — the gate's own shell, which lives as long as its vitest run — an admitted run
- *  takes a `kind: 'job'` record under that pid, and its path is the one line printed on stdout,
- *  for the gate to remove when it exits. This process exits before vitest starts, so a record under
- *  its own pid would read stale at once and promise nothing. */
-function main(argv: readonly string[]): number {
-  const [what, n, pidArg] = argv;
-  if (what !== 'vitest' || (pidArg !== undefined && !/^[1-9]\d*$/.test(pidArg))) {
-    console.error('usage: admission.ts vitest <workers|default> [<pid>]');
-    return 2;
-  }
-  // vitest's own default is (cpus - 1); anything that is not a plain integer (a `50%`) is priced at
-  // that, the most it can mean.
-  const workers = /^\d+$/.test(n ?? '') ? Math.max(1, Number(n)) : Math.max(1, cpus().length - 1);
-  const req = vitestRequest(workers);
-  const refusal = admissionRefusal(req);
-  if (refusal !== undefined) {
-    console.error(refusal);
-    return 2;
-  }
-  if (pidArg !== undefined) {
-    console.log(registerHeavyJob(`gate-vitest ${req.command}`, req.needBytes, Number(pidArg)));
-  }
-  return 0;
-}
-
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exit(main(process.argv.slice(2)));
 }

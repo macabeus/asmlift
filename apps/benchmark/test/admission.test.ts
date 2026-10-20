@@ -1,13 +1,12 @@
 // The memory admission check every heavy command calls (src/run/admission.ts). Every reading here is
 // INJECTED: a test that read this machine's /proc/meminfo would pass or fail on whatever else the
 // host happens to be running.
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { REPO_ROOT } from '../src/config';
+import { vitestWorkers } from '../../../vitest.memory-admission';
 import {
   ADMISSION_ENV,
   type MemoryReading,
@@ -16,11 +15,14 @@ import {
   SHARD_BYTES,
   admissionRefusal,
   admissionVerdict,
+  legacyNeedBytes,
   parseMeminfo,
+  parsePsTable,
   parseVmStat,
   processTreeBytes,
   readAdmissibleMemory,
   readAvailableMemory,
+  runRequest as shippedRunRequest,
   unitsThatFit,
   unspentBudgets,
   vitestRequest,
@@ -45,12 +47,8 @@ const meminfo = (memAvailableKb: number, swapFreeKb: number): string =>
 
 const linux = (text: string) => ({ platform: 'linux', meminfo: () => text, freemem: () => 0 });
 
-const runRequest = (shards: number) => ({
-  command: 'bench run',
-  needBytes: shards * SHARD_BYTES,
-  need: `${shards} shards × 2.5 GB`,
-  instead: 'run fewer shards',
-});
+/** The shipped `bench run` request at `shards` shards over a whole tier, with no live reading. */
+const runRequest = (shards: number) => shippedRunRequest(shards, undefined, () => 0);
 
 describe('parseMeminfo', () => {
   it('reads MemAvailable and SwapFree in bytes', () => {
@@ -194,7 +192,7 @@ describe('admissionVerdict', () => {
     expect(text).toContain('3 shards × 2.5 GB');
     expect(text).toContain('3.5 GB to give');
     expect(text).toContain('MemAvailable 4.0 GB');
-    expect(text).toContain('run fewer shards');
+    expect(text).toContain('scope it with `--only`');
     expect(text).toContain(`${ADMISSION_ENV}=off`);
   });
 
@@ -234,30 +232,43 @@ describe('unitsThatFit', () => {
   });
 });
 
-describe('the vitest gate entry point', () => {
+describe('what `bench run` asks for (the request cli.ts builds)', () => {
+  it('starts one shard per row up to --jobs, and --jobs shards over a whole tier', () => {
+    expect(shippedRunRequest(3, undefined, () => 0).needBytes).toBe(3 * SHARD_BYTES);
+    expect(shippedRunRequest(3, 1, () => 0).needBytes).toBe(SHARD_BYTES);
+    expect(shippedRunRequest(3, 1, () => 0).need).toBe('1 shard × 2.5 GB');
+    expect(shippedRunRequest(2, 40, () => 0).needBytes).toBe(2 * SHARD_BYTES);
+    // a selection that names no row still starts the run's own process
+    expect(shippedRunRequest(3, 0, () => 0).needBytes).toBe(SHARD_BYTES);
+  });
+
+  it('advises the --jobs that fits now, or scoping when not one shard does', () => {
+    expect(shippedRunRequest(3, undefined, () => 2).instead).toBe('run `--jobs 2`, which fits now');
+    expect(shippedRunRequest(3, undefined, () => 0).instead).toBe('scope it with `--only`');
+  });
+});
+
+describe('what a vitest run asks for (vitest.memory-admission.ts)', () => {
+  type Cfg = Parameters<typeof vitestWorkers>[0];
+  const cfg = (c: Record<string, unknown>): Cfg => ({ pool: 'forks', ...c }) as unknown as Cfg;
+
   it('prices the workers it is given', () => {
     expect(vitestRequest(3).needBytes).toBe(3 * PEAK_BYTES.vitestWorker);
   });
 
-  it('runs from the gate script and exits 0 when the check is off', () => {
-    const r = spawnSync(
-      join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
-      [join(REPO_ROOT, 'apps/benchmark/src/run/admission.ts'), 'vitest', '3'],
-      { encoding: 'utf8', env: { ...process.env, [ADMISSION_ENV]: 'off' } },
-    );
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toContain(`${ADMISSION_ENV}=off`);
+  it('counts the workers the pool will start: maxForks, then maxWorkers, then vitest’s own default', () => {
+    expect(vitestWorkers(cfg({ maxWorkers: 3 }), 8)).toBe(3);
+    expect(vitestWorkers(cfg({ maxWorkers: 3, poolOptions: { forks: { maxForks: 2 } } }), 8)).toBe(2);
+    // `pnpm test:offline` and a bare `pnpm exec vitest run`: no --maxWorkers, so cpus - 1
+    expect(vitestWorkers(cfg({}), 8)).toBe(7);
+    expect(vitestWorkers(cfg({ watch: true }), 8)).toBe(4);
+    expect(vitestWorkers(cfg({ pool: 'threads', poolOptions: { threads: { maxThreads: 5 } } }), 8)).toBe(5);
+    expect(vitestWorkers(cfg({}), 1)).toBe(1);
   });
 
-  it('exits 2 on an argument it does not know, and on a pid that is not one', () => {
-    for (const args of [['bogus'], ['vitest', '3', 'abc'], ['vitest', '3', '0']]) {
-      const r = spawnSync(
-        join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
-        [join(REPO_ROOT, 'apps/benchmark/src/run/admission.ts'), ...args],
-        { encoding: 'utf8' },
-      );
-      expect(r.status, args.join(' ')).toBe(2);
-    }
+  it('counts one worker for a single fork, as the matching config runs', () => {
+    expect(vitestWorkers(cfg({ maxWorkers: 3, poolOptions: { forks: { singleFork: true } } }), 8)).toBe(1);
+    expect(vitestWorkers(cfg({ maxWorkers: 3, fileParallelism: false }), 8)).toBe(1);
   });
 
   it('advises the worker count, the one thing that lowers its price — not the file count', () => {
@@ -300,7 +311,21 @@ describe('what registered jobs have still to take', () => {
     expect(processTreeBytes(100, proc)).toBe((1000 + 2000 + 500 + 3000) * kB);
     expect(processTreeBytes(102, proc)).toBe(3000 * kB);
     expect(processTreeBytes(300, proc)).toBeUndefined();
-    expect(processTreeBytes(100, '/no/such/proc')).toBeUndefined();
+    expect(processTreeBytes(100, '/no/such/proc', () => '')).toBeUndefined();
+  });
+
+  it('reads the tree from `ps` where there is no /proc, as on macOS', () => {
+    const ps = ['  100     1  1000', '  101   100  2000', '  102   101  3000', '  200     1 99999', 'garbage'].join(
+      '\n',
+    );
+    expect(parsePsTable(ps).get(101)).toEqual([100, 2000 * kB]);
+    expect(processTreeBytes(100, '/no/such/proc', () => ps)).toBe(6000 * kB);
+    expect(processTreeBytes(102, '/no/such/proc', () => ps)).toBe(3000 * kB);
+    expect(processTreeBytes(300, '/no/such/proc', () => ps)).toBeUndefined();
+    const fail = () => {
+      throw new Error('ENOENT');
+    };
+    expect(processTreeBytes(100, '/no/such/proc', fail)).toBeUndefined();
   });
 
   it('subtracts what a live job was admitted with less what its tree holds, never below nothing', () => {
@@ -309,10 +334,24 @@ describe('what registered jobs have still to take', () => {
     expect(r).toEqual({ bytes: 6.5 * GB, jobs: 1 });
   });
 
-  it('promises nothing for a record without a need, a tree it cannot read, or a free register', () => {
-    expect(unspentBudgets(held(record(1)), () => 0)).toEqual({ bytes: 0, jobs: 0 });
-    expect(unspentBudgets(held(record(1, 7.5 * GB)), () => undefined)).toEqual({ bytes: 0, jobs: 0 });
+  it('promises a live record’s whole need when its tree cannot be read, and nothing for a free register', () => {
+    // a Mac whose `ps` failed too: before, every promise there was dropped
+    expect(unspentBudgets(held(record(1, 7.5 * GB)), () => undefined)).toEqual({ bytes: 7.5 * GB, jobs: 1 });
     expect(unspentBudgets(freeRegister(), () => 0)).toEqual({ bytes: 0, jobs: 0 });
+  });
+
+  it('prices a record written without a need as the `bench run` an older base started', () => {
+    const host = { cpus: 8, totalmem: 7.88e9 };
+    expect(legacyNeedBytes({ command: 'bench run --jobs 3 --detach' }, host)).toBe(3 * SHARD_BYTES);
+    expect(legacyNeedBytes({ command: 'bench run --jobs=2' }, host)).toBe(2 * SHARD_BYTES);
+    expect(legacyNeedBytes({ command: 'bench run --serial --only Foo' }, host)).toBe(SHARD_BYTES);
+    // no --jobs: the older default, min(8, cpus, totalmem / 2.5 GB) — 3 on this host
+    expect(legacyNeedBytes({ command: 'bench run' }, host)).toBe(3 * SHARD_BYTES);
+    expect(legacyNeedBytes({ command: 'bench run' }, { cpus: 2, totalmem: 64e9 })).toBe(2 * SHARD_BYTES);
+    expect(legacyNeedBytes({ command: 'bench run', kind: 'sweep' }, host)).toBe(PEAK_BYTES.sweepBase);
+    // an older full run ramping up, as the 13:18 incident's mixed-base lanes ran: it promised 0
+    const old = record(1);
+    expect(unspentBudgets(held(old), () => 2.8 * GB).bytes).toBe(legacyNeedBytes(old) - 2.8 * GB);
   });
 
   it('refuses a vitest gate beside a full bench still ramping up, which a reading of NOW alone admits', () => {
@@ -342,5 +381,18 @@ describe('what registered jobs have still to take', () => {
     const gateFirst = { ...deps, lockState: () => held(gateJob), held: () => 0.4 * GB };
     expect(admissionRefusal(gate, runFirst)).toContain('REFUSED');
     expect(admissionRefusal(runRequest(3), gateFirst)).toContain('REFUSED');
+  });
+
+  it('decides them the same on a Mac, where no /proc can say what a job holds', () => {
+    // The breaker's probe: vm_stat reading 9.0 GB, and the first job's tree unreadable. Before, an
+    // unreadable tree promised nothing, and both orders were ADMITTED: 10.5 GB of need on 9.0 GB.
+    const pages = Math.round((9.0 * GB) / 16384);
+    const vmStat = `Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: ${pages}.\n`;
+    const mac = { platform: 'darwin', vmStat: () => vmStat, freemem: () => 0, env: {}, held: () => undefined };
+    const gate = vitestRequest(3);
+    const gateJob: BenchLockRecord = { ...record(7, gate.needBytes), tiers: [], whole: false, kind: 'job' };
+    expect(admissionRefusal(runRequest(3), { ...mac, lockState: () => held(gateJob) })).toContain('REFUSED');
+    expect(admissionRefusal(gate, { ...mac, lockState: () => held(record(7, 3 * SHARD_BYTES)) })).toContain('REFUSED');
+    expect(admissionRefusal(runRequest(3), { ...mac, lockState: freeRegister })).toBeUndefined();
   });
 });

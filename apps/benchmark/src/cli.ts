@@ -111,7 +111,7 @@ import { REPO_ROOT, RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
-import { type AdmissionRequest, PEAK_BYTES, SHARD_BYTES, admissionRefusal, unitsThatFit } from './run/admission';
+import { type AdmissionRequest, PEAK_BYTES, admissionRefusal, runRequest } from './run/admission';
 import { defaultJobs } from './run/default-jobs';
 import { acquireBenchLock, benchLockStatus, concurrentSweepRefusal, readBenchLock, registerHeavyJob } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
@@ -337,22 +337,11 @@ switch (command) {
     // them costs the case load `orchestrate` pays anyway, so only a scoped run pays it here.
     if (runTakesTheBenchLock(runOpts) && Number.isInteger(jobs) && jobs >= 1) {
       const rows = tiers.some((t) => !tierIsFiltered(t, opts))
-        ? jobs
+        ? undefined
         : tiers.reduce((n, t) => n + casesFor(t).length, 0);
-      const shards = Math.min(jobs, rows);
-      runNeed = shards * SHARD_BYTES;
-      admitOrExit(
-        {
-          command: 'bench run',
-          needBytes: runNeed,
-          need: `${shards} shard${shards === 1 ? '' : 's'} × ${(SHARD_BYTES / 1e9).toFixed(1)} GB`,
-          instead:
-            unitsThatFit(SHARD_BYTES) >= 1
-              ? `run \`--jobs ${unitsThatFit(SHARD_BYTES)}\`, which fits now`
-              : 'scope it with `--only`',
-        },
-        1,
-      );
+      const req = runRequest(jobs, rows);
+      runNeed = req.needBytes;
+      admitOrExit(req, 1);
     }
     // DETACHED: the same argv minus `--detach`, in its own process group with its output in a log.
     // After the preflight, so a refusal is still answered here and now. This process returns only
@@ -730,7 +719,7 @@ switch (command) {
     // the lift, which is why it is a flag. Scope it with `--tier`/`--project`/`--only` when the
     // question is scoped. The figures are dated rows of `docs/bench-cost.md` §1 and live only
     // there; run/sweep.ts's header carries the SHAPE of the price.
-    const { artifactRowIds, sweep, sweepIsWholeCorpus, sweepRequest } = await import('./run/sweep');
+    const { sweep, sweepIsWholeCorpus, sweepRequest } = await import('./run/sweep');
     const sweepOpts = {
       tiers,
       ...(opts.only !== undefined ? { only: opts.only } : {}),
@@ -756,15 +745,12 @@ switch (command) {
         }
       }
     }
-    const sweepNeed = sweepRequest(
-      {
-        mapModes: [],
-        ...sweepOpts,
-        fan: opts.fan,
-        ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
-      },
-      artifactRowIds(),
-    );
+    const sweepNeed = sweepRequest({
+      mapModes: [],
+      ...sweepOpts,
+      fan: opts.fan,
+      ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
+    });
     if (!sweepIsWholeCorpus(sweepOpts)) {
       admitAndRegister(sweepNeed, 2);
     } else {
