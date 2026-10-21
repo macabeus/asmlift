@@ -3111,6 +3111,9 @@ export function structure(
     // break; } }` keeps the arm inside a guarded bottom-tested loop, so the arm is the one in the
     // loop, and a bare `return` copies no code: `while (t[i] != 7) { ...; if (i >= n) return; }
     // gHit = 1;` is the spelling the bytes do not hold (breaknend_code 21/26 against 4/18).
+    // The arm is asked in shared mode, as `exitArmOf` asks it for `while (1)`: a break whose tail
+    // another arm or an `else` before the loop also enters is a break all the same, and the `while`
+    // reading that took it for the exit would leave the other exit edge with no spelling.
     const runsEffect = (x: Block) => [x, ...reachFrom(x)].some((y) => !nl.body.has(y) && y.ops.some(effectful));
     const hOutIsBreakArm =
       hOut.length === 1 &&
@@ -3118,7 +3121,7 @@ export function structure(
         if (e.to === hOut[0].block) {
           return false;
         }
-        const region = codeBreakArm(preds, h, hOut[0].block, nl.body, e.to);
+        const region = codeBreakArm(preds, h, hOut[0].block, nl.body, e.to, true);
         const bareReturn = e.to.ops.length === 1 && e.to.ops[0].opcode === 'ret' && e.to.ops[0].operands.length === 0;
         return region !== null && (runsEffect(e.to) || (bareReturn && [...region].some((y) => y.ops.some(effectful))));
       });

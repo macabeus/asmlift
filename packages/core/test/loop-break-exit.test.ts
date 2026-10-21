@@ -1173,6 +1173,48 @@ const EXIT_OVER_ELSE = `fn fwdexit {
   ret %18
 }`;
 
+/** ido's spelling of the same source when the break arm runs a call under an `if`: `if (f) { for (..)
+ *  if (i == k) { if (i + 100 < n) ping(i); id = i + 100; break; } } else id = f + 26; out(id);`.
+ *  The header is the arm's own test, so the header's way out is the break arm, and its tail (the `u8`
+ *  truncation, spelt `sub`) is the one block the `else` enters too. Once the `j` is folded, the
+ *  `while` reading takes that arm for the loop's exit unless the header's arm is asked the way
+ *  `while (1)` asks it, as a break whose tail an `else` shares. */
+const ARM_OVER_ELSE = `fn armelse {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %8: u32 = icmp_eq %5, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  %30: u32 = icmp_slt %10, %0
+  cond_br %30, ^bb11(), ^bb5(%10)
+^bb11():
+  %31: s32 = call %5 {target="ping"}
+  br ^bb5(%10)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  %6: u32 = icmp_slt %16, %0
+  cond_br %6, ^bb1(%16), ^bb4()
+^bb4():
+  br ^bb7(%3)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  br ^bb5(%12)
+^bb5(%21: s32):
+  %20: s32 = const {value=7}
+  %22: s32 = sub %21, %20
+  br ^bb7(%22)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  ret %18
+}`;
+
 describe('a loop whose exit jumps over an `else`', () => {
   test('folds the empty exit block, and the loop leaves by a `break` that hands the join a value', () => {
     const r = folded(EXIT_OVER_ELSE);
@@ -1186,6 +1228,17 @@ describe('a loop whose exit jumps over an `else`', () => {
 
   test('declines without the fold: the structurer has no second reading of the two exit targets', () => {
     expect(() => judged(EXIT_OVER_ELSE)).toThrow(/unrecovered back-edge/);
+  });
+
+  test('a header whose way out is a break arm sharing its tail with the `else` leaves `while` to `while (1)`', () => {
+    const r = folded(ARM_OVER_ELSE);
+    expect(r.n).toBe(1);
+    expect(r.src).toContain('while (1) {');
+    expect(r.src.match(/ping\(/g)).toHaveLength(1);
+    expect(r.src.match(/ - 7;/g)).toHaveLength(2);
+    expect(r.src.match(/out\(/g)).toHaveLength(1);
+    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a second exit that reaches the target only round an enclosing loop does not count', () => {
