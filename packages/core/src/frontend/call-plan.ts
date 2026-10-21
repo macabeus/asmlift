@@ -161,7 +161,8 @@ export interface CallDeclarations {
   readonly heldAtUndeclaredCall: ReadonlySet<Value>;
   /** THE #351 GAPLESS GUESS, NOT LET IN THROUGH A JUMP TABLE'S CASES. Once every call is lowered:
    *  where the function lifts only because of what an elided or kept dispatch left in its registers
-   *  — a `parked` register among some guessed call's argument registers, which stood where the
+   *  — a dispatch's marker or scaled index reaching some guessed call's argument registers
+   *  (`CallSite.parked`, `CallSite.scaledIndex`; a PowerPC pair's r4 too), which stands where the
    *  pre-dispatch value had made a gap refuse, or `caseStateRead`, a read of the scaled index a case
    *  target is entered with — refuse the first guessed arity the bytes cannot tell from another:
    *    - its last counted register holds a value its block did not write since its last call, a
@@ -169,7 +170,7 @@ export interface CallDeclarations {
    *      a0 still in r2; mwcc `return g()` lifted `return g(a0)`);
    *    - a counted register holds a value an effect of its block uses, a store's address or value
    *      left in the register (`gc = ga; g()` lifted `g(&gc, v0)`);
-   *    - a register it leaves out below the parked one still holds its incoming value, an argument
+   *    - a register it leaves out below that marker still holds its incoming value, an argument
    *      passed on or not (mwcc `g(a)` with the table base in r4 lifted `g()`).
    *  Elsewhere the guess takes these, an open gap (`g()` and `g(a0)` are the same bytes); there the
    *  function declined before the dispatch's registers were modelled, and a decline is not turned
@@ -262,7 +263,7 @@ export function callDeclarations(
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
-  // parked register stood among a guessed call's argument registers, and the first guessed count
+  // dispatch's marker reached a guessed call's argument registers, and the first guessed count
   // the bytes cannot tell from another, as its refusal
   let parkedInArgs = false;
   let passThrough: { call: string; reg: string; why: string } | undefined;
@@ -923,18 +924,12 @@ export function callDeclarations(
     const resultOwed: Array<() => void> = [];
     // how many argument words the decided gaps put beyond doubt
     let decidedWords = 0;
-    // the lowest argument register a dispatch parked at this call, where the guess asked
-    let parkedAt = -1;
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
             gap: { name, at: guess.at, fail },
             floor,
-            ceiling: (k) => {
-              parkedInArgs = true;
-              parkedAt = k;
-            },
             parked: (r) =>
               !holes.skippable.has(r) &&
               !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
@@ -978,6 +973,15 @@ export function callDeclarations(
             'argument count is not decidable',
         );
       }
+      // the lowest argument register past the stated ones that a marker or the scaled index a
+      // dispatch left there may reach, parked or not (a PowerPC pair's r4 never parks): where the
+      // pre-dispatch value stood
+      const markedAt = target.argRegs.findIndex(
+        (r, k) =>
+          k >= floor &&
+          ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
+      );
+      parkedInArgs ||= markedAt >= 0;
       if (passThrough === undefined) {
         const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
         const last = target.argRegs[argc - 1];
@@ -991,7 +995,7 @@ export function callDeclarations(
           .slice(floor, argc)
           .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
         const leftIncoming =
-          parkedAt < 0 ? undefined : target.argRegs.slice(argc, parkedAt).find((r) => ssa.holdsEntryValue(r, bi));
+          markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
         if (argc > floor && !ssa.writtenSinceCall(last, bi)) {
           passThrough = {
             call,
@@ -1004,7 +1008,7 @@ export function callDeclarations(
           passThrough = {
             call,
             reg: leftIncoming,
-            why: 'which the count leaves out below a parked register, holds its incoming value',
+            why: "which the count leaves out below a dispatch's register, holds its incoming value",
           };
         }
       }

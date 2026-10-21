@@ -1724,7 +1724,7 @@ describe('a guessed arity in a function that reads the scaled index', () => {
       .replace('addi    r4,r4,0', 'addi    r4,r5,0')
       .replace('  2c:\tmr      r3,r0', '  2c:\tnop');
     expect(() => decompile('swp', swq, PPC_MWCC, { asmData, prototypes: { swp: { returnsVoid: true } } })).toThrow(
-      /r3, which the count leaves out below a parked register, holds its incoming value/,
+      /r3, which the count leaves out below a dispatch.s register, holds its incoming value/,
     );
   });
 });
