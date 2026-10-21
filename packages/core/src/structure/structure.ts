@@ -3233,19 +3233,6 @@ export function structure(
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
     const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
-    // A target that is a bodyless `br` forwarder also offers ITS target, after every exit edge's own:
-    // ido, gcc2.7.2kmc and mwcc lay an `else` the loop sits beside between the loop and the join, so
-    // the loop's normal exit is a `b`/`j` over that `else` while its breaks jump to the join itself
-    // (`if (f) { for (..) if (..) { id = i; break; } } else id = ..; out(id);`). Taking the join as
-    // the exit reads the forwarder as a break arm that runs only its copies (`codeBreakArm`). Last,
-    // so a loop an exit edge's own target already spells keeps that spelling.
-    for (const x of [...targets]) {
-      const t = x.ops[x.ops.length - 1];
-      const past = x.ops.length === 1 && t.opcode === 'br' ? t.successors[0].block : null;
-      if (past !== null && !nl.body.has(past) && !targets.includes(past)) {
-        targets.push(past);
-      }
-    }
     for (const exit of targets) {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();

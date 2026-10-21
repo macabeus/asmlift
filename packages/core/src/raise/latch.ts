@@ -138,6 +138,13 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
 // (`synthetic:break_value`) or on the latch's own exit with the break going direct (kleod
 // `sub_0801E664`).
 //
+// The second exit need not land on the target itself. ido, gcc2.7.2kmc and mwcc lay an `else` the
+// loop sits beside between the loop and its join — `if (f) { for (..) if (a(i) == k) { id = i + 100;
+// break; } } else id = f + 26; out(id);` (`synthetic:break_elsetail`) — so the loop's own exit is an
+// empty `b`/`j` over the `else`, and the break reaches the join only through the code its arm runs.
+// That loop has two exit targets because of the block just the same, so the scope gate asks whether
+// another exit edge's target REACHES the target, going forward and outside the loop's body.
+//
 // Splicing it out re-points each edge into it at its target with its own arguments, and the loop
 // exits to one block: a `break` that carries its copies, which the structurer already spells. The
 // arguments move soundly for the reason the latch's do: the block has no params and one op, so
@@ -150,7 +157,8 @@ export interface ExitTrampoline {
   /** the predecessors of `block` */
   preds: readonly Block[];
   /** does some loop hold every predecessor of `block` but not `block` itself, and leave by another
-   *  edge for `target` as well? */
+   *  edge for `target` as well — landing on it, or on a block that reaches it forward without
+   *  re-entering the loop (`reachesForward`)? */
   sharedExit: boolean;
   /** does every path from `target` reach a `ret` without an effect on the way? */
   pureReturn: boolean;
@@ -182,7 +190,7 @@ export const EXIT_TRAMPOLINE_GATES: readonly Gate<ExitTrampoline>[] = [
     // structurer wherever it is the loop's one way out, and folding it there would only re-spell
     // functions that already lift.
     id: 'trampoline-not-a-second-exit',
-    why: 'only a loop that also leaves for the same target by another edge has two exit targets because of it',
+    why: 'only a loop that also leaves for the same target by another edge, or for a block that runs on into it, has two exit targets because of it',
     sound: false,
     rejects: (c) => !c.sharedExit,
   },
@@ -221,13 +229,33 @@ export function returnsPurely(b: Block): boolean {
   return true;
 }
 
+/** Does `from` reach `to` along forward edges — never a back-edge, whose target dominates its
+ *  source — without entering `body`? Forward only, so an enclosing loop's next iteration does not
+ *  count as reaching a block the inner loop's exit runs before it. */
+function reachesForward(from: Block, to: Block, body: ReadonlySet<Block>, dom: Map<Block, Set<Block>>): boolean {
+  const seen = new Set<Block>();
+  for (const stack = [from]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (x === to) {
+      return true;
+    }
+    if (seen.has(x) || body.has(x)) {
+      continue;
+    }
+    seen.add(x);
+    stack.push(...successorsOf(x).filter((s) => !dom.get(x)!.has(s)));
+  }
+  return false;
+}
+
 /** Splice out every empty EXIT TRAMPOLINE the gates above admit; returns how many were removed.
  *  Iterated, as the latch fold is: one splice can make another block's exit edges shared. */
 export function foldExitTrampolines(fn: Fn, gates: readonly Gate<ExitTrampoline>[] = EXIT_TRAMPOLINE_GATES): number {
   let folded = 0;
   for (;;) {
     const preds = predecessors(fn);
-    const loops = [...analyzeLoops(fn, dominators(fn)).byHeader.values()];
+    const dom = dominators(fn);
+    const loops = [...analyzeLoops(fn, dom).byHeader.values()];
     const found = fn.blocks.find((b) => {
       const target = b.ops[0]?.successors[0]?.block;
       if (target === undefined) {
@@ -237,7 +265,10 @@ export function foldExitTrampolines(fn: Fn, gates: readonly Gate<ExitTrampoline>
       const sharedExit =
         into.length > 0 &&
         loops.some(
-          (nl) => !nl.body.has(b) && into.every((p) => nl.body.has(p)) && nl.exitEdges.some((e) => e.to === target),
+          (nl) =>
+            !nl.body.has(b) &&
+            into.every((p) => nl.body.has(p)) &&
+            nl.exitEdges.some((e) => e.to !== b && reachesForward(e.to, target, nl.body, dom)),
         );
       return (
         firstRejection(gates, { block: b, target, preds: into, sharedExit, pureReturn: returnsPurely(target) }) === null

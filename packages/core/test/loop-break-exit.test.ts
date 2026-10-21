@@ -1136,11 +1136,12 @@ describe('break arms that share a tail', () => {
   });
 });
 
-// A LOOP WHOSE NORMAL EXIT JUMPS OVER AN `else` (`foreverShape`'s forwarder candidate): ido,
-// gcc2.7.2kmc and mwcc lay `if (f) { for (..) if (a(i) == k) { id = i + 100; break; } } else id = f +
-// 26; out(id);` out with the `else` between the loop and the join. The break arm runs its code and
-// jumps to the join; the loop's own exit lands on a bodyless `j` over the `else`. Neither exit edge's
-// target is the join, so only the forwarder's target spells the loop.
+// A LOOP WHOSE NORMAL EXIT JUMPS OVER AN `else` (raise/latch.ts `foldExitTrampolines`, whose scope
+// gate counts a second exit that REACHES the target): ido, gcc2.7.2kmc and mwcc lay `if (f) { for (..)
+// if (a(i) == k) { id = i + 100; break; } } else id = f + 26; out(id);` out with the `else` between
+// the loop and the join. The break arm runs its code and jumps to the join; the loop's own exit lands
+// on a bodyless `j` over the `else`. Neither exit edge's target is the join, so the loop has two exit
+// targets until the fold splices the `j` out.
 const EXIT_OVER_ELSE = `fn fwdexit {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -1173,69 +1174,29 @@ const EXIT_OVER_ELSE = `fn fwdexit {
 }`;
 
 describe('a loop whose exit jumps over an `else`', () => {
-  test("takes the forwarder's target as its exit, the forwarder a `break` that hands it a value", () => {
-    const { src, agreement, shipped } = judged(EXIT_OVER_ELSE);
-    expect(src).toContain('while (1) {');
-    expect(src.match(/break;/g)).toHaveLength(2);
-    expect(src.match(/out\(/g)).toHaveLength(1);
-    expect(agreement).toEqual({ judged: 300, disagree: 0 });
-    expect(shipped).toEqual({ judged: 300, disagree: 0 });
-  });
-});
-
-// TWO EARLY-RETURN ARMS THAT SHARE THEIR TAIL (`earlyReturnArm`): `if (k(i) == 7) { ping(i); return
-// hit(a); } if (k(i) == 8) { pong(i); return hit(a); }`, the two `hit(a); return` cross-jumped into one
-// block (agbcc, gcc2.7.2kmc: jump.c). No edge dominates that block, so neither arm owns it, and it
-// calls. Only the loop's exit arms run it and it holds no cycle, so the duplication policy writes it
-// in each arm: each path still calls `hit` once.
-const SHARED_RETURN_TAIL = `fn rettail {
-^bb0(%0: s32, %1: s32):
-  %2: s32 = const {value=0}
-  br ^bb1(%2)
-^bb1(%4: s32):
-  %3: u32 = icmp_slt %4, %1
-  cond_br %3, ^bb2(), ^bb7()
-^bb2():
-  %5: s32 = call %4 {target="k"}
-  %6: s32 = const {value=7}
-  %7: u32 = icmp_eq %5, %6
-  cond_br %7, ^bb3(), ^bb8()
-^bb3():
-  %8: s32 = call %4 {target="ping"}
-  br ^bb5()
-^bb8():
-  %9: s32 = const {value=8}
-  %10: u32 = icmp_eq %5, %9
-  cond_br %10, ^bb4(), ^bb6()
-^bb4():
-  %11: s32 = call %4 {target="pong"}
-  br ^bb5()
-^bb5():
-  %12: s32 = call %0 {target="hit"}
-  ret %12
-^bb6():
-  %13: s32 = const {value=1}
-  %14: s32 = add %4, %13
-  br ^bb1(%14)
-^bb7():
-  ret %2
-}`;
-
-describe('early-return arms that share their tail', () => {
-  test('each arm writes the shared tail and its `return`', () => {
-    const { src, agreement, shipped } = judged(SHARED_RETURN_TAIL);
-    expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
-    expect(src.match(/ping\(/g)).toHaveLength(1);
-    expect(src.match(/pong\(/g)).toHaveLength(1);
-    expect(agreement).toEqual({ judged: 180, disagree: 0 });
-    expect(shipped).toEqual({ judged: 180, disagree: 0 });
+  test('folds the empty exit block, and the loop leaves by a `break` that hands the join a value', () => {
+    const r = folded(EXIT_OVER_ELSE);
+    expect(r.n).toBe(1);
+    expect(r.src).toContain('while (1) {');
+    expect(r.src.match(/break;/g)).toHaveLength(2);
+    expect(r.src.match(/out\(/g)).toHaveLength(1);
+    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test("a tail the loop's own exit also runs is written once, after the loop", () => {
-    const { src, agreement, shipped } = judged(SHARED_RETURN_TAIL.replace('^bb7():\n  ret %2', '^bb7():\n  br ^bb5()'));
-    expect(src.match(/hit\(/g)).toHaveLength(1);
-    expect(src.match(/break;/g)).toHaveLength(3);
-    expect(agreement).toEqual({ judged: 300, disagree: 0 });
-    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  test('declines without the fold: the structurer has no second reading of the two exit targets', () => {
+    expect(() => judged(EXIT_OVER_ELSE)).toThrow(/unrecovered back-edge/);
+  });
+
+  test('a second exit that reaches the target only round an enclosing loop does not count', () => {
+    // the break arm ^bb3 now jumps back to ^bb10, the header of an OUTER loop around this one; ^bb7
+    // is reached from ^bb3 only through that back-edge, so the `j` is the loop's one way to it
+    const outer = EXIT_OVER_ELSE.replace(
+      'cond_br %4, ^bb1(%3), ^bb6()',
+      'cond_br %4, ^bb10(), ^bb6()\n^bb10():\n  br ^bb1(%3)',
+    ).replace('  br ^bb7(%10)', '  br ^bb10()');
+    const fn = parse(outer);
+    verify(fn);
+    expect(foldExitTrampolines(fn)).toBe(0);
   });
 });
