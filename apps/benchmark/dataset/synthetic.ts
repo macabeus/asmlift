@@ -1792,8 +1792,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // TWO LOOP SWITCHES AND A CALL AFTER THEM. KMC hoists each table base into its loop's preheader,
   // the second at `.rodata+32`, and the call makes the function non-leaf: the lift asks only that
   // each base reach its dispatch on every path (frontend/jump-table.ts), not where the allocator put
-  // it. The two tables store different values, so a dispatch read through the other one's base would
-  // not recompile.
+  // it. IDO forms the second base in its dispatch block instead and folds the table's `%lo` into the
+  // load (`lw t7,32(at)`), which frontend/mips.ts pairs with the `lui`'s `%hi`. The two tables store
+  // different values, so a dispatch read through the other one's base would not recompile.
   {
     sym: 'sw_jtloop2',
     src: 'void jh(int);\nvoid sw_jtloop2(int n,int *p,int *q){ int k=n; do { switch(*p){case 0:*p=11;break;case 1:*p=15;break;case 2:*p=16;break;case 3:*p=17;break;case 4:*p=13;break;case 5:*p=12;break;case 6:*p=19;break;case 7:*p=14;break;} p++; } while(--k); k=n; do { switch(*q){case 0:*q=21;break;case 1:*q=25;break;case 2:*q=26;break;case 3:*q=27;break;case 4:*q=23;break;case 5:*q=22;break;case 6:*q=29;break;case 7:*q=24;break;} q++; } while(--k); jh(n); }',
@@ -12436,10 +12437,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      takes those instructions as the table's `extras` (`dispatchExtraRefusal` says which it
   //      refuses), and the dispatch block stays, cut to them, under its bounds test: agbcc lifts,
   //      nonmatch. EntityCreate's second table carries four such values. Give `case 4` a body or drop
-  //      the `if` path and the insertion moves to the join: MATCH (controls, not rows). ido7.1 and
-  //      gcc2.7.2kmc decline the control on their own second table, for an unrelated reason: the
-  //      table's `%lo` folds into its load (`lw t7,32(at)`), which frontend/mips.ts refuses on a
-  //      non-zero offset, as it does for sw_jtloop2:ido7.1; mwcc_242_81 lifts it.
+  //      the `if` path and the insertion moves to the join: MATCH (controls, not rows). On ido7.1,
+  //      gcc2.7.2kmc and gcc2.7.2 the row pins something else: the second table's `%lo` folds into
+  //      its load (`lw t7,32(at)`), which frontend/mips.ts reads as the low half of the table's
+  //      address; jt_second_fn and jt_far40k pin the same pairing at `.rodata+24` and past 32 KiB.
   //   9. jt_dupdef (VisionSelectInputAndMovement). A table entry naming a label that ALIASES the
   //      default: `case 8` and `default` have identical arms, jump.c cross-jumps case 8's, and its
   //      label is left on the default's first instruction. `recoverJumpTable` reads a `.word` entry
@@ -12765,9 +12766,34 @@ export const SYNTHETIC: SynthSpec[] = [
       '    case 37: p[9] = 1; break;\n    case 38: p[10] = 2; break;\n    case 39: p[11] = 3; break;\n    case 40: p[12] = 4; break;\n' +
       '    case 41: p[13] = 5; break;\n    case 42: p[14] = 6; break;\n    case 43: p[15] = 7; break;\n    case 44: p[16] = 8; break;\n    }\n}',
     features: ['dense', 'branch'],
-    toolchains: ['agbcc', 'mwcc_242_81'],
+    toolchains: ['agbcc', 'mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'extern s32 gOut;\nvoid jt_pre_midg(s32 x, s32 *p, s32 c);',
     proto: { jt_pre_midg: { returnsVoid: true } },
+  },
+  // A TABLE BEHIND ANOTHER FUNCTION'S TABLE. IDO, KMC and gcc 2.7.2 form each base in its dispatch
+  // block, both halves against the `.rodata` section symbol with addend 0, so the second table's
+  // offset lives only in the load's displacement: `lui at,0x0 ; lw rV,24(at)`. mwcc_242_81 gives each
+  // table its own `@N` and loads with `lwzx`: the control.
+  {
+    sym: 'jt_second_fn',
+    src:
+      'int jt_first(int x){ switch(x){case 0:return 3;case 1:return 9;case 2:return 4;case 3:return 7;case 4:return 1;case 5:return 8;default:return 0;} }\n' +
+      'void jt_second_fn(int x, int *p){ switch(x){case 0:p[0]=5;break;case 1:p[1]=6;break;case 2:p[3]=2;break;case 3:p[2]=9;break;case 4:p[5]=1;break;case 5:p[4]=7;break;case 6:p[6]=3;break;} }',
+    features: ['dense'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'void jt_second_fn(int x, int *p);',
+    proto: { jt_second_fn: { returnsVoid: true } },
+  },
+  // A TABLE PAST 32 KiB INTO ITS SECTION: `lui at,0x1 ; lw rV,-24576(at)`, the `%lo` sign-extended
+  // below the `%hi`'s 64 KiB. A model that read the displacement alone, or the `lui`'s relocation
+  // without its immediate, reads another offset. mwcc_242_81 is the control.
+  {
+    sym: 'jt_far40k',
+    src: 'const int jt_far40k_pad[10240] = {1,2,3};\nvoid jt_far40k(int x, int *p){ switch(x){case 0:p[0]=5;break;case 1:p[1]=6;break;case 2:p[3]=2;break;case 3:p[2]=9;break;case 4:p[5]=1;break;case 5:p[4]=7;break;case 6:p[6]=3;break;} }',
+    features: ['dense'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern const int jt_far40k_pad[10240]; void jt_far40k(int x, int *p);',
+    proto: { jt_far40k: { returnsVoid: true } },
   },
   {
     sym: 'jt_dupdef',
