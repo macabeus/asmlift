@@ -2,6 +2,7 @@
 import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
@@ -371,6 +372,23 @@ test('a load displacement that is no paired %lo of the base declines', () => {
   for (const disp of ['32', '0']) {
     expect(() => decompile('f', folded('0x0', disp), MIPS_IDO, { asmData: foldedTable(32, 'other') })).toThrow(
       declines,
+    );
+  }
+});
+
+test('a table entry naming code outside the function declines loud', () => {
+  // The table's second word points past the function's last block (0x40), as one read off another
+  // function's table would.
+  const outside: AsmData = {
+    ...asmData,
+    sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x20, 0, 0, 0, 0x40])]]),
+  };
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: outside })).toThrow(
+      FrontendUnsupportedError,
+    );
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: outside })).toThrow(
+      /jump-table target is not a block boundary/,
     );
   }
 });

@@ -1648,6 +1648,15 @@ function liftOnce(
   // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
   // markers written there, by value. Not a placeholder: a case may copy one (`move v0,at`), and a
   // return or a call that skipped it would drop what the case handed on.
+  // A table entry naming an address no block of this function starts at (another function's
+  // code, read off a table that is not this dispatch's) declines here, before any arm is built.
+  const armBlock = (addr: number): number => {
+    const j = idxOf.get(addr);
+    if (j === undefined) {
+      throw new FrontendUnsupportedError(`cannot lift '${name}': jump-table target is not a block boundary`);
+    }
+    return j;
+  };
   const entries = caseEntries(
     blocks.flatMap((b, at) => {
       const jt = b.branch ? jts.get(b.branch.addr) : undefined;
@@ -1657,8 +1666,8 @@ function liftOnce(
             {
               at,
               scrutReg: jt.scrutReg,
-              cases: jt.caseAddrs.map((a) => idxOf.get(a)!),
-              defaultBlock: idxOf.get(jt.defaultAddr)!,
+              cases: jt.caseAddrs.map(armBlock),
+              defaultBlock: armBlock(jt.defaultAddr),
               leaves: jt.leaves,
             },
           ];
