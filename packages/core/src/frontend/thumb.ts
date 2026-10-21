@@ -4564,29 +4564,36 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
   return { saved, carriers };
 }
 
-/** Every register a `push` anywhere in the function saves, a high one through the `mov rLow, rHi`
- *  that stages it in the same block — the prologue's and any later one's. `push` is a save and
- *  nothing else on Thumb, so a register in here is one the function preserves, wherever it does it
- *  (`registerLiveIns`' `savedLater`). */
+/** Every register a `push` or a `pop` anywhere in the function names, a high one through the `mov`
+ *  that stages it in the same block (`mov rLow, rHi` before the push, `mov rHi, rLow` after the
+ *  pop) — the prologue's and epilogue's and any other. Both are frame bookkeeping the fill reads as
+ *  transparent, so a register in here is one the function saves or restores, wherever it does it,
+ *  and a write the `pop` makes is one no op records (`registerLiveIns`' `savedLater`). */
 function pushedRegs(blocks: readonly AsmBlock[]): ReadonlySet<string> {
-  const pushed = new Set<string>();
+  const named = new Set<string>();
   for (const b of blocks) {
     const staged = new Map<string, string>(); // low register ← the high one a `mov` put there
+    const popped = new Set<string>();
     for (const x of b.instrs) {
-      if (x.mnemonic === 'push') {
+      if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
         for (const r of regListOf(x.ops) ?? []) {
-          pushed.add(r);
+          named.add(r);
           const hi = staged.get(r);
-          if (hi !== undefined) {
-            pushed.add(hi);
+          if (x.mnemonic === 'push' && hi !== undefined) {
+            named.add(hi);
+          }
+          if (x.mnemonic === 'pop') {
+            popped.add(r);
           }
         }
       } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
         staged.set(x.ops[0], x.ops[1]);
+      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[0] ?? '') && popped.has(x.ops[1] ?? '')) {
+        named.add(x.ops[0]);
       }
     }
   }
-  return pushed;
+  return named;
 }
 
 /** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from

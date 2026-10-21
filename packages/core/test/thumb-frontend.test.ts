@@ -840,6 +840,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const lateHigh =
         'f:\n\tmov\tr1, r0\n\tmov\tr3, r8\n\tpush\t{r3}\n\tmov\tr8, r1\n\tmov\tr0, r8\n\tpop\t{r3}\n\tmov\tr8, r3\n\tbx\tlr\n';
       expect(() => decompile('f', lateHigh, ARMV4T_AGBCC)).toThrow(/callee-saved r8/);
+      // …and a `pop` with no push before it restores the register all the same, a write the
+      // transparent pop leaves out of the lift
+      expect(() => decompile('f', 'f:\n\tmov\tr0, r4\n\tpop\t{r4}\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(
+        /it reads callee-saved r4 before writing it and never saved it/,
+      );
     });
   });
 
