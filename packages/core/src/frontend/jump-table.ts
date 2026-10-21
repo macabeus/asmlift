@@ -296,10 +296,14 @@ export function staleMarker(ops: Op[], key: string, read: StaleIdiomRead, stale:
 
 /** Whether `v`, read from `reg`, is the marker the idiom left in that very register on every path
  *  that brings it — where the compiler parked the dispatch's own value, which no call is handed and
- *  no return hands back (a guessed arity stops below it, a return holding it returns nothing). A copy
- *  into another register is something the case did with it, and a MIXED target's marker stands in
- *  for what another path brought too (`StaleIdiomRead.parks`): both are read like any value. `key` is
- *  the frontend's register spelling. */
+ *  no return hands back. A guessed arity stops below it (`CallSite.parked`). A return reaching only
+ *  it returns nothing where the frontend already asks whether a value reaches the return register
+ *  (PowerPC's r3, MIPS's v0, each written by the idiom on mwcc and gcc). Thumb asks no such thing — a
+ *  return with nothing written in r0 hands back the caller's r0 — so its return reads the marker, and
+ *  the read declines unless the function is declared void. A copy into another register is
+ *  something the case did with it, and a MIXED target's marker stands in for what another path
+ *  brought too (`StaleIdiomRead.parks`): both are read like any value. `key` is the frontend's
+ *  register spelling. */
 export const parkedIn =
   (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
   (v: Value, reg: string): boolean => {
