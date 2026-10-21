@@ -12772,6 +12772,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void jt_dupdef(u32 x, s32 *p);',
     proto: { jt_dupdef: { returnsVoid: true } },
   },
+  // jt_idxreuse. A case body that reads the index the jump table's dispatch scaled: mwcc 2.4.2 at
+  // -O4,p computes `slwi r5,r3,2` once in the dispatch block and reuses r5 in every `p[i]` case
+  // (`stwx r0,r4,r5`). Every recognizer prunes the dispatch block, so the case read a register no
+  // lifted path wrote, and the lift minted a parameter for it (`*(s32 *)(a1 + a2) = 7`);
+  // frontend/jump-table.ts `enterCaseTarget` now writes `i << 2` there. agbcc emits the reuse as
+  // `add r1, r0, r1` (into the pointer register), a dispatch form `recoverJumpTable` does not
+  // recognise; ido7.1 and gcc2.7.2kmc recompute the index in the case. Those three are controls.
+  {
+    sym: 'jt_idxreuse',
+    src:
+      'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p)\n{\n    switch (i) {\n    case 0: p[i] = 7; break;\n' +
+      '    case 1: p[i] += 9; break;\n    case 2: p[i] -= 3; break;\n    case 3: p[i] = 0; break;\n' +
+      '    case 4: p[i] ^= 5; break;\n    case 5: p[i] |= 0x30; break;\n    case 6: gArr[i] = 1; break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p);',
+    proto: { jt_idxreuse: { returnsVoid: true } },
+  },
   {
     sym: 'thrbreak',
     src:
