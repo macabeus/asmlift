@@ -13117,6 +13117,43 @@ export const SYNTHETIC: SynthSpec[] = [
       retarm1_tail: { returnsVoid: true },
     },
   },
+  // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
+  // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
+  // / `mr r3,r14` — a callee-saved register read before any write, which the lift used to name a
+  // parameter, and a write (`g = a;`) it used to drop. Each compiler takes its own register set
+  // (`globalRegisterVariables` in core target.ts); mwcc 2.4 only as a run from r14, so `_r15` declares
+  // r14 beside it. IDO 7.1 and mwcc 2.3.3 reject the declaration, so they have no row.
+  ...(
+    [
+      ['', ['agbcc'], '__asm__("r8")'],
+      ['_s0', ['gcc2.7.2kmc', 'gcc2.7.2'], '__asm__("$16")'],
+      ['_r15', ['mwcc_242_81'], '__asm__("r15")'],
+    ] as const
+  ).flatMap(([suffix, toolchains, reg]): SynthSpec[] => {
+    const decl = `${suffix === '_r15' ? 'register int g0 __asm__("r14"); ' : ''}register int g ${reg};\n`;
+    return [
+      {
+        sym: `grv_read${suffix}`,
+        src: `${decl}int grv_read${suffix}(void){ return g; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+      },
+      {
+        sym: `grv_add${suffix}`,
+        src: `${decl}int grv_add${suffix}(int a){ return a + g; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+      },
+      {
+        sym: `grv_write${suffix}`,
+        src: `${decl}void grv_write${suffix}(int a){ g = a; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+        ctx: `void grv_write${suffix}(int);`,
+        proto: { [`grv_write${suffix}`]: { returnsVoid: true } },
+      },
+    ];
+  }),
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
