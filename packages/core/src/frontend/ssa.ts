@@ -1405,23 +1405,28 @@ export function makeSsaBuilder(
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     writtenOnEveryPath: (reg, b, stop, visit) => {
-      const seen = new Set<number>();
+      // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
+      // which a back edge brings, and a cycle adds no path the first visit did not judge
+      const seen = new Set<number>([b]);
       const walk = (at: number): boolean => {
-        if (at !== b) {
-          if (seen.has(at)) {
-            return true;
-          }
-          seen.add(at);
-          if (!filled[at] || stop(at)) {
-            return false;
-          }
-          visit?.(at);
-        }
         if (writtenSinceCall[at].has(reg) || clobberedLocal[at].has(reg)) {
           return true;
         }
         const ps = distinctPreds(at);
-        return ps.length > 0 && ps.every(walk);
+        return (
+          ps.length > 0 &&
+          ps.every((p) => {
+            if (seen.has(p)) {
+              return true;
+            }
+            seen.add(p);
+            if (!filled[p] || stop(p)) {
+              return false;
+            }
+            visit?.(p);
+            return walk(p);
+          })
+        );
       };
       return walk(b);
     },
