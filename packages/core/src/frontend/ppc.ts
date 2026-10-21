@@ -126,6 +126,7 @@ import {
   parkedIn,
   refuseReachableDispatch,
   refuseStaleIdiomReads,
+  scaledIndexIn,
 } from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
@@ -1613,6 +1614,7 @@ function liftOnce(
   );
   const staleIdiom = new Map<Value, StaleIdiomRead>();
   const parked = parkedIn(staleIdiom);
+  const scaledIndex = scaledIndexIn(staleIdiom);
   /** What this frontend defines registers with that is no argument: a pending `@ha` half and a
    *  table base. NOT a marker an elided dispatch left (`staleIdiom`): a case may copy one
    *  (`mr r3,r4`), and a return or a call that skipped it would drop what the case handed on. */
@@ -2700,6 +2702,7 @@ function liftOnce(
             // a pending `@ha` half and a table base are no argument
             placeholders,
             parked,
+            scaledIndex,
             guess: {
               // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
               at: ins.addr,

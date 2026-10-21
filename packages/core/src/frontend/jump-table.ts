@@ -216,6 +216,9 @@ export interface StaleIdiomRead {
    *  kept dispatch's, and an EXACT target's. A MIXED target's marker also replaced what the other
    *  paths into it brought, so it is read like any value, and its read declines. */
   parks: boolean;
+  /** Set on the scaled index an EXACT target is entered with ({@link enterCaseTarget}): no marker but
+   *  a value a case may read, recorded only for {@link scaledIndexIn}. */
+  scaled?: true;
 }
 
 /** What a case target's entry holds from an elided dispatch: the scrutinee's register (read for a
@@ -276,6 +279,7 @@ export function enterCaseTarget(
   for (const [r, left] of entry.leaves) {
     if (left === 'scaled') {
       io.write(r, scaled!);
+      stale.set(scaled!, { reg: r, form: 'elided', parks: entry.exact, scaled: true });
       continue;
     }
     io.write(r, staleMarker(ops, io.key(r), { reg: r, form: 'elided', parks: entry.exact }, stale));
@@ -300,7 +304,18 @@ export const parkedIn =
   (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
   (v: Value, reg: string): boolean => {
     const s = stale.get(v);
-    return s !== undefined && s.parks && key(s.reg) === key(reg);
+    return s !== undefined && s.parks && s.scaled === undefined && key(s.reg) === key(reg);
+  };
+
+/** Whether `v`, read from `reg`, is the scrutinee scaled by four that an elided dispatch left in that
+ *  very register (`enterCaseTarget`). A case reads it freely (`p[i]`), but a guessed arity may not
+ *  count it: mwcc 2.4.2 keeps the dispatch's `slwi r4,r3,2` live into its `p[i]` cases, and an
+ *  undeclared `g(2)` there is `li r3,2; bl g`, the bytes `g(2, i * 4)` compiles to too. */
+export const scaledIndexIn =
+  (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
+  (v: Value, reg: string): boolean => {
+    const s = stale.get(v);
+    return s?.scaled === true && key(s.reg) === key(reg);
   };
 
 /** A DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom is not lifted, so a marker
@@ -348,7 +363,7 @@ export function refuseStaleIdiomReads(
   while (work.length > 0) {
     (incoming.get(work.pop()!) ?? []).forEach(demand);
   }
-  const read = [...stale].find(([v]) => demanded.has(v));
+  const read = [...stale].find(([v, s]) => s.scaled === undefined && demanded.has(v));
   if (read !== undefined) {
     const [, { reg, form }] = read;
     const why =

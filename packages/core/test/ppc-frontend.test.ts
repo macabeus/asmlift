@@ -1475,7 +1475,7 @@ describe('an elided mwcc dispatch writes its registers at each case target', () 
 });
 
 // AN UNDECLARED CALL IN A CASE OF AN ELIDED mwcc DISPATCH, as mwcc 2.4.2 -O4,p lays it out: the
-// dispatch's `addi r3,r5,0` leaves the table base in r3, and its `slwi` the scaled index in r0.
+// dispatch's `addi r3,r5,0` leaves the table base in r3, and its `slwi` the scaled index in r0 or r4.
 describe('a guessed arity in a case of an elided mwcc dispatch', () => {
   const asmData = (cases: number[]): AsmData => ({
     sections: new Map([['.data', new Uint8Array(16)]]),
@@ -1522,5 +1522,25 @@ describe('a guessed arity in a case of an elided mwcc dispatch', () => {
     const body = [...cases, '  40:\tli      r4,7', toEnd('44')];
     const out = decompile('swc', asm('r0', body), PPC_MWCC, { asmData: asmData([0x34, 0x2c, 0x40, 0x48]) }).source;
     expect(out).toMatch(/case 0:\s*\n\s*a1 = g\(\);/);
+  });
+
+  // `void swc(int i) { switch (i) { case 0: g(1); break; case 1: g(2); break; } }` leaves the
+  // dispatch's `slwi r4,r3,2` in r4 at `li r3,1; bl g`, and `g(1)` and `g(1, i * 4)` compile to these
+  // bytes alike. Before, the guess counted r4 and lifted `g(1, a0 << 2)`.
+  test('a guess that would count the scaled index the dispatch left in r4 DECLINES', () => {
+    const body = [
+      '  2c:\tli      r3,1',
+      ...callG('30'),
+      toEnd('34'),
+      '  38:\tli      r3,2',
+      ...callG('3c'),
+      toEnd('40'),
+    ];
+    expect(() =>
+      decompile('swc', asm('r4', [...body, '  44:\tnop']), PPC_MWCC, {
+        asmData: asmData([0x2c, 0x38, 0x44, 0x48]),
+        prototypes: { swc: { returnsVoid: true } },
+      }),
+    ).toThrow(/r4, which the arity guessed without one counts, still holds the index the jump table's dispatch scaled/);
   });
 });

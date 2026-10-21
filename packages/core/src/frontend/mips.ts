@@ -82,6 +82,7 @@ import {
   parkedIn,
   refuseReachableDispatch,
   refuseStaleIdiomReads,
+  scaledIndexIn,
 } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
@@ -1640,6 +1641,7 @@ function liftOnce(
   );
   const staleIdiom = new Map<Value, StaleIdiomRead>();
   const parked = parkedIn(staleIdiom);
+  const scaledIndex = scaledIndexIn(staleIdiom);
   // O32 passes the words past a0..a3 on the stack, returns a word in v0, and returns every struct
   // and union through a hidden pointer in a0 (`aggregateReturn: 'memory'`). This lowering builds no
   // register pair, so the plan refuses one. A call through an argument register bounds no arity
@@ -2830,6 +2832,7 @@ function liftOnce(
         // a pending `%hi` half and a table base are no argument
         placeholders,
         parked,
+        scaledIndex,
         guess: {
           // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
           at: ins.addr,

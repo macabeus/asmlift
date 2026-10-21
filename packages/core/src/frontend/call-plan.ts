@@ -187,6 +187,10 @@ export interface CallSite {
    *  double's a1, a PowerPC pair's r4, a leading float's a0), which stays a gap. A copy of one into
    *  another register is a value the case moved there, counted, and its read declines. */
   readonly parked?: (v: Value, reg: string) => boolean;
+  /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
+   *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
+   *  alike, so a guessed arity that counts it refuses */
+  readonly scaledIndex?: (v: Value, reg: string) => boolean;
   /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
    *  no opt-out: a count that stopped at the first register nothing reaches would drop every
    *  argument past an incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`). */
@@ -929,6 +933,17 @@ export function callDeclarations(
           })
         : wordsOf(widths, target);
     if (widths === null) {
+      const index = target.argRegs
+        .slice(floor, argc)
+        .find((r) => ssa.hasReachingDef(r, bi, (v) => site.scaledIndex?.(v, r) === true));
+      if (index !== undefined) {
+        fail(
+          `cannot lift '${name}': the call ${typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at} ` +
+            `has no prototype, and ${index}, which the arity guessed without one counts, still holds the index the ` +
+            "jump table's dispatch scaled — a call handed it and one that is not compile to the same bytes, so the " +
+            'argument count is not decidable',
+        );
+      }
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
       if (decided.length > 0 && decidedCallRefusal(ssa, bi, argc, site)) {
