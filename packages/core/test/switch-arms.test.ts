@@ -308,13 +308,13 @@ test('a param-carrying dispatch INSIDE a loop hoists to the head of the switch, 
   // The accumulator is loop-carried (`case 1:` reads the PREVIOUS iteration's value), which is
   // what a write hoisted one level too far would destroy.
   const out = of(
-    'f:\n\tmov\tr5, #0x0\n\tmov\tr2, #0x0\n\tmov\tr4, #0x0\n' +
+    'f:\n\tpush\t{r4, r5}\n\tmov\tr5, #0x0\n\tmov\tr2, #0x0\n\tmov\tr4, #0x0\n' +
       '.Lloop:\n\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
       '\tmov\tr2, r5\n\tcmp\tr0, #0x2\n\tbne\t.Lnext\t@cond_branch\n' +
       '\tadd\tr2, r2, #0x2\n\tb\t.Lnext\n' +
       '.Lc1:\n\tadd\tr2, r2, #0x1\n' +
       '.Lnext:\n\tadd\tr4, r4, #0x1\n\tcmp\tr4, #0x5\n\tblt\t.Lloop\t@cond_branch\n' +
-      '\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+      '\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tpop\t{r4, r5}\n\tbx\tlr\n',
   );
   expect(out).toContain('do {');
   expect(out).toMatch(/do \{\s*\n\s*v2 = 0;\s*\n\s*switch \(a0\)/); // inside the loop, above the switch

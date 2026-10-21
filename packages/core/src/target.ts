@@ -262,10 +262,11 @@ export interface TargetDescription {
    *  on PPC it is `r0`, `r11` and `r12`, where mwcc homes a leaf's uninitialised locals (PPC_MWCC).
    *
    *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
-   *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
-   *  partition gets. OVER-stating it is the unsound direction — a callee-saved register listed here
-   *  is classified with no evidence at all, which is the defect the save half exists to close. Every
-   *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
+   *  the frontend cannot find is read as one the callee must preserve, and a read of it before any
+   *  write refuses (frontend/ssa.ts `LiveInModel.unsavedCalleeSavedRegs`). OVER-stating it is the
+   *  unsound direction — a callee-saved register listed here is classified with no evidence at all,
+   *  which is the defect the save half exists to close. Every entry must appear in `nonArgRegs`;
+   *  the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
   /** Of `scratchRegs`, the ones something outside the C calling convention hands an input in. On
    *  PPC that is mwcc's RUNTIME: its register save routines take their frame address in r11

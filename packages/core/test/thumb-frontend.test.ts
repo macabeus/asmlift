@@ -227,7 +227,7 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
       dc('ok', `\tcmp\tr0, r1\n${mid}\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`).source;
     expect(folds('')).toContain('if (a0 != a1)');
     expect(folds('\tldr\tr2, [r3]\n')).toContain('if (a0 != a1)');
-    expect(folds('\tmov\tr8, r2\n')).toContain('if (a0 != a1)');
+    expect(folds('\tmov\tip, r2\n')).toContain('if (a0 != a1)');
 
     // The guard reads the DESTINATION, so only that half of the high-register form is transparent.
     // `mov r7, sl` writes no flags on the machine either — Thumb-1 takes the flag-free encoding
@@ -554,7 +554,7 @@ describe('pre-UAL mnemonic spellings', () => {
     ['ldsh', '\tldsh\tr0, [r0, r1]\n\tbx\tlr\n', '\tldrsh\tr0, [r0, r1]\n\tbx\tlr\n'],
     ['ldsb', '\tldsb\tr0, [r0, r1]\n\tbx\tlr\n', '\tldrsb\tr0, [r0, r1]\n\tbx\tlr\n'],
     ['ldm', '\tldm\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
-    ['ldm multi', '\tldm\tr0!, {r5, r6, r7}\n\tbx\tlr\n', '\tldmia\tr0!, {r5, r6, r7}\n\tbx\tlr\n'],
+    ['ldm multi', '\tldm\tr0!, {r1, r2, r3}\n\tbx\tlr\n', '\tldmia\tr0!, {r1, r2, r3}\n\tbx\tlr\n'],
     ['ldm no-!', '\tldm\tr1, {r0}\n\tbx\tlr\n', '\tldmia\tr1, {r0}\n\tbx\tlr\n'],
     ['ldmfd', '\tldmfd\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
     ['stm', '\tstm\tr1!, {r0}\n\tbx\tlr\n', '\tstmia\tr1!, {r0}\n\tbx\tlr\n'],
@@ -783,27 +783,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   test('a register the prologue never saved is not one the compiler homed a local in', () => {
     // The MP2K engine's hand-written `ChnVolSetAsm` — vendored in klonoa, sa3 and pokeemerald
     // alike — receives two pointers in r4/r5 by a private convention and has no prologue at all.
-    // Classified by the ABI alone it came out `s32 ChnVolSetAsm(void)` storing through
-    // `uninit_r4`, with no diagnostic: a correct two-pointer signature traded for C that reads
-    // whatever the registers happen to hold.
+    // Classified by the ABI alone it came out storing through `uninit_r4`; read as parameters it came
+    // out `f(u8 *a0, u8 *a1)`, which a C caller hands over in r0/r1. Neither is what the machine
+    // does: the values are shared with the caller in registers it expects preserved, which is a
+    // global register variable (`register u8 *ra asm("r4");` compiles to exactly these bytes).
+    const refused = (reg: string) => new RegExp(`it reads callee-saved ${reg} before writing it and never saved it`);
     const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
-    expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
-      's32 f(u8 *a0, u8 *a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
-    );
+    expect(() => decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' })).toThrow(refused('r4'));
     // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
     // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved
     // while saving the ones it uses itself.
     const half = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
-    expect(decompile('f', half, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    return a4 + (a5 + 1);\n}\n',
-    );
+    expect(() => decompile('f', half, ARMV4T_AGBCC)).toThrow(refused('r4'));
     // r8-sl cannot be pushed directly, so agbcc saves them as `mov rLow, rHi; push {rLow}` — the
     // shape every high-register inhabitant in the corpus goes through. Read literally, the save set
     // would hold only the low register and the four of them would lose their local. (The `hi`
     // fixture above is the positive half; this is what happens without the mov.)
     const movless =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tmov\tr1, r8\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
-    expect(decompile('f', movless, ARMV4T_AGBCC).source).toContain('s32 a9');
+    expect(() => decompile('f', movless, ARMV4T_AGBCC)).toThrow(refused('r8'));
+    // …and a WRITE to one is handed back to the caller, which no C local spells
+    expect(() => decompile('f', 'f:\n\tmov\tr8, r0\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(
+      /it writes callee-saved r8 and never saved it/,
+    );
   });
 
   test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {
@@ -864,7 +866,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // undeclared: the result comes back in r0 and stays there while `c` goes into
       // r1. Argument 0 is unfresh and argument 1 is not, so the run bridges across r0 rather than
       // truncating the call to nothing.
-      expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), ');
+      expect(dc('\tbl\tfoo\n\tmov\tr1, #9\n\tbl\tbar\n')).toContain('bar(foo(), 9);');
     });
 
     test('…and the HOLE a 64-bit return spans is not a hole once the helper table states its width', () => {
@@ -877,7 +879,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // Both results are dropped here, and a recognised 64-bit helper is a PURE op, so the body is
       // dead and nothing is emitted — the answer `__divsi3` gives for a dead soft-division. The
       // signature is what shows the pair was read.
-      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('s64 a0, s64 a1, s32 a2');
+      expect(dc('\tbl\t__muldi3\n\tmov\tr2, #9\n\tbl\t__ashrdi3\n')).toContain('(s64 a0, s64 a1)');
     });
 
     test('…and the run STOPS at a hole, rather than resuming at a later register that is fresh', () => {
@@ -886,23 +888,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // are here. `mov r1` gives r1 a reaching definition that `bl foo` then destroys, so the
       // arity guess counts three and the CLOBBER TRIM cuts it back (`foo` declared, whose own
       // guess would refuse r1 past an r0 nothing set).
-      const clobbered =
-        'f:\n\tpush\t{lr}\n\tmov\tr1, #7\n\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n\tpop\t{r0}\n\tbx\tlr\n';
+      const clobbered = 'f:\n\tpush\t{lr}\n\tmov\tr1, #7\n\tbl\tfoo\n\tmov\tr2, #9\n\tbl\tbar\n\tpop\t{r0}\n\tbx\tlr\n';
       expect(
         decompile('f', clobbered, ARMV4T_AGBCC, { prototypes: { ...P, foo: { params: 0, returns: 's32' } } }).source,
       ).toContain('bar(foo());');
       // …without the `mov`, r1 has no reaching definition at all, and a register past it that does
       // is a gap the guess refuses rather than ends the run at (`fallbackArgc`).
       for (const body of [
-        '\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n',
-        '\tbl\tfoo\n\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tbar\n',
+        '\tbl\tfoo\n\tmov\tr2, #9\n\tbl\tbar\n',
+        '\tbl\tfoo\n\tmov\tr2, #9\n\tmov\tr3, #9\n\tbl\tbar\n',
       ]) {
         expect(() => dc(body)).toThrow(
           /the call 'bl bar' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
         );
       }
       // …and fill r1 and the same shape carries both.
-      expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), a0);');
+      expect(dc('\tbl\tfoo\n\tmov\tr1, #9\n\tbl\tbar\n')).toContain('bar(foo(), 9);');
     });
 
     test('a JOIN of that result with a caller-computed value stays an argument', () => {
@@ -1489,9 +1490,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // both are members of ONE object in memory, and each store is a store into it.
     test('a second object an unbounded read reaches is a member of one object', () => {
       const twoObjects =
-        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n' +
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n' +
         '\tmov\tr5, sp\n\tstrh\tr1, [r5, #0x2]\n\tldr\tr2, .L9\n\tstr\tr4, [r2, #0x0]\n' +
-        '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
+        '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n' +
         '.L9:\n\t.word\t0x040000D4\n';
       const src = decompile('f', twoObjects, ARMV4T_AGBCC).source;
       expect(src).toContain('    u8 sp0[16];');
@@ -1660,9 +1661,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
-    // with `r5 = 0` names the same one as `[r2, #0]`. An offset it cannot fold does not.
+    // with `r3 = 0` names the same one as `[r2, #0]`. An offset it cannot fold does not.
     test('a register offset resolves when it is a literal and refuses when it is not', () => {
-      const viaZero = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tmov\tr5, #0x00\n\tstr\tr4, [r2, r5]\n');
+      const viaZero = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tmov\tr3, #0x00\n\tstr\tr4, [r2, r3]\n');
       expect(viaZero).not.toBe(escapeTo('0x00'));
       expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('if (sp0 != 0) v0 = sp0;');
 
@@ -5081,8 +5082,11 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
           `\tldr\tr1, .Lk\n\tmov\tr2, #0\n\tmov\tr4, #0\n.Ll:\n${body}\tcmn\tr0, r1\n\tbgt\t.Ltrue\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}.Lk: .word 0x80000000\n`,
       ),
     ];
+    // r4-r6 are callee-saved, so a body that uses them saves them
+    const saving = (body: string) =>
+      `\tpush\t{r4, r5, r6}\n${body.replaceAll('\tbx\tlr\n', '\tpop\t{r4, r5, r6}\n\tbx\tlr\n')}`;
     for (const body of bodies) {
-      expect(() => dc('f', body)).toThrow(gap);
+      expect(() => dc('f', saving(body))).toThrow(gap);
     }
     // A reload of a store of 5 lifts.
     expect(
@@ -5096,7 +5100,7 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `${top}\tstr\tr1, [r3, #4]\n\tadd\tr2, r3, #8\n\tldr\tr2, [r2]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}`,
       `${top}\tstr\tr1, [r3]\n\tmov\tr4, #0\n.Ll:\n\tldr\tr2, [r3]\n\tcmn\tr0, r2\n\tbgt\t.Ltrue\n\tstr\tr4, [r3]\n\tadd\tr4, #1\n\tcmp\tr4, #9\n\tbne\t.Ll\n${TAIL}`,
     ]) {
-      expect(dc('f', body).source).toContain('<= -');
+      expect(dc('f', saving(body)).source).toContain('<= -');
     }
     // A loop counter that starts at a constant varies, and lifts.
     expect(

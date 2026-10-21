@@ -266,8 +266,9 @@ export interface LiveInModel {
    *  saved the register (so it is one the compiler was free to home a local in). The ABI half alone
    *  describes the CALLER, and asm that follows no ABI — hand-written, or a mid-function fragment,
    *  which klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed live values
-   *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
-   *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
+   *  in registers it never saved. Passing the ABI list unfiltered left the MP2K engine's
+   *  `ChnVolSetAsm` storing through `uninit_r4`, silently; such a read is
+   *  `unsavedCalleeSavedRegs`' instead.
    *
    *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it. Thumb reads
    *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
@@ -299,6 +300,19 @@ export interface LiveInModel {
    *  carried round a loop meets its own next value at the loop header. Meeting no such join, it is
    *  the input, and `finish` refuses rather than spell it `uninit_<reg>`. */
   hiddenInputRegs?: readonly string[];
+  /** Registers the ABI requires a callee to PRESERVE (`target.nonArgRegs` less `target.scratchRegs`)
+   *  that this function did NOT save — the third side of the register partition. No caller passes
+   *  an argument in one, and the compiler homed no local of this function there, so a value it holds
+   *  on entry is one the function shares with every other: a FILE-SCOPE GLOBAL REGISTER VARIABLE
+   *  (`register int g asm("r8");`), which is exactly what agbcc, gcc 2.7.2, KMC and mwcc 2.4 compile
+   *  `return g;` to (`mov r0, r8`, `move v0,s0`, `mr r3,r14`). gcc's `globalize_reg` (regclass.c)
+   *  marks such a register fixed and call-used, so no prologue saves it. A def-less read of one
+   *  refuses: naming it a parameter puts a value in the signature that a C caller would pass in an
+   *  argument register. A WRITE to one is visible to the caller just the same. Both refuse in
+   *  `finish`, of the finished function.
+   *
+   *  Disjoint from `argRegs` and `uninitRegs`, checked with them. */
+  unsavedCalleeSavedRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
    *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
@@ -342,6 +356,14 @@ function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
         `and one the ABI does not pass arguments in`,
     );
   }
+  const unsaved = m.unsavedCalleeSavedRegs ?? [];
+  const twice = unsaved.filter((r) => args.includes(r) || m.uninitRegs?.includes(r));
+  if (twice.length > 0) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists ${twice.join(', ')} as an unsaved callee-saved ` +
+        `register AND as an argument register or an uninitialised local's home`,
+    );
+  }
   return m;
 }
 
@@ -368,8 +390,9 @@ export function assertScratchRegsPartitioned(target: {
  *  register is an uninitialised local's home when the ABI passes no argument in it
  *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
- *  of its own prologue. A target stating no `nonArgRegs` claims no partition and gets an empty
- *  model, so every def-less read stays a parameter.
+ *  of its own prologue. The rest — callee-saved, and not saved — is `unsavedCalleeSavedRegs`. A
+ *  target stating no `nonArgRegs` claims no partition and gets an empty model, so every def-less
+ *  read stays a parameter.
  *
  *  THE FUNCTION'S OWN DECLARATION MOVES THE PARTITION'S EDGE. `ownWords` is how many argument
  *  words it can fill (`proto.ts` `ownArgumentWords`, an upper bound), and an argument register at
@@ -388,7 +411,7 @@ export function registerLiveIns(
   },
   savedRegs: ReadonlySet<string>,
   ownWords?: number,
-): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords'> {
+): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords' | 'unsavedCalleeSavedRegs'> {
   const scratchRegs = assertScratchRegsPartitioned(target);
   for (const r of target.hiddenInputRegs ?? []) {
     if (!scratchRegs.has(r)) {
@@ -406,6 +429,7 @@ export function registerLiveIns(
     ],
     argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
+    unsavedCalleeSavedRegs: target.nonArgRegs.filter((r) => !scratchRegs.has(r) && !savedRegs.has(r)),
     ...(ownWords === undefined ? {} : { ownArgWords: ownWords }),
   };
 }
@@ -677,7 +701,11 @@ export function makeSsaBuilder(
   };
 
   const frameWrites = new Set<Value>();
+  // Every key some instruction wrote, for `finish` to find a write to an unsaved callee-saved
+  // register (`LiveInModel.unsavedCalleeSavedRegs`).
+  const writtenKeys = new Set<string>();
   const writeVar = (reg: string, b: number, v: Value) => {
+    writtenKeys.add(reg);
     if (slotKeyOffset(reg) !== null || reg.startsWith(STACK_ARG_PREFIX)) {
       frameWrites.add(v);
     }
@@ -1764,6 +1792,24 @@ export function makeSsaBuilder(
               `(partially-initialised local, or storage this function does not own) — not modelled`,
           );
         }
+        // …AND NEITHER MAY A CALLEE-SAVED REGISTER THIS FUNCTION NEVER SAVED
+        // (`LiveInModel.unsavedCalleeSavedRegs`): no caller passes an argument there, so as a
+        // parameter it would be read from the argument register a C caller fills instead.
+        if (key !== undefined && koff === null && model().unsavedCalleeSavedRegs?.includes(key)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': it reads callee-saved ${key} before writing it and never saved it — ` +
+              `a value no caller passes as an argument (a global register variable) — not modelled`,
+          );
+        }
+      }
+      // A write to one is handed back to the caller (a global register variable's store,
+      // `mov r8, r0`): no C local spells it, and dropping it drops an effect.
+      const leaked = (model().unsavedCalleeSavedRegs ?? []).filter((r) => writtenKeys.has(r));
+      if (leaked.length > 0) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': it writes callee-saved ${leaked.join(', ')} and never saved it — ` +
+            `the caller sees the write (a global register variable) — not modelled`,
+        );
       }
     },
   };

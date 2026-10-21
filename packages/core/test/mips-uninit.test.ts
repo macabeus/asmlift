@@ -294,9 +294,12 @@ describe('the register half: scratch and saved registers', () => {
 
   // The save is the frontend's half of the rule: without it the register may be a value handed
   // over by asm that follows no ABI, so it keeps the parameter it always had.
-  test('an s-register nothing saved, or that was read before its store, stays a parameter', () => {
-    expect(src(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_GCC)).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/);
-    expect(src(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/);
+  // …and one nothing saved, or read before its store, is no local of this function and no argument
+  // either: a C caller passes a1 in a1, never in s1.
+  test('an s-register nothing saved, or that was read before its store, is refused rather than a parameter', () => {
+    const refused = /it reads callee-saved s1 before writing it and never saved it/;
+    expect(lift(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_GCC)).toThrow(refused);
+    expect(lift(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toThrow(refused);
   });
 
   test('an argument register read first stays a parameter', () => {

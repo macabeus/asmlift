@@ -647,20 +647,21 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       'c:\tadd     r3,r3,r31\n10:\tmtlr    r0\n14:\tblr\n';
     expect(dis('ur', routine)).toBe(uninit('ur'));
     // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
-    // there, so the entry value stays what the caller handed over.
-    expect(dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toBe('s32 un(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
-    expect(
+    // there, and no caller passes an argument in r31 either, so the read refuses.
+    const unsaved = /it reads callee-saved r31 before writing it and never saved it/;
+    expect(() => dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toThrow(unsaved);
+    expect(() =>
       dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
-    ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    ).toThrow(unsaved);
     // Saved only after the function READ it: a value handed over, which the save preserves. Counting
     // that save would mint `uninit_r31` for the read before it.
-    expect(
+    expect(() =>
       dis(
         'ur1',
         '0:\tstwu    r1,-16(r1)\n4:\tadd     r3,r3,r31\n8:\tstw     r31,12(r1)\nc:\tlwz     r31,12(r1)\n' +
           '10:\taddi    r1,r1,16\n14:\tblr\n',
       ),
-    ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    ).toThrow(unsaved);
   });
   // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
   // two-parameter function fills; without its own declaration each read is a made-up parameter
@@ -715,23 +716,23 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       'f: its context declaration `s32 f(s32, s32)` fills 2 argument words, and the body reads r5 past them — ' +
         'kept as a parameter, which the header contradicts',
     ]);
-    // a hand-written body is bounded by no declaration, stated or not
-    const hand = decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC, {
-      ownContextProto: { params: [], returnsVoid: true },
-    });
-    expect(hand.source).toBe(decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC).source);
-    expect(hand.ownArityNotes).toEqual([]);
+    // a hand-written body handed r31 refuses, declared or not
+    const hand = '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
+    expect(() => decompile('h', hand, PPC_MWCC, { ownContextProto: { params: [], returnsVoid: true } })).toThrow(
+      /it reads callee-saved r31 before writing it and never saved it/,
+    );
   });
   // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
   // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
-  // no register interface, and read as one it would turn r7 into `uninit_r7`. A callee-saved register
-  // named with no save marks the body hand-written, and no declaration bounds it.
+  // no register interface, and read as one it would turn r7 into `uninit_r7`; and r31 is no argument
+  // register, so no C signature hands it over. The body refuses, declared or not.
   test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
     const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
-    expect(decompile('ksNesInit03__Fv', asm, PPC_MWCC).source).not.toContain('uninit_');
-    expect(
-      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }).source,
-    ).not.toContain('uninit_');
+    const refused = /it reads callee-saved r31 before writing it and never saved it/;
+    expect(() => decompile('ksNesInit03__Fv', asm, PPC_MWCC)).toThrow(refused);
+    expect(() =>
+      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }),
+    ).toThrow(refused);
     // compiled code saves r31 before it touches it, and keeps the bound
     const saved =
       '0 <f>:\n0:\tstw     r31,-4(r1)\n4:\tmr      r31,r5\n8:\tadd     r3,r3,r31\nc:\tlwz     r31,-4(r1)\n10:\tblr\n';
@@ -787,10 +788,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => decompile('sh', '0 <sh>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', hiddenOutside)).toThrow(
       /hidden-input register r13 is not among the scratch registers/,
     );
-    // A target stating no scratch registers keeps the parameter, and one that lists a scratch
-    // register outside its non-argument registers is a target bug, refused before any lift.
+    // A target stating no scratch registers claims r0 is preserved and refuses the read, one
+    // stating no partition at all keeps the parameter, and one that lists a scratch register outside
+    // its non-argument registers is a target bug, refused before any lift.
     const none = { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined };
-    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none).source).toBe(
+    expect(() => decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none)).toThrow(
+      /it reads callee-saved r0 before writing it/,
+    );
+    const noPartition = { ...none, nonArgRegs: undefined };
+    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', noPartition).source).toBe(
       's32 sn(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     );
     const bad = { ...PPC_MWCC, scratchRegs: ['r3'] };
@@ -886,7 +892,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // `li`s; `head` goes between the store and them.
   const s9 = (sym: string, head: string, tail: (at: number) => string) => {
     let asm = pro(24) + 'c:\tstw     r3,8(r1)\n' + head;
-    let at = 0x10 + (head ? 4 : 0);
+    let at = 0x10 + 4 * head.split('\n').filter(Boolean).length;
     for (let k = 1; k <= 8; k++, at += 4) {
       asm += `${at.toString(16)}:\tli      r${k + 2},${k}\n`;
     }
@@ -908,8 +914,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => disUnclaimed('s9a', after)).toThrow(ninth);
     const before = s9(
       's9b',
-      '10:\tlwz     r31,8(r1)\n',
-      (at) => `${at.toString(16)}:\tmr      r3,r31\n` + epi(at + 4, 24),
+      '10:\tstw     r31,20(r1)\n14:\tlwz     r31,8(r1)\n',
+      (at) => `${at.toString(16)}:\tmr      r3,r31\n${(at + 4).toString(16)}:\tlwz     r31,20(r1)\n` + epi(at + 8, 24),
     );
     expect(() => disUnclaimed('s9b', before)).toThrow(ninth);
     // …but mwcc loads no word of its parameter area (`compilerBehaviors.outgoingAreaNeverLoadedFrom`),

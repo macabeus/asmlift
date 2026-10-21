@@ -221,8 +221,9 @@ test('a load that writes a second register refuses in annotate mode too, rather 
       expect(out).toContain(`unmodelled instruction ${msg}`);
     }
   }
-  // one destination still degrades to an honest opaque, and the plain indexed load still lifts
-  expect(both(['lmw     r31,0(r3)', 'mr      r3,r31', 'blr'])[1]).toContain(
+  // one destination still degrades to an honest opaque, and the plain indexed load still lifts (r31
+  // saved first: a write to a callee-saved register nothing saved refuses on its own)
+  expect(both(['stw     r31,-4(r1)', 'lmw     r31,0(r3)', 'mr      r3,r31', 'blr'])[1]).toContain(
     `ASMLIFT_ERROR("unmodelled instruction 'lmw'")`,
   );
   expect(both(['lwzx    r0,r3,r4', ...tail])[1]).toContain('return *(s32 *)(a0 + a1) + *a0;');

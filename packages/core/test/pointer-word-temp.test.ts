@@ -113,7 +113,7 @@ describe('a temp that keeps its integer', () => {
   });
 
   test('when an in-edge passes it anything else', () => {
-    const src = run(ARMS('\tmov\tr1, r5\n'), mapWith('pointer'));
+    const src = run(ARMS('\tmov\tr1, r2\n'), mapWith('pointer'));
     expect(src).toContain('*v2 = a2 + (v1 + v0);');
     expect(src).not.toContain('u8 *v');
   });

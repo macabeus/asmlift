@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 105 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -79,6 +79,13 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ssa.ts          6  a register read round a cycle through the entry block with no join,
+//                               a struct one call hands back in the return register passed on
+//                               as the next guessed call's first argument, or copied into another
+//                               of a guessed call's arguments, an incoming stack
+//                               argument past the words the function's own declaration fills, and a
+//                               callee-saved register the function never saved read before any
+//                               write or written (a global register variable)
 //   frontend/call-plan.ts    5  a call returning a struct through a hidden pointer whose parameters
 //                               nothing sizes, one whose declaration the lifted source cannot print (a
 //                               type it has no spelling for, or a bare parameter count that states
@@ -90,11 +97,6 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          4  a register read round a cycle through the entry block with no join,
-//                               a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument, or copied into another
-//                               of a guessed call's arguments, and an incoming stack
-//                               argument past the words the function's own declaration fills
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
 //   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
 //                               callee handed back in it, where the callee's leftover bits are no value

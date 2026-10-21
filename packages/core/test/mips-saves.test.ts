@@ -116,14 +116,29 @@ test('a save into a slot an earlier block stored a value to refuses the same way
 });
 
 test('a callee-saved register stored after it was written is a value, reloaded like any spill', () => {
+  // …so the store is no save, and the write it follows is one the caller sees: s0 leaves the
+  // function changed, which no C local spells
   expect(
-    src(
+    lift(
       '0:\taddiu\tsp,sp,-8',
       '4:\taddiu\ts0,a0,1',
       '8:\tsw\ts0,4(sp)',
       'c:\tlw\tv0,4(sp)',
       '10:\tjr\tra',
       '14:\taddiu\tsp,sp,8',
+    ),
+  ).toThrow(/it writes callee-saved s0 and never saved it/);
+  // saved first, the same value is an ordinary spill
+  expect(
+    src(
+      '0:\taddiu\tsp,sp,-8',
+      '4:\tsw\ts0,0(sp)',
+      '8:\taddiu\ts0,a0,1',
+      'c:\tsw\ts0,4(sp)',
+      '10:\tlw\tv0,4(sp)',
+      '14:\tlw\ts0,0(sp)',
+      '18:\tjr\tra',
+      '1c:\taddiu\tsp,sp,8',
     ),
   ).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
 });

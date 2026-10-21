@@ -117,8 +117,10 @@ describe('the return width', () => {
   test('the high half survives a call through copies and slots of registers the call preserved', () => {
     const viaMov = ['\tmov\tr4, r0', '\tmov\tr5, r1', '\tbl\tg', '\tmov\tr1, r5', '\tmov\tr0, r4'];
     expect(framed([...pair, ...viaMov])).toMatch(/^s64 f\(/);
+    // sl is callee-saved too, so this frame saves it the way agbcc does (`mov r5, sl; push {r5}`)
     const viaHigh = ['\tadd\tr4, r0, #0', '\tmov\tsl, r1', '\tbl\tg', '\tmov\tr1, sl', '\tadd\tr0, r4, #0'];
-    expect(framed([...pair, ...viaHigh])).toMatch(/^s64 f\(/);
+    const slSaved = ['\tmov\tr5, sl', '\tpush\t{r5}', ...pair, ...viaHigh, '\tpop\t{r5}', '\tmov\tsl, r5'];
+    expect(framed(slSaved)).toMatch(/^s64 f\(/);
     const viaSlot = ['\tadd\tsp, #-8', ...pair, '\tstr\tr1, [sp, #4]', '\tadd\tr4, r0, #0', '\tbl\tg'];
     expect(framed([...viaSlot, '\tldr\tr1, [sp, #4]', '\tadd\tr0, r4, #0', '\tadd\tsp, #8'])).toMatch(/^s64 f\(/);
     const stored = ['\tpush\t{r4, r5, lr}', ...pair, '\tldr\tr4, .Lg', '\tstr\tr1, [r4]'];
@@ -159,7 +161,7 @@ describe('what refuses', () => {
   const unmodelled = /unmodelled instruction '(adc|sbc)'/;
 
   test('the carry consumer is not the next instruction', () => {
-    expect(() => liftLeaf(['\tadd\tr0, r0, r2', '\tldr\tr4, [r5]', '\tadc\tr1, r1, r3'])).toThrow(unmodelled);
+    expect(() => liftLeaf(['\tadd\tr0, r0, r2', '\tldr\tr2, [r3]', '\tadc\tr1, r1, r3'])).toThrow(unmodelled);
   });
 
   test('an add does not feed an sbc, nor a sub an adc', () => {
@@ -167,9 +169,9 @@ describe('what refuses', () => {
     expect(() => liftLeaf(['\tsub\tr0, r0, r2', '\tadc\tr1, r1, r3'])).toThrow(unmodelled);
   });
 
-  // `add r0, r8` is the high-register encoding, which writes no flags at all.
+  // `add r0, ip` is the high-register encoding, which writes no flags at all.
   test('a high register anywhere in the pair', () => {
-    expect(() => liftLeaf(['\tadd\tr0, r8', '\tadc\tr1, r1, r3'])).toThrow(unmodelled);
+    expect(() => liftLeaf(['\tadd\tr0, ip', '\tadc\tr1, r1, r3'])).toThrow(unmodelled);
   });
 
   test('the low destination is a high-half operand', () => {

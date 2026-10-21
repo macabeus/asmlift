@@ -235,11 +235,12 @@ const liftMips = ({ asm, at }: ReturnType<typeof listing>, target = MIPS_GCC) =>
   }).source;
 
 test('a MIPS dispatch lifts with what compilers schedule around it', () => {
-  // IDO puts `move s0,a1` between the bound and its branch, and the scaled index or another instruction
-  // in the branch's delay slot (here a dead temporary)
+  // IDO puts a move (`move s0,a1`, of a register its prologue saved) between the bound and its
+  // branch, and the scaled index or another instruction in the branch's delay slot (here a dead
+  // temporary)
   for (const [shape, target] of [
     [{}, MIPS_GCC],
-    [{ between: ['move\ts0,a1'] }, MIPS_IDO],
+    [{ between: ['move\tt2,a1'] }, MIPS_IDO],
     [
       { slot: 'li\tt1,7', dispatch: ['sll\tv0,a0,0x2', 'LUI:', 'lui\tat,0x0', 'addu\tat,at,v0', 'lw\tv0,0(at)'] },
       MIPS_IDO,
@@ -367,7 +368,8 @@ test('a PPC table base formed outside the dispatch block lifts when it reaches t
   // in whatever register the allocator chose — a callee-saved one, or an argument register whose
   // argument is dead (mwcc 2.3.3 puts a second loop's base in r4) — and with its halves apart
   for (const shape of [
-    ppcHoisted([], [], 'r31'),
+    // (saved first, as compiled code saves a callee-saved register before it writes one)
+    ppcHoisted(['stw     r31,-4(r1)'], [], 'r31'),
     ppcHoisted([], [], 'r4'),
     ppcHoisted([], [], 'r5', ['li      r6,0']),
   ]) {
@@ -528,8 +530,11 @@ test('…but with no declaration, a word computed only to be returned shows the 
  *  `post` after it; `arm` is case 3's body. */
 const mipsLoop = (o: { pre?: string[]; mid?: string[]; post?: string[]; arm?: string[]; base?: string } = {}) => {
   const b = o.base ?? 't6';
+  // a callee-saved base is one the prologue saved and the epilogue restores
+  const saved = /^s\d$/.test(b);
   return listing(
     [
+      ...(saved ? ['addiu\tsp,sp,-8', `sw\t${b},0(sp)`] : []),
       'blez\ta0,@END',
       'sll\tv0,a0,0x2',
       ...(o.pre ?? []),
@@ -566,8 +571,7 @@ const mipsLoop = (o: { pre?: string[]; mid?: string[]; post?: string[]; arm?: st
       'bnez\tv0,@LOOP',
       'nop',
       'END:',
-      'jr\tra',
-      'nop',
+      ...(saved ? [`lw\t${b},0(sp)`, 'jr\tra', 'addiu\tsp,sp,8'] : ['jr\tra', 'nop']),
     ],
     MIPS_HEAD,
   );
