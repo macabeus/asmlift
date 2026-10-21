@@ -1312,3 +1312,57 @@ describe('early-return arms that share their tail', () => {
   });
 });
 
+// THE SAME ARMS IN A LOOP NESTED IN ANOTHER. The inner loop's exit runs `tick(j)` and goes round the
+// outer loop, which re-enters the inner one and so reaches every block of both arms — but only
+// through the outer back-edge, which is no path that runs an arm's tail after the inner loop. The
+// question "does the exit run this block" is asked forward only (`reachForward`), as the exit
+// trampoline fold asks it; a full walk refused every early-return arm of every nested loop.
+const NESTED_RETURN_TAIL = SHARED_RETURN_TAIL.replace('fn rettail {', 'fn rettailnest {')
+  .replace(
+    '  br ^bb1(%2)\n',
+    '  br ^bb10(%2)\n^bb10(%20: s32):\n  %21: s32 = const {value=3}\n  %22: u32 = icmp_slt %20, %21\n' +
+      '  cond_br %22, ^bb1(%2), ^bb11()\n',
+  )
+  .replace(
+    '^bb7():\n  ret %2',
+    '^bb7():\n  %23: s32 = call %20 {target="tick"}\n  %24: s32 = const {value=1}\n  %25: s32 = add %20, %24\n' +
+      '  br ^bb10(%25)\n^bb11():\n  ret %2',
+  );
+
+describe('early-return arms of a loop nested in another', () => {
+  test('two arms that share their tail each write it, and the outer loop runs `tick` after the inner one', () => {
+    const { src, agreement, shipped } = judged(NESTED_RETURN_TAIL);
+    expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
+    expect(src.match(/tick\(/g)).toHaveLength(1);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.judged).toBeGreaterThan(100);
+    expect(shipped).toEqual(agreement);
+  });
+
+  test('an arm the edge owns outright lifts the same way', () => {
+    const { src, agreement, shipped } = judged(
+      NESTED_RETURN_TAIL.replace(
+        '  %11: s32 = call %4 {target="pong"}\n  br ^bb5()',
+        '  %11: s32 = call %4 {target="pong"}\n  ret %11',
+      ),
+    );
+    expect(src.match(/hit\(a0\);/g)).toHaveLength(1);
+    expect(src.match(/tick\(/g)).toHaveLength(1);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.judged).toBeGreaterThan(100);
+    expect(shipped).toEqual(agreement);
+  });
+
+  test('a tail the inner exit also reaches forward declines loud', () => {
+    // the inner exit now runs into `hit` too when `tick` says so: the arms reach it without `tick`,
+    // so the inner loop leaves for two live merges, and neither arm may copy a tail the exit runs
+    expect(() =>
+      judged(
+        NESTED_RETURN_TAIL.replace(
+          '  br ^bb10(%25)\n',
+          '  %26: u32 = icmp_eq %23, %2\n  cond_br %26, ^bb5(), ^bb10(%25)\n',
+        ),
+      ),
+    ).toThrow(/unrecovered back-edge/);
+  });
+});

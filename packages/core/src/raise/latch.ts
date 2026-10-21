@@ -24,7 +24,7 @@
 // `if` (declining loud on the hazards). The guard therefore survives the fold either way; what the
 // gate preserves is the SHAPE — a forward trampoline is not a latch, and folding one re-casts an
 // unrelated branch as a loop guard — which is the `target-dominates` entry's own note below.
-import { Block, Fn, dominators, foldWriteOrder, predecessors, successorsOf } from '../ir/core';
+import { Block, Fn, dominators, foldWriteOrder, predecessors, reachForward, successorsOf } from '../ir/core';
 import { effectful } from '../ir/discipline';
 import { analyzeLoops } from '../ir/loops';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -158,7 +158,7 @@ export interface ExitTrampoline {
   preds: readonly Block[];
   /** does some loop hold every predecessor of `block` but not `block` itself, and leave by another
    *  edge for `target` as well — landing on it, or on a block that reaches it forward without
-   *  re-entering the loop (`reachesForward`)? */
+   *  re-entering the loop (`reachForward`)? */
   sharedExit: boolean;
   /** does every path from `target` reach a `ret` without an effect on the way? */
   pureReturn: boolean;
@@ -229,25 +229,6 @@ export function returnsPurely(b: Block): boolean {
   return true;
 }
 
-/** Does `from` reach `to` along forward edges — never a back-edge, whose target dominates its
- *  source — without entering `body`? Forward only, so an enclosing loop's next iteration does not
- *  count as reaching a block the inner loop's exit runs before it. */
-function reachesForward(from: Block, to: Block, body: ReadonlySet<Block>, dom: Map<Block, Set<Block>>): boolean {
-  const seen = new Set<Block>();
-  for (const stack = [from]; stack.length > 0;) {
-    const x = stack.pop()!;
-    if (x === to) {
-      return true;
-    }
-    if (seen.has(x) || body.has(x)) {
-      continue;
-    }
-    seen.add(x);
-    stack.push(...successorsOf(x).filter((s) => !dom.get(x)!.has(s)));
-  }
-  return false;
-}
-
 /** Splice out every empty EXIT TRAMPOLINE the gates above admit; returns how many were removed.
  *  Iterated, as the latch fold is: one splice can make another block's exit edges shared. */
 export function foldExitTrampolines(fn: Fn, gates: readonly Gate<ExitTrampoline>[] = EXIT_TRAMPOLINE_GATES): number {
@@ -268,7 +249,7 @@ export function foldExitTrampolines(fn: Fn, gates: readonly Gate<ExitTrampoline>
           (nl) =>
             !nl.body.has(b) &&
             into.every((p) => nl.body.has(p)) &&
-            nl.exitEdges.some((e) => e.to !== b && reachesForward(e.to, target, nl.body, dom)),
+            nl.exitEdges.some((e) => e.to !== b && reachForward(e.to, dom, nl.body).has(target)),
         );
       return (
         firstRejection(gates, { block: b, target, preds: into, sharedExit, pureReturn: returnsPurely(target) }) === null

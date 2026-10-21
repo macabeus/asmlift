@@ -456,6 +456,32 @@ export function reachableBlocks(fn: Fn): Set<Block> {
   return seen;
 }
 
+/** The blocks `from` reaches along FORWARD edges — never a back-edge, whose target dominates its
+ *  source — `from` itself included. A block of `stop` is reached but not walked past.
+ *
+ *  Forward only, so an enclosing loop's next iteration does not count: the exit of a loop nested in
+ *  another reaches every block of the inner body round the outer back-edge, and a full walk would
+ *  say it runs the inner loop's own arms. Two passes ask "does a loop's exit run this block":
+ *  `raise/latch.ts`'s exit-trampoline scope gate and `structure.ts`'s `earlyReturnArm`. */
+export function reachForward(
+  from: Block,
+  dom: ReadonlyMap<Block, ReadonlySet<Block>>,
+  stop: ReadonlySet<Block> = new Set(),
+): Set<Block> {
+  const seen = new Set<Block>();
+  for (const stack = [from]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (seen.has(x)) {
+      continue;
+    }
+    seen.add(x);
+    if (!stop.has(x)) {
+      stack.push(...successorsOf(x).filter((s) => !dom.get(x)!.has(s)));
+    }
+  }
+  return seen;
+}
+
 /** Predecessor map for the whole function's CFG. */
 export function predecessors(fn: Fn): Map<Block, Block[]> {
   const preds = new Map<Block, Block[]>();

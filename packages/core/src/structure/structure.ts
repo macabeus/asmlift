@@ -61,6 +61,7 @@ import {
   defOpMap,
   dominators,
   mergeClasses,
+  reachForward,
   successorsOf,
 } from '../ir/core';
 import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
@@ -2438,13 +2439,17 @@ function earlyReturnArm(
   body: Set<Block>,
   exit: Block,
 ): Set<Block> | null {
-  const entryOwned = dom.get(to)!.has(from) && to !== exit && !reachFrom(exit).has(to);
+  // what the loop's own exit runs, forward only: round an enclosing loop's back-edge the exit reaches
+  // the inner loop again and every arm of it, which is no path that runs this arm's tail after the
+  // loop (`reachForward`)
+  const fromExit = reachForward(exit, dom);
+  const entryOwned = dom.get(to)!.has(from) && to !== exit && !fromExit.has(to);
   const armOfBody = onlyFromBody(preds, body, exit);
   // the duplication policy's admission: only the loop's exit arms run it, and no cycle holds it. Never
   // the arm's own head: an edge straight from the body into a block others enter too is a `break` to
   // it, which `while (1)` writes once, after the loop.
   const armsOnly = (bb: Block) =>
-    bb !== to && bb !== exit && armOfBody(bb) && !reachFrom(exit).has(bb) && !reachFrom(bb).has(bb);
+    bb !== to && bb !== exit && armOfBody(bb) && !fromExit.has(bb) && !reachFrom(bb).has(bb);
   const owned = new Set<Block>();
   const seen = new Set<Block>();
   const stack = [to];
