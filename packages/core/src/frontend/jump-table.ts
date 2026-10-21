@@ -1,4 +1,5 @@
-// asmlift — what the MIPS and PowerPC jump-table recognizers share.
+// asmlift — what the jump-table recognizers share: the MIPS and PowerPC ones below, and all three
+// frontends what an elided dispatch leaves in its registers (at the end of this file).
 //
 // Both frontends recover a dense switch from its dispatch idiom BEFORE the CFG is built, because
 // the case count decides the block leaders: the bounds branch becomes a `switch_br`, and the
@@ -155,4 +156,91 @@ export function makeTableBases(hoisted: Iterable<HoistedDispatch>, fail: Fronten
       }
     },
   };
+}
+
+// WHAT AN ELIDED DISPATCH LEAVES BEHIND. Every recognizer prunes the dispatch block unread, so the
+// registers its idiom writes — the scaled index, the table's base, the entry's address, the loaded
+// code address, PowerPC's `ctr` — are written on no path the lift models. The default path never
+// ran the idiom, so nothing may be written at the bounds block; the case edges did, so the case
+// targets are where it is written: at the ENTRY of each, before its first instruction. A register
+// holds what the idiom's LAST write of it left:
+//   - the index shift (`lsl`/`sll`/`slwi rI,rS,2`) leaves `rS << 2`, a value C spells. mwcc 2.4.2
+//     at -O4 reuses it in the case bodies (`p[i] = 7` in a switch on `i` is `stwx r0,r4,r5` with r5
+//     the dispatch's own `slwi`), so it is modelled, not refused. The shift reads the scrutinee as
+//     the switch does: every recognizer refuses an idiom that rewrites it before the shift, and the
+//     switch reads it where the bounds test did, so the scrutinee at a case's entry is the one the
+//     shift read — on a target only the table's case edges enter (EXACT);
+//   - every other write leaves an address no C expression spells, so it is a MARKER: an `undef`
+//     value that `refuseStaleIdiomReads` declines wherever an operand demands it.
+// A target some other edge also enters (the default, a hole naming the default, a loop's back
+// edge, a second table, the function's entry: MIXED) cannot tell the paths apart at its entry, so
+// every register the idiom writes is a marker there, the index too. Compiled code loses nothing to
+// that: a register live into such a block is live on its case edges as well, where it holds what
+// the idiom left, so no compiler reads one there.
+
+/** What an elided dispatch leaves in a register it writes: the scrutinee scaled by four, or an
+ *  address no C expression spells. */
+export type IdiomLeft = 'scaled' | 'opaque';
+
+/** The registers an elided dispatch's idiom writes, in program order, each with whether it is the
+ *  index shift: what each register holds after it, decided by its last writer. */
+export function idiomLeaves(writes: ReadonlyArray<{ reg: string; scaled: boolean }>): Map<string, IdiomLeft> {
+  const left = new Map<string, IdiomLeft>();
+  for (const { reg, scaled } of writes) {
+    left.set(reg, scaled ? 'scaled' : 'opaque');
+  }
+  return left;
+}
+
+/** A table whose dispatch block was elided, by block index. */
+export interface ElidedDispatch {
+  /** the block emitting the `switch_br` */
+  at: number;
+  /** the bounds-checked scrutinee's register */
+  scrutReg: string;
+  /** the case targets, one per case */
+  cases: readonly number[];
+  /** the default target, or null when the out-of-range path is a return of its own */
+  defaultBlock: number | null;
+  leaves: ReadonlyMap<string, IdiomLeft>;
+}
+
+/** What a case target's entry holds from an elided dispatch: the scrutinee's register (read for a
+ *  `scaled` entry) and each register the idiom wrote. */
+export interface CaseEntry {
+  scrutReg: string;
+  leaves: ReadonlyMap<string, IdiomLeft>;
+  /** only the table's case edges enter the target */
+  exact: boolean;
+}
+
+/** Each case target's entry: EXACT (every edge into it is one table's case edge) keeps that table's
+ *  `leaves`; MIXED makes every register any of its tables wrote a marker. Block 0 is MIXED: the
+ *  call that enters a function is an edge no `preds` lists. */
+export function caseEntries(
+  tables: readonly ElidedDispatch[],
+  preds: ReadonlyArray<readonly number[]>,
+): Map<number, CaseEntry> {
+  const owners = new Map<number, ElidedDispatch[]>();
+  for (const t of tables) {
+    for (const c of new Set(t.cases)) {
+      owners.set(c, [...(owners.get(c) ?? []), t]);
+    }
+  }
+  const out = new Map<number, CaseEntry>();
+  for (const [b, ts] of owners) {
+    const [t] = ts;
+    const exact = ts.length === 1 && b !== 0 && b !== t.defaultBlock && preds[b].every((p) => p === t.at);
+    out.set(
+      b,
+      exact
+        ? { scrutReg: t.scrutReg, leaves: t.leaves, exact }
+        : {
+            scrutReg: t.scrutReg,
+            leaves: new Map(ts.flatMap((u) => [...u.leaves.keys()]).map((r) => [r, 'opaque' as const])),
+            exact,
+          },
+    );
+  }
+  return out;
 }
