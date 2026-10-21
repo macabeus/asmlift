@@ -3016,7 +3016,17 @@ function liftOnce(
       // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and
       // then `v0` is scratch like any other integer register. An undecided one returns `v0` here,
       // and `settleReturnHome` may hand the return the float home instead.
-      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET));
+      //
+      // NOR ANYTHING AT ALL WHERE THE FUNCTION'S OWN DECLARATION IS VOID. Then `v0` is scratch on every
+      // path: a loop can leave a value in it on one path while a void callee destroyed it on another
+      // (`for (..) if (t[i] == 7) { Ping(i); return; }`), and reading it would join the callee's
+      // leftover into a return the declaration says carries nothing — refused as a stale read
+      // (ssa.ts `refuseStaleCallerSavedReads`), and dropped unread after the lift anyway (pipeline.ts
+      // `dropVoidReturnOperands`). The same declaration `ownReturnFitsAWord` reads.
+      const returnsWord =
+        !floatReturn &&
+        !declaresVoidReturn(own) &&
+        ssa.holdsValue(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET));
       // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
       // one word: returning v0 alone hands back the high word with the low one dropped, a function
       // that compiles and returns the wrong value (`long long f(int a, int b, int c, int d,
