@@ -1182,3 +1182,60 @@ describe('a loop whose exit jumps over an `else`', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
+
+// TWO EARLY-RETURN ARMS THAT SHARE THEIR TAIL (`earlyReturnArm`): `if (k(i) == 7) { ping(i); return
+// hit(a); } if (k(i) == 8) { pong(i); return hit(a); }`, the two `hit(a); return` cross-jumped into one
+// block (agbcc, gcc2.7.2kmc: jump.c). No edge dominates that block, so neither arm owns it, and it
+// calls. Only the loop's exit arms run it and it holds no cycle, so the duplication policy writes it
+// in each arm: each path still calls `hit` once.
+const SHARED_RETURN_TAIL = `fn rettail {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%4: s32):
+  %3: u32 = icmp_slt %4, %1
+  cond_br %3, ^bb2(), ^bb7()
+^bb2():
+  %5: s32 = call %4 {target="k"}
+  %6: s32 = const {value=7}
+  %7: u32 = icmp_eq %5, %6
+  cond_br %7, ^bb3(), ^bb8()
+^bb3():
+  %8: s32 = call %4 {target="ping"}
+  br ^bb5()
+^bb8():
+  %9: s32 = const {value=8}
+  %10: u32 = icmp_eq %5, %9
+  cond_br %10, ^bb4(), ^bb6()
+^bb4():
+  %11: s32 = call %4 {target="pong"}
+  br ^bb5()
+^bb5():
+  %12: s32 = call %0 {target="hit"}
+  ret %12
+^bb6():
+  %13: s32 = const {value=1}
+  %14: s32 = add %4, %13
+  br ^bb1(%14)
+^bb7():
+  ret %2
+}`;
+
+describe('early-return arms that share their tail', () => {
+  test('each arm writes the shared tail and its `return`', () => {
+    const { src, agreement, shipped } = judged(SHARED_RETURN_TAIL);
+    expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
+    expect(src.match(/ping\(/g)).toHaveLength(1);
+    expect(src.match(/pong\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 180, disagree: 0 });
+    expect(shipped).toEqual({ judged: 180, disagree: 0 });
+  });
+
+  test("a tail the loop's own exit also runs is written once, after the loop", () => {
+    const { src, agreement, shipped } = judged(SHARED_RETURN_TAIL.replace('^bb7():\n  ret %2', '^bb7():\n  br ^bb5()'));
+    expect(src.match(/hit\(/g)).toHaveLength(1);
+    expect(src.match(/break;/g)).toHaveLength(3);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+});
