@@ -185,7 +185,9 @@ export interface CallSite {
    *  compiler wrote it for the dispatch, not for the call, so a guessed arity stops below the lowest
    *  register only it reaches (`fallbackArgc`'s `parked`), except one this ABI may skip (an O32
    *  double's a1, a PowerPC pair's r4, a leading float's a0), which stays a gap. A copy of one into
-   *  another register is a value the case moved there, counted, and its read declines. */
+   *  a register below that ceiling is a value the case moved there, counted, and its read declines;
+   *  a copy above it is dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts
+   *  `g(…)` without it). No compiler copies a marker, so only hand asm meets the second. */
   readonly parked?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
@@ -910,7 +912,9 @@ export function callDeclarations(
             parked: (r) =>
               !holes.skippable.has(r) &&
               !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
-              ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true),
+              // not through a call: one that destroyed the parked register left a hole of its own,
+              // which the gap refusal answers (`fallbackArgc`'s `parked`)
+              ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true),
             decide: (gap, set, refuse) => {
               const value = decideGap(ssa, bi, gap, set, (v) => mayPass(v, set));
               if (value === undefined) {

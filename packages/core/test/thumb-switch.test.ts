@@ -885,6 +885,12 @@ test('a case reading a register the ELIDED dispatch idiom wrote DECLINES', () =>
   // r1, #0` in `int f(int i, int a){ switch (i) { case 0: a = gi(a); … } }`), so r0 = a, r1 = the
   // table's address and r2 = a at the call. A gap below r2 declined before.
   expect(decompile('f', call('\tmov\tr0, r2\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(a2\);/);
+  // a call in the case that destroyed r1 left a hole of its own: r2, written since, is a value set
+  // up for `g`, and a gap below it is no more decidable than outside a switch
+  const h = { prototypes: { h: { params: 0, returnsVoid: true } } };
+  expect(() => decompile('f', call('\tbl\th\n\tmov\tr2, #5\n\tmov\tr0, #1\n'), ARMV4T_AGBCC, h)).toThrow(
+    /r2 holds a value and r1 holds none/,
+  );
 });
 
 test('…through a join, at a target the default shares, and round a loop back into the bounds test', () => {
