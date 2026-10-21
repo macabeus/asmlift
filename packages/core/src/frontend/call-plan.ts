@@ -180,6 +180,11 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
+  /** whether `v`, in argument register `reg`, is what an elided jump-table dispatch left in that very
+   *  register (frontend/jump-table.ts `staleMarker`): no argument, as a table base is none — the
+   *  compiler wrote it for the dispatch, not for the call, so a guessed arity stops below it. A copy
+   *  of one into another register is a value the case moved there, counted, and its read declines. */
+  readonly parked?: (v: Value, reg: string) => boolean;
   /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
    *  no opt-out: a count that stopped at the first register nothing reaches would drop every
    *  argument past an incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`). */
@@ -840,6 +845,8 @@ export function callDeclarations(
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
     const { ssa, bi, pairs, guess, placeholders } = site;
+    // whether `v`, reaching argument register `r`, may be an argument the caller set up
+    const mayPass = (v: Value, r: string) => !placeholders?.has(v) && site.parked?.(v, r) !== true;
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
@@ -890,11 +897,11 @@ export function callDeclarations(
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
-            accept: (v) => !placeholders?.has(v),
+            accept: mayPass,
             gap: { name, at: guess.at, fail },
             floor,
             decide: (gap, set, refuse) => {
-              const value = decideGap(ssa, bi, gap, set, (v) => !placeholders?.has(v));
+              const value = decideGap(ssa, bi, gap, set, (v) => mayPass(v, set));
               if (value === undefined) {
                 return false;
               }
@@ -910,7 +917,7 @@ export function callDeclarations(
               ssa.holdsValue(
                 reg,
                 bi,
-                (v) => !placeholders?.has(v) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
+                (v) => mayPass(v, reg) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
               ),
           })
         : wordsOf(widths, target);
@@ -941,7 +948,7 @@ export function callDeclarations(
       site.leftOut(
         target.argRegs
           .slice(argc)
-          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !placeholders?.has(v))),
+          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );
     }

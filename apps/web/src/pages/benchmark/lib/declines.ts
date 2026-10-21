@@ -535,7 +535,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '|a case of the kept jump table reads/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '|a case of the (?:kept|elided) jump table reads/,
   },
   {
     key: 'structs',

@@ -43,7 +43,21 @@ describe('readThumbText', () => {
     const text = readThumbText('f', SWITCH(DIRECT));
     expect(labels(text.blocks)).toEqual(['f', '.Lc0', '.Lc1', '.Ldef']);
     expect([...text.tables]).toEqual([
-      [text.blocks[0], { scrutReg: 'r1', caseLabels: ['.Lc0', '.Lc1'], defaultLabel: '.Ldef', extras: [], stale: [] }],
+      [
+        text.blocks[0],
+        {
+          scrutReg: 'r1',
+          caseLabels: ['.Lc0', '.Lc1'],
+          defaultLabel: '.Ldef',
+          extras: [],
+          stale: [],
+          // the idiom's `add` rewrites the index its `lsl` scaled, so both registers are markers
+          leaves: new Map([
+            ['r0', 'opaque'],
+            ['r1', 'opaque'],
+          ]),
+        },
+      ],
     ]);
   });
 

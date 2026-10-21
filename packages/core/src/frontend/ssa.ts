@@ -1765,7 +1765,8 @@ export function fallbackArgc(
   argRegs: readonly string[],
   bi: number,
   opts: {
-    accept?: (v: Value) => boolean;
+    /** whether `v`, reaching argument register `reg`, is a value the caller may have set up */
+    accept?: (v: Value, reg: string) => boolean;
     /** the call's function, where it is (`CallSite`'s `guess.at`), and the frontend's own refusal */
     gap: { name: string; at: number | string; fail: FrontendRefusal };
     /** the leading arguments a declaration states (`GuessedCallSite.floor`): counted whether or not
@@ -1787,7 +1788,7 @@ export function fallbackArgc(
 ): number {
   const accept = opts.accept ?? (() => true);
   // whether the caller set argument register k up: a definition reaches it, through a call too
-  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, accept);
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, (v) => accept(v, argRegs[k]));
   const { name, at, fail } = opts.gap;
   const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
   const floor = opts.floor ?? 0;

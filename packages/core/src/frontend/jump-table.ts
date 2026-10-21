@@ -212,6 +212,10 @@ export interface ElidedDispatch {
 export interface StaleIdiomRead {
   reg: string;
   form: 'kept' | 'elided';
+  /** Whether the marker stands for the register on EVERY path that brings it ({@link parkedIn}): a
+   *  kept dispatch's, and an EXACT target's. A MIXED target's marker also replaced what the other
+   *  paths into it brought, so it is read like any value, and its read declines. */
+  parks: boolean;
 }
 
 /** What a case target's entry holds from an elided dispatch: the scrutinee's register (read for a
@@ -254,6 +258,30 @@ export function caseEntries(
   return out;
 }
 
+/** Write what an elided dispatch left at the entry of case target `entry`'s block, before its first
+ *  instruction: `scrutinee` reads the switch's scrutinee there (before any of these writes, which may
+ *  overwrite its register), `write` defines a register in the block. Each marker is recorded in
+ *  `stale` against the register it stands in, for {@link refuseStaleIdiomReads}. */
+export function enterCaseTarget(
+  entry: CaseEntry,
+  ops: Op[],
+  io: { key: (reg: string) => string; scrutinee: (reg: string) => Value; write: (reg: string, v: Value) => void },
+  stale: Map<Value, StaleIdiomRead>,
+): void {
+  let scaled: Value | null = null;
+  if ([...entry.leaves.values()].includes('scaled')) {
+    scaled = mkValue(T.unk(32));
+    ops.push(mkOp('shl', { operands: [io.scrutinee(entry.scrutReg)], results: [scaled], attrs: { imm: 2 } }));
+  }
+  for (const [r, left] of entry.leaves) {
+    if (left === 'scaled') {
+      io.write(r, scaled!);
+      continue;
+    }
+    io.write(r, staleMarker(ops, io.key(r), { reg: r, form: 'elided', parks: entry.exact }, stale));
+  }
+}
+
 /** A marker for what the unlifted idiom left in `read.reg`, keyed `key` in the SSA. */
 export function staleMarker(ops: Op[], key: string, read: StaleIdiomRead, stale: Map<Value, StaleIdiomRead>): Value {
   const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
@@ -261,6 +289,19 @@ export function staleMarker(ops: Op[], key: string, read: StaleIdiomRead, stale:
   stale.set(op.results[0], read);
   return op.results[0];
 }
+
+/** Whether `v`, read from `reg`, is the marker the idiom left in that very register on every path
+ *  that brings it — where the compiler parked the dispatch's own value, which no call is handed and
+ *  no return hands back (a guessed arity stops below it, a return holding it returns nothing). A copy
+ *  into another register is something the case did with it, and a MIXED target's marker stands in
+ *  for what another path brought too (`StaleIdiomRead.parks`): both are read like any value. `key` is
+ *  the frontend's register spelling. */
+export const parkedIn =
+  (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
+  (v: Value, reg: string): boolean => {
+    const s = stale.get(v);
+    return s !== undefined && s.parks && key(s.reg) === key(reg);
+  };
 
 /** A DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom is not lifted, so a marker
  *  ({@link staleMarker}) stands for the table's address, an entry's address or the case's own code
@@ -309,9 +350,15 @@ export function refuseStaleIdiomReads(
   }
   const read = [...stale].find(([v]) => demanded.has(v));
   if (read !== undefined) {
+    const [, { reg, form }] = read;
+    const why =
+      "which the unlifted dispatch idiom wrote — the lift would read the value from before the dispatch, not the table's " +
+      'index, address or target';
+    // one literal per form: the decline classifier (apps/web declines.ts) keys on the text up to `reads`
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': a case of the kept jump table reads ${read[1].reg}, which the unlifted dispatch idiom ` +
-        `wrote — the lift would read the value from before the dispatch, not the table's index, address or target`,
+      form === 'kept'
+        ? `cannot lift '${name}': a case of the kept jump table reads ${reg}, ${why}`
+        : `cannot lift '${name}': a case of the elided jump table reads ${reg}, ${why}`,
     );
   }
 }
