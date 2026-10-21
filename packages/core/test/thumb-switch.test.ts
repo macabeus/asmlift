@@ -700,11 +700,10 @@ test('a retry that does not spell either leaves the stop reading its own decline
     '\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tbl\ta\n.L5:\n\tbl\tb\n\tb\t.L3\n.L6:\n\tmov\tr0, #0x1\n' +
     '\tb\t.L12\n.L7:\n\tbl\tc\n\tb\t.L3\n.L8:\n\tbl\td\n\tb\t.L3\n.L9:\n\tbl\te\n' +
     '.L3:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tmov\tr0, #0x0\n.L12:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-  // The dispatch scales into r2 and loads the table through r3 here, and `b` is declared to take r0
-  // (the others as they are written):
-  // the source's own idiom writes r0 and r1, which then hold the case's code address and the table's
-  // on the case edge into `.L5`, and reading either declines before any switch question. `b` reads r0
-  // on both edges into it, the incoming x on the case edge and a's result on the fall-through: the
+  // The dispatch scales into r2 and loads the table through r3 here, and `b` is declared to take r0:
+  // the source's own idiom writes r0 and r1, so on the case edge into `.L5` they hold the case's code
+  // address and the table's, and reading either declines before any switch question. `b` reads r0 on
+  // both edges into it — the incoming x on the case edge, a's result on the fall-through: the
   // switch-edge copy.
   const viaR2 = asm.replace(
     '\tlsl\tr0, r4, #0x2\n\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n',
@@ -855,8 +854,8 @@ test('the retry still refuses to end the switch at a case arm the default edge o
 // AN ELIDED DISPATCH'S IDIOM WRITES ITS REGISTERS ON THE CASE EDGES. The idiom below leaves r1 holding
 // the table's address and r0 the case's own code address on every case path, and on no default
 // path; the block it sat in is gone from the CFG, so each case target is entered with a marker for
-// each (jump-table.ts `enterCaseTarget`) and a read of one declines. Lifted before, a case reading r1
-// returned `a1` — the value from before the dispatch, which the hardware no longer holds there.
+// each (jump-table.ts `enterCaseTarget`) and a read of one declines. A lift that read r1 there would
+// return `a1`, the value from before the dispatch, which the hardware no longer holds.
 const IDIOM = '\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n';
 const POOL = '.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n';
 const elided = (bounds: string, cases: string) => `f:\n${bounds}${IDIOM}${cases}${POOL}`;
@@ -883,7 +882,7 @@ test('a case reading a register the ELIDED dispatch idiom wrote DECLINES', () =>
   expect(() => decompile('f', call('\tmov\tr1, r0\n\tmov\tr0, #1\n'), ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
   // nor is any register above it: agbcc keeps a parameter it needs past the dispatch in r2 (`add r2,
   // r1, #0` in `int f(int i, int a){ switch (i) { case 0: a = gi(a); … } }`), so r0 = a, r1 = the
-  // table's address and r2 = a at the call. A gap below r2 declined before.
+  // table's address and r2 = a at the call.
   expect(decompile('f', call('\tmov\tr0, r2\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(a2\);/);
   // a call in the case that destroyed r1 left a hole of its own: r2, written since, is a value set
   // up for `g`, and a gap below it is no more decidable than outside a switch

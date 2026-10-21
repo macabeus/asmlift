@@ -225,7 +225,7 @@ test('a case body that breaks on one path and falls into the next case on anothe
 // its words wrote (jump-table.ts `enterCaseTarget`): an `sll` there leaves the scaled scrutinee, a
 // value C spells; `lui`, `addu` and `lw` leave the table's, the entry's and the case's addresses,
 // which a case may not read. No compiler measured reads one — IDO and KMC recompute the index in the
-// case — so these are hand-written; before, `move v0,at` in a case lifted `return a0 < 2;`.
+// case — so these are hand-written.
 const scaledTable: AsmData = {
   ...asmData,
   sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x24, 0, 0, 0, 0x2c])]]),

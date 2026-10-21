@@ -1412,9 +1412,7 @@ describe('a bare return under a stated word return', () => {
 // is pruned, so each case target is entered with what it wrote (jump-table.ts `enterCaseTarget`).
 // mwcc 2.4.2 at -O4,p scales the index IN PLACE and reuses it in a case: `case 3: return i * 4;` is
 // a bare `blr` with r3 = i << 2, and `p[i] = 7` is `stwx r0,r4,r5` with r5 the dispatch's own `slwi`.
-// Lifted before, the case read the scrutinee as it was before the shift (`return a0;`) or minted a
-// parameter for the register (`*(s32 *)(a1 + a2) = 7`). The table base and the code address are no
-// value C spells, and a case reading either declines.
+// The table base and the code address are no value C spells, and a case reading either declines.
 describe('an elided mwcc dispatch writes its registers at each case target', () => {
   const asmData: AsmData = {
     sections: new Map([['.data', new Uint8Array(16)]]),
@@ -1518,7 +1516,7 @@ describe('a guessed arity in a case of an elided mwcc dispatch', () => {
 
   // `int swc(int i, int a) { switch (i) { case 0: a = g(); break; case 1: a += 3; break; case 2:
   // a = 7; break; } return a; }`: at the call r3 holds the table base and r4 still holds `a`. The
-  // base is no argument, so none above it is. Before, r4 above an empty r3 was a gap, and it declined.
+  // base is no argument, so none above it is.
   test('the table base the dispatch left in r3 is no argument, and none past it is', () => {
     const cases = ['  2c:\taddi    r4,r4,3', toEnd('30'), ...callG('34'), '  38:\tmr      r4,r3', toEnd('3c')];
     const body = [...cases, '  40:\tli      r4,7', toEnd('44')];
@@ -1528,7 +1526,7 @@ describe('a guessed arity in a case of an elided mwcc dispatch', () => {
 
   // `void swc(int i) { switch (i) { case 0: g(1); break; case 1: g(2); break; } }` leaves the
   // dispatch's `slwi r4,r3,2` in r4 at `li r3,1; bl g`, and `g(1)` and `g(1, i * 4)` compile to these
-  // bytes alike. Before, the guess counted r4 and lifted `g(1, a0 << 2)`.
+  // bytes alike.
   test('a guess that would count the scaled index the dispatch left in r4 DECLINES', () => {
     const body = [
       '  2c:\tli      r3,1',
@@ -1550,9 +1548,8 @@ describe('a guessed arity in a case of an elided mwcc dispatch', () => {
 // A SCALED INDEX AT A TARGET OTHER EDGES ENTER TOO. mwcc 2.4.2 -O4,p keeps the dispatch's `slwi` live
 // into a case another case falls into (`case 2: ...; case 3: ... p[i] ...`, r31) and into a case
 // whose body is a do-while, re-entered by its back edge (`lwzx r0,r4,r3`). Every path into such a
-// target brings `i << 2` in that register, so it is the scaled index there too; before, the target
-// made it a marker and the case declined. A path that brings anything else in it still declines:
-// the default's, a case that rewrote it, a loop that advanced it.
+// target brings `i << 2` in that register, so it is the scaled index there too. A path that brings
+// anything else in it declines: the default's, a case that rewrote it, a loop that advanced it.
 describe('the scaled index at a case target other edges also enter', () => {
   const asmData = (cases: number[]): AsmData => ({
     sections: new Map([['.data', new Uint8Array(16)]]),

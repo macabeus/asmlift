@@ -181,13 +181,12 @@ export interface CallSite {
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
   /** whether `v`, in argument register `reg`, is what a jump-table dispatch left in that very
-   *  register (frontend/jump-table.ts `parkedIn`): no argument, as a table base is none — the
-   *  compiler wrote it for the dispatch, not for the call, so a guessed arity stops below the lowest
-   *  register only it reaches (`fallbackArgc`'s `parked`), except one this ABI may skip (an O32
-   *  double's a1, a PowerPC pair's r4, a leading float's a0), which stays a gap. A copy of one into
-   *  a register below that ceiling is a value the case moved there, counted, and its read declines;
-   *  a copy above it is dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts
-   *  `g(…)` without it). No compiler copies a marker, so only hand asm meets the second. */
+   *  register (frontend/jump-table.ts `parkedIn`): no argument, as a table base is none, so a guessed
+   *  arity stops below the lowest register only it reaches (`fallbackArgc`'s `parked`), except one
+   *  this ABI may skip (an O32 double's a1, a PowerPC pair's r4, a leading float's a0), which stays a
+   *  gap. A copy of one below that ceiling is counted, and its read declines; a copy above it is
+   *  dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts `g(…)` without it), which
+   *  only hand asm meets: no compiler copies a marker. */
   readonly parked?: (v: Value, reg: string) => boolean;
   /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
    *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile

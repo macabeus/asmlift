@@ -1792,21 +1792,16 @@ export function fallbackArgc(
      *  (`CallSite.parked`). Where nothing `accept` takes reaches it too, the count stops below it: no
      *  compiler hands a callee the dispatch's own register, so no register above it is an argument.
      *
-     *  WHY THIS STOPS WHERE A CALL-DESTROYED REGISTER REFUSES. A register a call destroyed is a hole
-     *  too, and one holding a value above it refuses (`r2 holds a value and r1 holds none`), not
-     *  stops. What separates them is where the value above came from. A call destroys every
-     *  caller-saved register, so one holding a value after it was written since, for a call — an
-     *  argument as likely as not — and a value meant to outlive the call sits in a callee-saved
-     *  register instead, never above the hole. A dispatch clobbers only its idiom's registers, and
-     *  agbcc moves a value it keeps live across the switch out of them, upward, before the idiom
-     *  runs (`add r2,r1,#0` ahead of the `lsl` in a switch on r0 whose cases call): the value above
-     *  the parked register was set up for the switch, not for the call. Refusing there declined
-     *  those switches; counting it handed the callee the function's own argument. The cost is a
-     *  value a case itself writes above the parked register, dropped too (`mov r2,#5; mov r0,#1;
-     *  bl g` lifts `g(1)`): no compiler measured writes one there — agbcc puts an uninitialised
-     *  argument in a register of its own and copies it down into the parked one. And a parked
-     *  register a call in the case destroyed is the call's hole, not the dispatch's: the frontend
-     *  asks it without walking through calls (`SsaBuilder.holdsValue`), so the refusal answers. */
+     *  WHY THIS STOPS WHERE A CALL-DESTROYED REGISTER REFUSES (`r2 holds a value and r1 holds
+     *  none`): where the value above came from. A call destroys every caller-saved register, so one
+     *  holding a value after it was written since, for a call — an argument as likely as not. A
+     *  dispatch clobbers only its idiom's registers, and agbcc moves a value it keeps live across the
+     *  switch out of them, upward, before the idiom runs (`add r2,r1,#0` ahead of the `lsl` in a
+     *  switch on r0 whose cases call): the value above the parked register was set up for the switch,
+     *  not for the call. The cost is a value a case itself writes above the parked register, dropped
+     *  too (`mov r2,#5; mov r0,#1; bl g` lifts `g(1)`): no compiler measured writes one there. A
+     *  parked register a call in the case destroyed is that call's hole, not the dispatch's: the
+     *  frontend asks without walking through calls (`SsaBuilder.holdsValue`), so the refusal answers. */
     parked?: (reg: string) => boolean;
   },
 ): number {

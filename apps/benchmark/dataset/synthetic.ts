@@ -12776,7 +12776,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // -O4,p computes `slwi r5,r3,2` once in the dispatch block and reuses r5 in every `p[i]` case
   // (`stwx r0,r4,r5`). Every recognizer prunes the dispatch block, so the case read a register no
   // lifted path wrote, and the lift minted a parameter for it (`*(s32 *)(a1 + a2) = 7`);
-  // frontend/jump-table.ts `enterCaseTarget` now writes `i << 2` there. agbcc emits the reuse as
+  // frontend/jump-table.ts `enterCaseTarget` writes `i << 2` there. agbcc emits the reuse as
   // `add r1, r0, r1` (into the pointer register), a dispatch form `recoverJumpTable` does not
   // recognise; ido7.1 and gcc2.7.2kmc recompute the index in the case. Those three are controls.
   {
@@ -12792,9 +12792,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // jt_idxloop. The dispatch's scaled index at a case target another edge enters too: mwcc 2.4.2 at
   // -O4,p keeps `slwi r6,r3,2` in r6 into case 0, a do-while its back edge re-enters
-  // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts settles it there once every path in
-  // brings it (`StaleScaledIndex.settle`); before, the target made it a marker and the switch
-  // declined ("reads r6"), and earlier still the lift read r6 as a parameter. mwcc alone: agbcc,
+  // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts keeps it there because every path in
+  // brings it (`StaleScaledIndex.settle`); the lift used to read r6 as a parameter. mwcc alone: agbcc,
   // ido7.1 and gcc2.7.2kmc lay this switch out without a reused index.
   {
     sym: 'jt_idxloop',

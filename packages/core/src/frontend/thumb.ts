@@ -5043,7 +5043,7 @@ interface ThumbFill {
   /** the function-scope statics the operands define, finished into the lifted function's objects */
   readonly statics: LocalStatics;
   readonly frameUses: ThumbFrameUses;
-  /** A dispatch's stale idiom registers, by the marker value each holds after it. */
+  /** What an elided or kept dispatch left in its idiom's registers, by the value standing for each. */
   readonly staleIdiomValues: Map<Value, StaleIdiomRead>;
   /** What an elided dispatch left at each case target's entry, by block index. */
   readonly caseEntries: ReadonlyMap<number, CaseEntry>;

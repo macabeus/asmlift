@@ -1,5 +1,5 @@
-// asmlift — what the jump-table recognizers share: the MIPS and PowerPC ones below, and all three
-// frontends what an elided dispatch leaves in its registers (at the end of this file).
+// asmlift — what the jump-table recognizers share: the MIPS and PowerPC idiom matchers below, and,
+// for all three frontends, what an elided dispatch leaves in its registers (at the end of this file).
 //
 // Both frontends recover a dense switch from its dispatch idiom BEFORE the CFG is built, because
 // the case count decides the block leaders: the bounds branch becomes a `switch_br`, and the
@@ -175,18 +175,15 @@ export function makeTableBases(hoisted: Iterable<HoistedDispatch>, fail: Fronten
 //   - every other write leaves an address no C expression spells, so it is a MARKER: an `undef`
 //     value that `refuseStaleIdiomReads` declines wherever an operand demands it.
 // A target some other edge also enters (the default, a hole naming the default, a loop's back
-// edge, a fallthrough from another case: MIXED) cannot tell the paths apart at its entry. Its
-// markers stand for what the other paths brought too, so a read of one declines. Its scaled index
-// does not: mwcc 2.4.2 at -O4 keeps it live into such targets — a case whose body is a do-while
-// re-enters it on the back edge (`lwzx r0,r4,r3` with r3 the dispatch's `slwi r3,r3,2`), and a case
-// falls through into the next with the `slwi r31,r27,2` still in r31. So it is written there too,
-// as the shift of the scrutinee where the `switch_br` read it (`CaseEntry.at`), not where the
-// target reads it: a back edge brings whatever the case left in the scrutinee's register. It is
-// only a guess until every block is filled, and it stands where every other path into the target
-// brings that same scaled index in that register (`StaleScaledIndex.settle`, settled in
-// `refuseStaleIdiomReads`); where some path brings anything else, it is a marker, and a read of it
-// declines. A target two tables enter, and the function's entry, whose call edge no `preds` lists,
-// make every register a marker.
+// edge, a fallthrough from another case: MIXED) cannot tell the paths apart at its entry, so its
+// markers stand for what the other paths brought too, and a read of one declines. Its scaled index
+// may stand: mwcc 2.4.2 at -O4 keeps it live into such targets — a do-while case re-entered on its
+// back edge (`lwzx r0,r4,r3` with r3 the dispatch's `slwi r3,r3,2`), a case falling into the next
+// with `slwi r31,r27,2` still in r31. It is the shift of the scrutinee where the `switch_br` read
+// it, not where the target reads it (a back edge brings whatever the case left in the scrutinee's
+// register), and it stands only where every other path in brings that same scaled index
+// (`unsettledScaledIndices`); elsewhere it is a marker. A target two tables enter, and the
+// function's entry, whose call edge no `preds` lists, make every register a marker.
 
 /** What an elided dispatch leaves in a register it writes: the scrutinee scaled by four, or an
  *  address no C expression spells. */
