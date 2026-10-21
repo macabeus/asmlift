@@ -12707,7 +12707,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
       'void thrbreak(u8 x)\n{\n    u8 i;\n    for (i = 0; i < 3; i++) {\n        if (x == gTbl[i].a || x == gTbl[i].b)\n            break;\n    }\n    if (x == gTbl[i].a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
     features: ['break', 'struct'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'void thrbreak(u8 x);',
     proto: { thrbreak: { returnsVoid: true } },
   },
@@ -12715,15 +12715,30 @@ export const SYNTHETIC: SynthSpec[] = [
   // pointer from its latch and the current one from its in-body exit, which is the one the threaded
   // exit read, so raise/unthread.ts points that exit back at the re-test through the THEN arm its
   // delay slot carried (declined on gcc2.7.2kmc before; agbcc and ido7.1 lifted it already).
+  // gcc2.7.2 -O1 re-masks `x` on each exit's own block, so its exit target only forwards to the
+  // re-test, and unthread reads the re-test behind it (declined before).
   {
     sym: 'thrwalk',
     src:
       'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
       'void thrwalk(u8 x)\n{\n    struct Pair *p;\n    for (p = gTbl; p < gTbl + 3; p++) {\n        if (x == p->a || x == p->b)\n            break;\n    }\n    if (x == p->a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
     features: ['break', 'struct'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'void thrwalk(u8 x);',
     proto: { thrwalk: { returnsVoid: true } },
+  },
+  // thrwalk with its break tests swapped: gcc2.7.2kmc puts the step in the threaded branch's delay
+  // slot, so the current and the stepped pointer are both defined at the threaded exit, and
+  // raise/unthread.ts judges each as the re-test's arg (declined on gcc2.7.2kmc and gcc2.7.2 before).
+  {
+    sym: 'thrwalkba',
+    src:
+      'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
+      'void thrwalkba(u8 x)\n{\n    struct Pair *p;\n    for (p = gTbl; p < gTbl + 3; p++) {\n        if (x == p->b || x == p->a)\n            break;\n    }\n    if (x == p->a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
+    features: ['break', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void thrwalkba(u8 x);',
+    proto: { thrwalkba: { returnsVoid: true } },
   },
   {
     sym: 'brmerge',
