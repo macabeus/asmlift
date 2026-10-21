@@ -288,8 +288,9 @@ export const PASSES: Record<string, CensusablePass> = {
   unthread: {
     // raise/unthread.ts's `UNTHREAD_GATES` — which jump-threaded loop exits go back to the re-test they
     // skipped. Asked once per (exit edge, other exit target, arg proposal) whose shape admits one — the
-    // target ends in a `cond_br` and each of its params has a value, handed it by an in-loop edge, that
-    // is defined at the exit — until one is admitted, on every round.
+    // target ends in a `cond_br`, or in a `br` to an out-of-loop block that does (gcc2.7.2's forwarder
+    // in front of the re-test, `retestOf`), and each of its params has a value, handed it by an
+    // in-loop edge, that is defined at the exit — until one is admitted, on every round.
     tables: [['unthread', UNTHREAD_GATES as readonly Gate<never>[]]],
     install: (w) => installFold('unthread', (fn) => unthreadLoopExits(fn, w[0] as readonly Gate<ThreadedExit>[])),
   },
