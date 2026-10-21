@@ -1702,7 +1702,7 @@ describe('a guessed arity in a function that reads the scaled index', () => {
   test('a call passing on the incoming r3 DECLINES', () => {
     const lift = () => decompile('swp', asm('nop'), PPC_MWCC, { asmData });
     expect(lift).toThrow(
-      /the call at 0x38 has no prototype, and r3, the last register the arity guessed without one counts, holds a value its block did not write/,
+      /the call at 0x38 has no prototype, and r3, the last register the count takes, holds a value its block did not write/,
     );
     expect(lift).toThrow(PpcUnsupportedError);
   });
@@ -1711,5 +1711,20 @@ describe('a guessed arity in a function that reads the scaled index', () => {
     const out = decompile('swp', asm('li      r3,5'), PPC_MWCC, { asmData }).source;
     expect(out).toMatch(/case 0:\s*\n\s*v0 = a0 << 2;/);
     expect(out).toMatch(/case 1:\s*\n\s*v0 = g\(5\);/);
+  });
+
+  // `void swq(int a, int i){ switch (i){ case 0: g(a); break; case 1: ... } }`: the table base is
+  // parked in r4, and r3 still holds a. Left out below it, a is as likely passed on as not (the
+  // bytes `g()` gives too); the pre-dispatch r4 made that a gap refusal before.
+  test('a call leaving out an incoming register below the parked base DECLINES', () => {
+    const swq = asm('nop')
+      .replace('cmplwi  r3,1', 'cmplwi  r4,1')
+      .replace('lis     r4,0', 'lis     r5,0')
+      .replace('slwi    r0,r3,2', 'slwi    r0,r4,2')
+      .replace('addi    r4,r4,0', 'addi    r4,r5,0')
+      .replace('  2c:\tmr      r3,r0', '  2c:\tnop');
+    expect(() => decompile('swp', swq, PPC_MWCC, { asmData, prototypes: { swp: { returnsVoid: true } } })).toThrow(
+      /r3, which the count leaves out below a parked register, holds its incoming value/,
+    );
   });
 });

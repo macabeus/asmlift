@@ -951,10 +951,29 @@ test('a guessed arity whose last register its block did not write DECLINES where
     '.Lc1:\n\tmov\tr0, #0x3\n\tbl\tg1\n\tldr\tr1, .Lg\n\tstr\tr0, [r1]\n\tb\t.L3\n.Lg:\n\t.word\tgv\n' +
     '.L3:\n\tpop\t{r0}\n\tbx\tr0\n';
   expect(() => decompile('f', asm(''), ARMV4T_AGBCC)).toThrow(
-    /'bl g0' in block '\.Lc0' has no prototype, and r2, the last register the arity guessed without one counts, holds a value its block did not write/,
+    /'bl g0' in block '\.Lc0' has no prototype, and r2, the last register the count takes, holds a value its block did not write/,
   );
   // control: a case that writes every register it passes lifts, the ceiling and all
   const written = decompile('f', asm('\tmov\tr2, #0x4\n'), ARMV4T_AGBCC).source;
   expect(written).toMatch(/case 0:\s*\n\s*g0\(a0, 9, 4\);/);
   expect(written).toMatch(/g1\(3\)/);
+});
+
+// …nor a count that takes what a store in its block left in the argument registers. agbcc, `void
+// f(int a){ switch (a){ case 0: hv(); break; case 1: gc = ga; g(); break; } }` with neither declared:
+// `str r1,[r0]` leaves &gc in r0 and ga in r1 at `bl g`, the bytes `g(&gc, ga)` compiles to as well,
+// and `bl hv` with r0 and r1 parked declined the function before the dispatch's registers were
+// modelled ("r1 holds a value and r0 holds none").
+test('a guessed arity that counts a value its block stored DECLINES where a parked register stood', () => {
+  const asm = (c1: string) =>
+    'f:\n\tpush\t{lr}\n\tcmp\tr0, #0x1\n\tbhi\t.L90\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
+    '\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    '.Lc0:\n\tbl\thv\n\tb\t.L90\n' +
+    `.Lc1:\n\tldr\tr0, .Lg\n\tldr\tr1, .Lg+0x4\n\tldr\tr1, [r1]\n\tstr\tr1, [r0]\n${c1}\tbl\tg\n\tb\t.L90\n` +
+    '.Lg:\n\t.word\tgc\n\t.word\tga\n.L90:\n\tpop\t{r0}\n\tbx\tr0\n';
+  expect(() => decompile('f', asm(''), ARMV4T_AGBCC)).toThrow(
+    /'bl g' in block '\.Lc1' has no prototype, and r0, which the count takes, holds a value an effect of its block uses/,
+  );
+  // control: arguments the case set up after the store lift
+  expect(decompile('f', asm('\tmov\tr0, #0x7\n\tmov\tr1, #0x8\n'), ARMV4T_AGBCC).source).toMatch(/g\(7, 8\);/);
 });
