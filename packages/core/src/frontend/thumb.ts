@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaresVoidReturn, paramClassOf, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, ownLeadingWordParams, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -3387,30 +3387,15 @@ function calleeRegister(ins: Instr, target: TargetDescription): string | null | 
   return thunks.regs.includes(r) ? r : undefined;
 }
 
-/** HOW MANY OF THE FIRST ARGUMENT REGISTERS THE OWN DECLARATION PROVES ARE NO BY-VALUE STRUCT'S HOME:
- *  the count of its leading parameters that are each one integer word (`proto.ts` `paramClassOf`),
- *  stopping at the first that is not, and 0 where the declaration does not prove (`OwnDeclaration`)
- *  or states no parameter list (a bare count, a variadic one). A hidden word the caller may hand in
- *  ahead of them (a struct return's pointer, `this`) is a word too and only moves the parameters to
- *  later registers, so each of the first that-many registers holds a word whichever way it falls.
- *  The reader is `argumentHomes`, which otherwise tells a by-value struct parameter's home from a
- *  spill by the asm alone. */
-function ownLeadingWordArgs(own: OwnDeclaration | undefined): number {
-  const params = own?.proves === true ? own.proto.params : undefined;
-  if (!Array.isArray(params)) {
-    return 0;
-  }
-  const n = params.findIndex((_, k) => paramClassOf(own!.proto, params, k) !== 'word');
-  return n < 0 ? params.length : n;
-}
-
 function measureThumbFrame({
+  name,
   target,
   cfg: { asmBlocks, preds, entryReachable },
   calls,
   oneObject,
   own,
 }: {
+  name: string;
   target: TargetDescription;
   cfg: ThumbCfg;
   calls: CallDeclarations;
@@ -3760,7 +3745,8 @@ function measureThumbFrame({
   // all. A word the entry block stores straight from an argument register it has not written is
   // that home, and its reloads keep the object model. A spilled promoted local is stored from the
   // value it was computed as. That test reads the asm alone, and the function's own declaration
-  // overrules it where it proves the register holds one integer word (`ownLeadingWordArgs`): a
+  // overrules it where it proves the register holds one integer word (`proto.ts`
+  // `ownLeadingWordParams`, asked whether a register holds a word whoever's): a
   // `u32 k` spilled on entry and read back as `(u8)k` is no struct's home, and lifts as the slot
   // narrowed. A copy kept here is no capture, so its
   // offset leaves `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one
@@ -3785,7 +3771,8 @@ function measureThumbFrame({
   );
   const argumentHomes = new Set<number>();
   {
-    const wordArgRegs = new Set(target.argRegs.slice(0, ownLeadingWordArgs(own)));
+    const proving = own?.proves === true ? own.proto : undefined;
+    const wordArgRegs = new Set(target.argRegs.slice(0, ownLeadingWordParams(name, proving, target, false, 'a-word')));
     const written = new Set<string>();
     for (const ins of asmBlocks[0].instrs) {
       const a = spMemAccess(ins);
@@ -5125,6 +5112,7 @@ function thumbFillOf(
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
   );
   const frame = measureThumbFrame({
+    name,
     target,
     cfg,
     calls,

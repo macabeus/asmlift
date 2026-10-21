@@ -5179,7 +5179,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   });
 
   // …unless the function's own declaration proves the register holds one integer word, which no
-  // struct passed by value is (thumb.ts `ownLeadingWordArgs`): `u32 f(u32 k)` spilling k on entry and
+  // struct passed by value is (proto.ts `ownLeadingWordParams`, `'a-word'`): `u32 f(u32 k)` spilling k on entry and
   // reading `(u8)k` back. A count states no type, and a by-value parameter is the home it guards.
   test("the own declaration's word parameter is no by-value home", () => {
     const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');

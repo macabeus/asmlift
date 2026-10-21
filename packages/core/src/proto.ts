@@ -485,16 +485,28 @@ function ownParamList(name: string, p: FnProto | undefined): (FnProto & { params
  *  return the declaration does not show is a scalar, a symbol that may be a method) makes it 0,
  *  and the count stops at the first parameter that is not one integer word — a floating one may
  *  travel in the FPU's registers and leave its general words holding nothing (O32's leading
- *  float), a wide or unsized one takes words this does not place. */
+ *  float), a wide or unsized one takes words this does not place.
+ *
+ *  `hidden: 'a-word'` asks the other question the same count answers: how many of the first
+ *  argument registers surely hold ONE INTEGER WORD, whoever's. A hidden word (a struct return's
+ *  pointer, `this`, a constructor's flag) is a word too, and only moves the parameters to later
+ *  registers, so each of the first that-many registers holds a word whichever way it falls, and a
+ *  later parameter this cannot place does not move the ones before it. Its reader is the Thumb
+ *  frame's by-value home test (`frontend/thumb.ts` `argumentHomes`): a register that surely holds
+ *  a word is no by-value struct's home. */
 export function ownLeadingWordParams(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
   registerReturn = false,
+  hidden: 'none-first' | 'a-word' = 'none-first',
 ): number {
-  const own = ownArguments(name, p, target, registerReturn);
   const decl = ownParamList(name, p);
-  if (own === undefined || own.hidden !== 0 || decl === undefined) {
+  if (decl === undefined) {
+    return 0;
+  }
+  const own = hidden === 'a-word' ? undefined : ownArguments(name, p, target, registerReturn);
+  if (hidden === 'none-first' && (own === undefined || own.hidden !== 0)) {
     return 0;
   }
   let n = 0;

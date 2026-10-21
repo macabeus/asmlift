@@ -58,6 +58,20 @@ describe('the first argument registers that surely hold an own word parameter', 
     expect(n({ params: ['s32'] })).toBe(0);
     expect(n({ params: ['s32'], returns: 'struct Big' })).toBe(0);
   });
+  // Asked whether a register holds a word whoever's, a hidden word ahead is one too, and a later
+  // parameter nothing places does not move the ones before it.
+  test("asked for words whoever's, a hidden word is one and a later unsized parameter is no bar", () => {
+    const w = (p: Parameters<typeof ownLeadingWordParams>[1]) =>
+      ownLeadingWordParams('f', p, ARMV4T_AGBCC, false, 'a-word');
+    expect(w({ params: ['u32'], returns: 'u32' })).toBe(1);
+    expect(w({ params: ['u32', 'u8 *'], returns: 'u32' })).toBe(2);
+    expect(w({ params: ['float', 'u32'], returns: 'u32' })).toBe(0);
+    expect(w({ params: ['u32', 'Foo'], returns: 'u32' })).toBe(1);
+    expect(w({ params: ['u32'], returns: 'struct S' })).toBe(1);
+    expect(w({ params: ['u32'] })).toBe(1);
+    expect(w({ params: 1 })).toBe(0);
+    expect(w(undefined)).toBe(0);
+  });
 });
 
 /** Wrap objdump-shaped MIPS body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
