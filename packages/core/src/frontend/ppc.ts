@@ -680,9 +680,13 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
 
 /** Whether any of `body` names a callee-saved general register (`isCalleeSaved`), as an operand or
  *  a memory base, that the prologue did not save — the mark of hand-written asm, since compiled
- *  code saves such a register before it touches it, unless the register holds a global register
- *  variable (`target.globalRegisterVariables`), which compiled code never saves. A save routine or
- *  `stmw` names only its first register, and saves it, so either is in `saved`. */
+ *  code saves such a register before it touches it. A save routine or `stmw` names only its first
+ *  register, and saves it, so either is in `saved`.
+ *
+ *  A GLOBAL REGISTER VARIABLE'S register (`target.globalRegisterVariables`) counts too, though
+ *  compiled code never saves one: hand-written entry points are handed inputs in r14.. as well, and
+ *  read as compiled code a declaration that bounds nothing turns their argument registers into
+ *  `uninit_<reg>` — where a compiled body dropping the bound only over-counts its parameters. */
 const namesUnsavedCalleeSaved = (
   body: readonly Instr[],
   target: TargetDescription,
@@ -691,9 +695,7 @@ const namesUnsavedCalleeSaved = (
   body.some((ins) =>
     ins.ops.some((op) => {
       const reg = op.includes('(') ? parseMem(op).base : op;
-      return (
-        isCalleeSaved(target, reg) && !saved.has(reg) && !Object.hasOwn(target.globalRegisterVariables?.regs ?? {}, reg)
-      );
+      return isCalleeSaved(target, reg) && !saved.has(reg);
     }),
   );
 

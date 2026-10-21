@@ -399,7 +399,10 @@ export function assertScratchRegsPartitioned(target: {
  *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
  *  of its own prologue. The rest — callee-saved, and not saved — is `globalRegs` where the target
- *  can declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot. A
+ *  can declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot, or
+ *  where the function saves it past its prologue (`savedLater`): compiled code never saves a global
+ *  register variable's register, and asm that saves one late restores it too, so its writes are not
+ *  the caller's and its entry value is no global's. A
  *  target stating no `nonArgRegs` claims no partition and gets an empty model, so every def-less
  *  read stays a parameter.
  *
@@ -421,6 +424,7 @@ export function registerLiveIns(
   },
   savedRegs: ReadonlySet<string>,
   ownWords?: number,
+  savedLater: ReadonlySet<string> = new Set(),
 ): Pick<
   LiveInModel,
   'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords' | 'unsavedCalleeSavedRegs' | 'globalRegs'
@@ -444,8 +448,10 @@ export function registerLiveIns(
     ],
     argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
-    unsavedCalleeSavedRegs: unsaved.filter((r) => !Object.hasOwn(spelled, r)),
-    globalRegs: new Map(unsaved.filter((r) => Object.hasOwn(spelled, r)).map((r) => [r, spelled[r]])),
+    unsavedCalleeSavedRegs: unsaved.filter((r) => !Object.hasOwn(spelled, r) || savedLater.has(r)),
+    globalRegs: new Map(
+      unsaved.filter((r) => Object.hasOwn(spelled, r) && !savedLater.has(r)).map((r) => [r, spelled[r]]),
+    ),
     ...(ownWords === undefined ? {} : { ownArgWords: ownWords }),
   };
 }

@@ -831,6 +831,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', movless, none)).toThrow(read('r8'));
       expect(() => decompile('f', write, none)).toThrow(/it writes callee-saved r8 and never saved it/);
     });
+
+    // A push past the leading run saves the register all the same, and the pop that restores it is
+    // transparent: hand-written asm keeping a register, not a global's write the caller sees.
+    test('…and refuses one the function saves past its prologue', () => {
+      const late = 'f:\n\tmov\tr1, r0\n\tpush\t{r4}\n\tmov\tr4, r1\n\tadd\tr0, r4, #1\n\tpop\t{r4}\n\tbx\tlr\n';
+      expect(() => decompile('f', late, ARMV4T_AGBCC)).toThrow(/it writes callee-saved r4 and never saved it/);
+      const lateHigh =
+        'f:\n\tmov\tr1, r0\n\tmov\tr3, r8\n\tpush\t{r3}\n\tmov\tr8, r1\n\tmov\tr0, r8\n\tpop\t{r3}\n\tmov\tr8, r3\n\tbx\tlr\n';
+      expect(() => decompile('f', lateHigh, ARMV4T_AGBCC)).toThrow(/callee-saved r8/);
+    });
   });
 
   test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {
