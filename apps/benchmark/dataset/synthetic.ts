@@ -12447,8 +12447,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      so the loop's exit lands on the post-loop `if`'s THEN arm while the other exits land on the
   //      re-test — two exit targets (structure.ts `singleExit`, then `foreverShape`, then `onStack`;
   //      traced on the real function and the row). gcc2.7.2kmc threads it too, past the THEN arm into
-  //      its delay slot, but its exits hand the re-test a counter re-masked on each edge, so its decline
-  //      is the shared re-test rather than the threading; ido7.1 does not thread and lifts (control);
+  //      its delay slot, but its exits hand the re-test an index each computes on its own edge (the
+  //      counter re-masked for a `u8`, `i<<2` for an `int`), so its decline is the shared re-test
+  //      rather than the threading; ido7.1 does not thread and lifts (control);
   //      mwcc_242_81 off (frontend `nor` on both siblings). Lifts now: agbcc by pointing the threaded
   //      exit back at the re-test (raise/unthread.ts), gcc2.7.2kmc by the shared break tail of item 11.
   //  11. brmerge (sub_0801D6B0). Two break arms that run their own code and then share one tail
@@ -12709,6 +12710,20 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
     ctx: 'void thrbreak(u8 x);',
     proto: { thrbreak: { returnsVoid: true } },
+  },
+  // thrbreak as a pointer walk: gcc2.7.2kmc's bottom-tested loop hands the re-test the stepped
+  // pointer from its latch and the current one from its in-body exit, which is the one the threaded
+  // exit read, so raise/unthread.ts points that exit back at the re-test through the THEN arm its
+  // delay slot carried (declined on gcc2.7.2kmc before; agbcc and ido7.1 lifted it already).
+  {
+    sym: 'thrwalk',
+    src:
+      'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
+      'void thrwalk(u8 x)\n{\n    struct Pair *p;\n    for (p = gTbl; p < gTbl + 3; p++) {\n        if (x == p->a || x == p->b)\n            break;\n    }\n    if (x == p->a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
+    features: ['break', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void thrwalk(u8 x);',
+    proto: { thrwalk: { returnsVoid: true } },
   },
   {
     sym: 'brmerge',

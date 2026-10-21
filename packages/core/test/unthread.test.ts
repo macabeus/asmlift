@@ -75,6 +75,9 @@ function run(fn: Fn, seed: number): Ev[] {
         case 'icmp_slt':
           set(o[0] < o[1] ? 1 : 0);
           break;
+        case 'icmp_ult':
+          set(o[0] >>> 0 < o[1] >>> 0 ? 1 : 0);
+          break;
         case 'icmp_ugt':
           set(o[0] >>> 0 > o[1] >>> 0 ? 1 : 0);
           break;
@@ -211,6 +214,46 @@ const KMC = `fn thrk {
   ret
 }`;
 
+/** gcc2.7.2kmc's pointer walk `for (p = t; p < t + 3; p++) if (x == p->a || x == p->b) break;
+ *  if (x == p->a) gOut = 1; else gOut = 2;`, bottom-tested: the latch hands the re-test bb4 the
+ *  stepped pointer %13 and the in-body exit hands it %5, the pointer bb1's threaded exit reads. */
+const KMC_WALK = `fn walk {
+^bb0(%0: s32):
+  %1: u8* = gaddr {sym="gTbl"}
+  %2: s32 = const {value=12}
+  %3: u8* = add %1, %2
+  %4: u32 = icmp_ult %1, %3
+  cond_br %4, ^bb1(%1), ^bb4(%1)
+^bb1(%5: u8*):
+  %6: u32 = zext %0 {width=8}
+  %7: s32 = load %5 {off=0, signed=false, width=1}
+  %8: u32 = icmp_eq %6, %7
+  %9: s32 = const {value=1}
+  cond_br %8, ^bb6(%9), ^bb2()
+^bb2():
+  %10: s32 = load %5 {off=1, signed=false, width=1}
+  %11: u32 = icmp_eq %6, %10
+  cond_br %11, ^bb4(%5), ^bb3()
+^bb3():
+  %12: s32 = const {value=4}
+  %13: u8* = add %5, %12
+  %14: u32 = icmp_ult %13, %3
+  cond_br %14, ^bb1(%13), ^bb4(%13)
+^bb4(%15: u8*):
+  %16: s32 = load %15 {off=0, signed=false, width=1}
+  %17: u32 = zext %0 {width=8}
+  %18: u32 = icmp_ne %17, %16
+  %19: s32 = const {value=2}
+  cond_br %18, ^bb6(%19), ^bb5()
+^bb5():
+  %20: s32 = const {value=1}
+  br ^bb6(%20)
+^bb6(%21: s32):
+  %22: u8* = gaddr {sym="gOut"}
+  store %22, %21 {off=0, width=1}
+  ret
+}`;
+
 describe('a threaded loop exit goes back to the re-test it skipped', () => {
   test('agbcc: the exit lands on the THEN arm the re-test falls into', () => {
     const { n, fn, before } = folded(AGBCC);
@@ -236,6 +279,17 @@ describe('a threaded loop exit goes back to the re-test it skipped', () => {
     expect(fn.blocks[5].params).toEqual([]);
     expect(disagreements(before, fn)).toBe(0);
     expect(() => structure(fn)).not.toThrow();
+  });
+
+  test('gcc2.7.2kmc pointer walk: the exit hands the re-test the pointer it read, not the latch’s stepped one', () => {
+    const { n, fn, before } = folded(KMC_WALK);
+    expect(n).toBe(1);
+    verify(fn);
+    const edge = fn.blocks[1].ops[fn.blocks[1].ops.length - 1].successors[0];
+    expect(edge.block).toBe(fn.blocks[4]);
+    expect(edge.args).toEqual([fn.blocks[1].params[0]]);
+    expect(disagreements(before, fn)).toBe(0);
+    expect(cBackend.emit(structure(fn))).toContain('break;');
   });
 
   test('the fold runs in the pre-structure record, ahead of the re-roll', () => {
@@ -366,6 +420,12 @@ describe('refusals', () => {
 
   test('a re-test param the loop hands two values is left alone', () => {
     const { n } = folded(edit(KMC, ['  cond_br %12, ^bb4(%3), ^bb5()', '  cond_br %12, ^bb4(%2), ^bb5()']));
+    expect(n).toBe(0);
+  });
+
+  test('a re-test param handed two values defined at the exit is left alone', () => {
+    // bb2's exit hands the walk's base pointer instead of the current one: both are defined at bb1
+    const { n } = folded(edit(KMC_WALK, ['  cond_br %11, ^bb4(%5), ^bb3()', '  cond_br %11, ^bb4(%1), ^bb3()']));
     expect(n).toBe(0);
   });
 

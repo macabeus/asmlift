@@ -36,11 +36,17 @@
 // T must not merely return, because an exit that returns is an early `return` the structurer already
 // spells. Every function that lifted without this pass keeps its CFG.
 //
-// THE ARGS E HANDS R are the one value every in-loop edge into R hands that param, where that value
-// is defined at E (dominates E's block). The choice is a proposal: the comparison above is what makes
-// it sound, and a param with no such value refuses. gcc2.7.2kmc re-masks a `u8` counter on each exit
-// edge (`andi v0,a1,0xff` in every delay slot), so its exits hand R distinct values and the row
-// `synthetic:thrbreak:gcc2.7.2kmc` stays declined here — a gap of its own, not this pass's.
+// THE ARGS E HANDS R, per param: the one value, among those the loop's in-loop edges into R hand it,
+// that is defined at E (dominates E's block). A bottom-tested loop's latch hands R the stepped
+// counter, which E never sees, and its in-body exits hand R the counter E reads; only the second is
+// defined at E. The choice is a proposal: the comparison above is what makes it sound, and a param
+// with no such value, or several, refuses. Inhabitants: `synthetic:thrbreak:agbcc` (top-tested,
+// every exit hands one counter, S == T), and a gcc2.7.2kmc pointer walk
+// `for (p = t; p < t + 3; p++) if (x == p->a || x == p->b) break;  if (x == p->a) A; else B;`
+// (bottom-tested, through S). Not `synthetic:thrbreak:gcc2.7.2kmc`, whatever the counter's width:
+// kmc indexes `t[i]` there by a value each exit computes on its own block (`i<<2`, re-masked
+// `i & 0xff` for a `u8`, in the exit branch's delay slot), so no value R reads is defined at E. That
+// row lifts through the break tail its exits share instead (structure.ts `codeBreakArm`).
 import { Block, Fn, Op, Value, dominators, predecessors, successorsOf } from '../ir/core';
 import { effectful, placedAt, spelledWhenDead } from '../ir/discipline';
 import { type EntryReading, sameAtEntry } from '../ir/entry';
@@ -210,17 +216,18 @@ function judge(
 ): ThreadedExit | null {
   const eTerm = E.ops[E.ops.length - 1];
   const rTerm = R.ops[R.ops.length - 1];
-  // THE SHAPE, untabled: R ends in a `cond_br` (only a branch re-takes E's decision), and each of
-  // its params is handed one value by every in-loop edge into R, defined at E — the args E hands it.
+  // THE SHAPE, untabled: R ends in a `cond_br` (only a branch re-takes E's decision), and for each
+  // of its params exactly one of the values the in-loop edges into R hand it is defined at E — the
+  // arg E hands it.
   if (rTerm?.opcode !== 'cond_br') {
     return null;
   }
   const into = [...body].flatMap((p) => terminatorEdges(p).filter((s) => s.block === R));
   const args: Value[] = [];
   for (let k = 0; k < R.params.length; k++) {
-    const vals = new Set(into.map((s) => s.args[k]));
+    const vals = new Set(into.map((s) => s.args[k]).filter((v) => v !== undefined && dominatesAt(v, E)));
     const [only] = vals;
-    if (vals.size !== 1 || only === undefined || !dominatesAt(only, E)) {
+    if (vals.size !== 1 || only === undefined) {
       return null;
     }
     args.push(only);
