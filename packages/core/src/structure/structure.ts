@@ -2257,8 +2257,9 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  cross-jump arms written with a tail each into that same shape, jump.c). The region is then
  *  admitted when every edge into it from outside comes from the body — a body block, or a block
  *  every path into which comes from the body without passing `exit` (the other arm's own blocks,
- *  whose exit edge the classifier must admit as an arm of its own, or the loop declines) — and it
- *  holds no cycle. Each arm writes the shared blocks again ahead of its own `break`, a shared `ret`
+ *  whose exit edge the classifier must admit as an arm of its own, or the loop declines), or the
+ *  block past the arm's head it enters is pure up to `exit` (`pureTail`) — and it holds no cycle.
+ *  Each arm writes the shared blocks again ahead of its own `break`, a shared `ret`
  *  as one `return` per arm. The arms run on exclusive paths, so every path still runs the tail
  *  once, as the asm does; where the compiler cross-jumps, the copies are the same code
  *  (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
@@ -2316,10 +2317,27 @@ function codeBreakArm(
     fromBody.set(p, ok);
     return ok;
   };
+  // Shared, too: a block past the arm's head that runs no effect, nor does any region block it
+  // reaches, may be entered from anywhere — from outside the loop as well. Its copies then run no
+  // store or call twice on any path, and a path from outside structures its own copy where it sits.
+  // agbcc cross-jumps a `break` that assigns a `u8` with an `else` before the loop that assigns the
+  // same `u8` into one `lsr` truncation block (jump.c); the per-arm copy is the source's spelling.
+  const pureFrom = new Map<Block, boolean>();
+  const pureTail = (x: Block): boolean => {
+    let known = pureFrom.get(x);
+    if (known === undefined) {
+      known = [x, ...reachWithin(x, region)].every((y) => !y.ops.some(effectful));
+      pureFrom.set(x, known);
+    }
+    return known;
+  };
   let entersShared = false;
   const entered = (x: Block) =>
     (preds.get(x) ?? []).every(
-      (p) => region.has(p) || (x === to && p === from) || (shared && armOfBody(p) && (entersShared = true)),
+      (p) =>
+        region.has(p) ||
+        (x === to && p === from) ||
+        (shared && (armOfBody(p) || (x !== to && pureTail(x))) && (entersShared = true)),
     );
   if (!leaves || ![...region].every(entered)) {
     return null;
@@ -2327,6 +2345,18 @@ function codeBreakArm(
   // a region another arm enters is written once per arm, so it must be one a walk writes once: no
   // cycle. One only its own edge enters is written once wherever it sits.
   return !entersShared || [...region].every((x) => acyclicThrough(x, region)) ? region : null;
+}
+/** The blocks of `region` a path inside it reaches from `x` — `x` itself only on a cycle. */
+function reachWithin(x: Block, region: ReadonlySet<Block>): Set<Block> {
+  const seen = new Set<Block>();
+  for (const stack = successorsOf(x); stack.length > 0;) {
+    const y = stack.pop()!;
+    if (region.has(y) && !seen.has(y)) {
+      seen.add(y);
+      stack.push(...successorsOf(y));
+    }
+  }
+  return seen;
 }
 /** Does no path inside `region` lead from `x` back to `x`? */
 function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {

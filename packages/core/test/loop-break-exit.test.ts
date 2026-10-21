@@ -1027,6 +1027,45 @@ const SHARED_TAIL_PHI = `fn sharedphi {
   ret %16
 }`;
 
+/** agbcc's `if (flag == 0) { for (i = 0; i < n; i++) if (a(i) == k) { id = i; break; } } else id =
+ *  flag + 26; out(id);` with a `u8 id`: the break arm and the `else` each compute a value and jump to
+ *  ONE pure block that finishes it (agbcc's `lsl` in each, one cross-jumped `lsr`; spelt here with
+ *  `add`/`sub`, which the trace oracle models and shifts are not). */
+const PURE_TAIL_ELSE = `fn elsetail {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %6: u32 = icmp_slt %5, %0
+  cond_br %6, ^bb2(), ^bb7(%3)
+^bb2():
+  %7: s32 = call %5 {target="a"}
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  br ^bb5(%10)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  %13: s32 = const {value=100}
+  %14: s32 = add %12, %13
+  br ^bb5(%14)
+^bb5(%21: s32):
+  %20: s32 = const {value=100}
+  %22: s32 = sub %21, %20
+  br ^bb7(%22)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  br ^bb1(%16)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  ret %18
+}`;
+
 describe('break arms that share a tail', () => {
   test('a top-tested loop writes the shared tail in each arm, ahead of its `break`', () => {
     const { src, agreement, shipped } = judged(SHARED_TAIL_TOP_TESTED);
@@ -1064,6 +1103,25 @@ describe('break arms that share a tail', () => {
       SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
         '^bb7():\n',
         '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
+      ),
+    );
+  });
+
+  test('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {
+    const { src, agreement, shipped } = judged(PURE_TAIL_ELSE);
+    expect(src).toContain('while (1) {');
+    // the tail is written twice: once ahead of the `break`, once in the `else`
+    expect(src.match(/ - 100;/g)).toHaveLength(2);
+    expect(src.match(/out\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail an `else` before the loop also enters is refused when it runs an effect', () => {
+    declines(
+      PURE_TAIL_ELSE.replace(
+        '  %22: s32 = sub %21, %20\n',
+        '  %22: s32 = sub %21, %20\n  %23: s32 = call %22 {target="hit"}\n',
       ),
     );
   });
