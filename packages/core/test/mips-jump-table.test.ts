@@ -298,3 +298,79 @@ test('a case another falls into reads the scaled index both paths bring, on IDO 
     );
   }
 });
+
+// THE TABLE'S `%lo` FOLDED INTO THE LOAD. IDO 7.1, KMC and gcc 2.7.2 form a dispatch's base in its
+// own block as `lui at,%hi(T) ; addu at,at,rI ; lw rV,%lo(T)(at)`, both relocations against the
+// section symbol with addend 0 (REL): the table's offset lives only in the two immediates. So the
+// second table of a unit is `lw rV,32(at)` (`synthetic:sw_jtloop2:ido7.1`), one 64 KiB in is
+// `lui at,0x1 ; lw rV,0(at)`, and one 40 KiB in is `lui at,0x1 ; lw rV,-24576(at)`.
+/** `.rodata` holding a decoy table at 0 (cases swapped) and the real one at `at`. */
+const foldedTable = (at: number, lo: string | null): AsmData => {
+  const bytes = new Uint8Array(at + 8);
+  bytes.set([0, 0, 0, 0x28, 0, 0, 0, 0x20], 0);
+  bytes.set([0, 0, 0, 0x20, 0, 0, 0, 0x28], at);
+  return {
+    sections: new Map([['.rodata', bytes]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_HI16', sym: '.rodata', addend: 0 },
+      ...(lo === null ? [] : [{ section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: lo, addend: 0 }]),
+      ...[0, 4, at, at + 4].map((offset) => ({
+        section: '.rodata',
+        offset,
+        type: 'R_MIPS_32',
+        sym: '.text',
+        addend: 0,
+      })),
+    ],
+    symbols: new Map([
+      ['other', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+};
+const folded = (hi: string, disp: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,30 <f+0x30>',
+    ' 8:\tsll\tt6,a0,0x2',
+    ` c:\tlui\tat,${hi}`,
+    '10:\taddu\tat,at,t6',
+    `14:\tlw\tt6,${disp}(at)`,
+    '18:\tjr\tt6',
+    '1c:\tnop',
+    '20:\tjr\tra',
+    '24:\tli\tv0,5',
+    '28:\tjr\tra',
+    '2c:\tli\tv0,9',
+    '30:\tjr\tra',
+    '34:\tli\tv0,-1',
+  );
+
+test('a table whose %lo the load carries is read at both halves, past 32 and 64 KiB too', () => {
+  for (const [hi, disp, at] of [
+    ['0x0', '32', 32],
+    ['0x1', '0', 0x10000],
+    ['0x1', '-24576', 0xa000],
+  ] as const) {
+    for (const t of [MIPS_IDO, MIPS_GCC]) {
+      const out = decompile('f', folded(hi, disp), t, { asmData: foldedTable(at, '.rodata') }).source;
+      expect(out).toContain('switch (a0)');
+      expect(out).toMatch(/case 0:\s*return 5;/);
+      expect(out).toMatch(/case 1:\s*return 9;/);
+    }
+  }
+});
+
+test('a load displacement that is no paired %lo of the base declines', () => {
+  const declines = /indirect jump 'jr t6'/;
+  // No LO16: `table[a0 + 8]` off an unpaired `%hi`.
+  expect(() => decompile('f', folded('0x0', '32'), MIPS_IDO, { asmData: foldedTable(32, null) })).toThrow(declines);
+  // A LO16 on another symbol than the `lui`'s HI16, at any displacement.
+  for (const disp of ['32', '0']) {
+    expect(() => decompile('f', folded('0x0', disp), MIPS_IDO, { asmData: foldedTable(32, 'other') })).toThrow(
+      declines,
+    );
+  }
+});

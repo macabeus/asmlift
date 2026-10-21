@@ -535,10 +535,38 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
         if (!hi || hi.sym !== lo.sym) {
           return [{ sym: '', addend: NaN }];
         }
-        const half = (o: string) => parseImm(o) & 0xffff;
-        return [{ sym: hi.sym, addend: hi.addend + ((half(instrs[p].ops[1]) << 16) + ((half(x.ops[2]) << 16) >> 16)) }];
+        return [paired(hi, instrs[p], parseImm(x.ops[2]))];
       }),
     );
+  /** The table a `lui %hi` / `%lo` pair addresses: the HI16 record's symbol and addend plus both
+   *  halves' immediates, the `%lo` sign-extended — REL keeps the offset in the immediates, so a
+   *  table 64 KiB into its section is `lui 1` and one past 32 KiB has a negative `%lo`. */
+  const paired = (hi: TableKey, lui: Instr, loImm: number): TableKey => ({
+    sym: hi.sym,
+    addend: hi.addend + (((parseImm(lui.ops[1]) & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
+  });
+  /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
+   *  A `lui` base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
+   *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
+   *  the TABLE's address, not an index offset. Refuses (null):
+   *    - a non-zero displacement with no R_MIPS_LO16 on the load — `table[i + off/4]`, the `lui`
+   *      left unpaired;
+   *    - a LO16 on another symbol, or any other relocation on the load;
+   *    - a non-zero displacement on a GOT16 base, which no compiler here emits (no ido row is PIC). */
+  const inBlockTable = (base: Instr, ld: Instr, off: number): TableKey | null => {
+    const hi = tableBaseOf(base);
+    if (!hi) {
+      return null;
+    }
+    const lo = textRelocAt(ad, ld.addr);
+    if (base.mnemonic !== 'lui') {
+      return off === 0 && lo === null ? hi : null;
+    }
+    if (lo === null ? off !== 0 : lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
+      return null;
+    }
+    return paired(hi, base, off);
+  };
 
   const out = new Map<number, MipsJT>();
   for (let i = 0; i < instrs.length; i++) {
@@ -562,9 +590,6 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       continue;
     } // rV = *(rAddr)
     const mem = parseMem(instrs[ldIdx].ops[1]);
-    if (mem.off !== 0) {
-      continue;
-    }
     const aIdx = defBefore(mem.base, ldIdx); // rAddr = base + index
     if (aIdx < 0 || instrs[aIdx].mnemonic !== 'addu') {
       continue;
@@ -582,8 +607,9 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     ] as const) {
       const si = defBefore(idxCand, aIdx);
       const bi2 = defBefore(baseCand, aIdx);
-      // A base the dispatch's block does not form is a HOISTED one (`hoistedTable`).
-      const out = bi2 < 0 && si >= 0 ? hoistedTable(baseCand) : null;
+      // A base the dispatch's block does not form is a HOISTED one (`hoistedTable`), whose `%lo`
+      // its own `addiu` carries: the load reads displacement 0 off it.
+      const out = bi2 < 0 && si >= 0 && mem.off === 0 ? hoistedTable(baseCand) : null;
       if (si < 0 || (bi2 < 0 && !out)) {
         continue;
       }
@@ -591,7 +617,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       if (sll.mnemonic !== 'sll' || (sll.ops[2] !== '0x2' && sll.ops[2] !== '2')) {
         continue;
       } // index*4
-      const tb = out ?? tableBaseOf(instrs[bi2]);
+      const tb = out ?? inBlockTable(instrs[bi2], instrs[ldIdx], mem.off);
       if (!tb) {
         continue;
       }
