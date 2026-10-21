@@ -217,6 +217,21 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     }
     returned.set(op, mkValue(T.f32()));
   }
+  // A FLOAT RETURNED MAKES THE FUNCTION'S RETURN A FLOAT, so every other `ret` converts what it
+  // hands back: `return 5;` beside `return fget();` compiles to the bits of 5.0f where the asm
+  // hands back the word 5. Each value a `ret` reads must then be a float this pass makes — a kept
+  // helper's result or a declared single's.
+  const madeFloat = (v: Value) => {
+    const d = def.get(v);
+    return d !== undefined && (returned.has(d) || (calls.has(d) && sidesOf(d).result));
+  };
+  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
+  if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
+    throw new RaiseUnsupportedError(
+      `cannot lift '${fn.name}': it returns a float on one path, and another return of this function hands ` +
+        'back an integer word, which C would convert to that float',
+    );
+  }
   // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
   // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
   // on as integers are the wrong number — so a double parameter nothing here can hand a double

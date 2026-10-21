@@ -51,6 +51,19 @@ describe('a declared float return on a target without an FPU', () => {
     expect(lift('f', body, prototypes)).toContain(line);
   });
 
+  // A float handed to `ret` makes the function's return a float, so a second `ret` of an integer
+  // word would be converted there: `return 5;` compiles to the bits of 5.0f where the asm hands
+  // back the word 5. agbcc shares one epilogue, so only hand-written asm has two.
+  test.each([
+    ['a declared float return', 'fget', FGET],
+    ['a kept helper', '__addsf3', {}],
+  ])('%s returned beside an integer return declines', (_, callee, prototypes: Prototypes) => {
+    const body =
+      `\tpush\t{lr}\n\tcmp\tr2, #0\n\tbeq\t.L2\n\tbl\t${callee}\n\tpop\t{r1}\n\tbx\tr1\n` +
+      '.L2:\n\tmov\tr0, #0x5\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => lift('f', body, prototypes)).toThrow('another return of this function hands back an integer word');
+  });
+
   // A double is two words and the frontend reads one of them, which is not the value.
   test('a declared double read off one word declines', () => {
     expect(() =>
