@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaresVoidReturn, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, paramClassOf, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -43,7 +43,7 @@ import {
   nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
-import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
+import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import {
   type LocalStatics,
   gasPoolReferrers,
@@ -3387,16 +3387,36 @@ function calleeRegister(ins: Instr, target: TargetDescription): string | null | 
   return thunks.regs.includes(r) ? r : undefined;
 }
 
+/** HOW MANY OF THE FIRST ARGUMENT REGISTERS THE OWN DECLARATION PROVES ARE NO BY-VALUE STRUCT'S HOME:
+ *  the count of its leading parameters that are each one integer word (`proto.ts` `paramClassOf`),
+ *  stopping at the first that is not, and 0 where the declaration does not prove (`OwnDeclaration`)
+ *  or states no parameter list (a bare count, a variadic one). A hidden word the caller may hand in
+ *  ahead of them (a struct return's pointer, `this`) is a word too and only moves the parameters to
+ *  later registers, so each of the first that-many registers holds a word whichever way it falls.
+ *  The reader is `argumentHomes`, which otherwise tells a by-value struct parameter's home from a
+ *  spill by the asm alone. */
+function ownLeadingWordArgs(own: OwnDeclaration | undefined): number {
+  const params = own?.proves === true ? own.proto.params : undefined;
+  if (!Array.isArray(params)) {
+    return 0;
+  }
+  const n = params.findIndex((_, k) => paramClassOf(own!.proto, params, k) !== 'word');
+  return n < 0 ? params.length : n;
+}
+
 function measureThumbFrame({
   target,
   cfg: { asmBlocks, preds, entryReachable },
   calls,
   oneObject,
+  own,
 }: {
   target: TargetDescription;
   cfg: ThumbCfg;
   calls: CallDeclarations;
   oneObject: FrameRange | undefined;
+  /** the function's own declaration (`ownDeclarationOf`), read only where it `proves` */
+  own: OwnDeclaration | undefined;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -3739,7 +3759,10 @@ function measureThumbFrame({
   // (cli/test/matching/frame-union.test.ts) where the words narrowed recompile with no frame at
   // all. A word the entry block stores straight from an argument register it has not written is
   // that home, and its reloads keep the object model. A spilled promoted local is stored from the
-  // value it was computed as. A copy kept here is no capture, so its
+  // value it was computed as. That test reads the asm alone, and the function's own declaration
+  // overrules it where it proves the register holds one integer word (`ownLeadingWordArgs`): a
+  // `u32 k` spilled on entry and read back as `(u8)k` is no struct's home, and lifts as the slot
+  // narrowed. A copy kept here is no capture, so its
   // offset leaves `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one
   // dropped is the capture it always was, and keeps today's decline.
   const narrowCandidates = narrowSlotReloads(
@@ -3762,11 +3785,19 @@ function measureThumbFrame({
   );
   const argumentHomes = new Set<number>();
   {
+    const wordArgRegs = new Set(target.argRegs.slice(0, ownLeadingWordArgs(own)));
     const written = new Set<string>();
     for (const ins of asmBlocks[0].instrs) {
       const a = spMemAccess(ins);
       const src = reg(ins.ops[0] ?? '');
-      if (ins.mnemonic === 'str' && a !== null && !a.regOff && target.argRegs.includes(src) && !written.has(src)) {
+      if (
+        ins.mnemonic === 'str' &&
+        a !== null &&
+        !a.regOff &&
+        target.argRegs.includes(src) &&
+        !wordArgRegs.has(src) &&
+        !written.has(src)
+      ) {
         argumentHomes.add(a.off);
       }
       for (const r of target.argRegs) {
@@ -5093,7 +5124,13 @@ function thumbFillOf(
     },
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
   );
-  const frame = measureThumbFrame({ target, cfg, calls, oneObject });
+  const frame = measureThumbFrame({
+    target,
+    cfg,
+    calls,
+    oneObject,
+    own: ownDeclarationOf(name, prototypes, contextOwnProto),
+  });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
   // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.

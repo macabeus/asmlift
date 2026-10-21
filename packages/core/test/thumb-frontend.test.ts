@@ -5178,6 +5178,19 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(decompile('f', afterCall, ARMV4T_AGBCC, { prototypes: GET }).source).toContain('return (u8)v0 + ');
   });
 
+  // …unless the function's own declaration proves the register holds one integer word, which no
+  // struct passed by value is (thumb.ts `ownLeadingWordArgs`): `u32 f(u32 k)` spilling k on entry and
+  // reading `(u8)k` back. A count states no type, and a by-value parameter is the home it guards.
+  test("the own declaration's word parameter is no by-value home", () => {
+    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    const own = (params: Prototypes[string]['params']): string =>
+      decompile('f', home, ARMV4T_AGBCC, { prototypes: { ...P, f: { params, returns: 's32' } } }).source;
+    expect(own(['u32'])).toContain('return (u8)a0 + *(s32 *)&sp0;');
+    expect(own(['u8 *'])).toContain('return (u8)a0 + ');
+    expect(() => own(['struct Q'])).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+    expect(() => own(1)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+  });
+
   test('a byte that is not the low-order part of the word is no reload of it', () => {
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0, #0x1]\n'))).toThrow(
       'the objects at [sp,#4) and [sp,#5) overlap — one byte, two models',
