@@ -207,19 +207,29 @@ export interface ElidedDispatch {
   leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
-/** A marker's register, and whether the dispatch that left it was kept (its block lifted, holding
- *  the code the compiler placed in it) or elided. */
-export interface StaleIdiomRead {
+/** A MARKER ({@link staleMarker}): what the idiom left in `reg` that no C expression spells, and
+ *  whether the dispatch that left it was kept (its block lifted, holding the code the compiler
+ *  placed in it) or elided. A read of one declines ({@link refuseStaleIdiomReads}). */
+export interface StaleMarker {
+  kind: 'marker';
   reg: string;
   form: 'kept' | 'elided';
   /** Whether the marker stands for the register on EVERY path that brings it ({@link parkedIn}): a
    *  kept dispatch's, and an EXACT target's. A MIXED target's marker also replaced what the other
    *  paths into it brought, so it is read like any value, and its read declines. */
   parks: boolean;
-  /** Set on the scaled index an EXACT target is entered with ({@link enterCaseTarget}): no marker but
-   *  a value a case may read, recorded only for {@link scaledIndexIn}. */
-  scaled?: true;
 }
+
+/** The scaled index an EXACT target is entered with in `reg` ({@link enterCaseTarget}): no marker
+ *  but a value a case may read, recorded only for {@link scaledIndexIn}. */
+export interface StaleScaledIndex {
+  kind: 'scaled';
+  reg: string;
+}
+
+/** What an elided or kept dispatch left in a register, by the value standing for it: a marker no
+ *  read may reach, or the scaled index a read may reach but a guessed arity may not count. */
+export type StaleIdiomRead = StaleMarker | StaleScaledIndex;
 
 /** What a case target's entry holds from an elided dispatch: the scrutinee's register (read for a
  *  `scaled` entry) and each register the idiom wrote. */
@@ -264,7 +274,8 @@ export function caseEntries(
 /** Write what an elided dispatch left at the entry of case target `entry`'s block, before its first
  *  instruction: `scrutinee` reads the switch's scrutinee there (before any of these writes, which may
  *  overwrite its register), `write` defines a register in the block. Each marker is recorded in
- *  `stale` against the register it stands in, for {@link refuseStaleIdiomReads}. */
+ *  `stale` against the register it stands in, for {@link refuseStaleIdiomReads}, and the scaled
+ *  index as its own kind, for {@link scaledIndexIn}. */
 export function enterCaseTarget(
   entry: CaseEntry,
   ops: Op[],
@@ -279,7 +290,7 @@ export function enterCaseTarget(
   for (const [r, left] of entry.leaves) {
     if (left === 'scaled') {
       io.write(r, scaled!);
-      stale.set(scaled!, { reg: r, form: 'elided', parks: entry.exact, scaled: true });
+      stale.set(scaled!, { kind: 'scaled', reg: r });
       continue;
     }
     io.write(r, staleMarker(ops, io.key(r), { reg: r, form: 'elided', parks: entry.exact }, stale));
@@ -287,10 +298,15 @@ export function enterCaseTarget(
 }
 
 /** A marker for what the unlifted idiom left in `read.reg`, keyed `key` in the SSA. */
-export function staleMarker(ops: Op[], key: string, read: StaleIdiomRead, stale: Map<Value, StaleIdiomRead>): Value {
+export function staleMarker(
+  ops: Op[],
+  key: string,
+  read: Omit<StaleMarker, 'kind'>,
+  stale: Map<Value, StaleIdiomRead>,
+): Value {
   const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
   ops.push(op);
-  stale.set(op.results[0], read);
+  stale.set(op.results[0], { kind: 'marker', ...read });
   return op.results[0];
 }
 
@@ -308,7 +324,7 @@ export const parkedIn =
   (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
   (v: Value, reg: string): boolean => {
     const s = stale.get(v);
-    return s !== undefined && s.parks && s.scaled === undefined && key(s.reg) === key(reg);
+    return s?.kind === 'marker' && s.parks && key(s.reg) === key(reg);
   };
 
 /** Whether `v`, read from `reg`, is the scrutinee scaled by four that an elided dispatch left in that
@@ -319,7 +335,7 @@ export const scaledIndexIn =
   (stale: ReadonlyMap<Value, StaleIdiomRead>, key: (reg: string) => string = (r) => r) =>
   (v: Value, reg: string): boolean => {
     const s = stale.get(v);
-    return s?.scaled === true && key(s.reg) === key(reg);
+    return s?.kind === 'scaled' && key(s.reg) === key(reg);
   };
 
 /** A DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom is not lifted, so a marker
@@ -369,9 +385,9 @@ export function refuseStaleIdiomReads(
   while (work.length > 0) {
     (incoming.get(work.pop()!) ?? []).forEach(demand);
   }
-  const read = [...stale].find(([v, s]) => s.scaled === undefined && demanded.has(v));
+  const read = [...stale].flatMap(([v, s]) => (s.kind === 'marker' && demanded.has(v) ? [s] : []))[0];
   if (read !== undefined) {
-    const [, { reg, form }] = read;
+    const { reg, form } = read;
     const why =
       "which the unlifted dispatch idiom wrote — the lift would read the value from before the dispatch, not the table's " +
       'index, address or target';
