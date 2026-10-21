@@ -152,3 +152,26 @@ test('a caller-saved t-register stored with nothing in it is no save, so reloadi
     lift('0:\taddiu\tsp,sp,-8', '4:\tsw\tt0,4(sp)', '8:\tlw\tv0,4(sp)', 'c:\tjr\tra', '10:\taddiu\tsp,sp,8'),
   ).toThrow(/t0 is read before anything writes it, and no join meets it with a definition of its own/);
 });
+
+// $30 is `s8` and `fp` both: saved under one name and used under the other, it is still saved. Read
+// as two registers, the body's write went to a global register variable the epilogue undoes
+// (`greg_r30 = a0 + 1`), and on IDO, which can spell none, the lift refused a function it reads right.
+test('one register spelt `s8` and `fp` in one function is one saved register', () => {
+  for (const [save, use] of [
+    ['s8', 'fp'],
+    ['fp', 's8'],
+  ]) {
+    const lines = [
+      '0:\taddiu\tsp,sp,-8',
+      `4:\tsw\t${save},0(sp)`,
+      `8:\taddiu\t${use},a0,1`,
+      `c:\tmove\tv0,${use}`,
+      `10:\tlw\t${save},0(sp)`,
+      '14:\tjr\tra',
+      '18:\taddiu\tsp,sp,8',
+    ];
+    for (const target of [MIPS_GCC, MIPS_IDO]) {
+      expect(decompile('f', obj(...lines), target).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+    }
+  }
+});

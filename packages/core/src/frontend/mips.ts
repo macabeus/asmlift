@@ -94,7 +94,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, registerLiveIns } from './ssa';
+import { makeSsaBuilder, registerLiveIns, unifyRegisterSpellings } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1443,6 +1443,8 @@ function liftOnce(
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
+  // $30 has two names, and everything below keys a register by its spelling.
+  unifyRegisterSpellings(instrs, [['s8', 'fp']]);
   // Headerless input — a raw fragment, and every Splat listing — says where the function starts
   // only by its first line.
   const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;

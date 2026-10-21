@@ -846,6 +846,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         /it reads callee-saved r4 before writing it and never saved it/,
       );
     });
+
+    // `sl` and `r10` are one register: saved under one spelling and used under the other, it is
+    // still saved — read as two, its writes became a global's the epilogue undoes.
+    test('one register spelt two ways in one function is one register', () => {
+      const sl =
+        'f:\n\tpush\t{r7, lr}\n\tmov\tr7, sl\n\tpush\t{r7}\n\tmov\tsl, r0\n\tmov\tr0, r10\n\tadd\tr0, r0, #1\n' +
+        '\tpop\t{r3}\n\tmov\tsl, r3\n\tpop\t{r7}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', sl, ARMV4T_AGBCC).source).toContain('return a0 + 1;');
+      const sb =
+        'f:\n\tpush\t{lr}\n\tmov\tr3, sb\n\tpush\t{r3}\n\tmov\tr9, r0\n\tmov\tr0, sb\n\tpop\t{r3}\n\tmov\tsb, r3\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', sb, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
+      // unsaved, the two spellings are one global
+      expect(
+        decompile('f', 'f:\n\tmov\tfp, r0\n\tmov\tr1, r11\n\tadd\tr0, r1, #1\n\tbx\tlr\n', ARMV4T_AGBCC).source,
+      ).toBe('s32 f(s32 a0) {\n    greg_r11 = a0;\n    return greg_r11 + 1;\n}\n');
+    });
   });
 
   test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {

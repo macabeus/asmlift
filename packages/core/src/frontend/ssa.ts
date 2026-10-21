@@ -393,6 +393,32 @@ export function assertScratchRegsPartitioned(target: {
   return scratchRegs;
 }
 
+/** ONE SPELLING PER REGISTER, WHERE A FUNCTION WRITES ONE REGISTER TWO WAYS. The builder keys a
+ *  register by its operand text, and so does every save measurement a frontend makes, so `sl` and
+ *  `r10` (or O32's `s8` and `fp`) would be two variables and two partition entries for one register:
+ *  `mov sl, r0; mov r0, r10` returned a second parameter where the machine returns the first, and a
+ *  register saved as `s8` and written as `fp` read as never saved, its writes as a global's. `pairs`
+ *  is each register's two spellings, the one kept first. Only a function that names BOTH of a pair
+ *  is rewritten — every other keeps the spelling it was written in, and with it the name of any local
+ *  homed there — and an alias is rewritten wherever it stands as a whole word of an operand, so a
+ *  memory operand's base (`8(fp)`) is too. */
+export function unifyRegisterSpellings(
+  instrs: Iterable<{ ops: string[] }>,
+  pairs: readonly (readonly [keep: string, alias: string])[],
+): void {
+  const all = [...instrs];
+  const words = new Set(all.flatMap((ins) => ins.ops.flatMap((op) => op.match(/[A-Za-z_$.][\w$.]*/g) ?? [])));
+  for (const [keep, alias] of pairs) {
+    if (!words.has(keep) || !words.has(alias)) {
+      continue;
+    }
+    const re = new RegExp(`(?<![\\w$.])${alias}(?![\\w$.])`, 'g');
+    for (const ins of all) {
+      ins.ops = ins.ops.map((op) => op.replace(re, keep));
+    }
+  }
+}
+
 /** THE REGISTER HALF OF THE LIVE-IN MODEL (`LiveInModel.uninitRegs` and `argRegs`), composed here
  *  once for every frontend that claims it, so that no frontend can drop a half of the rule. A
  *  register is an uninitialised local's home when the ABI passes no argument in it

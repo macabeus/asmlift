@@ -75,6 +75,7 @@ import {
   stackArgKey,
   stackArgSlots,
   stackSlotKey,
+  unifyRegisterSpellings,
 } from './ssa';
 import {
   type OutgoingArgs,
@@ -385,8 +386,9 @@ const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp:
 
 // Registers Thumb-1's `push` cannot name, in every spelling this ISA's asm uses for them. Saving
 // one takes agbcc's `mov rLow, rHi; push {rLow}`, which is why the prologue's save set has to read
-// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: nothing here normalises
-// a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
+// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: a register keeps the
+// name it was written with, and only a function that writes one two ways is rewritten to one of them
+// (`unifyRegisterSpellings` in `readThumbText`), so `sl` and `r10` are never both keys of one lift.
 const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
 
 /** The operands of a `cmp` whose flags are still live — the whole of the condition state this
@@ -2984,6 +2986,17 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
 function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark);
+  // Everything below keys a register by its spelling, so a function that writes one two ways
+  // (`sl` and `r10`) is read in one of them.
+  unifyRegisterSpellings(
+    rawBlocks.flatMap((b) => b.instrs),
+    [
+      ['r9', 'sb'],
+      ['r10', 'sl'],
+      ['r11', 'fp'],
+      ['r12', 'ip'],
+    ],
+  );
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.
   const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
