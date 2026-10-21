@@ -37,6 +37,7 @@ import {
   declaresAggregateReturn,
   declaresParams,
   declaresVoidReturn,
+  floatingSpelling,
   isFloatingSpelling,
   ownDeclaresFloatingParam,
   paramClassOf,
@@ -127,6 +128,9 @@ export interface CallPlan {
   /** the callee is declared void, whether or not this lowering writes no value for it (`returns`
    *  is `void` only where `CallLowering.voidReturn` says so) */
   readonly declaredVoid: boolean;
+  /** the floating type an ordinary callee is declared to return where the target has no FPU, so
+   *  the return register holds its bits (`raise/floathelpers.ts` holds every read of them) */
+  readonly floatReturn?: 'float' | 'double' | 'long double';
 }
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
@@ -597,7 +601,18 @@ export function callDeclarations(
     const declaredVoid = !isRuntimeHelperName(callee) && declaresVoidReturn(own);
     const voided = lowering.voidReturn && declaredVoid;
     const image = returned === 'register' && registerStructLocal(known(prototypes, callee), target) !== undefined;
+    // A FLOAT RETURNED WITHOUT AN FPU IS BITS IN THE RETURN REGISTER. The candidate prints the call
+    // against the declaration, so `v = f()` into anything but a float converts the value (agbcc:
+    // `bl f; bl __fixsfsi`), where the bytes moved the bits. The call names the type, and
+    // `raise/floathelpers.ts` reads the result as that float or refuses. A target with an FPU
+    // refused the call above; a runtime helper's return is its table's.
+    const returnSpelling = own?.returns ?? declarationOf(callee)?.returns;
+    const floatReturn =
+      target.fpu === undefined && !isRuntimeHelperName(callee) && !voided && typeof returnSpelling === 'string'
+        ? floatingSpelling(returnSpelling)
+        : undefined;
     return {
+      ...(floatReturn === undefined ? {} : { floatReturn }),
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
       ...(declared?.byValue === undefined ? {} : { byValue: declared.byValue }),
@@ -1029,6 +1044,7 @@ export function callDeclarations(
         ...(sret === undefined ? {} : { sret: true }),
         ...(returns.kind === 'register-struct' && returns.image ? { [REGISTER_STRUCT]: true } : {}),
         ...(doubles === undefined ? {} : { doubles }),
+        ...(p.floatReturn === undefined ? {} : { floatReturn: p.floatReturn }),
         ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
     });
