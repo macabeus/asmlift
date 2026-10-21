@@ -12495,8 +12495,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      OUTSIDE the loop assigning the same u8. agbcc cross-jumps the break's `lsr` truncation with
   //      the `else`'s, so the break region shares a pure block with an entry from outside the loop
   //      (`codeBreakArm`'s `pureTail`); ido7.1, gcc2.7.2kmc and mwcc_242_81 lay the `else` between the
-  //      loop and the join, so the loop's own exit is a bodyless `j` over it and only that forwarder's
-  //      target spells the loop (`foreverShape`). All four lift since; mwcc as its 8 unrolled break
+  //      loop and the join, so the loop's own exit is a bodyless `j` over it, which the exit-trampoline
+  //      fold splices out (raise/latch.ts, its second exit reaching the join through the break's code).
+  //      All four lift since; mwcc as its 8 unrolled break
   //      arms. The no-else control lifts on all four. retarm2_tail: two arms in one loop ending in the
   //      same `Hit(a); return;`, which agbcc and gcc2.7.2kmc cross-jump into one block no edge owns;
   //      `earlyReturnArm` writes it in each arm (the duplication policy), and one arm owning the tail
