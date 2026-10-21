@@ -6028,18 +6028,35 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       return;
     }
   }
+  // WHICH RELOADS OF THIS FUNCTION'S OWN FRAME ARE SLOT READS — the dual of the spill in the str
+  // arm, and the whole soundness of it. The word reload below and the narrow reload next both ask
+  // it here, so a change to its terms is made once.
+  //
+  // One a store reaches on some path reads that store, and a path that brings none reads an
+  // uninitialised local: the frame is `ownedLocals`, so `readVar` answers that path with `undef`,
+  // never with a parameter (frontend/ssa.ts `LiveInModel`).
+  //
+  // A slot NO store reaches, on any path, is the same local read before any store — `if (k > 5)
+  // use(v0); … v0 = p[0];`, or a local the source never initialises. Only two kinds of callee
+  // could have written it instead. One that assigned the word as its own stack parameter ran
+  // before the load, so the load is after a call, which the after-call layout claim
+  // (`localsAboveOutgoingArea`) says no word of the outgoing area is; with no call reaching the
+  // load there is no such callee. Without the claim it may be one, and falls through to the
+  // decline. The stronger `outgoingAreaNeverLoadedFrom` adds nothing here: a load BEFORE a call reads
+  // a staged word, and a staged word has a reaching store. The other is a callee holding an
+  // address of the frame, which the frame-object audit refuses: an `undef` slot an escaped writer
+  // reaches (`writer-over-undef`), or one a captured object overlaps.
+  const readsOwnSlot = (at: string, o: number, ro: string | undefined, w: number): boolean =>
+    frame.isOwnFrameWordSlot(at, o, ro, w) &&
+    (ssa.hasReachingDef(stackSlotKey(o), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true);
   // A NARROW RELOAD OF A WORD SLOT through a copy of sp nothing else reads (`narrowSlotReloads`):
-  // the low-order part of the word the slot holds, so the slot's value narrowed — under the same
-  // terms as the word reload below, the slot keyed and reached by a store. Its copy was not lifted,
-  // so a reload this cannot take refuses here rather than reading through a register never set.
+  // the low-order part of the word the slot holds, so the slot's value narrowed — taken where the
+  // word reload of the slot would be, and the slot is no object's. Its copy was not lifted, so a
+  // reload this cannot take refuses here rather than reading through a register never set.
   {
     const slot = frame.narrowReloadOf.get(ins);
     if (slot !== undefined) {
-      if (
-        !frame.isOwnFrameWordSlot('sp', slot, undefined, 4) ||
-        frame.isFrameObjectAccess('sp', slot, undefined, 4) ||
-        !(ssa.hasReachingDef(stackSlotKey(slot), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
-      ) {
+      if (!readsOwnSlot('sp', slot, undefined, 4) || frame.isFrameObjectAccess('sp', slot, undefined, 4)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': narrow reload of a stack local through a copy of sp — ` +
             `'${ins.mnemonic} ${ins.ops.join(', ')}' reads the word slot [sp,#${slot}], which the word-slot model does not key here`,
@@ -6066,27 +6083,8 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     writeData(reg(a), bi, res);
     return;
   }
-  // A word reload from this function's own frame — the dual of the spill in the str arm.
-  //
-  // Which reloads it takes is the whole soundness of it. One a store reaches on some path reads
-  // that store, and a path that brings none reads an uninitialised local: the frame is
-  // `ownedLocals`, so `readVar` answers that path with `undef`, never with a parameter
-  // (frontend/ssa.ts `LiveInModel`).
-  //
-  // A slot NO store reaches, on any path, is the same local read before any store — `if (k > 5)
-  // use(v0); … v0 = p[0];`, or a local the source never initialises. Only two kinds of callee
-  // could have written it instead. One that assigned the word as its own stack parameter ran
-  // before the load, so the load is after a call, which the after-call layout claim
-  // (`localsAboveOutgoingArea`) says no word of the outgoing area is; with no call reaching the
-  // load there is no such callee. Without the claim it may be one, and falls through to the
-  // decline. The stronger `outgoingAreaNeverLoadedFrom` adds nothing here: a load BEFORE a call reads
-  // a staged word, and a staged word has a reaching store. The other is a callee holding an
-  // address of the frame, which the frame-object audit refuses: an `undef` slot an escaped writer
-  // reaches (`writer-over-undef`), or one a captured object overlaps.
-  if (
-    frame.isOwnFrameWordSlot(base, off, regOff, width) &&
-    (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
-  ) {
+  // A word reload from this function's own frame (`readsOwnSlot`, above).
+  if (readsOwnSlot(base, off, regOff, width)) {
     usedSlotOffsets.add(off);
     writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
     return;
