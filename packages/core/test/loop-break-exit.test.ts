@@ -1135,3 +1135,50 @@ describe('break arms that share a tail', () => {
     );
   });
 });
+
+// A LOOP WHOSE NORMAL EXIT JUMPS OVER AN `else` (`foreverShape`'s forwarder candidate): ido,
+// gcc2.7.2kmc and mwcc lay `if (f) { for (..) if (a(i) == k) { id = i + 100; break; } } else id = f +
+// 26; out(id);` out with the `else` between the loop and the join. The break arm runs its code and
+// jumps to the join; the loop's own exit lands on a bodyless `j` over the `else`. Neither exit edge's
+// target is the join, so only the forwarder's target spells the loop.
+const EXIT_OVER_ELSE = `fn fwdexit {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %7: s32 = call %5 {target="a"}
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  br ^bb7(%10)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  %6: u32 = icmp_slt %16, %0
+  cond_br %6, ^bb1(%16), ^bb4()
+^bb4():
+  br ^bb7(%3)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  br ^bb7(%12)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  br ^bb9()
+^bb9():
+  ret %18
+}`;
+
+describe('a loop whose exit jumps over an `else`', () => {
+  test("takes the forwarder's target as its exit, the forwarder a `break` that hands it a value", () => {
+    const { src, agreement, shipped } = judged(EXIT_OVER_ELSE);
+    expect(src).toContain('while (1) {');
+    expect(src.match(/break;/g)).toHaveLength(2);
+    expect(src.match(/out\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+});
