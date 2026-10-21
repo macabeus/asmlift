@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaresVoidReturn, ownLeadingWordRegisters, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -44,6 +44,17 @@ import {
   refuseSretOutsideFrame,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
+import {
+  type CaseEntry,
+  type IdiomLeft,
+  type StaleIdiomRead,
+  caseEntries,
+  enterCaseTarget,
+  idiomLeaves,
+  parkedIn,
+  refuseStaleIdiomReads,
+  staleMarker,
+} from './jump-table';
 import {
   type LocalStatics,
   gasPoolReferrers,
@@ -2288,9 +2299,11 @@ interface JumpTable {
   defaultLabel: string;
   /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
   extras: Instr[];
-  /** The registers the unlifted idiom wrote (index, table pointer, target) that no extra rewrote: a
-   *  kept dispatch leaves them holding values the lift does not model (`refuseStaleIdiomReads`). */
-  stale: string[];
+  /** What the dispatch idiom leaves in each register it writes (index, table pointer, target;
+   *  jump-table.ts `idiomLeaves`). The `add` rewrites the index the `lsl` scaled, so every one is a
+   *  marker here: an elided dispatch writes them at the entry of each case target (`caseEntries`), a
+   *  kept one at its own block's end, save the ones its extras rewrote. */
+  leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
 // Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
@@ -2494,10 +2507,8 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  // Only a kept dispatch (one carrying extras) has a block for them to be stale after.
-  const rewritten = new Set(extras.map((ins) => ins.ops[0]));
-  const stale = extras.length === 0 ? [] : [...new Set([idxReg, ptrReg, ldrV.ops[0]])].filter((r) => !rewritten.has(r));
-  return { scrutReg, caseLabels, defaultLabel, extras, stale };
+  const leaves = idiomLeaves([idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: false })));
+  return { scrutReg, caseLabels, defaultLabel, extras, leaves };
 }
 
 // The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
@@ -2545,61 +2556,6 @@ function dispatchExtraRefusal(
     stale.delete(dest);
   }
   return null;
-}
-
-/** A KEPT DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom (`lsl`, the table
- *  pointer's load, `add`, the target's load) is not lifted, so the registers it wrote and no extra
- *  rewrote hold the scaled index, the table's address and the case's code address on the hardware,
- *  and the marker `lowerTerminator` put in each stands for none of them. Run on the filled SSA, before
- *  `finish` collapses a join of an undefined value into its other argument: a marker some operand
- *  demands, directly or through the joins that carry it, declines. A `ret` operand demands nothing
- *  under a declared `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). */
-function refuseStaleIdiomReads(
-  name: string,
-  irBlocks: readonly Block[],
-  stale: ReadonlyMap<Value, string>,
-  own: FnProto | undefined,
-): void {
-  if (stale.size === 0) {
-    return;
-  }
-  const incoming = new Map<Value, Value[]>();
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      for (const s of op.successors) {
-        s.args.forEach((a, i) => {
-          const p = s.block.params[i];
-          incoming.set(p, [...(incoming.get(p) ?? []), a]);
-        });
-      }
-    }
-  }
-  const demanded = new Set<Value>();
-  const work: Value[] = [];
-  const demand = (v: Value) => {
-    if (!demanded.has(v)) {
-      demanded.add(v);
-      work.push(v);
-    }
-  };
-  const voidReturn = declaresVoidReturn(own);
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      if (!(op.opcode === 'ret' && voidReturn)) {
-        op.operands.forEach(demand);
-      }
-    }
-  }
-  while (work.length > 0) {
-    (incoming.get(work.pop()!) ?? []).forEach(demand);
-  }
-  const read = [...stale].find(([v]) => demanded.has(v));
-  if (read !== undefined) {
-    throw new FrontendUnsupportedError(
-      `cannot lift '${name}': a case of the kept jump table reads ${read[1]}, which the unlifted dispatch idiom ` +
-        `wrote — the lift would read the value from before the dispatch, not the table's index, address or target`,
-    );
-  }
 }
 
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
@@ -2656,7 +2612,17 @@ function liftOnce(
     fillThumbBlock(fill, ab, bi);
     ssa.markFilled(bi);
   });
-  refuseStaleIdiomReads(name, irBlocks, fill.staleIdiomValues, prototypes[name] ?? options.contextOwnProto?.proto);
+  refuseStaleIdiomReads(
+    name,
+    irBlocks,
+    fill.staleIdiomValues,
+    ssa,
+    prototypes[name] ?? options.contextOwnProto?.proto,
+    (m) => {
+      throw new FrontendUnsupportedError(m);
+    },
+    fill.calls,
+  );
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
   refuseReturnsNotThroughCallersLr(name, cfg);
@@ -5078,8 +5044,10 @@ interface ThumbFill {
   /** the function-scope statics the operands define, finished into the lifted function's objects */
   readonly statics: LocalStatics;
   readonly frameUses: ThumbFrameUses;
-  /** A kept dispatch's stale idiom registers, by the marker value each holds after it. */
-  readonly staleIdiomValues: Map<Value, string>;
+  /** What an elided or kept dispatch left in its idiom's registers, by the value standing for each. */
+  readonly staleIdiomValues: Map<Value, StaleIdiomRead>;
+  /** What an elided dispatch left at each case target's entry, by block index. */
+  readonly caseEntries: ReadonlyMap<number, CaseEntry>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -5174,7 +5142,27 @@ function thumbFillOf(
       offEntryArgReads: new Set(),
     },
     staleIdiomValues: new Map(),
+    caseEntries: elidedCaseEntries(cfg, text.tables),
   };
+}
+
+/** Each case target of an ELIDED dispatch, with what the idiom left at its entry (jump-table.ts
+ *  `caseEntries`). A kept dispatch's block is lifted and leaves its markers at its own end
+ *  (`lowerTerminator`), where the default path never goes. */
+function elidedCaseEntries(cfg: ThumbCfg, tables: ReadonlyMap<AsmBlock, JumpTable>): Map<number, CaseEntry> {
+  const at = (label: string) => cfg.labelIndex.get(label)!;
+  return caseEntries(
+    [...tables]
+      .filter(([, jt]) => jt.extras.length === 0)
+      .map(([ab, jt]) => ({
+        at: at(ab.label),
+        scrutReg: jt.scrutReg,
+        cases: jt.caseLabels.map(at),
+        defaultBlock: at(jt.defaultLabel),
+        leaves: jt.leaves,
+      })),
+    cfg.preds,
+  );
 }
 
 type FrameWalk = ReturnType<typeof makeFrameWalk>;
@@ -5194,8 +5182,24 @@ interface BlockCursor {
   readonly dispatchScrutinee: Value | null;
 }
 
-function openBlockCursor({ target, text, cfg, ssa, flags, frame }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
+function openBlockCursor(fill: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
+  const { target, text, cfg, ssa, flags, frame } = fill;
   const irb = ssa.irBlocks[bi];
+  // A case target of an elided dispatch is entered with what the idiom left in its registers.
+  const entry = fill.caseEntries.get(bi);
+  if (entry !== undefined) {
+    enterCaseTarget(
+      entry,
+      irb.ops,
+      {
+        key: reg,
+        scrutinee: (r) => ssa.readVar(reg(r), bi),
+        dispatchScrutinee: (r) => ssa.readAtEnd(reg(r), entry.at),
+        write: (r, v) => ssa.writeVar(reg(r), bi, v),
+      },
+      fill.staleIdiomValues,
+    );
+  }
   // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
   // judged by the in-block clear (`retireFlags`) exactly as one this block made itself would be: a
   // block that inherits flags and then writes its own must lose them.
@@ -6193,6 +6197,8 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     callee: through === null ? callee : { address: readData(through, bi), reg: through },
     ssa,
     bi,
+    // what an elided or kept dispatch left in an argument register is no argument
+    parked: parkedIn(fill.staleIdiomValues, reg),
     read: (r) => ssa.readVar(r, bi),
     write: (r, v) => writeData(r, bi, v),
     // ARGUMENT WORD `k` past the registers is a word of this frame's outgoing area, at [sp,#0]
@@ -6301,13 +6307,15 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // What the unlifted idiom left in the registers no extra rewrote is no value the lift models: on
     // the hardware the case blocks see the scaled index, the table's address and the case's own code
     // address. Each is a marker here, and a read of one declines (`refuseStaleIdiomReads`). The
-    // elided form cannot carry them: its bounds block's default path never ran the idiom.
+    // elided form cannot put them here, since its bounds block's default path never ran the idiom: it
+    // writes them at each case target's entry instead (`openBlockCursor`).
     if (cur.dispatchScrutinee !== null) {
-      for (const r of jt.stale) {
-        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg(r) } });
-        irb.ops.push(op);
-        ssa.writeVar(reg(r), bi, op.results[0]);
-        fill.staleIdiomValues.set(op.results[0], r);
+      for (const r of [...jt.leaves.keys()].filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
+        ssa.writeVar(
+          reg(r),
+          bi,
+          staleMarker(irb.ops, reg(r), { reg: r, form: 'kept', parks: true }, fill.staleIdiomValues),
+        );
       }
     }
     pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)], cur.dispatchScrutinee !== null);

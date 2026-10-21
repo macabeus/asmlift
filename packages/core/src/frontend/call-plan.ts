@@ -159,6 +159,24 @@ export interface CallDeclarations {
    *  lowered. One the call does not pass is unused by the LIFT, not proved unused by the source: the
    *  dead-read pin refuses it (frontend/dead-reads.ts `held-at-undeclared-call`). */
   readonly heldAtUndeclaredCall: ReadonlySet<Value>;
+  /** THE #351 GAPLESS GUESS, NOT LET IN THROUGH A JUMP TABLE'S CASES. Once every call is lowered:
+   *  where the function lifts only because of what an elided or kept dispatch left in its registers
+   *  — a dispatch's marker or scaled index reaching some guessed call's argument registers
+   *  (`CallSite.parked`, `CallSite.scaledIndex`; a PowerPC pair's r4 too), which stands where the
+   *  pre-dispatch value had made a gap refuse, or `caseStateRead`, a read of the scaled index a case
+   *  target is entered with — refuse the first guessed arity the bytes cannot tell from another:
+   *    - its last counted register holds a value some path from the dispatch's block to the call
+   *      did not write (`SsaBuilder.writtenOnEveryPath`; a cross-jumped call's block writes nothing,
+   *      its cases do), a value passed on unchanged (`g0(a, 9)` lifted `g0(a0, 9, a0)`, agbcc's pre-dispatch copy of
+   *      a0 still in r2; mwcc `return g()` lifted `return g(a0)`);
+   *    - a counted register holds a value an effect of its block uses, a store's address or value
+   *      left in the register (`gc = ga; g()` lifted `g(&gc, v0)`);
+   *    - a register it leaves out below that marker still holds its incoming value, an argument
+   *      passed on or not (mwcc `g(a)` with the table base in r4 lifted `g()`).
+   *  Elsewhere the guess takes these, an open gap (`g()` and `g(a0)` are the same bytes); there the
+   *  function declined before the dispatch's registers were modelled, and a decline is not turned
+   *  into that guess. */
+  refuseDispatchUnlockedPassThrough(caseStateRead: boolean): void;
 }
 
 /** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
@@ -180,6 +198,18 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
+  /** whether `v`, in argument register `reg`, is what a jump-table dispatch left in that very
+   *  register (frontend/jump-table.ts `parkedIn`): no argument, as a table base is none, so a guessed
+   *  arity stops below the lowest register only it reaches (`fallbackArgc`'s `parked`), except one
+   *  this ABI may skip (an O32 double's a1, a PowerPC pair's r4, a leading float's a0), which stays a
+   *  gap. A copy of one below that ceiling is counted, and its read declines; a copy above it is
+   *  dropped with everything else there (`mov r2,r1` ahead of `bl g` lifts `g(…)` without it), which
+   *  only hand asm meets: no compiler copies a marker. */
+  readonly parked?: (v: Value, reg: string) => boolean;
+  /** whether `v`, in argument register `reg`, is the scaled index a jump-table dispatch left in that
+   *  very register (frontend/jump-table.ts `scaledIndexIn`): a call handed it and one not compile
+   *  alike, so a guessed arity that counts it refuses */
+  readonly scaledIndex?: (v: Value, reg: string) => boolean;
   /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
    *  no opt-out: a count that stopped at the first register nothing reaches would drop every
    *  argument past an incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`). */
@@ -233,6 +263,11 @@ export function callDeclarations(
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
+  // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
+  // dispatch's marker reached a guessed call's argument registers, and the first guessed count
+  // the bytes cannot tell from another, as its refusal
+  let parkedInArgs = false;
+  let passThrough: { call: string; reg: string; why: string } | undefined;
   // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
   // the low half is the return register (already excluded) and `lower` writes the high one itself
   // from the callee's own result. The two arms of one rule: where the callee hands a register back,
@@ -840,6 +875,9 @@ export function callDeclarations(
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
     const { ssa, bi, pairs, guess, placeholders } = site;
+    // whether `v`, reaching argument register `r`, may be an argument the caller set up
+    const mayPass = (v: Value, r: string) => !placeholders?.has(v) && site.parked?.(v, r) !== true;
+    const holes = argRegisterHoles(target);
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
@@ -890,11 +928,21 @@ export function callDeclarations(
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
-            accept: (v) => !placeholders?.has(v),
+            accept: mayPass,
             gap: { name, at: guess.at, fail },
             floor,
+            parked: (r) =>
+              !holes.skippable.has(r) &&
+              !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
+              (ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true) ||
+                // a call in the case destroyed it: the hole is that call's, and refuses only where a
+                // register above holds a value written since (`fallbackArgc`'s `parked`)
+                (ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true) &&
+                  !target.argRegs
+                    .slice(target.argRegs.indexOf(r) + 1)
+                    .some((a) => ssa.holdsValue(a, bi, (v) => mayPass(v, a))))),
             decide: (gap, set, refuse) => {
-              const value = decideGap(ssa, bi, gap, set, (v) => !placeholders?.has(v));
+              const value = decideGap(ssa, bi, gap, set, (v) => mayPass(v, set));
               if (value === undefined) {
                 return false;
               }
@@ -910,11 +958,67 @@ export function callDeclarations(
               ssa.holdsValue(
                 reg,
                 bi,
-                (v) => !placeholders?.has(v) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
+                (v) => mayPass(v, reg) && ssa.paramReg.get(v) === reg && ssa.irBlocks[0].params.includes(v),
               ),
           })
         : wordsOf(widths, target);
     if (widths === null) {
+      const index = target.argRegs
+        .slice(floor, argc)
+        .find((r) => ssa.hasReachingDef(r, bi, (v) => site.scaledIndex?.(v, r) === true));
+      if (index !== undefined) {
+        fail(
+          `cannot lift '${name}': the call ${typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at} ` +
+            `has no prototype, and ${index}, which the arity guessed without one counts, still holds the index the ` +
+            "jump table's dispatch scaled — a call handed it and one that is not compile to the same bytes, so the " +
+            'argument count is not decidable',
+        );
+      }
+      // the lowest argument register past the stated ones that a marker or the scaled index a
+      // dispatch left there may reach, parked or not (a PowerPC pair's r4 never parks): where the
+      // pre-dispatch value stood
+      const markedAt = target.argRegs.findIndex(
+        (r, k) =>
+          k >= floor &&
+          ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
+      );
+      parkedInArgs ||= markedAt >= 0;
+      if (passThrough === undefined) {
+        const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
+        const last = target.argRegs[argc - 1];
+        // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
+        const since = new Set<number>([bi]);
+        const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
+        const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
+        // what an effect those blocks made so far reads
+        const effectReads = new Set(
+          [...since].flatMap((at) =>
+            ssa.irBlocks[at].ops.flatMap((op) =>
+              (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
+            ),
+          ),
+        );
+        const stored = target.argRegs
+          .slice(floor, argc)
+          .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
+        const leftIncoming =
+          markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
+        if (!lastWritten) {
+          passThrough = {
+            call,
+            reg: last,
+            why: 'the last register the count takes, holds a value some path since the dispatch did not write',
+          };
+        } else if (stored !== undefined) {
+          passThrough = { call, reg: stored, why: 'which the count takes, holds a value an effect of its block uses' };
+        } else if (leftIncoming !== undefined) {
+          passThrough = {
+            call,
+            reg: leftIncoming,
+            why: "which the count leaves out below a dispatch's register, holds its incoming value",
+          };
+        }
+      }
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
       if (decided.length > 0 && decidedCallRefusal(ssa, bi, argc, site)) {
@@ -941,7 +1045,7 @@ export function callDeclarations(
       site.leftOut(
         target.argRegs
           .slice(argc)
-          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !placeholders?.has(v))),
+          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );
     }
@@ -1125,6 +1229,16 @@ export function callDeclarations(
     plan,
     lower,
     heldAtUndeclaredCall,
+    refuseDispatchUnlockedPassThrough: (caseStateRead) => {
+      if ((parkedInArgs || caseStateRead) && passThrough !== undefined) {
+        fail(
+          `cannot lift '${name}': the call ${passThrough.call} has no prototype, and ${passThrough.reg}, ` +
+            `${passThrough.why}, in a function that lifts only through what a jump-table dispatch left in its ` +
+            'registers — the arity guessed without a prototype and another compile to the same bytes, so the ' +
+            'argument count is not decidable',
+        );
+      }
+    },
   };
 }
 

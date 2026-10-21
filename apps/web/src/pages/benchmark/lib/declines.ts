@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 287 distinct decline messages (the texts reached by
+// `packages/core/src` throws 289 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -535,7 +535,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '|a case of the kept jump table reads/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|a case body leaves its switch|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '|a case of the (?:kept|elided) jump table reads/,
   },
   {
     key: 'structs',

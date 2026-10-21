@@ -12772,6 +12772,73 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void jt_dupdef(u32 x, s32 *p);',
     proto: { jt_dupdef: { returnsVoid: true } },
   },
+  // jt_idxreuse. A case body that reads the index the jump table's dispatch scaled: mwcc 2.4.2 at
+  // -O4,p computes `slwi r5,r3,2` once in the dispatch block and reuses r5 in every `p[i]` case
+  // (`stwx r0,r4,r5`). Every recognizer prunes the dispatch block, so the case read a register no
+  // lifted path wrote, and the lift minted a parameter for it (`*(s32 *)(a1 + a2) = 7`);
+  // frontend/jump-table.ts `enterCaseTarget` writes `i << 2` there. agbcc emits the reuse as
+  // `add r1, r0, r1` (into the pointer register), a dispatch form `recoverJumpTable` does not
+  // recognise; ido7.1 and gcc2.7.2kmc recompute the index in the case. Those three are controls.
+  {
+    sym: 'jt_idxreuse',
+    src:
+      'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p)\n{\n    switch (i) {\n    case 0: p[i] = 7; break;\n' +
+      '    case 1: p[i] += 9; break;\n    case 2: p[i] -= 3; break;\n    case 3: p[i] = 0; break;\n' +
+      '    case 4: p[i] ^= 5; break;\n    case 5: p[i] |= 0x30; break;\n    case 6: gArr[i] = 1; break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p);',
+    proto: { jt_idxreuse: { returnsVoid: true } },
+  },
+  // jt_idxloop. The dispatch's scaled index at a case target another edge enters too: mwcc 2.4.2 at
+  // -O4,p keeps `slwi r6,r3,2` in r6 into case 0, a do-while its back edge re-enters
+  // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts keeps it there because every path in
+  // brings it (`StaleScaledIndex.settle`); the lift used to read r6 as a parameter. mwcc alone: agbcc,
+  // ido7.1 and gcc2.7.2kmc lay this switch out without a reused index.
+  {
+    sym: 'jt_idxloop',
+    src:
+      'extern s32 gArr[];\nvoid jt_idxloop(s32 i, s32 *p, s32 n)\n{\n    switch (i) {\n' +
+      '    case 0: do { p[i] += n; } while (--n); break;\n    case 1: p[i] = 1; break;\n' +
+      '    case 2: gArr[i] = 9; break;\n    case 3: p[i] -= 4; break;\n    case 4: p[i] ^= 6; break;\n' +
+      '    case 5: gArr[i] = 2; break;\n    case 6: p[i] |= 0x30; break;\n    case 7: p[i] = 5; break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'extern s32 gArr[];\nvoid jt_idxloop(s32 i, s32 *p, s32 n);',
+    proto: { jt_idxloop: { returnsVoid: true } },
+  },
+  // jt_parkcall and jt_parkarg. An undeclared call in a case of an elided jump table, where the
+  // dispatch left its own registers in argument registers: agbcc's `ldr r1,=table` and the code
+  // address in r0, mwcc 2.4.2's table base in r3 (`addi r3,r5,0`). What a dispatch parked there is
+  // no argument and no register above it is one (frontend/call-plan.ts `CallSite.parked`): the
+  // guessed arity stops below it. Lifted before, `jpkick()` was `jpkick(a0)` on both, and agbcc's
+  // `jpget()` with `a` copied into r2 (`add r2,r1,#0`) was `jpget(a0, a1, a1)`. jt_parkarg runs on
+  // agbcc alone: mwcc keeps `a` in r4, which the guess counts as passed on (`jpget(a1, a1)`), and
+  // gcc2.7.2/kmc decline its switch; jt_parkcall's ido7.1 and gcc2.7.2kmc guesses read their own
+  // argument registers.
+  {
+    sym: 'jt_parkcall',
+    src:
+      'extern void jpset();\nextern void jpkick();\nvoid jt_parkcall(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: jpset(1); break;\n    case 1: jpset(2, 3); break;\n    case 2: jpkick(); break;\n' +
+      '    case 3: jpset(4); break;\n    case 4: jpkick(9); break;\n    case 5: jpset(7); break;\n' +
+      '    case 6: jpkick(); break;\n    case 7: jpset(8); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'void jt_parkcall(s32 i);',
+    proto: { jt_parkcall: { returnsVoid: true } },
+  },
+  {
+    sym: 'jt_parkarg',
+    src:
+      'extern s32 gJpA, gJpB;\nextern s32 jpget();\ns32 jt_parkarg(s32 i, s32 a)\n{\n    switch (i) {\n' +
+      '    case 0: a = jpget(a); break;\n    case 1: a = gJpA; break;\n    case 2: a = jpget(); break;\n' +
+      '    case 3: a += 3; break;\n    case 4: gJpA = a; break;\n    case 5: a = jpget(7); break;\n' +
+      '    case 6: a = gJpB; break;\n    case 7: a = 7; break;\n    }\n    return a;\n}',
+    features: ['dense'],
+    toolchains: ['agbcc'],
+    ctx: 'extern s32 gJpA, gJpB;\ns32 jt_parkarg(s32 i, s32 a);',
+  },
   {
     sym: 'thrbreak',
     src:

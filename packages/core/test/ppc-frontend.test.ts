@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
-import { lift } from '../src/frontend/ppc';
+import { PpcUnsupportedError, lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
 import { PPC_MWCC, targetFor } from '../src/target';
 
@@ -1405,5 +1405,326 @@ describe('a bare return under a stated word return', () => {
     ]) {
       expect(decompile('r1', r1, PPC_MWCC, { prototypes: { r1: r } }).source).toMatch(/void r1\(void\) \{\n\s+return;/);
     }
+  });
+});
+
+// WHAT AN ELIDED mwcc DISPATCH LEAVES IN ITS REGISTERS. The `lis; slwi; addi; lwzx; mtctr; bctr` block
+// is pruned, so each case target is entered with what it wrote (jump-table.ts `enterCaseTarget`).
+// mwcc 2.4.2 at -O4,p scales the index IN PLACE and reuses it in a case: `case 3: return i * 4;` is
+// a bare `blr` with r3 = i << 2, and `p[i] = 7` is `stwx r0,r4,r5` with r5 the dispatch's own `slwi`.
+// The table base and the code address are no value C spells, and a case reading either declines.
+describe('an elided mwcc dispatch writes its registers at each case target', () => {
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: [0x20, 0x28, 0x30, 0x38].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swi',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swi', { section: '.text', value: 0, size: 0x48, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+  const asm = (c0: string) =>
+    [
+      '00000000 <swi>:',
+      '   0:\tcmplwi  r3,3',
+      '   4:\tbgt     40 <swi+0x40>',
+      '   8:\tlis     r4,0',
+      '\t\t\t8: R_PPC_ADDR16_HA jtbl',
+      '   c:\tslwi    r3,r3,2',
+      '  10:\taddi    r4,r4,0',
+      '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+      '  14:\tlwzx    r0,r4,r3',
+      '  18:\tmtctr   r0',
+      '  1c:\tbctr',
+      `  20:\t${c0}`,
+      '  24:\tblr',
+      '  28:\tli      r3,20',
+      '  2c:\tblr',
+      '  30:\tli      r3,30',
+      '  34:\tblr',
+      '  38:\tli      r3,40',
+      '  3c:\tblr',
+      '  40:\tli      r3,-1',
+      '  44:\tblr',
+    ].join('\n');
+  const lift = (c0: string) => decompile('swi', asm(c0), PPC_MWCC, { asmData }).source;
+
+  test('the scaled index is the scrutinee shifted by two', () => {
+    expect(lift('addi    r3,r3,1')).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ 1;/);
+  });
+
+  test('the table base and the code address decline', () => {
+    const stale = /a case of the elided jump table reads (r4|r0), which the unlifted dispatch idiom wrote/;
+    expect(() => lift('mr      r3,r4')).toThrow(stale);
+    expect(() => lift('mr      r3,r0')).toThrow(stale);
+    // the refusal the shared model makes is this frontend's own (frontend/errors.ts `FrontendRefusal`)
+    expect(() => lift('mr      r3,r4')).toThrow(PpcUnsupportedError);
+  });
+
+  test('…but not on the default path, which never ran the idiom', () => {
+    const def = asm('li      r3,10').replace('  40:\tli      r3,-1', '  40:\tmr      r3,r4');
+    expect(decompile('swi', def, PPC_MWCC, { asmData }).source).toMatch(/default:\s*\n\s*return a1;/);
+  });
+});
+
+// AN UNDECLARED CALL IN A CASE OF AN ELIDED mwcc DISPATCH, as mwcc 2.4.2 -O4,p lays it out: the
+// dispatch's `addi r3,r5,0` leaves the table base in r3, and its `slwi` the scaled index in r0 or r4.
+describe('a guessed arity in a case of an elided mwcc dispatch', () => {
+  const asmData = (cases: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: cases.map((off, i) => ({ section: '.data', offset: i * 4, type: 'R_PPC_ADDR32', sym: 'swc', addend: off })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swc', { section: '.text', value: 0, size: 0x5c, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  });
+  // the cases fill 0x2c up to the epilogue at 0x48
+  const asm = (index: string, cases: string[]) =>
+    [
+      '00000000 <swc>:',
+      '   0:\tstwu    r1,-16(r1)',
+      '   4:\tmflr    r0',
+      '   8:\tcmplwi  r3,3',
+      '   c:\tstw     r0,20(r1)',
+      '  10:\tbgt-    48 <swc+0x48>',
+      '  14:\tlis     r5,0',
+      '\t\t\t16: R_PPC_ADDR16_HA\tjtbl',
+      `  18:\tslwi    ${index},r3,2`,
+      '  1c:\taddi    r3,r5,0',
+      '\t\t\t1e: R_PPC_ADDR16_LO\tjtbl',
+      `  20:\tlwzx    r0,r3,${index}`,
+      '  24:\tmtctr   r0',
+      '  28:\tbctr',
+      ...cases,
+      '  48:\tlwz     r0,20(r1)',
+      '  4c:\tmtlr    r0',
+      '  50:\taddi    r1,r1,16',
+      '  54:\tmr      r3,r4',
+      '  58:\tblr',
+    ].join('\n');
+  const callG = (at: string) => [`  ${at}:\tbl      ${at} <swc+0x${at}>`, `\t\t\t${at}: R_PPC_REL24\tg`];
+  const toEnd = (at: string) => `  ${at}:\tb       48 <swc+0x48>`;
+
+  // `int swc(int i, int a) { switch (i) { case 0: a = g(); break; case 1: a += 3; break; case 2:
+  // a = 7; break; } return a; }`: at the call r3 holds the table base and r4 still holds `a`. The
+  // base is no argument, so none above it is.
+  test('the table base the dispatch left in r3 is no argument, and none past it is', () => {
+    const cases = ['  2c:\taddi    r4,r4,3', toEnd('30'), ...callG('34'), '  38:\tmr      r4,r3', toEnd('3c')];
+    const body = [...cases, '  40:\tli      r4,7', toEnd('44')];
+    const out = decompile('swc', asm('r0', body), PPC_MWCC, { asmData: asmData([0x34, 0x2c, 0x40, 0x48]) }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*a1 = g\(\);/);
+  });
+
+  // `void swc(int i) { switch (i) { case 0: g(1); break; case 1: g(2); break; } }` leaves the
+  // dispatch's `slwi r4,r3,2` in r4 at `li r3,1; bl g`, and `g(1)` and `g(1, i * 4)` compile to these
+  // bytes alike.
+  test('a guess that would count the scaled index the dispatch left in r4 DECLINES', () => {
+    const body = [
+      '  2c:\tli      r3,1',
+      ...callG('30'),
+      toEnd('34'),
+      '  38:\tli      r3,2',
+      ...callG('3c'),
+      toEnd('40'),
+    ];
+    expect(() =>
+      decompile('swc', asm('r4', [...body, '  44:\tnop']), PPC_MWCC, {
+        asmData: asmData([0x2c, 0x38, 0x44, 0x48]),
+        prototypes: { swc: { returnsVoid: true } },
+      }),
+    ).toThrow(/r4, which the arity guessed without one counts, still holds the index the jump table's dispatch scaled/);
+  });
+});
+
+// A SCALED INDEX AT A TARGET OTHER EDGES ENTER TOO. mwcc 2.4.2 -O4,p keeps the dispatch's `slwi` live
+// into a case another case falls into (`case 2: ...; case 3: ... p[i] ...`, r31) and into a case
+// whose body is a do-while, re-entered by its back edge (`lwzx r0,r4,r3`). Every path into such a
+// target brings `i << 2` in that register, so it is the scaled index there too. A path that brings
+// anything else in it declines: the default's, a case that rewrote it, a loop that advanced it.
+describe('the scaled index at a case target other edges also enter', () => {
+  const asmData = (cases: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: cases.map((off, i) => ({ section: '.data', offset: i * 4, type: 'R_PPC_ADDR32', sym: 'swm', addend: off })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swm', { section: '.text', value: 0, size: 0x48, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  });
+  const asm = (deflt: string, body: string[]) =>
+    [
+      '00000000 <swm>:',
+      '   0:\tcmplwi  r3,3',
+      `   4:\tbgt     ${deflt} <swm+0x${deflt}>`,
+      '   8:\tlis     r4,0',
+      '\t\t\t8: R_PPC_ADDR16_HA jtbl',
+      '   c:\tslwi    r5,r3,2',
+      '  10:\taddi    r4,r4,0',
+      '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+      '  14:\tlwzx    r0,r4,r5',
+      '  18:\tmtctr   r0',
+      '  1c:\tbctr',
+      ...body,
+    ].join('\n');
+  const rest = [
+    '  30:\tli      r3,30',
+    '  34:\tblr',
+    '  38:\tli      r3,40',
+    '  3c:\tblr',
+    '  40:\tli      r3,-1',
+    '  44:\tblr',
+  ];
+  // case 0 falls into case 1, which returns `p[i]` with r5 the dispatch's `slwi r5,r3,2`
+  const fall = (c0: string) =>
+    asm('40', [`  20:\tli      r7,1`, `  24:\t${c0}`, '  28:\tlwzx    r3,r6,r5', '  2c:\tblr', ...rest]);
+  const lift = (a: string, cases = [0x20, 0x28, 0x30, 0x38]) =>
+    decompile('swm', a, PPC_MWCC, { asmData: asmData(cases) }).source;
+  const stale = /a case of the elided jump table reads r5, which the unlifted dispatch idiom wrote/;
+
+  test('a case fallen into reads the scaled index the falling case kept', () => {
+    expect(lift(fall('stw     r7,0(r6)'))).toMatch(/case 0:\s*\n\s*\*a3 = 1;\s*\n\s*case 1:\s*\n\s*return a3\[a0\];/);
+  });
+
+  test('…and the shift is of the scrutinee the switch read, not the one the falling case left', () => {
+    const out = lift(
+      asm('40', [
+        '  20:\taddi    r3,r3,1',
+        '  24:\tstw     r3,0(r6)',
+        '  28:\tlwzx    r3,r6,r5',
+        '  2c:\tblr',
+        ...rest,
+      ]),
+    );
+    expect(out).toMatch(/\*a3 = a0 \+ 1;\s*\n\s*case 1:\s*\n\s*return a3\[a0\];/);
+  });
+
+  test('a do-while case re-entered by its back edge reads it on every iteration', () => {
+    const loop = [
+      '  28:\tlwzx    r3,r6,r5',
+      '  2c:\taddi    r6,r6,4',
+      '  30:\tcmpwi   r3,0',
+      '  34:\tbne     28 <swm+0x28>',
+    ];
+    const out = lift(
+      asm('40', ['  20:\tli      r3,1', '  24:\tblr', ...loop, '  38:\tblr', '  3c:\tli      r3,7', '  40:\tblr']),
+      [0x20, 0x28, 0x3c, 0x3c],
+    );
+    expect(out).toMatch(/do \{\s*\n\s*v0 = v1\[a0\];\s*\n\s*v1 = v1 \+ 1;\s*\n\s*\} while \(v0 != 0\);/);
+  });
+
+  test('a path that brings anything else in the register DECLINES', () => {
+    // the falling case rewrote it
+    expect(() => lift(fall('li      r5,8'))).toThrow(stale);
+    // the default enters the target too, and never ran the idiom
+    expect(() =>
+      lift(
+        asm('28', ['  20:\tli      r7,1', '  24:\tstw     r7,0(r6)', '  28:\tlwzx    r3,r6,r5', '  2c:\tblr', ...rest]),
+      ),
+    ).toThrow(stale);
+    // the loop advances it
+    const loop = [
+      '  28:\tlwzx    r3,r6,r5',
+      '  2c:\taddi    r5,r5,4',
+      '  30:\tcmpwi   r3,0',
+      '  34:\tbne     28 <swm+0x28>',
+    ];
+    expect(() =>
+      lift(
+        asm('40', ['  20:\tli      r3,1', '  24:\tblr', ...loop, '  38:\tblr', '  3c:\tli      r3,7', '  40:\tblr']),
+        [0x20, 0x28, 0x3c, 0x3c],
+      ),
+    ).toThrow(stale);
+  });
+});
+
+// A FUNCTION THAT LIFTS ONLY THROUGH A CASE'S READ OF THE SCALED INDEX DOES NOT TAKE THE #351
+// TRAILING PASS-THROUGH. mwcc 2.4.2 -O4,p, `int swp(int a){ switch (a){ case 0: return a * 4; case
+// 1: return g(); } return 0; }` with g undeclared: case 0 returns the dispatch's `slwi r0,r3,2`,
+// which read as `mflr`'s r0 declined the function before the dispatch's registers were modelled.
+// Once it lifts, `bl g` counts r3, which still holds a and its block never wrote: `return g(a0);`,
+// the bytes `return g();` compiles to as well.
+describe('a guessed arity in a function that reads the scaled index', () => {
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(8)]]),
+    relocs: [0x2c, 0x34].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swp',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 8, index: 1 }],
+      ['swp', { section: '.text', value: 0, size: 0x54, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+  const asm = (c1: string) =>
+    [
+      '00000000 <swp>:',
+      '   0:\tstwu    r1,-16(r1)',
+      '   4:\tmflr    r0',
+      '   8:\tcmplwi  r3,1',
+      '   c:\tstw     r0,20(r1)',
+      '  10:\tbgt-    40 <swp+0x40>',
+      '  14:\tlis     r4,0',
+      '\t\t\t16: R_PPC_ADDR16_HA\tjtbl',
+      '  18:\tslwi    r0,r3,2',
+      '  1c:\taddi    r4,r4,0',
+      '\t\t\t1e: R_PPC_ADDR16_LO\tjtbl',
+      '  20:\tlwzx    r4,r4,r0',
+      '  24:\tmtctr   r4',
+      '  28:\tbctr',
+      '  2c:\tmr      r3,r0',
+      '  30:\tb       44 <swp+0x44>',
+      `  34:\t${c1}`,
+      '  38:\tbl      38 <swp+0x38>',
+      '\t\t\t38: R_PPC_REL24\tg',
+      '  3c:\tb       44 <swp+0x44>',
+      '  40:\tli      r3,0',
+      '  44:\tlwz     r0,20(r1)',
+      '  48:\tmtlr    r0',
+      '  4c:\taddi    r1,r1,16',
+      '  50:\tblr',
+    ].join('\n');
+
+  test('a call passing on the incoming r3 DECLINES', () => {
+    const lift = () => decompile('swp', asm('nop'), PPC_MWCC, { asmData });
+    expect(lift).toThrow(
+      /the call at 0x38 has no prototype, and r3, the last register the count takes, holds a value some path since the dispatch did not write/,
+    );
+    expect(lift).toThrow(PpcUnsupportedError);
+  });
+
+  test('…while one that writes what it passes lifts', () => {
+    const out = decompile('swp', asm('li      r3,5'), PPC_MWCC, { asmData }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*v0 = a0 << 2;/);
+    expect(out).toMatch(/case 1:\s*\n\s*v0 = g\(5\);/);
+  });
+
+  // `void swq(int a, int i){ switch (i){ case 0: g(a); break; case 1: ... } }`: the table base is
+  // parked in r4, and r3 still holds a. Left out below it, a is as likely passed on as not (the
+  // bytes `g()` gives too); the pre-dispatch r4 made that a gap refusal before.
+  test('a call leaving out an incoming register below the parked base DECLINES', () => {
+    const swq = asm('nop')
+      .replace('cmplwi  r3,1', 'cmplwi  r4,1')
+      .replace('lis     r4,0', 'lis     r5,0')
+      .replace('slwi    r0,r3,2', 'slwi    r0,r4,2')
+      .replace('addi    r4,r4,0', 'addi    r4,r5,0')
+      .replace('  2c:\tmr      r3,r0', '  2c:\tnop');
+    expect(() => decompile('swp', swq, PPC_MWCC, { asmData, prototypes: { swp: { returnsVoid: true } } })).toThrow(
+      /r3, which the count leaves out below a dispatch.s register, holds its incoming value/,
+    );
   });
 });

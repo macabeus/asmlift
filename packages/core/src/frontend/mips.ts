@@ -70,11 +70,19 @@ import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
+  type IdiomLeft,
+  type StaleIdiomRead,
   type TableKey,
   agreedTable,
+  caseEntries,
+  enterCaseTarget,
   entersBetween,
+  idiomLeaves,
   makeTableBases,
+  parkedIn,
   refuseReachableDispatch,
+  refuseStaleIdiomReads,
+  scaledIndexIn,
 } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
@@ -377,6 +385,8 @@ interface MipsJT {
    *  2.7.2 hoist the `lui`/`addiu` pair into a loop's preheader): `lift` proves the base reaches it
    *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
   hoisted: HoistedDispatch | null;
+  /** What the pruned dispatch leaves in each register it writes (`idiomLeaves`). */
+  leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
 /** A MIPS jump table's bounds guard for the dispatch whose `jr` is at `i`: `sltiu tmp,scrutReg,N`
@@ -619,6 +629,17 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     if (!caseAddrs) {
       continue;
     }
+    // Only the words past the bounds branch's delay slot are pruned: the slot runs on both paths and
+    // is lifted (KMC's `sll`, IDO's in-place one, a `lui` gcc puts there).
+    const leaves = idiomLeaves(
+      [...idiom]
+        .filter((x) => x > k + 1)
+        .sort((a, b) => a - b)
+        .flatMap((x) => {
+          const r = writtenReg(instrs[x]);
+          return r === null ? [] : [{ reg: r, scaled: x === sllIdx }];
+        }),
+    );
     out.set(bounds.addr, {
       scrutReg,
       caseAddrs,
@@ -626,6 +647,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       jrAddr: jr.addr,
       entry: bounds.entry,
       hoisted,
+      leaves,
     });
   }
   // A bound read off its block's ENTRY EDGES holds only for the edges `mipsBounds` saw. A table's
@@ -1597,6 +1619,29 @@ function liftOnce(
     has: (v: Value) => highHalves.has(v) || tableBases.has(v),
     guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
   };
+  // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
+  // markers written there, by value. Not a placeholder: a case may copy one (`move v0,at`), and a
+  // return or a call that skipped it would drop what the case handed on.
+  const entries = caseEntries(
+    blocks.flatMap((b, at) => {
+      const jt = b.branch ? jts.get(b.branch.addr) : undefined;
+      return jt === undefined
+        ? []
+        : [
+            {
+              at,
+              scrutReg: jt.scrutReg,
+              cases: jt.caseAddrs.map((a) => idxOf.get(a)!),
+              defaultBlock: idxOf.get(jt.defaultAddr)!,
+              leaves: jt.leaves,
+            },
+          ];
+    }),
+    preds,
+  );
+  const staleIdiom = new Map<Value, StaleIdiomRead>();
+  const parked = parkedIn(staleIdiom);
+  const scaledIndex = scaledIndexIn(staleIdiom);
   // O32 passes the words past a0..a3 on the stack, returns a word in v0, and returns every struct
   // and union through a hidden pointer in a0 (`aggregateReturn: 'memory'`). This lowering builds no
   // register pair, so the plan refuses one. A call through an argument register bounds no arity
@@ -1851,6 +1896,21 @@ function liftOnce(
   const movedIn = new Set<Value>();
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
+    // A case target of an elided dispatch is entered with what the idiom left in its registers.
+    const entry = entries.get(bi);
+    if (entry !== undefined) {
+      enterCaseTarget(
+        entry,
+        ops,
+        {
+          key: (r) => r,
+          scrutinee: (r) => readVar(r, bi),
+          dispatchScrutinee: (r) => ssa.readAtEnd(r, entry.at),
+          write: (r, v) => writeVar(r, bi, v),
+        },
+        staleIdiom,
+      );
+    }
     // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
     // structurer lowers a load/store through it to `SYM` (scalar) or `((T *)&SYM)[i]` (aggregate).
     const emitGaddr = (sym: string): Value => {
@@ -2776,6 +2836,8 @@ function liftOnce(
         },
         // a pending `%hi` half and a table base are no argument
         placeholders,
+        parked,
+        scaledIndex,
         guess: {
           // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
           at: ins.addr,
@@ -2954,7 +3016,7 @@ function liftOnce(
       // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `returnHomeRule`), and
       // then `v0` is scratch like any other integer register. An undecided one returns `v0` here,
       // and `settleReturnHome` may hand the return the float home instead.
-      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v));
+      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET));
       // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
       // one word: returning v0 alone hands back the high word with the low one dropped, a function
       // that compiles and returns the wrong value (`long long f(int a, int b, int c, int d,
@@ -2991,6 +3053,15 @@ function liftOnce(
   }
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
+  refuseStaleIdiomReads(
+    name,
+    irBlocks,
+    staleIdiom,
+    ssa,
+    prototypes[name] ?? options.contextOwnProto?.proto,
+    fail,
+    calls,
+  );
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();

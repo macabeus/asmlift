@@ -123,7 +123,9 @@ test('falling into an arm that takes a value from the switch edge DECLINES', () 
     'f:\n\tmov\tr2, #0x5\n\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr0, r1, #0x2\n\tldr\tr3, .Lp\n\tadd\tr0, r0, r3\n' +
     '\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
     '.Lc0:\n\tmov\tr2, #0x7\n.Lc1:\n\tmov\tr0, r2\n\tbl\tsideB\n\tb\t.Lend\n.Lend:\n\tbx\tlr\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+  // sideB is declared: a guessed arity would also read r3, which the dispatch left the table's address
+  const sideB = { sideB: { params: 1, returns: 's32' } };
+  expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: sideB })).toThrow(/takes a value from the switch edge/);
 });
 
 test('the LAST case may fall into a default that has a body — C emits the default last', () => {
@@ -153,14 +155,23 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   const loop = (body: string) => `\tmov\tr4, #3\n.Llp:\n${body}\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n`;
   // `sideB` takes one argument, so `sideA`'s result rides the loop's exit edge into it
   const intoNext = { ...SIDES, sideB: { params: 1, returns: 's32' } };
-  const recovered = decompile('f', conv([loop('\tbl\tsideA\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, {
+  // The dispatch scales into r2 and loads the table through r3 here: case 1 reads r0, which conv's
+  // idiom would leave holding the case's code address on the case edge (a read that declines).
+  const viaR2 = (arms: string[]) =>
+    conv(arms).replace(
+      '\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n',
+      '\tlsl\tr2, r1, #0x2\n\tldr\tr3, .Lp\n\tadd\tr2, r2, r3\n\tldr\tr2, [r2]\n\tmov\tpc, r2\n',
+    );
+  const recovered = decompile('f', viaR2([loop('\tbl\tsideA\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, {
     prototypes: intoNext,
   }).source;
   expect(recovered).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
   expect(recovered.match(/sideA\(/g)).toHaveLength(1);
-  expect(() => decompile('f', conv([loop('\tmrs\tr0, cpsr\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
-    /inlines a 'opaque' from inside the loop/,
-  );
+  expect(() =>
+    decompile('f', viaR2([loop('\tmrs\tr0, cpsr\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, {
+      prototypes: intoNext,
+    }),
+  ).toThrow(/inlines a 'opaque' from inside the loop/);
   // control: the SAME loop in a closed arm keeps the call inside the loop and recovers.
   const closed = convSrc([loop('\tbl\tsideA\n') + LEAVE, '\tbl\tsideB\n' + LEAVE]);
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
@@ -689,7 +700,24 @@ test('a retry that does not spell either leaves the stop reading its own decline
     '\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tbl\ta\n.L5:\n\tbl\tb\n\tb\t.L3\n.L6:\n\tmov\tr0, #0x1\n' +
     '\tb\t.L12\n.L7:\n\tbl\tc\n\tb\t.L3\n.L8:\n\tbl\td\n\tb\t.L3\n.L9:\n\tbl\te\n' +
     '.L3:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tmov\tr0, #0x0\n.L12:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/case arms do not linearize/);
+  // The dispatch scales into r2 and loads the table through r3 here, and `b` is declared to take r0:
+  // the source's own idiom writes r0 and r1, so on the case edge into `.L5` they hold the case's code
+  // address and the table's, and reading either declines before any switch question. `b` reads r0 on
+  // both edges into it — the incoming x on the case edge, a's result on the fall-through: the
+  // switch-edge copy.
+  const viaR2 = asm.replace(
+    '\tlsl\tr0, r4, #0x2\n\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n',
+    '\tlsl\tr2, r4, #0x2\n\tldr\tr3, .L13\n\tadd\tr2, r2, r3\n\tldr\tr2, [r2]\n\tmov\tpc, r2\n',
+  );
+  expect(viaR2).not.toBe(asm);
+  const takesR0 = {
+    prototypes: {
+      ...Object.fromEntries(['a', 'c', 'd', 'e'].map((n) => [n, { params: 0, returns: 'void' }])),
+      b: { params: 1, returns: 'void' },
+      g: { params: 1, returns: 'void' },
+    },
+  };
+  expect(() => decompile('f', viaR2, ARMV4T_AGBCC, takesR0)).toThrow(/case arms do not linearize/);
 });
 
 test('a default arm that returns on its own does not name where the switch ends', () => {
@@ -818,5 +846,134 @@ test('the retry still refuses to end the switch at a case arm the default edge o
     '\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n\t.word\t.Lc2\n\t.word\t.Lc3\n' +
     '.Lc0:\n\tbl\ta\n\tb\t.Lc1\n.Lc2:\n\tmov\tr0, #0x2\n\tbx\tlr\n.Lc3:\n\tmov\tr0, #0x3\n\tbx\tlr\n' +
     '.Ldef:\n\tbl\td\n.Lc1:\n\tbl\tb\n\tmov\tr0, #0x0\n\tbx\tlr\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/case arms do not linearize/);
+  // declared, as in the source (see the retry above)
+  const protos = Object.fromEntries(['a', 'b', 'd'].map((n) => [n, { params: 0, returns: 'void' }]));
+  expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: protos })).toThrow(/case arms do not linearize/);
+});
+
+// AN ELIDED DISPATCH'S IDIOM WRITES ITS REGISTERS ON THE CASE EDGES. The idiom below leaves r1 holding
+// the table's address and r0 the case's own code address on every case path, and on no default
+// path; the block it sat in is gone from the CFG, so each case target is entered with a marker for
+// each (jump-table.ts `enterCaseTarget`) and a read of one declines. A lift that read r1 there would
+// return `a1`, the value from before the dispatch, which the hardware no longer holds.
+const IDIOM = '\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n';
+const POOL = '.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n';
+const elided = (bounds: string, cases: string) => `f:\n${bounds}${IDIOM}${cases}${POOL}`;
+const ELIDED_STALE = /a case of the elided jump table reads (r0|r1), which the unlifted dispatch idiom wrote/;
+
+test('a case reading a register the ELIDED dispatch idiom wrote DECLINES', () => {
+  const c1 = '.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n';
+  for (const bounds of [DIRECT, LONGJMP]) {
+    // r1 is the table's address on the case path
+    expect(() => decompile('f', elided(bounds, `.Lc0:\n\tmov\tr0, r1\n\tbx\tlr\n${c1}`), ARMV4T_AGBCC)).toThrow(
+      ELIDED_STALE,
+    );
+  }
+  // a case that leaves r0 holding its own code address returns it, unless the return is declared void
+  const leaves = elided(DIRECT, `.Lc0:\n\tstr\tr2, [r3]\n\tbx\tlr\n${c1}`);
+  expect(() => decompile('f', leaves, ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+  const voidOut = decompile('f', leaves, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(voidOut).toMatch(/case 0:\s*\n\s*\*a3 = a2;/);
+  // what the idiom left in r1 is no argument a guessed arity counts: the compiler parked the table's
+  // address there for the dispatch, not for the call (as it parks a table base)
+  const call = (setup: string) => elided(DIRECT, `.Lc0:\n\tpush\t{lr}\n${setup}\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n${c1}`);
+  expect(decompile('f', call('\tmov\tr0, #1\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(1\);/);
+  // …but one the case copied into an argument register is a value it moved there, and declines
+  expect(() => decompile('f', call('\tmov\tr1, r0\n\tmov\tr0, #1\n'), ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+  // nor is any register above it: agbcc keeps a parameter it needs past the dispatch in r2 (`add r2,
+  // r1, #0` in `int f(int i, int a){ switch (i) { case 0: a = gi(a); … } }`), so r0 = a, r1 = the
+  // table's address and r2 = a at the call.
+  expect(decompile('f', call('\tmov\tr0, r2\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(a2\);/);
+  // a call in the case that destroyed r1 left a hole of its own: r2, written since, is a value set
+  // up for `g`, and a gap below it is no more decidable than outside a switch
+  const h = { prototypes: { h: { params: 0, returnsVoid: true } } };
+  expect(() => decompile('f', call('\tbl\th\n\tmov\tr2, #5\n\tmov\tr0, #1\n'), ARMV4T_AGBCC, h)).toThrow(
+    /r2 holds a value and r1 holds none/,
+  );
+  // …while a value the dispatch's own setup put above r1, which the call destroyed too, is no value
+  // there: agbcc's `add r3,r1,#0` ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lift
+  // `g(1)` (`int m3(int i, int a, int b) { switch (i) { case 0: h(); g(1); break; case 1: gv = a; … } }`)
+  const kept = elided(
+    `\tadd\tr3, r2, #0\n${DIRECT}`,
+    `.Lc0:\n\tpush\t{lr}\n\tbl\th\n\tmov\tr0, #1\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n` +
+      '.Lc1:\n\tstr\tr3, [r2]\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n',
+  );
+  expect(decompile('f', kept, ARMV4T_AGBCC, h).source).toMatch(/case 0:\s*\n\s*h\(\);\s*\n\s*g\(1\);/);
+});
+
+test('…through a join, at a target the default shares, and round a loop back into the bounds test', () => {
+  // a case and the default meet before the read: the join takes the marker from the case edge
+  const join = elided(
+    DIRECT,
+    '.Lc0:\n\tb\t.Lj\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr2, #0\n.Lj:\n\tmov\tr0, r1\n\tbx\tlr\n',
+  );
+  expect(() => decompile('f', join, ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+  // the case's label IS the default's: one block entered both ways, which its entry cannot tell apart
+  const shared =
+    `f:\n${DIRECT}${IDIOM}.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n.Lc0:\n\tmov\tr0, r1\n\tbx\tlr\n` + POOL;
+  expect(() => decompile('f', shared, ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+  // a case loops back to the bounds test without rewriting r1, the scrutinee: the hardware tests the
+  // table's address there
+  const loop =
+    `f:\n.Ltop:\n${DIRECT}${IDIOM}.Lc0:\n\tadd\tr2, r2, #1\n\tb\t.Ltop\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n` +
+    `.Ldef:\n\tmov\tr0, r2\n\tbx\tlr\n${POOL}`;
+  expect(() => decompile('f', loop, ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+});
+
+test('…and a case that rewrites the register first, or a read on the default path alone, still lifts', () => {
+  const c1 = '.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n';
+  const redefined = decompile(
+    'f',
+    elided(DIRECT, `.Lc0:\n\tmov\tr1, #3\n\tmov\tr0, r1\n\tbx\tlr\n${c1}.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n`),
+    ARMV4T_AGBCC,
+  ).source;
+  expect(redefined).toMatch(/case 0:\s*\n\s*return 3;/);
+  // the default path never ran the idiom: r1 is still the scrutinee there
+  const defaultRead = decompile(
+    'f',
+    elided(DIRECT, `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n${c1}.Ldef:\n\tmov\tr0, r1\n\tbx\tlr\n`),
+    ARMV4T_AGBCC,
+  ).source;
+  expect(defaultRead).toMatch(/default:\s*\n\s*return a1;/);
+});
+
+// A FUNCTION THAT LIFTS ONLY THROUGH THE PARKED CEILING DOES NOT TAKE THE #351 TRAILING PASS-THROUGH.
+// agbcc, `void f(int a){ switch (a){ case 0: g0(a, 9); break; case 1: gv = g1(3); break; } }` with
+// g0 and g1 undeclared: `add r2,r0,#0` keeps a in r2 past the idiom, which parks r0 and r1. At `bl g1`
+// the ceiling at r1 hides r2, which declined the whole function before the dispatch's registers were
+// modelled ("r2 holds a value and r1 holds none"). Once it lifts, `bl g0` counts r2, which its block
+// never wrote: `g0(a0, 9, a0)`, the bytes `g0(a, 9)` compiles to as well.
+test('a guessed arity whose last register no case wrote DECLINES where the parked ceiling hid one', () => {
+  const asm = (c0: string) =>
+    'f:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x1\n\tbhi\t.L3\n\tlsl\tr0, r2, #0x2\n\tldr\tr1, .Lp\n' +
+    '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    `.Lc0:\n\tadd\tr0, r2, #0\n\tmov\tr1, #0x9\n${c0}\tbl\tg0\n\tb\t.L3\n` +
+    '.Lc1:\n\tmov\tr0, #0x3\n\tbl\tg1\n\tldr\tr1, .Lg\n\tstr\tr0, [r1]\n\tb\t.L3\n.Lg:\n\t.word\tgv\n' +
+    '.L3:\n\tpop\t{r0}\n\tbx\tr0\n';
+  expect(() => decompile('f', asm(''), ARMV4T_AGBCC)).toThrow(
+    /'bl g0' in block '\.Lc0' has no prototype, and r2, the last register the count takes, holds a value some path since the dispatch did not write/,
+  );
+  // control: a case that writes every register it passes lifts, the ceiling and all
+  const written = decompile('f', asm('\tmov\tr2, #0x4\n'), ARMV4T_AGBCC).source;
+  expect(written).toMatch(/case 0:\s*\n\s*g0\(a0, 9, 4\);/);
+  expect(written).toMatch(/g1\(3\)/);
+});
+
+// …nor a count that takes what a store in its block left in the argument registers. agbcc, `void
+// f(int a){ switch (a){ case 0: hv(); break; case 1: gc = ga; g(); break; } }` with neither declared:
+// `str r1,[r0]` leaves &gc in r0 and ga in r1 at `bl g`, the bytes `g(&gc, ga)` compiles to as well,
+// and `bl hv` with r0 and r1 parked declined the function before the dispatch's registers were
+// modelled ("r1 holds a value and r0 holds none").
+test('a guessed arity that counts a value its block stored DECLINES where a parked register stood', () => {
+  const asm = (c1: string) =>
+    'f:\n\tpush\t{lr}\n\tcmp\tr0, #0x1\n\tbhi\t.L90\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
+    '\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    '.Lc0:\n\tbl\thv\n\tb\t.L90\n' +
+    `.Lc1:\n\tldr\tr0, .Lg\n\tldr\tr1, .Lg+0x4\n\tldr\tr1, [r1]\n\tstr\tr1, [r0]\n${c1}\tbl\tg\n\tb\t.L90\n` +
+    '.Lg:\n\t.word\tgc\n\t.word\tga\n.L90:\n\tpop\t{r0}\n\tbx\tr0\n';
+  expect(() => decompile('f', asm(''), ARMV4T_AGBCC)).toThrow(
+    /'bl g' in block '\.Lc1' has no prototype, and r0, which the count takes, holds a value an effect of its block uses/,
+  );
+  // control: arguments the case set up after the store lift
+  expect(decompile('f', asm('\tmov\tr0, #0x7\n\tmov\tr1, #0x8\n'), ARMV4T_AGBCC).source).toMatch(/g\(7, 8\);/);
 });

@@ -114,11 +114,19 @@ import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf 
 import { makeHighHalves } from './high-half';
 import {
   type HoistedDispatch,
+  type IdiomLeft,
+  type StaleIdiomRead,
   type TableKey,
   agreedTable,
+  caseEntries,
+  enterCaseTarget,
   entersBetween,
+  idiomLeaves,
   makeTableBases,
+  parkedIn,
   refuseReachableDispatch,
+  refuseStaleIdiomReads,
+  scaledIndexIn,
 } from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
@@ -313,6 +321,8 @@ interface PpcJT {
    *  hoists the `lis`/`addi` pair out of a loop): `lift` proves the base reaches it
    *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
   hoisted: HoistedDispatch | null;
+  /** What the pruned dispatch leaves in each register it writes, `ctr` included (`idiomLeaves`). */
+  leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
 /** The `cr` field a compare writes or a conditional branch reads: its first operand when it names
@@ -476,6 +486,11 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (!caseAddrs) {
       continue;
     }
+    // In program order, `mtctr` writing `ctr`, the `slwi` the scaled scrutinee, every other word its
+    // first operand (`lis`, `addi`, `lwzx`).
+    const leaves = idiomLeaves(
+      [...idiom].sort((a, b) => a - b).map((k) => ({ reg: k === mi ? 'ctr' : instrs[k].ops[0], scaled: k === si })),
+    );
     out.set(bgt.addr, {
       scrutReg,
       cmpAddr: bound.addr,
@@ -483,6 +498,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       defaultAddr: bgt.target ?? null,
       bctrAddr: instrs[i].addr,
       hoisted: hoisted === null ? null : { reg: rB, table: hoisted },
+      leaves,
     });
   }
   // A table's case is a branch target too, which `entersBetween` cannot see before the tables are
@@ -1580,8 +1596,28 @@ function liftOnce(
     [...jts.values()].flatMap((j) => (j.hoisted ? [j.hoisted] : [])),
     fail,
   );
+  // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
+  // markers written there, by value.
+  const entries = caseEntries(
+    blocks.flatMap((b, at) => {
+      const jt = b.branch ? jts.get(b.branch.addr) : undefined;
+      if (jt === undefined) {
+        return [];
+      }
+      const n = jt.caseAddrs.length;
+      // the default is a `bgtlr` bound's synthetic return of its own, or the default block
+      return [
+        { at, scrutReg: jt.scrutReg, cases: succIdx[at].slice(0, n), defaultBlock: succIdx[at][n], leaves: jt.leaves },
+      ];
+    }),
+    preds,
+  );
+  const staleIdiom = new Map<Value, StaleIdiomRead>();
+  const parked = parkedIn(staleIdiom);
+  const scaledIndex = scaledIndexIn(staleIdiom);
   /** What this frontend defines registers with that is no argument: a pending `@ha` half and a
-   *  table base. */
+   *  table base. NOT a marker an elided dispatch left (`staleIdiom`): a case may copy one
+   *  (`mr r3,r4`), and a return or a call that skipped it would drop what the case handed on. */
   const placeholders = {
     has: (v: Value) => highHalves.has(v) || tableBases.has(v),
     guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
@@ -1818,7 +1854,7 @@ function liftOnce(
   const returnOperands = (bi: number): Value[] =>
     floatReturn
       ? [readReg(fpu!.returnReg, bi)]
-      : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v))
+      : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v) && !parked(v, RET))
         ? [readReg(RET, bi)]
         : [];
   // A RETURN NOTHING WROTE r3 FOR STILL RETURNS r3 — the caller's value, which on PowerPC is the
@@ -1962,6 +1998,21 @@ function liftOnce(
     if (b.synthReturn) {
       emitReturn(ops, bi);
       return;
+    }
+    // A case target of an elided dispatch is entered with what the idiom left in its registers.
+    const entry = entries.get(bi);
+    if (entry !== undefined) {
+      enterCaseTarget(
+        entry,
+        ops,
+        {
+          key: (r) => r,
+          scrutinee: (r) => readReg(r, bi),
+          dispatchScrutinee: (r) => ssa.readAtEnd(r, entry.at),
+          write: (r, v) => writeVar(r, bi, v),
+        },
+        staleIdiom,
+      );
     }
 
     // `lastDef` is the value most recently written to a register in this instruction — used to
@@ -2655,6 +2706,8 @@ function liftOnce(
             write,
             // a pending `@ha` half and a table base are no argument
             placeholders,
+            parked,
+            scaledIndex,
             guess: {
               // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
               at: ins.addr,
@@ -3634,6 +3687,7 @@ function liftOnce(
   // emitted".
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
+  refuseStaleIdiomReads(name, irBlocks, staleIdiom, ssa, prototypes[name] ?? contextOwnProto?.proto, ppcRefusal, calls);
   // A value stored to the frame that nothing reloads is either a home the body never reads or an
   // OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same

@@ -64,6 +64,9 @@ export interface SsaBuilder {
    *
    *  One of the three call verbs `CallDeclarations.lower` owns ({@link noteCall}). */
   readGuessedArg(reg: string, b: number): Value;
+  /** The value `reg` holds at the END of block `b` once `b` is filled, as the edges out of it carry
+   *  it; `null` before. A lookup, not a read: it records no read for `finish` to judge. */
+  readAtEnd(reg: string, b: number): Value | null;
   /** Record that `reg` now holds `v` within block `b`. */
   writeVar(reg: string, b: number, v: Value): void;
   /** Every value written to a frame-slot key ({@link stackSlotKey}) or an incoming stack-argument key
@@ -121,6 +124,12 @@ export interface SsaBuilder {
   /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
    *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
   writtenSinceCall(reg: string, b: number): boolean;
+  /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
+   *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
+   *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
+   *  block not filled yet answers no; a cycle adds no path the first visit did not judge. `visit`
+   *  is told each block the walk passes through after `b`. */
+  writtenOnEveryPath(reg: string, b: number, stop: (at: number) => boolean, visit?: (at: number) => void): boolean;
   /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
    *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
    *  erased, so the address appears in no operand. The refusal of a read a call destroyed
@@ -1384,6 +1393,7 @@ export function makeSsaBuilder(
     irBlocks,
     readVar,
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
+    readAtEnd: (reg: string, b: number) => (filled[b] ? readAny(reg, b) : null),
     writeVar,
     frameWrites,
     paramReg,
@@ -1394,6 +1404,32 @@ export function makeSsaBuilder(
     entryValue,
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
+    writtenOnEveryPath: (reg, b, stop, visit) => {
+      // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
+      // which a back edge brings, and a cycle adds no path the first visit did not judge
+      const seen = new Set<number>([b]);
+      const walk = (at: number): boolean => {
+        if (writtenSinceCall[at].has(reg) || clobberedLocal[at].has(reg)) {
+          return true;
+        }
+        const ps = distinctPreds(at);
+        return (
+          ps.length > 0 &&
+          ps.every((p) => {
+            if (seen.has(p)) {
+              return true;
+            }
+            seen.add(p);
+            if (!filled[p] || stop(p)) {
+              return false;
+            }
+            visit?.(p);
+            return walk(p);
+          })
+        );
+      };
+      return walk(b);
+    },
     requireSoleReader: (value: Value, op: Op, refuse: () => void) => {
       soleReaders.push({ value, op, refuse });
     },
@@ -1765,7 +1801,8 @@ export function fallbackArgc(
   argRegs: readonly string[],
   bi: number,
   opts: {
-    accept?: (v: Value) => boolean;
+    /** whether `v`, reaching argument register `reg`, is a value the caller may have set up */
+    accept?: (v: Value, reg: string) => boolean;
     /** the call's function, where it is (`CallSite`'s `guess.at`), and the frontend's own refusal */
     gap: { name: string; at: number | string; fail: FrontendRefusal };
     /** the leading arguments a declaration states (`GuessedCallSite.floor`): counted whether or not
@@ -1783,19 +1820,40 @@ export function fallbackArgc(
      *  again with an empty `gap` for every register the count takes past a decided gap. Each must be
      *  proven an argument the same way, or the gap refuses. */
     decide?: (gap: readonly string[], set: string, refuse: () => void) => boolean;
+    /** whether what a jump-table dispatch parked in argument register `reg` reaches the call
+     *  (`CallSite.parked`). Where nothing `accept` takes reaches it too, the count stops below it: no
+     *  compiler hands a callee the dispatch's own register, so no register above it is an argument.
+     *
+     *  WHY THIS STOPS WHERE A CALL-DESTROYED REGISTER REFUSES (`r2 holds a value and r1 holds
+     *  none`): where the value above came from. A call destroys every caller-saved register, so one
+     *  holding a value after it was written since, for a call — an argument as likely as not. A
+     *  dispatch clobbers only its idiom's registers, and agbcc moves a value it keeps live across the
+     *  switch out of them, upward, before the idiom runs (`add r2,r1,#0` ahead of the `lsl` in a
+     *  switch on r0 whose cases call): the value above the parked register was set up for the switch,
+     *  not for the call. The cost is a value a case itself writes above the parked register, dropped
+     *  too (`mov r2,#5; mov r0,#1; bl g` lifts `g(1)`): no compiler measured writes one there. A
+     *  parked register a call in the case destroyed is that call's hole, not the dispatch's, and it
+     *  stops the count only where no register above holds a value written since that call
+     *  (`SsaBuilder.holdsValue`): `bl h; mov r2,#5; mov r0,#1; bl g` refuses, while `add r3,r1,#0`
+     *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
+     *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
+    parked?: (reg: string) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
   // whether the caller set argument register k up: a definition reaches it, through a call too
-  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, accept);
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, (v) => accept(v, argRegs[k]));
   const { name, at, fail } = opts.gap;
   const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
   const floor = opts.floor ?? 0;
+  // the registers past the lowest parked one are none of the call's: neither counted nor a gap's top
+  const parkedAt = argRegs.findIndex((r, k) => k >= floor && opts.parked?.(r) === true && !setUp(k));
+  const top = parkedAt < 0 ? argRegs.length : parkedAt;
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
   const run = (from: number): number => {
     let n = from;
-    while (n < argRegs.length && setUp(n)) {
+    while (n < top && setUp(n)) {
       // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
       // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
       // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
@@ -1835,7 +1893,7 @@ export function fallbackArgc(
   // lift `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` `g(a0, a2 + 1, a2)` on all seven
   // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
   // argument.
-  for (let k = n + 1; k < argRegs.length; k++) {
+  for (let k = n + 1; k < top; k++) {
     if (setUp(k)) {
       const [gapAt, setAt] = [n, k];
       const refuse = () =>

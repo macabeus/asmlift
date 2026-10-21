@@ -219,3 +219,82 @@ test('a case body that breaks on one path and falls into the next case on anothe
   expect(out.match(/\bf\(/g)).toHaveLength(1);
   expect(out).toMatch(/\}\s*\n\s*r\(0\);/);
 });
+
+// WHAT AN ELIDED DISPATCH LEAVES IN ITS REGISTERS. Past the bounds branch's delay slot (which runs on
+// both paths and is lifted), the dispatch block is pruned, so each case target is entered with what
+// its words wrote (jump-table.ts `enterCaseTarget`): an `sll` there leaves the scaled scrutinee, a
+// value C spells; `lui`, `addu` and `lw` leave the table's, the entry's and the case's addresses,
+// which a case may not read. No compiler measured reads one — IDO and KMC recompute the index in the
+// case — so these are hand-written.
+const scaledTable: AsmData = {
+  ...asmData,
+  sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x24, 0, 0, 0, 0x2c])]]),
+};
+const shiftedAfterSlot = (c0slot: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,34 <f+0x34>',
+    ' 8:\tnop',
+    ' c:\tlui\tat,0x0',
+    '10:\tsll\tv0,a0,0x2',
+    '14:\taddu\tat,at,v0',
+    '18:\tlw\tt6,0(at)',
+    '1c:\tjr\tt6',
+    '20:\tnop',
+    '24:\tjr\tra',
+    `28:\t${c0slot}`,
+    '2c:\tjr\tra',
+    '30:\tli\tv0,9',
+    '34:\tjr\tra',
+    '38:\tli\tv0,-1',
+  );
+
+test('an elided dispatch leaves its scaled index in a case, on IDO as on gcc', () => {
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(decompile('f', shiftedAfterSlot('addiu\tv0,v0,1'), t, { asmData: scaledTable }).source).toMatch(
+      /case 0:\s*\n\s*return \(a0 << 2\) \+ 1;/,
+    );
+  }
+});
+
+test('a case reading the table, entry or code address the elided dispatch left DECLINES', () => {
+  const stale = /a case of the elided jump table reads (at|t6), which the unlifted dispatch idiom wrote/;
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(() => decompile('f', shiftedAfterSlot('move\tv0,at'), t, { asmData: scaledTable })).toThrow(stale);
+    expect(() => decompile('f', shiftedAfterSlot('move\tv0,t6'), t, { asmData: scaledTable })).toThrow(stale);
+  }
+});
+
+// The scaled index at a target another case falls into (jump-table.ts `StaleScaledIndex.settle`):
+// every path in brings it, so the case reads it; one that rewrote it on the way declines.
+const fallTable: AsmData = {
+  ...asmData,
+  sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x24, 0, 0, 0, 0x28])]]),
+};
+const fallsIntoScaled = (c0: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,30 <f+0x30>',
+    ' 8:\tnop',
+    ' c:\tlui\tat,0x0',
+    '10:\tsll\tv0,a0,0x2',
+    '14:\taddu\tat,at,v0',
+    '18:\tlw\tt6,0(at)',
+    '1c:\tjr\tt6',
+    '20:\tnop',
+    `24:\t${c0}`,
+    '28:\tjr\tra',
+    '2c:\taddiu\tv0,v0,1',
+    '30:\tjr\tra',
+    '34:\tli\tv0,-1',
+  );
+
+test('a case another falls into reads the scaled index both paths bring, on IDO as on gcc', () => {
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    const out = decompile('f', fallsIntoScaled('sw\ta0,0(a1)'), t, { asmData: fallTable }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*\*a1 = a0;\s*\n\s*case 1:\s*\n\s*return \(a0 << 2\) \+ 1;/);
+    expect(() => decompile('f', fallsIntoScaled('li\tv0,8'), t, { asmData: fallTable })).toThrow(
+      /a case of the elided jump table reads v0, which the unlifted dispatch idiom wrote/,
+    );
+  }
+});
