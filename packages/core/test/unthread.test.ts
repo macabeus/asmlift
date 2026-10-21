@@ -60,6 +60,9 @@ function run(fn: Fn, seed: number): Ev[] {
         case 'add':
           set(o[0] + o[1]);
           break;
+        case 'and':
+          set(o[0] & o[1]);
+          break;
         case 'shl':
           set(o[0] << (op.attrs.imm as number));
           break;
@@ -77,6 +80,9 @@ function run(fn: Fn, seed: number): Ev[] {
           break;
         case 'icmp_ult':
           set(o[0] >>> 0 < o[1] >>> 0 ? 1 : 0);
+          break;
+        case 'icmp_uge':
+          set(o[0] >>> 0 >= o[1] >>> 0 ? 1 : 0);
           break;
         case 'icmp_ugt':
           set(o[0] >>> 0 > o[1] >>> 0 ? 1 : 0);
@@ -254,6 +260,55 @@ const KMC_WALK = `fn walk {
   ret
 }`;
 
+/** gcc2.7.2 -O1's thrwalk: as KMC_WALK, but each exit re-masks `x` on its own block (bb5 is the
+ *  latch fall-through and the `beql` delay slot merged), so bb5, the loop's other exit target, only
+ *  forwards to the re-test bb6, which the loop's guard enters as well. bb5 is dominated by bb3, the
+ *  in-body exit's block, which does not dominate the threaded exit bb2. */
+const GCC272_WALK = `fn walk {
+^bb0(%0: s32):
+  %1: u8* = gaddr {sym="gTbl"}
+  %2: s32 = const {value=12}
+  %3: u8* = add %1, %2
+  %4: u32 = icmp_uge %1, %3
+  %5: s32 = const {value=255}
+  %6: s32 = and %0, %5
+  cond_br %4, ^bb6(%1, %6), ^bb1()
+^bb1():
+  %7: s32 = const {value=255}
+  %8: s32 = and %0, %7
+  br ^bb2(%1)
+^bb2(%11: u8*):
+  %12: s32 = load %11 {off=0, signed=false, width=1}
+  %13: u32 = icmp_eq %8, %12
+  %14: s32 = const {value=1}
+  cond_br %13, ^bb8(%14), ^bb3()
+^bb3():
+  %15: s32 = load %11 {off=1, signed=false, width=1}
+  %16: u32 = icmp_eq %8, %15
+  cond_br %16, ^bb5(%11), ^bb4()
+^bb4():
+  %17: s32 = const {value=4}
+  %18: u8* = add %11, %17
+  %19: u32 = icmp_ult %18, %3
+  cond_br %19, ^bb2(%18), ^bb5(%18)
+^bb5(%20: u8*):
+  %21: s32 = const {value=255}
+  %22: s32 = and %0, %21
+  br ^bb6(%20, %22)
+^bb6(%23: u8*, %24: s32):
+  %25: s32 = load %23 {off=0, signed=false, width=1}
+  %26: u32 = icmp_ne %24, %25
+  %27: s32 = const {value=2}
+  cond_br %26, ^bb8(%27), ^bb7()
+^bb7():
+  %28: s32 = const {value=1}
+  br ^bb8(%28)
+^bb8(%29: s32):
+  %30: u8* = gaddr {sym="gOut"}
+  store %30, %29 {off=0, width=1}
+  ret
+}`;
+
 describe('a threaded loop exit goes back to the re-test it skipped', () => {
   test('agbcc: the exit lands on the THEN arm the re-test falls into', () => {
     const { n, fn, before } = folded(AGBCC);
@@ -310,6 +365,17 @@ describe('a threaded loop exit goes back to the re-test it skipped', () => {
     const edge = fn.blocks[1].ops[fn.blocks[1].ops.length - 1].successors[0];
     expect(edge.block).toBe(fn.blocks[4]);
     expect(edge.args).toEqual([fn.blocks[1].params[0]]);
+    expect(disagreements(before, fn)).toBe(0);
+    expect(cBackend.emit(structure(fn))).toContain('break;');
+  });
+
+  test('gcc2.7.2 pointer walk: the exit lands on the block that forwards to the re-test', () => {
+    const { n, fn, before } = folded(GCC272_WALK);
+    expect(n).toBe(1);
+    verify(fn);
+    const edge = fn.blocks[2].ops[fn.blocks[2].ops.length - 1].successors[0];
+    expect(edge.block).toBe(fn.blocks[5]);
+    expect(edge.args).toEqual([fn.blocks[2].params[0]]);
     expect(disagreements(before, fn)).toBe(0);
     expect(cBackend.emit(structure(fn))).toContain('break;');
   });
@@ -453,6 +519,25 @@ describe('refusals', () => {
     // bb2's exit hands the walk's base pointer instead of the current one, and the latch's stepped
     // pointer is not defined at bb1: the one candidate makes the re-test read another cell
     refusedBy(edit(KMC_WALK, ['  cond_br %11, ^bb4(%5), ^bb3()', '  cond_br %11, ^bb4(%1), ^bb3()']), 'test-differs');
+  });
+
+  test('a forwarder handing the re-test a value from the in-body exit’s block is left alone', () => {
+    // bb5 forwards `x & 0xff` as bb3 computed it: bb3 dominates bb5 but not the threaded exit bb2
+    refusedBy(
+      edit(
+        GCC272_WALK,
+        ['  %15: s32 = load %11', '  %40: s32 = and %0, %7\n  %15: s32 = load %11'],
+        ['  br ^bb6(%20, %22)', '  br ^bb6(%20, %40)'],
+      ),
+      'not-dominated',
+    );
+  });
+
+  test('a forwarder that stores is left alone', () => {
+    refusedBy(
+      edit(GCC272_WALK, ['  br ^bb6(%20, %22)', '  store %20, %21 {off=0, width=1}\n  br ^bb6(%20, %22)']),
+      'retest-observable',
+    );
   });
 
   test('a re-test block ending in an unconditional branch is left alone', () => {
