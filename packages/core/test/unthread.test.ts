@@ -292,6 +292,28 @@ describe('a threaded loop exit goes back to the re-test it skipped', () => {
     expect(cBackend.emit(structure(fn))).toContain('break;');
   });
 
+  test('gcc2.7.2kmc pointer walk with the step in the exit’s delay slot: of two pointers defined at the exit, the one the re-test decides on', () => {
+    // kmc -O2 on `if (x == p->b || x == p->a) break;` threads `beq a1,v0,L` with `addiu v1,v1,4` in its
+    // delay slot, so the stepped pointer %13 is defined in the exit block too: the latch hands the
+    // re-test %13 and the in-body exit %5, both defined at bb1
+    const ir = edit(
+      KMC_WALK,
+      [
+        '  %9: s32 = const {value=1}\n',
+        '  %9: s32 = const {value=1}\n  %12: s32 = const {value=4}\n  %13: u8* = add %5, %12\n',
+      ],
+      ['^bb3():\n  %12: s32 = const {value=4}\n  %13: u8* = add %5, %12\n', '^bb3():\n'],
+    );
+    const { n, fn, before } = folded(ir);
+    expect(n).toBe(1);
+    verify(fn);
+    const edge = fn.blocks[1].ops[fn.blocks[1].ops.length - 1].successors[0];
+    expect(edge.block).toBe(fn.blocks[4]);
+    expect(edge.args).toEqual([fn.blocks[1].params[0]]);
+    expect(disagreements(before, fn)).toBe(0);
+    expect(cBackend.emit(structure(fn))).toContain('break;');
+  });
+
   test('the fold runs in the pre-structure record, ahead of the re-roll', () => {
     const ids = PRE_STRUCTURE_FOLDS.map((f) => f.id);
     expect(ids.indexOf('unthread')).toBeGreaterThan(ids.indexOf('trampoline'));
@@ -418,15 +440,19 @@ describe('refusals', () => {
     );
   });
 
-  test('a re-test param the loop hands two values is left alone', () => {
-    const { n } = folded(edit(KMC, ['  cond_br %12, ^bb4(%3), ^bb5()', '  cond_br %12, ^bb4(%2), ^bb5()']));
-    expect(n).toBe(0);
+  test('a re-test param the loop hands two values takes the one the comparison decides', () => {
+    // bb3's exit hands the constant 0 and bb1's the counter: both are defined at bb2, and only the
+    // counter makes the re-test read what the exit read. Not a refusal: each candidate is judged.
+    const { n, fn, before } = folded(edit(KMC, ['  cond_br %12, ^bb4(%3), ^bb5()', '  cond_br %12, ^bb4(%2), ^bb5()']));
+    expect(n).toBe(1);
+    verify(fn);
+    expect(disagreements(before, fn)).toBe(0);
   });
 
-  test('a re-test param handed two values defined at the exit is left alone', () => {
-    // bb2's exit hands the walk's base pointer instead of the current one: both are defined at bb1
-    const { n } = folded(edit(KMC_WALK, ['  cond_br %11, ^bb4(%5), ^bb3()', '  cond_br %11, ^bb4(%1), ^bb3()']));
-    expect(n).toBe(0);
+  test('a re-test param whose only value defined at the exit is another pointer is left alone', () => {
+    // bb2's exit hands the walk's base pointer instead of the current one, and the latch's stepped
+    // pointer is not defined at bb1: the one candidate makes the re-test read another cell
+    refusedBy(edit(KMC_WALK, ['  cond_br %11, ^bb4(%5), ^bb3()', '  cond_br %11, ^bb4(%1), ^bb3()']), 'test-differs');
   });
 
   test('a re-test block ending in an unconditional branch is left alone', () => {

@@ -36,14 +36,18 @@
 // T must not merely return, because an exit that returns is an early `return` the structurer already
 // spells. Every function that lifted without this pass keeps its CFG.
 //
-// THE ARGS E HANDS R, per param: the one value, among those the loop's in-loop edges into R hand it,
-// that is defined at E (dominates E's block). A bottom-tested loop's latch hands R the stepped
-// counter, which E never sees, and its in-body exits hand R the counter E reads; only the second is
-// defined at E. The choice is a proposal: the comparison above is what makes it sound, and a param
-// with no such value, or several, refuses. Inhabitants: `synthetic:thrbreak:agbcc` (top-tested,
-// every exit hands one counter, S == T), and a gcc2.7.2kmc pointer walk
+// THE ARGS E HANDS R, per param: a value, among those the loop's in-loop edges into R hand it, that
+// is defined at E (dominates E's block). A bottom-tested loop's latch hands R the stepped counter,
+// which E never sees, and its in-body exits hand R the counter E reads; only the second is defined
+// at E. When kmc puts the step in the threaded branch's delay slot (`beq a1,v0,L` / `addiu v1,v1,4`),
+// the stepped pointer is defined at E too, and R has two candidates. Each choice is only a proposal:
+// the comparison above is what makes it sound, so every combination of candidates (at most
+// `MAX_PROPOSALS`) is judged, and the first the gates admit is taken; a param with no such value
+// refuses. Inhabitants: `synthetic:thrbreak:agbcc` (top-tested, every exit hands one counter,
+// S == T), the gcc2.7.2kmc pointer walk `synthetic:thrwalk`
 // `for (p = t; p < t + 3; p++) if (x == p->a || x == p->b) break;  if (x == p->a) A; else B;`
-// (bottom-tested, through S). Not `synthetic:thrbreak:gcc2.7.2kmc`, whatever the counter's width:
+// (bottom-tested, through S), and `synthetic:thrwalkba`, its tests swapped, where kmc's delay-slot
+// step gives R two candidates. Not `synthetic:thrbreak:gcc2.7.2kmc`, whatever the counter's width:
 // kmc indexes `t[i]` there by a value each exit computes on its own block (`i<<2`, re-masked
 // `i & 0xff` for a `u8`, in the exit branch's delay slot), so no value R reads is defined at E. That
 // row lifts through the break tail its exits share instead (structure.ts `codeBreakArm`).
@@ -70,7 +74,8 @@ export interface ThreadedExit {
   targetReturns: boolean;
   /** does R (or the S it reaches T through) run an op whose second run is observable? */
   observable: boolean;
-  /** the args E would hand R: per param, the one value every in-loop edge into R hands it */
+  /** the args E would hand R: per param, one of the values the in-loop edges into R hand it that is
+   *  defined at E (one proposal; each combination of such values is a site of its own) */
   args: Value[];
   /** do R's dominators (and so every block R reaches) all dominate E? */
   dominated: boolean;
@@ -189,8 +194,10 @@ function unthreadOne(fn: Fn, gates: readonly Gate<ThreadedExit>[]): boolean {
           if (R === T || R === E || eTerm.successors[1 - index].block === R) {
             continue;
           }
-          const site = judge(nl.body, E, index, T, R, preds, dom, defs, defBlock, dominatesAt);
-          if (site === null || firstRejection(gates, site) !== null) {
+          const site = judge(nl.body, E, index, T, R, preds, dom, defs, defBlock, dominatesAt).find(
+            (c) => firstRejection(gates, c) === null,
+          );
+          if (site === undefined) {
             continue;
           }
           eTerm.successors[index] = { block: R, args: site.args };
@@ -213,25 +220,43 @@ function judge(
   defs: ReadonlyMap<Value, Op>,
   defBlock: ReadonlyMap<Value, Block>,
   dominatesAt: (v: Value, at: Block) => boolean,
-): ThreadedExit | null {
-  const eTerm = E.ops[E.ops.length - 1];
-  const rTerm = R.ops[R.ops.length - 1];
-  // THE SHAPE, untabled: R ends in a `cond_br` (only a branch re-takes E's decision), and for each
-  // of its params exactly one of the values the in-loop edges into R hand it is defined at E — the
-  // arg E hands it.
-  if (rTerm?.opcode !== 'cond_br') {
-    return null;
+): ThreadedExit[] {
+  // THE SHAPE, untabled: R ends in a `cond_br` (only a branch re-takes E's decision), and each of
+  // its params is handed, by some in-loop edge into R, a value defined at E — a candidate arg. One
+  // site per combination of candidates, refused as a whole past `MAX_PROPOSALS`.
+  if (R.ops[R.ops.length - 1]?.opcode !== 'cond_br') {
+    return [];
   }
   const into = [...body].flatMap((p) => terminatorEdges(p).filter((s) => s.block === R));
-  const args: Value[] = [];
+  let proposals: Value[][] = [[]];
   for (let k = 0; k < R.params.length; k++) {
-    const vals = new Set(into.map((s) => s.args[k]).filter((v) => v !== undefined && dominatesAt(v, E)));
-    const [only] = vals;
-    if (vals.size !== 1 || only === undefined) {
-      return null;
+    const vals = [...new Set(into.map((s) => s.args[k]).filter((v) => v !== undefined && dominatesAt(v, E)))];
+    proposals = proposals.flatMap((p) => vals.map((v) => [...p, v]));
+    if (proposals.length === 0 || proposals.length > MAX_PROPOSALS) {
+      return [];
     }
-    args.push(only);
   }
+  return proposals.map((args) => judgeArgs(body, E, index, T, R, preds, dom, defs, defBlock, args));
+}
+
+/** How many arg combinations one (exit, re-test) pair may propose. kmc's delay-slot step gives a
+ *  pointer walk two; the bound keeps a re-test with many params from multiplying its comparisons. */
+const MAX_PROPOSALS = 8;
+
+function judgeArgs(
+  body: ReadonlySet<Block>,
+  E: Block,
+  index: number,
+  T: Block,
+  R: Block,
+  preds: ReadonlyMap<Block, Block[]>,
+  dom: ReadonlyMap<Block, Set<Block>>,
+  defs: ReadonlyMap<Value, Op>,
+  defBlock: ReadonlyMap<Value, Block>,
+  args: Value[],
+): ThreadedExit {
+  const eTerm = E.ops[E.ops.length - 1];
+  const rTerm = R.ops[R.ops.length - 1];
   const site: ThreadedExit = {
     from: E,
     index,
