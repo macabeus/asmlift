@@ -32,7 +32,7 @@ import {
 } from './candcache';
 import { type BenchCommand, benchCommandRefusal } from './candcache-bench';
 import { candidateReadsRefusal } from './candcache-reads';
-import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
+import { declarationsKeptWithHeaders, renderDeclarations, selfDeclaredContext } from './declare';
 import { loadedCodeDigest, loadedPackageDigest } from './loaded-code';
 import { stripShellComments } from './shell-text';
 
@@ -644,7 +644,7 @@ const PROBE = 'int asmlift_prelude_probe;\n';
 // copy of `C_TYPEDEFS + decls` — the webapp's scorer calls the same function, so the two
 // scoring worlds cannot drift on what a candidate was compiled in.
 const preludeFor = (world: boolean, declarations?: string): string =>
-  world ? selfDeclaredContext(declarations) : macroDefinesOf(declarations);
+  world ? selfDeclaredContext(declarations) : declarationsKeptWithHeaders(declarations);
 
 /** A verdict as the caller's contract wants it: the object path, or a throw — a
  *  `CompilerRejection` when the template ran to completion and said no, so that a ranking driver

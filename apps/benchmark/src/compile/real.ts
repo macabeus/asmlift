@@ -8,7 +8,7 @@
 import type { CandidateCompileOptions } from '@asmlift/cli/compile-command';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { type Attempt, CompilerRejection, joinAttempts } from '@asmlift/core/compiler-diagnostics';
-import { macroDefinesOf } from '@asmlift/core/declare';
+import { declarationsKeptWithHeaders } from '@asmlift/core/declare';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { type BuiltTarget, type ToolchainId, checkedTarget } from '../toolchains';
@@ -304,7 +304,7 @@ export function ladderCompile(
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
     // without this. So do its global register variables, whose names the lift made up and no context
     // declares. The rest of the synthesized block stays dropped: the context owns it.
-    const macros = macroDefinesOf(declarations);
+    const macros = declarationsKeptWithHeaders(declarations);
     // Each dialect's complaint in the RICHEST context, because a row that compiles nowhere PUBLISHES
     // this text as its error markers: the project's own context is where the candidate had to compile,
     // and bare typedefs fail on every project type. The fallback dialect is a harness convenience, and a

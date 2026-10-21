@@ -8,7 +8,7 @@
 // checkout whose asm carries raw addresses (`ldr r0, [pc,#0x020] @ =0x030034A0`), so every name
 // there comes from the symbol MAP and its five dogfood functions synthesize nothing; and the
 // benchmark's real tier is a headers world by construction (`makeRealCompile` threads only
-// `macroDefinesOf`), so a synthesized declaration renders no line it ever compiles.
+// `declarationsKeptWithHeaders`), so a synthesized declaration renders no line it ever compiles.
 //
 // So: one real ROM function whose asm names its globals TEXTUALLY (the committed corpus `.s`, the
 // shape a pasted `.s` has), compiled twice through the pinned agbcc.

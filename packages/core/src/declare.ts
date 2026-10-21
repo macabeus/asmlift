@@ -370,20 +370,22 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   return lines.length ? lines.join('\n') + '\n' : '';
 }
 
-/** The object-like `#define`s out of a rendered declaration block, and its global register
- *  variables.
+/** THE LINES OF A RENDERED DECLARATION BLOCK THAT THE HEADERS WORLD KEEPS: its object-like
+ *  `#define`s and its global register variables. Everything else there is owned by the injected
+ *  headers (a duplicate typedef or struct definition is a C89 hard error), and these two are not:
  *
- *  Address-cast macro defines are one of the two parts of a synthesized block that must survive into
- *  the HEADERS world too. Everything else there is owned by the injected headers (a duplicate typedef
- *  or struct definition is a C89 hard error), but a duplicate `#define` with an identical body is
- *  legal — and a PREPROCESSED project context has no macros left at all, so dropping these turns a
- *  macro-named candidate into an `undeclared identifier` rather than a spelling choice. */
-export function macroDefinesOf(declarations: string | undefined): string {
+ *  - an address-cast macro, because a duplicate `#define` with an identical body is legal — and a
+ *    PREPROCESSED project context has no macros left at all, so dropping these turns a macro-named
+ *    candidate into an `undeclared identifier` rather than a spelling choice;
+ *  - a global register variable (`register T greg_r8 __asm__("r8");`, SymbolInfo.globalRegister),
+ *    because no header declares the name the lift made up for it.
+ *
+ *  Chosen by each line's leading keyword, which `renderDeclarations` prints for these two kinds
+ *  only: a new kind of line it prints with either keyword rides into the headers world too. */
+export function declarationsKeptWithHeaders(declarations: string | undefined): string {
   if (!declarations) {
     return '';
   }
-  // …and so must a global register variable's: no header declares the name the lift made up for
-  // it, so the headers world would leave it undeclared
   const lines = declarations.split('\n').filter((l) => l.startsWith('#define ') || l.startsWith('register '));
   return lines.length ? lines.join('\n') + '\n' : '';
 }

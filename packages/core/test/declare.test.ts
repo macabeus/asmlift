@@ -6,7 +6,7 @@
 // skipped so the candidate fails loud, never a silently-wrong declaration).
 import { expect, test } from 'vitest';
 
-import { macroDefinesOf, renderDeclarations } from '../src/declare';
+import { declarationsKeptWithHeaders, renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
@@ -285,7 +285,9 @@ test('a global register variable declares itself in its register, in both worlds
     ref('gX', { kind: 'data' }),
   ]);
   expect(out).toBe('register s32 greg_r8 __asm__("r8");\nregister void *greg_r16 __asm__("$16");\nextern u32 gX;\n');
-  expect(macroDefinesOf(out)).toBe('register s32 greg_r8 __asm__("r8");\nregister void *greg_r16 __asm__("$16");\n');
+  expect(declarationsKeptWithHeaders(out)).toBe(
+    'register s32 greg_r8 __asm__("r8");\nregister void *greg_r16 __asm__("$16");\n',
+  );
 });
 
 // mwcc 2.4 declares them only as a run from r14 ("gaps between assigned global register variables are

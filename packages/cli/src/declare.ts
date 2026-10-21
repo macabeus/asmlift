@@ -7,7 +7,7 @@
 // across every command that prints one.
 import { renderDeclarations } from '@asmlift/core/declare';
 
-export { macroDefinesOf, renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
+export { declarationsKeptWithHeaders, renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
 
 /** A declaration block as stderr lines: rendered, blank lines dropped, each one under the
  *  `asmlift:` prefix that separates this tool's output from the compiler's in a shared log. */
