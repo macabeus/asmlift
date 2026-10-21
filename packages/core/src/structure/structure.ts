@@ -1132,8 +1132,12 @@ interface LoopInfo {
 
 // One early-`return` exit out of a loop body, and the blocks of it the loop emits inside its body
 // (`earlyReturnArm` decides which). Per-EDGE rather than flattened into per-loop sets: ownership is
-// decided against `from`, so a second edge into the same target is a separate question. `owned` has
-// one reader, `emitDoWhile` — a `while` hoists no update, so it has no pre-update reads to exempt.
+// decided against `from`, so a second edge into the same target is a separate question. Two arms'
+// `owned` sets may OVERLAP: an effectful tail only the loop's exit arms run (`armsOnly`, the
+// cross-jumped `h(i); return;` two arms end in) is owned by every arm that reaches it, and written
+// once in each. `owned` has one reader, `emitDoWhile`, which unions the arms' sets for its
+// pre-update hazard check — an overlap only repeats a block in that union — and a `while` hoists no
+// update, so it has no pre-update reads to exempt.
 interface LoopArm {
   from: Block;
   to: Block;
@@ -2424,8 +2428,9 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // then reachable from it — so the loop falls to the reading whose exit runs nothing of the tail.
 // A shared epilogue the exit also reaches still has to be pure.
 //
-// Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
-// of the update — or null when this is not an early-`return` arm.
+// Returns the blocks the arm OWNS — the ones the loop emits inside its body for this arm, ahead of
+// the update — or null when this is not an early-`return` arm. Not exclusive to the arm: a block the
+// `armsOnly` count admits is owned by every arm that reaches it, so two arms' sets can share it.
 function earlyReturnArm(
   { dom, reachFrom, preds }: EarlyReturnArmDeps,
   from: Block,
