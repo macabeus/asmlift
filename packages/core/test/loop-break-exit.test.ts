@@ -1089,13 +1089,21 @@ describe('break arms that share a tail', () => {
   // Each refusal leaves the loop to decline LOUD.
   const declines = (ir: string) => expect(() => judged(ir)).toThrow(/cannot structure/);
 
-  test('a shared tail also entered from before the loop is refused', () => {
-    declines(
+  // An entry from before the loop runs on a path that ran no arm, and the exit does not reach the
+  // tail: each path runs one copy once, whatever the tail does (the duplication policy, at
+  // `earlyReturnArm`).
+  test('a shared tail also entered from before the loop is written in each arm and where it sits', () => {
+    const { src, agreement, shipped } = judged(
       SHARED_TAIL_TOP_TESTED.replace(
         '  br ^bb1(%2)\n',
         '  %20: u32 = icmp_eq %0, %1\n  cond_br %20, ^bb6(), ^bb1(%2)\n',
       ).replace('%13: s32 = call %3 {target="hit"}', '%13: s32 = call %0 {target="hit"}'),
     );
+    expect(src.match(/hit\(a0\);\n {16}break;/g)).toHaveLength(2);
+    expect(src.match(/hit\(/g)).toHaveLength(3);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a shared tail the exit also reaches is refused', () => {
@@ -1117,13 +1125,20 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test('a tail an `else` before the loop also enters is refused when it runs an effect', () => {
-    declines(
+  // agbcc's `gLast = id;` in the break and in the `else`, cross-jumped into one `strb` past the `lsr`;
+  // gcc2.7.2kmc's one `jal note` both enter. Spelt with a call the trace oracle logs.
+  test('a tail an `else` before the loop also enters is written in each when it runs an effect', () => {
+    const { src, agreement, shipped } = judged(
       PURE_TAIL_ELSE.replace(
         '  %22: s32 = sub %21, %20\n',
         '  %22: s32 = sub %21, %20\n  %23: s32 = call %22 {target="hit"}\n',
       ),
     );
+    expect(src).toContain('while (1) {');
+    expect(src.match(/hit\(/g)).toHaveLength(2);
+    expect(src.match(/out\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a shared tail holding a loop of its own is refused', () => {

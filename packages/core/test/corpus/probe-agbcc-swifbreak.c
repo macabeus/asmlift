@@ -4,7 +4,8 @@
  *
  * `inloop` is the shape inside a loop, as Klonoa writes it: the `break;` must leave the SWITCH and
  * run the loop's update, never leave the loop. `loopout` leaves the switch from inside a loop the
- * case body opened, which C can only write with a `goto`, and must keep declining. `elsearm` falls
+ * case body opened, which this source writes with a `goto`. It lifts without one: the loop's other
+ * exit copies the next case's body into its arm. `elsearm` falls
  * through from the `else` of an `if` whose `then` breaks. `exitloop` leaves its loop from an arm
  * whose `break;` reaches that exit, the switch's own merge. `twoguards` breaks twice before it
  * falls, and `intodefault` breaks or falls into the `default:` arm. `loopleave` and `subret` are

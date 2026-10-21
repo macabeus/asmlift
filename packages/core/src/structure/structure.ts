@@ -2261,14 +2261,16 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  `if (a) f |= 1; else if (b) f |= 2; else continue; gHit = i; break;` compiles to two arms that
  *  each run their own code and jump to one `gHit = i` block on the way out (agbcc and gcc2.7.2
  *  cross-jump arms written with a tail each into that same shape, jump.c). The region is then
- *  admitted when every edge into it from outside comes from the body — a body block, or a block
- *  every path into which comes from the body without passing `exit` (the other arm's own blocks,
- *  whose exit edge the classifier must admit as an arm of its own, or the loop declines), or the
- *  block past the arm's head it enters is pure up to `exit` (`pureTail`) — and it holds no cycle.
- *  Each arm writes the shared blocks again ahead of its own `break`, a shared `ret`
- *  as one `return` per arm. The arms run on exclusive paths, so every path still runs the tail
- *  once, as the asm does; where the compiler cross-jumps, the copies are the same code
- *  (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
+ *  admitted when the arm's head is entered only from the body (a body block, or a block every path
+ *  into which comes from the body without passing `exit`: the other arm's own blocks, whose exit
+ *  edge the classifier must admit as an arm of its own, or the loop declines), every other block an
+ *  edge from outside enters is one the loop's own exit path does not run (`offExitPath`), and the
+ *  region holds no cycle. Each arm writes the shared blocks again ahead of its own `break`, a shared
+ *  `ret` as one `return` per arm, and a path from outside the loop (an `else` before it) structures
+ *  its own copy where the block sits. Those paths are exclusive — a path that left the body by an arm
+ *  reaches a region block again only through `exit`, and the exit does not reach it — so every path
+ *  runs the tail once, as the asm does, whatever the tail does; where the compiler cross-jumps, the
+ *  copies are the same code (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
  *
  *  THE COST where it does not: ido keeps one tail, and only the source's single copy at the arms'
  *  join recompiles to it. `synthetic:brmerge:ido7.1`'s row source is byte-identical to its target;
@@ -2279,6 +2281,7 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  body holding one (l3/ast.ts, the `for` node). */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
+  dom: ReadonlyMap<Block, ReadonlySet<Block>>,
   from: Block,
   to: Block,
   body: ReadonlySet<Block>,
@@ -2306,30 +2309,24 @@ function codeBreakArm(
     region.add(x);
     stack.push(...successorsOf(x));
   }
-  // Shared: a block outside the region is an entry from another arm when every path into it comes
-  // from the body without passing `exit` — the body block itself, or the other arm's own blocks.
+  // Shared: the arm's head is entered from another arm when every path into the entering block
+  // comes from the body without passing `exit` — the body block itself, or the other arm's own
+  // blocks. Never from outside the loop: an edge straight from the body into a block others enter
+  // too is a `break` to it, which `while (1)` writes once, after the loop.
   const armOfBody = onlyFromBody(preds, body, exit);
-  // Shared, too: a block past the arm's head that runs no effect, nor does any region block it
-  // reaches, may be entered from anywhere — from outside the loop as well. Its copies then run no
-  // store or call twice on any path, and a path from outside structures its own copy where it sits.
-  // agbcc cross-jumps a `break` that assigns a `u8` with an `else` before the loop that assigns the
-  // same `u8` into one `lsr` truncation block (jump.c); the per-arm copy is the source's spelling.
-  const pureFrom = new Map<Block, boolean>();
-  const pureTail = (x: Block): boolean => {
-    let known = pureFrom.get(x);
-    if (known === undefined) {
-      known = [x, ...reachWithin(x, region)].every((y) => !y.ops.some(effectful));
-      pureFrom.set(x, known);
-    }
-    return known;
-  };
+  // Shared, past the head: a block may be entered from anywhere — another arm, or outside the loop —
+  // when the loop's own exit path does not run it (`offExitPathOf`). agbcc cross-jumps a `break`
+  // that assigns a `u8` with an `else` before the loop that assigns the same `u8` into one `lsr`
+  // truncation block, and a `gLast = id;` both write into one `strb` (jump.c); gcc2.7.2kmc keeps one
+  // `jal note` the arm's `beql` and the `else` both enter. The per-arm copy is the source's spelling.
+  const offExitPath = offExitPathOf(exit, dom);
   let entersShared = false;
   const entered = (x: Block) =>
     (preds.get(x) ?? []).every(
       (p) =>
         region.has(p) ||
         (x === to && p === from) ||
-        (shared && (armOfBody(p) || (x !== to && pureTail(x))) && (entersShared = true)),
+        (shared && (x === to ? armOfBody(p) : offExitPath(x)) && (entersShared = true)),
     );
   if (!leaves || ![...region].every(entered)) {
     return null;
@@ -2337,6 +2334,14 @@ function codeBreakArm(
   // a region another arm enters is written once per arm, so it must be one a walk writes once: no
   // cycle. One only its own edge enters is written once wherever it sits.
   return !entersShared || [...region].every((x) => acyclicThrough(x, region)) ? region : null;
+}
+/** The duplication policy's admission (written at `earlyReturnArm`): is a block one the loop's own
+ *  exit path does not run? Forward only (`reachForward`): round an enclosing loop's back-edge the exit
+ *  reaches the inner loop again, which is the next iteration running the block again in the asm too,
+ *  not the fall-through path running it after the loop. Computed on first use. */
+function offExitPathOf(exit: Block, dom: ReadonlyMap<Block, ReadonlySet<Block>>): (b: Block) => boolean {
+  let fromExit: Set<Block> | undefined;
+  return (b) => !(fromExit ??= reachForward(exit, dom)).has(b);
 }
 /** Does every path into a block come from `body` without passing `exit`? True of a body block, and
  *  of a block outside whose every predecessor is one — a loop exit arm's own blocks, and a tail only
@@ -2362,18 +2367,6 @@ function onlyFromBody(
     return ok;
   };
   return armOfBody;
-}
-/** The blocks of `region` a path inside it reaches from `x` — `x` itself only on a cycle. */
-function reachWithin(x: Block, region: ReadonlySet<Block>): Set<Block> {
-  const seen = new Set<Block>();
-  for (const stack = successorsOf(x); stack.length > 0;) {
-    const y = stack.pop()!;
-    if (region.has(y) && !seen.has(y)) {
-      seen.add(y);
-      stack.push(...successorsOf(y));
-    }
-  }
-  return seen;
 }
 /** Does no path inside `region` lead from `x` back to `x`? */
 function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
@@ -2402,16 +2395,18 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // is a FIDELITY rule, not a soundness one.
 //
 // ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
-// effects may be written once per arm only when nothing but the loop's exit arms runs it — every
-// path into it comes from the body without passing the loop's `exit` — and it holds no cycle: each
-// path then runs it once, and on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) the per-arm
-// copies are the source the one copy came from. A block the loop's own exit path also runs is
-// written once, after the loop: copying it into an arm writes a store or call twice where the asm
-// holds it once on the fall-through path, and drags the rest of the function along. `codeBreakArm`'s
-// shared region meets the first rule by construction (its walk stops at `exit`, and an outside
-// entry must come from the body), so the loop's own arms bound it and it takes no size limit.
-// This walk applies the same policy to a tail that ends in its own `return`: an effectful block is
-// admitted only on one of the two counts below, and refused otherwise.
+// effects may be written once per arm when the loop's own exit path does not run it
+// (`offExitPathOf`) and it holds no cycle, whoever else enters it — another arm, or a path from
+// before the loop (an `else` beside it). A path that left the body by an arm reaches the block only
+// through that arm, because the exit does not reach it; a path from before the loop never ran an arm.
+// The paths are exclusive, so each runs one copy once, the arm's or the one written where the block
+// sits; on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) those copies are the source the one
+// block came from. Whether the block has an effect does not enter into it. A block the loop's own
+// exit path also runs is written once, after the loop: copying it into an arm writes a store or call
+// twice where the asm holds it once on the fall-through path, and drags the rest of the function
+// along. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms bound it and it
+// takes no size limit. This walk applies the same policy to a tail that ends in its own `return`:
+// an effectful block is admitted only on one of the two counts below, and refused otherwise.
 //
 // THE EDGE OWNS IT. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
@@ -2421,13 +2416,22 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // `to` covers the whole region — a block dominated by `to` that the exit reached would mean the exit
 // reached `to`.
 //
-// ONLY THE LOOP'S EXIT ARMS RUN IT (`armsOnly`): every path into it comes from the body without
-// passing `exit` (`onlyFromBody`), the exit does not reach it, and no cycle holds it. Two arms ending
-// in the same `h(i); return;`, which agbcc and gcc2.7.2kmc cross-jump into one block no edge
-// dominates, write it once each: the arms run on exclusive paths, so each path still runs it once.
-// The `while` reading that takes one such arm for the exit stays refused — the other arm's tail is
-// then reachable from it — so the loop falls to the reading whose exit runs nothing of the tail.
-// A shared epilogue the exit also reaches still has to be pure.
+// ONLY THE LOOP'S EXIT ARMS RUN IT (`armsOnly`): the policy's count, plus every path into it comes
+// from the body without passing `exit` (`onlyFromBody`). Two arms ending in the same `h(i); return;`,
+// which agbcc and gcc2.7.2kmc cross-jump into one block no edge dominates, write it once each: the
+// arms run on exclusive paths, so each path still runs it once. The `while` reading that takes one
+// such arm for the exit stays refused — the other arm's tail is then reachable from it — so the loop
+// falls to the reading whose exit runs nothing of the tail. A shared epilogue the exit also reaches
+// still has to be pure.
+//
+// WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop is sound to copy past —
+// the paths are exclusive — but into a tail that returns it is, in the common shape, the loop's own
+// zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) { if (t[i] == 7) {
+// ping(i); return; } } out(0);`. Admitting it lets the `while` reading take the early-return arm for
+// the exit and copy `out(0); return;` into the body, where the asm holds it once after the loop
+// (ido7.1 and mwcc_242_81 re-spell `while (1)` that way, equivalent but not the source's shape).
+// What it would buy is an `else` before the loop that cross-jumps into the arms' tail (agbcc's
+// `else { pong(9); hit(a); return; }`), and that lifts only through the same re-spelling.
 //
 // Returns the blocks the arm OWNS — the ones the loop emits inside its body for this arm, ahead of
 // the update — or null when this is not an early-`return` arm. Not exclusive to the arm: a block the
@@ -2439,17 +2443,16 @@ function earlyReturnArm(
   body: Set<Block>,
   exit: Block,
 ): Set<Block> | null {
-  // what the loop's own exit runs, forward only: round an enclosing loop's back-edge the exit reaches
-  // the inner loop again and every arm of it, which is no path that runs this arm's tail after the
-  // loop (`reachForward`)
-  const fromExit = reachForward(exit, dom);
-  const entryOwned = dom.get(to)!.has(from) && to !== exit && !fromExit.has(to);
-  const armOfBody = onlyFromBody(preds, body, exit);
-  // the duplication policy's admission: only the loop's exit arms run it, and no cycle holds it. Never
+  // what the loop's own exit runs, forward only (`offExitPathOf`)
+  const offExitPath = offExitPathOf(exit, dom);
+  const entryOwned = dom.get(to)!.has(from) && to !== exit && offExitPath(to);
+  // the duplication policy's admission: the loop's own exit path does not run it, and no cycle holds
+  // it — and, for a tail that returns, only the loop's exit arms enter it (`armsOnly`, below). Never
   // the arm's own head: an edge straight from the body into a block others enter too is a `break` to
   // it, which `while (1)` writes once, after the loop.
+  const armOfBody = onlyFromBody(preds, body, exit);
   const armsOnly = (bb: Block) =>
-    bb !== to && bb !== exit && armOfBody(bb) && !fromExit.has(bb) && !reachFrom(bb).has(bb);
+    bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
   const owned = new Set<Block>();
   const seen = new Set<Block>();
   const stack = [to];
@@ -3066,7 +3069,7 @@ export function structure(
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
     const region =
-      codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, e.from, e.to, nl.body, exit, true) : null;
+      codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
     const owned = region === null ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit) : null;
     return { region, owned };
   };
@@ -3126,7 +3129,7 @@ export function structure(
         if (e.to === hOut[0].block) {
           return false;
         }
-        const region = codeBreakArm(preds, h, hOut[0].block, nl.body, e.to, true);
+        const region = codeBreakArm(preds, dom, h, hOut[0].block, nl.body, e.to, true);
         const bareReturn = e.to.ops.length === 1 && e.to.ops[0].opcode === 'ret' && e.to.ops[0].operands.length === 0;
         return region !== null && (runsEffect(e.to) || (bareReturn && [...region].some((y) => y.ops.some(effectful))));
       });

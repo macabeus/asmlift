@@ -1818,9 +1818,19 @@ test('a `for` is two Pascal statements, so a lone one still takes begin/end', ()
   expect(pascalBackend.emit(fn)).toMatch(/then\s*\n\s*begin\s*\n\s*i := 0;\s*\n\s*while/);
 });
 
-test('a case body that leaves the switch from inside a loop it opened still DECLINES', () => {
-  // C's `break;` there would leave the loop, not the switch; only a `goto` spells it.
-  expect(() => ifBreakLift('loopout')).toThrow(/cannot structure 'loopout'/);
+test('a case body that leaves the switch from inside a loop it opened writes the next case in the loop arm', () => {
+  // A `break;` inside the loop would leave the loop, not the switch, so the source needs a `goto`.
+  // The loop's exit is the `goto`'s target, the switch's own merge. The other way out, `p() == 0`,
+  // falls into `case 2:` unless `gB`. It is a break arm that runs code, and it copies `case 2`'s
+  // `f(i)` ahead of its `break`. The dispatch enters that block from before the loop, which the
+  // duplication policy admits (structure.ts, at `earlyReturnArm`). Each path runs one copy once, and
+  // a host run against the source agrees on 20000 states.
+  const out = ifBreakLift('loopout');
+  expect(out).not.toContain('goto');
+  expect(out).toMatch(
+    /case 1:\s*\n\s*while \(1\) \{\s*\n\s*if \(p\(\) == 0\) \{\s*\n\s*if \(gB == 0\) f\(v0\);\s*\n\s*break;\s*\n\s*\}\s*\n\s*if \(gA != 0\) break;\s*\n\s*\}\s*\n\s*break;\s*\n\s*case 2:\s*\n\s*f\(v0\);/,
+  );
+  expect(count(out, 'f(v0)')).toBe(2);
 });
 
 test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {
