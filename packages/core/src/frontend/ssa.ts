@@ -1806,6 +1806,9 @@ export function fallbackArgc(
      *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
+    /** told when the `parked` ceiling stops the count below a register the caller set up: the count
+     *  without it would have refused at the gap, or gone on past it (`CallDeclarations.passThroughRefusal`) */
+    ceilingHid?: () => void;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -1817,6 +1820,9 @@ export function fallbackArgc(
   // the registers past the lowest parked one are none of the call's: neither counted nor a gap's top
   const parkedAt = argRegs.findIndex((r, k) => k >= floor && opts.parked?.(r) === true && !setUp(k));
   const top = parkedAt < 0 ? argRegs.length : parkedAt;
+  if (parkedAt >= 0 && argRegs.some((_, k) => k > parkedAt && setUp(k))) {
+    opts.ceilingHid?.();
+  }
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
   const run = (from: number): number => {

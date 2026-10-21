@@ -1646,3 +1646,70 @@ describe('the scaled index at a case target other edges also enter', () => {
     ).toThrow(stale);
   });
 });
+
+// A FUNCTION THAT LIFTS ONLY THROUGH A CASE'S READ OF THE SCALED INDEX DOES NOT TAKE THE #351
+// TRAILING PASS-THROUGH. mwcc 2.4.2 -O4,p, `int swp(int a){ switch (a){ case 0: return a * 4; case
+// 1: return g(); } return 0; }` with g undeclared: case 0 returns the dispatch's `slwi r0,r3,2`,
+// which read as `mflr`'s r0 declined the function before the dispatch's registers were modelled.
+// Once it lifts, `bl g` counts r3, which still holds a and its block never wrote: `return g(a0);`,
+// the bytes `return g();` compiles to as well.
+describe('a guessed arity in a function that reads the scaled index', () => {
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(8)]]),
+    relocs: [0x2c, 0x34].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swp',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 8, index: 1 }],
+      ['swp', { section: '.text', value: 0, size: 0x54, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+  const asm = (c1: string) =>
+    [
+      '00000000 <swp>:',
+      '   0:\tstwu    r1,-16(r1)',
+      '   4:\tmflr    r0',
+      '   8:\tcmplwi  r3,1',
+      '   c:\tstw     r0,20(r1)',
+      '  10:\tbgt-    40 <swp+0x40>',
+      '  14:\tlis     r4,0',
+      '\t\t\t16: R_PPC_ADDR16_HA\tjtbl',
+      '  18:\tslwi    r0,r3,2',
+      '  1c:\taddi    r4,r4,0',
+      '\t\t\t1e: R_PPC_ADDR16_LO\tjtbl',
+      '  20:\tlwzx    r4,r4,r0',
+      '  24:\tmtctr   r4',
+      '  28:\tbctr',
+      '  2c:\tmr      r3,r0',
+      '  30:\tb       44 <swp+0x44>',
+      `  34:\t${c1}`,
+      '  38:\tbl      38 <swp+0x38>',
+      '\t\t\t38: R_PPC_REL24\tg',
+      '  3c:\tb       44 <swp+0x44>',
+      '  40:\tli      r3,0',
+      '  44:\tlwz     r0,20(r1)',
+      '  48:\tmtlr    r0',
+      '  4c:\taddi    r1,r1,16',
+      '  50:\tblr',
+    ].join('\n');
+
+  test('a call passing on the incoming r3 DECLINES', () => {
+    const lift = () => decompile('swp', asm('nop'), PPC_MWCC, { asmData });
+    expect(lift).toThrow(
+      /the call at 0x38 has no prototype, and r3, the last register the arity guessed without one counts, holds a value its block did not write/,
+    );
+    expect(lift).toThrow(PpcUnsupportedError);
+  });
+
+  test('…while one that writes what it passes lifts', () => {
+    const out = decompile('swp', asm('li      r3,5'), PPC_MWCC, { asmData }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*v0 = a0 << 2;/);
+    expect(out).toMatch(/case 1:\s*\n\s*v0 = g\(5\);/);
+  });
+});

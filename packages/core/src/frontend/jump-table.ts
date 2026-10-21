@@ -32,6 +32,7 @@
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { T } from '../ir/types';
 import { type FnProto, declaresVoidReturn } from '../proto';
+import type { CallDeclarations } from './call-plan';
 import type { FrontendRefusal } from './errors';
 import type { SsaBuilder } from './ssa';
 
@@ -389,7 +390,10 @@ export const scaledIndexIn =
  *  through the joins that carry it, declines. A `ret` operand demands nothing under a declared
  *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). A MIXED target's scaled
  *  index is settled first ({@link unsettledScaledIndices}): one that does not stand is a marker,
- *  read or not. `fail` is the frontend's own refusal. */
+ *  read or not. `fail` is the frontend's own refusal. Last, `calls` refuses a guessed arity's
+ *  trailing pass-through where the function lifts only through this modelling: a parked ceiling that
+ *  hid a register, or a case reading a scaled index that stands
+ *  (`CallDeclarations.refuseDispatchUnlockedPassThrough`). */
 export function refuseStaleIdiomReads(
   name: string,
   irBlocks: readonly Block[],
@@ -397,6 +401,7 @@ export function refuseStaleIdiomReads(
   ssa: Pick<SsaBuilder, 'everyReachingDef'>,
   own: FnProto | undefined,
   fail: FrontendRefusal,
+  calls: Pick<CallDeclarations, 'refuseDispatchUnlockedPassThrough'>,
 ): void {
   if (stale.size === 0) {
     return;
@@ -449,6 +454,9 @@ export function refuseStaleIdiomReads(
         : `cannot lift '${name}': a case of the elided jump table reads ${reg}, ${why}`,
     );
   }
+  calls.refuseDispatchUnlockedPassThrough(
+    [...stale].some(([v, s]) => s.kind === 'scaled' && demanded.has(v) && !unsettled.has(v)),
+  );
   // Read by nothing, so no C spells it; a marker keeps the SSA honest, as the shift's scrutinee need
   // not reach a target some other path enters.
   for (const v of unsettled) {

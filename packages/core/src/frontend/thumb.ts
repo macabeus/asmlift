@@ -2621,6 +2621,7 @@ function liftOnce(
     (m) => {
       throw new FrontendUnsupportedError(m);
     },
+    fill.calls,
   );
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.

@@ -159,6 +159,15 @@ export interface CallDeclarations {
    *  lowered. One the call does not pass is unused by the LIFT, not proved unused by the source: the
    *  dead-read pin refuses it (frontend/dead-reads.ts `held-at-undeclared-call`). */
   readonly heldAtUndeclaredCall: ReadonlySet<Value>;
+  /** THE #351 TRAILING PASS-THROUGH, NOT LET IN THROUGH A JUMP TABLE'S CASES. Once every call is
+   *  lowered: refuse the first guessed arity whose last counted register its own block did not write
+   *  — a value passed on unchanged (`g(a0, 9)` lifted `g(a0, 9, a0)`, agbcc's pre-dispatch copy of
+   *  a0 still in r2) — where the function lifts only because of what an elided or kept dispatch left
+   *  in its registers: a `parked` ceiling that stopped a count below a register the caller set up,
+   *  or `caseStateRead`, a read of the scaled index a case target is entered with. Elsewhere the
+   *  guess counts it, an open gap (`g()` and `g(a0)` are the same bytes); there the function declined
+   *  before the dispatch's registers were modelled, and a decline is not turned into that guess. */
+  refuseDispatchUnlockedPassThrough(caseStateRead: boolean): void;
 }
 
 /** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
@@ -245,6 +254,11 @@ export function callDeclarations(
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
+  // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
+  // parked ceiling hid a register the caller set up, and the first guessed count's trailing
+  // pass-through, as its refusal
+  let ceilingHid = false;
+  let passThrough: { call: string; reg: string } | undefined;
   // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
   // the low half is the return register (already excluded) and `lower` writes the high one itself
   // from the callee's own result. The two arms of one rule: where the callee hands a register back,
@@ -908,6 +922,9 @@ export function callDeclarations(
             accept: mayPass,
             gap: { name, at: guess.at, fail },
             floor,
+            ceilingHid: () => {
+              ceilingHid = true;
+            },
             parked: (r) =>
               !holes.skippable.has(r) &&
               !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
@@ -950,6 +967,10 @@ export function callDeclarations(
             "jump table's dispatch scaled — a call handed it and one that is not compile to the same bytes, so the " +
             'argument count is not decidable',
         );
+      }
+      const last = target.argRegs[argc - 1];
+      if (passThrough === undefined && argc > floor && !ssa.writtenSinceCall(last, bi)) {
+        passThrough = { call: typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at, reg: last };
       }
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
@@ -1161,6 +1182,16 @@ export function callDeclarations(
     plan,
     lower,
     heldAtUndeclaredCall,
+    refuseDispatchUnlockedPassThrough: (caseStateRead) => {
+      if ((ceilingHid || caseStateRead) && passThrough !== undefined) {
+        fail(
+          `cannot lift '${name}': the call ${passThrough.call} has no prototype, and ${passThrough.reg}, the last ` +
+            'register the arity guessed without one counts, holds a value its block did not write, in a function ' +
+            'that lifts only through what a jump-table dispatch left in its registers — a value passed on unchanged ' +
+            'and one the call is not handed compile to the same bytes, so the argument count is not decidable',
+        );
+      }
+    },
   };
 }
 

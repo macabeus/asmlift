@@ -936,3 +936,25 @@ test('…and a case that rewrites the register first, or a read on the default p
   ).source;
   expect(defaultRead).toMatch(/default:\s*\n\s*return a1;/);
 });
+
+// A FUNCTION THAT LIFTS ONLY THROUGH THE PARKED CEILING DOES NOT TAKE THE #351 TRAILING PASS-THROUGH.
+// agbcc, `void f(int a){ switch (a){ case 0: g0(a, 9); break; case 1: gv = g1(3); break; } }` with
+// g0 and g1 undeclared: `add r2,r0,#0` keeps a in r2 past the idiom, which parks r0 and r1. At `bl g1`
+// the ceiling at r1 hides r2, which declined the whole function before the dispatch's registers were
+// modelled ("r2 holds a value and r1 holds none"). Once it lifts, `bl g0` counts r2, which its block
+// never wrote: `g0(a0, 9, a0)`, the bytes `g0(a, 9)` compiles to as well.
+test('a guessed arity whose last register its block did not write DECLINES where the parked ceiling hid one', () => {
+  const asm = (c0: string) =>
+    'f:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0x1\n\tbhi\t.L3\n\tlsl\tr0, r2, #0x2\n\tldr\tr1, .Lp\n' +
+    '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    `.Lc0:\n\tadd\tr0, r2, #0\n\tmov\tr1, #0x9\n${c0}\tbl\tg0\n\tb\t.L3\n` +
+    '.Lc1:\n\tmov\tr0, #0x3\n\tbl\tg1\n\tldr\tr1, .Lg\n\tstr\tr0, [r1]\n\tb\t.L3\n.Lg:\n\t.word\tgv\n' +
+    '.L3:\n\tpop\t{r0}\n\tbx\tr0\n';
+  expect(() => decompile('f', asm(''), ARMV4T_AGBCC)).toThrow(
+    /'bl g0' in block '\.Lc0' has no prototype, and r2, the last register the arity guessed without one counts, holds a value its block did not write/,
+  );
+  // control: a case that writes every register it passes lifts, the ceiling and all
+  const written = decompile('f', asm('\tmov\tr2, #0x4\n'), ARMV4T_AGBCC).source;
+  expect(written).toMatch(/case 0:\s*\n\s*g0\(a0, 9, 4\);/);
+  expect(written).toMatch(/g1\(3\)/);
+});
