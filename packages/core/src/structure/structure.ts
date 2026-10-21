@@ -2242,24 +2242,37 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
   }
   return false;
 }
-/** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
- *  the region it heads re-enters no `body` block, admits no edge from outside itself, and leaves only
- *  for `exit` or by a `ret` of its own. Returns that region, or null. Each region block is then
- *  written once, inside the loop, ahead of the `break` — a `ret` among them as the `return` it is:
- *  `if (t[i] == 7) { if (k) return; gHit = 1; break; }`. The region owns those `ret`s, since no
- *  other edge enters it, so the `return` is written where the asm holds its one copy.
+/** The arm `from -> to` breaks to `exit` after running code: the region `to` heads re-enters no
+ *  `body` block and leaves only for `exit` or by a `ret` of its own. Returns that region, or null.
+ *  The region is written inside the loop, ahead of the `break` — a `ret` among it as the `return` it
+ *  is: `if (t[i] == 7) { if (k) return; gHit = 1; break; }`.
  *
- *  A TAIL SEVERAL BREAKS SHARE, with `shared`: `if (a) f |= 1; else if (b) f |= 2; else continue;
+ *  UNSHARED (the default, and the header-exit caller), `to` is entered by that edge alone and the
+ *  region admits no edge from outside itself, so each region block is written once and the region
+ *  owns its `ret`s: the `return` is written where the asm holds its one copy.
+ *
+ *  A TAIL SEVERAL BREAKS SHARE, with `shared` (what `exitArmOf` passes, so every in-body code arm
+ *  is judged this way): `if (a) f |= 1; else if (b) f |= 2; else continue;
  *  gHit = i; break;` compiles to two arms that each run their own code and jump to one `gHit = i`
  *  block on the way out (and agbcc and gcc2.7.2 cross-jump arms written with a tail each into that
  *  same shape, jump.c). The shared block is then entered from the other arm as well, so it is
  *  admitted when every edge into the region from outside it comes from the body — a body block, or
  *  a block every path into which comes from the body without passing `exit`: the other arm's own
  *  blocks, whose exit edge the loop's classifier then admits as an arm of its own, or the loop
- *  declines — and the region holds no cycle. Each arm then writes the shared blocks again, ahead of its own
- *  `break`: the arms run on exclusive paths, so every path still runs the tail once, as the asm does.
- *  The source's single copy at the arms' join needs a `continue` that runs the latch's update, which
- *  only a `for` spells, and no loop form here does. */
+ *  declines — and the region holds no cycle. Neither unshared rule then holds: `to` and the
+ *  region's other blocks may be entered from the other arms, and each arm writes the shared blocks
+ *  again ahead of its own `break`, a shared `ret` included (as one `return` per arm). The arms run
+ *  on exclusive paths, so every path still runs the tail once, as the asm does — correct C, and
+ *  where the compiler cross-jumps the copies back into one the same code (gcc2.7.2kmc
+ *  byte-identical, agbcc up to register allocation).
+ *
+ *  THE COST, where it does not: ido keeps one tail, and only the source's single copy at the arms'
+ *  join recompiles to it. `synthetic:brmerge:ido7.1`'s row source is byte-identical to its target;
+ *  the per-arm spelling compiles to a different object (52 instructions against 50: an extra `lui` and `sb`), so that row cannot
+ *  MATCH this way. The single copy needs a `continue` that runs the latch's update — a `for` whose
+ *  `inc` is that update, or a `do`/`while` whose test the `continue` reaches — and structure writes
+ *  `continue` only to a `while (1)` header, while the L3 `for` respell refuses a body holding one
+ *  (l3/ast.ts, the `for` node). */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
   from: Block,
