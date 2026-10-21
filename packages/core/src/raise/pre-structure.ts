@@ -2,7 +2,7 @@
 // loop's edges into a shape a loop spelling owns, and each is its own stage in the trace, so a
 // re-spelled function names the fold that moved its CFG.
 //
-// A MUTABLE RECORD, not a sum of three calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
+// A MUTABLE RECORD, not a sum of four calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
 // caller-side seam a process outside core swaps to census a fold's gate table (`pnpm bench gates`,
 // apps/benchmark/src/run/gate-census.ts). A static import binding cannot be swapped.
 import { Fn } from '../ir/core';
@@ -25,7 +25,12 @@ export interface PreStructureFold {
  *  trampoline fold has spliced out the empty block the break leaves through; ahead of it, the re-roll
  *  declines and the loop with it ('unrecovered back-edge'). `reroll.test.ts` pins it by lifting that
  *  row's pre-fold IR through this record. The latch fold comes first for the same reason in kind:
- *  the other two read the back edge it leaves. */
+ *  the folds after it read the back edge it leaves. The un-threading reads loop exits, which the
+ *  trampoline fold reshapes, and sits ahead of the re-roll so a loop it gives one way out is one
+ *  the re-roll may then read. On the inhabitants measured — `synthetic:thrbreak:agbcc`, and the
+ *  pointer walk unthread.ts names on agbcc and gcc2.7.2kmc — its position does not matter (each
+ *  lifts the same C with the fold first, second, third or last), so that place is a precaution:
+ *  `unthread.test.ts` pins where it sits, not a lift that needs it there. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',
