@@ -142,8 +142,11 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
 // loop sits beside between the loop and its join — `if (f) { for (..) if (a(i) == k) { id = i + 100;
 // break; } } else id = f + 26; out(id);` (`synthetic:break_elsetail`) — so the loop's own exit is an
 // empty `b`/`j` over the `else`, and the break reaches the join only through the code its arm runs.
-// That loop has two exit targets because of the block just the same, so the scope gate asks whether
-// another exit edge's target REACHES the target, going forward and outside the loop's body.
+// Folding the block there leaves the loop two exit targets all the same — the break arm's head is
+// one. What it buys is that the loop's own exit becomes the join the break arm runs on into, which
+// is the exit a `break` that runs code has to leave for (`codeBreakArm`'s region must reach it). So
+// the scope gate asks whether another exit edge's target REACHES the target, going forward and
+// outside the loop's body.
 //
 // Splicing it out re-points each edge into it at its target with its own arguments, and the loop
 // exits to one block: a `break` that carries its copies, which the structurer already spells. The
@@ -190,7 +193,7 @@ export const EXIT_TRAMPOLINE_GATES: readonly Gate<ExitTrampoline>[] = [
     // structurer wherever it is the loop's one way out, and folding it there would only re-spell
     // functions that already lift.
     id: 'trampoline-not-a-second-exit',
-    why: 'only a loop that also leaves for the same target by another edge, or for a block that runs on into it, has two exit targets because of it',
+    why: 'only a loop that also leaves for the same target by another edge, or for a block that runs on into it, gains from the fold an exit every edge out can leave for',
     sound: false,
     rejects: (c) => !c.sharedExit,
   },
