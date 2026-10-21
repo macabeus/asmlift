@@ -2411,10 +2411,10 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // THE EDGE OWNS IT. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
 // first half, since two predecessors cannot both dominate it. And the region must not be reachable
-// from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
-// post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
-// `to` covers the whole region — a block dominated by `to` that the exit reached would mean the exit
-// reached `to`.
+// forward from the loop's own exit (`offExitPathOf`), which dominance does NOT rule out: an arm
+// landing straight on the post-loop join dominates itself, and claiming it would emit the epilogue
+// on both paths. Testing `to` covers the whole region — a block dominated by `to` that the exit
+// reached would mean the exit reached `to`.
 //
 // ONLY THE LOOP'S EXIT ARMS RUN IT (`armsOnly`): the policy's count, plus every path into it comes
 // from the body without passing `exit` (`onlyFromBody`). Two arms ending in the same `h(i); return;`,
@@ -2443,7 +2443,7 @@ function earlyReturnArm(
   body: Set<Block>,
   exit: Block,
 ): Set<Block> | null {
-  // what the loop's own exit runs, forward only (`offExitPathOf`)
+  // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
   const entryOwned = dom.get(to)!.has(from) && to !== exit && offExitPath(to);
   // the duplication policy's admission: the loop's own exit path does not run it, and no cycle holds

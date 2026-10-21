@@ -12493,17 +12493,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //      mwcc_242_81 returns the struct in r3 and lifts both (controls); ido7.1 (`swl`) and
   //      gcc2.7.2kmc (frame as sp data) decline first, off. break_elsetail: break_value with an `else`
   //      OUTSIDE the loop assigning the same u8. agbcc cross-jumps the break's `lsr` truncation with
-  //      the `else`'s, so the break region shares a pure block with an entry from outside the loop
-  //      (`codeBreakArm`'s `pureTail`); ido7.1, gcc2.7.2kmc and mwcc_242_81 lay the `else` between the
-  //      loop and the join, so the loop's own exit is a bodyless `j` over it, which the exit-trampoline
-  //      fold splices out (raise/latch.ts, its second exit reaching the join through the break's code).
-  //      All four lift since; mwcc as its 8 unrolled break
-  //      arms. The no-else control lifts on all four. retarm2_tail: two arms in one loop ending in the
-  //      same `Hit(a); return;`, which agbcc and gcc2.7.2kmc cross-jump into one block no edge owns;
-  //      `earlyReturnArm` writes it in each arm (the duplication policy), and one arm owning the tail
-  //      MATCHes (retarm1_tail). ido7.1 and mwcc_242_81 keep the tails apart. ido7.1 and gcc2.7.2kmc
-  //      also declined every void function whose loop leaves a value in v0 beside a `jal`'s path
-  //      (frontend/mips.ts reads no v0 at a declared-void return since). The real sub_0801DFC4 reaches
+  //      the `else`'s, so the break region holds a block an entry from outside the loop shares, which
+  //      the loop's exit path does not run (`codeBreakArm`, the duplication policy); ido7.1,
+  //      gcc2.7.2kmc and mwcc_242_81 lay the `else` between the loop and the join, so the loop's own
+  //      exit is a bodyless `j` over it, which the exit-trampoline fold splices out (raise/latch.ts,
+  //      its second exit reaching the join through the break's code). mwcc lifts as its 8 unrolled
+  //      break arms. The no-else control lifts on all four. retarm2_tail: two arms in one loop ending
+  //      in the same `Hit(a); return;`, which agbcc and gcc2.7.2kmc cross-jump into one block no edge
+  //      owns; `earlyReturnArm` writes it in each arm (the duplication policy), and one arm owning the
+  //      tail MATCHes (retarm1_tail). ido7.1 and mwcc_242_81 keep the tails apart. On ido7.1 and
+  //      gcc2.7.2kmc a void function whose loop leaves a value in v0 beside a `jal`'s path reads no v0
+  //      at its return when its own declaration says void (frontend/mips.ts). The real sub_0801DFC4 reaches
   //      this through three `goto`s whose goto-free spelling is a different object, so the FUNCTION
   //      stays set aside under the no-goto rule; the row pins the guard.
   // Still set aside, each one function: sub_0801D6B0's second blocker, a return tail shared by a loop

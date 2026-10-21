@@ -1331,7 +1331,7 @@ describe('early-return arms that share their tail', () => {
 // outer loop, which re-enters the inner one and so reaches every block of both arms — but only
 // through the outer back-edge, which is no path that runs an arm's tail after the inner loop. The
 // question "does the exit run this block" is asked forward only (`reachForward`), as the exit
-// trampoline fold asks it; a full walk refused every early-return arm of every nested loop.
+// trampoline fold asks it; a full walk would refuse every early-return arm of every nested loop.
 const NESTED_RETURN_TAIL = SHARED_RETURN_TAIL.replace('fn rettail {', 'fn rettailnest {')
   .replace(
     '  br ^bb1(%2)\n',
