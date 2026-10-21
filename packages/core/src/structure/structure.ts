@@ -2355,9 +2355,24 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 //
 // The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
 // twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
-// is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
-// would have produced from this asm, and the region it drags along is unbounded. A block escapes
-// that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
+// is a FIDELITY rule, not a soundness one.
+//
+// ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
+// effects may be written once per arm only when nothing but the loop's exit arms runs it — every
+// path into it comes from the body without passing the loop's `exit` — and it holds no cycle: each
+// path then runs it once, and on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) the per-arm
+// copies are the very source the one copy came from. A block the loop's own exit path also runs is
+// written once, after the loop: copying it into an arm writes a store or call twice where the asm
+// holds it once on the fall-through path, and the region dragged along that way is the rest of the
+// function, unbounded. `codeBreakArm`'s shared region meets the first rule by construction (its
+// walk stops at `exit`, and an outside entry must come from the body), so it is bounded by the
+// loop's own arms and takes no size limit: declining a correct per-arm copy buys nothing, and where
+// ido kept one copy the cost is a MATCH ceiling written at `codeBreakArm`, not wrong C. This walk is
+// stricter than the policy: it refuses EVERY effectful block it does not own, so a tail two arms
+// share that ends in its own `return` (`h(i); k(i); gF += 3; return i;`, which declines on agbcc
+// and ido7.1) is an admission not built here, not one the policy refuses.
+//
+// A block escapes the refusal on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
 // first half, since two predecessors cannot both dominate it. And the region must not be reachable
 // from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
@@ -2983,8 +2998,12 @@ export function structure(
     ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
   // An edge out of `nl` that does not land on `exit` itself, read the one way both the `while` and the
   // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return whose
-  // tail the loop emits (`owned`). The break arm is asked first: where the exit ends in a `return`,
-  // `earlyReturnArm` would also take the arm and copy that tail into it, where the asm holds one copy.
+  // tail the loop emits (`owned`). The break arm is asked first: where the code past `exit` is a pure
+  // `return`, `earlyReturnArm` would also take the arm and copy that post-loop `return` into it, where
+  // the asm holds one copy after the loop (two code arms ahead of `return 3;` lift as `gHit = i;
+  // return 3;` twice that way, against a `break` each and one `return 3` this way). The break arm
+  // copies nothing past `exit`: what it writes per arm is only what the loop's arms alone run — the
+  // one duplication policy both admitters share, written at `earlyReturnArm`.
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
     const region =
