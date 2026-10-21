@@ -1784,6 +1784,10 @@ export function fallbackArgc(
      *  again with an empty `gap` for every register the count takes past a decided gap. Each must be
      *  proven an argument the same way, or the gap refuses. */
     decide?: (gap: readonly string[], set: string, refuse: () => void) => boolean;
+    /** whether what a jump-table dispatch parked in argument register `reg` reaches the call
+     *  (`CallSite.parked`). Where nothing `accept` takes reaches it too, the count stops below it: no
+     *  compiler hands a callee the dispatch's own register, so no register above it is an argument. */
+    parked?: (reg: string) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -1792,11 +1796,14 @@ export function fallbackArgc(
   const { name, at, fail } = opts.gap;
   const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
   const floor = opts.floor ?? 0;
+  // the registers past the lowest parked one are none of the call's: neither counted nor a gap's top
+  const parkedAt = argRegs.findIndex((r, k) => k >= floor && opts.parked?.(r) === true && !setUp(k));
+  const top = parkedAt < 0 ? argRegs.length : parkedAt;
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
   const run = (from: number): number => {
     let n = from;
-    while (n < argRegs.length && setUp(n)) {
+    while (n < top && setUp(n)) {
       // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
       // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
       // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
@@ -1836,7 +1843,7 @@ export function fallbackArgc(
   // lift `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` `g(a0, a2 + 1, a2)` on all seven
   // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
   // argument.
-  for (let k = n + 1; k < argRegs.length; k++) {
+  for (let k = n + 1; k < top; k++) {
     if (setUp(k)) {
       const [gapAt, setAt] = [n, k];
       const refuse = () =>

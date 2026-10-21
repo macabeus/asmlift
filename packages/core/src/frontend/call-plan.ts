@@ -180,10 +180,12 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
-  /** whether `v`, in argument register `reg`, is what an elided jump-table dispatch left in that very
-   *  register (frontend/jump-table.ts `staleMarker`): no argument, as a table base is none — the
-   *  compiler wrote it for the dispatch, not for the call, so a guessed arity stops below it. A copy
-   *  of one into another register is a value the case moved there, counted, and its read declines. */
+  /** whether `v`, in argument register `reg`, is what a jump-table dispatch left in that very
+   *  register (frontend/jump-table.ts `parkedIn`): no argument, as a table base is none — the
+   *  compiler wrote it for the dispatch, not for the call, so a guessed arity stops below the lowest
+   *  register only it reaches (`fallbackArgc`'s `parked`), except one this ABI may skip (an O32
+   *  double's a1, a PowerPC pair's r4, a leading float's a0), which stays a gap. A copy of one into
+   *  another register is a value the case moved there, counted, and its read declines. */
   readonly parked?: (v: Value, reg: string) => boolean;
   /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
    *  no opt-out: a count that stopped at the first register nothing reaches would drop every
@@ -847,6 +849,7 @@ export function callDeclarations(
     const { ssa, bi, pairs, guess, placeholders } = site;
     // whether `v`, reaching argument register `r`, may be an argument the caller set up
     const mayPass = (v: Value, r: string) => !placeholders?.has(v) && site.parked?.(v, r) !== true;
+    const holes = argRegisterHoles(target);
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
@@ -900,6 +903,10 @@ export function callDeclarations(
             accept: mayPass,
             gap: { name, at: guess.at, fail },
             floor,
+            parked: (r) =>
+              !holes.skippable.has(r) &&
+              !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
+              ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true),
             decide: (gap, set, refuse) => {
               const value = decideGap(ssa, bi, gap, set, (v) => mayPass(v, set));
               if (value === undefined) {

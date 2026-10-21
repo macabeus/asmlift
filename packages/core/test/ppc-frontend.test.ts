@@ -1473,3 +1473,54 @@ describe('an elided mwcc dispatch writes its registers at each case target', () 
     expect(decompile('swi', def, PPC_MWCC, { asmData }).source).toMatch(/default:\s*\n\s*return a1;/);
   });
 });
+
+// AN UNDECLARED CALL IN A CASE OF AN ELIDED mwcc DISPATCH, as mwcc 2.4.2 -O4,p lays it out: the
+// dispatch's `addi r3,r5,0` leaves the table base in r3, and its `slwi` the scaled index in r0.
+describe('a guessed arity in a case of an elided mwcc dispatch', () => {
+  const asmData = (cases: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: cases.map((off, i) => ({ section: '.data', offset: i * 4, type: 'R_PPC_ADDR32', sym: 'swc', addend: off })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swc', { section: '.text', value: 0, size: 0x5c, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  });
+  // the cases fill 0x2c up to the epilogue at 0x48
+  const asm = (index: string, cases: string[]) =>
+    [
+      '00000000 <swc>:',
+      '   0:\tstwu    r1,-16(r1)',
+      '   4:\tmflr    r0',
+      '   8:\tcmplwi  r3,3',
+      '   c:\tstw     r0,20(r1)',
+      '  10:\tbgt-    48 <swc+0x48>',
+      '  14:\tlis     r5,0',
+      '\t\t\t16: R_PPC_ADDR16_HA\tjtbl',
+      `  18:\tslwi    ${index},r3,2`,
+      '  1c:\taddi    r3,r5,0',
+      '\t\t\t1e: R_PPC_ADDR16_LO\tjtbl',
+      `  20:\tlwzx    r0,r3,${index}`,
+      '  24:\tmtctr   r0',
+      '  28:\tbctr',
+      ...cases,
+      '  48:\tlwz     r0,20(r1)',
+      '  4c:\tmtlr    r0',
+      '  50:\taddi    r1,r1,16',
+      '  54:\tmr      r3,r4',
+      '  58:\tblr',
+    ].join('\n');
+  const callG = (at: string) => [`  ${at}:\tbl      ${at} <swc+0x${at}>`, `\t\t\t${at}: R_PPC_REL24\tg`];
+  const toEnd = (at: string) => `  ${at}:\tb       48 <swc+0x48>`;
+
+  // `int swc(int i, int a) { switch (i) { case 0: a = g(); break; case 1: a += 3; break; case 2:
+  // a = 7; break; } return a; }`: at the call r3 holds the table base and r4 still holds `a`. The
+  // base is no argument, so none above it is. Before, r4 above an empty r3 was a gap, and it declined.
+  test('the table base the dispatch left in r3 is no argument, and none past it is', () => {
+    const cases = ['  2c:\taddi    r4,r4,3', toEnd('30'), ...callG('34'), '  38:\tmr      r4,r3', toEnd('3c')];
+    const body = [...cases, '  40:\tli      r4,7', toEnd('44')];
+    const out = decompile('swc', asm('r0', body), PPC_MWCC, { asmData: asmData([0x34, 0x2c, 0x40, 0x48]) }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*a1 = g\(\);/);
+  });
+});

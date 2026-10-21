@@ -881,6 +881,10 @@ test('a case reading a register the ELIDED dispatch idiom wrote DECLINES', () =>
   expect(decompile('f', call('\tmov\tr0, #1\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(1\);/);
   // …but one the case copied into an argument register is a value it moved there, and declines
   expect(() => decompile('f', call('\tmov\tr1, r0\n\tmov\tr0, #1\n'), ARMV4T_AGBCC)).toThrow(ELIDED_STALE);
+  // nor is any register above it: agbcc keeps a parameter it needs past the dispatch in r2 (`add r2,
+  // r1, #0` in `int f(int i, int a){ switch (i) { case 0: a = gi(a); … } }`), so r0 = a, r1 = the
+  // table's address and r2 = a at the call. A gap below r2 declined before.
+  expect(decompile('f', call('\tmov\tr0, r2\n'), ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*g\(a2\);/);
 });
 
 test('…through a join, at a target the default shares, and round a loop back into the bounds test', () => {
