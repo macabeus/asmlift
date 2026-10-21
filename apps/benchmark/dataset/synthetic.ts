@@ -12487,17 +12487,24 @@ export const SYNTHETIC: SynthSpec[] = [
   //      retarm2_tail / retarm1_tail (sub_0801DFC4): one guard chain (`singleExit` → `foreverShape` →
   //      `onStack`, traced on all three), three cross-jumped exit shapes. sretloop2ret: the function's
   //      OWN hidden-pointer struct return written by two `p.at=..; p.kind=..; return p;` in one loop —
-  //      agbcc merges the two insert tails into one non-ret block; one assigning return lifts.
+  //      agbcc merges the two insert tails into one non-ret block; one assigning return lifts. The
+  //      shared break tail (`codeBreakArm`) lifts it as the source's two arms; its residue is the
+  //      register-held struct's field spelling, not the per-arm copy.
   //      mwcc_242_81 returns the struct in r3 and lifts both (controls); ido7.1 (`swl`) and
   //      gcc2.7.2kmc (frame as sp data) decline first, off. break_elsetail: break_value with an `else`
-  //      OUTSIDE the loop assigning the same u8, whose truncation tail is cross-jumped with the break's;
-  //      the `while` reading takes the break arm as the exit. Declines on all four (mwcc unrolls 8x,
-  //      MIPS put the `andi` in the arm); the no-else control lifts on all four. retarm2_tail: two arms
-  //      in one loop ending in the same `Hit(a); return;`, cross-jumped into one block no edge owns
-  //      (`earlyReturnArm`); one arm owning the tail MATCHes. mwcc_242_81 keeps the tails apart
-  //      (controls); ido7.1 and gcc2.7.2kmc decline on a void function's v0 after `jal`, off. The real
-  //      sub_0801DFC4 reaches this through three `goto`s whose goto-free spelling is a different
-  //      object, so the FUNCTION stays set aside under the no-goto rule; the row pins the guard.
+  //      OUTSIDE the loop assigning the same u8. agbcc cross-jumps the break's `lsr` truncation with
+  //      the `else`'s, so the break region shares a pure block with an entry from outside the loop
+  //      (`codeBreakArm`'s `pureTail`); ido7.1, gcc2.7.2kmc and mwcc_242_81 lay the `else` between the
+  //      loop and the join, so the loop's own exit is a bodyless `j` over it and only that forwarder's
+  //      target spells the loop (`foreverShape`). All four lift since; mwcc as its 8 unrolled break
+  //      arms. The no-else control lifts on all four. retarm2_tail: two arms in one loop ending in the
+  //      same `Hit(a); return;`, which agbcc and gcc2.7.2kmc cross-jump into one block no edge owns;
+  //      `earlyReturnArm` writes it in each arm (the duplication policy), and one arm owning the tail
+  //      MATCHes (retarm1_tail). ido7.1 and mwcc_242_81 keep the tails apart. ido7.1 and gcc2.7.2kmc
+  //      also declined every void function whose loop leaves a value in v0 beside a `jal`'s path
+  //      (frontend/mips.ts reads no v0 at a declared-void return since). The real sub_0801DFC4 reaches
+  //      this through three `goto`s whose goto-free spelling is a different object, so the FUNCTION
+  //      stays set aside under the no-goto rule; the row pins the guard.
   // Still set aside, each one function: sub_0801D6B0's second blocker, a return tail shared by a loop
   // exit and post-loop code (the `goto` set-aside; sound); sub_0803D4AC's by-value parameter byte read
   // (same site as 13, not isolated); EntityCreate's and sub_0801DFC4's far-jump relays (lowered).
@@ -13057,7 +13064,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        if (gTab[i] == 7) {\n            Ping(i);\n            Hit(a);\n            return;\n        }\n' +
       '        if (gTab[i] == 8) {\n            Pong(i);\n            Hit(a);\n            return;\n        }\n    }\n}',
     features: ['branch'],
-    toolchains: ['agbcc', 'mwcc_242_81'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 'extern u8 gTab[16];\nvoid Hit(u32 who);\nvoid Ping(u32 i);\nvoid Pong(u32 i);\nvoid retarm2_tail(u32 a, u32 n);',
     proto: {
       Hit: { params: 1, returnsVoid: true },
@@ -13074,7 +13081,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '        if (gTab[i] == 7) {\n            Ping(i);\n            Hit(a);\n            return;\n        }\n' +
       '        if (gTab[i] == 8) {\n            Pong(i);\n            return;\n        }\n    }\n}',
     features: ['branch'],
-    toolchains: ['agbcc', 'mwcc_242_81'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 'extern u8 gTab[16];\nvoid Hit(u32 who);\nvoid Ping(u32 i);\nvoid Pong(u32 i);\nvoid retarm1_tail(u32 a, u32 n);',
     proto: {
       Hit: { params: 1, returnsVoid: true },
