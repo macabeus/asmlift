@@ -245,6 +245,186 @@ test('two labels on ONE instruction are aliases — a branch to either reaches t
   expect(control).toContain('return 2;'); // the branch target's body is reached, not skipped
 });
 
+// ── code between the table load and the `mov pc` ──────────────────────────────────────────────────
+// agbcc's PRE inserts `reg = expr` "just before the tablejump" (gcse.c:4231-4236), so the dispatch
+// runs it on every case and on no other path. The default reads r2 too: it must see the incoming a2.
+const withExtra = (extra: string) =>
+  'f:\n\tcmp\tr0, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+  `${extra}\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +
+  '.Lc0:\n\tmov\tr0, r2\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, r2\n\tbx\tlr\n';
+
+test('code PRE put inside the dispatch is lifted on the dispatched path only', () => {
+  const out = decompile('f', withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n'), ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
+  // the bounds test's own default path still returns the incoming a2
+  expect(out).toMatch(/else \{\s*\n\s*return a2;/);
+  // the long-jump bounds form keeps its `b DEF` as the default path
+  const long = withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n').replace(
+    '\tbhi\t.Ldef\n',
+    '\tbls\t.LCB\n\tb\t.Ldef\t@long jump\n.LCB:\n',
+  );
+  expect(decompile('f', long, ARMV4T_AGBCC).source).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
+  // a load is a computation PRE may insert too
+  expect(decompile('f', withExtra('\tldr\tr2, [r3, #0x4]\n'), ARMV4T_AGBCC).source).toMatch(
+    /case 0:\s*\n\s*return a3\[1\];/,
+  );
+});
+
+test("a kept dispatch's switch has no `default:` arm: its bounds test already took every other value", () => {
+  // The default edge the dispatch still names is never taken; an arm for it would run the default's
+  // code under the registers the dispatch code wrote (here r2 = a3 - 5, not the incoming a2).
+  const out = decompile('f', withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n'), ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).not.toContain('default:');
+});
+
+test('dispatch code that is not a register computation, or that disturbs the dispatch, DECLINES', () => {
+  const jump = /indirect\/computed jump/;
+  const refused = (extra: string) => () => decompile('f', withExtra(extra), ARMV4T_AGBCC);
+  expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(jump); // writes the register `mov pc` jumps through
+  expect(refused('\tstr\tr3, [r2]\n')).toThrow(jump); // a store
+  expect(refused('\tbl\tg\n')).toThrow(jump); // a call
+  expect(refused('\tadc\tr2, r3\n')).toThrow(jump); // reads the carry
+  expect(refused('\tadd\tsp, #0x8\n')).toThrow(jump); // moves the stack
+  // writes lr: a case's `bx lr` would lift as a return where the hardware jumps to r3
+  expect(refused('\tmov\tlr, r3\n')).toThrow(/'mov lr, r3' writes the register the dispatch needs, 'lr'/);
+  // reads the table pointer the unlifted idiom loaded into r1
+  expect(refused('\tadd\tr2, r1, #0\n')).toThrow(jump);
+  // the decline names the reason the recognised table was refused, not "jump tables unsupported"
+  expect(refused('\tstr\tr3, [r2]\n')).toThrow(/'str r3, \[r2\]' is not a register computation or a load/);
+  expect(refused('\tadc\tr2, r3\n')).toThrow(/'adc r2, r3' is not a register computation/);
+  expect(refused('\tadd\tr2, r1, #0\n')).toThrow(
+    /'add r2, r1, #0' reads 'r1', which the unlifted dispatch idiom wrote/,
+  );
+  expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(/writes the register the dispatch needs, 'r0'/);
+});
+
+test('a case may fall into the default when the dispatch code writes what the default reads', () => {
+  // The default edge of a kept dispatch is never taken, so the copies it carries (here r2 = a3, which
+  // the default reads) never run: they are neither emitted nor a reason to refuse the fall-through.
+  const fallInto = (extra: string) =>
+    withExtra(extra).replace(
+      /\.Lc0:[\s\S]*$/,
+      '.Lc0:\n\tmov\tr0, #5\n\tb\t.Lj\n.Lc1:\n\tadd\tr2, #1\n.Ldef:\n\tlsl\tr0, r2, #1\n.Lj:\n\tadd\tr0, r0, r2\n\tbx\tlr\n',
+    );
+  const out = decompile('f', fallInto('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC).source;
+  // case 0 sees the dispatch's r2 = a3; case 1 adds one to it and runs on into the default
+  expect(out).toMatch(/case 0:\s*\n\s*v0 = 5;\s*\n\s*break;/);
+  expect(out).toMatch(/case 1:\s*\n\s*a2 = a3 \+ 1;\s*\n\s*default:\s*\n\s*a3 = a2;/);
+  expect(out).toMatch(/return v0 \+ a3;/);
+  // the bounds test's own default path reads the incoming a2
+  expect(out).toMatch(/else \{\s*\n\s*a3 = a2;\s*\n\s*v0 = a2 << 1;/);
+});
+
+test('a case falling into a table hole that names the default leaves no dead default arm', () => {
+  // The hole (slot 0) names .Ldef, so that block is case 0's arm, and case 2 falling into it lands
+  // under `case 0:`. The default edge is never taken, so the `default:` label would head a dead copy.
+  const holeFall = (ents: string[]) =>
+    'f:\n\tcmp\tr0, #0x2\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+    `\tadd\tr1, r3, #0\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n${ents.map((e) => `\t.word\t${e}\n`).join('')}` +
+    '.Lc0:\n\tmov\tr0, #5\n\tb\t.Lj\n.Lc1:\n\tadd\tr2, #1\n.Ldef:\n\tlsl\tr0, r2, #1\n.Lj:\n\tadd\tr0, r0, r2\n\tbx\tlr\n';
+  for (const [ents, hole, falls] of [
+    [['.Ldef', '.Lc0', '.Lc1'], 0, 2],
+    [['.Lc0', '.Ldef', '.Lc1'], 1, 2],
+    [['.Lc1', '.Lc0', '.Ldef'], 2, 0],
+    [['.Lc0', '.Lc1', '.Ldef'], 2, 1],
+  ] as const) {
+    const out = decompile('f', holeFall([...ents]), ARMV4T_AGBCC).source;
+    expect(out).toMatch(
+      new RegExp(`case ${falls}:\\s*\\n\\s*a2 = a2 \\+ 1;\\s*\\n\\s*case ${hole}:\\s*\\n\\s*v0 = a2 << 1;`),
+    );
+    expect(out).not.toContain('default:');
+    // the bounds test's own default path still runs the default's body
+    expect(out).toMatch(/else \{\s*\n\s*v0 = a2 << 1;/);
+  }
+});
+
+test('every data-processing op that writes only its destination is admitted, rotate included', () => {
+  // The admitted set is `mayWriteReg`'s operand-0 writers less the carry readers, so a mnemonic is
+  // corrected in one place: `ror` reads no flag and lifts like `lsl`.
+  expect(decompile('f', withExtra('\tror\tr2, r3\n'), ARMV4T_AGBCC).source).toContain('switch (a0)');
+});
+
+test('dispatch code may overwrite the scrutinee: the switch reads it as the dispatch was entered', () => {
+  // agbcc's own shape: the scrutinee r1 is also the table-pointer register, so the idiom has already
+  // overwritten it, and PRE then reuses r1 for its value. The cases read that value.
+  const asm =
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n` +
+    '\tadd\tr1, r3, #0\n\tsub\tr1, r1, #0x25\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n' +
+    '.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n.Lc0:\n\tadd\tr0, r1, #0\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n' +
+    '.Ldef:\n\tmov\tr0, r1\n\tbx\tlr\n';
+  const out = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a1)');
+  expect(out).toMatch(/case 0:\s*\n\s*return a3 - 37;/);
+  // the bounds test's default path never ran the dispatch: it returns the incoming scrutinee
+  expect(out).toMatch(/else \{\s*\n\s*return a1;/);
+});
+
+test('a case reading a register the kept dispatch idiom wrote DECLINES', () => {
+  // The idiom (`lsl`, the pointer load, `add`, the target load) is not lifted, so a case reading what
+  // it left would see the value from before the dispatch: on the hardware r1 holds the table's
+  // address and r0 the case's own code address. A register the dispatch code rewrites is not stale.
+  const reading = (c0: string, c1: string) =>
+    withExtra('\tadd\tr2, r3, #0x1\n').replace(
+      /\.Lc0:[\s\S]*$/,
+      `.Lc0:\n${c0}\tbx\tlr\n.Lc1:\n${c1}\tbx\tlr\n.Ldef:\n\tmov\tr0, #9\n\tbx\tlr\n`,
+    );
+  const stale = /a case of the kept jump table reads (r0|r1), which the unlifted dispatch idiom wrote/;
+  expect(() => decompile('f', reading('\tadd\tr0, r1, #0\n', '\tmov\tr0, #4\n'), ARMV4T_AGBCC)).toThrow(stale);
+  expect(() => decompile('f', reading('\tmov\tr0, #4\n', '\tadd\tr0, r0, #3\n'), ARMV4T_AGBCC)).toThrow(stale);
+  // r0 left holding the code address at a `bx lr`: an inferred return reads it, a declared void one does not
+  const leaves = reading('\tmov\tr0, #4\n', '\tstr\tr2, [r3]\n');
+  expect(() => decompile('f', leaves, ARMV4T_AGBCC)).toThrow(stale);
+  const voidOut = decompile('f', leaves, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(voidOut).toContain('switch (a0)');
+  // what the dispatch code wrote is not stale
+  expect(decompile('f', reading('\tadd\tr0, r2, #0\n', '\tmov\tr0, #4\n'), ARMV4T_AGBCC).source).toMatch(
+    /case 0:\s*\n\s*return a3 \+ 1;/,
+  );
+});
+
+test('a table entry naming a dispatch block DECLINES — it jumps through a code address, not a case', () => {
+  // A table case is an edge the branch counts never saw. A kept dispatch would lift it as a second
+  // switch on the unscaled scrutinee (a `while (1)` re-dispatch); the asm jumps through r0, which
+  // then holds the table entry's code address.
+  const entering = (extra: string) =>
+    withExtra(extra)
+      .replace('\tbhi\t.Ldef\n', '\tbhi\t.Ldef\n.Ldisp:\n')
+      .replace('\t.word\t.Lc1\n', '\t.word\t.Ldisp\n');
+  const why = /the recovered jump table's 'mov pc, r0' at '\.Ldisp' is still reachable/;
+  expect(() => decompile('f', entering('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC)).toThrow(why);
+  expect(() => decompile('f', entering(''), ARMV4T_AGBCC)).toThrow(why);
+});
+
+test("a table entry naming the long-jump form's `b DEF` relay is an edge to the default", () => {
+  // The relay is not a dispatch block: entering it runs the default, with or without dispatch code.
+  const relay = (extra: string) =>
+    withExtra(extra)
+      .replace('\tbhi\t.Ldef\n', '\tbls\t.LCB\n.Lrelay:\n\tb\t.Ldef\n.LCB:\n')
+      .replace('\t.word\t.Lc1\n', '\t.word\t.Lrelay\n');
+  expect(decompile('f', relay(''), ARMV4T_AGBCC).source).toMatch(/case 1:\s*\n\s*default:\s*\n\s*return a2;/);
+  expect(decompile('f', relay('\tadd\tr2, r3, #0\n'), ARMV4T_AGBCC).source).toMatch(/case 1:\s*\n\s*a2 = a3;/);
+});
+
+test('a TABLE entry naming a label that shares its instruction dispatches to that instruction', () => {
+  // jump.c cross-jumps a case arm identical to the default's onto the default's first instruction
+  // and leaves the case label standing on it (`.Lc1:` `.Ldef:` `mov r0,#99`): the table names
+  // `.Lc1`, the bounds branch `.Ldef`. Asserted against the table naming `.Ldef` itself.
+  const table = (entry: string, labels: string, after = '') =>
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n${labels}\tmov\tr0, #99\n\tbx\tlr\n${after}` +
+    `.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t${entry}\n`;
+  const control = decompile('f', table('.Ldef', '.Ldef:\n'), ARMV4T_AGBCC).source;
+  expect(control).toContain('switch (a1)');
+  expect(decompile('f', table('.Lc1', '.Lc1:\n.Ldef:\n'), ARMV4T_AGBCC).source).toBe(control);
+  // A label standing on DATA is not an alias of the code after it, and one left trailing names no
+  // instruction at all: both entries still decline.
+  const jump = /indirect\/computed jump/;
+  expect(() => decompile('f', table('.Lc1', '.Ldef:\n', '.Lc1:\n'), ARMV4T_AGBCC)).toThrow(jump);
+  expect(() => decompile('f', `${table('.Lc1', '.Ldef:\n')}.Lc1:\n`, ARMV4T_AGBCC)).toThrow(jump);
+});
+
 // ── Regime A (comparison trees) ───────────────────────────────────────────────────────────────────
 test('a comparison tree whose default is the merge recovers as a switch, not an if-chain', () => {
   // Regime A shares the arm analysis. Before it, the merge counted as a fall-through target, so the

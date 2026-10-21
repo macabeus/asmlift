@@ -5989,6 +5989,9 @@ export function structure(
       // Everything below that depends on WHERE THE SWITCH ENDS, read for one candidate merge: the
       // arms' exits, their linearization, and whether the emission below would decline them. Read
       // twice at most — see the retry after it.
+      // A default edge the dispatch never takes: a frontend whose dispatch is entered only past a
+      // bounds test that already sent every other value elsewhere says so with `exhaustive`.
+      const deadDefaultEdge = term.attrs.exhaustive === true;
       const readArms = (at: Block | null) => {
         // The blocks an arm could fall INTO. The default block counts only when it is a block of
         // its own: when it IS the merge, "the default" is just where the switch ends, and an arm
@@ -6073,8 +6076,10 @@ export function structure(
             // path calling with 5). They cannot simply be dropped either: entering that arm by its
             // own case value needs them. Hoisting them above the switch is possible but not always
             // safe (another arm may read the same name first), so this shape declines LOUD;
-            // recovering it is future work.
-            if (edgeCopyRecords(b, next.edge).length > 0) {
+            // recovering it is future work. The one edge that needs no copies is a default edge the
+            // dispatch never takes (the op's `exhaustive` attr): nothing enters the default by it,
+            // so its copies are not emitted (`edgeCopies` below) and cannot re-run.
+            if (!(deadDefaultEdge && next.edge === defEdge) && edgeCopyRecords(b, next.edge).length > 0) {
               return {
                 at: i,
                 raise: () => {
@@ -6202,13 +6207,27 @@ export function structure(
       // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
       // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
       // output (the same reason emitDoWhile reuses its `updates`).
-      const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
+      // A dead default edge carries none: the default runs only when a case falls into it, and that
+      // case's own edge copies hand it its values.
+      const edgeCopies = emitOrder.map((a) => (deadDefaultEdge && a.edge === defEdge ? [] : argAssignsFor(b, a.edge)));
+      // A default edge the dispatch never takes (the op's `exhaustive` attr) gets no arm: its block
+      // runs under whatever the dispatch path left in the registers, a state the machine never gives
+      // it there. Unless a case runs on into that block — then the label is where that case goes.
+      // A table whose hole names that block already gives it a case arm (`dflt` is null in
+      // `readArms`), and a fall into the block lands under that arm's labels, never the default's.
+      const deadDefault =
+        deadDefaultEdge &&
+        (armOf.has(defEdge.block) ||
+          ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block));
       const bodies = emitOrder.map((a, i) => {
         // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
         // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
         // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
         if (read.refusal !== null && read.refusal.at === i) {
           read.refusal.raise();
+        }
+        if (deadDefault && i === emitOrder.length - 1) {
+          return { body: [], fallsThrough: false };
         }
         const exit = exitOf.get(a.entry)!;
         const ft = exit.kind === 'fallthrough';

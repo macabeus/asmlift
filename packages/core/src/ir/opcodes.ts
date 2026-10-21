@@ -279,6 +279,11 @@ export const OPCODES = {
   // Many-way switch dispatch (Regime B, jump table). The single operand is the scrutinee;
   // successors are the N case blocks followed by the default block (the LAST successor);
   // `cases` is the index-aligned list of the first N successors' case values.
+  // `exhaustive: true` — OPTIONAL, set by a frontend whose dispatch block is entered only past a
+  // bounds test that already sent every value outside `cases` elsewhere, so the default edge is
+  // never taken. It still names a block, because the op needs a last successor; the structurer
+  // reads the attr to emit no `default:` arm for it. A pass that rebuilds the op leaves it off and
+  // gets the default arm back, which is the conservative answer.
   switch_br: { operands: 1, results: 0, terminator: true, successors: 'variadic', requiredAttrs: ['cases'] },
 } as const satisfies Record<string, OpSig>;
 
