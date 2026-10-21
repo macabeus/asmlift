@@ -5100,10 +5100,19 @@ function thumbFillOf(
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
   // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
   // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
-  const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
-    ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
-  }));
+  const liveIns = registerLiveIns(
+    target,
+    frame.savedRegs,
+    contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
+  );
+  const ssa = makeSsaBuilder(
+    name,
+    cfg.asmBlocks.length,
+    cfg.preds,
+    () => ({ ...frame.partition, ...liveIns }),
+    undefined,
+    liveIns.globalRegs,
+  );
   const statics = makeLocalStatics();
   const operands = thumbOperands({
     name,

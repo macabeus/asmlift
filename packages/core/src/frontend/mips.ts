@@ -1601,22 +1601,21 @@ function liftOnce(
   // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
   // builder asks for before that claims no frame, which only refuses more.
   let ownedFrameOf: (() => { from: number; to: number } | undefined) | undefined;
+  const liveIns = registerLiveIns(
+    target,
+    savedRegs,
+    options.contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
     () => {
       const owned = ownedFrameOf?.();
-      return {
-        ...registerLiveIns(
-          target,
-          savedRegs,
-          options.contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
-        ),
-        ...(owned === undefined ? {} : { ownedLocals: owned }),
-      };
+      return { ...liveIns, ...(owned === undefined ? {} : { ownedLocals: owned }) };
     },
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
+    liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;

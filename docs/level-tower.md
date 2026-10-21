@@ -1712,9 +1712,17 @@ corpus: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` get their 
 three `SoundMainBTM` (`mov ip, r4`, no prologue either) go back to the fabricated trailing parameter
 they had before this capability existed, which is an over-count and not a wrong answer.
 
-The gap this leaves is one direction only. A register in the ABI list that the prologue did not save
-falls back to being a parameter — the treatment a target declaring no partition gets — so what the
-model cannot describe costs an invented argument, never an invented local.
+A register in the ABI list that the prologue did not save is no argument either: a C caller passes
+nothing there, so naming it a parameter puts a value in the signature the caller would hand over in
+`r0`-`r3`. Compiled code reaches that shape one way, a FILE-SCOPE GLOBAL REGISTER VARIABLE
+(`register int g __asm__("r8");` — gcc's `globalize_reg`, regclass.c:587-611, makes the register
+fixed and call-used, so no prologue saves it), and `return g;` / `g = a;` compile to exactly the
+unsaved read and write. So the model's third list is that register: where the compiler can declare
+one (`globalRegisterVariables` — agbcc r4-r11, gcc 2.7.2 and KMC s0-s8, mwcc 2.4.2/2.4.7 r14-r28 as
+a run from r14), every read of it is a load of that global and every write a store, which a call in
+between may change like any global's; `ChnVolSetAsm` lifts to `((u8 *)greg_r4)[18]`, byte-exact
+against agbcc's own compile of `register u8 *ra __asm__("r4")`. Where it cannot (IDO 7.1, mwcc
+2.3.3, PowerPC r29-r31), the read and the write refuse (`unsavedCalleeSavedRegs`).
 
 O32 needs the same clause for the opposite reason. Its scratch set is thirteen registers (`at`,
 `v0`/`v1`, `t0`-`t9`) where Thumb's is `ip` alone, so the save is no evidence there, and hand-written

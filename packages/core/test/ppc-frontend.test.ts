@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import type { AsmData } from '../src/frontend/asmdata';
 import { PpcUnsupportedError, lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
-import { PPC_MWCC, targetFor } from '../src/target';
+import { PPC_MWCC, PPC_MWCC_233, targetFor } from '../src/target';
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 /** `dis` on a target that claims no start offset past which it never loads its outgoing area. */
@@ -662,6 +662,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
           '10:\taddi    r1,r1,16\n14:\tblr\n',
       ),
     ).toThrow(unsaved);
+    // r14..r28 are where 2.4.2 and 2.4.7 declare a global register variable (`register int g
+    // __asm__("r14"); return g;` is `mr r3,r14`), so an unsaved one is that global; 2.3.3 has no
+    // such declaration
+    expect(dis('ug', '0:\tadd     r3,r3,r14\n4:\tblr\n')).toBe('s32 ug(s32 a0) {\n    return a0 + greg_r14;\n}\n');
+    expect(() => decompile('ug', '0 <ug>:\n0:\tadd     r3,r3,r14\n4:\tblr\n', PPC_MWCC_233)).toThrow(
+      /it reads callee-saved r14 before writing it and never saved it/,
+    );
   });
   // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
   // two-parameter function fills; without its own declaration each read is a made-up parameter

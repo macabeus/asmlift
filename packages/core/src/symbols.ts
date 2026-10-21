@@ -189,6 +189,12 @@ export interface SymbolInfo {
    *  DECLARATION differs — `#define name body` instead of `extern T name;` — which is why the
    *  body is carried rather than reconstructed. */
   macroBody?: string;
+  /** This name is a FILE-SCOPE GLOBAL REGISTER VARIABLE, and this is the register's `__asm__` name
+   *  (`target.globalRegisterVariables`): the lift reads and writes a callee-saved register no
+   *  prologue saved as this global. `gName` and `gName = v` mean what they mean for an `extern`, and
+   *  `&gName` is an error, as for any register variable. Only the DECLARATION differs —
+   *  `register T name __asm__("r8");` instead of `extern T name;`. */
+  globalRegister?: string;
 }
 
 /** THE one reading of {@link SymbolInfo.dims} for spelling C, shared by the access side

@@ -222,6 +222,14 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       lines.push(`#define ${name} ${info.macroBody}`);
       continue;
     }
+    // A GLOBAL REGISTER VARIABLE declares itself in its register (SymbolInfo.globalRegister), typed
+    // as a name-only global is: a pointer where the body stores or meets one, else the word the
+    // body accesses.
+    if (info.globalRegister !== undefined) {
+      const t = holdsPointer ? 'void *' : `${intType(access?.width ?? 4, access?.signed ?? true) ?? 's32'} `;
+      lines.push(`register ${t}${name} __asm__("${info.globalRegister}");`);
+      continue;
+    }
     // A CALL TARGET the project declared completely — its own prototype, re-spelled from the
     // parameter and return type texts the project wrote. This is the one declaration here that
     // is load-bearing for the CALL and not only for the name: an implicit declaration is `int`,
@@ -362,10 +370,11 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   return lines.length ? lines.join('\n') + '\n' : '';
 }
 
-/** The object-like `#define`s out of a rendered declaration block.
+/** The object-like `#define`s out of a rendered declaration block, and its global register
+ *  variables.
  *
- *  Address-cast macro defines are the one part of a synthesized block that must survive into the
- *  HEADERS world too. Everything else there is owned by the injected headers (a duplicate typedef
+ *  Address-cast macro defines are one of the two parts of a synthesized block that must survive into
+ *  the HEADERS world too. Everything else there is owned by the injected headers (a duplicate typedef
  *  or struct definition is a C89 hard error), but a duplicate `#define` with an identical body is
  *  legal — and a PREPROCESSED project context has no macros left at all, so dropping these turns a
  *  macro-named candidate into an `undeclared identifier` rather than a spelling choice. */
@@ -373,7 +382,9 @@ export function macroDefinesOf(declarations: string | undefined): string {
   if (!declarations) {
     return '';
   }
-  const lines = declarations.split('\n').filter((l) => l.startsWith('#define '));
+  // …and so must a global register variable's: no header declares the name the lift made up for
+  // it, so the headers world would leave it undeclared
+  const lines = declarations.split('\n').filter((l) => l.startsWith('#define ') || l.startsWith('register '));
   return lines.length ? lines.join('\n') + '\n' : '';
 }
 

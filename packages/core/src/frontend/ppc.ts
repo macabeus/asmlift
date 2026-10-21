@@ -680,8 +680,9 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
 
 /** Whether any of `body` names a callee-saved general register (`isCalleeSaved`), as an operand or
  *  a memory base, that the prologue did not save — the mark of hand-written asm, since compiled
- *  code saves such a register before it touches it. A save routine or `stmw` names only its first
- *  register, and saves it, so either is in `saved`. */
+ *  code saves such a register before it touches it, unless the register holds a global register
+ *  variable (`target.globalRegisterVariables`), which compiled code never saves. A save routine or
+ *  `stmw` names only its first register, and saves it, so either is in `saved`. */
 const namesUnsavedCalleeSaved = (
   body: readonly Instr[],
   target: TargetDescription,
@@ -690,7 +691,9 @@ const namesUnsavedCalleeSaved = (
   body.some((ins) =>
     ins.ops.some((op) => {
       const reg = op.includes('(') ? parseMem(op).base : op;
-      return isCalleeSaved(target, reg) && !saved.has(reg);
+      return (
+        isCalleeSaved(target, reg) && !saved.has(reg) && !Object.hasOwn(target.globalRegisterVariables?.regs ?? {}, reg)
+      );
     }),
   );
 
@@ -1529,17 +1532,18 @@ function liftOnce(
     fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined)),
     ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
   );
+  const liveIns = registerLiveIns(
+    target,
+    savedRegs,
+    !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () =>
-      registerLiveIns(
-        target,
-        savedRegs,
-        !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
-      ),
+    () => liveIns,
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
+    liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 

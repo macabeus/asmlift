@@ -17,6 +17,7 @@ import {
   MIPS_GCC,
   MIPS_IDO,
   PPC_MWCC,
+  PPC_MWCC_233,
   TOOLCHAIN_TARGETS,
   type TargetDescription,
   type ToolchainId,
@@ -33,7 +34,7 @@ const DESCRIPTIONS: Record<ToolchainId, TargetDescription> = {
   'gcc2.7.2kmc': MIPS_GCC,
   'gcc2.7.2': MIPS_GCC,
   mwcc_242_81: PPC_MWCC,
-  mwcc_233_163n: PPC_MWCC,
+  mwcc_233_163n: PPC_MWCC_233,
   mwcc_247_107: PPC_MWCC,
 };
 const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);

@@ -780,32 +780,57 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
   // The other side of that fixture's premise, and the reason it had to be stated: the rule is
   // "the compiler homed a local here", which is only true of a register the function SAVED.
-  test('a register the prologue never saved is not one the compiler homed a local in', () => {
+  describe('a register the prologue never saved is not one the compiler homed a local in', () => {
     // The MP2K engine's hand-written `ChnVolSetAsm` — vendored in klonoa, sa3 and pokeemerald
     // alike — receives two pointers in r4/r5 by a private convention and has no prologue at all.
     // Classified by the ABI alone it came out storing through `uninit_r4`; read as parameters it came
-    // out `f(u8 *a0, u8 *a1)`, which a C caller hands over in r0/r1. Neither is what the machine
-    // does: the values are shared with the caller in registers it expects preserved, which is a
-    // global register variable (`register u8 *ra asm("r4");` compiles to exactly these bytes).
-    const refused = (reg: string) => new RegExp(`it reads callee-saved ${reg} before writing it and never saved it`);
+    // out `f(u8 *a0, u8 *a1)`, which a C caller hands over in r0/r1. What the machine does is share
+    // the values with the caller in registers it expects preserved: a global register variable, and
+    // `register u8 *ra __asm__("r4");` compiles to exactly these bytes.
     const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
-    expect(() => decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' })).toThrow(refused('r4'));
     // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
     // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved
     // while saving the ones it uses itself.
     const half = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
-    expect(() => decompile('f', half, ARMV4T_AGBCC)).toThrow(refused('r4'));
     // r8-sl cannot be pushed directly, so agbcc saves them as `mov rLow, rHi; push {rLow}` — the
     // shape every high-register inhabitant in the corpus goes through. Read literally, the save set
     // would hold only the low register and the four of them would lose their local. (The `hi`
     // fixture above is the positive half; this is what happens without the mov.)
     const movless =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tmov\tr1, r8\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
-    expect(() => decompile('f', movless, ARMV4T_AGBCC)).toThrow(refused('r8'));
-    // …and a WRITE to one is handed back to the caller, which no C local spells
-    expect(() => decompile('f', 'f:\n\tmov\tr8, r0\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(
-      /it writes callee-saved r8 and never saved it/,
-    );
+    // …and a WRITE to one is handed back to the caller
+    const write = 'f:\n\tmov\tr8, r0\n\tbx\tlr\n';
+
+    test('is a global register variable where agbcc can declare one', () => {
+      expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
+        's32 f(void) {\n    s32 v0;\n    v0 = ((u8 *)greg_r4)[18];\n    ((u8 *)greg_r5)[2] = v0;\n    return v0;\n}\n',
+      );
+      expect(decompile('f', half, ARMV4T_AGBCC).source).toContain('return a4 + (greg_r4 + 1);');
+      expect(decompile('f', movless, ARMV4T_AGBCC).source).toContain('return a8 + greg_r8;');
+      expect(decompile('f', write, ARMV4T_AGBCC).source).toBe(
+        's32 f(s32 a0) {\n    greg_r8 = a0;\n    return a0;\n}\n',
+      );
+      // memory, not a value the function holds: a call between the write and the read may change it,
+      // so the read is the global's again
+      const call = 'f:\n\tpush\t{lr}\n\tmov\tr8, r0\n\tbl\tg\n\tmov\tr0, r8\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', call, ARMV4T_AGBCC, { prototypes: { g: { params: 0, returnsVoid: true } } }).source).toBe(
+        's32 f(s32 a0) {\n    greg_r8 = a0;\n    g();\n    return greg_r8;\n}\n',
+      );
+      // both spellings of r10 are the one global
+      const sl = 'f:\n\tmov\tr1, sl\n\tmov\tr10, r0\n\tadd\tr0, r1, #0\n\tbx\tlr\n';
+      expect(decompile('f', sl, ARMV4T_AGBCC).source).toBe(
+        's32 f(s32 a0) {\n    s32 v0;\n    v0 = greg_r10;\n    greg_r10 = a0;\n    return v0;\n}\n',
+      );
+    });
+
+    test('…and refuses where the compiler has no spelling for one', () => {
+      const none = { ...ARMV4T_AGBCC, globalRegisterVariables: undefined };
+      const read = (reg: string) => new RegExp(`it reads callee-saved ${reg} before writing it and never saved it`);
+      expect(() => decompile('f', noSave, none, { onGap: 'strict' })).toThrow(read('r4'));
+      expect(() => decompile('f', half, none)).toThrow(read('r4'));
+      expect(() => decompile('f', movless, none)).toThrow(read('r8'));
+      expect(() => decompile('f', write, none)).toThrow(/it writes callee-saved r8 and never saved it/);
+    });
   });
 
   test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {
