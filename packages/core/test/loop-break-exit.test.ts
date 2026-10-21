@@ -1027,6 +1027,45 @@ const SHARED_TAIL_PHI = `fn sharedphi {
   ret %16
 }`;
 
+/** agbcc's `if (flag == 0) { for (i = 0; i < n; i++) if (a(i) == k) { id = i; break; } } else id =
+ *  flag + 26; out(id);` with a `u8 id`: the break arm and the `else` each compute a value and jump to
+ *  ONE pure block that finishes it (agbcc's `lsl` in each, one cross-jumped `lsr`; spelt here with
+ *  `add`/`sub`, which the trace oracle models and shifts are not). */
+const PURE_TAIL_ELSE = `fn elsetail {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %6: u32 = icmp_slt %5, %0
+  cond_br %6, ^bb2(), ^bb7(%3)
+^bb2():
+  %7: s32 = call %5 {target="a"}
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  br ^bb5(%10)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  %13: s32 = const {value=100}
+  %14: s32 = add %12, %13
+  br ^bb5(%14)
+^bb5(%21: s32):
+  %20: s32 = const {value=100}
+  %22: s32 = sub %21, %20
+  br ^bb7(%22)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  br ^bb1(%16)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  ret %18
+}`;
+
 describe('break arms that share a tail', () => {
   test('a top-tested loop writes the shared tail in each arm, ahead of its `break`', () => {
     const { src, agreement, shipped } = judged(SHARED_TAIL_TOP_TESTED);
@@ -1050,13 +1089,21 @@ describe('break arms that share a tail', () => {
   // Each refusal leaves the loop to decline LOUD.
   const declines = (ir: string) => expect(() => judged(ir)).toThrow(/cannot structure/);
 
-  test('a shared tail also entered from before the loop is refused', () => {
-    declines(
+  // An entry from before the loop runs on a path that ran no arm, and the exit does not reach the
+  // tail: each path runs one copy once, whatever the tail does (the duplication policy, at
+  // `earlyReturnArm`).
+  test('a shared tail also entered from before the loop is written in each arm and where it sits', () => {
+    const { src, agreement, shipped } = judged(
       SHARED_TAIL_TOP_TESTED.replace(
         '  br ^bb1(%2)\n',
         '  %20: u32 = icmp_eq %0, %1\n  cond_br %20, ^bb6(), ^bb1(%2)\n',
       ).replace('%13: s32 = call %3 {target="hit"}', '%13: s32 = call %0 {target="hit"}'),
     );
+    expect(src.match(/hit\(a0\);\n {16}break;/g)).toHaveLength(2);
+    expect(src.match(/hit\(/g)).toHaveLength(3);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a shared tail the exit also reaches is refused', () => {
@@ -1068,6 +1115,32 @@ describe('break arms that share a tail', () => {
     );
   });
 
+  test('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {
+    const { src, agreement, shipped } = judged(PURE_TAIL_ELSE);
+    expect(src).toContain('while (1) {');
+    // the tail is written twice: once ahead of the `break`, once in the `else`
+    expect(src.match(/ - 100;/g)).toHaveLength(2);
+    expect(src.match(/out\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  // agbcc's `gLast = id;` in the break and in the `else`, cross-jumped into one `strb` past the `lsr`;
+  // gcc2.7.2kmc's one `jal note` both enter. Spelt with a call the trace oracle logs.
+  test('a tail an `else` before the loop also enters is written in each when it runs an effect', () => {
+    const { src, agreement, shipped } = judged(
+      PURE_TAIL_ELSE.replace(
+        '  %22: s32 = sub %21, %20\n',
+        '  %22: s32 = sub %21, %20\n  %23: s32 = call %22 {target="hit"}\n',
+      ),
+    );
+    expect(src).toContain('while (1) {');
+    expect(src.match(/hit\(/g)).toHaveLength(2);
+    expect(src.match(/out\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
   test('a shared tail holding a loop of its own is refused', () => {
     declines(
       SHARED_TAIL_TOP_TESTED.replace(
@@ -1075,5 +1148,236 @@ describe('break arms that share a tail', () => {
         '^bb6():\n  br ^bb9()\n^bb9():\n  %13: s32 = call %3 {target="hit"}\n  cond_br %13, ^bb9(), ^bb7()',
       ),
     );
+  });
+});
+
+// A LOOP WHOSE NORMAL EXIT JUMPS OVER AN `else` (raise/latch.ts `foldExitTrampolines`, whose scope
+// gate counts a second exit that REACHES the target): ido, gcc2.7.2kmc and mwcc lay `if (f) { for (..)
+// if (a(i) == k) { id = i + 100; break; } } else id = f + 26; out(id);` out with the `else` between
+// the loop and the join. The break arm runs its code and jumps to the join; the loop's own exit lands
+// on a bodyless `j` over the `else`. Neither exit edge's target is the join, so the loop has two exit
+// targets until the fold splices the `j` out.
+const EXIT_OVER_ELSE = `fn fwdexit {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %7: s32 = call %5 {target="a"}
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  br ^bb7(%10)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  %6: u32 = icmp_slt %16, %0
+  cond_br %6, ^bb1(%16), ^bb4()
+^bb4():
+  br ^bb7(%3)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  br ^bb7(%12)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  br ^bb9()
+^bb9():
+  ret %18
+}`;
+
+/** ido's spelling of the same source when the break arm runs a call under an `if`: `if (f) { for (..)
+ *  if (i == k) { if (i + 100 < n) ping(i); id = i + 100; break; } } else id = f + 26; out(id);`.
+ *  The header is the arm's own test, so the header's way out is the break arm, and its tail (the `u8`
+ *  truncation, spelt `sub`) is the one block the `else` enters too. Once the `j` is folded, the
+ *  `while` reading takes that arm for the loop's exit unless the header's arm is asked the way
+ *  `while (1)` asks it, as a break whose tail an `else` shares. */
+const ARM_OVER_ELSE = `fn armelse {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb1(%3), ^bb6()
+^bb1(%5: s32):
+  %8: u32 = icmp_eq %5, %1
+  cond_br %8, ^bb3(), ^bb8()
+^bb3():
+  %9: s32 = const {value=100}
+  %10: s32 = add %5, %9
+  %30: u32 = icmp_slt %10, %0
+  cond_br %30, ^bb11(), ^bb5(%10)
+^bb11():
+  %31: s32 = call %5 {target="ping"}
+  br ^bb5(%10)
+^bb8():
+  %15: s32 = const {value=1}
+  %16: s32 = add %5, %15
+  %6: u32 = icmp_slt %16, %0
+  cond_br %6, ^bb1(%16), ^bb4()
+^bb4():
+  br ^bb7(%3)
+^bb6():
+  %11: s32 = const {value=26}
+  %12: s32 = add %2, %11
+  br ^bb5(%12)
+^bb5(%21: s32):
+  %20: s32 = const {value=7}
+  %22: s32 = sub %21, %20
+  br ^bb7(%22)
+^bb7(%17: s32):
+  %18: s32 = call %17 {target="out"}
+  ret %18
+}`;
+
+describe('a loop whose exit jumps over an `else`', () => {
+  test('folds the empty exit block, and the loop leaves by a `break` that hands the join a value', () => {
+    const r = folded(EXIT_OVER_ELSE);
+    expect(r.n).toBe(1);
+    expect(r.src).toContain('while (1) {');
+    expect(r.src.match(/break;/g)).toHaveLength(2);
+    expect(r.src.match(/out\(/g)).toHaveLength(1);
+    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('declines without the fold: the structurer has no second reading of the two exit targets', () => {
+    expect(() => judged(EXIT_OVER_ELSE)).toThrow(/unrecovered back-edge/);
+  });
+
+  test('a header whose way out is a break arm sharing its tail with the `else` leaves `while` to `while (1)`', () => {
+    const r = folded(ARM_OVER_ELSE);
+    expect(r.n).toBe(1);
+    expect(r.src).toContain('while (1) {');
+    expect(r.src.match(/ping\(/g)).toHaveLength(1);
+    expect(r.src.match(/ - 7;/g)).toHaveLength(2);
+    expect(r.src.match(/out\(/g)).toHaveLength(1);
+    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a second exit that reaches the target only round an enclosing loop does not count', () => {
+    // the break arm ^bb3 now jumps back to ^bb10, the header of an OUTER loop around this one; ^bb7
+    // is reached from ^bb3 only through that back-edge, so the `j` is the loop's one way to it
+    const outer = EXIT_OVER_ELSE.replace(
+      'cond_br %4, ^bb1(%3), ^bb6()',
+      'cond_br %4, ^bb10(), ^bb6()\n^bb10():\n  br ^bb1(%3)',
+    ).replace('  br ^bb7(%10)', '  br ^bb10()');
+    const fn = parse(outer);
+    verify(fn);
+    expect(foldExitTrampolines(fn)).toBe(0);
+  });
+});
+
+// TWO EARLY-RETURN ARMS THAT SHARE THEIR TAIL (`earlyReturnArm`): `if (k(i) == 7) { ping(i); return
+// hit(a); } if (k(i) == 8) { pong(i); return hit(a); }`, the two `hit(a); return` cross-jumped into one
+// block (agbcc, gcc2.7.2kmc: jump.c). No edge dominates that block, so neither arm owns it, and it
+// calls. Only the loop's exit arms run it and it holds no cycle, so the duplication policy writes it
+// in each arm: each path still calls `hit` once.
+const SHARED_RETURN_TAIL = `fn rettail {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%4: s32):
+  %3: u32 = icmp_slt %4, %1
+  cond_br %3, ^bb2(), ^bb7()
+^bb2():
+  %5: s32 = call %4 {target="k"}
+  %6: s32 = const {value=7}
+  %7: u32 = icmp_eq %5, %6
+  cond_br %7, ^bb3(), ^bb8()
+^bb3():
+  %8: s32 = call %4 {target="ping"}
+  br ^bb5()
+^bb8():
+  %9: s32 = const {value=8}
+  %10: u32 = icmp_eq %5, %9
+  cond_br %10, ^bb4(), ^bb6()
+^bb4():
+  %11: s32 = call %4 {target="pong"}
+  br ^bb5()
+^bb5():
+  %12: s32 = call %0 {target="hit"}
+  ret %12
+^bb6():
+  %13: s32 = const {value=1}
+  %14: s32 = add %4, %13
+  br ^bb1(%14)
+^bb7():
+  ret %2
+}`;
+
+describe('early-return arms that share their tail', () => {
+  test('each arm writes the shared tail and its `return`', () => {
+    const { src, agreement, shipped } = judged(SHARED_RETURN_TAIL);
+    expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
+    expect(src.match(/ping\(/g)).toHaveLength(1);
+    expect(src.match(/pong\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 180, disagree: 0 });
+    expect(shipped).toEqual({ judged: 180, disagree: 0 });
+  });
+
+  test("a tail the loop's own exit also runs is written once, after the loop", () => {
+    // the exit's `br` to the tail is an exit trampoline beside the arms that reach the tail too
+    const { src, agreement, shipped } = folded(SHARED_RETURN_TAIL.replace('^bb7():\n  ret %2', '^bb7():\n  br ^bb5()'));
+    expect(src.match(/hit\(/g)).toHaveLength(1);
+    expect(src.match(/break;/g)).toHaveLength(2);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+});
+
+// THE SAME ARMS IN A LOOP NESTED IN ANOTHER. The inner loop's exit runs `tick(j)` and goes round the
+// outer loop, which re-enters the inner one and so reaches every block of both arms — but only
+// through the outer back-edge, which is no path that runs an arm's tail after the inner loop. The
+// question "does the exit run this block" is asked forward only (`reachForward`), as the exit
+// trampoline fold asks it; a full walk would refuse every early-return arm of every nested loop.
+const NESTED_RETURN_TAIL = SHARED_RETURN_TAIL.replace('fn rettail {', 'fn rettailnest {')
+  .replace(
+    '  br ^bb1(%2)\n',
+    '  br ^bb10(%2)\n^bb10(%20: s32):\n  %21: s32 = const {value=3}\n  %22: u32 = icmp_slt %20, %21\n' +
+      '  cond_br %22, ^bb1(%2), ^bb11()\n',
+  )
+  .replace(
+    '^bb7():\n  ret %2',
+    '^bb7():\n  %23: s32 = call %20 {target="tick"}\n  %24: s32 = const {value=1}\n  %25: s32 = add %20, %24\n' +
+      '  br ^bb10(%25)\n^bb11():\n  ret %2',
+  );
+
+describe('early-return arms of a loop nested in another', () => {
+  test('two arms that share their tail each write it, and the outer loop runs `tick` after the inner one', () => {
+    const { src, agreement, shipped } = judged(NESTED_RETURN_TAIL);
+    expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
+    expect(src.match(/tick\(/g)).toHaveLength(1);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.judged).toBeGreaterThan(100);
+    expect(shipped).toEqual(agreement);
+  });
+
+  test('an arm the edge owns outright lifts the same way', () => {
+    const { src, agreement, shipped } = judged(
+      NESTED_RETURN_TAIL.replace(
+        '  %11: s32 = call %4 {target="pong"}\n  br ^bb5()',
+        '  %11: s32 = call %4 {target="pong"}\n  ret %11',
+      ),
+    );
+    expect(src.match(/hit\(a0\);/g)).toHaveLength(1);
+    expect(src.match(/tick\(/g)).toHaveLength(1);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.judged).toBeGreaterThan(100);
+    expect(shipped).toEqual(agreement);
+  });
+
+  test('a tail the inner exit also reaches forward declines loud', () => {
+    // the inner exit now runs into `hit` too when `tick` says so: the arms reach it without `tick`,
+    // so the inner loop leaves for two live merges, and neither arm may copy a tail the exit runs
+    expect(() =>
+      judged(
+        NESTED_RETURN_TAIL.replace(
+          '  br ^bb10(%25)\n',
+          '  %26: u32 = icmp_eq %23, %2\n  cond_br %26, ^bb5(), ^bb10(%25)\n',
+        ),
+      ),
+    ).toThrow(/unrecovered back-edge/);
   });
 });

@@ -380,6 +380,55 @@ describe('what a call destroys', () => {
   });
 });
 
+// `void f(u32 n) { u32 i; for (i = 0; i < n; i++) if (gTab[i] == 7) { Ping(i); return; } }` at
+// gcc2.7.2kmc -O2: the loop leaves a byte in v0 on its own exit, and Ping, void, destroys v0 on the
+// other. A return the function's own declaration says is void reads neither.
+const VOID_RETURN_PAST_CALL = [
+  '0:\taddiu\tsp,sp,-32',
+  '4:\tsw\tra,24(sp)',
+  '8:\tmove\tv1,a0',
+  'c:\tbeqz\tv1,48 <f+0x48>',
+  '10:\tmove\ta0,zero',
+  '14:\tli\ta1,7',
+  '18:\tlui\tv0,0x0',
+  '1c:\taddu\tv0,v0,a0',
+  '20:\tlbu\tv0,0(v0)',
+  '24:\tbnel\tv0,a1,3c <f+0x3c>',
+  '28:\taddiu\ta0,a0,1',
+  '2c:\tjal\t0 <f>',
+  '30:\tnop',
+  '34:\tj\t48 <f+0x48>',
+  '38:\tnop',
+  '3c:\tsltu\tv0,a0,v1',
+  '40:\tbnez\tv0,18 <f+0x18>',
+  '44:\tnop',
+  '48:\tlw\tra,24(sp)',
+  '4c:\tjr\tra',
+  '50:\taddiu\tsp,sp,32',
+];
+const VOID_RETURN_RELOCS: [number, string, string][] = [
+  [0x18, 'R_MIPS_HI16', 'gTab'],
+  [0x20, 'R_MIPS_LO16', 'gTab'],
+  [0x2c, 'R_MIPS_26', 'Ping'],
+];
+
+describe('a return the own declaration says is void', () => {
+  test('reads no v0, so a void callee destroying it on one path refuses nothing', () => {
+    const out = src(VOID_RETURN_PAST_CALL, VOID_RETURN_RELOCS, {
+      Ping: { params: 1, returnsVoid: true },
+      f: { returnsVoid: true },
+    });
+    expect(out).toContain('void f(');
+    expect(out).toMatch(/Ping\(v\d\);\n\s+return;/);
+  });
+
+  test('undeclared, the same return still reads v0 and refuses', () => {
+    expect(lift(VOID_RETURN_PAST_CALL, VOID_RETURN_RELOCS, { Ping: { params: 1, returnsVoid: true } })).toThrow(
+      /v0 is read on a path where a call has destroyed it/,
+    );
+  });
+});
+
 describe('what this lowering cannot carry out refuses', () => {
   test('a callee declared to return 64 bits', () => {
     expect(lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], { g: { params: ['s32'], returns: 'long long' } })).toThrow(
