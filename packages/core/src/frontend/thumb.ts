@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaresVoidReturn, ownLeadingWordRegisters, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -44,6 +44,7 @@ import {
   refuseSretOutsideFrame,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
+import { type StaleIdiomRead, refuseStaleIdiomReads, staleMarker } from './jump-table';
 import {
   type LocalStatics,
   gasPoolReferrers,
@@ -2547,61 +2548,6 @@ function dispatchExtraRefusal(
   return null;
 }
 
-/** A KEPT DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom (`lsl`, the table
- *  pointer's load, `add`, the target's load) is not lifted, so the registers it wrote and no extra
- *  rewrote hold the scaled index, the table's address and the case's code address on the hardware,
- *  and the marker `lowerTerminator` put in each stands for none of them. Run on the filled SSA, before
- *  `finish` collapses a join of an undefined value into its other argument: a marker some operand
- *  demands, directly or through the joins that carry it, declines. A `ret` operand demands nothing
- *  under a declared `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). */
-function refuseStaleIdiomReads(
-  name: string,
-  irBlocks: readonly Block[],
-  stale: ReadonlyMap<Value, string>,
-  own: FnProto | undefined,
-): void {
-  if (stale.size === 0) {
-    return;
-  }
-  const incoming = new Map<Value, Value[]>();
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      for (const s of op.successors) {
-        s.args.forEach((a, i) => {
-          const p = s.block.params[i];
-          incoming.set(p, [...(incoming.get(p) ?? []), a]);
-        });
-      }
-    }
-  }
-  const demanded = new Set<Value>();
-  const work: Value[] = [];
-  const demand = (v: Value) => {
-    if (!demanded.has(v)) {
-      demanded.add(v);
-      work.push(v);
-    }
-  };
-  const voidReturn = declaresVoidReturn(own);
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      if (!(op.opcode === 'ret' && voidReturn)) {
-        op.operands.forEach(demand);
-      }
-    }
-  }
-  while (work.length > 0) {
-    (incoming.get(work.pop()!) ?? []).forEach(demand);
-  }
-  const read = [...stale].find(([v]) => demanded.has(v));
-  if (read !== undefined) {
-    throw new FrontendUnsupportedError(
-      `cannot lift '${name}': a case of the kept jump table reads ${read[1]}, which the unlifted dispatch idiom ` +
-        `wrote — the lift would read the value from before the dispatch, not the table's index, address or target`,
-    );
-  }
-}
-
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
  *  declared parameter count (from the project's headers); it is authoritative for recovering
  *  how many argument registers a `bl` passes (falling back to a heuristic when absent).
@@ -5078,8 +5024,8 @@ interface ThumbFill {
   /** the function-scope statics the operands define, finished into the lifted function's objects */
   readonly statics: LocalStatics;
   readonly frameUses: ThumbFrameUses;
-  /** A kept dispatch's stale idiom registers, by the marker value each holds after it. */
-  readonly staleIdiomValues: Map<Value, string>;
+  /** A dispatch's stale idiom registers, by the marker value each holds after it. */
+  readonly staleIdiomValues: Map<Value, StaleIdiomRead>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -6304,10 +6250,7 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // elided form cannot carry them: its bounds block's default path never ran the idiom.
     if (cur.dispatchScrutinee !== null) {
       for (const r of jt.stale) {
-        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg(r) } });
-        irb.ops.push(op);
-        ssa.writeVar(reg(r), bi, op.results[0]);
-        fill.staleIdiomValues.set(op.results[0], r);
+        ssa.writeVar(reg(r), bi, staleMarker(irb.ops, reg(r), { reg: r, form: 'kept' }, fill.staleIdiomValues));
       }
     }
     pushSwitchBr(irb.ops, scrut, [...jt.caseLabels.map(succ), succ(jt.defaultLabel)], cur.dispatchScrutinee !== null);

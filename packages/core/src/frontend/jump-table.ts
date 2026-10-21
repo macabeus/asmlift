@@ -29,8 +29,10 @@
 //   value, not by register — the same reason high-half.ts gives — so a second pair, a rewrite, a
 //   path around the pair, a call that clobbers it and a callee-saved restore all answer "no" here,
 //   by the SSA's own bookkeeping rather than by a count of the register's mentions.
-import type { Block, Value } from '../ir/core';
-import type { FrontendRefusal } from './errors';
+import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
+import { T } from '../ir/types';
+import { type FnProto, declaresVoidReturn } from '../proto';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { SsaBuilder } from './ssa';
 
 /** Whether any branch lands after the word at `afterAddr`, up to and including the word at
@@ -205,6 +207,13 @@ export interface ElidedDispatch {
   leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
+/** A marker's register, and whether the dispatch that left it was kept (its block lifted, holding
+ *  the code the compiler placed in it) or elided. */
+export interface StaleIdiomRead {
+  reg: string;
+  form: 'kept' | 'elided';
+}
+
 /** What a case target's entry holds from an elided dispatch: the scrutinee's register (read for a
  *  `scaled` entry) and each register the idiom wrote. */
 export interface CaseEntry {
@@ -243,4 +252,66 @@ export function caseEntries(
     );
   }
   return out;
+}
+
+/** A marker for what the unlifted idiom left in `read.reg`, keyed `key` in the SSA. */
+export function staleMarker(ops: Op[], key: string, read: StaleIdiomRead, stale: Map<Value, StaleIdiomRead>): Value {
+  const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
+  ops.push(op);
+  stale.set(op.results[0], read);
+  return op.results[0];
+}
+
+/** A DISPATCH'S STALE IDIOM REGISTERS MAY NOT BE READ. The dispatch idiom is not lifted, so a marker
+ *  ({@link staleMarker}) stands for the table's address, an entry's address or the case's own code
+ *  address, none of which a C expression spells. Run on the filled SSA, before `finish` collapses a
+ *  join of an undefined value into its other argument: a marker some operand demands, directly or
+ *  through the joins that carry it, declines. A `ret` operand demands nothing under a declared
+ *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). */
+export function refuseStaleIdiomReads(
+  name: string,
+  irBlocks: readonly Block[],
+  stale: ReadonlyMap<Value, StaleIdiomRead>,
+  own: FnProto | undefined,
+): void {
+  if (stale.size === 0) {
+    return;
+  }
+  const incoming = new Map<Value, Value[]>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      for (const s of op.successors) {
+        s.args.forEach((a, i) => {
+          const p = s.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  const demanded = new Set<Value>();
+  const work: Value[] = [];
+  const demand = (v: Value) => {
+    if (!demanded.has(v)) {
+      demanded.add(v);
+      work.push(v);
+    }
+  };
+  const voidReturn = declaresVoidReturn(own);
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if (!(op.opcode === 'ret' && voidReturn)) {
+        op.operands.forEach(demand);
+      }
+    }
+  }
+  while (work.length > 0) {
+    (incoming.get(work.pop()!) ?? []).forEach(demand);
+  }
+  const read = [...stale].find(([v]) => demanded.has(v));
+  if (read !== undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': a case of the kept jump table reads ${read[1].reg}, which the unlifted dispatch idiom ` +
+        `wrote — the lift would read the value from before the dispatch, not the table's index, address or target`,
+    );
+  }
 }
