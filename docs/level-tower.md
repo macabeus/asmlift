@@ -769,8 +769,8 @@ captures nothing (frontend/thumb.ts `narrowSlotReloads`). It is read that way on
 stores a word to the slot with `str` and nothing else claims it: no other capture, no by-value block, not the one
 object. A word the entry block stores straight from an argument register it has not yet written is
 taken as a by-value parameter's home and keeps the object model, which the own declaration
-overrules where it proves that register holds one integer word (proto.ts `ownLeadingWordParams`,
-asked for words whoever's), since no struct passed by value is one. In either model a store
+overrules where it proves that register holds one integer word (proto.ts `ownLeadingWordRegisters`,
+words whoever's), since no struct passed by value is one. In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a

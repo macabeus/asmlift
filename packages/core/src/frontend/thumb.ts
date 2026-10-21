@@ -22,7 +22,7 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaresVoidReturn, ownLeadingWordParams, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, ownLeadingWordRegisters, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -3746,7 +3746,7 @@ function measureThumbFrame({
   // that home, and its reloads keep the object model. A spilled promoted local is stored from the
   // value it was computed as. That test reads the asm alone, and the function's own declaration
   // overrules it where it proves the register holds one integer word (`proto.ts`
-  // `ownLeadingWordParams`, asked whether a register holds a word whoever's): a
+  // `ownLeadingWordRegisters`, which asks whether a register holds a word whoever's): a
   // `u32 k` spilled on entry and read back as `(u8)k` is no struct's home, and lifts as the slot
   // narrowed. A copy kept here is no capture, so its
   // offset leaves `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one
@@ -3772,7 +3772,7 @@ function measureThumbFrame({
   const argumentHomes = new Set<number>();
   {
     const proving = own?.proves === true ? own.proto : undefined;
-    const wordArgRegs = new Set(target.argRegs.slice(0, ownLeadingWordParams(name, proving, target, false, 'a-word')));
+    const wordArgRegs = new Set(target.argRegs.slice(0, ownLeadingWordRegisters(name, proving)));
     const written = new Set<string>();
     for (const ins of asmBlocks[0].instrs) {
       const a = spMemAccess(ins);

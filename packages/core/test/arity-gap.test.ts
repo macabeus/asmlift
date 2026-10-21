@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { type Prototypes, ownLeadingWordParams } from '../src/proto';
+import { type Prototypes, ownLeadingWordParams, ownLeadingWordRegisters } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, argRegisterHoles } from '../src/target';
 
 describe('where an ABI can leave an argument register empty below a filled one', () => {
@@ -61,8 +61,7 @@ describe('the first argument registers that surely hold an own word parameter', 
   // Asked whether a register holds a word whoever's, a hidden word ahead is one too, and a later
   // parameter nothing places does not move the ones before it.
   test("asked for words whoever's, a hidden word is one and a later unsized parameter is no bar", () => {
-    const w = (p: Parameters<typeof ownLeadingWordParams>[1]) =>
-      ownLeadingWordParams('f', p, ARMV4T_AGBCC, false, 'a-word');
+    const w = (p: Parameters<typeof ownLeadingWordRegisters>[1]) => ownLeadingWordRegisters('f', p);
     expect(w({ params: ['u32'], returns: 'u32' })).toBe(1);
     expect(w({ params: ['u32', 'u8 *'], returns: 'u32' })).toBe(2);
     expect(w({ params: ['float', 'u32'], returns: 'u32' })).toBe(0);
