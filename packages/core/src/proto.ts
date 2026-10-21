@@ -485,18 +485,35 @@ function ownParamList(name: string, p: FnProto | undefined): (FnProto & { params
  *  return the declaration does not show is a scalar, a symbol that may be a method) makes it 0,
  *  and the count stops at the first parameter that is not one integer word — a floating one may
  *  travel in the FPU's registers and leave its general words holding nothing (O32's leading
- *  float), a wide or unsized one takes words this does not place. */
+ *  float), a wide or unsized one takes words this does not place.
+ *
+ *  {@link ownLeadingWordRegisters} asks the other question the same run of parameters answers. */
 export function ownLeadingWordParams(
   name: string,
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'fpu' | 'evenWordAlignedArgs'>,
   registerReturn = false,
 ): number {
-  const own = ownArguments(name, p, target, registerReturn);
   const decl = ownParamList(name, p);
-  if (own === undefined || own.hidden !== 0 || decl === undefined) {
-    return 0;
-  }
+  const own = ownArguments(name, p, target, registerReturn);
+  return decl === undefined || own === undefined || own.hidden !== 0 ? 0 : leadingWordRun(decl);
+}
+
+/** HOW MANY OF THE FIRST ARGUMENT REGISTERS SURELY HOLD ONE INTEGER WORD, WHOEVER'S, by the own
+ *  declaration (or the parameter list a mangled symbol records), and 0 where it states no list. A
+ *  hidden word (a struct return's pointer, `this`, a constructor's flag) is a word too, and only
+ *  moves the parameters to later registers, so each of the first that-many registers holds a word
+ *  whichever way it falls, and a later parameter this cannot place does not move the ones before
+ *  it. Its reader is the Thumb frame's by-value home test (`frontend/thumb.ts` `argumentHomes`): a
+ *  register that surely holds a word is no by-value struct's home. */
+export function ownLeadingWordRegisters(name: string, p: FnProto | undefined): number {
+  const decl = ownParamList(name, p);
+  return decl === undefined ? 0 : leadingWordRun(decl);
+}
+
+/** The run of leading parameters that are each one integer-class word: it stops at the first
+ *  floating one or the first {@link paramClassOf} does not call `'word'`. */
+function leadingWordRun(decl: FnProto & { params: ParamType[] }): number {
   let n = 0;
   while (
     n < decl.params.length &&

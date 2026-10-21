@@ -5127,3 +5127,204 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     );
   });
 });
+
+// A NARROW RELOAD OF A WORD SLOT. agbcc spills a promoted u8/u16 local as a word and reloads only
+// the narrow part where the use is narrow, through a copy of sp made for that load alone (Thumb
+// has no sp-relative `ldrb`/`ldrh`): `void f(u8 x){ struct R4 s; u8 m = x; … s = mk(); … use(m); }`
+// is `str r0, [sp, #0x4] / … / add r0, sp, #0x4 / ldrb r0, [r0]`. The bytes it reads are the
+// slot's low-order part, so the load is the slot's value narrowed. Each frame here also holds a
+// struct-return temp at [sp,#0) — an escape, so the one-object answer is off and every shape the
+// fold refuses declines loud rather than lifting through the frame as memory.
+describe('a narrow reload of a word slot is the slot narrowed', () => {
+  const P: Prototypes = {
+    f: { params: 1, returns: 's32' },
+    mk: {
+      params: [],
+      returns: 'struct R4',
+      returnLayout: {
+        kind: 'struct',
+        members: [
+          { name: 'a', type: 'u16' },
+          { name: 'b', type: 'u16' },
+        ],
+      },
+    },
+  };
+  const fr = (mid: string, tail = '') =>
+    'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+    `${mid}\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n${tail}`;
+  const lift = (asm: string, target = ARMV4T_AGBCC) => decompile('f', asm, target, { prototypes: P }).source;
+
+  test('a byte through `add rD, sp, #k` and a halfword through `mov rD, sp` read the slot', () => {
+    expect(lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n'))).toContain('return (u8)(a0 + 1) + *(s32 *)&sp0;');
+    expect(lift(fr('\tmov\tr0, sp\n\tldrh\tr0, [r0, #0x4]\n'))).toContain('return (u16)(a0 + 1) + *(s32 *)&sp0;');
+    // …and an instruction that leaves the copy alone may sit between the two
+    expect(lift(fr('\tmov\tr0, sp\n\tmov\tr2, #0x3\n\tldrh\tr0, [r0, #0x4]\n\tadd\tr0, r0, r2\n'))).toContain(
+      'return (u16)(a0 + 1) + 3 + *(s32 *)&sp0;',
+    );
+  });
+
+  // …and a word the entry stores straight from an argument register is that argument's home, the
+  // by-value struct parameter's shape, whose members are an object's (thumb.ts `argumentHomes`)
+  test('an incoming argument stored on entry keeps the object model', () => {
+    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    expect(() => lift(home)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+    // …which a call before the store ends: r0 is then the callee's return, not the argument
+    const afterCall = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace(
+      '\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n',
+      '\tbl\tget\n\tstr\tr0, [sp, #0x4]\n',
+    );
+    const GET: Prototypes = { ...P, get: { params: [], returns: 'u32' } };
+    expect(decompile('f', afterCall, ARMV4T_AGBCC, { prototypes: GET }).source).toContain('return (u8)v0 + ');
+  });
+
+  // …unless the function's own declaration proves the register holds one integer word, which no
+  // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
+  // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it
+  // guards.
+  test("the own declaration's word parameter is no by-value home", () => {
+    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    const own = (params: Prototypes[string]['params']): string =>
+      decompile('f', home, ARMV4T_AGBCC, { prototypes: { ...P, f: { params, returns: 's32' } } }).source;
+    expect(own(['u32'])).toContain('return (u8)a0 + *(s32 *)&sp0;');
+    expect(own(['u8 *'])).toContain('return (u8)a0 + ');
+    expect(() => own(['struct Q'])).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+    expect(() => own(1)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+  });
+
+  test('a byte that is not the low-order part of the word is no reload of it', () => {
+    expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0, #0x1]\n'))).toThrow(
+      'the objects at [sp,#4) and [sp,#5) overlap — one byte, two models',
+    );
+  });
+
+  test('a copy anything else reads, or that outlives the load, stays a capture', () => {
+    const WIDTHS = 'the accesses through the captured address disagree on width (4 vs 1)';
+    // the loaded value lands in another register, so the copy outlives the load
+    expect(() => lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toThrow(WIDTHS);
+    // a second load through the copy
+    expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr2, [r0]\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
+      WIDTHS,
+    );
+    // the copy stored out before the load
+    expect(() =>
+      lift(fr('\tadd\tr0, sp, #0x4\n\tldr\tr2, .L9\n\tstr\tr0, [r2]\n\tldrb\tr0, [r0]\n', '.L9:\n\t.word\tgP\n')),
+    ).toThrow(WIDTHS);
+    // a call between the copy and the load
+    expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tbl\tmk2\n\tldrb\tr0, [r0]\n'))).toThrow(/one byte, two models/);
+  });
+
+  test('a register-offset or signed narrow load is no reload of the slot', () => {
+    expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x0\n\tldrsb\tr0, [r0, r2]\n'))).toThrow(
+      'the accesses through the captured address disagree on width (4 vs 1)',
+    );
+  });
+
+  test('a narrow store into the slot through another copy keeps the slot refused', () => {
+    expect(() =>
+      lift(fr('\tmov\tr2, sp\n\tmov\tr1, #0x7\n\tstrb\tr1, [r2, #0x5]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n')),
+    ).toThrow('the object at [sp,#5) overlaps the SSA slot at [sp,#4] — one byte, two models');
+    expect(() =>
+      lift(fr('\tadd\tr2, sp, #0x4\n\tmov\tr1, #0x7\n\tstrb\tr1, [r2]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n')),
+    ).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+  });
+
+  // Each object model that covers the slot keeps it (thumb.ts `narrowReloadOf`). Without an escape
+  // the frame is the one object, and the reload stays a member read of it: read as the slot
+  // narrowed instead, the object's other narrow reads leave the slot unkeyed, and the lowering
+  // refuses a frame the one object lifts.
+  test('the one object keeps a narrow reload of its word', () => {
+    const one =
+      'f:\n\tadd\tsp, sp, #-0xc\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x9]\n' +
+      '\tmov\tr2, sp\n\tldrh\tr2, [r2, #0x8]\n\tadd\tr3, sp, #0x4\n\tldrb\tr3, [r3]\n\tadd\tr0, r1, r2\n' +
+      '\tadd\tr0, r0, r3\n\tadd\tsp, sp, #0xc\n\tbx\tlr\n';
+    expect(lift(one)).toContain('return p0[9] + ((u16 *)sp0)[4] + p0[4];');
+  });
+
+  // …a word of a struct built in the frame and passed by value is the struct's member…
+  test("a by-value block keeps a narrow reload of its word as the struct's", () => {
+    const W = {
+      kind: 'struct' as const,
+      members: [
+        { name: 'a', type: 'u32' },
+        { name: 'b', type: 'u32' },
+      ],
+    };
+    const PB: Prototypes = {
+      ...P,
+      f: { params: 2, returns: 's32' },
+      take: { params: ['struct W'], returns: 'void', byValueLayouts: { 0: W } },
+    };
+    const byval =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp]\n\tadd\tr1, r1, #0x2\n' +
+      '\tstr\tr1, [sp, #0x4]\n\tadd\tr0, sp, #0x8\n\tbl\tmk\n\tadd\tr4, sp, #0x4\n\tldrb\tr4, [r4]\n\tldr\tr0, [sp]\n' +
+      '\tldr\tr1, [sp, #0x4]\n\tbl\ttake\n\tadd\tr0, r4, #0\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', byval, ARMV4T_AGBCC, { prototypes: PB }).source).toContain('v0 = ((u8 *)&sp0)[4];');
+  });
+
+  // …and the one-word frame handed to a callee is read back as memory the callee may have written,
+  // through the other capture at offset 0 that hands it out (no gate of its own)
+  test('a one-word frame handed to a callee keeps a narrow reload of it', () => {
+    const whole =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n' +
+      '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+    const PG: Prototypes = { ...P, g: { params: ['u32 *'], returns: 'void' } };
+    expect(decompile('f', whole, ARMV4T_AGBCC, { prototypes: PG }).source).toContain(
+      '    g(sp0);\n    return *(u8 *)sp0;',
+    );
+  });
+
+  test('a slot inside the struct-return temp is the temp, and refuses', () => {
+    const P8: Prototypes = {
+      ...P,
+      mk: {
+        params: [],
+        returns: 'struct R8',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u32' },
+            { name: 'b', type: 'u32' },
+          ],
+        },
+      },
+    };
+    expect(() =>
+      decompile('f', fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n'), ARMV4T_AGBCC, { prototypes: P8 }),
+    ).toThrow('the object at [sp,#0) overlaps the SSA slot at [sp,#4] — one byte, two models');
+  });
+
+  // The word must be a slot: with no word store to it anywhere, the bytes are a sub-word local's and
+  // the copy stays the capture it was.
+  test('a word no `str` writes is no slot, and the copy stays a capture', () => {
+    const unstored =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr0, sp\n\tbl\tmk\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(unstored)).toContain('    u8 sp4;\n    sp0 = mk();\n    return sp4;');
+  });
+
+  // A reload no store reaches reads an uninitialised local only under the after-call layout claim,
+  // as for the word reload; without it the copy was never lifted, so the reload refuses by name.
+  test('a slot no store reaches reads uninitialised only where the layout claim holds', () => {
+    const before =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr0, sp\n\tbl\tmk\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(before)).toContain('(u8)uninit_sp4');
+    const { localsAboveOutgoingArea: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    expect(() => lift(before, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors })).toThrow(
+      "narrow reload of a stack local through a copy of sp — 'ldrb r0, [r0]' reads the word slot [sp,#4]",
+    );
+  });
+
+  // The low-order part is an ENDIANNESS fact. No big-endian toolchain emits this shape (MIPS
+  // gcc/kmc spill the byte itself, IDO reloads at the width it stored, mwcc keeps the local in a
+  // register), so this target is hypothetical: on it the low byte of [sp,#4] is at +3.
+  test('on a big-endian target the low-order part is the last bytes of the word', () => {
+    const BE = { ...ARMV4T_AGBCC, capabilities: { ...ARMV4T_AGBCC.capabilities, endianness: 'big' as const } };
+    expect(lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0, #0x3]\n'), BE)).toContain('return (u8)(a0 + 1) + ');
+    expect(lift(fr('\tmov\tr0, sp\n\tldrh\tr0, [r0, #0x6]\n'), BE)).toContain('return (u16)(a0 + 1) + ');
+    expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n'), BE)).toThrow(
+      'the accesses through the captured address disagree on width (4 vs 1)',
+    );
+  });
+});

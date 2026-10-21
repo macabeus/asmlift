@@ -4,7 +4,8 @@
 //   2. operands well-formed: opcode registered, correct arity/attrs
 //   3. SSA: each value defined once; every use is defined; def dominates use
 //   4. a float value is an operand or result of a float op, a conversion or a compare, or `ret` only
-//      — or a `double` operand of a call whose callee declares one there — and crosses an edge only
+//      — or a `double` operand of a call whose callee declares one there, or the result of a call
+//      whose callee is declared to return a `float` — and crosses an edge only
 //      into a block parameter of its own type; an `fconst` is a double, sixteen hex digits into an f64
 //   5. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
@@ -16,13 +17,15 @@ import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
 export class VerifyError extends Error {}
 
 /** A call hands a float only to a parameter its callee is declared to take a `double` in — the
- *  operands the frontend lists in `doubles` — and returns none. */
-function doublesDeclared(op: Op): boolean {
-  const at = op.attrs.doubles;
+ *  operands the frontend lists in `doubles` — and returns one only where its callee is declared to
+ *  return a `float` (`floatReturn`), as that single. */
+function floatsDeclared(op: Op): boolean {
+  const at = Array.isArray(op.attrs.doubles) ? op.attrs.doubles : [];
   return (
     op.opcode === 'call' &&
-    Array.isArray(at) &&
-    op.results.every((r) => r.type.kind !== 'float') &&
+    op.results.every(
+      (r) => r.type.kind !== 'float' || (op.attrs.floatReturn === 'float' && typeEquals(r.type, T.f32())),
+    ) &&
     op.operands.every((o, i) => o.type.kind !== 'float' || (at.includes(i) && typeEquals(o.type, T.f64())))
   );
 }
@@ -282,7 +285,7 @@ export function verify(fn: Fn): void {
             }
           } else if (FLOAT_COMPUTING.has(op.opcode)) {
             verifyFloatCrossing(op);
-          } else if (floats.length > 0 && op.opcode !== 'ret' && !doublesDeclared(op)) {
+          } else if (floats.length > 0 && op.opcode !== 'ret' && !floatsDeclared(op)) {
             throw new VerifyError(`a float value reaches '${op.opcode}', which does not compute on floats`);
           }
           // A literal's width is its pattern's, so the pattern and the result must name one width.

@@ -12385,13 +12385,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //   3. spillu8byte / spillu8word (sub_0800D188, sub_08016EEC; one site, instrumented on both). A
   //      `u8` local agbcc gives no register is promoted to SImode (thumb.h:344 PROMOTE_MODE), spilled
   //      as a word (reload1.c:2274 → `str`), and a QImode use of it is alter_subreg's `(mem:QI slot)`
-  //      (final.c:2153-2159 → `ldrb`), which Thumb addresses at a slot >= 0x20 only through a copy of
-  //      sp (thumb.h:884, :786): `add r3, sp, #0x28 / ldrb r3, [r3]`. The capture taints the slot, the
-  //      direct str/ldr fold into the same object, and frame-objects.ts `objectShapes` refuses the
-  //      widths (4 vs 1) — a decline, not the one-object fallback, because the frame also holds a
-  //      struct-return temp (a bounded escape, `chooseFrameModel`). spillu8word reads the slot back as
-  //      a word: MATCH. agbcc only: ido7.1 and gcc2.7.2kmc spill the u8 as a byte and mwcc_242_81
-  //      keeps it in r16, so none compiles the shape (all three lift both at the same score).
+  //      (final.c:2153-2159 → `ldrb`), which Thumb addresses only through a copy of sp (thumb.h:884,
+  //      :786): `add r3, sp, #0x28 / ldrb r3, [r3]`. That copy used to be a capture: it tainted the
+  //      slot, folded the direct str/ldr into the same object, and frame-objects.ts `objectShapes`
+  //      refused the widths (4 vs 1) — a decline rather than the one-object fallback, because the
+  //      frame also holds a struct-return temp. LIFTED since the Thumb frontend reads a narrow load at
+  //      a word slot's low-order bytes, through a copy that dies at it, as the slot narrowed
+  //      (thumb.ts `narrowSlotReloads`): MATCH. spillu8word reads the slot back as a word (control,
+  //      MATCH); spillu8half reads the u8's slot as a halfword (`mov r3, sp / ldrh r3, [r3, #0x28]`);
+  //      spillu8nosret has a scalar-returning callee instead, so nothing escapes and it used to lift as
+  //      one `u8 sp0[44]` that recompiles 114 lines off. agbcc only: ido7.1 and gcc2.7.2kmc spill the
+  //      u8 as a byte and mwcc_242_81 keeps it in r16, so none compiles the shape.
   //   4. bfstrad (SetUpRoomInfo). A u8 bitfield straddling a byte: agbcc packs bitfields contiguously
   //      (thumb.h has no PCC_BITFIELD_TYPE_MATTERS, stor-layout.c:404-405), so `c:7` sits in bits 5-11
   //      and is read as a HALFWORD (expmed.c:1153) beside the byte reads of `a` and `d`; the raise
@@ -12473,11 +12477,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //  13. spillhsret (sub_0803D4AC). A spilled local READ BACK NARROWER than it was stored, beside a
   //      struct-return temp: a promoted `u16` spilled as a word (a slot the SSA model keys) and reloaded
   //      `mov r2, sp / ldrh r2, [r2, #4]` because Thumb admits an sp-relative offset only at word size
-  //      (thumb.h:886-891) — an object of width 2 over the slot, "one byte, two models"
-  //      (`failIfSlotKeysIt`); the one-object answer is off because the hidden return pointer is an
-  //      escape. Word reload MATCHes. gcc2.7.2kmc MATCHes (control); ido7.1 and mwcc_242_81 lift the
-  //      row and its controls to one residual, off. The real function's by-value parameter read as
-  //      `ldrb` over its home is the same site and did not reproduce small. Instrument-pinned.
+  //      (thumb.h:886-891). It used to be an object of width 2 over the slot, "one byte, two models"
+  //      (`failIfSlotKeysIt`), with the one-object answer off because the hidden return pointer is an
+  //      escape. LIFTED by item 3's narrow slot reload: MATCH. spillhsword reloads the word (control,
+  //      MATCH). gcc2.7.2kmc MATCHes (control); ido7.1 and mwcc_242_81 lift the row and its controls
+  //      to one residual, off. The real function's by-value parameter read as `ldrb` over its home is
+  //      the same site and did not reproduce small. Instrument-pinned.
   //  14. sretloop2ret / sretloop1ret (sub_08014230), break_elsetail / break_noelsetail (TextBoxInit),
   //      retarm2_tail / retarm1_tail (sub_0801DFC4): one guard chain (`singleExit` → `foreverShape` →
   //      `onStack`, traced on all three), three cross-jumped exit shapes. sretloop2ret: the function's
@@ -12576,6 +12581,72 @@ export const SYNTHETIC: SynthSpec[] = [
       'u32 spillu8word(u32 k);',
     proto: {
       sink: { params: 4, returnsVoid: true },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'spillu8half',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u32 mk2(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8half(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' s = mk(k, 0, 0x10); gOut16 = s.a;\n' +
+      ' gOut16 = m; return v0; }',
+    features: ['narrow', 'promotion', 'struct-return', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nu32 mk2(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8half(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk2: { params: ['u16', 'u16', 'u8'], returns: 'u32' },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'spillu8nosret',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u32 mk2(u16 x, u16 y, u8 z);\n' +
+      'extern u8 gTbl[];\nextern u32 gA[16];\nextern u8 gOut8;\nextern u32 gOut;\nextern u16 gOut16;\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8nosret(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' gOut16 = mk2(k, 0, 0x10);\n' +
+      ' gOut8 = m; return v0; }',
+    features: ['narrow', 'promotion', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nu32 mk2(u16 x, u16 y, u8 z);\nvoid sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8nosret(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk2: { params: ['u16', 'u16', 'u8'], returns: 'u32' },
       mk: {
         params: ['u16', 'u16', 'u8'],
         returns: 'struct S4',
@@ -12801,6 +12872,33 @@ export const SYNTHETIC: SynthSpec[] = [
         },
       },
       spillhsret: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'spillhsword',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u32 w; };\n#define gEnts ((struct Ent *)0x03003440)\nextern u8 gFlags;\n' +
+      'extern struct S4 mk(u16 x);\n' +
+      'void spillhsword(u8 i)\n{\n    struct S4 s;\n    u16 k0, k1, k2, k3, k4; u32 k5;\n' +
+      '    k0 = gEnts[i + 0].x;\n    k1 = gEnts[i + 1].x;\n    k2 = gEnts[i + 2].x;\n    k3 = gEnts[i + 3].x;\n    k4 = gEnts[i + 4].x;\n    k5 = gEnts[i + 5].x;\n' +
+      '    if (gFlags & 0x10) {\n        s = mk(gEnts[i].y);\n        if (s.a != 0xFFFF) {\n            gFlags |= 4;\n        } else {\n            gFlags &= ~4;\n        }\n    }\n' +
+      '    gEnts[i + 0].y = k0;\n    gEnts[i + 1].y = k1;\n    gEnts[i + 2].y = k2;\n    gEnts[i + 3].y = k3;\n    gEnts[i + 4].y = k4;\n    gEnts[i + 5].w = k5;\n}',
+    features: ['struct-return', 'value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nextern u8 gFlags;\nstruct S4 mk(u16 x);\nvoid spillhsword(u8 i);',
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      spillhsword: { returnsVoid: true },
     },
   },
   {

@@ -759,7 +759,18 @@ deref contract share `memberOf`, so they agree on which member access is well-ty
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
 model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
 read member by member through `mov rD, sp`, at two widths or two signednesses, or copied out a word
-at a time; `chooseFrameModel` offers it before any shape is judged). In either model a store
+at a time; `chooseFrameModel` offers it before any shape is judged). That read has a second
+inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc promotes a `u8` or
+`u16` local to a word, spills it with `str`, and reloads only the narrow part through a copy of sp
+made for that one load (`mov r2, sp / ldrh r2, [r2, #4]`), because Thumb has no sp-relative
+`ldrb`/`ldrh`. Those bytes are the stored word's low-order part (the slot's own address on a
+little-endian target), so the load is the slot's value narrowed, a `zext` of the slot, and the copy
+captures nothing (frontend/thumb.ts `narrowSlotReloads`). It is read that way only where live code
+stores a word to the slot with `str` and nothing else claims it: no other capture, no by-value
+block, not the one object. A word the entry block stores straight from an argument register it
+has not yet written is taken as a by-value parameter's home and keeps the object model, which the
+own declaration overrules where it proves that register holds one integer word (proto.ts
+`ownLeadingWordRegisters`), since no struct passed by value is one. In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a

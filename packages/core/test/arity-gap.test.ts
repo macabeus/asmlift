@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { type Prototypes, ownLeadingWordParams } from '../src/proto';
+import { type Prototypes, ownLeadingWordParams, ownLeadingWordRegisters } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, argRegisterHoles } from '../src/target';
 
 describe('where an ABI can leave an argument register empty below a filled one', () => {
@@ -57,6 +57,19 @@ describe('the first argument registers that surely hold an own word parameter', 
     // a return the declaration does not show is a scalar may be a struct handed back through a0
     expect(n({ params: ['s32'] })).toBe(0);
     expect(n({ params: ['s32'], returns: 'struct Big' })).toBe(0);
+  });
+  // Asked whether a register holds a word whoever's, a hidden word ahead is one too, and a later
+  // parameter nothing places does not move the ones before it.
+  test("asked for words whoever's, a hidden word is one and a later unsized parameter is no bar", () => {
+    const w = (p: Parameters<typeof ownLeadingWordRegisters>[1]) => ownLeadingWordRegisters('f', p);
+    expect(w({ params: ['u32'], returns: 'u32' })).toBe(1);
+    expect(w({ params: ['u32', 'u8 *'], returns: 'u32' })).toBe(2);
+    expect(w({ params: ['float', 'u32'], returns: 'u32' })).toBe(0);
+    expect(w({ params: ['u32', 'Foo'], returns: 'u32' })).toBe(1);
+    expect(w({ params: ['u32'], returns: 'struct S' })).toBe(1);
+    expect(w({ params: ['u32'] })).toBe(1);
+    expect(w({ params: 1 })).toBe(0);
+    expect(w(undefined)).toBe(0);
   });
 });
 

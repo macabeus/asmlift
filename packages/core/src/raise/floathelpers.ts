@@ -1,18 +1,19 @@
 // asmlift — the soft-float boundary (L1 recognition): where integer words become floats.
 //
-// Three things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
+// Four things cross it. A runtime helper whose op computes on floats (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
-// A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). And a
+// A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). The
+// result of an ordinary callee declared to return a floating type (its `floatReturn`). And a
 // double literal, two constant words, where the target states their order
 // (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
-// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer
+// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all four apart from the integer
 // helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
 // as floats, which only data flow may justify — see the function below.
 import { constWord } from '../ir/bits';
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { type Opcode, fcmpOfTruth } from '../ir/opcodes';
-import { T } from '../ir/types';
+import { T, intWidth } from '../ir/types';
 import { arrivesAsDeclared, floatSidesOf, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { RaiseUnsupportedError } from './errors';
@@ -62,6 +63,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const consumers = new Map<Op, readonly number[]>();
   const def = new Map<Value, Op>();
   const users = new Map<Value, Array<Op | null>>(); // null: an edge argument
+  const returners = new Map<Op, string>(); // ordinary calls declared to return a floating type
   const use = (v: Value, by: Op | null) => users.set(v, [...(users.get(v) ?? []), by]);
   const helperOf = (op: Op) => (op.opcode === 'call' ? lookupHelper(table, String(op.attrs.target)) : undefined);
   const sidesOf = (op: Op) => floatSidesOf(helperOf(op)!);
@@ -84,9 +86,12 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       } else if (!helper && op.opcode === 'call' && Array.isArray(op.attrs.doubles)) {
         consumers.set(op, op.attrs.doubles as number[]);
       }
+      if (!helper && op.opcode === 'call' && typeof op.attrs.floatReturn === 'string') {
+        returners.set(op, op.attrs.floatReturn);
+      }
     }
   }
-  if (!sites.length && !consumers.size) {
+  if (!sites.length && !consumers.size && !returners.size) {
     return false;
   }
   // A projection nothing reads is not a read of a half: `dce` runs ahead of this pass only after a
@@ -119,9 +124,13 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       users.get(d.operands[0])!.every((u) => samePair(u, d) && floatsOnly(u.results[0], calls))
     );
   };
+  // A SINGLE AN ORDINARY CALLEE IS DECLARED TO RETURN is one whole word in the return register, so
+  // it is a float source as a helper's result is. A double is not: the frontend reads one word of
+  // it (`declaredReturnWidth` sizes no floating type), and that word is not the value.
+  const declaredSingle = (d: Op) => returners.get(d) === 'float' && intWidth(d.results[0].type) === 32;
   const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
     const d = def.get(v);
-    return d !== undefined && calls.has(d) && sidesOf(d).result;
+    return d !== undefined && ((calls.has(d) && sidesOf(d).result) || declaredSingle(d));
   };
   // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
   // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
@@ -185,6 +194,44 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     sites = kept;
   }
   const calls = new Set(sites);
+  // A DECLARED FLOATING RETURN HAS NO FALLBACK EITHER. The candidate prints the call against its
+  // declaration, so its result stored, compared, narrowed, carried across an edge in an integer
+  // variable or handed to any other call is CONVERTED there — `u.f = f(); g = u.b[0];` lifted as
+  // `g = f();` compiles to `bl f; bl __fixsfsi` — where the bytes moved the bits. So a single may
+  // go only where a helper's result may (a helper the fold keeps, a `double` parameter, the
+  // return), and is retyped a float; a double read off its one word goes nowhere. A result nothing
+  // reads is a call statement, and stays one.
+  const returned = new Map<Op, Value>();
+  for (const [op, spelled] of returners) {
+    const r = op.results[0];
+    const read = (users.get(r) ?? []).filter((u) => !deadHalf(u));
+    if (read.length === 0) {
+      continue;
+    }
+    if (!declaredSingle(op) || !read.every((u) => floatUse(u, r, calls) || u?.opcode === 'ret')) {
+      throw new RaiseUnsupportedError(
+        `cannot lift '${fn.name}': '${String(op.attrs.target)}' is declared to return ${spelled}, which this ` +
+          'target hands back as bits in a general register, and its result is read here as something ' +
+          'other than that float — a conversion the bytes do not make',
+      );
+    }
+    returned.set(op, mkValue(T.f32()));
+  }
+  // A FLOAT RETURNED MAKES THE FUNCTION'S RETURN A FLOAT, so every other `ret` converts what it
+  // hands back: `return 5;` beside `return fget();` compiles to the bits of 5.0f where the asm
+  // hands back the word 5. Each value a `ret` reads must then be a float this pass makes — a kept
+  // helper's result or a declared single's.
+  const madeFloat = (v: Value) => {
+    const d = def.get(v);
+    return d !== undefined && (returned.has(d) || (calls.has(d) && sidesOf(d).result));
+  };
+  const rets = fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'ret' && op.operands.length > 0));
+  if (rets.some((r) => r.operands.some(madeFloat)) && !rets.every((r) => r.operands.every(madeFloat))) {
+    throw new RaiseUnsupportedError(
+      `cannot lift '${fn.name}': it returns a float on one path, and another return of this function hands ` +
+        'back an integer word, which C would convert to that float',
+    );
+  }
   // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
   // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
   // on as integers are the wrong number — so a double parameter nothing here can hand a double
@@ -202,7 +249,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
       }
     }
   }
-  if (!sites.length && !consumers.size) {
+  if (!sites.length && !consumers.size && !returned.size) {
     return false;
   }
   const floatOf = new Map<Value, Value>();
@@ -241,6 +288,9 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     }
     floatOf.set(o, whole);
   };
+  for (const [op, now] of returned) {
+    floatOf.set(op.results[0], now);
+  }
   for (const op of sites) {
     const helper = helperOf(op)!;
     const sides = floatSidesOf(helper);
@@ -274,6 +324,10 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   }
   for (const block of fn.blocks) {
     block.ops = block.ops.flatMap((op) => {
+      // the call stays, its result now the float it was declared
+      if (returned.has(op)) {
+        return [mkOp('call', { operands: op.operands, results: [returned.get(op)!], attrs: op.attrs })];
+      }
       if (folded.has(op)) {
         return [folded.get(op)!];
       }
