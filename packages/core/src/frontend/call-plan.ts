@@ -165,8 +165,9 @@ export interface CallDeclarations {
    *  (`CallSite.parked`, `CallSite.scaledIndex`; a PowerPC pair's r4 too), which stands where the
    *  pre-dispatch value had made a gap refuse, or `caseStateRead`, a read of the scaled index a case
    *  target is entered with — refuse the first guessed arity the bytes cannot tell from another:
-   *    - its last counted register holds a value its block did not write since its last call, a
-   *      value passed on unchanged (`g0(a, 9)` lifted `g0(a0, 9, a0)`, agbcc's pre-dispatch copy of
+   *    - its last counted register holds a value some path from the dispatch's block to the call
+   *      did not write (`SsaBuilder.writtenOnEveryPath`; a cross-jumped call's block writes nothing,
+   *      its cases do), a value passed on unchanged (`g0(a, 9)` lifted `g0(a0, 9, a0)`, agbcc's pre-dispatch copy of
    *      a0 still in r2; mwcc `return g()` lifted `return g(a0)`);
    *    - a counted register holds a value an effect of its block uses, a store's address or value
    *      left in the register (`gc = ga; g()` lifted `g(&gc, v0)`);
@@ -985,10 +986,16 @@ export function callDeclarations(
       if (passThrough === undefined) {
         const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
         const last = target.argRegs[argc - 1];
-        // what an effect this block made so far reads
+        // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
+        const since = new Set<number>([bi]);
+        const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
+        const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
+        // what an effect those blocks made so far reads
         const effectReads = new Set(
-          ssa.irBlocks[bi].ops.flatMap((op) =>
-            (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
+          [...since].flatMap((at) =>
+            ssa.irBlocks[at].ops.flatMap((op) =>
+              (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
+            ),
           ),
         );
         const stored = target.argRegs
@@ -996,11 +1003,11 @@ export function callDeclarations(
           .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
         const leftIncoming =
           markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
-        if (argc > floor && !ssa.writtenSinceCall(last, bi)) {
+        if (!lastWritten) {
           passThrough = {
             call,
             reg: last,
-            why: 'the last register the count takes, holds a value its block did not write',
+            why: 'the last register the count takes, holds a value some path since the dispatch did not write',
           };
         } else if (stored !== undefined) {
           passThrough = { call, reg: stored, why: 'which the count takes, holds a value an effect of its block uses' };

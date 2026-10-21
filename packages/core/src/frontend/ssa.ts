@@ -124,6 +124,12 @@ export interface SsaBuilder {
   /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
    *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
   writtenSinceCall(reg: string, b: number): boolean;
+  /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
+   *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
+   *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
+   *  block not filled yet answers no; a cycle adds no path the first visit did not judge. `visit`
+   *  is told each block the walk passes through after `b`. */
+  writtenOnEveryPath(reg: string, b: number, stop: (at: number) => boolean, visit?: (at: number) => void): boolean;
   /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
    *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
    *  erased, so the address appears in no operand. The refusal of a read a call destroyed
@@ -1398,6 +1404,27 @@ export function makeSsaBuilder(
     entryValue,
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
+    writtenOnEveryPath: (reg, b, stop, visit) => {
+      const seen = new Set<number>();
+      const walk = (at: number): boolean => {
+        if (at !== b) {
+          if (seen.has(at)) {
+            return true;
+          }
+          seen.add(at);
+          if (!filled[at] || stop(at)) {
+            return false;
+          }
+          visit?.(at);
+        }
+        if (writtenSinceCall[at].has(reg) || clobberedLocal[at].has(reg)) {
+          return true;
+        }
+        const ps = distinctPreds(at);
+        return ps.length > 0 && ps.every(walk);
+      };
+      return walk(b);
+    },
     requireSoleReader: (value: Value, op: Op, refuse: () => void) => {
       soleReaders.push({ value, op, refuse });
     },

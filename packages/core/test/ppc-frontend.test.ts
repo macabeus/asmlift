@@ -1702,7 +1702,7 @@ describe('a guessed arity in a function that reads the scaled index', () => {
   test('a call passing on the incoming r3 DECLINES', () => {
     const lift = () => decompile('swp', asm('nop'), PPC_MWCC, { asmData });
     expect(lift).toThrow(
-      /the call at 0x38 has no prototype, and r3, the last register the count takes, holds a value its block did not write/,
+      /the call at 0x38 has no prototype, and r3, the last register the count takes, holds a value some path since the dispatch did not write/,
     );
     expect(lift).toThrow(PpcUnsupportedError);
   });
