@@ -4517,8 +4517,9 @@ const CALLEE_SAVED_LOW_REGS: ReadonlySet<string> = new Set(['r4', 'r5', 'r6', 'r
 // that the compiler homed a local in the register, which it may only do after saving it. Asm that
 // saves nothing follows no such convention, and some of it really is handed live values there:
 // the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
-// takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
-// signature and stored through reads of registers nothing ever wrote.
+// reads r4/r5 with no prologue at all — classified by the ABI alone it stored through reads of
+// registers nothing ever wrote. Unsaved, they are global register variables
+// (`LiveInModel.globalRegs`), which is what agbcc compiles `register u8 *p asm("r4")` to.
 //
 // PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
 // agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
@@ -4577,36 +4578,104 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
   return { saved, carriers };
 }
 
-/** Every register a `push` or a `pop` anywhere in the function names, a high one through the `mov`
- *  that stages it in the same block (`mov rLow, rHi` before the push, `mov rHi, rLow` after the
- *  pop) — the prologue's and epilogue's and any other. Both are frame bookkeeping the fill reads as
- *  transparent, so a register in here is one the function saves or restores, wherever it does it,
- *  and a write the `pop` makes is one no op records (`registerLiveIns`' `savedLater`). */
-function pushedRegs(blocks: readonly AsmBlock[]): ReadonlySet<string> {
-  const named = new Set<string>();
+/** WHAT A `push` SAVES BEFORE EVERY USE, ON EVERY PATH — the prologue's (`prologueSavedRegs`) and
+ *  any other. A register the function names nowhere before a `push` of it, along any path from
+ *  the entry, is saved as surely as one the prologue saves (`saved`): its writes are restored and
+ *  its entry value is the caller's, so it is a local's home like the prologue's
+ *  (`LiveInModel.uninitRegs`). Hand-written asm saves late: `cmp r0, #0; beq .L1; push {r4}; …;
+ *  pop {r4}; .L1: bx lr` uses r4 only past its save. A `push` is nothing but a save and a `pop`
+ *  nothing but a restore, which is what lets this read them anywhere; MIPS's `sw` and PPC's `stw`
+ *  also store a value (a global register variable passed on the stack is `sw s0,16(sp)`), so those
+ *  frontends read saves only in the entry block.
+ *
+ *  A high register is saved through the `mov rLow, rHi` that stages it, and that `mov` is the
+ *  save's, provided `rLow` reaches the `push` unchanged — PROLOGUESAVEDREGS' RULE, here past the
+ *  leading run too, so the two readings of one idiom agree: `mov r0, r8; add r0, #1; push {r0}`
+ *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise.
+ *
+ *  `misSaved` is every register a save or a restore names that some path uses before saving: a
+ *  `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`), a `push` past a read. Its
+ *  writes are not the caller's and its entry value is no global's, so `registerLiveIns` refuses it
+ *  rather than spell it either way. "Uses" is any naming in an operand, read or write. */
+function bodySavedRegs(
+  blocks: readonly AsmBlock[],
+  preds: readonly (readonly number[])[],
+): { saved: ReadonlySet<string>; misSaved: ReadonlySet<string> } {
+  // What each instruction saves, restores and otherwise names; the staging `mov`s first.
+  const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
+  const restoresHi = new Set<Instr>(); // `mov rHi, rLow` where rLow was popped unchanged
   for (const b of blocks) {
-    const staged = new Map<string, string>(); // low register ← the high one a `mov` put there
+    const staged = new Map<string, Instr>(); // low register ← the `mov` that put a high one there
     const popped = new Set<string>();
     for (const x of b.instrs) {
-      if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
-        for (const r of regListOf(x.ops) ?? []) {
-          named.add(r);
-          const hi = staged.get(r);
-          if (x.mnemonic === 'push' && hi !== undefined) {
-            named.add(hi);
-          }
-          if (x.mnemonic === 'pop') {
-            popped.add(r);
-          }
+      const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [];
+      if (x.mnemonic === 'push') {
+        list.forEach((r) => staged.has(r) && savesHi.set(staged.get(r)!, staged.get(r)!.ops[1]));
+      }
+      const isMov = /^movs?$/.test(x.mnemonic);
+      if (isMov && HIGH_REGS.has(x.ops[0] ?? '') && popped.has(x.ops[1] ?? '')) {
+        restoresHi.add(x);
+      }
+      const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? list : regWritesOf(x);
+      if (writes === 'all') {
+        staged.clear();
+        popped.clear();
+      } else {
+        for (const w of writes) {
+          staged.delete(w);
+          popped.delete(w);
         }
-      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
-        staged.set(x.ops[0], x.ops[1]);
-      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[0] ?? '') && popped.has(x.ops[1] ?? '')) {
-        named.add(x.ops[0]);
+      }
+      if (x.mnemonic === 'pop') {
+        list.forEach((r) => popped.add(r));
+      } else if (isMov && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
+        staged.set(x.ops[0], x);
       }
     }
   }
-  return named;
+  const namedBy = (x: Instr): string[] => [
+    ...(x.ops.join(',').match(/(?<![\w.#])(r1[0-5]|r\d|sb|sl|fp|ip)(?![\w])/g) ?? []),
+    ...(/^(ldm|stm)/.test(x.mnemonic) ? (regListOf(x.ops.slice(1)) ?? []) : []),
+  ];
+  const savedSomewhere = new Set<string>();
+  const restoredSomewhere = new Set<string>();
+  const usedUnsaved = new Set<string>();
+  // Forward MUST dataflow: the registers saved on every path into each block (null: not reached yet).
+  const savedIn: (Set<string> | null)[] = blocks.map((_, i) => (i === 0 ? new Set() : null));
+  const walk = (b: number, record: boolean): Set<string> => {
+    const cur = new Set(savedIn[b]!);
+    for (const x of blocks[b].instrs) {
+      const saves = x.mnemonic === 'push' ? (regListOf(x.ops) ?? []) : savesHi.has(x) ? [savesHi.get(x)!] : [];
+      const restores = x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : restoresHi.has(x) ? [x.ops[0]] : [];
+      const uses = x.mnemonic === 'push' ? [] : savesHi.has(x) ? [x.ops[0]] : [...restores, ...namedBy(x)];
+      if (record) {
+        saves.forEach((r) => savedSomewhere.add(r));
+        restores.forEach((r) => restoredSomewhere.add(r));
+        uses.filter((r) => !cur.has(r)).forEach((r) => usedUnsaved.add(r));
+      }
+      saves.filter((r) => !uses.includes(r)).forEach((r) => cur.add(r));
+    }
+    return cur;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 1; b < blocks.length; b++) {
+      const ins = preds[b].filter((p) => savedIn[p] !== null).map((p) => walk(p, false));
+      if (ins.length === 0) {
+        continue;
+      }
+      const meet = new Set([...ins[0]].filter((r) => ins.every((s) => s.has(r))));
+      if (savedIn[b] === null || savedIn[b]!.size !== meet.size) {
+        savedIn[b] = meet;
+        changed = true;
+      }
+    }
+  }
+  blocks.forEach((_, b) => savedIn[b] !== null && walk(b, true));
+  return {
+    saved: new Set([...savedSomewhere].filter((r) => !usedUnsaved.has(r))),
+    misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter((r) => usedUnsaved.has(r))),
+  };
 }
 
 /** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from
@@ -5138,24 +5207,25 @@ function thumbFillOf(
   // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.
   // The register half needs both of its facts, and they come from different places. The target says
   // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
-  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
-  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
-  // the treatment a target claiming no partition gets. The save is asked only of the registers the
+  // saved, and so could have homed a local in — in its prologue, or by a `push` ahead of every use
+  // (`bodySavedRegs`). A register in only the first is one the function shares with every other: a
+  // global register variable, or a refusal where the target cannot spell one. The save is asked only of the registers the
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
   // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
   // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
+  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);
   const liveIns = registerLiveIns(
     target,
-    frame.savedRegs,
+    new Set([...frame.savedRegs, ...body.saved]),
     contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
-    pushedRegs(cfg.asmBlocks),
+    body.misSaved,
   );
   const ssa = makeSsaBuilder(
     name,
     cfg.asmBlocks.length,
     cfg.preds,
-    () => ({ ...frame.partition, ...liveIns }),
+    () => ({ ...frame.partition, ...liveIns, saveSite: '`push` ahead of every use' }),
     undefined,
     liveIns.globalRegs,
   );

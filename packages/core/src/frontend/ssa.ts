@@ -315,6 +315,13 @@ export interface LiveInModel {
    *
    *  Disjoint from `argRegs` and `uninitRegs`, checked with them. */
   unsavedCalleeSavedRegs?: readonly string[];
+  /** Of `unsavedCalleeSavedRegs`, the ones the function does save or restore — only not before
+   *  every use (a `pop` with no `push` before it, or a `push` past a read). Refused like the rest,
+   *  and named apart only so the refusal says what it saw. */
+  misSavedRegs?: readonly string[];
+  /** Where the frontend looks for the saves it measures, for those refusals to name: the partition
+   *  is only as wide as that look, and a save it does not read is still a save. */
+  saveSite?: string;
   /** The registers of `unsavedCalleeSavedRegs`' kind the target can declare a global register
    *  variable in (`target.globalRegisterVariables`), each to the name `__asm__` takes. Every read of
    *  one is a load of that global and every write a store to it, so a call between two reads may
@@ -424,13 +431,13 @@ export function unifyRegisterSpellings(
  *  register is an uninitialised local's home when the ABI passes no argument in it
  *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
- *  of its own prologue. The rest — callee-saved, and not saved — is `globalRegs` where the target
- *  can declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot, or
- *  where the function saves it past its prologue (`savedLater`): compiled code never saves a global
- *  register variable's register, and asm that saves one late restores it too, so its writes are not
- *  the caller's and its entry value is no global's. A
- *  target stating no `nonArgRegs` claims no partition and gets an empty model, so every def-less
- *  read stays a parameter.
+ *  of its saves. The rest — callee-saved, and not saved — is `globalRegs` where the target can
+ *  declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot, or where
+ *  the function saves or restores it but not before every use of it (`misSaved`, a measurement only
+ *  Thumb makes, whose `push` and `pop` are nothing but saves and restores): compiled code never saves
+ *  a global register variable's register, and asm that saves one restores it too, so its writes are
+ *  not the caller's and its entry value is no global's. A target stating no `nonArgRegs` claims no
+ *  partition and gets an empty model, so every def-less read stays a parameter.
  *
  *  THE FUNCTION'S OWN DECLARATION MOVES THE PARTITION'S EDGE. `ownWords` is how many argument
  *  words it can fill (`proto.ts` `ownArgumentWords`, an upper bound), and an argument register at
@@ -450,10 +457,16 @@ export function registerLiveIns(
   },
   savedRegs: ReadonlySet<string>,
   ownWords?: number,
-  savedLater: ReadonlySet<string> = new Set(),
+  misSaved: ReadonlySet<string> = new Set(),
 ): Pick<
   LiveInModel,
-  'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords' | 'unsavedCalleeSavedRegs' | 'globalRegs'
+  | 'uninitRegs'
+  | 'argRegs'
+  | 'hiddenInputRegs'
+  | 'ownArgWords'
+  | 'unsavedCalleeSavedRegs'
+  | 'misSavedRegs'
+  | 'globalRegs'
 > {
   const scratchRegs = assertScratchRegsPartitioned(target);
   for (const r of target.hiddenInputRegs ?? []) {
@@ -474,9 +487,10 @@ export function registerLiveIns(
     ],
     argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
-    unsavedCalleeSavedRegs: unsaved.filter((r) => !Object.hasOwn(spelled, r) || savedLater.has(r)),
+    unsavedCalleeSavedRegs: unsaved.filter((r) => !Object.hasOwn(spelled, r) || misSaved.has(r)),
+    misSavedRegs: unsaved.filter((r) => misSaved.has(r)),
     globalRegs: new Map(
-      unsaved.filter((r) => Object.hasOwn(spelled, r) && !savedLater.has(r)).map((r) => [r, spelled[r]]),
+      unsaved.filter((r) => Object.hasOwn(spelled, r) && !misSaved.has(r)).map((r) => [r, spelled[r]]),
     ),
     ...(ownWords === undefined ? {} : { ownArgWords: ownWords }),
   };
@@ -546,7 +560,25 @@ export function makeSsaBuilder(
   // function that reads the mis-listed register. A contradictory or half-declared partition is a
   // bug in the TARGET, not an unliftable function, so it throws a plain Error: a decline would
   // report the target's typo as a property of the input, once per function, forever.
-  const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
+  const model = (): LiveInModel => (modelMemo ??= sameGlobalRegs(checkedLiveInModel(name, liveInOf())));
+  // The model's `globalRegs` is the copy checked against the other lists, and the builder's own the
+  // one every read and write consults: two copies of one fact, which must be one.
+  const sameGlobalRegs = (m: LiveInModel): LiveInModel => {
+    const theirs = m.globalRegs ?? new Map<string, string>();
+    if (theirs.size !== globalRegs.size || [...theirs].some(([r, n]) => globalRegs.get(r) !== n)) {
+      throw new Error(`lifting '${name}': the live-in model's global registers are not the ones the builder was given`);
+    }
+    return m;
+  };
+  // What the refusals of unsaved callee-saved registers say of their saves (`misSavedRegs`).
+  const unsavedWhy = (regs: readonly string[]): string => {
+    const mis = regs.filter((r) => model().misSavedRegs?.includes(r));
+    const never = regs.filter((r) => !mis.includes(r));
+    return [
+      ...(mis.length ? [`saves or restores ${mis.join(', ')} only where a use comes first on some path`] : []),
+      ...(never.length ? [`no ${model().saveSite ?? 'save this lift reads'} saves ${never.join(', ')}`] : []),
+    ].join(', and ');
+  };
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
@@ -1908,7 +1940,7 @@ export function makeSsaBuilder(
         // parameter it would be read from the argument register a C caller fills instead.
         if (key !== undefined && koff === null && model().unsavedCalleeSavedRegs?.includes(key)) {
           throw new FrontendUnsupportedError(
-            `cannot lift '${name}': it reads callee-saved ${key} before writing it and never saved it — ` +
+            `cannot lift '${name}': it reads callee-saved ${key} before writing it, and ${unsavedWhy([key])} — ` +
               `a value no caller passes as an argument (a global register variable) — not modelled`,
           );
         }
@@ -1918,7 +1950,7 @@ export function makeSsaBuilder(
       const leaked = (model().unsavedCalleeSavedRegs ?? []).filter((r) => writtenKeys.has(r));
       if (leaked.length > 0) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': it writes callee-saved ${leaked.join(', ')} and never saved it — ` +
+          `cannot lift '${name}': it writes callee-saved ${leaked.join(', ')}, and ${unsavedWhy(leaked)} — ` +
             `the caller sees the write (a global register variable) — not modelled`,
         );
       }

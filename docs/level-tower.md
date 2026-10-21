@@ -1708,9 +1708,19 @@ of the same game whose C declares that local uninitialised (`CheckTileCollisionV
 Measuring the save costs one scan of the entry block's leading run, in the module that had already
 walked that prologue for `localArea` — `mov rLow, rHi; push {rLow}` counts as a save of `rHi`, which
 is how agbcc saves r8-sl and how every high-register inhabitant here is saved. Whole effect on the
-corpus: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` get their signature back; the
-three `SoundMainBTM` (`mov ip, r4`, no prologue either) go back to the fabricated trailing parameter
-they had before this capability existed, which is an over-count and not a wrong answer.
+corpus when it landed: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` got their
+two-pointer signature back, and the three `SoundMainBTM` (`mov ip, r4`, no prologue either) went
+back to the trailing parameter they had before. Both readings were later found wrong — the registers
+they read there are no parameters at all — and the next paragraph says what they are now.
+
+A `push` past that leading run is a save too, where nothing on any path uses the register before
+it (`bodySavedRegs`): hand-written asm saves late (`beq .L1; push {r4}; …; pop {r4}`), and a `push`
+is nothing but a save. A register saved or restored with a use ahead of the save on some path is
+neither a local nor a global, and refuses. The O32 and PowerPC frontends keep the entry-block
+reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
+the stack as `sw s0,16(sp)`. And the register is keyed by its spelling throughout, so a function
+that writes one register two ways (`sl` and `r10`, `s8` and `fp`) is read in one of them
+(`unifyRegisterSpellings`); saved as one and used as the other, it read as never saved.
 
 A register in the ABI list that the prologue did not save is no argument either: a C caller passes
 nothing there, so naming it a parameter puts a value in the signature the caller would hand over in

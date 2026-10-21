@@ -127,7 +127,7 @@ test('a callee-saved register stored after it was written is a value, reloaded l
       '10:\tjr\tra',
       '14:\taddiu\tsp,sp,8',
     ),
-  ).toThrow(/it writes callee-saved s0 and never saved it/);
+  ).toThrow(/it writes callee-saved s0, and no store in its entry block saves s0/);
   // saved first, the same value is an ordinary spill
   expect(
     src(

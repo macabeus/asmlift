@@ -1543,7 +1543,7 @@ function liftOnce(
     name,
     blocks.length,
     preds,
-    () => liveIns,
+    () => ({ ...liveIns, saveSite: 'store or save routine in its entry block' }),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
     liveIns.globalRegs,
   );

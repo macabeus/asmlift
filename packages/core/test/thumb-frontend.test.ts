@@ -825,26 +825,53 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     test('…and refuses where the compiler has no spelling for one', () => {
       const none = { ...ARMV4T_AGBCC, globalRegisterVariables: undefined };
-      const read = (reg: string) => new RegExp(`it reads callee-saved ${reg} before writing it and never saved it`);
+      const read = (reg: string) =>
+        new RegExp(`it reads callee-saved ${reg} before writing it, and no \`push\` ahead of every use saves ${reg}`);
       expect(() => decompile('f', noSave, none, { onGap: 'strict' })).toThrow(read('r4'));
       expect(() => decompile('f', half, none)).toThrow(read('r4'));
       expect(() => decompile('f', movless, none)).toThrow(read('r8'));
-      expect(() => decompile('f', write, none)).toThrow(/it writes callee-saved r8 and never saved it/);
+      expect(() => decompile('f', write, none)).toThrow(
+        /it writes callee-saved r8, and no `push` ahead of every use saves r8/,
+      );
     });
 
     // A push past the leading run saves the register all the same, and the pop that restores it is
     // transparent: hand-written asm keeping a register, not a global's write the caller sees.
-    test('…and refuses one the function saves past its prologue', () => {
+    test('…and reads one a `push` saves before every use, past the prologue too, as a local', () => {
       const late = 'f:\n\tmov\tr1, r0\n\tpush\t{r4}\n\tmov\tr4, r1\n\tadd\tr0, r4, #1\n\tpop\t{r4}\n\tbx\tlr\n';
-      expect(() => decompile('f', late, ARMV4T_AGBCC)).toThrow(/it writes callee-saved r4 and never saved it/);
+      expect(decompile('f', late, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
       const lateHigh =
         'f:\n\tmov\tr1, r0\n\tmov\tr3, r8\n\tpush\t{r3}\n\tmov\tr8, r1\n\tmov\tr0, r8\n\tpop\t{r3}\n\tmov\tr8, r3\n\tbx\tlr\n';
-      expect(() => decompile('f', lateHigh, ARMV4T_AGBCC)).toThrow(/callee-saved r8/);
-      // …and a `pop` with no push before it restores the register all the same, a write the
-      // transparent pop leaves out of the lift
-      expect(() => decompile('f', 'f:\n\tmov\tr0, r4\n\tpop\t{r4}\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(
-        /it reads callee-saved r4 before writing it and never saved it/,
+      expect(decompile('f', lateHigh, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
+      // past a branch, on the one path that uses it
+      const branch =
+        'f:\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tpush\t{r4}\n\tadd\tr4, r0, #0\n\tadd\tr0, r4, r4\n\tpop\t{r4}\n.L1:\n\tbx\tlr\n';
+      expect(decompile('f', branch, ARMV4T_AGBCC).source).toBe(
+        's32 f(s32 a0) {\n    if (a0 != 0) a0 = a0 + a0;\n    return a0;\n}\n',
       );
+    });
+
+    test('…and refuses one it saves or restores only where a use comes first', () => {
+      const mis = /it reads callee-saved r4 before writing it, and saves or restores r4 only where a use comes first/;
+      // a `pop` with no push before it restores the register all the same, a write the
+      // transparent pop leaves out of the lift
+      expect(() => decompile('f', 'f:\n\tmov\tr0, r4\n\tpop\t{r4}\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(mis);
+      // a read ahead of the push
+      const before = 'f:\n\tmov\tr0, r4\n\tpush\t{r4}\n\tmov\tr4, #1\n\tpop\t{r4}\n\tbx\tlr\n';
+      expect(() => decompile('f', before, ARMV4T_AGBCC)).toThrow(mis);
+      // a read on a path the push is not on
+      const path =
+        'f:\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tpush\t{r4}\n\tadd\tr4, r0, #0\n\tadd\tr0, r4, r4\n\tpop\t{r4}\n\tbx\tlr\n' +
+        '.L1:\n\tmov\tr0, r4\n\tbx\tlr\n';
+      expect(() => decompile('f', path, ARMV4T_AGBCC)).toThrow(mis);
+    });
+
+    // The staging `mov` is the save's only where its low register reaches the push unchanged; one
+    // rewritten first pushes a value of the function's own, and saves no high register.
+    test('…and a high register staged into a push through another value is still a global', () => {
+      const interposed =
+        'f:\n\tpush\t{lr}\n\tmov\tr0, r8\n\tadd\tr0, #1\n\tpush\t{r0}\n\tbl\tg\n\tpop\t{r0}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', interposed, ARMV4T_AGBCC).source).toBe('s32 f(void) {\n    return g(greg_r8 + 1);\n}\n');
     });
 
     // `sl` and `r10` are one register: saved under one spelling and used under the other, it is

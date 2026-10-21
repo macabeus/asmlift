@@ -305,12 +305,14 @@ describe('the register half: scratch and saved registers', () => {
     expect(lift(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toThrow(
       /the caller's s1, which the 'lw' at 0xc restores, reaches a value this function computes with/,
     );
-    const refused = /it reads callee-saved s1 before writing it and never saved it/;
+    const refused = /it reads callee-saved s1 before writing it, and no store in its entry block saves s1/;
     expect(lift(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_IDO)).toThrow(refused);
     expect(lift(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_IDO)).toThrow(refused);
     // …and a write is the global's store, which IDO refuses too
     expect(src(['0:\tjr\tra', '4:\tmove\ts0,a0'], MIPS_GCC)).toBe('void f(s32 a0) {\n    greg_r16 = a0;\n}\n');
-    expect(lift(['0:\tjr\tra', '4:\tmove\ts0,a0'], MIPS_IDO)).toThrow(/it writes callee-saved s0 and never saved it/);
+    expect(lift(['0:\tjr\tra', '4:\tmove\ts0,a0'], MIPS_IDO)).toThrow(
+      /it writes callee-saved s0, and no store in its entry block saves s0/,
+    );
   });
 
   test('an argument register read first stays a parameter', () => {

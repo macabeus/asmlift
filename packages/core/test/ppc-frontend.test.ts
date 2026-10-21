@@ -648,7 +648,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(dis('ur', routine)).toBe(uninit('ur'));
     // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
     // there, and no caller passes an argument in r31 either, so the read refuses.
-    const unsaved = /it reads callee-saved r31 before writing it and never saved it/;
+    const unsaved =
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/;
     expect(() => dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toThrow(unsaved);
     expect(() =>
       dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
@@ -667,7 +668,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // such declaration
     expect(dis('ug', '0:\tadd     r3,r3,r14\n4:\tblr\n')).toBe('s32 ug(s32 a0) {\n    return a0 + greg_r14;\n}\n');
     expect(() => decompile('ug', '0 <ug>:\n0:\tadd     r3,r3,r14\n4:\tblr\n', PPC_MWCC_233)).toThrow(
-      /it reads callee-saved r14 before writing it and never saved it/,
+      /it reads callee-saved r14 before writing it, and no store or save routine in its entry block saves r14/,
     );
   });
   // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
@@ -726,7 +727,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // a hand-written body handed r31 refuses, declared or not
     const hand = '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
     expect(() => decompile('h', hand, PPC_MWCC, { ownContextProto: { params: [], returnsVoid: true } })).toThrow(
-      /it reads callee-saved r31 before writing it and never saved it/,
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/,
     );
   });
   // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
@@ -735,7 +736,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // register, so no C signature hands it over. The body refuses, declared or not.
   test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
     const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
-    const refused = /it reads callee-saved r31 before writing it and never saved it/;
+    const refused =
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/;
     expect(() => decompile('ksNesInit03__Fv', asm, PPC_MWCC)).toThrow(refused);
     expect(() =>
       decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }),

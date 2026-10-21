@@ -1614,7 +1614,11 @@ function liftOnce(
     preds,
     () => {
       const owned = ownedFrameOf?.();
-      return { ...liveIns, ...(owned === undefined ? {} : { ownedLocals: owned }) };
+      return {
+        ...liveIns,
+        saveSite: 'store in its entry block',
+        ...(owned === undefined ? {} : { ownedLocals: owned }),
+      };
     },
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
     liveIns.globalRegs,
