@@ -12446,14 +12446,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //      repeats: agbcc threads the break's jump through that test (jump.c thread_jumps, on from -O1),
   //      so the loop's exit lands on the post-loop `if`'s THEN arm while the other exits land on the
   //      re-test — two exit targets (structure.ts `singleExit`, then `foreverShape`, then `onStack`;
-  //      traced on the real function and the row). gcc2.7.2kmc threads it too (same guard); ido7.1 does
-  //      not and lifts (control); mwcc_242_81 off (frontend `nor` on both siblings).
+  //      traced on the real function and the row). gcc2.7.2kmc threads it too, past the THEN arm into
+  //      its delay slot, but its exits hand the re-test an index each computes on its own edge (the
+  //      counter re-masked for a `u8`, `i<<2` for an `int`), so the threaded exit cannot be pointed
+  //      back at it; ido7.1 does not thread and lifts (control); mwcc_242_81 off (frontend `nor` on
+  //      both siblings). Lifted since by pointing the threaded exit back at the re-test on agbcc
+  //      (raise/unthread.ts) and by the shared break tail of item 11 on gcc2.7.2kmc.
   //  11. brmerge (sub_0801D6B0). Two break arms that run their own code and then share one tail
   //      (`gHit = i; break;`) before leaving the loop: `codeBreakArm` requires an arm's region to be
   //      entered only through its own edge, the shared tail is entered from the other arm, both arms
   //      refuse, and the header re-enters. Declines on agbcc, ido7.1 and gcc2.7.2kmc with lifting
   //      one-arm controls; mwcc_242_81 off (its one-arm control declines at emission of the recovered
-  //      while). The three `continue` tests keep agbcc from peeling the first iteration.
+  //      while). The three `continue` tests keep agbcc from peeling the first iteration. Lifted
+  //      since on all three: `codeBreakArm` admits a tail other arms enter from the body, and each arm
+  //      writes it again ahead of its own `break` (the one copy at the join needs a `continue` that
+  //      runs the latch's update, which no loop form spells).
   //  12. dmasret (sub_080202D4). A `vu16` published to a DMA source register BESIDE a struct-return
   //      temp of a two-field 4-byte struct (thumb.c:1426-1472 returns it in memory), with a store
   //      through a computed pointer AFTER the DMA block. The audit bounds a DMA source read by walking
@@ -12700,9 +12707,38 @@ export const SYNTHETIC: SynthSpec[] = [
       'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
       'void thrbreak(u8 x)\n{\n    u8 i;\n    for (i = 0; i < 3; i++) {\n        if (x == gTbl[i].a || x == gTbl[i].b)\n            break;\n    }\n    if (x == gTbl[i].a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
     features: ['break', 'struct'],
-    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'void thrbreak(u8 x);',
     proto: { thrbreak: { returnsVoid: true } },
+  },
+  // thrbreak as a pointer walk: gcc2.7.2kmc's bottom-tested loop hands the re-test the stepped
+  // pointer from its latch and the current one from its in-body exit, which is the one the threaded
+  // exit read, so raise/unthread.ts points that exit back at the re-test through the THEN arm its
+  // delay slot carried (agbcc and ido7.1 are controls). gcc2.7.2 -O1 re-masks `x` on each exit's
+  // own block, so its exit target only forwards to the re-test, and unthread reads the re-test
+  // behind it.
+  {
+    sym: 'thrwalk',
+    src:
+      'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
+      'void thrwalk(u8 x)\n{\n    struct Pair *p;\n    for (p = gTbl; p < gTbl + 3; p++) {\n        if (x == p->a || x == p->b)\n            break;\n    }\n    if (x == p->a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
+    features: ['break', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void thrwalk(u8 x);',
+    proto: { thrwalk: { returnsVoid: true } },
+  },
+  // thrwalk with its break tests swapped: gcc2.7.2kmc puts the step in the threaded branch's delay
+  // slot, so the current and the stepped pointer are both defined at the threaded exit, and
+  // raise/unthread.ts judges each as the re-test's arg (gcc2.7.2kmc and gcc2.7.2).
+  {
+    sym: 'thrwalkba',
+    src:
+      'struct Pair { u8 a; u8 b; u8 c; u8 d; };\nextern struct Pair gTbl[3];\nextern u8 gOut;\n' +
+      'void thrwalkba(u8 x)\n{\n    struct Pair *p;\n    for (p = gTbl; p < gTbl + 3; p++) {\n        if (x == p->b || x == p->a)\n            break;\n    }\n    if (x == p->a)\n        gOut = 1;\n    else\n        gOut = 2;\n}',
+    features: ['break', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void thrwalkba(u8 x);',
+    proto: { thrwalkba: { returnsVoid: true } },
   },
   {
     sym: 'brmerge',

@@ -198,7 +198,7 @@ export const EXIT_TRAMPOLINE_GATES: readonly Gate<ExitTrampoline>[] = [
 ];
 
 /** Every path from `b` ends in a `ret` and runs no effect on the way. */
-function returnsPurely(b: Block): boolean {
+export function returnsPurely(b: Block): boolean {
   const seen = new Set<Block>();
   for (const stack = [b]; stack.length > 0;) {
     const x = stack.pop()!;

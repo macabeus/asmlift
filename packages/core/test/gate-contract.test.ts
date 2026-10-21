@@ -56,6 +56,7 @@ import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
 import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
 import { DISPLACED_BASE_GATES, DISPLACED_ROOT_GATES } from '../src/raise/structs';
 import { TRUNC_LOAD_GATES } from '../src/raise/truncload';
+import { UNTHREAD_GATES } from '../src/raise/unthread';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
@@ -91,6 +92,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   EXIT_TRAMPOLINE_GATES: EXIT_TRAMPOLINE_GATES as readonly Gate<never>[],
   REROLL_GATES: REROLL_GATES as readonly Gate<never>[],
+  UNTHREAD_GATES: UNTHREAD_GATES as readonly Gate<never>[],
   TOP_TEST_GATES: TOP_TEST_GATES as readonly Gate<never>[],
   FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
