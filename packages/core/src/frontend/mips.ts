@@ -3048,7 +3048,7 @@ function liftOnce(
   }
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
-  refuseStaleIdiomReads(name, irBlocks, staleIdiom, prototypes[name] ?? options.contextOwnProto?.proto);
+  refuseStaleIdiomReads(name, irBlocks, staleIdiom, prototypes[name] ?? options.contextOwnProto?.proto, fail);
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();

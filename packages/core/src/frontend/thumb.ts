@@ -2612,7 +2612,15 @@ function liftOnce(
     fillThumbBlock(fill, ab, bi);
     ssa.markFilled(bi);
   });
-  refuseStaleIdiomReads(name, irBlocks, fill.staleIdiomValues, prototypes[name] ?? options.contextOwnProto?.proto);
+  refuseStaleIdiomReads(
+    name,
+    irBlocks,
+    fill.staleIdiomValues,
+    prototypes[name] ?? options.contextOwnProto?.proto,
+    (m) => {
+      throw new FrontendUnsupportedError(m);
+    },
+  );
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
   refuseReturnsNotThroughCallersLr(name, cfg);

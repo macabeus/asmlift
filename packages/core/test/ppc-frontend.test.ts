@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
-import { lift } from '../src/frontend/ppc';
+import { PpcUnsupportedError, lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
 import { PPC_MWCC, targetFor } from '../src/target';
 
@@ -1466,6 +1466,8 @@ describe('an elided mwcc dispatch writes its registers at each case target', () 
     const stale = /a case of the elided jump table reads (r4|r0), which the unlifted dispatch idiom wrote/;
     expect(() => lift('mr      r3,r4')).toThrow(stale);
     expect(() => lift('mr      r3,r0')).toThrow(stale);
+    // the refusal the shared model makes is this frontend's own (frontend/errors.ts `FrontendRefusal`)
+    expect(() => lift('mr      r3,r4')).toThrow(PpcUnsupportedError);
   });
 
   test('…but not on the default path, which never ran the idiom', () => {

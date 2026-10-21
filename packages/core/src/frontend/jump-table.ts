@@ -32,7 +32,7 @@
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { T } from '../ir/types';
 import { type FnProto, declaresVoidReturn } from '../proto';
-import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
+import type { FrontendRefusal } from './errors';
 import type { SsaBuilder } from './ssa';
 
 /** Whether any branch lands after the word at `afterAddr`, up to and including the word at
@@ -327,12 +327,14 @@ export const scaledIndexIn =
  *  address, none of which a C expression spells. Run on the filled SSA, before `finish` collapses a
  *  join of an undefined value into its other argument: a marker some operand demands, directly or
  *  through the joins that carry it, declines. A `ret` operand demands nothing under a declared
- *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). */
+ *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). `fail` is the frontend's own
+ *  refusal. */
 export function refuseStaleIdiomReads(
   name: string,
   irBlocks: readonly Block[],
   stale: ReadonlyMap<Value, StaleIdiomRead>,
   own: FnProto | undefined,
+  fail: FrontendRefusal,
 ): void {
   if (stale.size === 0) {
     return;
@@ -374,7 +376,7 @@ export function refuseStaleIdiomReads(
       "which the unlifted dispatch idiom wrote — the lift would read the value from before the dispatch, not the table's " +
       'index, address or target';
     // one literal per form: the decline classifier (apps/web declines.ts) keys on the text up to `reads`
-    throw new FrontendUnsupportedError(
+    fail(
       form === 'kept'
         ? `cannot lift '${name}': a case of the kept jump table reads ${reg}, ${why}`
         : `cannot lift '${name}': a case of the elided jump table reads ${reg}, ${why}`,
