@@ -6,7 +6,7 @@
 // result of an ordinary callee declared to return a floating type (its `floatReturn`). And a
 // double literal, two constant words, where the target states their order
 // (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
-// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer
+// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all four apart from the integer
 // helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
 // as floats, which only data flow may justify — see the function below.
 import { constWord } from '../ir/bits';

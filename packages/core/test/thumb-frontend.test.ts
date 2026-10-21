@@ -5179,8 +5179,9 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   });
 
   // …unless the function's own declaration proves the register holds one integer word, which no
-  // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on entry and
-  // reading `(u8)k` back. A count states no type, and a by-value parameter is the home it guards.
+  // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
+  // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it
+  // guards.
   test("the own declaration's word parameter is no by-value home", () => {
     const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
     const own = (params: Prototypes[string]['params']): string =>
@@ -5231,7 +5232,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // Each object model that covers the slot keeps it (thumb.ts `narrowReloadOf`). Without an escape
   // the frame is the one object, and the reload stays a member read of it: read as the slot
   // narrowed instead, the object's other narrow reads leave the slot unkeyed, and the lowering
-  // refuses a frame it lifts today.
+  // refuses a frame the one object lifts.
   test('the one object keeps a narrow reload of its word', () => {
     const one =
       'f:\n\tadd\tsp, sp, #-0xc\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x9]\n' +

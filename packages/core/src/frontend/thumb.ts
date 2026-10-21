@@ -3734,9 +3734,9 @@ function measureThumbFrame({
   // and no object's: a word `str` to [sp,#slot] in live code writes it — without one the bytes are
   // a sub-word local's (`mov r3, sp / strh r2, [r3, #4]`), which the object model owns — no other
   // copy of sp names the slot's offset, and neither a by-value block nor the one object covers it.
-  // The one-word frame object (`capturedObjectIsTheWholeFrame`) needs no gate of its own: its
+  // The one-word frame object (`capturedObjectIsTheWholeFrame`) needs no test of its own: its
   // escape is a copy of sp at offset 0 handed out, which no candidate's copy can be (that one dies
-  // in its load), so it is another capture at the slot's offset and the first test already drops it.
+  // in its load), so it is another capture at the slot's offset.
   //
   // …AND THE WORD IS NOT AN INCOMING ARGUMENT'S HOME. A by-value struct parameter is the other
   // producer of these instructions: agbcc stores its argument registers word by word on entry and
@@ -3748,11 +3748,10 @@ function measureThumbFrame({
   // that home, and its reloads keep the object model. A spilled promoted local is stored from the
   // value it was computed as. That test reads the asm alone, and the function's own declaration
   // overrules it where it proves the register holds one integer word (`proto.ts`
-  // `ownLeadingWordRegisters`, which asks whether a register holds a word whoever's): a
-  // `u32 k` spilled on entry and read back as `(u8)k` is no struct's home, and lifts as the slot
-  // narrowed. A copy kept here is no capture, so its
-  // offset leaves `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one
-  // dropped is the capture it always was, and keeps today's decline.
+  // `ownLeadingWordRegisters`): a `u32 k` spilled on entry and read back as `(u8)k` is no struct's
+  // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
+  // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
+  // capture.
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
@@ -4160,9 +4159,10 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
 //     A load at any other byte of the word is not that word's value narrowed, whatever it reads.
 //   * `ldrsb`/`ldrsh` exist only register-offset in Thumb-1, and agbcc's signed use reloads a word
 //     and shifts (measured), so no signed shape is taken.
-// What the caller then adds, because it needs the frame model: the slot named by no other
-// capture, outside a by-value block and outside the one object (`measureThumbFrame`), and at the
-// lowering a slot the word model keys with a store reaching it (`lowerLoad`). A narrow STORE into
+// What the caller then adds, because it needs the frame model: a word `str` to the slot in live
+// code, the slot named by no other capture, no argument's home, outside a by-value block and
+// outside the one object (`measureThumbFrame`), and at the lowering a slot the word reload would
+// read (`lowerLoad` `readsOwnSlot`). A narrow STORE into
 // the slot through any other address is the frame-object audit's: it sees that slot used and the
 // object overlapping it, the "one byte, two models" refusal.
 function narrowSlotReloads(
@@ -6030,8 +6030,8 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     }
   }
   // WHICH RELOADS OF THIS FUNCTION'S OWN FRAME ARE SLOT READS — the dual of the spill in the str
-  // arm, and the whole soundness of it. The word reload below and the narrow reload next both ask
-  // it here, so a change to its terms is made once.
+  // arm, and the whole soundness of it. The narrow reload next and the word reload below both ask
+  // it.
   //
   // One a store reaches on some path reads that store, and a path that brings none reads an
   // uninitialised local: the frame is `ownedLocals`, so `readVar` answers that path with `undef`,
