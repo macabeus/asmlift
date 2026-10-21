@@ -1902,7 +1902,12 @@ function liftOnce(
       enterCaseTarget(
         entry,
         ops,
-        { key: (r) => r, scrutinee: (r) => readVar(r, bi), write: (r, v) => writeVar(r, bi, v) },
+        {
+          key: (r) => r,
+          scrutinee: (r) => readVar(r, bi),
+          dispatchScrutinee: (r) => ssa.readAtEnd(r, entry.at),
+          write: (r, v) => writeVar(r, bi, v),
+        },
         staleIdiom,
       );
     }
@@ -3048,7 +3053,7 @@ function liftOnce(
   }
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
-  refuseStaleIdiomReads(name, irBlocks, staleIdiom, prototypes[name] ?? options.contextOwnProto?.proto, fail);
+  refuseStaleIdiomReads(name, irBlocks, staleIdiom, ssa, prototypes[name] ?? options.contextOwnProto?.proto, fail);
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();

@@ -2616,6 +2616,7 @@ function liftOnce(
     name,
     irBlocks,
     fill.staleIdiomValues,
+    ssa,
     prototypes[name] ?? options.contextOwnProto?.proto,
     (m) => {
       throw new FrontendUnsupportedError(m);
@@ -5192,6 +5193,7 @@ function openBlockCursor(fill: ThumbFill, ab: AsmBlock, bi: number): BlockCursor
       {
         key: reg,
         scrutinee: (r) => ssa.readVar(reg(r), bi),
+        dispatchScrutinee: (r) => ssa.readAtEnd(reg(r), entry.at),
         write: (r, v) => ssa.writeVar(reg(r), bi, v),
       },
       fill.staleIdiomValues,

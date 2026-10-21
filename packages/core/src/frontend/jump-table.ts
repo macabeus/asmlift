@@ -175,10 +175,18 @@ export function makeTableBases(hoisted: Iterable<HoistedDispatch>, fail: Fronten
 //   - every other write leaves an address no C expression spells, so it is a MARKER: an `undef`
 //     value that `refuseStaleIdiomReads` declines wherever an operand demands it.
 // A target some other edge also enters (the default, a hole naming the default, a loop's back
-// edge, a second table, the function's entry: MIXED) cannot tell the paths apart at its entry, so
-// every register the idiom writes is a marker there, the index too. Compiled code loses nothing to
-// that: a register live into such a block is live on its case edges as well, where it holds what
-// the idiom left, so no compiler reads one there.
+// edge, a fallthrough from another case: MIXED) cannot tell the paths apart at its entry. Its
+// markers stand for what the other paths brought too, so a read of one declines. Its scaled index
+// does not: mwcc 2.4.2 at -O4 keeps it live into such targets — a case whose body is a do-while
+// re-enters it on the back edge (`lwzx r0,r4,r3` with r3 the dispatch's `slwi r3,r3,2`), and a case
+// falls through into the next with the `slwi r31,r27,2` still in r31. So it is written there too,
+// as the shift of the scrutinee where the `switch_br` read it (`CaseEntry.at`), not where the
+// target reads it: a back edge brings whatever the case left in the scrutinee's register. It is
+// only a guess until every block is filled, and it stands where every other path into the target
+// brings that same scaled index in that register (`StaleScaledIndex.settle`, settled in
+// `refuseStaleIdiomReads`); where some path brings anything else, it is a marker, and a read of it
+// declines. A target two tables enter, and the function's entry, whose call edge no `preds` lists,
+// make every register a marker.
 
 /** What an elided dispatch leaves in a register it writes: the scrutinee scaled by four, or an
  *  address no C expression spells. */
@@ -220,11 +228,20 @@ export interface StaleMarker {
   parks: boolean;
 }
 
-/** The scaled index an EXACT target is entered with in `reg` ({@link enterCaseTarget}): no marker
- *  but a value a case may read, recorded only for {@link scaledIndexIn}. */
+/** The scaled index a case target is entered with in `reg` ({@link enterCaseTarget}): no marker
+ *  but a value a case may read, recorded for {@link scaledIndexIn} and, on a MIXED target, to be
+ *  settled. */
 export interface StaleScaledIndex {
   kind: 'scaled';
   reg: string;
+  /** the dispatch's block: two tables' scaled indices are different values */
+  table: number;
+  /** the scrutinee the shift reads, where the dispatch's `switch_br` read it */
+  of: Value;
+  /** On a MIXED target: the `shl` defining it, the frontend's key for `reg`, and the predecessors
+   *  ({@link CaseEntry.others}) every path into whose end must bring the same scaled index. Where
+   *  one does not, `refuseStaleIdiomReads` declines a read of it and makes the `shl` a marker. */
+  settle?: { op: Op; key: string; others: readonly number[] };
 }
 
 /** What an elided or kept dispatch left in a register, by the value standing for it: a marker no
@@ -238,11 +255,18 @@ export interface CaseEntry {
   leaves: ReadonlyMap<string, IdiomLeft>;
   /** only the table's case edges enter the target */
   exact: boolean;
+  /** the block emitting the table's `switch_br` */
+  at: number;
+  /** A MIXED target's predecessors other than the table's case edges — `at` itself when the target
+   *  is also the default — each of whose paths must bring the scaled index for it to stand there
+   *  (`StaleScaledIndex.settle`). Empty on an EXACT target. */
+  others: readonly number[];
 }
 
-/** Each case target's entry: EXACT (every edge into it is one table's case edge) keeps that table's
- *  `leaves`; MIXED makes every register any of its tables wrote a marker. Block 0 is MIXED: the
- *  call that enters a function is an edge no `preds` lists. */
+/** Each case target's entry: EXACT (every edge into it is one table's case edge) and MIXED (other
+ *  edges enter it too) keep that table's `leaves`, the scaled index settled later on a MIXED one; a
+ *  target two tables enter makes every register they wrote a marker. Block 0 does too: the call
+ *  that enters a function is an edge no `preds` lists. */
 export function caseEntries(
   tables: readonly ElidedDispatch[],
   preds: ReadonlyArray<readonly number[]>,
@@ -256,15 +280,24 @@ export function caseEntries(
   const out = new Map<number, CaseEntry>();
   for (const [b, ts] of owners) {
     const [t] = ts;
-    const exact = ts.length === 1 && b !== 0 && b !== t.defaultBlock && preds[b].every((p) => p === t.at);
+    const own = ts.length === 1 && b !== 0;
+    const exact = own && b !== t.defaultBlock && preds[b].every((p) => p === t.at);
     out.set(
       b,
-      exact
-        ? { scrutReg: t.scrutReg, leaves: t.leaves, exact }
+      own
+        ? {
+            scrutReg: t.scrutReg,
+            leaves: t.leaves,
+            exact,
+            at: t.at,
+            others: exact ? [] : [...new Set(preds[b])].filter((p) => p !== t.at || b === t.defaultBlock),
+          }
         : {
             scrutReg: t.scrutReg,
             leaves: new Map(ts.flatMap((u) => [...u.leaves.keys()]).map((r) => [r, 'opaque' as const])),
             exact,
+            at: t.at,
+            others: [],
           },
     );
   }
@@ -273,24 +306,38 @@ export function caseEntries(
 
 /** Write what an elided dispatch left at the entry of case target `entry`'s block, before its first
  *  instruction: `scrutinee` reads the switch's scrutinee there (before any of these writes, which may
- *  overwrite its register), `write` defines a register in the block. Each marker is recorded in
- *  `stale` against the register it stands in, for {@link refuseStaleIdiomReads}, and the scaled
- *  index as its own kind, for {@link scaledIndexIn}. */
+ *  overwrite its register), `dispatchScrutinee` at the end of the dispatch's block `entry.at` (null
+ *  while that block is unfilled, where a MIXED target's scaled index is a marker instead), `write`
+ *  defines a register in the block. Each marker is recorded in `stale` against the register it
+ *  stands in, for {@link refuseStaleIdiomReads}, and the scaled index as its own kind, for
+ *  {@link scaledIndexIn} and, on a MIXED target, to be settled. */
 export function enterCaseTarget(
   entry: CaseEntry,
   ops: Op[],
-  io: { key: (reg: string) => string; scrutinee: (reg: string) => Value; write: (reg: string, v: Value) => void },
+  io: {
+    key: (reg: string) => string;
+    scrutinee: (reg: string) => Value;
+    dispatchScrutinee: (reg: string) => Value | null;
+    write: (reg: string, v: Value) => void;
+  },
   stale: Map<Value, StaleIdiomRead>,
 ): void {
-  let scaled: Value | null = null;
-  if ([...entry.leaves.values()].includes('scaled')) {
-    scaled = mkValue(T.unk(32));
-    ops.push(mkOp('shl', { operands: [io.scrutinee(entry.scrutReg)], results: [scaled], attrs: { imm: 2 } }));
+  // On an EXACT target the two reads are one value: its only predecessor is the dispatch's block.
+  const of = [...entry.leaves.values()].includes('scaled')
+    ? entry.exact
+      ? io.scrutinee(entry.scrutReg)
+      : io.dispatchScrutinee(entry.scrutReg)
+    : null;
+  const shl = of === null ? null : mkOp('shl', { operands: [of], results: [mkValue(T.unk(32))], attrs: { imm: 2 } });
+  if (shl !== null) {
+    ops.push(shl);
   }
   for (const [r, left] of entry.leaves) {
-    if (left === 'scaled') {
-      io.write(r, scaled!);
-      stale.set(scaled!, { kind: 'scaled', reg: r });
+    if (left === 'scaled' && shl !== null) {
+      const [scaled] = shl.results;
+      io.write(r, scaled);
+      const settle = entry.exact ? {} : { settle: { op: shl, key: io.key(r), others: entry.others } };
+      stale.set(scaled, { kind: 'scaled', reg: r, table: entry.at, of: of!, ...settle });
       continue;
     }
     io.write(r, staleMarker(ops, io.key(r), { reg: r, form: 'elided', parks: entry.exact }, stale));
@@ -343,12 +390,14 @@ export const scaledIndexIn =
  *  address, none of which a C expression spells. Run on the filled SSA, before `finish` collapses a
  *  join of an undefined value into its other argument: a marker some operand demands, directly or
  *  through the joins that carry it, declines. A `ret` operand demands nothing under a declared
- *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). `fail` is the frontend's own
- *  refusal. */
+ *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). A MIXED target's scaled
+ *  index is settled first ({@link unsettledScaledIndices}): one that does not stand is a marker,
+ *  read or not. `fail` is the frontend's own refusal. */
 export function refuseStaleIdiomReads(
   name: string,
   irBlocks: readonly Block[],
   stale: ReadonlyMap<Value, StaleIdiomRead>,
+  ssa: Pick<SsaBuilder, 'everyReachingDef'>,
   own: FnProto | undefined,
   fail: FrontendRefusal,
 ): void {
@@ -366,6 +415,7 @@ export function refuseStaleIdiomReads(
       }
     }
   }
+  const unsettled = unsettledScaledIndices(irBlocks, stale, incoming, ssa);
   const demanded = new Set<Value>();
   const work: Value[] = [];
   const demand = (v: Value) => {
@@ -385,7 +435,11 @@ export function refuseStaleIdiomReads(
   while (work.length > 0) {
     (incoming.get(work.pop()!) ?? []).forEach(demand);
   }
-  const read = [...stale].flatMap(([v, s]) => (s.kind === 'marker' && demanded.has(v) ? [s] : []))[0];
+  const read = [...stale].flatMap(([v, s]) =>
+    demanded.has(v) && (s.kind === 'marker' || unsettled.has(v))
+      ? [s.kind === 'marker' ? s : { reg: s.reg, form: 'elided' as const }]
+      : [],
+  )[0];
   if (read !== undefined) {
     const { reg, form } = read;
     const why =
@@ -398,4 +452,74 @@ export function refuseStaleIdiomReads(
         : `cannot lift '${name}': a case of the elided jump table reads ${reg}, ${why}`,
     );
   }
+  // Read by nothing, so no C spells it; a marker keeps the SSA honest, as the shift's scrutinee need
+  // not reach a target some other path enters.
+  for (const v of unsettled) {
+    const s = stale.get(v) as StaleScaledIndex;
+    Object.assign(s.settle!.op, { opcode: 'undef', operands: [], attrs: { key: s.settle!.key } });
+  }
+}
+
+/** The scaled indices written at MIXED targets that do not stand. One stands where every path into
+ *  the end of each of its target's other predecessors brings, in its register, a scaled index of the
+ *  same table shifted from the same scrutinee — directly or through joins all of whose inputs do —
+ *  with no call destroying it (`SsaBuilder.everyReachingDef`). Those paths include ones through
+ *  other MIXED targets, so it is a greatest fixpoint: every guess stands until a path refutes it, and
+ *  a refuted one refutes whatever leaned on it. What stands is then exactly what the register holds
+ *  on every path into the target: the table's case edges bring the shift the target computes, and
+ *  each other edge brings a value computing that same shift. The scrutinee is compared through
+ *  joins all of whose other inputs are it, which the trivial-phi pass has yet to fold. */
+function unsettledScaledIndices(
+  irBlocks: readonly Block[],
+  stale: ReadonlyMap<Value, StaleIdiomRead>,
+  incoming: ReadonlyMap<Value, readonly Value[]>,
+  ssa: Pick<SsaBuilder, 'everyReachingDef'>,
+): Set<Value> {
+  const pending = [...stale].flatMap(([v, s]) => (s.kind === 'scaled' && s.settle !== undefined ? [{ v, s }] : []));
+  const refuted = new Set<Value>();
+  if (pending.length === 0) {
+    return refuted;
+  }
+  // the entry block's parameters are the caller's values, whatever its back edges bring
+  const entryParams = new Set(irBlocks[0].params);
+  const joined = (v: Value) => (entryParams.has(v) ? undefined : incoming.get(v));
+  const resolve = (v: Value, seen: Set<Value>): Value => {
+    const ins = joined(v);
+    if (ins === undefined || seen.has(v)) {
+      return v;
+    }
+    seen.add(v);
+    const others = new Set(ins.map((i) => resolve(i, seen)).filter((u) => u !== v));
+    return others.size === 1 ? [...others][0] : v;
+  };
+  const brings = (s: StaleScaledIndex) => {
+    const of = resolve(s.of, new Set());
+    const seen = new Set<Value>();
+    const ok = (u: Value): boolean => {
+      const t = stale.get(u);
+      if (t?.kind === 'scaled' && t.table === s.table && !refuted.has(u) && resolve(t.of, new Set()) === of) {
+        return true;
+      }
+      const ins = joined(u);
+      if (ins === undefined) {
+        return false;
+      }
+      if (seen.has(u)) {
+        return true; // a cycle of joins adds no input the first visit did not judge
+      }
+      seen.add(u);
+      return ins.every(ok);
+    };
+    return ok;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const { v, s } of pending) {
+      if (!refuted.has(v) && !s.settle!.others.every((p) => ssa.everyReachingDef(s.settle!.key, p, brings(s)))) {
+        refuted.add(v);
+        changed = true;
+      }
+    }
+  }
+  return refuted;
 }

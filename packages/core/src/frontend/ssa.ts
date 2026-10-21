@@ -64,6 +64,9 @@ export interface SsaBuilder {
    *
    *  One of the three call verbs `CallDeclarations.lower` owns ({@link noteCall}). */
   readGuessedArg(reg: string, b: number): Value;
+  /** The value `reg` holds at the END of block `b` once `b` is filled, as the edges out of it carry
+   *  it; `null` before. A lookup, not a read: it records no read for `finish` to judge. */
+  readAtEnd(reg: string, b: number): Value | null;
   /** Record that `reg` now holds `v` within block `b`. */
   writeVar(reg: string, b: number, v: Value): void;
   /** Every value written to a frame-slot key ({@link stackSlotKey}) or an incoming stack-argument key
@@ -1384,6 +1387,7 @@ export function makeSsaBuilder(
     irBlocks,
     readVar,
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
+    readAtEnd: (reg: string, b: number) => (filled[b] ? readAny(reg, b) : null),
     writeVar,
     frameWrites,
     paramReg,

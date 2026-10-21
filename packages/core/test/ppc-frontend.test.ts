@@ -1546,3 +1546,106 @@ describe('a guessed arity in a case of an elided mwcc dispatch', () => {
     ).toThrow(/r4, which the arity guessed without one counts, still holds the index the jump table's dispatch scaled/);
   });
 });
+
+// A SCALED INDEX AT A TARGET OTHER EDGES ENTER TOO. mwcc 2.4.2 -O4,p keeps the dispatch's `slwi` live
+// into a case another case falls into (`case 2: ...; case 3: ... p[i] ...`, r31) and into a case
+// whose body is a do-while, re-entered by its back edge (`lwzx r0,r4,r3`). Every path into such a
+// target brings `i << 2` in that register, so it is the scaled index there too; before, the target
+// made it a marker and the case declined. A path that brings anything else in it still declines:
+// the default's, a case that rewrote it, a loop that advanced it.
+describe('the scaled index at a case target other edges also enter', () => {
+  const asmData = (cases: number[]): AsmData => ({
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: cases.map((off, i) => ({ section: '.data', offset: i * 4, type: 'R_PPC_ADDR32', sym: 'swm', addend: off })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swm', { section: '.text', value: 0, size: 0x48, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  });
+  const asm = (deflt: string, body: string[]) =>
+    [
+      '00000000 <swm>:',
+      '   0:\tcmplwi  r3,3',
+      `   4:\tbgt     ${deflt} <swm+0x${deflt}>`,
+      '   8:\tlis     r4,0',
+      '\t\t\t8: R_PPC_ADDR16_HA jtbl',
+      '   c:\tslwi    r5,r3,2',
+      '  10:\taddi    r4,r4,0',
+      '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+      '  14:\tlwzx    r0,r4,r5',
+      '  18:\tmtctr   r0',
+      '  1c:\tbctr',
+      ...body,
+    ].join('\n');
+  const rest = [
+    '  30:\tli      r3,30',
+    '  34:\tblr',
+    '  38:\tli      r3,40',
+    '  3c:\tblr',
+    '  40:\tli      r3,-1',
+    '  44:\tblr',
+  ];
+  // case 0 falls into case 1, which returns `p[i]` with r5 the dispatch's `slwi r5,r3,2`
+  const fall = (c0: string) =>
+    asm('40', [`  20:\tli      r7,1`, `  24:\t${c0}`, '  28:\tlwzx    r3,r6,r5', '  2c:\tblr', ...rest]);
+  const lift = (a: string, cases = [0x20, 0x28, 0x30, 0x38]) =>
+    decompile('swm', a, PPC_MWCC, { asmData: asmData(cases) }).source;
+  const stale = /a case of the elided jump table reads r5, which the unlifted dispatch idiom wrote/;
+
+  test('a case fallen into reads the scaled index the falling case kept', () => {
+    expect(lift(fall('stw     r7,0(r6)'))).toMatch(/case 0:\s*\n\s*\*a3 = 1;\s*\n\s*case 1:\s*\n\s*return a3\[a0\];/);
+  });
+
+  test('…and the shift is of the scrutinee the switch read, not the one the falling case left', () => {
+    const out = lift(
+      asm('40', [
+        '  20:\taddi    r3,r3,1',
+        '  24:\tstw     r3,0(r6)',
+        '  28:\tlwzx    r3,r6,r5',
+        '  2c:\tblr',
+        ...rest,
+      ]),
+    );
+    expect(out).toMatch(/\*a3 = a0 \+ 1;\s*\n\s*case 1:\s*\n\s*return a3\[a0\];/);
+  });
+
+  test('a do-while case re-entered by its back edge reads it on every iteration', () => {
+    const loop = [
+      '  28:\tlwzx    r3,r6,r5',
+      '  2c:\taddi    r6,r6,4',
+      '  30:\tcmpwi   r3,0',
+      '  34:\tbne     28 <swm+0x28>',
+    ];
+    const out = lift(
+      asm('40', ['  20:\tli      r3,1', '  24:\tblr', ...loop, '  38:\tblr', '  3c:\tli      r3,7', '  40:\tblr']),
+      [0x20, 0x28, 0x3c, 0x3c],
+    );
+    expect(out).toMatch(/do \{\s*\n\s*v0 = v1\[a0\];\s*\n\s*v1 = v1 \+ 1;\s*\n\s*\} while \(v0 != 0\);/);
+  });
+
+  test('a path that brings anything else in the register DECLINES', () => {
+    // the falling case rewrote it
+    expect(() => lift(fall('li      r5,8'))).toThrow(stale);
+    // the default enters the target too, and never ran the idiom
+    expect(() =>
+      lift(
+        asm('28', ['  20:\tli      r7,1', '  24:\tstw     r7,0(r6)', '  28:\tlwzx    r3,r6,r5', '  2c:\tblr', ...rest]),
+      ),
+    ).toThrow(stale);
+    // the loop advances it
+    const loop = [
+      '  28:\tlwzx    r3,r6,r5',
+      '  2c:\taddi    r5,r5,4',
+      '  30:\tcmpwi   r3,0',
+      '  34:\tbne     28 <swm+0x28>',
+    ];
+    expect(() =>
+      lift(
+        asm('40', ['  20:\tli      r3,1', '  24:\tblr', ...loop, '  38:\tblr', '  3c:\tli      r3,7', '  40:\tblr']),
+        [0x20, 0x28, 0x3c, 0x3c],
+      ),
+    ).toThrow(stale);
+  });
+});

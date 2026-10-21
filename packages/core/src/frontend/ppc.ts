@@ -2005,7 +2005,12 @@ function liftOnce(
       enterCaseTarget(
         entry,
         ops,
-        { key: (r) => r, scrutinee: (r) => readReg(r, bi), write: (r, v) => writeVar(r, bi, v) },
+        {
+          key: (r) => r,
+          scrutinee: (r) => readReg(r, bi),
+          dispatchScrutinee: (r) => ssa.readAtEnd(r, entry.at),
+          write: (r, v) => writeVar(r, bi, v),
+        },
         staleIdiom,
       );
     }
@@ -3682,7 +3687,7 @@ function liftOnce(
   // emitted".
   highHalves.assertAllConsumed(name);
   tableBases.prove(name, ssa);
-  refuseStaleIdiomReads(name, irBlocks, staleIdiom, prototypes[name] ?? contextOwnProto?.proto, ppcRefusal);
+  refuseStaleIdiomReads(name, irBlocks, staleIdiom, ssa, prototypes[name] ?? contextOwnProto?.proto, ppcRefusal);
   // A value stored to the frame that nothing reloads is either a home the body never reads or an
   // OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same

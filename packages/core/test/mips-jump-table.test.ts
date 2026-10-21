@@ -264,3 +264,37 @@ test('a case reading the table, entry or code address the elided dispatch left D
     expect(() => decompile('f', shiftedAfterSlot('move\tv0,t6'), t, { asmData: scaledTable })).toThrow(stale);
   }
 });
+
+// The scaled index at a target another case falls into (jump-table.ts `StaleScaledIndex.settle`):
+// every path in brings it, so the case reads it; one that rewrote it on the way declines.
+const fallTable: AsmData = {
+  ...asmData,
+  sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x24, 0, 0, 0, 0x28])]]),
+};
+const fallsIntoScaled = (c0: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,30 <f+0x30>',
+    ' 8:\tnop',
+    ' c:\tlui\tat,0x0',
+    '10:\tsll\tv0,a0,0x2',
+    '14:\taddu\tat,at,v0',
+    '18:\tlw\tt6,0(at)',
+    '1c:\tjr\tt6',
+    '20:\tnop',
+    `24:\t${c0}`,
+    '28:\tjr\tra',
+    '2c:\taddiu\tv0,v0,1',
+    '30:\tjr\tra',
+    '34:\tli\tv0,-1',
+  );
+
+test('a case another falls into reads the scaled index both paths bring, on IDO as on gcc', () => {
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    const out = decompile('f', fallsIntoScaled('sw\ta0,0(a1)'), t, { asmData: fallTable }).source;
+    expect(out).toMatch(/case 0:\s*\n\s*\*a1 = a0;\s*\n\s*case 1:\s*\n\s*return \(a0 << 2\) \+ 1;/);
+    expect(() => decompile('f', fallsIntoScaled('li\tv0,8'), t, { asmData: fallTable })).toThrow(
+      /a case of the elided jump table reads v0, which the unlifted dispatch idiom wrote/,
+    );
+  }
+});

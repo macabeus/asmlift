@@ -35,18 +35,17 @@ test('a target only its table’s case edges enter is EXACT; any other edge make
     ['r4', 'opaque' as const],
   ]);
   const t = { at: 1, scrutReg: 'r3', cases: [2, 3, 4, 2], defaultBlock: 5, leaves };
-  // 2: two case edges from the switch; 3: also a branch from block 4; 4: case and the default's label
+  // 2: two case edges from the switch; 3: also a branch from block 4; 5: case and the default's label
   const preds = [[], [0], [1, 1], [1, 4], [1], [1, 4]];
   const e = caseEntries([{ ...t, cases: [2, 3, 5] }], preds);
-  expect(e.get(2)?.leaves).toBe(leaves);
-  expect([...e.get(3)!.leaves]).toEqual([
-    ['r3', 'opaque'],
-    ['r4', 'opaque'],
-  ]);
-  expect(e.get(5)?.leaves.get('r3')).toBe('opaque');
+  expect(e.get(2)).toMatchObject({ leaves, exact: true, others: [] });
+  // a MIXED target keeps the leaves; its scaled index is settled against the other predecessors —
+  // the dispatch's own block among them where the target is also the default
+  expect(e.get(3)).toMatchObject({ leaves, exact: false, at: 1, others: [4] });
+  expect(e.get(5)).toMatchObject({ leaves, exact: false, others: [1, 4] });
   // the default alone is no case target: the default path never ran the idiom
   expect(caseEntries([t], preds).has(5)).toBe(false);
-  // a target two tables share, and the function's entry, are MIXED
+  // a target two tables share, and the function's entry, make every register a marker
   const two = caseEntries([t, { ...t, at: 4, cases: [2] }], [[], [0], [1, 4], [1], [1], [1]]);
   expect(two.get(2)?.leaves.get('r3')).toBe('opaque');
   expect(
