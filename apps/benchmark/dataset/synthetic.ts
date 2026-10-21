@@ -12790,6 +12790,24 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p);',
     proto: { jt_idxreuse: { returnsVoid: true } },
   },
+  // jt_idxloop. The dispatch's scaled index at a case target another edge enters too: mwcc 2.4.2 at
+  // -O4,p keeps `slwi r6,r3,2` in r6 into case 0, a do-while its back edge re-enters
+  // (`lwzx r0,r4,r6` at the loop's head). frontend/jump-table.ts settles it there once every path in
+  // brings it (`StaleScaledIndex.settle`); before, the target made it a marker and the switch
+  // declined ("reads r6"), and earlier still the lift read r6 as a parameter. mwcc alone: agbcc,
+  // ido7.1 and gcc2.7.2kmc lay this switch out without a reused index.
+  {
+    sym: 'jt_idxloop',
+    src:
+      'extern s32 gArr[];\nvoid jt_idxloop(s32 i, s32 *p, s32 n)\n{\n    switch (i) {\n' +
+      '    case 0: do { p[i] += n; } while (--n); break;\n    case 1: p[i] = 1; break;\n' +
+      '    case 2: gArr[i] = 9; break;\n    case 3: p[i] -= 4; break;\n    case 4: p[i] ^= 6; break;\n' +
+      '    case 5: gArr[i] = 2; break;\n    case 6: p[i] |= 0x30; break;\n    case 7: p[i] = 5; break;\n    }\n}',
+    features: ['dense', 'loop'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'extern s32 gArr[];\nvoid jt_idxloop(s32 i, s32 *p, s32 n);',
+    proto: { jt_idxloop: { returnsVoid: true } },
+  },
   // jt_parkcall and jt_parkarg. An undeclared call in a case of an elided jump table, where the
   // dispatch left its own registers in argument registers: agbcc's `ldr r1,=table` and the code
   // address in r0, mwcc 2.4.2's table base in r3 (`addi r3,r5,0`). What a dispatch parked there is
