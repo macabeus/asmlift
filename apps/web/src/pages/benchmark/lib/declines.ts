@@ -374,9 +374,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `fcmpu`'s ordering bits), and a reload of the high word an `fctiwz` result's `stfd` leaves
     // undefined. And on a target with no FPU, the result of a callee declared to return a float
     // read as anything but that float (`raise/floathelpers.ts`): the return register holds its bits,
-    // and the candidate's C converts the value wherever it lands in an integer.
+    // and the candidate's C converts the value wherever it lands in an integer — and a float returned
+    // beside a return of an integer word, which the function's float return would convert.
     pattern:
-      /unmodelled floating-point instruction|hands back as bits in a general register|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|a float reaches the integer file|the float return register|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'|'fctiwz' leaves that half/,
+      /unmodelled floating-point instruction|hands back as bits in a general register|returns a float on one path|floating-point argument|the floating-point registers a call|both single and double precision|and it holds (an integer word|a float)|is handed (an integer word|a float)|an FPU register holds a float or an integer word|a float reaches the integer file|the float return register|condition code no compare|a compare in its delay slot|'cror' at|copy of the condition register|operands of an 'fcmpu'|'fctiwz' leaves that half/,
   },
   {
     // UNINHABITED AT THE SOURCE NOW, RATHER THAN BY ARRAY ORDER. Until `fpReg` landed, all 13
