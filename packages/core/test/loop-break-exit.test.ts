@@ -1047,7 +1047,7 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  // Each refusal leaves the loop to decline LOUD, as both fixtures did before the shared tail.
+  // Each refusal leaves the loop to decline LOUD.
   const declines = (ir: string) => expect(() => judged(ir)).toThrow(/cannot structure/);
 
   test('a shared tail also entered from before the loop is refused', () => {

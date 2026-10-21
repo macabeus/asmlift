@@ -27,10 +27,9 @@ export interface PreStructureFold {
  *  row's pre-fold IR through this record. The latch fold comes first for the same reason in kind:
  *  the folds after it read the back edge it leaves. The un-threading reads loop exits, which the
  *  trampoline fold reshapes, and sits ahead of the re-roll so a loop it gives one way out is one
- *  the re-roll may then read. On the inhabitants measured — `synthetic:thrbreak:agbcc`, and the
- *  pointer walk unthread.ts names on agbcc and gcc2.7.2kmc — its position does not matter (each
- *  lifts the same C with the fold first, second, third or last), so that place is a precaution:
- *  `unthread.test.ts` pins where it sits, not a lift that needs it there. */
+ *  the re-roll may then read. That place is a precaution: `synthetic:thrbreak:agbcc` and the
+ *  pointer walk unthread.ts names lift the same C wherever the fold sits, so `unthread.test.ts`
+ *  pins its position, not a lift that needs it. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',

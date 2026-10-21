@@ -7,8 +7,9 @@
 // Every fixture is run before and after the fold by the small interpreter below, which models
 // memory (a read of a cell nobody stored answers a value off the seed, in 0..3 so equalities are
 // common), so a fold that changes which edge a path takes changes an observable here. Each refusal
-// is also run with its gate ablated: the fold then fires, and the program it leaves is a different
-// one (or does not verify) — which is what makes the gate `sound`.
+// by a `sound` gate is also run with that gate ablated (`refusedBy`): the fold then fires, and the
+// program it leaves is a different one (or does not verify). A scope gate's refusal only shows the
+// fold fires without it, and a shape the fold never asks about only shows it does not fire.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

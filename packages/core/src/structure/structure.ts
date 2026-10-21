@@ -2251,28 +2251,25 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  region admits no edge from outside itself, so each region block is written once and the region
  *  owns its `ret`s: the `return` is written where the asm holds its one copy.
  *
- *  A TAIL SEVERAL BREAKS SHARE, with `shared` (what `exitArmOf` passes, so every in-body code arm
- *  is judged this way): `if (a) f |= 1; else if (b) f |= 2; else continue;
- *  gHit = i; break;` compiles to two arms that each run their own code and jump to one `gHit = i`
- *  block on the way out (and agbcc and gcc2.7.2 cross-jump arms written with a tail each into that
- *  same shape, jump.c). The shared block is then entered from the other arm as well, so it is
- *  admitted when every edge into the region from outside it comes from the body — a body block, or
- *  a block every path into which comes from the body without passing `exit`: the other arm's own
- *  blocks, whose exit edge the loop's classifier then admits as an arm of its own, or the loop
- *  declines — and the region holds no cycle. Neither unshared rule then holds: `to` and the
- *  region's other blocks may be entered from the other arms, and each arm writes the shared blocks
- *  again ahead of its own `break`, a shared `ret` included (as one `return` per arm). The arms run
- *  on exclusive paths, so every path still runs the tail once, as the asm does — correct C, and
- *  where the compiler cross-jumps the copies back into one the same code (gcc2.7.2kmc
- *  byte-identical, agbcc up to register allocation).
+ *  A TAIL SEVERAL BREAKS SHARE, with `shared` (what `exitArmOf` passes for every in-body code arm):
+ *  `if (a) f |= 1; else if (b) f |= 2; else continue; gHit = i; break;` compiles to two arms that
+ *  each run their own code and jump to one `gHit = i` block on the way out (agbcc and gcc2.7.2
+ *  cross-jump arms written with a tail each into that same shape, jump.c). The region is then
+ *  admitted when every edge into it from outside comes from the body — a body block, or a block
+ *  every path into which comes from the body without passing `exit` (the other arm's own blocks,
+ *  whose exit edge the classifier must admit as an arm of its own, or the loop declines) — and it
+ *  holds no cycle. Each arm writes the shared blocks again ahead of its own `break`, a shared `ret`
+ *  as one `return` per arm. The arms run on exclusive paths, so every path still runs the tail
+ *  once, as the asm does; where the compiler cross-jumps, the copies are the same code
+ *  (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
  *
- *  THE COST, where it does not: ido keeps one tail, and only the source's single copy at the arms'
+ *  THE COST where it does not: ido keeps one tail, and only the source's single copy at the arms'
  *  join recompiles to it. `synthetic:brmerge:ido7.1`'s row source is byte-identical to its target;
- *  the per-arm spelling compiles to a different object (52 instructions against 50: an extra `lui` and `sb`), so that row cannot
- *  MATCH this way. The single copy needs a `continue` that runs the latch's update — a `for` whose
- *  `inc` is that update, or a `do`/`while` whose test the `continue` reaches — and structure writes
- *  `continue` only to a `while (1)` header, while the L3 `for` respell refuses a body holding one
- *  (l3/ast.ts, the `for` node). */
+ *  the per-arm spelling compiles to 52 instructions against 50 (an extra `lui` and `sb`), so that
+ *  row cannot MATCH this way. The single copy needs a `continue` that runs the latch's update — a
+ *  `for` whose `inc` is that update, or a `do`/`while` whose test the `continue` reaches — and
+ *  structure writes `continue` only to a `while (1)` header, while the L3 `for` respell refuses a
+ *  body holding one (l3/ast.ts, the `for` node). */
 function codeBreakArm(
   preds: ReadonlyMap<Block, Block[]>,
   from: Block,
@@ -2328,7 +2325,7 @@ function codeBreakArm(
     return null;
   }
   // a region another arm enters is written once per arm, so it must be one a walk writes once: no
-  // cycle. One no other arm enters keeps what it admitted before.
+  // cycle. One only its own edge enters is written once wherever it sits.
   return !entersShared || [...region].every((x) => acyclicThrough(x, region)) ? region : null;
 }
 /** Does no path inside `region` lead from `x` back to `x`? */
@@ -2361,24 +2358,23 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // effects may be written once per arm only when nothing but the loop's exit arms runs it — every
 // path into it comes from the body without passing the loop's `exit` — and it holds no cycle: each
 // path then runs it once, and on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) the per-arm
-// copies are the very source the one copy came from. A block the loop's own exit path also runs is
+// copies are the source the one copy came from. A block the loop's own exit path also runs is
 // written once, after the loop: copying it into an arm writes a store or call twice where the asm
-// holds it once on the fall-through path, and the region dragged along that way is the rest of the
-// function, unbounded. `codeBreakArm`'s shared region meets the first rule by construction (its
-// walk stops at `exit`, and an outside entry must come from the body), so it is bounded by the
-// loop's own arms and takes no size limit: declining a correct per-arm copy buys nothing, and where
-// ido kept one copy the cost is a MATCH ceiling written at `codeBreakArm`, not wrong C. This walk is
-// stricter than the policy: it refuses EVERY effectful block it does not own, so a tail two arms
-// share that ends in its own `return` (`h(i); k(i); gF += 3; return i;`, which declines on agbcc
-// and ido7.1) is an admission not built here, not one the policy refuses.
+// holds it once on the fall-through path, and drags the rest of the function along. `codeBreakArm`'s
+// shared region meets the first rule by construction (its walk stops at `exit`, and an outside
+// entry must come from the body), so the loop's own arms bound it and it takes no size limit.
+// This walk is stricter: it refuses EVERY effectful block it does not own. KNOWN GAP: a tail two
+// arms share that ends in its own `return` (`h(i); k(i); gF += 3; return i;`) declines on agbcc and
+// ido7.1 though the policy admits it.
 //
-// A block escapes the refusal on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
-// runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
-// first half, since two predecessors cannot both dominate it. And the region must not be reachable
-// from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
-// post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
-// `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
-// exit reached `to`. The shared epilogue an arm branches to still has to be pure.
+// An effectful block escapes that refusal on two counts. `from` dominates `to` and `to` dominates
+// the block, so every path reaching it runs this edge's predecessor and then this region — and
+// only one edge into `to` can satisfy the first half, since two predecessors cannot both dominate
+// it. And the region must not be reachable from the loop's own exit, which dominance does NOT rule
+// out: an arm landing straight on the post-loop join dominates itself, and claiming it would emit
+// the epilogue on both paths. Testing `to` covers the whole region — a block dominated by `to` that
+// the exit reached would mean the exit reached `to`. The shared epilogue an arm branches to still
+// has to be pure.
 //
 // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
 // of the update — or null when this is not an early-`return` arm.
@@ -3000,10 +2996,9 @@ export function structure(
   // `while (1)` classifiers read it: a `break` that runs `region` first, or an early return whose
   // tail the loop emits (`owned`). The break arm is asked first: where the code past `exit` is a pure
   // `return`, `earlyReturnArm` would also take the arm and copy that post-loop `return` into it, where
-  // the asm holds one copy after the loop (two code arms ahead of `return 3;` lift as `gHit = i;
-  // return 3;` twice that way, against a `break` each and one `return 3` this way). The break arm
-  // copies nothing past `exit`: what it writes per arm is only what the loop's arms alone run — the
-  // one duplication policy both admitters share, written at `earlyReturnArm`.
+  // the asm holds one copy after the loop (two code arms ahead of `return 3;` would lift as `gHit = i;
+  // return 3;` twice, not a `break` each and one `return 3`). The break arm copies nothing past
+  // `exit` — the duplication policy written at `earlyReturnArm`.
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
     const region =
