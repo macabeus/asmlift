@@ -2299,12 +2299,10 @@ interface JumpTable {
   defaultLabel: string;
   /** What runs between the table load and the `mov pc` ({@link dispatchExtraRefusal}). */
   extras: Instr[];
-  /** The registers the unlifted idiom wrote (index, table pointer, target) that no extra rewrote: a
-   *  kept dispatch leaves them holding values the lift does not model (`refuseStaleIdiomReads`). */
-  stale: string[];
-  /** What an elided dispatch leaves in each register its idiom writes (jump-table.ts `idiomLeaves`),
-   *  written at the entry of each case target (`caseEntries`). The `add` rewrites the index the `lsl`
-   *  scaled, so every one is a marker here. */
+  /** What the dispatch idiom leaves in each register it writes (index, table pointer, target;
+   *  jump-table.ts `idiomLeaves`). The `add` rewrites the index the `lsl` scaled, so every one is a
+   *  marker here: an elided dispatch writes them at the entry of each case target (`caseEntries`), a
+   *  kept one at its own block's end, save the ones its extras rewrote. */
   leaves: ReadonlyMap<string, IdiomLeft>;
 }
 
@@ -2509,16 +2507,8 @@ function recoverJumpTable(
   if (!blockLabels.has(defaultLabel) || caseLabels.some((l) => !blockLabels.has(l))) {
     return null;
   }
-  // Only a kept dispatch (one carrying extras) has a block for them to be stale after.
-  const rewritten = new Set(extras.map((ins) => ins.ops[0]));
-  const stale = extras.length === 0 ? [] : [...new Set([idxReg, ptrReg, ldrV.ops[0]])].filter((r) => !rewritten.has(r));
-  const leaves = idiomLeaves([
-    { reg: idxReg, scaled: true },
-    { reg: ptrReg, scaled: false },
-    { reg: add.ops[0], scaled: false },
-    { reg: ldrV.ops[0], scaled: false },
-  ]);
-  return { scrutReg, caseLabels, defaultLabel, extras, stale, leaves };
+  const leaves = idiomLeaves([idxReg, ptrReg, ldrV.ops[0]].map((reg) => ({ reg, scaled: false })));
+  return { scrutReg, caseLabels, defaultLabel, extras, leaves };
 }
 
 // The instructions an agbcc dispatch may carry between the table load and the `mov pc`. gcse's
@@ -6309,7 +6299,7 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
     // elided form cannot put them here, since its bounds block's default path never ran the idiom: it
     // writes them at each case target's entry instead (`openBlockCursor`).
     if (cur.dispatchScrutinee !== null) {
-      for (const r of jt.stale) {
+      for (const r of [...jt.leaves.keys()].filter((r) => !jt.extras.some((ins) => ins.ops[0] === r))) {
         ssa.writeVar(
           reg(r),
           bi,

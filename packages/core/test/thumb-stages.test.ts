@@ -50,7 +50,6 @@ describe('readThumbText', () => {
           caseLabels: ['.Lc0', '.Lc1'],
           defaultLabel: '.Ldef',
           extras: [],
-          stale: [],
           // the idiom's `add` rewrites the index its `lsl` scaled, so both registers are markers
           leaves: new Map([
             ['r0', 'opaque'],
