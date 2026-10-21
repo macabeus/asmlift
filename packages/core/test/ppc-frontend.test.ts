@@ -1407,3 +1407,69 @@ describe('a bare return under a stated word return', () => {
     }
   });
 });
+
+// WHAT AN ELIDED mwcc DISPATCH LEAVES IN ITS REGISTERS. The `lis; slwi; addi; lwzx; mtctr; bctr` block
+// is pruned, so each case target is entered with what it wrote (jump-table.ts `enterCaseTarget`).
+// mwcc 2.4.2 at -O4,p scales the index IN PLACE and reuses it in a case: `case 3: return i * 4;` is
+// a bare `blr` with r3 = i << 2, and `p[i] = 7` is `stwx r0,r4,r5` with r5 the dispatch's own `slwi`.
+// Lifted before, the case read the scrutinee as it was before the shift (`return a0;`) or minted a
+// parameter for the register (`*(s32 *)(a1 + a2) = 7`). The table base and the code address are no
+// value C spells, and a case reading either declines.
+describe('an elided mwcc dispatch writes its registers at each case target', () => {
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: [0x20, 0x28, 0x30, 0x38].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swi',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swi', { section: '.text', value: 0, size: 0x48, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+  const asm = (c0: string) =>
+    [
+      '00000000 <swi>:',
+      '   0:\tcmplwi  r3,3',
+      '   4:\tbgt     40 <swi+0x40>',
+      '   8:\tlis     r4,0',
+      '\t\t\t8: R_PPC_ADDR16_HA jtbl',
+      '   c:\tslwi    r3,r3,2',
+      '  10:\taddi    r4,r4,0',
+      '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+      '  14:\tlwzx    r0,r4,r3',
+      '  18:\tmtctr   r0',
+      '  1c:\tbctr',
+      `  20:\t${c0}`,
+      '  24:\tblr',
+      '  28:\tli      r3,20',
+      '  2c:\tblr',
+      '  30:\tli      r3,30',
+      '  34:\tblr',
+      '  38:\tli      r3,40',
+      '  3c:\tblr',
+      '  40:\tli      r3,-1',
+      '  44:\tblr',
+    ].join('\n');
+  const lift = (c0: string) => decompile('swi', asm(c0), PPC_MWCC, { asmData }).source;
+
+  test('the scaled index is the scrutinee shifted by two', () => {
+    expect(lift('addi    r3,r3,1')).toMatch(/case 0:\s*\n\s*return \(a0 << 2\) \+ 1;/);
+  });
+
+  test('the table base and the code address decline', () => {
+    const stale = /a case of the elided jump table reads (r4|r0), which the unlifted dispatch idiom wrote/;
+    expect(() => lift('mr      r3,r4')).toThrow(stale);
+    expect(() => lift('mr      r3,r0')).toThrow(stale);
+  });
+
+  test('…but not on the default path, which never ran the idiom', () => {
+    const def = asm('li      r3,10').replace('  40:\tli      r3,-1', '  40:\tmr      r3,r4');
+    expect(decompile('swi', def, PPC_MWCC, { asmData }).source).toMatch(/default:\s*\n\s*return a1;/);
+  });
+});
