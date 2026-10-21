@@ -890,6 +890,15 @@ test('a case reading a register the ELIDED dispatch idiom wrote DECLINES', () =>
   expect(() => decompile('f', call('\tbl\th\n\tmov\tr2, #5\n\tmov\tr0, #1\n'), ARMV4T_AGBCC, h)).toThrow(
     /r2 holds a value and r1 holds none/,
   );
+  // …while a value the dispatch's own setup put above r1, which the call destroyed too, is no value
+  // there: agbcc's `add r3,r1,#0` ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lift
+  // `g(1)` (`int m3(int i, int a, int b) { switch (i) { case 0: h(); g(1); break; case 1: gv = a; … } }`)
+  const kept = elided(
+    `\tadd\tr3, r2, #0\n${DIRECT}`,
+    `.Lc0:\n\tpush\t{lr}\n\tbl\th\n\tmov\tr0, #1\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n` +
+      '.Lc1:\n\tstr\tr3, [r2]\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n',
+  );
+  expect(decompile('f', kept, ARMV4T_AGBCC, h).source).toMatch(/case 0:\s*\n\s*h\(\);\s*\n\s*g\(1\);/);
 });
 
 test('…through a join, at a target the default shares, and round a loop back into the bounds test', () => {

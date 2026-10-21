@@ -911,9 +911,13 @@ export function callDeclarations(
             parked: (r) =>
               !holes.skippable.has(r) &&
               !(holes.leadingFloatShadow && r === target.argRegs[0]) &&
-              // not through a call: one that destroyed the parked register left a hole of its own,
-              // which the gap refusal answers (`fallbackArgc`'s `parked`)
-              ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true),
+              (ssa.holdsValue(r, bi, (v) => site.parked?.(v, r) === true) ||
+                // a call in the case destroyed it: the hole is that call's, and refuses only where a
+                // register above holds a value written since (`fallbackArgc`'s `parked`)
+                (ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true) &&
+                  !target.argRegs
+                    .slice(target.argRegs.indexOf(r) + 1)
+                    .some((a) => ssa.holdsValue(a, bi, (v) => mayPass(v, a))))),
             decide: (gap, set, refuse) => {
               const value = decideGap(ssa, bi, gap, set, (v) => mayPass(v, set));
               if (value === undefined) {

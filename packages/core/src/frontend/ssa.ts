@@ -1800,8 +1800,11 @@ export function fallbackArgc(
      *  switch on r0 whose cases call): the value above the parked register was set up for the switch,
      *  not for the call. The cost is a value a case itself writes above the parked register, dropped
      *  too (`mov r2,#5; mov r0,#1; bl g` lifts `g(1)`): no compiler measured writes one there. A
-     *  parked register a call in the case destroyed is that call's hole, not the dispatch's: the
-     *  frontend asks without walking through calls (`SsaBuilder.holdsValue`), so the refusal answers. */
+     *  parked register a call in the case destroyed is that call's hole, not the dispatch's, and it
+     *  stops the count only where no register above holds a value written since that call
+     *  (`SsaBuilder.holdsValue`): `bl h; mov r2,#5; mov r0,#1; bl g` refuses, while `add r3,r1,#0`
+     *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
+     *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
   },
 ): number {
