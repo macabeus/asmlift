@@ -12802,7 +12802,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    case 0: do { p[i] += n; } while (--n); break;\n    case 1: p[i] = 1; break;\n' +
       '    case 2: gArr[i] = 9; break;\n    case 3: p[i] -= 4; break;\n    case 4: p[i] ^= 6; break;\n' +
       '    case 5: gArr[i] = 2; break;\n    case 6: p[i] |= 0x30; break;\n    case 7: p[i] = 5; break;\n    }\n}',
-    features: ['dense', 'loop'],
+    features: ['dense'],
     toolchains: ['mwcc_242_81'],
     ctx: 'extern s32 gArr[];\nvoid jt_idxloop(s32 i, s32 *p, s32 n);',
     proto: { jt_idxloop: { returnsVoid: true } },
