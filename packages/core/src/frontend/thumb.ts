@@ -3733,8 +3733,10 @@ function measureThumbFrame({
   // THE NARROW RELOADS OF A WORD SLOT (`narrowSlotReloads`), kept only where the word is a slot
   // and no object's: a word `str` to [sp,#slot] in live code writes it — without one the bytes are
   // a sub-word local's (`mov r3, sp / strh r2, [r3, #4]`), which the object model owns — no other
-  // copy of sp names the slot's offset, and neither a by-value block, the one-word frame object nor
-  // the one object covers it.
+  // copy of sp names the slot's offset, and neither a by-value block nor the one object covers it.
+  // The one-word frame object (`capturedObjectIsTheWholeFrame`) needs no gate of its own: its
+  // escape is a copy of sp at offset 0 handed out, which no candidate's copy can be (that one dies
+  // in its load), so it is another capture at the slot's offset and the first test already drops it.
   //
   // …AND THE WORD IS NOT AN INCOMING ARGUMENT'S HOME. A by-value struct parameter is the other
   // producer of these instructions: agbcc stores its argument registers word by word on entry and
@@ -3801,7 +3803,6 @@ function measureThumbFrame({
       !argumentHomes.has(slot) &&
       !otherCaptureOffsets.has(slot) &&
       !inByValueBlock(slot, 4) &&
-      !(capturedObjectIsTheWholeFrame && slot === 0) &&
       !(oneObject !== undefined && slot < oneObject.to && slot + 4 > oneObject.from)
     ) {
       narrowReloadOf.set(load, slot);

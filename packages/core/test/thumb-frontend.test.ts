@@ -5228,6 +5228,51 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     ).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
   });
 
+  // Each object model that covers the slot keeps it (thumb.ts `narrowReloadOf`). Without an escape
+  // the frame is the one object, and the reload stays a member read of it: read as the slot
+  // narrowed instead, the object's other narrow reads leave the slot unkeyed, and the lowering
+  // refuses a frame it lifts today.
+  test('the one object keeps a narrow reload of its word', () => {
+    const one =
+      'f:\n\tadd\tsp, sp, #-0xc\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x9]\n' +
+      '\tmov\tr2, sp\n\tldrh\tr2, [r2, #0x8]\n\tadd\tr3, sp, #0x4\n\tldrb\tr3, [r3]\n\tadd\tr0, r1, r2\n' +
+      '\tadd\tr0, r0, r3\n\tadd\tsp, sp, #0xc\n\tbx\tlr\n';
+    expect(lift(one)).toContain('return p0[9] + ((u16 *)sp0)[4] + p0[4];');
+  });
+
+  // …a word of a struct built in the frame and passed by value is the struct's member…
+  test("a by-value block keeps a narrow reload of its word as the struct's", () => {
+    const W = {
+      kind: 'struct' as const,
+      members: [
+        { name: 'a', type: 'u32' },
+        { name: 'b', type: 'u32' },
+      ],
+    };
+    const PB: Prototypes = {
+      ...P,
+      f: { params: 2, returns: 's32' },
+      take: { params: ['struct W'], returns: 'void', byValueLayouts: { 0: W } },
+    };
+    const byval =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp]\n\tadd\tr1, r1, #0x2\n' +
+      '\tstr\tr1, [sp, #0x4]\n\tadd\tr0, sp, #0x8\n\tbl\tmk\n\tadd\tr4, sp, #0x4\n\tldrb\tr4, [r4]\n\tldr\tr0, [sp]\n' +
+      '\tldr\tr1, [sp, #0x4]\n\tbl\ttake\n\tadd\tr0, r4, #0\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', byval, ARMV4T_AGBCC, { prototypes: PB }).source).toContain('v0 = ((u8 *)&sp0)[4];');
+  });
+
+  // …and the one-word frame handed to a callee is read back as memory the callee may have written,
+  // through the other capture at offset 0 that hands it out (no gate of its own)
+  test('a one-word frame handed to a callee keeps a narrow reload of it', () => {
+    const whole =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n' +
+      '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+    const PG: Prototypes = { ...P, g: { params: ['u32 *'], returns: 'void' } };
+    expect(decompile('f', whole, ARMV4T_AGBCC, { prototypes: PG }).source).toContain(
+      '    g(sp0);\n    return *(u8 *)sp0;',
+    );
+  });
+
   test('a slot inside the struct-return temp is the temp, and refuses', () => {
     const P8: Prototypes = {
       ...P,
