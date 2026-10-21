@@ -12790,6 +12790,38 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'extern s32 gArr[];\nvoid jt_idxreuse(s32 i, s32 *p);',
     proto: { jt_idxreuse: { returnsVoid: true } },
   },
+  // jt_parkcall and jt_parkarg. An undeclared call in a case of an elided jump table, where the
+  // dispatch left its own registers in argument registers: agbcc's `ldr r1,=table` and the code
+  // address in r0, mwcc 2.4.2's table base in r3 (`addi r3,r5,0`). What a dispatch parked there is
+  // no argument and no register above it is one (frontend/call-plan.ts `CallSite.parked`): the
+  // guessed arity stops below it. Lifted before, `jpkick()` was `jpkick(a0)` on both, and agbcc's
+  // `jpget()` with `a` copied into r2 (`add r2,r1,#0`) was `jpget(a0, a1, a1)`. jt_parkarg runs on
+  // agbcc alone: mwcc keeps `a` in r4, which the guess counts as passed on (`jpget(a1, a1)`), and
+  // gcc2.7.2/kmc decline its switch; jt_parkcall's ido7.1 and gcc2.7.2kmc guesses read their own
+  // argument registers.
+  {
+    sym: 'jt_parkcall',
+    src:
+      'extern void jpset();\nextern void jpkick();\nvoid jt_parkcall(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: jpset(1); break;\n    case 1: jpset(2, 3); break;\n    case 2: jpkick(); break;\n' +
+      '    case 3: jpset(4); break;\n    case 4: jpkick(9); break;\n    case 5: jpset(7); break;\n' +
+      '    case 6: jpkick(); break;\n    case 7: jpset(8); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'void jt_parkcall(s32 i);',
+    proto: { jt_parkcall: { returnsVoid: true } },
+  },
+  {
+    sym: 'jt_parkarg',
+    src:
+      'extern s32 gJpA, gJpB;\nextern s32 jpget();\ns32 jt_parkarg(s32 i, s32 a)\n{\n    switch (i) {\n' +
+      '    case 0: a = jpget(a); break;\n    case 1: a = gJpA; break;\n    case 2: a = jpget(); break;\n' +
+      '    case 3: a += 3; break;\n    case 4: gJpA = a; break;\n    case 5: a = jpget(7); break;\n' +
+      '    case 6: a = gJpB; break;\n    case 7: a = 7; break;\n    }\n    return a;\n}',
+    features: ['dense'],
+    toolchains: ['agbcc'],
+    ctx: 'extern s32 gJpA, gJpB;\ns32 jt_parkarg(s32 i, s32 a);',
+  },
   {
     sym: 'thrbreak',
     src:
