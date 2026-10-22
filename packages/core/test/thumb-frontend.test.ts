@@ -3857,6 +3857,86 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       }
     });
 
+    // A STORE THROUGH A COMPUTED POINTER WHOSE EVERY ADDRESS MISSES THE CONTROL HALFWORD cannot
+    // re-arm the channel (`addressRangeOf`), so the window stays where the literal stores put it
+    // and the struct-return temp beside the published `tmp` is its own object. Verbatim agbcc,
+    // `struct Ent { u16 x; u16 y; u8 f; u8 pad[3]; }`: `if (k) { s = mk(gEnts[i].x); gEnts[i].x =
+    // s.a; } else { tmp = 0xFFFF; DMA3 = &tmp, 0x05000200, 0x81000010; } gEnts[i].f = 1;` with `i`
+    // a `u8`, so the tail store lands in `base + 4 + [0, 255*8]`. The base is a literal
+    // (synthetic:dmasret) or `extern struct Ent gEnts[]` (dmasretx): a name resolves only where a
+    // map places it, and placed at 0x04000000 its range covers 0x040000de, so it may re-arm.
+    // Through a pointer parameter (dmaptr) nothing bounds the store. Every refusal keeps the
+    // decline it had: the escape reaches `mk`'s return storage, a writer the one object cannot hold.
+    test('a computed store whose every address misses the control halfword cannot re-arm the channel', () => {
+      const dma =
+        '.L3:\n\tmov\tr1, sp\n\tldr\tr2, .L7\n\tadd\tr0, r2, #0\n\tstrh\tr0, [r1]\n\tldr\tr0, .L7+0x4\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L7+0x8\n\tldr\tr0, .L7+0xc\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L7+0x10\n\tstr\tr0, [r1]\n';
+      const pool =
+        '\t.word\t0xffff\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x5000200\n\t.word\t-0x7efffff0\n';
+      const epilogue = (saved: string) => `\tadd\tsp, sp, #0x8\n\tpop\t{${saved}}\n\tpop\t{r0}\n\tbx\tr0\n`;
+      const dmasret =
+        'dmasret:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x18\n\tlsr\tr5, r0, #0x18\n' +
+        '\tlsl\tr1, r1, #0x18\n\tcmp\tr1, #0\n\tbeq\t.L3\n\tlsl\tr5, r5, #0x3\n\tldr\tr0, .L5\n\tadd\tr4, r5, r0\n' +
+        '\tldrh\tr1, [r4]\n\tadd\tr0, sp, #0x4\n\tbl\tmk\n\tldr\tr0, [sp, #0x4]\n\tstrh\tr0, [r4]\n\tb\t.L4\n' +
+        '.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0x3003440\n' +
+        dma +
+        '\tlsl\tr5, r5, #0x3\n.L4:\n\tldr\tr0, .L7+0x14\n\tadd\tr1, r5, r0\n\tmov\tr0, #0x1\n\tstrb\tr0, [r1, #0x4]\n' +
+        epilogue('r4, r5') +
+        '.L8:\n\t.align\t2, 0\n.L7:\n' +
+        pool +
+        '\t.word\t0x3003440\n';
+      const dmasretx =
+        'dmasretx:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x18\n\tlsr\tr5, r0, #0x18\n' +
+        '\tlsl\tr1, r1, #0x18\n\tcmp\tr1, #0\n\tbeq\t.L3\n\tldr\tr4, .L5\n\tlsl\tr5, r5, #0x3\n\tadd\tr4, r5, r4\n' +
+        '\tldrh\tr1, [r4]\n\tadd\tr0, sp, #0x4\n\tbl\tmk\n\tldr\tr0, [sp, #0x4]\n\tstrh\tr0, [r4]\n\tb\t.L4\n' +
+        '.L6:\n\t.align\t2, 0\n.L5:\n\t.word\tgEnts\n' +
+        dma +
+        '\tlsl\tr5, r5, #0x3\n.L4:\n\tldr\tr0, .L7+0x14\n\tadd\tr0, r5, r0\n\tmov\tr1, #0x1\n\tstrb\tr1, [r0, #0x4]\n' +
+        epilogue('r4, r5') +
+        '.L8:\n\t.align\t2, 0\n.L7:\n' +
+        pool +
+        '\t.word\tgEnts\n';
+      const dmaptr =
+        'dmaptr:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tlsl\tr1, r1, #0x18\n\tcmp\tr1, #0\n' +
+        '\tbeq\t.L3\n\tldrh\tr1, [r4]\n\tadd\tr0, sp, #0x4\n\tbl\tmk\n\tldr\tr0, [sp, #0x4]\n\tstrh\tr0, [r4]\n' +
+        '\tb\t.L4\n' +
+        dma +
+        '.L4:\n\tmov\tr0, #0x1\n\tstrb\tr0, [r4, #0x4]\n' +
+        epilogue('r4') +
+        '.L8:\n\t.align\t2, 0\n.L7:\n' +
+        pool;
+      const S4 = {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct' as const,
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      };
+      const protos = (self: string) => ({ prototypes: { mk: S4, [self]: { returnsVoid: true } } });
+      const placed = (at: number) => new Map([[at, [{ name: 'gEnts', kind: 'data' as const }]]]);
+      const lifted = decompile('dmasret', dmasret, ARMV4T_AGBCC, protos('dmasret')).source;
+      expect(lifted).toContain('    struct S4 sp4;');
+      expect(lifted).toContain('    volatile u16 sp0;');
+      expect(lifted).toContain('*(s32 *)67109076 = &sp0;');
+      const named = decompile('dmasretx', dmasretx, ARMV4T_AGBCC, {
+        ...protos('dmasretx'),
+        symbols: placed(0x03003440),
+      }).source;
+      expect(named).toContain('    struct S4 sp4;');
+      expect(named).toContain('    volatile u16 sp0;');
+      const reachesTheTemp = /the one object cannot hold every writer: .* where `mk` returns its struct/;
+      expect(() => decompile('dmasretx', dmasretx, ARMV4T_AGBCC, protos('dmasretx'))).toThrow(reachesTheTemp);
+      expect(() =>
+        decompile('dmasretx', dmasretx, ARMV4T_AGBCC, { ...protos('dmasretx'), symbols: placed(0x04000000) }),
+      ).toThrow(reachesTheTemp);
+      expect(() => decompile('dmaptr', dmaptr, ARMV4T_AGBCC, protos('dmaptr'))).toThrow(reachesTheTemp);
+    });
+
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
     // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
     // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;
@@ -4316,22 +4396,33 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
-  // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here).
+  // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here). DMA1
+  // or DMA2, and never DMA3's control halfword, which `addressRangeOf` proves (`[0x40000BC,
+  // 0x40000C8]` plus 12 bytes misses 0x40000DE): the two DMA3 transfers each read one object, and
+  // the function is accepted object by object, its phi stores pinned where the second arm
+  // overwrites them. With the phi able to pick DMA3 itself (`#0x18`, hand-edited), the stores may
+  // re-arm it, the frame is one object, and every phi store is pinned.
   test('a phi of device registers is a device store too', () => {
-    const eitherChannel =
+    const eitherChannel = (step: string) =>
       'q7:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr6, r0, #0\n\tadd\tr5, r1, #0\n' +
       '\tmov\tr1, sp\n\tmov\tr0, #0x0\n\tstrh\tr0, [r1]\n\tldr\tr4, .L5\n\tstr\tr1, [r4]\n' +
       '\tldr\tr3, .L5+0x4\n\tstr\tr6, [r3]\n\tldr\tr1, .L5+0x8\n\tldr\tr0, .L5+0xc\n\tstr\tr0, [r1]\n' +
       '\tldr\tr0, [r1]\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n' +
       '\tstr\tr5, [r3]\n\tldr\tr0, .L5+0x10\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n\tsub\tr1, r1, #0x20\n' +
-      '\tcmp\tr2, #0\n\tbeq\t.L3\n\tadd\tr1, r1, #0xc\n.L3:\n\tstr\tr6, [r1]\n\tstr\tr5, [r1, #0x4]\n' +
+      '\tcmp\tr2, #0\n\tbeq\t.L3\n\tadd\tr1, r1, #' +
+      step +
+      '\n.L3:\n\tstr\tr6, [r1]\n\tstr\tr5, [r1, #0x4]\n' +
       '\tldr\tr0, .L5+0x14\n\tstr\tr0, [r1, #0x8]\n\tstr\tr5, [r1]\n\tstr\tr6, [r1, #0x4]\n' +
       '\tstr\tr0, [r1, #0x8]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L6:\n' +
       '\t.align\t2, 0\n.L5:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
       '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t-0x7fffffe0\n';
-    const src = decompile('q7', eitherChannel, ARMV4T_AGBCC).source;
-    expect(src).toContain('    u8 sp0[8];');
-    expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
+    const split = decompile('q7', eitherChannel('0xc'), ARMV4T_AGBCC).source;
+    expect(split).toContain('    volatile u32 sp4;\n    volatile u16 sp0;\n');
+    expect(split).toContain('    *(volatile s32 *)v0 = a0;\n    ((volatile s32 *)v0)[1] = a1;\n');
+    expect(split).toContain('    *v0 = a1;\n    v0[1] = a0;\n');
+    const one = decompile('q7', eitherChannel('0x18'), ARMV4T_AGBCC).source;
+    expect(one).toContain('    u8 sp0[8];');
+    expect(one.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
   });
 
   // …and a pointer stepped through the channels by a constant is placed by the register it starts
