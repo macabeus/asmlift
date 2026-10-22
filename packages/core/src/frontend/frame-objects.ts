@@ -1048,13 +1048,10 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
-  /** every escape of each object's address, in the order found, as the frame bytes it may reach:
-   *  `[lo, hi)` where a standard block copy with a literal count proves them (`boundedCopy`), and
-   *  `null` for every other escape, which nothing here bounds. KEPT APART FROM THE ESCAPE WINDOWS
-   *  (`escapeWindows`), which read the same copy as a writer without bound — that unbounded writer
-   *  is what puts the one-object answer on offer at all (`chooseFrameModel`), so a bound there
-   *  would turn a frame that lifts as one object into a refusal. Only the split of that one object
-   *  reads this (`provenParts`). */
+  /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
+   *  literal-count block copy proves them (`boundedCopy`), `null` where nothing does. Only the
+   *  split of the one object reads this (`provenParts`); the escape windows keep the copy as an
+   *  unbounded writer, which is what puts that one object on offer at all (`chooseFrameModel`). */
   readonly escapeExtents: ReadonlyMap<number, readonly ({ readonly lo: number; readonly hi: number } | null)[]>;
   readonly fixed: readonly {
     readonly op: Op;
@@ -2158,8 +2155,9 @@ function failIfSlotKeysIt(
  *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
  *  holds (`writerNotKept` says which writers it can hold) — or one per part, where the accesses
  *  prove the bytes are several objects no use reads across (`provenParts`) — and every access
- *  inside it is a cast-spelled access to that array, or a view of the union it is declared as
- *  where two widths meet at one byte — so each store the machine made there is a store the
+ *  inside it is a cast-spelled access to that array (an element of a part, by its index:
+ *  structure.ts `frameArrayElement`), or a view of the union it is declared as where two widths
+ *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
  *  store in the same block overwrites it). And it is right whichever the source had there: a
@@ -2442,10 +2440,11 @@ function provenParts(
   // …and a part starts only where the compiler places a local array of its own: at a multiple of
   // its `alignment` (agbcc pads `u8 a[18]` to 20, so a split there declares `b` at sp+20 where the
   // target had it at sp+18; gcc 2.7.2 on MIPS starts every one at a multiple of 8, so a part at
-  // sp+20 is placed at sp+24 and the frame grows), and never as ONE byte, which declared alone is a `u8` scalar whose address nothing
-  // takes — kept in a register, it drops the frame byte and the store the target made. Such a
-  // part joins the one below it, and the lowest one byte joins the one above: fewer parts only
-  // ever read as the one object does, so this costs a split, never a value.
+  // sp+20 is placed at sp+24 and the frame grows), and never as ONE byte, which declared alone is
+  // a `u8` scalar whose address nothing takes — kept in a register, it drops the frame byte and
+  // the store the target made. Such a part joins the one below it, and the lowest one byte joins
+  // the one above: fewer parts only ever read as the one object does, so this costs a split,
+  // never a value.
   const merged: { from: number; to: number }[] = [];
   for (const p of parts) {
     const last = merged.at(-1);

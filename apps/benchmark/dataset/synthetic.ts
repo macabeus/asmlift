@@ -12386,24 +12386,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //   2. imgpair / imgone (sub_0804D0B0). TWO brace-initialised locals in one frame (`s8 a[16]` from
   //      .LC184, `u8 b[16]` from .LC186, each `bl memcpy` of 16). Each memcpy destination is a writer
   //      without bound, so the frame audit gives the one-object answer (frame-objects.ts
-  //      `keepAsOneObject`), which declared the whole local area one `u8 sp0[32]` with the second local
-  //      at `(u32)sp0 + 16`; the constant-init fold (l3/constinit.ts `planCopy`) then found a 16-byte
-  //      image filling a 32-byte local and refused. MATCH since the one object splits where a
-  //      literal-count memcpy starts and no use reads across (frame-objects.ts `provenParts`), so both
-  //      images fold, and an element of such a part is named (`b[5]`, structure.ts
-  //      `frameArrayElement`): through a cast (`((u8 *)sp16)[5]`) agbcc re-forms sp+0x15 where the
-  //      source's `b[5]` reads through the base it holds for the memcpy. imgswap puts the signed
-  //      image there, whose element type only the fold knows, so the fold names its elements
-  //      (l3/constinit.ts `asElement`). imgone (one image) MATCHes.
-  //      imgnbr keeps the decline: a `u32` handed to `h` beside the image is an escape nothing bounds,
-  //      so the bytes stay one object (`u8[20]`) and the image does not fill it. cpypair is the same
-  //      split without images (`memcpy` from two globals), declared in the order each compiler
-  //      places address-taken arrays (target.ts `addressTakenArrayOrder`: ido7.1 the reverse) and
-  //      not split on mwcc_242_81, whose order is neither. agbcc only for the
-  //      images: the one-image control fails elsewhere on the other three (ido7.1 lifts the image as
-  //      `(s32 *)&.data` and no candidate compiles; gcc2.7.2kmc refuses the copy's `swl`;
-  //      mwcc_242_81 its anonymous constant pool entry) — the local-aggregate-init gap on each, its
-  //      own future row. Ablation-pinned, and the split instrumented.
+  //      `keepAsOneObject`), declared as one `u8 sp0[32]` — and a 16-byte image cannot fill that
+  //      (l3/constinit.ts `planCopy`). MATCH where the one object splits at each literal-count
+  //      memcpy no use reads across (frame-objects.ts `provenParts`), so both images fold, and an
+  //      element of a part is named (`b[5]`, structure.ts `frameArrayElement`; the fold's own
+  //      element type, l3/constinit.ts `asElement`, for imgswap's signed image there): through a cast
+  //      agbcc re-forms sp+0x15 where `b[5]` reads through the base it holds for the memcpy. imgone
+  //      (one image) MATCHes. imgnbr keeps the decline: a `u32` handed to `h` beside the image is an
+  //      escape nothing bounds, so the bytes stay one `u8[20]`. cpypair is the split without images,
+  //      declared in each compiler's placement order and alignment (target.ts
+  //      `addressTakenArrayOrder`, `addressTakenArrayAlignment`) and not split on mwcc_242_81, which
+  //      has neither. agbcc only for the images: the one-image control fails elsewhere on the other
+  //      three (ido7.1 lifts the image as `(s32 *)&.data` and no candidate compiles; gcc2.7.2kmc
+  //      refuses the copy's `swl`; mwcc_242_81 its anonymous constant pool entry) — the
+  //      local-aggregate-init gap on each, its own future row. Ablation-pinned, the split
+  //      instrumented.
   //   3. spillu8byte / spillu8word (sub_0800D188, sub_08016EEC; one site, instrumented on both). A
   //      `u8` local agbcc gives no register is promoted to SImode (thumb.h:344 PROMOTE_MODE), spilled
   //      as a word (reload1.c:2274 → `str`), and a QImode use of it is alter_subreg's `(mem:QI slot)`
