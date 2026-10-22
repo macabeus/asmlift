@@ -269,7 +269,10 @@ describe('classifyFrameUses', () => {
       expect([...uses.passedToWriter].sort()).toEqual([0, 4]);
       return Object.fromEntries(uses.escapeExtents);
     };
-    expect(escapes('memcpy', true)).toEqual({ 0: [{ lo: 0, hi: 16 }], 4: [{ lo: 4, hi: 20 }] });
+    expect(escapes('memcpy', true)).toEqual({
+      0: [{ lo: 0, hi: 16, into: false }],
+      4: [{ lo: 4, hi: 20, into: true }],
+    });
     expect(escapes('memcpy', false)).toEqual({ 0: [null], 4: [null] });
     expect(escapes('g', true)).toEqual({ 0: [null], 4: [null] });
   });
@@ -677,6 +680,20 @@ describe('keepAsOneObject', () => {
   test('keeps one object where the lowest part starts at no copy', () => {
     expect(objectsOf(withKept(below(4, 4)))).toEqual([[0, 8]]);
     expect(objectsOf(withKept(below(1, 7)))).toEqual([[0, 8]]);
+  });
+
+  // `u32 w[4]; w[0..3] = …; memcpy(g1, w, 8); memcpy(g2, &w[2], 8)`: two copies reading OUT of
+  // one array start no object — declared as two, agbcc's recompile holds the upper half's base in
+  // a saved register where the target re-formed sp+8 for each store
+  test('keeps one object where the parts start only at copies reading out of it', () => {
+    const [x, g1, g2] = [value(), value(), value()];
+    const [a, b, k] = [laddr(0), laddr(8), konst(8)];
+    const ops = [a, b, k, store(a.results[0], x, 0, 4), store(a.results[0], x, 4, 4), store(b.results[0], x, 0, 4)];
+    ops.push(store(b.results[0], x, 4, 4), call('memcpy', g1, a.results[0], k.results[0]));
+    ops.push(call('memcpy', g2, b.results[0], k.results[0]), ret());
+    const blk = { params: [x, g1, g2], ops };
+    kept(blk, ARMV4T_AGBCC, 16);
+    expect(objectsOf(blk)).toEqual([[0, 16]]);
   });
   const withKept = (blk: Block): Block => {
     kept(blk);

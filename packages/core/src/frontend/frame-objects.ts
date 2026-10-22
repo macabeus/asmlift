@@ -1049,10 +1049,14 @@ interface FrameUses {
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
   /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
-   *  literal-count block copy proves them (`boundedCopy`), `null` where nothing does. Only the
-   *  split of the one object reads this (`provenParts`); the escape windows keep the copy as an
+   *  literal-count block copy proves them (`boundedCopy`), `null` where nothing does, and `into`
+   *  where the copy WRITES them (the address is its destination, not its source). Only the split
+   *  of the one object reads this (`provenParts`); the escape windows keep the copy as an
    *  unbounded writer, which is what puts that one object on offer at all (`chooseFrameModel`). */
-  readonly escapeExtents: ReadonlyMap<number, readonly ({ readonly lo: number; readonly hi: number } | null)[]>;
+  readonly escapeExtents: ReadonlyMap<
+    number,
+    readonly ({ readonly lo: number; readonly hi: number; readonly into: boolean } | null)[]
+  >;
   readonly fixed: readonly {
     readonly op: Op;
     readonly at: number;
@@ -1173,7 +1177,7 @@ function classifyFrameUses({
   // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
   // value, whose members are the struct's declared ones (`objectShapes`)
   const memberRefusals: [number, string][] = [];
-  const escapeExtents = new Map<number, ({ lo: number; hi: number } | null)[]>();
+  const escapeExtents = new Map<number, ({ lo: number; hi: number; into: boolean } | null)[]>();
   // …and every value something reads, since a copy whose returned destination is read hands the
   // address on to a use nothing here follows
   const readValues = new Set<Value>(
@@ -1241,7 +1245,7 @@ function classifyFrameUses({
           escaped.add(off); // the address ESCAPES as a value — the point of the capability
           const copied = op.opcode === 'call' ? boundedCopy(op, idx, facts, readValues) : undefined;
           (escapeExtents.get(off) ?? escapeExtents.set(off, []).get(off)!).push(
-            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi },
+            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi, into: copied.into },
           );
           const handedTo = op.opcode === 'store' ? facts.readsThrough(op) : [];
           const read = op.opcode === 'call' ? transferRead(op, idx, off, target, facts) : undefined;
@@ -1340,15 +1344,15 @@ function classifyFrameUses({
 }
 
 // The bytes, relative to the address at operand `idx`, that a call of a standard block copy with
-// a literal, positive count reaches through it — or `undefined` for any other callee, operand or
-// count, which this does not bound, and for a copy whose result (`memcpy` returns its
-// destination) anything in `read` uses.
+// a literal, positive count reaches through it, and whether it writes them (`idx` is its
+// destination) — or `undefined` for any other callee, operand or count, which this does not
+// bound, and for a copy whose result (`memcpy` returns its destination) anything in `read` uses.
 function boundedCopy(
   op: Op,
   idx: number,
   facts: LiteralAddresses,
   read: ReadonlySet<Value>,
-): { lo: number; hi: number } | undefined {
+): { lo: number; hi: number; into: boolean } | undefined {
   const roles = blockCopyRoles(op.attrs.target);
   if (
     roles === undefined ||
@@ -1359,7 +1363,7 @@ function boundedCopy(
     return undefined;
   }
   const n = facts.constOf(op.operands[roles.n]);
-  return n !== undefined && Number.isInteger(n) && n > 0 ? { lo: 0, hi: n } : undefined;
+  return n !== undefined && Number.isInteger(n) && n > 0 ? { lo: 0, hi: n, into: idx === roles.dst } : undefined;
 }
 
 // The bytes a block transfer that took the address at `idx` reads, when `idx` is its source and
@@ -2413,8 +2417,10 @@ function provenParts(
   // run per word, and is one object at every word. The LOWEST part is held to the same test
   // (below): where it is only stores, a copy above it is as likely `memcpy(&buf[4], s, 12)` into
   // the middle of one array as the start of a second one, and declared as two the recompile
-  // reads `buf[6]` through a base it holds where the target re-formed sp+6.
-  const starts = new Set([...uses.escapeExtents.values()].flat().map((e) => e?.lo));
+  // reads `buf[6]` through a base it holds where the target re-formed sp+6. Only a copy's
+  // DESTINATION counts: a copy reading OUT of the frame says where the source took bytes from,
+  // which is as likely `memcpy(g, &w[2], 8)` from the middle of one array as a second object.
+  const starts = new Set([...uses.escapeExtents.values()].flat().flatMap((e) => (e?.into ? [e.lo] : [])));
   const parts: { from: number; to: number }[] = [];
   for (const { lo, hi } of [...touched].sort((a, b) => a.lo - b.lo)) {
     const last = parts.at(-1);
