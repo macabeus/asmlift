@@ -48,7 +48,17 @@
 // read; no benchmark row has one, and the MIPS and PPC frontends refuse the address-taken frame
 // local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
-import { type Expr, type InitAddress, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
+import {
+  type Expr,
+  type InitAddress,
+  type SFn,
+  type SImage,
+  type Stmt,
+  mapExprChildren,
+  mapStmtExprs,
+  mentionedName,
+  walkExprs,
+} from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
 
 /** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
@@ -325,6 +335,28 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
   return null;
 }
 
+/** `e` with every access to a folded local that reads one of its elements AS that element spelled
+ *  `a[k]` on the local itself. The structurer spelled the access against the type the frame audit
+ *  gave the local — bytes, unsigned — so a read of the element type this pass gives it (`s8`, from
+ *  the image) came out through the local's address and a cast, `((s8 *)a)[5]`. The two are one C
+ *  value and not one compile: agbcc re-forms `sp + 0x15` for the cast where `b[5]` reads through
+ *  the base it already holds for `b`'s copy (`ldrsb r0, [r5, r0]`). An access of another width or
+ *  signedness keeps its cast, which is the element type it spells. */
+function asElement(e: Expr, by: ReadonlyMap<string, Fold>): Expr {
+  const inner = mapExprChildren(e, (c) => asElement(c, by));
+  if (inner.k !== 'index' || (inner.lead?.length ?? 0) > 0 || inner.baseElem !== undefined) {
+    return inner;
+  }
+  const base = inner.base;
+  const name = base.k === 'addr' || base.k === 'var' ? base.name : undefined;
+  const fold = name === undefined ? undefined : by.get(name);
+  const elem = fold?.type.kind === 'array' ? fold.type.elem : undefined;
+  if (elem?.kind !== 'int' || elem.width !== inner.width * 8 || elem.signed !== inner.signed) {
+    return inner;
+  }
+  return { ...inner, base: { k: 'var', name: name! }, subscript: true };
+}
+
 /** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
  *  the copies gone and the image with them. Throws where one does not fold: structure() refused
  *  that function already, so a tree that reaches here unfoldable was made so by a later pass. */
@@ -343,7 +375,7 @@ export function foldConstantImages(sfn: SFn): SFn {
     const by = new Map(plan.map((f) => [f.local, f]));
     out = {
       ...out,
-      body: out.body.filter((_, i) => !copies.has(i)),
+      body: out.body.filter((_, i) => !copies.has(i)).map((st) => mapStmtExprs(st, (e) => asElement(e, by))),
       locals: out.locals.map((l) => {
         const f = by.get(l.name);
         return f === undefined

@@ -12392,7 +12392,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      literal-count memcpy starts and no use reads across (frame-objects.ts `provenParts`), so both
   //      images fold, and an element of such a part is named (`b[5]`, structure.ts
   //      `frameArrayElement`): through a cast (`((u8 *)sp16)[5]`) agbcc re-forms sp+0x15 where the
-  //      source's `b[5]` reads through the base it holds for the memcpy. imgone (one image) MATCHes.
+  //      source's `b[5]` reads through the base it holds for the memcpy. imgswap puts the signed
+  //      image there, whose element type only the fold knows, so the fold names its elements
+  //      (l3/constinit.ts `asElement`). imgone (one image) MATCHes.
   //      imgnbr keeps the decline: a `u32` handed to `h` beside the image is an escape nothing bounds,
   //      so the bytes stay one object (`u8[20]`) and the image does not fill it. cpypair is the same
   //      split without images (`memcpy` from two globals) on every toolchain. agbcc only for the
@@ -12568,6 +12570,19 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgone(u32 i);',
     proto: { imgone: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgswap',
+    // imgpair with the images swapped, so the SIGNED one is the part at sp+16: its element type is
+    // the image's (`s8`), which only the constant-init fold knows, so the fold spells the read as
+    // that element (l3/constinit.ts `asElement`); through the cast agbcc re-forms sp+0x15.
+    src:
+      'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\n' +
+      'void imgswap(u32 i){ u8 a[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70}; s8 b[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; gO[i].x = a[3]; gO[i].y = b[5]; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgswap(u32 i);',
+    proto: { imgswap: { returnsVoid: true } },
   },
   {
     sym: 'imgnbr',
