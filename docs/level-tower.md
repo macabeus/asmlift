@@ -1835,10 +1835,12 @@ object keys on what the escape may REACH rather than on whether it writes, becau
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
 control halfword), read per transfer, and an unresolved store after the transfer is handed the
-address — through a pointer, or to a name no symbol map places — leaves the read unbounded. What
-no fact about one function can check is stated as a premise instead: a callee or an interrupt
-handler arms only a transfer it set up itself, source register first, so neither a call on the
-path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
+address — through a pointer, or to a name no symbol map places — leaves the read unbounded, unless
+no address it may hold overlaps that halfword (`addressRangeOf`, ir/bits.ts `stridedRange`: a
+placed base plus a `u8` index times 8 is every eighth address of an interval, a pointer parameter is
+nothing). What no fact about one function can check is stated as a premise instead: a callee or an
+interrupt handler arms only a transfer it set up itself, source register first, so neither a call
+on the path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
 unbounded — a device's read or a callee's write — and every writer of the frame is one the
 whole-area argument holds (none at all, or a callee handed the address as an argument that may
 write through it, which a block transfer reading its source is not, with any store of the address
@@ -1846,7 +1848,9 @@ beside that call), the audit does not refuse: it answers with the local area, th
 once more with every word of it routed through `laddr`, and the second audit declares those bytes
 one `u8` array in memory, so every store the machine made there is a store the recompile makes.
 The asm cannot tell a member the device reads from a spill nobody reads, and keeping both in
-memory is right for both. Every member
+memory is right for both. A read only the `stridedRange` proof bounded keeps that answer on offer
+where the per-object model then refuses, a shape or a reach alike: the proof narrows what the
+device reads, and takes away no lift its unbounded read had. Every member
 is spelled through a cast, whose pointee would drop a qualifier on the array, so the array carries
 none, and where the address was stored somewhere a writer may hold it — a global an interrupt
 reads, a device's destination — each access carries the qualifier itself, whether it reaches the

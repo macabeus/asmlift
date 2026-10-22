@@ -586,3 +586,170 @@ export function provableBits(ctx: BitsCtx, v: Value): number {
         : null;
   return m !== null && m >= 0 ? 32 - Math.clz32(m) : 32;
 }
+
+// LINEAR FORMS AND STRIDED RANGES — "which words may this value be", for a caller that asks
+// whether a computed address can land on one register (frontend/frame-objects.ts: a store after a
+// DMA arming that may hit the channel's control halfword, a word store that hands an address to a
+// channel's source register). One decomposition answers both, so they cannot disagree on a store.
+
+/** What a linear form may read: each value's def and the constant a value is. */
+export interface LinearCtx {
+  readonly defs: ReadonlyMap<Value, Op>;
+  constOf(v: Value): number | undefined;
+}
+
+/** `v` as a sum of runtime values times constants, plus a constant (the `1` key): agbcc's `ch *
+ *  12` is `((ch << 1) + ch) << 2`, which is 12 times `ch` only once the two `ch` terms are added.
+ *  Every rule is a ring operation, so the form equals the machine's word modulo 2^32 whatever
+ *  wraps on the way. A value this cannot read further is its own term. */
+export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1, number> | undefined {
+  const c = ctx.constOf(v);
+  if (c !== undefined) {
+    return new Map([[1, c]]);
+  }
+  const d = ctx.defs.get(v);
+  if (d === undefined || depth > 8) {
+    return new Map([[v, 1]]);
+  }
+  const scaled = (x: Value, by: number) => {
+    const l = linearTerms(ctx, x, depth + 1);
+    return l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+  };
+  const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : ctx.constOf(d.operands[1]);
+  if (d.opcode === 'shl' && k !== undefined && k >= 0 && k < 31) {
+    return scaled(d.operands[0], 2 ** k);
+  }
+  if (d.opcode === 'mul' && d.operands.length === 2 && k !== undefined) {
+    return scaled(d.operands[0], k);
+  }
+  if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
+    const x = linearTerms(ctx, d.operands[0], depth + 1);
+    const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
+    if (x === undefined || y === undefined) {
+      return undefined;
+    }
+    y.forEach((n, t) => x.set(t, (x.get(t) ?? 0) + n));
+    return x;
+  }
+  return new Map([[v, 1]]);
+}
+
+/** A number every value of `v` is a multiple of, or 0 when this cannot name one. */
+export function linearFactor(ctx: LinearCtx, v: Value): number {
+  const l = linearTerms(ctx, v);
+  return l === undefined ? 0 : [...l.values()].reduce(gcdOf, 0);
+}
+
+/** Every word a value may hold is `lo + stride * n` for some `n >= 0`, and lies in `[lo, hi]`, an
+ *  unsigned closed interval. `stride` is 0 exactly when `lo === hi`. */
+export interface StridedRange {
+  readonly lo: number;
+  readonly hi: number;
+  readonly stride: number;
+}
+
+/** What a strided range may read beyond a linear form. */
+export interface RangeCtx extends LinearCtx {
+  /** block param -> the value each in-edge passes (`incomingArgs`) */
+  readonly incoming: ReadonlyMap<Value, readonly (Value | undefined)[]>;
+  /** the function's own parameters, which arrive from a caller and hold anything */
+  readonly entry: ReadonlySet<Value>;
+  /** the one word a term the form cannot read is known to be — a name a symbol map places */
+  pointOf?(v: Value): number | undefined;
+}
+
+const WORD = 2 ** 32;
+/** The most terms one `stridedRange` question bounds before it answers nothing. */
+const RANGE_BUDGET = 256;
+
+/** Every word `v` may hold, or undefined when this cannot bound it. The form is `linearTerms`; a
+ *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
+ *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, or, a block
+ *  param, by the union of what its in-edges pass. Anything else — a function parameter, a whole
+ *  word loaded from memory, a name nothing places, a param whose range depends on itself through a
+ *  loop — bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the
+ *  words are the sum's integer range moved into one word, when it fits one; a sum whose range
+ *  crosses a multiple of 2^32 holds words on both sides of zero, which no interval names. Exact is
+ *  not the point: an answer must hold every word the machine can compute there, and a wider one
+ *  only proves less.
+ *
+ *  KNOWN GAP: a signed narrow index bounds nothing. Every leaf is unsigned (`provableBits` reads a
+ *  signed value as 32 bits), and each in-edge of a param is moved into one word before the union,
+ *  so `8 * (s8)i` — [-1024, 1016], across zero — names no interval even with a signed leaf. Both
+ *  would have to change; no real GBA DMA function measured yet needs either. */
+export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
+  const open = new Set<Value>();
+  let left = RANGE_BUDGET;
+  const bits: BitsCtx = {
+    defs: ctx.defs as Map<Value, Op>,
+    bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
+  };
+  const termRange = (t: Value): StridedRange | undefined => {
+    const at = ctx.pointOf?.(t);
+    if (at !== undefined) {
+      return { lo: mod(at), hi: mod(at), stride: 0 };
+    }
+    if (ctx.defs.has(t)) {
+      const n = provableBits(bits, t);
+      return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
+    }
+    const ins = ctx.entry.has(t) ? undefined : ctx.incoming.get(t);
+    if (ins === undefined || ins.length === 0 || open.has(t) || --left < 0) {
+      return undefined;
+    }
+    open.add(t);
+    try {
+      let out: StridedRange | undefined;
+      for (const x of ins) {
+        const r = x === undefined ? undefined : rangeOf(x);
+        if (r === undefined) {
+          return undefined;
+        }
+        out =
+          out === undefined
+            ? r
+            : {
+                lo: Math.min(out.lo, r.lo),
+                hi: Math.max(out.hi, r.hi),
+                stride: gcdOf(gcdOf(out.stride, r.stride), r.lo - out.lo),
+              };
+      }
+      return out;
+    } finally {
+      open.delete(t);
+    }
+  };
+  const rangeOf = (x: Value): StridedRange | undefined => {
+    const form = linearTerms(ctx, x);
+    if (form === undefined) {
+      return undefined;
+    }
+    let lo = 0;
+    let hi = 0;
+    let stride = 0;
+    for (const [t, c] of form) {
+      if (c === 0) {
+        continue;
+      }
+      const r = t === 1 ? { lo: 1, hi: 1, stride: 0 } : termRange(t);
+      if (r === undefined) {
+        return undefined;
+      }
+      lo += c > 0 ? c * r.lo : c * r.hi;
+      hi += c > 0 ? c * r.hi : c * r.lo;
+      stride = gcdOf(stride, c * r.stride);
+    }
+    if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) {
+      return undefined;
+    }
+    const base = Math.floor(lo / WORD) * WORD;
+    return hi - base >= WORD ? undefined : { lo: lo - base, hi: hi - base, stride };
+  };
+  return rangeOf(v);
+}
+
+const mod = (w: number): number => ((w % WORD) + WORD) % WORD;
+
+function gcdOf(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcdOf(b, a % b);
+}

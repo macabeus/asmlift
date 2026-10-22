@@ -54,6 +54,7 @@
  *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
  *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
  *  another instruction sequence. */
+import { type RangeCtx, type StridedRange, incomingArgs, stridedRange } from '../ir/bits';
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -65,6 +66,9 @@ export interface LiteralAddresses {
   constOf(v: Value): number | undefined;
   /** the literal address `v` denotes, or undefined when this cannot say */
   literalAddrOf(v: Value): number | undefined;
+  /** every address `v` may denote, as a strided unsigned interval, or undefined when this cannot
+   *  bound it */
+  addressRangeOf(v: Value): StridedRange | undefined;
 }
 
 /** `literalAddrOf`: `const` is the bare pool word, `gaddr` is the same word after the symbol map
@@ -129,7 +133,21 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     }
     return undefined;
   };
-  return { defOf, constOf, literalAddrOf: (v) => literalAddrOf(v) };
+  // `addressRangeOf`: where `literalAddrOf` names one address, this names every address a value
+  // may hold (ir/bits.ts `stridedRange`), a placed name being the one leaf only this module reads.
+  const rangeCtx: RangeCtx = {
+    defs: defOf,
+    constOf,
+    incoming: incomingArgs(irBlocks),
+    entry: new Set(irBlocks[0]?.params ?? []),
+    pointOf: (v) => (defOf.get(v)?.opcode === 'gaddr' ? literalAddrOf(v) : undefined),
+  };
+  return {
+    defOf,
+    constOf,
+    literalAddrOf: (v) => literalAddrOf(v),
+    addressRangeOf: (v) => stridedRange(rangeCtx, v),
+  };
 }
 
 /** Which device stores a policy pins, beside every device read. */

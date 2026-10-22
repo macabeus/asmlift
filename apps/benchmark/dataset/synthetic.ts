@@ -12487,12 +12487,20 @@ export const SYNTHETIC: SynthSpec[] = [
   //  12. dmasret (sub_080202D4). A `vu16` published to a DMA source register BESIDE a struct-return
   //      temp of a two-field 4-byte struct (thumb.c:1426-1472 returns it in memory), with a store
   //      through a computed pointer AFTER the DMA block. The audit bounds a DMA source read by walking
-  //      forward from the arming store (frame-objects.ts `readWindow`); the tail's store through an
-  //      unresolved pointer makes the walk unbounded, the escape reaches the temp
+  //      forward from the arming store (frame-objects.ts `readWindow`), and a store it could resolve
+  //      only to a point made the walk unbounded: the escape reached the temp
   //      (`reaches-another-object`), and the one-object answer is withheld because a callee's return
-  //      storage is a writer it cannot hold (`writerNotKept`). Drop the tail store, make the callee
-  //      scalar, or drop the DMA: each lifts. agbcc only: the other three decline the scalar control on
-  //      the published address itself (no `readOnlyAddressSinks` off the GBA). Instrument-pinned.
+  //      storage is a writer it cannot hold (`writerNotKept`). The synthetic row LIFTS by bounding
+  //      the tail store's addresses (device-pins.ts `addressRangeOf`): `gEnts[i].f`, `i` a u8,
+  //      lands at `base + 4 + 8 * [0, 255]`, which misses the control halfword. dmasretx is the same
+  //      body over `extern struct Ent gEnts[]` placed by a map, as the real base is a name; dmaptr
+  //      stores through a pointer parameter and stays declined (control). The CENSUS ROW DOES NOT
+  //      MOVE: the real sub_080202D4 still declines with the same message, for a gap of its own
+  //      that is not this audit's — its base gUnk_03003590 is a NOTYPE linker global (kleod.elf
+  //      .symtab, kleod.map) that the CLI's ELF symbol map does not carry, so the name places
+  //      nowhere (cli symbols-provider.ts `symbolMapFromElf`). Placed, the same audit bounds it.
+  //      agbcc only: the other three decline the scalar control on the published address itself
+  //      (no `readOnlyAddressSinks` off the GBA).
   //  13. spillhsret (sub_0803D4AC). A spilled local READ BACK NARROWER than it was stored, beside a
   //      struct-return temp: a promoted `u16` spilled as a word (a slot the SSA model keys) and reloaded
   //      `mov r2, sp / ldrh r2, [r2, #4]` because Thumb admits an sp-relative offset only at word size
@@ -13011,6 +13019,59 @@ export const SYNTHETIC: SynthSpec[] = [
         },
       },
       dmasret: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'dmasretx',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u8 f; u8 pad[3]; };\nextern struct Ent gEnts[];\n' +
+      'extern struct S4 mk(u16 x);\n#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmasretx(u8 i, u8 k)\n{\n    volatile u16 tmp;\n    struct S4 s;\n' +
+      '    if (k) {\n        s = mk(gEnts[i].x);\n        gEnts[i].x = s.a;\n    } else {\n        tmp = 0xFFFF;\n        gDma[0] = (u32)&tmp;\n        gDma[1] = 0x05000200;\n        gDma[2] = 0x81000010;\n    }\n' +
+      '    gEnts[i].f = 1;\n}',
+    features: ['struct-return', 'struct', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nstruct S4 mk(u16 x);\nvoid dmasretx(u8 i, u8 k);',
+    symbols: new Map([[0x03003440, [{ name: 'gEnts', kind: 'data' as const }]]]),
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      dmasretx: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'dmaptr',
+    src:
+      'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u8 f; u8 pad[3]; };\n' +
+      'extern struct S4 mk(u16 x);\n#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmaptr(struct Ent *e, u8 k)\n{\n    volatile u16 tmp;\n    struct S4 s;\n' +
+      '    if (k) {\n        s = mk(e->x);\n        e->x = s.a;\n    } else {\n        tmp = 0xFFFF;\n        gDma[0] = (u32)&tmp;\n        gDma[1] = 0x05000200;\n        gDma[2] = 0x81000010;\n    }\n' +
+      '    e->f = 1;\n}',
+    features: ['struct-return', 'struct', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'struct S4 { u16 a; u16 b; };\nstruct Ent { u16 x; u16 y; u8 f; u8 pad[3]; };\nstruct S4 mk(u16 x);\nvoid dmaptr(struct Ent *e, u8 k);',
+    proto: {
+      mk: {
+        params: ['u16'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u16' },
+          ],
+        },
+      },
+      dmaptr: { returnsVoid: true },
     },
   },
   {
