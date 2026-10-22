@@ -665,9 +665,14 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => lift(indexed('\tbl\tuse\n'))).toThrow(
           /a runtime index into the object at \[sp,#0\) flows into `call`/,
         );
-        expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(
-          /a runtime index into the object at \[sp,#0\) is accessed at displacement 1 from the indexed element/,
-        );
+      });
+
+      // a load's own displacement moves the index to the bytes it lands on, as a literal register
+      // does, and they are judged there
+      test('an indexed load displaced by its immediate is an index into the bytes at the displacement', () => {
+        const displaced = lift(indexed('\tldrb\tr0, [r0, #0x1]\n')).source;
+        expect(displaced).toContain('u8 sp0[8];');
+        expect(displaced).toContain('return *(u8 *)((u32)sp0 + 1 + a0);');
       });
 
       // …and the storage need not escape: its own indexed stores write it. agbcc's own output for

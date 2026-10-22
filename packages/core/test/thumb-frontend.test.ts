@@ -2645,8 +2645,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // AN INDEX MOVED BY A LITERAL `add` NAMES THE OBJECT AT THE SUM. agbcc's `a[i]` on a local
   // above a 5-argument call's outgoing word is the frame base plus the index, moved after
   // (`u16 a[8]; fill(a); five(1, 2, 3, 4, a[i]);`, compiled at the corpus flags): the index is into
-  // the array at [sp,#4), not a field of an element of whatever sits at [sp,#0). A displaced load
-  // through it is still refused, naming the array and the displacement.
+  // the array at [sp,#4), not a field of an element of whatever sits at [sp,#0). A load displaced
+  // through it, by its immediate or by agbcc's literal register, indexes the bytes it lands on.
   test('a runtime index moved by a literal add indexes the object at the sum', () => {
     const frame = (access: string) =>
       'r1:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r0, #0\n\tadd\tr0, sp, #0x4\n\tbl\tfill\n' +
@@ -2666,9 +2666,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // the same index read signed, through agbcc's literal register, stays signed
     const signed = decompile('r1', frame('\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
     expect(signed).toMatch(/five\(1, 2, 3, 4, \*\(s16 \*\)\(\(u32\)sp4 \+ \(a0 << 1\)( \+ 0)?\)\);/);
-    expect(() => decompile('r1', frame('\tldrb\tr0, [r0, #0x1]\n'), ARMV4T_AGBCC, opts)).toThrow(
-      'a runtime index into the object at [sp,#4) is accessed at displacement 1 from the indexed element',
-    );
+    // a displaced access reaches the same bytes whether the literal sits in the load's immediate
+    // or in agbcc's register, so both are the index into the bytes at [sp,#5), each with its own
+    // extension
+    const unsigned = decompile('r1', frame('\tldrb\tr0, [r0, #0x1]\n'), ARMV4T_AGBCC, opts).source;
+    expect(unsigned).toContain('u8 sp4[16];');
+    expect(unsigned).toContain('five(1, 2, 3, 4, *(u8 *)((u32)sp4 + 1 + (a0 << 1)));');
+    const viaRegister = decompile('r1', frame('\tmov\tr1, #0x1\n\tldrsb\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts);
+    expect(viaRegister.source).toContain('five(1, 2, 3, 4, *(s8 *)((u32)sp4 + 1 + (a0 << 1)));');
+  });
+
+  // THE MOVE DOES NOT DEPEND ON BLOCK ORDER. The sum and the access through it are in two blocks,
+  // and the block that reads the sum is laid out first: the fold reaches a fixpoint, so the use is
+  // moved as it is when the sum comes first.
+  test('a runtime index moved in a block laid out before its sum is moved the same', () => {
+    const head = 'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x40\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n';
+    const sum = '\tmov\tr1, sp\n\tadd\tr0, r1, r4\n';
+    const use = '\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n\tadd\tsp, sp, #0x40\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const opts = {
+      prototypes: { fill: { params: ['void *'], returnsVoid: true }, f: { params: ['s32'], returns: 's32' } },
+    };
+    const inOrder = decompile('f', `${head}${sum}${use}`, ARMV4T_AGBCC, opts).source;
+    const useFirst = decompile('f', `${head}\tb\t.Lsum\n.Luse:\n${use}.Lsum:\n${sum}\tb\t.Luse\n`, ARMV4T_AGBCC, opts);
+    expect(inOrder).toContain('return *(s8 *)((u32)sp0 + 3 + a0);');
+    expect(useFirst.source).toContain('return *(s8 *)((u32)sp0 + 3 + a0);');
   });
 
   // WHAT THE BENCHMARK ACTUALLY SLICES is the diagnostic's REASON, and the stage word is prepended

@@ -12374,9 +12374,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      uses of an `add` of a literal 0 to the indexed address as the element (frame-objects.ts
   //      `indexedAccess`), which LIFTS (MATCH) and stays signed. A nonzero literal moves the index
   //      to the bytes at that displacement (`foldMovedCaptures`) — also agbcc's `a[i]` on an array
-  //      above a 5-argument call's outgoing word, `mov r0,sp / add r0,r0,r4 / add r0,#4` — and a
-  //      load's own displacement (`ldrb r0,[r0,#1]`, a field of an element struct) refuses naming
-  //      the object and the displacement. stkhidx
+  //      above a 5-argument call's outgoing word, `mov r0,sp / add r0,r0,r4 / add r0,#4` — and so
+  //      does a load's own displacement (`ldrb r0,[r0,#1]`, a field of an element struct), so the
+  //      verdict does not depend on where agbcc puts the literal. stkhidx
   //      is the `s16 a[32]` / `ldrsh` twin. `u8` (`stkidx`) is the `ldrb [r0]` control. ido7.1,
   //      gcc2.7.2kmc and mwcc_242_81 put a constant offset in the displacement (mwcc folds it into the
   //      base, `addi r3,r1,11`, before its `lbzx`), so the walk has no inhabitant there; they are

@@ -505,7 +505,12 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
  *  `mov r1, #0x0 / ldrsb r0, [r0, r1]`, which `indexedAccess` judges where the register put it.
  *  The rebased object is held to every rule an object at a+k is held to, so a displaced FIELD of a
  *  struct element — no object of its own at a+k, the struct's other bytes at a — lands as a second
- *  object beside the first and is refused or lifted as one object by the same rules.
+ *  object beside the first and is refused or lifted as one object by the same rules. A load or
+ *  store's own nonzero displacement on the sum is the same move: `ldrb r0, [r0, #0x1]` (the field
+ *  agbcc reads unsigned) and `mov r1, #0x1 / ldrsb r0, [r0, r1]` (signed) reach the same byte, so
+ *  the access is re-pointed at `add(laddr@(a+d), i)` with displacement 0, and the verdict does not
+ *  depend on where the literal sits. The moves are iterated to a fixpoint, so a use laid out in a
+ *  block before its sum's is moved too.
  *
  *  Returns every `laddr` that survives, in block order. */
 function foldMovedCaptures(
@@ -533,6 +538,31 @@ function foldMovedCaptures(
     for (const blk of irBlocks) {
       blk.ops = blk.ops.flatMap((op) => {
         const [x, y] = op.operands;
+        // …and a load or store that displaces the index by its own immediate, `ldrb r0, [r0, #0x1]`,
+        // reaches the bytes `mov r1, #0x1 / ldrsb r0, [r0, r1]` does, so it is moved the same way:
+        // its address becomes the index into the capture at the sum, accessed at displacement 0
+        const sum0 = (op.opcode === 'load' || op.opcode === 'store') && x !== undefined ? indexOf.get(x) : undefined;
+        const disp = (op.attrs.off as number | undefined) ?? 0;
+        if (sum0 !== undefined && disp !== 0) {
+          const object = mkOp('laddr', {
+            results: [mkValue(sum0.base.results[0].type)],
+            attrs: { off: ((sum0.base.attrs.off as number) + disp) | 0 },
+          });
+          const moves = mkOp('add', {
+            results: [mkValue(x.type)],
+            operands: [object.results[0], sum0.index],
+            attrs: sum0.sum.attrs,
+          });
+          laddrOf.set(object.results[0], object);
+          indexOf.set(moves.results[0], { base: object, index: sum0.index, sum: moves });
+          moved.add(sum0.base.results[0]);
+          foldedHere.add(object);
+          rebased.add(sum0.sum);
+          op.operands[0] = moves.results[0];
+          op.attrs = { ...op.attrs, off: 0 };
+          changed = true;
+          return [object, moves, op];
+        }
         if (op.opcode !== 'add' || op.operands.length !== 2) {
           return [op];
         }
@@ -549,7 +579,12 @@ function foldMovedCaptures(
         }
         const index = base === undefined ? undefined : laddrOf.has(x) ? y : x;
         if (base !== undefined && index !== undefined && !laddrOf.has(index)) {
-          indexOf.set(op.results[0], { base, index, sum: op });
+          // a sum first seen here takes another pass: a use laid out in an EARLIER block was
+          // visited before the sum was known, and is moved only on the next one
+          if (!indexOf.has(op.results[0])) {
+            indexOf.set(op.results[0], { base, index, sum: op });
+            changed = true;
+          }
           return [op];
         }
         const sum = indexOf.get(x) ?? indexOf.get(y);
@@ -1313,9 +1348,10 @@ function transferRead(
 // displacement 0 is the indexed element. A nonzero literal on a sum whose base is a capture never
 // arrives here: `foldMovedCaptures` has already moved the index to the object at the sum, which is
 // what agbcc's `mov r0, sp / add r0, r0, r4 / add r0, #0x4` is (an array above the outgoing word),
-// and what `mov r1, #0x3 / ldrsb r1, [r0, r1]` reaches. What is left nonzero — a load's own
-// displacement, `ldrb r0, [r0, #0x1]` (a field of an element struct, or `a[i + 1]`), or a literal
-// on an index into a capture a phi carries — refuses naming the displacement.
+// and what `mov r1, #0x3 / ldrsb r1, [r0, r1]` and a load's own displacement, `ldrb r0, [r0,
+// #0x1]` (a field of an element struct, or `a[i + 1]`), reach. What is left nonzero — a literal or
+// a displacement on an index into a capture a phi carries, or a displacement on top of the zero
+// literal, which no compiler emits — refuses naming the displacement.
 //
 // The element is judged here and left where the register put it, so it is spelled with the
 // literal: `*(s16 *)((u32)sp0 + (a0 << 1) + 0)`. Re-pointing it at the sum spells
