@@ -137,7 +137,8 @@ describe("a return is a return only through the caller's lr, read from the frame
     ['`mov pc, lr`', '\tmov\tr0, #5\n\tmov\tpc, lr\n'],
     ['`pop {rN}; bx rN`', '\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r1}\n\tbx\tr1\n'],
     ["agbcc's `pop {r4}; pop {r1}; bx r1`", '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n'],
-    ['`pop {r4, r5}; bx r5`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, r5}\n\tbx\tr5\n'],
+    // (into scratch registers: popping lr's word into a callee-saved one is a write the caller sees)
+    ['`pop {r2, r3}; bx r3`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r2, r3}\n\tbx\tr3\n'],
     ['`pop {r4, pc}`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, pc}\n'],
     ['a pop in the block that falls into the `bx`', '\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r1}\n.L1:\n\tbx\tr1\n'],
     [
@@ -908,6 +909,40 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', agbcc, ARMV4T_AGBCC).source).toContain('return a0 + 1;');
     });
 
+    // A pop restores a register only from the word that register's own push left: one that names
+    // the register but loads another word rewrites it, and the pop being transparent to the fill,
+    // the C dropped that write. Each of these left the caller's r4/r5 (or r8/r9) swapped or holding
+    // a0, and lifted as if restored.
+    test('…and restores one only from the word its own push left', () => {
+      const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
+      const foreign = (pop: string, reg: string) =>
+        new RegExp(`'${pop}' loads a word that is not ${reg}'s own save into callee-saved ${reg}`);
+      expect(lift('push {r4, r5}; pop {r5}; pop {r4}; bx lr')).toThrow(foreign('pop {r5}', 'r5'));
+      expect(lift('push {r4}; push {r0}; pop {r4}; pop {r1}; bx lr')).toThrow(foreign('pop {r4}', 'r4'));
+      expect(lift('push {r4, r5}; mov r4, r0; mov r5, r1; add r0, r4, r5; pop {r5}; pop {r4}; bx lr')).toThrow(
+        foreign('pop {r5}', 'r5'),
+      );
+      expect(lift('push {r4, lr}; push {r0}; mov r4, r1; add r0, r4, #1; pop {r4}; pop {r1}; pop {r1}; bx r1')).toThrow(
+        foreign('pop {r4}', 'r4'),
+      );
+      // late, on the one path that saves
+      expect(
+        lift(
+          'cmp r0, #0; beq .L1; push {r4, r5}; mov r4, r0; mov r5, r1; add r0, r4, r5; pop {r5}; pop {r4}; .L1: bx lr',
+        ),
+      ).toThrow(foreign('pop {r5}', 'r5'));
+      // agbcc's high-register staging, its two restores crossed
+      const crossed = (r8: string, r9: string) =>
+        `push {r4, r5, lr}; mov r5, r9; mov r4, r8; push {r4, r5}; mov r8, r0; mov r9, r1; mov r0, r8; add r0, r9; ` +
+        `pop {r3, r4}; mov r9, ${r9}; mov r8, ${r8}; pop {r4, r5}; pop {r1}; bx r1`;
+      expect(lift(crossed('r4', 'r3'))).toThrow(foreign('mov r9, r3', 'r9'));
+      expect(lift(crossed('r3', 'r4'))().source).toContain('return a0 + a1;');
+      // and the same pops in their own order restore
+      expect(lift('push {r4, r5}; mov r4, r0; mov r5, r1; add r0, r4, r5; pop {r4}; pop {r5}; bx lr')().source).toBe(
+        's32 f(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+      );
+    });
+
     // The staging `mov` is the save's only where its low register reaches the push unchanged; one
     // rewritten first pushes a value of the function's own, and saves no high register.
     test('…and a high register staged into a push through another value is still a global', () => {
@@ -1570,7 +1605,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr2, .L9\n' +
       `\tstr\tr4, [r2, #${regOff}]\n\tldr\tr0, .L9+4\n\tstr\tr0, [r2, #0x8]\n` +
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
-      '.L2:\n\tldr\tr3, [sp, #4]\n\tadd\tr0, r1, r3\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
+      '.L2:\n\tldr\tr3, [sp, #4]\n\tadd\tr0, r1, r3\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       `.L9:\n\t.word\t0x040000D4\n\t.word\t${control}\n`;
 
     // …and it is the CONTROL WORD that keeps [sp,#4] out of the device's reach: an incrementing

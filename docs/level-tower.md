@@ -1718,7 +1718,12 @@ it (`bodySavedRegs`): hand-written asm saves late (`beq .L1; push {r4}; …; pop
 is nothing but a save. Its `pop` ends the save: past the restore the register is the caller's again,
 so a use there, a save whose word is popped into another register or dropped with `add sp`, and a
 use ahead of the save on some path all leave a register that is neither a local nor a global, and
-it refuses — the prologue's save included. The O32 and PowerPC frontends keep the entry-block
+it refuses — the prologue's save included. Which `pop` restores is a question about WORDS, not
+names: the walk tracks whose entry value each pushed word holds, so `push {r4, r5}; pop {r5}; pop
+{r4}` — both names popped, the caller's r4 and r5 swapped — restores neither, and a callee-saved
+register a pop fills with another register's word and carries to a return refuses outright (the
+fill reads the `pop` as transparent, so no write of the body would show it). Matched by name, that
+shape and agbcc's r8/sl staging with its two `mov`s crossed lifted as if restored. The O32 and PowerPC frontends keep the entry-block
 reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
 the stack as `sw s0,16(sp)`, and mwcc as `stw r14,8(r1)`, in the entry block itself. So there a
 store is a save only where some reload of the register from the stack answers it, and never for

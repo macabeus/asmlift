@@ -2628,6 +2628,18 @@ function liftOnce(
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
   refuseReturnsNotThroughCallersLr(name, cfg);
+  // The fill reads a `pop` as transparent, so a callee-saved register one fills with another
+  // register's word is a write no op shows: refused here, after the return proof, which judges the
+  // same words for lr and has its own answer for a pop that takes lr's.
+  const [foreign] = fill.poppedForeign;
+  if (foreign !== undefined) {
+    const [reg, at] = foreign;
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${at.mnemonic} ${at.ops.join(', ')}' loads a word that is not ${reg}'s own save ` +
+        `into callee-saved ${reg}, and ${reg} reaches a return so, unrestored — the caller sees the write, which ` +
+        'no C statement spells',
+    );
+  }
 
   pairs.refuseWordReturns();
   // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
@@ -2715,6 +2727,12 @@ const canonReg = (r: string): string | null => {
   return /^r(\d|1[0-5])$/.test(t) ? t : (REG_ALIAS[t] ?? null);
 };
 const regIndex = (r: string): number => Number(r.slice(1));
+/** A push/pop/ldm list in the order the machine moves it, canonical names (`canonReg`): by register
+ *  number, lowest address first. Null where a name is not a register. */
+const byRegNumber = (list: readonly string[]): string[] | null => {
+  const regs = list.map(canonReg);
+  return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
+};
 // Registers `ins` may write, besides sp and besides a `pop`'s list (the proof reads both itself).
 // OVER-approximate: naming a register here that the instruction does not write costs a decline,
 // and missing one costs a wrong return. 'all' for a call, and for anything this cannot read.
@@ -2813,11 +2831,6 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
         `saved lr in — jump tables / computed gotos / register tail calls not supported`,
     );
   };
-  // A pop/ldm list in the order the machine fills it: by register number, lowest address first.
-  const byNumber = (list: readonly string[]): string[] | null => {
-    const regs = list.map(canonReg);
-    return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
-  };
 
   // Run one block from its in-state, asking each return as it is reached; the out-state.
   const run = (b: number, inState: LrState): LrState => {
@@ -2831,7 +2844,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
       const isPop =
         mn === 'pop' || ((mn === 'ldmia' || mn === 'ldmfd') && isSpReg((ins.ops[0] ?? '').replace(/!$/, '')));
       if (isPop) {
-        const list = byNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
+        const list = byRegNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
         if (list === null || list.length === 0) {
           if (xfer === 'return') {
             refuse(ins);
@@ -2857,7 +2870,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
           refuse(ins);
         }
       } else if (mn === 'push') {
-        const list = byNumber(regListOf(ins.ops) ?? []);
+        const list = byRegNumber(regListOf(ins.ops) ?? []);
         const k = list?.findIndex((r) => regs.has(r)) ?? -1;
         if (list !== null && k >= 0 && depth !== null) {
           slot = depth + 4 * list.length - 4 * k;
@@ -4599,6 +4612,18 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  with the word still on the stack is an input whose epilogue was left out, and is not asked: the
  *  blind side is hand-written asm that returns with its frame unbalanced, which no caller survives.
  *
+ *  A RESTORE IS THE REGISTER'S OWN WORD, not its name. The walk keeps the stack word by word —
+ *  whose entry value each pushed word holds — and a `pop` (or a staging pop's `mov rHi, rLow`)
+ *  restores a register only when the word it loads is that register's: `push {r4, r5}; pop {r5};
+ *  pop {r4}` names both and swaps the caller's r4 and r5, and agbcc's staging with its two `mov`s
+ *  crossed swaps r8 and r9. Such a pop is a write the caller sees that the fill, reading the `pop`
+ *  as transparent, never shows, so a callee-saved register one reaches a balanced return with is
+ *  `leaked`, and refused outright (after the return proof, `poppedForeign`). The blind side: where
+ *  the stack is not known — paths that disagree about it, a move of sp the frame walk cannot
+ *  follow, a store through a register-indexed sp address — a restore is read by name as before,
+ *  and a store through a copy of sp into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
+ *  asks the same word question of lr alone, on its own walk; the two are not yet one.
+ *
  *  `misSaved` is every register a save or a restore names that some path uses outside a save, or
  *  returns with still saved: a `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`),
  *  a `push` past a read, a use past the restore, a staged `push {r3}` of r8 popped into r1. Its
@@ -4607,7 +4632,7 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
-): { saved: ReadonlySet<string>; misSaved: ReadonlySet<string> } {
+): { saved: ReadonlySet<string>; misSaved: ReadonlySet<string>; leaked: ReadonlyMap<string, Instr> } {
   // What each instruction saves, restores and otherwise names; the staging `mov`s first.
   const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
   const restoresHi = new Set<Instr>(); // `mov rHi, rLow` where rLow was popped unchanged
@@ -4655,32 +4680,100 @@ function bodySavedRegs(
   // must-set; null: not reached yet) and on SOME path (`open`, a may-set) — a use needs the first,
   // a return must find the second empty — and the frame depth (`makeFrameWalk`; null where paths
   // disagree or it is not exact).
-  type State = { cur: Set<string>; open: Set<string>; depth: number | null };
+  //
+  // And the STACK, word by word (`stack`, top last; null where paths disagree or a move of sp is not
+  // exact): whose entry value each pushed word holds, so that a restore is a restore only when the
+  // word its `pop` loads is that register's own. `pop {r5}; pop {r4}` after `push {r4, r5}` NAMES
+  // both registers and restores neither — it swaps the caller's r4 and r5.
+  type Stack = readonly (string | null)[];
+  // `clobbered` (a may-set) is each callee-saved register a pop has loaded another word into since
+  // its last restore, with that pop: the fill reads a `pop` as transparent, so no write of the body
+  // shows it, and one that reaches a balanced return is refused here (`leaked`).
+  type State = {
+    cur: Set<string>;
+    open: Set<string>;
+    depth: number | null;
+    stack: Stack | null;
+    clobbered: Map<string, Instr>;
+  };
   const stateIn: (State | null)[] = blocks.map((_, i) =>
-    i === 0 ? { cur: new Set(), open: new Set(), depth: 0 } : null,
+    i === 0 ? { cur: new Set(), open: new Set(), depth: 0, stack: [], clobbered: new Map() } : null,
   );
+  const leaked = new Map<string, Instr>();
+  const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
     const open = new Set(stateIn[b]!.open);
+    const clobbered = new Map(stateIn[b]!.clobbered);
     const frame = makeFrameWalk({ argRegs: [], start: stateIn[b]!.depth });
+    let stack: (string | null)[] | null = stateIn[b]!.stack === null ? null : [...stateIn[b]!.stack!];
+    const holds = new Map<string, string>(); // low register ← the high one a save's staging `mov` copied
+    const loaded = new Map<string, string | null>(); // a staging pop's low register ← whose word it loaded
     for (const x of blocks[b].instrs) {
+      const before = frame.depthNow();
       frame.step(x);
+      const after = frame.depthNow();
       const saves = x.mnemonic === 'push' ? (regListOf(x.ops) ?? []) : savesHi.has(x) ? [savesHi.get(x)!] : [];
-      const restores =
+      const named =
         x.mnemonic === 'pop'
           ? (regListOf(x.ops) ?? []).filter((r) => !stagingPops.get(x)?.has(r))
           : restoresHi.has(x)
             ? [x.ops[0]]
             : [];
+      // Which of them the word they load really restores: all, by name, where the stack is not known.
+      let own: ((r: string) => boolean) | null = null;
+      const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? byRegNumber(regListOf(x.ops) ?? []) : null;
+      if (x.mnemonic === 'push') {
+        // a push stores its highest-numbered register deepest
+        stack = stack === null || list === null ? null : [...stack, ...list.map((r) => holds.get(r) ?? r).reverse()];
+      } else if (x.mnemonic === 'pop') {
+        if (stack === null || list === null || stack.length < list.length) {
+          stack = null;
+        } else {
+          const popped = new Map(list.map((r) => [r, stack!.pop()!] as const));
+          own = (r) => popped.get(word(r)) === word(r);
+          stagingPops.get(x)?.forEach((r) => loaded.set(word(r), popped.get(word(r)) ?? null));
+        }
+      } else if (restoresHi.has(x)) {
+        const from = loaded.get(word(x.ops[1]));
+        own = stack === null || from === undefined ? null : (r) => from === word(r);
+      } else if (stack !== null && /^str[bh]?$/.test(x.mnemonic) && isSpReg(parseAddr(x.ops[1] ?? '').base)) {
+        // a store into a pushed word replaces what it holds
+        const { off, regOff } = parseAddr(x.ops[1] ?? '');
+        if (regOff !== undefined) {
+          stack = null;
+        } else if (Math.floor(off / 4) < stack.length) {
+          stack[stack.length - 1 - Math.floor(off / 4)] = null;
+        }
+      } else if (stack !== null && before !== after) {
+        // any other move of sp (`sub sp, #8`, `add sp, #4`) pushes or drops whole anonymous words
+        const words = before === null || after === null || (after - before) % 4 !== 0 ? null : (after - before) / 4;
+        stack =
+          words === null || stack.length + words < 0
+            ? null
+            : words > 0
+              ? [...stack, ...Array<null>(words).fill(null)]
+              : stack.slice(0, stack.length + words);
+      }
+      const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : regWritesOf(x);
+      if (writes === 'all') {
+        holds.clear();
+      } else {
+        writes.forEach((r) => holds.delete(word(r)));
+      }
+      if (savesHi.has(x)) {
+        holds.set(word(x.ops[0]), word(savesHi.get(x)!));
+      }
+      const restores = own === null ? named : named.filter(own);
       const uses =
         x.mnemonic === 'push'
           ? []
           : savesHi.has(x)
             ? [x.ops[0]]
-            : [...restores, ...namedBy(x), ...(x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [])];
+            : [...named, ...namedBy(x), ...(x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [])];
       if (record) {
         saves.forEach((r) => savedSomewhere.add(r));
-        restores.forEach((r) => restoredSomewhere.add(r));
+        named.forEach((r) => restoredSomewhere.add(r));
         uses.filter((r) => !cur.has(r)).forEach((r) => usedUnsaved.add(r));
       }
       saves
@@ -4692,16 +4785,30 @@ function bodySavedRegs(
       restores.forEach((r) => {
         cur.delete(r);
         open.delete(r);
+        clobbered.delete(word(r));
       });
+      // A pop that loads another register's word writes this one and restores nothing: it is no
+      // longer saved, and its own save, still open, is unrestored at a balanced return.
+      named
+        .filter((r) => !restores.includes(r))
+        .forEach((r) => {
+          cur.delete(r);
+          if (/^r([4-9]|1[01])$/.test(word(r))) {
+            clobbered.set(word(r), x);
+          }
+        });
       // Only a return the frame is balanced at: one with the `push` still on the stack is an
       // input whose epilogue was left out (a fragment, a fixture), which the prologue's reading
       // has always taken as restored.
       if (record && classifyXfer(x) === 'return' && frame.depthNow() === 0) {
         open.forEach((r) => unrestored.add(r));
+        clobbered.forEach((at, r) => leaked.has(r) || leaked.set(r, at));
       }
     }
-    return { cur, open, depth: frame.depthNow() };
+    return { cur, open, depth: frame.depthNow(), stack, clobbered };
   };
+  const sameStack = (x: Stack | null, y: Stack | null) =>
+    x === null || y === null ? x === y : x.length === y.length && x.every((w, i) => w === y[i]);
   for (let changed = true; changed;) {
     changed = false;
     for (let b = 1; b < blocks.length; b++) {
@@ -4712,9 +4819,18 @@ function bodySavedRegs(
       const cur = new Set([...ins[0].cur].filter((r) => ins.every((s) => s.cur.has(r))));
       const open = new Set(ins.flatMap((s) => [...s.open]));
       const depth = ins.every((s) => s.depth === ins[0].depth) ? ins[0].depth : null;
+      const stack = ins.every((s) => sameStack(s.stack, ins[0].stack)) ? ins[0].stack : null;
+      const clobbered = new Map(ins.flatMap((s) => [...s.clobbered]));
       const was = stateIn[b];
-      if (was === null || was.cur.size !== cur.size || was.open.size !== open.size || was.depth !== depth) {
-        stateIn[b] = { cur, open, depth };
+      if (
+        was === null ||
+        was.cur.size !== cur.size ||
+        was.open.size !== open.size ||
+        was.depth !== depth ||
+        !sameStack(was.stack, stack) ||
+        was.clobbered.size !== clobbered.size
+      ) {
+        stateIn[b] = { cur, open, depth, stack, clobbered };
         changed = true;
       }
     }
@@ -4724,6 +4840,7 @@ function bodySavedRegs(
   return {
     saved: new Set([...savedSomewhere].filter((r) => !mis(r))),
     misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter(mis)),
+    leaked,
   };
 }
 
@@ -5211,6 +5328,9 @@ interface ThumbFill {
   readonly staleIdiomValues: Map<Value, StaleIdiomRead>;
   /** What an elided dispatch left at each case target's entry, by block index. */
   readonly caseEntries: ReadonlyMap<number, CaseEntry>;
+  /** Each callee-saved register a `pop` loads another word into and that reaches a balanced return
+   *  so (`bodySavedRegs`'s `leaked`), with that pop: refused once the return proof has run. */
+  readonly poppedForeign: ReadonlyMap<string, Instr>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -5319,6 +5439,7 @@ function thumbFillOf(
     },
     staleIdiomValues: new Map(),
     caseEntries: elidedCaseEntries(cfg, text.tables),
+    poppedForeign: body.leaked,
   };
 }
 
