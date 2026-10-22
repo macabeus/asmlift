@@ -222,6 +222,12 @@ export function verify(fn: Fn): void {
                   `got width ${String(op.attrs.width)}, signed ${String(op.attrs.signed)}`,
               );
             }
+            // …and a PART of the one object (frame-objects.ts `provenParts`) is such storage too
+            if (op.attrs.part !== undefined && (op.attrs.part !== true || count < 2)) {
+              throw new VerifyError(
+                `'laddr' part must be true on storage of two or more bytes, got ${String(op.attrs.part)}`,
+              );
+            }
             // …and storage accessed at two widths over one byte names the VIEWS a union of it
             // declares (frame-objects.ts `unionViews`): one per element width in bytes, negative
             // for a signed narrow one, each tiling the storage — so at least two, distinct, of a

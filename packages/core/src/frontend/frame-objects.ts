@@ -2276,8 +2276,14 @@ function keepAsOneObject({
   // (`provenParts`), each rewritten on its own: an access through a member at `k` lands on the
   // part that holds `k`, at `k` less the part's start.
   const parts = twoWidths === undefined ? provenParts({ from, to }, objects, uses) : [{ from, to }];
+  // …stamped `part` where there are several: storage a copy proved one object of the source's, so
+  // its bytes are that object's elements rather than the one object's mix of members and spills,
+  // and the emitter may name them as elements (structure.ts `frameArrayElement`)
   const laddrs = parts.map(({ from: lo, to: hi }) =>
-    mkOp('laddr', { results: [mkValue(T.unk(32))], attrs: { off: lo, width: 1, signed: false, count: hi - lo } }),
+    mkOp('laddr', {
+      results: [mkValue(T.unk(32))],
+      attrs: { off: lo, width: 1, signed: false, count: hi - lo, ...(parts.length > 1 ? { part: true } : {}) },
+    }),
   );
   const partOf = (at: number) => parts.findIndex((p) => at >= p.from && at < p.to);
   const object = laddrs[0];

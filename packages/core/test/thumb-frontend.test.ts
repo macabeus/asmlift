@@ -4048,6 +4048,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         expect(src).toContain('outp(sp0, (u32)sp0 + 2);\n    usepos(sp0);');
       });
 
+      // `u8 a[16], b[16]; memcpy(a, gS1, 16); memcpy(b, gS2, 16); return a[3] + b[5];` — verbatim
+      // agbcc; each copy's destination is a writer the one object holds, and each copy's count
+      // proves where its object starts and ends, so the one object is two, each named by element.
+      // Handing `b` to a callee nothing bounds keeps it one.
+      const copies = (second: string) =>
+        'cpypair:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x20\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n' +
+        `\tbl\tmemcpy\n\tadd\tr4, sp, #0x10\n${second}\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x3]\n` +
+        '\tldrb\tr1, [r4, #0x5]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x20\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '\t.align\t2, 0\n.L3:\n\t.word\tgS1\n\t.word\tgS2\n';
+      test('two arrays two copies fill are two objects', () => {
+        const pair = copies('\tldr\tr1, .L3+0x4\n\tadd\tr0, r4, #0\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n');
+        const src = decompile('cpypair', pair, ARMV4T_AGBCC).source;
+        expect(src).toContain('    u8 sp0[16];\n    u8 sp16[16];\n');
+        expect(src).toContain('memcpy(sp0, &gS1, 16);\n    memcpy(sp16, &gS2, 16);\n    return sp0[3] + sp16[5];');
+      });
+      test('an array a callee nothing bounds is handed keeps the one object', () => {
+        const handed = copies('\tadd\tr0, r4, #0\n\tbl\tfill\n');
+        const prototypes = { fill: { params: ['u8 *'], returnsVoid: true } };
+        const src = decompile('cpypair', handed, ARMV4T_AGBCC, { prototypes }).source;
+        expect(src).toContain('u8 sp0[32];');
+        expect(src).not.toContain('sp16');
+      });
+
       // `u16 *a; u16 *b; pair(&a, &b); eight(1, 2, 3, 4, 5, 6, 7); use2(b);` — the two objects
       // sit above the three outgoing argument words `eight` reads at [sp,#0..#8]
       test('two captures above an outgoing argument block', () => {
