@@ -2604,6 +2604,35 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     }
   });
 
+  // A RUNTIME INDEX MOVED BY A CONSTANT REGISTER. Thumb has no `ldrsb`/`ldrsh` with an immediate,
+  // so agbcc loads the whole displacement into a register (thumb.md:411-505): `s8 a[64]; … a[i]`
+  // is `mov r1, sp / add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]`, lowered as `add` +
+  // load@0. Displacement 0 is the indexed element and stays signed; any other is the displaced
+  // access `ldrb r0, [r0, #3]` refuses (a field of an element struct, `mov r1, #0x3`), and a moved
+  // sum that escapes still refuses by its role.
+  test('a runtime index moved by a constant register is judged at the displacement it lands on', () => {
+    const frame = (access: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x40\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
+      `\tmov\tr1, sp\n\tadd\tr0, r1, r4\n${access}\tadd\tsp, sp, #0x40\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const opts = { prototypes: { fill: { params: ['void *'], returnsVoid: true }, f: { params: ['s32'] } } };
+    const byte = decompile('f', frame('\tmov\tr1, #0x0\n\tldrsb\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
+    expect(byte).toContain('u8 sp0[64];');
+    expect(byte).toMatch(/return \*\(s8 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
+    const half = decompile('f', frame('\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
+    expect(half).toMatch(/return \*\(s16 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
+    // a nonzero displacement is a member of an element, not modelled
+    for (const access of ['\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n', '\tmov\tr1, #0x2\n\tldrsh\tr0, [r0, r1]\n']) {
+      expect(() => decompile('f', frame(access), ARMV4T_AGBCC, opts)).toThrow(
+        'a runtime index into the object at [sp,#0) flows into `load`',
+      );
+    }
+    // the moved sum handed to a call escapes, and refuses as the call
+    const escape = frame('\tmov\tr1, #0x0\n\tadd\tr0, r0, r1\n\tbl\tfill\n\tmov\tr0, #0x0\n');
+    expect(() => decompile('f', escape, ARMV4T_AGBCC, opts)).toThrow(
+      'a runtime index into the object at [sp,#0) flows into `call`',
+    );
+  });
+
   // WHAT THE BENCHMARK ACTUALLY SLICES is the diagnostic's REASON, and the stage word is prepended
   // AFTERWARDS: `errorMarkers: dec.diagnostics.map((d) => `${d.stage}: ${firstLine(d.reason)}`)`,
   // where `firstLine` is `s.split('\n')[0].slice(0, 200)`. So a published marker runs to 206 for a

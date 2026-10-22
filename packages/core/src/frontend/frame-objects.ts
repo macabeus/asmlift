@@ -1184,7 +1184,7 @@ function classifyFrameUses({
         // judged with the rest (`objectShapes`).
         const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
         if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
-          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], fail);
+          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], facts.constOf, fail);
           continue;
         }
         // A CONSTANT move left after the fold (`foldMovedCaptures`) moves a capture a phi carried.
@@ -1253,6 +1253,15 @@ function transferRead(
 }
 
 // Records every access through `sum`, a runtime index into the object at `off`.
+//
+// A SUM MOVED BY A LITERAL IS THE SAME INDEX, DISPLACED. Thumb has no `ldrsb`/`ldrsh` with an
+// immediate, so agbcc loads the whole displacement into a register (thumb.md:411-505, `mov %0,%2 ;
+// ldrs[bh] %0,[%1,%0]`) and the frontend lowers that register-offset load as `add` + load@0:
+// `add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]` is `a[i]` on an `s8 a[n]` local. So an
+// `add` of the sum and a `const` is walked with its displacement, and every use is judged at the
+// displacement it lands on. Only displacement 0 is the indexed element: anything else —
+// `mov r1, #0x3 / ldrsb r1, [r0, r1]`, a field of an element struct — is the displaced access
+// `ldrb r0, [r0, #0x3]` already refuses, and refuses in its words.
 function indexedAccess(
   irBlocks: readonly Block[],
   {
@@ -1261,27 +1270,47 @@ function indexedAccess(
   }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
   object: FrameAccessOp,
   sum: Value,
+  constOf: (v: Value) => number | undefined,
   fail: Refuse,
 ): void {
   const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      const roles = [
-        ...op.operands.flatMap((v, i) => (v === sum ? [i] : [])),
-        ...(op.successors ?? []).flatMap((s) => (s.args.includes(sum) ? [-1] : [])),
-      ];
-      for (const i of roles) {
-        if ((op.opcode !== 'load' && op.opcode !== 'store') || i !== 0 || (op.attrs.off as number) !== 0) {
-          fail(
-            `a runtime index into the object at [sp,#${off}) flows into \`${i === -1 ? 'a phi' : op.opcode}\` — ` +
-              'only a load or store at the indexed address is modelled',
-          );
+  const displaced = new Map<Value, number>([[sum, 0]]);
+  for (let work = [sum]; work.length > 0;) {
+    const next: Value[] = [];
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        for (const at of work) {
+          const by = displaced.get(at)!;
+          const roles = [
+            ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
+            ...(op.successors ?? []).flatMap((s) => (s.args.includes(at) ? [-1] : [])),
+          ];
+          for (const i of roles) {
+            const k =
+              op.opcode === 'add' && op.operands.length === 2 && i >= 0 ? constOf(op.operands[1 - i]) : undefined;
+            if (k !== undefined && !displaced.has(op.results[0])) {
+              displaced.set(op.results[0], (by + k) | 0);
+              next.push(op.results[0]);
+              continue;
+            }
+            if (
+              (op.opcode !== 'load' && op.opcode !== 'store') ||
+              i !== 0 ||
+              ((by + (op.attrs.off as number)) | 0) !== 0
+            ) {
+              fail(
+                `a runtime index into the object at [sp,#${off}) flows into \`${i === -1 ? 'a phi' : op.opcode}\` — ` +
+                  'only a load or store at the indexed address is modelled',
+              );
+            }
+            got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+            accessOps.set(op, object);
+          }
         }
-        got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
-        accessOps.set(op, object);
       }
     }
+    work = next;
   }
 }
 
