@@ -665,7 +665,9 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => lift(indexed('\tbl\tuse\n'))).toThrow(
           /a runtime index into the object at \[sp,#0\) flows into `call`/,
         );
-        expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(/flows into `load`/);
+        expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) is accessed at displacement 1 from the indexed element/,
+        );
       });
 
       // …and the storage need not escape: its own indexed stores write it. agbcc's own output for

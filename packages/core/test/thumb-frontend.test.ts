@@ -2620,12 +2620,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(byte).toMatch(/return \*\(s8 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
     const half = decompile('f', frame('\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
     expect(half).toMatch(/return \*\(s16 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
-    // a nonzero displacement is a member of an element, not modelled
-    for (const access of ['\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n', '\tmov\tr1, #0x2\n\tldrsh\tr0, [r0, r1]\n']) {
+    // a nonzero displacement is a member of an element, not modelled, and the refusal names it
+    for (const [access, by] of [
+      ['\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n', 3],
+      ['\tmov\tr1, #0x2\n\tldrsh\tr0, [r0, r1]\n', 2],
+    ] as const) {
       expect(() => decompile('f', frame(access), ARMV4T_AGBCC, opts)).toThrow(
-        'a runtime index into the object at [sp,#0) flows into `load`',
+        `a runtime index into the object at [sp,#0) is accessed at displacement ${by} from the indexed element`,
       );
     }
+    // one literal move deep, as agbcc emits it: a second move is not walked, even a zero one
+    const twice = frame('\tmov\tr1, #0x0\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x0\n\tldrsb\tr0, [r0, r1]\n');
+    expect(() => decompile('f', twice, ARMV4T_AGBCC, opts)).toThrow(
+      'a runtime index into the object at [sp,#0) flows into `add`',
+    );
     // the moved sum handed to a call escapes, and refuses as the call
     const escape = frame('\tmov\tr1, #0x0\n\tadd\tr0, r0, r1\n\tbl\tfill\n\tmov\tr0, #0x0\n');
     expect(() => decompile('f', escape, ARMV4T_AGBCC, opts)).toThrow(

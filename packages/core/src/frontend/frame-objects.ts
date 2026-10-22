@@ -1257,11 +1257,19 @@ function transferRead(
 // A SUM MOVED BY A LITERAL IS THE SAME INDEX, DISPLACED. Thumb has no `ldrsb`/`ldrsh` with an
 // immediate, so agbcc loads the whole displacement into a register (thumb.md:411-505, `mov %0,%2 ;
 // ldrs[bh] %0,[%1,%0]`) and the frontend lowers that register-offset load as `add` + load@0:
-// `add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]` is `a[i]` on an `s8 a[n]` local. So an
-// `add` of the sum and a `const` is walked with its displacement, and every use is judged at the
-// displacement it lands on. Only displacement 0 is the indexed element: anything else —
-// `mov r1, #0x3 / ldrsb r1, [r0, r1]`, a field of an element struct — is the displaced access
-// `ldrb r0, [r0, #0x3]` already refuses, and refuses in its words.
+// `add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]` is `a[i]` on an `s8 a[n]` local. So the
+// uses of an `add` of the sum and a `const` are judged at that displacement. One `add` deep: agbcc
+// emits one `mov` per load, and no other compiler emits a literal index register. Only
+// displacement 0 is the indexed element. Anything else — `mov r1, #0x3 / ldrsb r1, [r0, r1]`, a
+// field of an element struct — is the displaced access `ldrb r0, [r0, #0x3]` also is, and both
+// refuse naming the displacement.
+//
+// The element is judged here and left where the register put it, so it is spelled with the
+// literal: `*(s16 *)((u32)sp0 + (a0 << 1) + 0)`. Re-pointing it at the sum spells
+// `((s16 *)sp0)[a0]`, an index through a cast on the `u8` storage (`objectShapes`), which agbcc
+// compiles to `add r4, r4, sp` and the source's `mov r1, sp / add r0, r1, r4` does not: the `u16`
+// twin `((u16 *)sp0)[a0]` misses the same way. Left raw, the access compiles to the source's
+// bytes with or without the `+ 0`.
 function indexedAccess(
   irBlocks: readonly Block[],
   {
@@ -1275,43 +1283,43 @@ function indexedAccess(
 ): void {
   const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
-  const displaced = new Map<Value, number>([[sum, 0]]);
-  for (let work = [sum]; work.length > 0;) {
-    const next: Value[] = [];
+  const judge = (at: Value, by: number): void => {
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
-        for (const at of work) {
-          const by = displaced.get(at)!;
-          const roles = [
-            ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
-            ...(op.successors ?? []).flatMap((s) => (s.args.includes(at) ? [-1] : [])),
-          ];
-          for (const i of roles) {
-            const k =
-              op.opcode === 'add' && op.operands.length === 2 && i >= 0 ? constOf(op.operands[1 - i]) : undefined;
-            if (k !== undefined && !displaced.has(op.results[0])) {
-              displaced.set(op.results[0], (by + k) | 0);
-              next.push(op.results[0]);
-              continue;
-            }
-            if (
-              (op.opcode !== 'load' && op.opcode !== 'store') ||
-              i !== 0 ||
-              ((by + (op.attrs.off as number)) | 0) !== 0
-            ) {
-              fail(
-                `a runtime index into the object at [sp,#${off}) flows into \`${i === -1 ? 'a phi' : op.opcode}\` — ` +
-                  'only a load or store at the indexed address is modelled',
-              );
-            }
-            got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
-            accessOps.set(op, object);
+        const roles = [
+          ...op.operands.flatMap((v, i) => (v === at ? [i] : [])),
+          ...(op.successors ?? []).flatMap((s) => (s.args.includes(at) ? [-1] : [])),
+        ];
+        for (const i of roles) {
+          const k =
+            at === sum && op.opcode === 'add' && op.operands.length === 2 && i >= 0
+              ? constOf(op.operands[1 - i])
+              : undefined;
+          if (k !== undefined) {
+            judge(op.results[0], k);
+            continue;
           }
+          const access = (op.opcode === 'load' || op.opcode === 'store') && i === 0;
+          if (!access) {
+            fail(
+              `a runtime index into the object at [sp,#${off}) flows into \`${i === -1 ? 'a phi' : op.opcode}\` — ` +
+                'only a load or store at the indexed address is modelled',
+            );
+          }
+          const at0 = (by + (op.attrs.off as number)) | 0;
+          if (at0 !== 0) {
+            fail(
+              `a runtime index into the object at [sp,#${off}) is accessed at displacement ${at0} from the indexed element — ` +
+                'only a load or store at the indexed address is modelled',
+            );
+          }
+          got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+          accessOps.set(op, object);
         }
       }
     }
-    work = next;
-  }
+  };
+  judge(sum, 0);
 }
 
 /** Why two access types on one byte refuse, as every refusal of it words it. THE RULE IS AGBCC'S
