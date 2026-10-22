@@ -832,8 +832,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // `frontend/mips.ts`'s refusal of a `jr` to anything but `ra` that no recovered table claimed:
     // a dispatch the jump-table recognizer refused, or a register tail call. The message says both,
-    // and so does the label, dispatch side first. Its first row is IDO's second table in one
-    // function, read at `lw t9,32(at)` (`sw_jtloop2:ido7.1`), which the recognizer does not take.
+    // and so does the label, dispatch side first. No MIPS row reaches it: its last one,
+    // `sw_jtloop2:ido7.1`, lifts since the recognizer reads a `%lo` folded into the table load.
     // Thumb's "indirect/computed jump … — jump tables / computed gotos / register tail calls" is the
     // same refusal (`frontend/thumb.ts`): an agbcc `mov pc, r0` dispatch the Thumb recognizer leaves
     // unclaimed, including one whose dispatch code between the table load and the `mov pc` it
