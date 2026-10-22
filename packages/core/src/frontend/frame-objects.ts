@@ -2362,9 +2362,10 @@ function keepAsOneObject({
  *  part, wherever they do not. A part is a maximal run of bytes that overlapping uses chain
  *  together — a fixed-offset access, a struct passed by value, and an escape a standard block copy
  *  with a literal count bounds (`escapeExtents`) each name the bytes they touch — and a run that
- *  merely abuts the one below it starts a new part only where such a copy starts. Two brace-
- *  initialised arrays side by side are agbcc's `memcpy(a, .LC0, 16); memcpy(b, .LC2, 16)`, and
- *  declared as one `u8[32]` neither image can be folded into its own local (l3/constinit.ts).
+ *  merely abuts the one below it starts a new part only where such a copy starts — and so must
+ *  the lowest part, or nothing is split. Two brace-initialised arrays side by side are agbcc's
+ *  `memcpy(a, .LC0, 16); memcpy(b, .LC2, 16)`, and declared as one `u8[32]` neither image can be
+ *  folded into its own local (l3/constinit.ts).
  *
  *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
  *  (it names no byte, so it may reach every one), an escape nothing bounds (a callee or a holder
@@ -2404,7 +2405,10 @@ function provenParts(
   // the source put an object it fills. A run starting anywhere else is bytes reached from below,
   // which says nothing of where one object ends — the one-object relift reads every slot through
   // an address of its own, so a struct spilled word by word and read through its base shows a
-  // run per word, and is one object at every word.
+  // run per word, and is one object at every word. The LOWEST part is held to the same test
+  // (below): where it is only stores, a copy above it is as likely `memcpy(&buf[4], s, 12)` into
+  // the middle of one array as the start of a second one, and declared as two the recompile
+  // reads `buf[6]` through a base it holds where the target re-formed sp+6.
   const starts = new Set([...uses.escapeExtents.values()].flat().map((e) => e?.lo));
   const parts: { from: number; to: number }[] = [];
   for (const { lo, hi } of [...touched].sort((a, b) => a.lo - b.lo)) {
@@ -2443,7 +2447,7 @@ function provenParts(
       merged.push({ ...p });
     }
   }
-  return merged.length > 1 ? merged : whole;
+  return merged.length > 1 && merged.every((p) => starts.has(p.from)) ? merged : whole;
 }
 
 /** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width

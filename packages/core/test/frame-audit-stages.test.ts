@@ -628,18 +628,34 @@ describe('keepAsOneObject', () => {
     ops.push(call('memcpy', b.results[0], s, k.results[0]), load(a.results[0], 0, 1), load(b.results[0], 1, 1), ret());
     return { params: [x, s], ops };
   };
+  // a copy of `at` bytes to sp+0 and one of `n` bytes to sp+`at`, read at [0] and [1]
+  const pair = (at: number, n: number): Block => {
+    const [s, t] = [value(), value()];
+    const [a, b, ka, kb] = [laddr(0), laddr(at), konst(at), konst(n)];
+    const ops = [a, b, ka, kb, call('memcpy', a.results[0], s, ka.results[0])];
+    ops.push(call('memcpy', b.results[0], t, kb.results[0]), load(a.results[0], 0, 1), load(b.results[0], 1, 1), ret());
+    return { params: [s, t], ops };
+  };
 
   test('keeps one object where a part would be one byte or start off a word boundary', () => {
-    // `struct { u8 n; u8 name[7]; } s; s.n = x; memcpy(s.name, src, 7)`: declared alone, the
-    // one-byte part is a `u8` scalar agbcc keeps in a register (and verify refuses the stamp)
-    expect(objectsOf(withKept(below(1, 7)))).toEqual([[0, 8]]);
+    // `struct { u8 n; u8 name[7]; } s; memcpy(&s, src, 1); memcpy(s.name, src2, 7)`: declared
+    // alone, the one-byte part is a `u8` scalar agbcc keeps in a register (and verify refuses the stamp)
+    expect(objectsOf(withKept(pair(1, 7)))).toEqual([[0, 8]]);
     // `struct { u16 n; u8 name[6]; }`: agbcc would place a separate `u8 name[6]` at sp+4
-    expect(objectsOf(withKept(below(2, 6)))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(pair(2, 6)))).toEqual([[0, 8]]);
     // …and at a word boundary the split stands
-    expect(objectsOf(withKept(below(4, 4)))).toEqual([
+    expect(objectsOf(withKept(pair(4, 4)))).toEqual([
       [0, 4],
       [4, 4],
     ]);
+  });
+
+  // `u8 buf[8]; buf[0..3] = x; memcpy(&buf[4], s, 4)`: a copy into the middle of one array, below
+  // which only stores lie, proves no second object — declared as two, agbcc's recompile reads
+  // `buf[5]` through the base it holds for the copy where the target re-formed sp+5
+  test('keeps one object where the lowest part starts at no copy', () => {
+    expect(objectsOf(withKept(below(4, 4)))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(below(1, 7)))).toEqual([[0, 8]]);
   });
   const withKept = (blk: Block): Block => {
     kept(blk);
