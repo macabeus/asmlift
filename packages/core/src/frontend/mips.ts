@@ -94,7 +94,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, registerLiveIns, unifyRegisterSpellings } from './ssa';
+import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns, unifyRegisterSpellings } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1768,6 +1768,8 @@ function liftOnce(
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
   const restores = new Map<Value, { reg: string; addr: number }>();
+  const restoredBy = new Map<Instr, ReadonlySet<string>>(); // each `lw` that restores a save, and what
+  // A store of a callee-saved register is a save only while every path restores it after its last write.
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`):
   // IDO's `lw zero`, which `write` drops, so the load's value is recorded here or nowhere.
@@ -2775,6 +2777,7 @@ function liftOnce(
           }
           const caller = mkValue(T.unk(32));
           restores.set(caller, { reg: d, addr: ins.addr });
+          restoredBy.set(ins, new Set([d]));
           write(d, caller);
           return;
         }
@@ -3122,6 +3125,17 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  refuseSavedRegisterLeaks(
+    name,
+    blocks.map((b) => ({
+      instrs: [...b.body, ...(b.delay ? [b.delay] : [])],
+      returns: b.branch !== null && isReturn(b.branch) && b.branch.ops[0] === 'ra',
+    })),
+    preds,
+    new Set([...saveSlots.values()].filter((r) => r !== 'ra')),
+    (ins, r) => writtenReg(ins) === r,
+    restoredBy,
+  );
   // What the float home holds at each return, and, where the home is undecided and holds a float on
   // every path into every return, that float — read now, before the SSA is finished.
   const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];

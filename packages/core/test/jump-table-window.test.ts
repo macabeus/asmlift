@@ -327,36 +327,44 @@ test('the PPC idiom is found by register, in whatever order the block holds it',
 });
 
 /** mwcc 2.3.3's loop-hoisted table base: `lis r5 ; addi r5,r5` ahead of the dispatch, `before` the
- *  pair and `after` it, `between` inside it. */
-const ppcHoisted = (before: string[], after: string[] = [], base = 'r5', between: string[] = []) =>
-  listing([
-    ...before,
-    `lis     ${base},0 #HA tbl`,
-    ...between,
-    `addi    ${base},${base},0 #LO tbl`,
-    ...after,
-    'cmplwi  r3,3',
-    'bgt-    @DEF',
-    'slwi    r0,r3,2',
-    `lwzx    r0,${base},r0`,
-    'mtctr   r0',
-    'bctr',
-    'C0:',
-    'li      r3,10',
-    'blr',
-    'C1:',
-    'li      r3,20',
-    'blr',
-    'C2:',
-    'li      r3,30',
-    'blr',
-    'C3:',
-    'li      r3,40',
-    'blr',
-    'DEF:',
-    'li      r3,0',
-    'blr',
-  ]);
+ *  pair and `after` it, `between` inside it, `epilogue` before each return. */
+const ppcHoisted = (
+  before: string[],
+  after: string[] = [],
+  base = 'r5',
+  between: string[] = [],
+  epilogue: string[] = [],
+) =>
+  listing(
+    [
+      ...before,
+      `lis     ${base},0 #HA tbl`,
+      ...between,
+      `addi    ${base},${base},0 #LO tbl`,
+      ...after,
+      'cmplwi  r3,3',
+      'bgt-    @DEF',
+      'slwi    r0,r3,2',
+      `lwzx    r0,${base},r0`,
+      'mtctr   r0',
+      'bctr',
+      'C0:',
+      'li      r3,10',
+      'blr',
+      'C1:',
+      'li      r3,20',
+      'blr',
+      'C2:',
+      'li      r3,30',
+      'blr',
+      'C3:',
+      'li      r3,40',
+      'blr',
+      'DEF:',
+      'li      r3,0',
+      'blr',
+    ].flatMap((l) => (l === 'blr' ? [...epilogue, l] : [l])),
+  );
 
 test('a PPC table base formed outside the dispatch block lifts when it reaches the dispatch on every path', () => {
   // the `@N` pool name mwcc gives the table never reaches the naming policy: the pair is the base
@@ -368,8 +376,9 @@ test('a PPC table base formed outside the dispatch block lifts when it reaches t
   // in whatever register the allocator chose — a callee-saved one, or an argument register whose
   // argument is dead (mwcc 2.3.3 puts a second loop's base in r4) — and with its halves apart
   for (const shape of [
-    // (saved first, as compiled code saves a callee-saved register before it writes one)
-    ppcHoisted(['stw     r31,-4(r1)'], [], 'r31'),
+    // (saved first, as compiled code saves a callee-saved register before it writes one, and
+    // restored before every return)
+    ppcHoisted(['stw     r31,-4(r1)'], [], 'r31', [], ['lwz     r31,-4(r1)']),
     ppcHoisted([], [], 'r4'),
     ppcHoisted([], [], 'r5', ['li      r6,0']),
   ]) {

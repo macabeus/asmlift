@@ -737,6 +737,21 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       );
     }
   });
+  // A SAVE HOLDS ONLY WHILE EVERY PATH RESTORES IT AFTER ITS LAST WRITE (`refuseSavedRegisterLeaks`).
+  // Each of these leaves the caller's r31 changed, which the C — r31 a local — never says: a write
+  // past the restore lifted `return a0;`, as did a reload from a word that is not the save.
+  test('a write to a saved register that reaches a return with no restore after it refuses', () => {
+    const leak = /the write to saved r31 at 0x10 reaches a return with no restore of r31 after it/;
+    const frame = (mid: string) =>
+      `0:\tstwu    r1,-16(r1)\n4:\tstw     r31,12(r1)\n8:\taddi    r31,r3,1\n${mid}` +
+      '14:\taddi    r1,r1,16\n18:\tblr\n';
+    expect(() => dis('f', frame('c:\tlwz     r31,12(r1)\n10:\tmr      r31,r3\n'))).toThrow(leak);
+    expect(() => dis('f', frame('c:\tstw     r31,8(r1)\n10:\tlwz     r31,8(r1)\n'))).toThrow(leak);
+    // restored after its last write, as compiled code does, it is a local
+    expect(dis('f', frame('c:\tmr      r3,r31\n10:\tlwz     r31,12(r1)\n'))).toBe(
+      's32 f(s32 a0) {\n    return a0 + 1;\n}\n',
+    );
+  });
   // The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
   // `liftWithinContextBound`). mwcc 2.4.2's `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0);
   // while (zq(a) != 5) sl(); return gX; }`: r5/r6 reach only the guessed calls `zq` and `sl`.

@@ -1720,7 +1720,12 @@ so a use there, a save whose word is popped into another register or dropped wit
 use ahead of the save on some path all leave a register that is neither a local nor a global, and
 it refuses — the prologue's save included. The O32 and PowerPC frontends keep the entry-block
 reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
-the stack as `sw s0,16(sp)`. And the register is keyed by its spelling throughout, so a function
+the stack as `sw s0,16(sp)`, and mwcc as `stw r14,8(r1)`, in the entry block itself. So there a
+store is a save only where some reload of the register from the stack answers it, and never for
+a register the function reads as a global register variable; and a save holds only while every
+path restores it after its last write (`refuseSavedRegisterLeaks`), the counterpart of the `pop`
+that ends a Thumb save: a write past the restore, a reload from another word, or a return the
+restore never reaches leaves the caller a value the C never assigns, and refuses. And the register is keyed by its spelling throughout, so a function
 that writes one register two ways (`sl` and `r10`, `s8` and `fp`) is read in one of them
 (`unifyRegisterSpellings`); saved as one and used as the other, it read as never saved.
 

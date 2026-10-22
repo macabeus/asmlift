@@ -67,13 +67,14 @@ test('a read of the register its restore wrote refuses: it holds the caller s0',
 
 test('a restored value that reaches a merge someone reads refuses at the end of the lift', () => {
   // The read at the join resolves to the block parameter, not to the restore, so only the check of
-  // the finished function sees the caller's s0 flowing into it.
+  // the finished function sees the caller's s0 flowing into it. (No path writes s0: a write the
+  // taken edge carries past the restore would refuse first, as a write the caller sees.)
   expect(
     lift(
       '0:\taddiu\tsp,sp,-8',
       '4:\tsw\ts0,4(sp)',
       '8:\tbeqz\ta0,18 <f+0x18>',
-      'c:\tmove\ts0,a1',
+      'c:\tnop',
       '10:\tlw\ts0,4(sp)',
       '14:\tnop',
       '18:\tmove\tv0,s0',
@@ -233,5 +234,71 @@ test('a global register variable stored as a stack argument is that argument, no
     expect(() => decompile('f', obj(...body), MIPS_GCC, { asmData: call(at) })).toThrow(
       /outgoing stack arguments not modelled — the undeclared call to 'k' at 0x1[8c] fills a0..a3, and the word stored to 16\(sp\)/,
     );
+  }
+});
+
+// A SAVE HOLDS ONLY WHILE EVERY PATH RESTORES IT AFTER ITS LAST WRITE (`refuseSavedRegisterLeaks`).
+// Each of these leaves the caller's s0 changed, which the C — s0 a local — never says: a write past
+// the restore lifted `void f(s32 a0) { return; }`, and a reload from a word that is not the save,
+// `return;` as well. Hand-written shapes: compiled code restores in its epilogue, after every write.
+test('a write to a saved register that reaches a return with no restore after it refuses', () => {
+  const leak = /the write to saved s0 at 0x(c|10) reaches a return with no restore of s0 after it/;
+  for (const target of [MIPS_GCC, MIPS_IDO]) {
+    const at =
+      (...lines: string[]) =>
+      () =>
+        decompile('f', obj(...lines), target).source;
+    // written again past the restore
+    expect(
+      at(
+        '0:\taddiu\tsp,sp,-8',
+        '4:\tsw\ts0,4(sp)',
+        '8:\taddiu\ts0,a0,1',
+        'c:\tlw\ts0,4(sp)',
+        '10:\tmove\ts0,a0',
+        '14:\tjr\tra',
+        '18:\taddiu\tsp,sp,8',
+      ),
+    ).toThrow(leak);
+    // "restored" from a word that holds the body's value, not the caller's
+    expect(
+      at(
+        '0:\taddiu\tsp,sp,-8',
+        '4:\tsw\ts0,4(sp)',
+        '8:\taddiu\ts0,a0,1',
+        'c:\tsw\ts0,0(sp)',
+        '10:\tlw\ts0,0(sp)',
+        '14:\tjr\tra',
+        '18:\taddiu\tsp,sp,8',
+      ),
+    ).toThrow(leak);
+    // a path that skips the restore after writing
+    expect(
+      at(
+        '0:\taddiu\tsp,sp,-8',
+        '4:\tsw\ts0,4(sp)',
+        '8:\taddiu\ts0,a0,1',
+        'c:\tbnez\ta0,1c <f+0x1c>',
+        '10:\tmove\tv0,s0',
+        '14:\tlw\ts0,4(sp)',
+        '18:\tmove\tv0,zero',
+        '1c:\tjr\tra',
+        '20:\taddiu\tsp,sp,8',
+      ),
+    ).toThrow(/the write to saved s0 at 0x8 reaches a return/);
+    // a path that never writes s0 needs no restore
+    expect(
+      at(
+        '0:\taddiu\tsp,sp,-8',
+        '4:\tsw\ts0,4(sp)',
+        '8:\tbeqz\ta0,1c <f+0x1c>',
+        'c:\tmove\tv0,zero',
+        '10:\taddiu\ts0,a0,1',
+        '14:\taddu\tv0,s0,s0',
+        '18:\tlw\ts0,4(sp)',
+        '1c:\tjr\tra',
+        '20:\taddiu\tsp,sp,8',
+      )(),
+    ).toMatch(/^s32 f\(s32 a0\) \{/);
   }
 });

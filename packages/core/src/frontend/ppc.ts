@@ -139,7 +139,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, registerLiveIns } from './ssa';
+import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1823,6 +1823,9 @@ function liftOnce(
   // A slot is one kind for the whole function: a word both saved and stored with a value has no
   // single reading, and refuses.
   const saveSlots = new Map<number, string>();
+  // Each reload (`lwz`, `lmw`, restore routine) that restores a save, and the registers it restores:
+  // a save holds only while every path restores it after its last write (`refuseSavedRegisterLeaks`).
+  const restoredBy = new Map<Instr, ReadonlySet<string>>();
   // AN INCOMING STACK WORD HAS ONE NAME, `@sarg<k>`, for its loads and its stores: the EABI passes
   // integer argument word k >= 8 at entry r1 + 8 + 4(k - 8), in the caller's parameter area past
   // its back chain and link-register save word (`corpus/probe-mwcc-frame.c`, `in9`/`in10`). A read
@@ -2115,6 +2118,7 @@ function liftOnce(
         );
       }
       if (reg !== 'r1') {
+        restoredBy.set(ins, new Set([...(restoredBy.get(ins) ?? []), reg]));
         const caller = mkValue(T.unk(32));
         nonValues.set(caller, { kind: 'restored', reg, addr: ins.addr });
         writeVar(reg, bi, caller);
@@ -3715,6 +3719,18 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  refuseSavedRegisterLeaks(
+    name,
+    blocks.map((b) => ({
+      instrs: [...b.body, ...(b.branch ? [b.branch] : [])],
+      returns: b.synthReturn === true || (b.branch !== null && (isReturn(b.branch) || isCondReturn(b.branch))),
+    })),
+    preds,
+    new Set([...saveSlots.values()].filter((r) => isCalleeSaved(target, r))),
+    // a call preserves every callee-saved register, and a restore routine is a restore
+    (ins, r) => !ins.mnemonic.startsWith('b') && mayWriteGpr(ins, r),
+    restoredBy,
+  );
   returnUntouchedArg();
   // What f1 holds at each return, and, where the home is undecided and f1 holds a float this function
   // computed on every path into every return, that float — read now, before the SSA is finished.

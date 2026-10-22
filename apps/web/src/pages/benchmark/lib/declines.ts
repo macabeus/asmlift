@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 289 distinct decline messages (the texts reached by
+// `packages/core/src` throws 290 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 108 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -79,13 +79,14 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ssa.ts          6  a register read round a cycle through the entry block with no join,
+//   frontend/ssa.ts          7  a register read round a cycle through the entry block with no join,
 //                               a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument, or copied into another
 //                               of a guessed call's arguments, an incoming stack
 //                               argument past the words the function's own declaration fills, and a
 //                               callee-saved register the function never saved read before any
-//                               write or written (a global register variable)
+//                               write or written (a global register variable), and a write to a
+//                               saved MIPS or PowerPC register that reaches a return unrestored
 //   frontend/call-plan.ts    5  a call returning a struct through a hidden pointer whose parameters
 //                               nothing sizes, one whose declaration the lifted source cannot print (a
 //                               type it has no spelling for, or a bare parameter count that states

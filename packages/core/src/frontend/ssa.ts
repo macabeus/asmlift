@@ -496,6 +496,77 @@ export function registerLiveIns(
   };
 }
 
+/** REFUSE A WRITE TO A SAVED REGISTER THAT THE CALLER SEES. A register the frontend read as saved
+ *  (its save store, `LiveInModel.uninitRegs`) is a local's home, and the lift drops what is left
+ *  in it at a return — right only if every path restores it after its last write. A write past the
+ *  restore (`lw s0,4(sp); move s0,a0; jr ra`), a reload from a word that is not its save, or a
+ *  return its restore never reaches leaves the caller holding a value the C never assigns, so the
+ *  function refuses here rather than drop it. MIPS and PowerPC read a save as an ordinary store in
+ *  the entry block, so this is asked once the blocks are filled; Thumb asks the same of its
+ *  `push`/`pop` pairs in `bodySavedRegs`.
+ *
+ *  A forward may-dataflow over the asm: a register is DIRTY from a write (`writes`) until a restore
+ *  of it (`restores`: the instructions the frontend lowered as reloading its save word), and dirty
+ *  at the end of a block that returns is the refusal. Compiled code restores every saved register
+ *  in its epilogue, after its last write, so it never fires there; a path that never writes the
+ *  register needs no restore. */
+export function refuseSavedRegisterLeaks<I extends { addr: number }>(
+  name: string,
+  blocks: readonly { instrs: readonly I[]; returns: boolean }[],
+  preds: readonly (readonly number[])[],
+  saved: ReadonlySet<string>,
+  writes: (ins: I, reg: string) => boolean,
+  restores: ReadonlyMap<I, ReadonlySet<string>>,
+): void {
+  if (saved.size === 0) {
+    return;
+  }
+  // register → the address of a write no restore has answered since, on some path
+  const outs: (Map<string, number> | null)[] = blocks.map(() => null);
+  const transfer = (b: number, dirty: Map<string, number>) => {
+    for (const ins of blocks[b].instrs) {
+      for (const r of saved) {
+        if (restores.get(ins)?.has(r)) {
+          dirty.delete(r);
+        } else if (writes(ins, r)) {
+          dirty.set(r, ins.addr);
+        }
+      }
+    }
+    return dirty;
+  };
+  const inOf = (b: number) => {
+    const dirty = new Map<string, number>();
+    for (const p of preds[b]) {
+      outs[p]?.forEach((at, r) => dirty.has(r) || dirty.set(r, at));
+    }
+    return dirty;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    blocks.forEach((_, b) => {
+      if (b !== 0 && !preds[b].some((p) => outs[p] !== null)) {
+        return;
+      }
+      const out = transfer(b, inOf(b));
+      if (outs[b] === null || out.size !== outs[b]!.size) {
+        outs[b] = out;
+        changed = true;
+      }
+    });
+  }
+  blocks.forEach((blk, b) => {
+    const [leak] = blk.returns ? [...(outs[b] ?? [])] : [];
+    if (leak !== undefined) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the write to saved ${leak[0]} at 0x${leak[1].toString(16)} reaches a return ` +
+          `with no restore of ${leak[0]} after it, so the caller sees it — no C local spells a write ` +
+          'that outlives the function',
+      );
+    }
+  });
+}
+
 /** A read whose register may be holding a callee's leftover — see `refuseStaleCallerSavedReads`. */
 interface StaleRead {
   reg: string;
