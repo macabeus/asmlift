@@ -6,7 +6,7 @@ import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 const {
   addressFlow,
@@ -472,7 +472,7 @@ describe('frameEscapes', () => {
 
 // The second audit, which judges the bytes a first one asked to keep as one object.
 describe('keepAsOneObject', () => {
-  const kept = (blk: Block) =>
+  const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC) =>
     auditFrameObjects({
       name: 'f',
       irBlocks: [blk],
@@ -483,7 +483,7 @@ describe('keepAsOneObject', () => {
       movedCaptures: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
-      target: ARMV4T_AGBCC,
+      target,
       oneObject: { from: 0, to: 8 },
     });
   // `u8 sp[4]; u32 sp4; h(x, sp, &sp4); return sp[0];` — two out-parameters of one callee, at
@@ -600,6 +600,24 @@ describe('keepAsOneObject', () => {
       ops: [a, b, store(a.results[0], v, 0, 4), store(b.results[0], v, 0, 4), load(a.results[0], 1, 1), ret()],
     };
     expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
+  });
+
+  // the parts are declared in the order the compiler places address-taken arrays against their
+  // declarations, and not split at all on a compiler whose order is not known
+  test('declares the parts in the target order, and keeps one object where the order is unknown', () => {
+    const order = (o: 'descending' | undefined) => ({
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, addressTakenArrayOrder: o },
+    });
+    const descending = copies([4, 4]);
+    kept(descending, order('descending'));
+    expect(objectsOf(descending)).toEqual([
+      [4, 4],
+      [0, 4],
+    ]);
+    const unknown = copies([4, 4]);
+    kept(unknown, order(undefined));
+    expect(objectsOf(unknown)).toEqual([[0, 8]]);
   });
 
   // `at` bytes stored at sp+0 and read back, then a copy of `n` bytes to sp+`at` read at its [1]

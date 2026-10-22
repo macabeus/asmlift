@@ -397,7 +397,16 @@ export function auditFrameObjects({
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
-    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, returnsWithoutHiddenPointer, fail });
+    keepAsOneObject({
+      oneObject,
+      irBlocks,
+      objects,
+      uses,
+      usedSlotOffsets,
+      returnsWithoutHiddenPointer,
+      arrayOrder: target.compilerBehaviors.addressTakenArrayOrder,
+      fail,
+    });
     return { policy: 'one-object', sinks };
   }
   const shapes = objectShapes({
@@ -2162,6 +2171,7 @@ function keepAsOneObject({
   uses,
   usedSlotOffsets,
   returnsWithoutHiddenPointer,
+  arrayOrder,
   fail,
 }: {
   oneObject: FrameRange;
@@ -2170,6 +2180,7 @@ function keepAsOneObject({
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
+  arrayOrder: TargetDescription['compilerBehaviors']['addressTakenArrayOrder'];
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -2264,8 +2275,11 @@ function keepAsOneObject({
   const reread = uses.publishedToWriter.size > 0;
   // …and declared as SEVERAL objects where the accesses prove the bytes are several
   // (`provenParts`), each rewritten on its own: an access through a member at `k` lands on the
-  // part that holds `k`, at `k` less the part's start.
-  const parts = twoWidths === undefined ? provenParts({ from, to }, objects, uses) : [{ from, to }];
+  // part that holds `k`, at `k` less the part's start. Only on a compiler that places address-
+  // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
+  // parts are declared in that order, or the recompile swaps their addresses.
+  const parts =
+    twoWidths === undefined && arrayOrder !== undefined ? provenParts({ from, to }, objects, uses) : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
   // and the emitter may name them as elements (structure.ts `frameArrayElement`)
@@ -2341,7 +2355,7 @@ function keepAsOneObject({
     }
     object.attrs = { ...object.attrs, views: unionViews(irBlocks, base) };
   }
-  irBlocks[0].ops.unshift(...laddrs);
+  irBlocks[0].ops.unshift(...(arrayOrder === 'descending' ? [...laddrs].reverse() : laddrs));
 }
 
 /** THE PARTS THE ACCESSES PROVE `[from, to)` IS MADE OF, lowest first — or the whole range, one

@@ -532,6 +532,16 @@ export interface TargetDescription {
     // says so, but nothing in this bag could express it if they did not. Any behavior that can
     // differ between two toolchains sharing one description is mis-keyed by construction.
     spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
+    // Which way this compiler places the ADDRESS-TAKEN local arrays of one frame against their
+    // DECLARATION order: `ascending` = the earlier-declared array takes the lower address. Read
+    // where the frame audit declares the one object as several (frame-objects.ts `provenParts`),
+    // so the recompile puts each part back at its own offset. Absent REFUSES that split: the one
+    // object stays one array.
+    //
+    // MEASURED on `u8 a[64]; u8 b[32]; u8 c[48];`, each filled by a `memcpy`, at canonical flags:
+    // agbcc a@0 b@64 c@96; gcc2.7.2 and gcc2.7.2kmc a@16 b@80 c@112; ido7.1 a@104 b@72 c@24 (the
+    // reverse); mwcc_242_81 a@88 b@8 c@40, neither order — so absent there.
+    addressTakenArrayOrder?: 'ascending' | 'descending';
     // Does this compiler's C front end take a DESIGNATED array element in an initializer —
     // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
     // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
@@ -1352,6 +1362,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // must stay a MATCH), plus `synthetic:dma_fill_uninit`, a row this did not author.
     designatedInitializers: true, // agbcc compiles `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'ascending',
+    addressTakenArrayOrder: 'ascending', // MEASURED, the probe at the field
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
     stagesOutgoingArgsInFrame: true,
@@ -1526,6 +1537,7 @@ export const MIPS_IDO: TargetDescription = {
     // O32's caller-owned home area `[0,16)` would be read as this function's first four
     // declaration ranks. Shipping a direction before the partition orders by argument index.
     spillSlotOrder: 'unknown',
+    addressTakenArrayOrder: 'descending', // MEASURED, the probe at the field
     // MEASURED, the probe at the field: the local ends at the frame top, above `ra` and the spills.
     o32LocalArea: 'above-saved-registers',
     // MEASURED off the same probe (`twice`, `owns`): O32's outgoing area is the frame bottom, an
@@ -1685,6 +1697,7 @@ export const MIPS_GCC: TargetDescription = {
     // per-toolchain override this bag cannot express — see the note at `compilerBehaviors`.
     designatedInitializers: true, // both gcc 2.7.2 builds compile `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'unknown',
+    addressTakenArrayOrder: 'ascending', // MEASURED on both toolchains, the probe at the field
     // MEASURED on BOTH toolchains this description serves, the probe at the field: identical
     // layouts, the local right above the 8-aligned outgoing area and under the saves.
     o32LocalArea: 'above-outgoing-area',

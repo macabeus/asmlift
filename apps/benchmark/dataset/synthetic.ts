@@ -12397,7 +12397,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      (l3/constinit.ts `asElement`). imgone (one image) MATCHes.
   //      imgnbr keeps the decline: a `u32` handed to `h` beside the image is an escape nothing bounds,
   //      so the bytes stay one object (`u8[20]`) and the image does not fill it. cpypair is the same
-  //      split without images (`memcpy` from two globals) on every toolchain. agbcc only for the
+  //      split without images (`memcpy` from two globals), declared in the order each compiler
+  //      places address-taken arrays (target.ts `addressTakenArrayOrder`: ido7.1 the reverse) and
+  //      not split on mwcc_242_81, whose order is neither. agbcc only for the
   //      images: the one-image control fails elsewhere on the other three (ido7.1 lifts the image as
   //      `(s32 *)&.data` and no candidate compiles; gcc2.7.2kmc refuses the copy's `swl`;
   //      mwcc_242_81 its anonymous constant pool entry) — the local-aggregate-init gap on each, its
