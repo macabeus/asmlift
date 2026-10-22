@@ -102,10 +102,11 @@ describe('the return width', () => {
     expect(src).not.toMatch(/^s64 f\(/);
   });
 
+  // (r4 past its restore is the caller's value, no local's: the live-in model refuses the read
+  // before the return width is asked — frontend/thumb.ts `bodySavedRegs`)
   test('…nor does a copy of a register a pop reloaded', () => {
     const body = ['\tpush\t{r4, lr}', '\tadd\tr0, r0, r2', '\tadc\tr1, r1, r3', '\tadd\tr4, r1, #0', '\tpop\t{r4}'];
-    const src = liftLeaf([...body, '\tadd\tr1, r4, #0'], ['\tpop\t{pc}']);
-    expect(src).not.toMatch(/^s64 f\(/);
+    expect(() => liftLeaf([...body, '\tadd\tr1, r4, #0'], ['\tpop\t{pc}'])).toThrow(/saves or restores r4/);
   });
 
   // WHAT r1 HOLDS AFTER A CALL IS KNOWN ONLY THROUGH IDENTITIES: a register copy (either spelling,

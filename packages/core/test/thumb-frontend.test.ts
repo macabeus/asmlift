@@ -768,14 +768,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('h1', h1, ARMV4T_AGBCC).source).toBe(
       's32 h1(s32 a0) {\n    s32 uninit_r8;\n    return a0 + uninit_r8;\n}\n',
     );
-    // a callee-saved register staged before anything saved it is the same: its entry value is not
-    // in a save yet, so the `mov` is not the save's alone
+    // A callee-saved register staged before anything saved it is no save of its own: the `push`
+    // holds r8's value, so r4's entry value is lost and the function returns with r8's in r4 — a
+    // write the caller sees. Lifted as `return a0 + uninit_r8;` (#337 to here) it was dropped.
     const unsaved =
       'h2:\n\tmov\tr4, r8\n\tpush\t{r4, lr}\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tmov\tr8, r4\n' +
       '\tpop\t{r1}\n\tbx\tr1\n';
-    expect(decompile('h2', unsaved, ARMV4T_AGBCC).source).toBe(
-      's32 h2(s32 a0) {\n    s32 uninit_r8;\n    return a0 + uninit_r8;\n}\n',
-    );
+    expect(() => decompile('h2', unsaved, ARMV4T_AGBCC)).toThrow(/it writes callee-saved r4, and saves or restores r4/);
   });
 
   // The other side of that fixture's premise, and the reason it had to be stated: the rule is
@@ -852,7 +851,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     test('…and refuses one it saves or restores only where a use comes first', () => {
-      const mis = /it reads callee-saved r4 before writing it, and saves or restores r4 only where a use comes first/;
+      const mis =
+        /it reads callee-saved r4 before writing it, and saves or restores r4 but not around every use of it, restored at every return, on every path/;
       // a `pop` with no push before it restores the register all the same, a write the
       // transparent pop leaves out of the lift
       expect(() => decompile('f', 'f:\n\tmov\tr0, r4\n\tpop\t{r4}\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(mis);
@@ -866,11 +866,55 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', path, ARMV4T_AGBCC)).toThrow(mis);
     });
 
+    // The restore ends the save: past it the register is the caller's again, so a use there is
+    // neither a local's nor, the transparent `pop` having kept the function's last write, the
+    // global's — and a save some path carries to a return unrestored saved nothing there.
+    test('…and refuses one it uses past its restore, or returns with unrestored', () => {
+      const mis = (rw: 'reads' | 'writes', reg: string) =>
+        new RegExp(
+          `it ${rw} callee-saved ${reg}${rw === 'reads' ? ' before writing it' : ''}, and saves or restores ${reg} but not around every use of it, restored at every return, on every path`,
+        );
+      const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
+      // a read past the restore was the function's own last write (`return 5;`), or `uninit_r8`
+      expect(lift('push {r4}; mov r4, #5; pop {r4}; mov r0, r4; bx lr')).toThrow(mis('writes', 'r4'));
+      expect(
+        lift(
+          'add r0, #1; mov r3, r8; push {r3}; mov r8, r0; add r0, r0, r8; pop {r3}; mov r8, r3; add r0, r0, r8; bx lr',
+        ),
+      ).toThrow(mis('reads', 'r8'));
+      expect(lift('add r0, #1; mov r3, r8; push {r3}; mov r8, r0; pop {r3}; mov r8, r3; mov r0, r8; bx lr')).toThrow(
+        mis('reads', 'r8'),
+      );
+      // a write past the restore is the caller's, and was dropped
+      expect(lift('add r0, #1; push {r4}; mov r4, #5; add r0, r0, r4; pop {r4}; mov r4, r0; bx lr')).toThrow(
+        mis('writes', 'r4'),
+      );
+      // the prologue's save is no different
+      expect(lift('push {r4, lr}; mov r4, #5; add r0, r0, r4; pop {r4}; mov r4, r0; pop {r1}; bx r1')).toThrow(
+        mis('writes', 'r4'),
+      );
+      // a staged save whose word is popped into another register restores no r8 (`a0 + 1 + a1`)
+      expect(lift('add r0, #1; mov r3, r8; push {r3}; pop {r1}; add r0, r0, r1; bx lr')).toThrow(mis('reads', 'r8'));
+      // a save dropped with `add sp` leaves the write the caller's
+      expect(lift('push {r4}; mov r4, r0; add r0, r4, #1; add sp, #4; bx lr')).toThrow(mis('writes', 'r4'));
+      // …where a return with the word still pushed is an epilogue the input left out, read as before
+      expect(
+        decompile('f', 'f:\n\tpush\t{r4}\n\tmov\tr4, r0\n\tadd\tr0, r4, #1\n\tbx\tlr\n', ARMV4T_AGBCC).source,
+      ).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+      // agbcc's own epilogue pops sl's word into r4 before r4's restore, and stays a save of both
+      const agbcc =
+        'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tpush\t{r7}\n\tmov\tsl, r0\n\tmov\tr4, sl\n' +
+        '\tadd\tr0, r4, #1\n\tpop\t{r4}\n\tmov\tsl, r4\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', agbcc, ARMV4T_AGBCC).source).toContain('return a0 + 1;');
+    });
+
     // The staging `mov` is the save's only where its low register reaches the push unchanged; one
     // rewritten first pushes a value of the function's own, and saves no high register.
     test('…and a high register staged into a push through another value is still a global', () => {
+      // (the word goes to r2, which nothing reads: the fill keeps a `pop` transparent, so one into r0
+      // would read as `g`'s return where the machine has the pushed value back)
       const interposed =
-        'f:\n\tpush\t{lr}\n\tmov\tr0, r8\n\tadd\tr0, #1\n\tpush\t{r0}\n\tbl\tg\n\tpop\t{r0}\n\tpop\t{r1}\n\tbx\tr1\n';
+        'f:\n\tpush\t{lr}\n\tmov\tr0, r8\n\tadd\tr0, #1\n\tpush\t{r0}\n\tbl\tg\n\tpop\t{r2}\n\tpop\t{r1}\n\tbx\tr1\n';
       expect(decompile('f', interposed, ARMV4T_AGBCC).source).toBe('s32 f(void) {\n    return g(greg_r8 + 1);\n}\n');
     });
 

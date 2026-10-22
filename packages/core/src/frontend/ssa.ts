@@ -433,7 +433,7 @@ export function unifyRegisterSpellings(
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
  *  of its saves. The rest — callee-saved, and not saved — is `globalRegs` where the target can
  *  declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot, or where
- *  the function saves or restores it but not before every use of it (`misSaved`, a measurement only
+ *  the function saves or restores it but not around every use of it (`misSaved`, a measurement only
  *  Thumb makes, whose `push` and `pop` are nothing but saves and restores): compiled code never saves
  *  a global register variable's register, and asm that saves one restores it too, so its writes are
  *  not the caller's and its entry value is no global's. A target stating no `nonArgRegs` claims no
@@ -575,7 +575,11 @@ export function makeSsaBuilder(
     const mis = regs.filter((r) => model().misSavedRegs?.includes(r));
     const never = regs.filter((r) => !mis.includes(r));
     return [
-      ...(mis.length ? [`saves or restores ${mis.join(', ')} only where a use comes first on some path`] : []),
+      ...(mis.length
+        ? [
+            `saves or restores ${mis.join(', ')} but not around every use of it, restored at every return, on every path`,
+          ]
+        : []),
       ...(never.length ? [`no ${model().saveSite ?? 'save this lift reads'} saves ${never.join(', ')}`] : []),
     ].join(', and ');
   };

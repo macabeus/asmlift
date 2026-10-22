@@ -1715,8 +1715,10 @@ they read there are no parameters at all — and the next paragraph says what th
 
 A `push` past that leading run is a save too, where nothing on any path uses the register before
 it (`bodySavedRegs`): hand-written asm saves late (`beq .L1; push {r4}; …; pop {r4}`), and a `push`
-is nothing but a save. A register saved or restored with a use ahead of the save on some path is
-neither a local nor a global, and refuses. The O32 and PowerPC frontends keep the entry-block
+is nothing but a save. Its `pop` ends the save: past the restore the register is the caller's again,
+so a use there, a save whose word is popped into another register or dropped with `add sp`, and a
+use ahead of the save on some path all leave a register that is neither a local nor a global, and
+it refuses — the prologue's save included. The O32 and PowerPC frontends keep the entry-block
 reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
 the stack as `sw s0,16(sp)`. And the register is keyed by its spelling throughout, so a function
 that writes one register two ways (`sl` and `r10`, `s8` and `fp`) is read in one of them

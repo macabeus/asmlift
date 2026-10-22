@@ -4578,25 +4578,37 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
   return { saved, carriers };
 }
 
-/** WHAT A `push` SAVES BEFORE EVERY USE, ON EVERY PATH — the prologue's (`prologueSavedRegs`) and
- *  any other. A register the function names nowhere before a `push` of it, along any path from
- *  the entry, is saved as surely as one the prologue saves (`saved`): its writes are restored and
- *  its entry value is the caller's, so it is a local's home like the prologue's
+/** WHAT A `push` SAVES AROUND EVERY USE, ON EVERY PATH — the prologue's (`prologueSavedRegs`) and
+ *  any other. A register the function names nowhere before a `push` of it, nor after the `pop`
+ *  that restores it, along any path from the entry, and that every path restores before it
+ *  returns, is saved as surely as one the prologue saves (`saved`): its writes are undone and its
+ *  entry value is the caller's, so it is a local's home like the prologue's
  *  (`LiveInModel.uninitRegs`). Hand-written asm saves late: `cmp r0, #0; beq .L1; push {r4}; …;
- *  pop {r4}; .L1: bx lr` uses r4 only past its save. A `push` is nothing but a save and a `pop`
- *  nothing but a restore, which is what lets this read them anywhere; MIPS's `sw` and PPC's `stw`
- *  also store a value (a global register variable passed on the stack is `sw s0,16(sp)`), so those
- *  frontends read saves only in the entry block.
+ *  pop {r4}; .L1: bx lr` uses r4 only between its save and its restore. A `push` is nothing but a
+ *  save and a `pop` nothing but a restore, which is what lets this read them anywhere; MIPS's `sw`
+ *  and PPC's `stw` also store a value (a global register variable passed on the stack is
+ *  `sw s0,16(sp)`), so those frontends read saves only in the entry block.
  *
  *  A high register is saved through the `mov rLow, rHi` that stages it, and that `mov` is the
  *  save's, provided `rLow` reaches the `push` unchanged — PROLOGUESAVEDREGS' RULE, here past the
  *  leading run too, so the two readings of one idiom agree: `mov r0, r8; add r0, #1; push {r0}`
- *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise.
+ *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise, and that `pop` restores no
+ *  `rLow`: agbcc's `pop {r3, r4}; mov r8, r3; mov sl, r4; pop {r4-r7}` hands r4 sl's word first.
  *
- *  `misSaved` is every register a save or a restore names that some path uses before saving: a
- *  `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`), a `push` past a read. Its
- *  writes are not the caller's and its entry value is no global's, so `registerLiveIns` refuses it
- *  rather than spell it either way. "Uses" is any naming in an operand, read or write. */
+ *  THE RESTORE ENDS THE SAVE. Past it the register holds the caller's value again, so a read there
+ *  is the caller's value and a write there is one the caller sees, neither of them a local's —
+ *  and the fill keeps the `pop` transparent, so a read would see the function's last write
+ *  (`push {r4}; mov r4, #5; pop {r4}; mov r0, r4` lifted `return 5;`). For the same reason a save
+ *  that some path carries unrestored to a return the frame is balanced at — a `push` whose word is
+ *  popped into another register or dropped with `add sp` — saved nothing on that path. A return
+ *  with the word still on the stack is an input whose epilogue was left out, and is not asked: the
+ *  blind side is hand-written asm that returns with its frame unbalanced, which no caller survives.
+ *
+ *  `misSaved` is every register a save or a restore names that some path uses outside a save, or
+ *  returns with still saved: a `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`),
+ *  a `push` past a read, a use past the restore, a staged `push {r3}` of r8 popped into r1. Its
+ *  writes are not all the caller's and its entry value is no global's, so `registerLiveIns`
+ *  refuses it rather than spell it either way. "Uses" is any naming in an operand, read or write. */
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
@@ -4604,17 +4616,20 @@ function bodySavedRegs(
   // What each instruction saves, restores and otherwise names; the staging `mov`s first.
   const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
   const restoresHi = new Set<Instr>(); // `mov rHi, rLow` where rLow was popped unchanged
+  const stagingPops = new Map<Instr, Set<string>>(); // a `pop`'s rLow that a `mov rHi, rLow` restores through
   for (const b of blocks) {
     const staged = new Map<string, Instr>(); // low register ← the `mov` that put a high one there
-    const popped = new Set<string>();
+    const popped = new Map<string, Instr>(); // low register ← the `pop` that filled it
     for (const x of b.instrs) {
       const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [];
       if (x.mnemonic === 'push') {
         list.forEach((r) => staged.has(r) && savesHi.set(staged.get(r)!, staged.get(r)!.ops[1]));
       }
       const isMov = /^movs?$/.test(x.mnemonic);
-      if (isMov && HIGH_REGS.has(x.ops[0] ?? '') && popped.has(x.ops[1] ?? '')) {
+      const from = isMov && HIGH_REGS.has(x.ops[0] ?? '') ? popped.get(x.ops[1] ?? '') : undefined;
+      if (from !== undefined) {
         restoresHi.add(x);
+        stagingPops.set(from, (stagingPops.get(from) ?? new Set()).add(x.ops[1]));
       }
       const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? list : regWritesOf(x);
       if (writes === 'all') {
@@ -4627,7 +4642,7 @@ function bodySavedRegs(
         }
       }
       if (x.mnemonic === 'pop') {
-        list.forEach((r) => popped.add(r));
+        list.forEach((r) => popped.set(r, x));
       } else if (isMov && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
         staged.set(x.ops[0], x);
       }
@@ -4640,41 +4655,80 @@ function bodySavedRegs(
   const savedSomewhere = new Set<string>();
   const restoredSomewhere = new Set<string>();
   const usedUnsaved = new Set<string>();
-  // Forward MUST dataflow: the registers saved on every path into each block (null: not reached yet).
-  const savedIn: (Set<string> | null)[] = blocks.map((_, i) => (i === 0 ? new Set() : null));
-  const walk = (b: number, record: boolean): Set<string> => {
-    const cur = new Set(savedIn[b]!);
+  const unrestored = new Set<string>(); // still saved at a balanced return on some path
+  // Forward dataflow over two sets: the registers saved on EVERY path into each block (`cur`, a
+  // must-set; null: not reached yet) and on SOME path (`open`, a may-set) — a use needs the first,
+  // a return must find the second empty — and the frame depth (`makeFrameWalk`; null where paths
+  // disagree or it is not exact).
+  type State = { cur: Set<string>; open: Set<string>; depth: number | null };
+  const stateIn: (State | null)[] = blocks.map((_, i) =>
+    i === 0 ? { cur: new Set(), open: new Set(), depth: 0 } : null,
+  );
+  const walk = (b: number, record: boolean): State => {
+    const cur = new Set(stateIn[b]!.cur);
+    const open = new Set(stateIn[b]!.open);
+    const frame = makeFrameWalk({ argRegs: [], start: stateIn[b]!.depth });
     for (const x of blocks[b].instrs) {
+      frame.step(x);
       const saves = x.mnemonic === 'push' ? (regListOf(x.ops) ?? []) : savesHi.has(x) ? [savesHi.get(x)!] : [];
-      const restores = x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : restoresHi.has(x) ? [x.ops[0]] : [];
-      const uses = x.mnemonic === 'push' ? [] : savesHi.has(x) ? [x.ops[0]] : [...restores, ...namedBy(x)];
+      const restores =
+        x.mnemonic === 'pop'
+          ? (regListOf(x.ops) ?? []).filter((r) => !stagingPops.get(x)?.has(r))
+          : restoresHi.has(x)
+            ? [x.ops[0]]
+            : [];
+      const uses =
+        x.mnemonic === 'push'
+          ? []
+          : savesHi.has(x)
+            ? [x.ops[0]]
+            : [...restores, ...namedBy(x), ...(x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [])];
       if (record) {
         saves.forEach((r) => savedSomewhere.add(r));
         restores.forEach((r) => restoredSomewhere.add(r));
         uses.filter((r) => !cur.has(r)).forEach((r) => usedUnsaved.add(r));
       }
-      saves.filter((r) => !uses.includes(r)).forEach((r) => cur.add(r));
+      saves
+        .filter((r) => !uses.includes(r))
+        .forEach((r) => {
+          cur.add(r);
+          open.add(r);
+        });
+      restores.forEach((r) => {
+        cur.delete(r);
+        open.delete(r);
+      });
+      // Only a return the frame is balanced at: one with the `push` still on the stack is an
+      // input whose epilogue was left out (a fragment, a fixture), which the prologue's reading
+      // has always taken as restored.
+      if (record && classifyXfer(x) === 'return' && frame.depthNow() === 0) {
+        open.forEach((r) => unrestored.add(r));
+      }
     }
-    return cur;
+    return { cur, open, depth: frame.depthNow() };
   };
   for (let changed = true; changed;) {
     changed = false;
     for (let b = 1; b < blocks.length; b++) {
-      const ins = preds[b].filter((p) => savedIn[p] !== null).map((p) => walk(p, false));
+      const ins = preds[b].filter((p) => stateIn[p] !== null).map((p) => walk(p, false));
       if (ins.length === 0) {
         continue;
       }
-      const meet = new Set([...ins[0]].filter((r) => ins.every((s) => s.has(r))));
-      if (savedIn[b] === null || savedIn[b]!.size !== meet.size) {
-        savedIn[b] = meet;
+      const cur = new Set([...ins[0].cur].filter((r) => ins.every((s) => s.cur.has(r))));
+      const open = new Set(ins.flatMap((s) => [...s.open]));
+      const depth = ins.every((s) => s.depth === ins[0].depth) ? ins[0].depth : null;
+      const was = stateIn[b];
+      if (was === null || was.cur.size !== cur.size || was.open.size !== open.size || was.depth !== depth) {
+        stateIn[b] = { cur, open, depth };
         changed = true;
       }
     }
   }
-  blocks.forEach((_, b) => savedIn[b] !== null && walk(b, true));
+  blocks.forEach((_, b) => stateIn[b] !== null && walk(b, true));
+  const mis = (r: string) => usedUnsaved.has(r) || unrestored.has(r);
   return {
-    saved: new Set([...savedSomewhere].filter((r) => !usedUnsaved.has(r))),
-    misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter((r) => usedUnsaved.has(r))),
+    saved: new Set([...savedSomewhere].filter((r) => !mis(r))),
+    misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter(mis)),
   };
 }
 
@@ -5214,10 +5268,12 @@ function thumbFillOf(
   // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
   // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
   // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
+  // A prologue save that some path uses past its restore, or carries to a return unrestored, is
+  // `misSaved` and no save: the prologue's reading of it sees only the `push`.
   const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);
   const liveIns = registerLiveIns(
     target,
-    new Set([...frame.savedRegs, ...body.saved]),
+    new Set([...frame.savedRegs, ...body.saved].filter((r) => !body.misSaved.has(r))),
     contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
     body.misSaved,
   );
