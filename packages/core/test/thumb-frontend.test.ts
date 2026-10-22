@@ -3942,6 +3942,36 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('dmaptr', dmaptr, ARMV4T_AGBCC, protos('dmaptr'))).toThrow(reachesTheTemp);
     });
 
+    // …AND A WINDOW `misses` BOUNDED KEEPS THE ONE-OBJECT ANSWER ON OFFER that its unbounded read
+    // had. pokeemerald's CB2_InitTrainerCard, cut down: DmaClear32 of a `vu32` stored `str r0,
+    // [sp]` and published through `mov r2, sp`, DmaClear16 of a `vu16` at sp+4 (its read-back
+    // dropped, which structuring otherwise refuses on both sides), and `gMain.state++` through a
+    // phi of two loads of one literal. The phi's every address misses DMA3's control halfword, so
+    // each read is bounded — and the per-object model then refuses the sp-direct store under the
+    // capture. Without the proof the read reached the frame and the one object held it; the proof
+    // must not take that lift away, so the frame is one object again, as before the proof.
+    test('a window the miss proof bounds keeps the one-object answer the unbounded read had', () => {
+      const shared =
+        'tc:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr3, .L9\n\tcmp\tr0, #1\n\tbhi\t.L7\n' +
+        '\tcmp\tr0, #0\n\tbne\t.L2\n\tmov\tr1, #0xe0\n\tlsl\tr1, r1, #0x13\n\tmov\tr0, #0x0\n' +
+        '\tstr\tr0, [sp]\n\tldr\tr0, .L9+0x4\n\tmov\tr2, sp\n\tstr\tr2, [r0]\n\tstr\tr1, [r0, #0x4]\n' +
+        '\tldr\tr1, .L9+0x8\n\tstr\tr1, [r0, #0x8]\n\tldr\tr0, [r0, #0x8]\n\tmov\tr0, #0x87\n' +
+        '\tlsl\tr0, r0, #0x3\n\tadd\tr1, r3, r0\n\tb\t.L5\n.L2:\n\tmov\tr2, #0xa0\n' +
+        '\tlsl\tr2, r2, #0x13\n\tmov\tr0, #0\n\tadd\tr1, sp, #0x4\n\tstrh\tr0, [r1]\n' +
+        '\tldr\tr0, .L9+0x4\n\tstr\tr1, [r0]\n\tstr\tr2, [r0, #0x4]\n\tldr\tr1, .L9+0xc\n' +
+        '\tstr\tr1, [r0, #0x8]\n\tmov\tr2, #0x87\n\tlsl\tr2, r2, #0x3\n\tadd\tr1, r3, r2\n\tb\t.L5\n' +
+        '.L7:\n\tbl\tfoo\n\tldr\tr1, .L9\n\tmov\tr0, #0x87\n\tlsl\tr0, r0, #0x3\n\tadd\tr1, r1, r0\n' +
+        '.L5:\n\tldrb\tr0, [r1]\n\tadd\tr0, r0, #0x1\n\tstrb\tr0, [r1]\n\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x3002360\n\t.word\t0x40000d4\n' +
+        '\t.word\t-0x7affff00\n\t.word\t-0x7efffe00\n';
+      const src = decompile('tc', shared, ARMV4T_AGBCC, {
+        prototypes: { tc: { params: ['s32'], returnsVoid: true }, foo: { params: [], returnsVoid: true } },
+      }).source;
+      expect(src).toContain('    u8 sp0[8];');
+      expect(src).toContain('*(volatile s32 *)67109076 = sp0;');
+      expect(src).toContain('*(volatile s32 *)67109076 = (u32)sp0 + 4;');
+    });
+
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
     // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
     // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;

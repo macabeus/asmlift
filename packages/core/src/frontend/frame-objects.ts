@@ -1465,6 +1465,10 @@ interface ReadWindow {
   readonly lo: number;
   readonly hi: number;
   readonly why: string;
+  /** bounded only because a store through a computed pointer provably misses the control
+   *  halfword (`misses`): without that proof the read is unbounded, and the one-object answer
+   *  that held it then stays on offer (`chooseFrameModel`) */
+  readonly sparedByMiss?: true;
 }
 
 /** Each op's block and index, over the IR as the classification judged it. */
@@ -1549,6 +1553,7 @@ function readWindow(
   }
   const little = target.capabilities.endianness === 'little';
   const halves: number[] = [];
+  let spared = false;
   for (const { op: handed, sink } of stores) {
     const cnt = sink + control.offset;
     let armed = false;
@@ -1563,8 +1568,11 @@ function readWindow(
         }
         const base = facts.literalAddrOf(op.operands[0]);
         if (base === undefined) {
-          if (!flow.frameOnEveryPath.has(op.operands[0]) && !misses(op, facts, cnt)) {
-            return unbounded('a later store through an unresolved pointer may re-arm');
+          if (!flow.frameOnEveryPath.has(op.operands[0])) {
+            if (!misses(op, facts, cnt)) {
+              return unbounded('a later store through an unresolved pointer may re-arm');
+            }
+            spared = true;
           }
           continue;
         }
@@ -1605,7 +1613,7 @@ function readWindow(
     lo = Math.min(lo, reach.lo);
     hi = Math.max(hi, reach.hi);
   }
-  return { lo, hi, why: 'that reads through it' };
+  return { lo, hi, why: 'that reads through it', ...(spared ? { sparedByMiss: true as const } : {}) };
 }
 
 /** A store through a computed pointer that provably misses the control halfword at `cnt`: no
@@ -1708,8 +1716,11 @@ function chooseFrameModel({
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): ModelChoice {
+  // A window `misses` bounded keeps the answer on offer that its unbounded read had: the proof lets
+  // the per-object model describe the frame where it can, and takes no lift away where it cannot.
   const unbounded =
-    oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+    oneObject === undefined &&
+    [...windows.values()].some((w) => (w.lo === -Infinity && w.hi === Infinity) || w.sparedByMiss === true);
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
   const escapeFree = oneObject === undefined && uses.escaped.size === 0;
   // A struct passed by value is ONE object of its declared type, which the call names whole; the

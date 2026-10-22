@@ -1848,7 +1848,9 @@ beside that call), the audit does not refuse: it answers with the local area, th
 once more with every word of it routed through `laddr`, and the second audit declares those bytes
 one `u8` array in memory, so every store the machine made there is a store the recompile makes.
 The asm cannot tell a member the device reads from a spill nobody reads, and keeping both in
-memory is right for both. Every member
+memory is right for both. A read only the `stridedRange` proof bounded keeps that answer on offer
+where the per-object model then refuses: the proof narrows what the device reads, and takes away
+no lift its unbounded read had. Every member
 is spelled through a cast, whose pointee would drop a qualifier on the array, so the array carries
 none, and where the address was stored somewhere a writer may hold it — a global an interrupt
 reads, a device's destination — each access carries the qualifier itself, whether it reaches the
