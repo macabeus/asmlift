@@ -1037,6 +1037,14 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+  /** every escape of each object's address, in the order found, as the frame bytes it may reach:
+   *  `[lo, hi)` where a standard block copy with a literal count proves them (`boundedCopy`), and
+   *  `null` for every other escape, which nothing here bounds. KEPT APART FROM THE ESCAPE WINDOWS
+   *  (`escapeWindows`), which read the same copy as a writer without bound — that unbounded writer
+   *  is what puts the one-object answer on offer at all (`chooseFrameModel`), so a bound there
+   *  would turn a frame that lifts as one object into a refusal. Only the split of that one object
+   *  reads this (`provenParts`). */
+  readonly escapeExtents: ReadonlyMap<number, readonly ({ readonly lo: number; readonly hi: number } | null)[]>;
   readonly fixed: readonly {
     readonly op: Op;
     readonly at: number;
@@ -1157,6 +1165,12 @@ function classifyFrameUses({
   // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
   // value, whose members are the struct's declared ones (`objectShapes`)
   const memberRefusals: [number, string][] = [];
+  const escapeExtents = new Map<number, ({ lo: number; hi: number } | null)[]>();
+  // …and every value something reads, since a copy whose returned destination is read hands the
+  // address on to a use nothing here follows
+  const readValues = new Set<Value>(
+    irBlocks.flatMap((b) => b.ops.flatMap((op) => [...op.operands, ...(op.successors ?? []).flatMap((sx) => sx.args)])),
+  );
   // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
   // touches, whether it reads them, and whether its address is this frame's on every path — what
   // `storedNeverRead` asks of a frame that makes a call
@@ -1217,6 +1231,10 @@ function classifyFrameUses({
         }
         if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
           escaped.add(off); // the address ESCAPES as a value — the point of the capability
+          const copied = op.opcode === 'call' ? boundedCopy(op, idx, facts, readValues) : undefined;
+          (escapeExtents.get(off) ?? escapeExtents.set(off, []).get(off)!).push(
+            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi },
+          );
           const handedTo = op.opcode === 'store' ? facts.readsThrough(op) : [];
           const read = op.opcode === 'call' ? transferRead(op, idx, off, target, facts) : undefined;
           if (read !== undefined) {
@@ -1308,8 +1326,43 @@ function classifyFrameUses({
     indexed,
     members,
     memberRefusal: memberRefusals.find(([off]) => !returnTemps.has(off) && !byValueReads.has(off))?.[1],
+    escapeExtents,
     fixed,
   };
+}
+
+/** THE BLOCK COPIES THE C STANDARD FIXES, by the operand each role is: the copy reads `[0, n)`
+ *  through its source, writes `[0, n)` through its destination, and keeps neither address. The
+ *  same table as the constant-initializer fold's (l3/constinit.ts `BLOCK_COPIES`), which this
+ *  frontend stage may not import; `memmove` would be equally fixed, and is absent because nothing
+ *  measures it (proto.ts `STANDARD_SIGNATURES` says why that list is short too). */
+const BOUNDED_COPIES: Readonly<Record<string, { readonly dst: number; readonly src: number; readonly n: number }>> = {
+  memcpy: { dst: 0, src: 1, n: 2 },
+};
+
+// The bytes, relative to the address at operand `idx`, that a call of a standard block copy with
+// a literal, positive count reaches through it — or `undefined` for any other callee, operand or
+// count, which this does not bound, and for a copy whose result (`memcpy` returns its
+// destination) anything in `read` uses.
+function boundedCopy(
+  op: Op,
+  idx: number,
+  facts: LiteralAddresses,
+  read: ReadonlySet<Value>,
+): { lo: number; hi: number } | undefined {
+  const callee = op.attrs.target;
+  const roles =
+    typeof callee === 'string' && Object.hasOwn(BOUNDED_COPIES, callee) ? BOUNDED_COPIES[callee] : undefined;
+  if (
+    roles === undefined ||
+    (idx !== roles.dst && idx !== roles.src) ||
+    op.operands.length <= roles.n ||
+    op.results.some((r) => read.has(r))
+  ) {
+    return undefined;
+  }
+  const n = facts.constOf(op.operands[roles.n]);
+  return n !== undefined && Number.isInteger(n) && n > 0 ? { lo: 0, hi: n } : undefined;
 }
 
 // The bytes a block transfer that took the address at `idx` reads, when `idx` is its source and

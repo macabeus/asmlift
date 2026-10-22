@@ -254,6 +254,26 @@ describe('classifyFrameUses', () => {
     expect(uses.accesses.get(0)).toEqual([{ width: 1, signed: false, isLoad: false }]);
   });
 
+  // `memcpy(a, src, 16)` writes exactly a's 16 bytes; a count it cannot read, or another callee,
+  // bounds nothing — and the copy stays a writer for the escape windows either way
+  test('records the bytes a literal-count memcpy reaches through each frame address, and no bound otherwise', () => {
+    const escapes = (callee: string, literal: boolean) => {
+      const src = value();
+      const n = value();
+      const a = laddr(4);
+      const b = laddr(0);
+      const count = konst(16);
+      const ops = [a, b, count, call(callee, a.results[0], src, literal ? count.results[0] : n)];
+      ops.push(call(callee, src, b.results[0], literal ? count.results[0] : n), ret());
+      const { uses } = classify([{ params: [src, n], ops }], { owned: { from: 0, to: 20 } });
+      expect([...uses.passedToWriter].sort()).toEqual([0, 4]);
+      return Object.fromEntries(uses.escapeExtents);
+    };
+    expect(escapes('memcpy', true)).toEqual({ 0: [{ lo: 0, hi: 16 }], 4: [{ lo: 4, hi: 20 }] });
+    expect(escapes('memcpy', false)).toEqual({ 0: [null], 4: [null] });
+    expect(escapes('g', true)).toEqual({ 0: [null], 4: [null] });
+  });
+
   test('records a runtime index apart from the accesses that type the object', () => {
     const i = value();
     const a = laddr(0);
