@@ -654,6 +654,10 @@ export function makeSsaBuilder(
       ...(never.length ? [`no ${model().saveSite ?? 'save this lift reads'} saves ${never.join(', ')}`] : []),
     ].join(', and ');
   };
+  // What compiled code means by such a register — but not by one the function saves and breaks the
+  // save of (`misSavedRegs`), which the measurement has shown is no global's.
+  const globalNote = (regs: readonly string[]): string =>
+    regs.some((r) => model().misSavedRegs?.includes(r)) ? '' : ' (a global register variable)';
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
@@ -2016,7 +2020,7 @@ export function makeSsaBuilder(
         if (key !== undefined && koff === null && model().unsavedCalleeSavedRegs?.includes(key)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': it reads callee-saved ${key} before writing it, and ${unsavedWhy([key])} — ` +
-              `a value no caller passes as an argument (a global register variable) — not modelled`,
+              `a value no caller passes as an argument${globalNote([key])} — not modelled`,
           );
         }
       }
@@ -2026,7 +2030,7 @@ export function makeSsaBuilder(
       if (leaked.length > 0) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': it writes callee-saved ${leaked.join(', ')}, and ${unsavedWhy(leaked)} — ` +
-            `the caller sees the write (a global register variable) — not modelled`,
+            `the caller sees the write${globalNote(leaked)} — not modelled`,
         );
       }
     },

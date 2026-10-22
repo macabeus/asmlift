@@ -896,8 +896,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
       // a staged save whose word is popped into another register restores no r8 (`a0 + 1 + a1`)
       expect(lift('add r0, #1; mov r3, r8; push {r3}; pop {r1}; add r0, r0, r1; bx lr')).toThrow(mis('reads', 'r8'));
-      // a save dropped with `add sp` leaves the write the caller's
+      // a save dropped with `add sp` leaves the write the caller's — a broken save, so no global's
       expect(lift('push {r4}; mov r4, r0; add r0, r4, #1; add sp, #4; bx lr')).toThrow(mis('writes', 'r4'));
+      expect(lift('push {r4}; mov r4, r0; add r0, r4, #1; add sp, #4; bx lr')).toThrow(
+        /the caller sees the write — not modelled/,
+      );
       // …where a return with the word still pushed is an epilogue the input left out, read as before
       expect(
         decompile('f', 'f:\n\tpush\t{r4}\n\tmov\tr4, r0\n\tadd\tr0, r4, #1\n\tbx\tlr\n', ARMV4T_AGBCC).source,
