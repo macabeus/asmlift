@@ -2607,9 +2607,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // A RUNTIME INDEX MOVED BY A CONSTANT REGISTER. Thumb has no `ldrsb`/`ldrsh` with an immediate,
   // so agbcc loads the whole displacement into a register (thumb.md:411-505): `s8 a[64]; … a[i]`
   // is `mov r1, sp / add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]`, lowered as `add` +
-  // load@0. Displacement 0 is the indexed element and stays signed; any other is the displaced
-  // access `ldrb r0, [r0, #3]` refuses (a field of an element struct, `mov r1, #0x3`), and a moved
-  // sum that escapes still refuses by its role.
+  // load@0. Displacement 0 is the indexed element and stays signed; any other moves the index to
+  // the bytes at that displacement (`foldMovedCaptures`), which the frame rules then judge; and a
+  // moved sum that escapes still refuses by its role.
   test('a runtime index moved by a constant register is judged at the displacement it lands on', () => {
     const frame = (access: string) =>
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x40\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
@@ -2620,14 +2620,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(byte).toMatch(/return \*\(s8 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
     const half = decompile('f', frame('\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
     expect(half).toMatch(/return \*\(s16 \*\)\(\(u32\)sp0 \+ a0( \+ 0)?\);/);
-    // a nonzero displacement is a member of an element, not modelled, and the refusal names it
-    for (const [access, by] of [
-      ['\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n', 3],
-      ['\tmov\tr1, #0x2\n\tldrsh\tr0, [r0, r1]\n', 2],
+    // a nonzero literal is an index into the bytes at [sp,#k) (`foldMovedCaptures`), here beside
+    // the escaping object at [sp,#0), so the frame is one object and the extension is kept
+    for (const [access, spelled] of [
+      ['\tmov\tr1, #0x3\n\tldrsb\tr0, [r0, r1]\n', 'return *(s8 *)((u32)sp0 + 3 + a0);'],
+      ['\tmov\tr1, #0x2\n\tldrsh\tr0, [r0, r1]\n', 'return *(s16 *)((u32)sp0 + 2 + a0);'],
     ] as const) {
-      expect(() => decompile('f', frame(access), ARMV4T_AGBCC, opts)).toThrow(
-        `a runtime index into the object at [sp,#0) is accessed at displacement ${by} from the indexed element`,
-      );
+      const moved = decompile('f', frame(access), ARMV4T_AGBCC, opts).source;
+      expect(moved).toContain('u8 sp0[64];');
+      expect(moved).toContain(spelled);
     }
     // one literal move deep, as agbcc emits it: a second move is not walked, even a zero one
     const twice = frame('\tmov\tr1, #0x0\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x0\n\tldrsb\tr0, [r0, r1]\n');
@@ -2638,6 +2639,35 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const escape = frame('\tmov\tr1, #0x0\n\tadd\tr0, r0, r1\n\tbl\tfill\n\tmov\tr0, #0x0\n');
     expect(() => decompile('f', escape, ARMV4T_AGBCC, opts)).toThrow(
       'a runtime index into the object at [sp,#0) flows into `call`',
+    );
+  });
+
+  // AN INDEX MOVED BY A LITERAL `add` NAMES THE OBJECT AT THE SUM. agbcc's `a[i]` on a local
+  // above a 5-argument call's outgoing word is the frame base plus the index, moved after
+  // (`u16 a[8]; fill(a); five(1, 2, 3, 4, a[i]);`, compiled at the corpus flags): the index is into
+  // the array at [sp,#4), not a field of an element of whatever sits at [sp,#0). A displaced load
+  // through it is still refused, naming the array and the displacement.
+  test('a runtime index moved by a literal add indexes the object at the sum', () => {
+    const frame = (access: string) =>
+      'r1:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r0, #0\n\tadd\tr0, sp, #0x4\n\tbl\tfill\n' +
+      `\tlsl\tr4, r4, #0x1\n\tmov\tr0, sp\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, #0x4\n${access}\tstr\tr0, [sp]\n` +
+      '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+      '\tadd\tsp, sp, #0x14\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const opts = {
+      prototypes: {
+        fill: { params: ['void *'], returnsVoid: true },
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        r1: { params: ['u32'], returnsVoid: true },
+      },
+    };
+    const element = decompile('r1', frame('\tldrh\tr0, [r0]\n'), ARMV4T_AGBCC, opts).source;
+    expect(element).toContain('u8 sp4[16];');
+    expect(element).toContain('five(1, 2, 3, 4, ((u16 *)sp4)[a0]);');
+    // the same index read signed, through agbcc's literal register, stays signed
+    const signed = decompile('r1', frame('\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n'), ARMV4T_AGBCC, opts).source;
+    expect(signed).toMatch(/five\(1, 2, 3, 4, \*\(s16 \*\)\(\(u32\)sp4 \+ \(a0 << 1\)( \+ 0)?\)\);/);
+    expect(() => decompile('r1', frame('\tldrb\tr0, [r0, #0x1]\n'), ARMV4T_AGBCC, opts)).toThrow(
+      'a runtime index into the object at [sp,#4) is accessed at displacement 1 from the indexed element',
     );
   });
 

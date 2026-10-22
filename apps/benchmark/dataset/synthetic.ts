@@ -12369,11 +12369,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //   1. stksidx (sub_0804CFD0). `s8 a[64]` at a runtime index times a global halfword. Thumb has no
   //      `ldrsb`/`ldrsh` with an immediate, so agbcc's `*extendqisi2_insn`/`*extendhisi2_insn`
   //      (thumb.md:411-505) load the WHOLE constant displacement into a register — `mov r1,#0 /
-  //      ldrsb r1,[r0,r1]` for the element itself, `mov r1,#3` for a field of an element struct — and
-  //      the frontend lowers that register-offset load as `add` + load@0. The frame audit judges the
-  //      uses of an `add` of a literal to the indexed address at that displacement (frame-objects.ts
-  //      `indexedAccess`): displacement 0 is the element, which LIFTS (MATCH) and stays signed, and
-  //      any other is a displaced access, which refuses as `ldrb r0,[r0,#3]` does. stkhidx
+  //      ldrsb r1,[r0,r1]` for the element itself, `mov r1,#3` three bytes past it — and the
+  //      frontend lowers that register-offset load as `add` + load@0. The frame audit judges the
+  //      uses of an `add` of a literal 0 to the indexed address as the element (frame-objects.ts
+  //      `indexedAccess`), which LIFTS (MATCH) and stays signed. A nonzero literal moves the index
+  //      to the bytes at that displacement (`foldMovedCaptures`) — also agbcc's `a[i]` on an array
+  //      above a 5-argument call's outgoing word, `mov r0,sp / add r0,r0,r4 / add r0,#4` — and a
+  //      load's own displacement (`ldrb r0,[r0,#1]`, a field of an element struct) refuses naming
+  //      the object and the displacement. stkhidx
   //      is the `s16 a[32]` / `ldrsh` twin. `u8` (`stkidx`) is the `ldrb [r0]` control. ido7.1,
   //      gcc2.7.2kmc and mwcc_242_81 put a constant offset in the displacement (mwcc folds it into the
   //      base, `addi r3,r1,11`, before its `lbzx`), so the walk has no inhabitant there; they are
