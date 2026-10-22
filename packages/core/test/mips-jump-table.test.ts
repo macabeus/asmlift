@@ -2,6 +2,7 @@
 import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
@@ -295,6 +296,192 @@ test('a case another falls into reads the scaled index both paths bring, on IDO 
     expect(out).toMatch(/case 0:\s*\n\s*\*a1 = a0;\s*\n\s*case 1:\s*\n\s*return \(a0 << 2\) \+ 1;/);
     expect(() => decompile('f', fallsIntoScaled('li\tv0,8'), t, { asmData: fallTable })).toThrow(
       /a case of the elided jump table reads v0, which the unlifted dispatch idiom wrote/,
+    );
+  }
+});
+
+// THE TABLE'S `%lo` FOLDED INTO THE LOAD. IDO 7.1, KMC and gcc 2.7.2 form a dispatch's base in its
+// own block as `lui at,%hi(T) ; addu at,at,rI ; lw rV,%lo(T)(at)`, both relocations against the
+// section symbol with addend 0 (REL): the table's offset lives only in the two immediates. So the
+// second table of a unit is `lw rV,32(at)` (`synthetic:sw_jtloop2:ido7.1`), one 64 KiB in is
+// `lui at,0x1 ; lw rV,0(at)`, and one 40 KiB in is `lui at,0x1 ; lw rV,-24576(at)`.
+/** `.rodata` holding a decoy table at 0 (cases swapped) and the real one at `at`. */
+const foldedTable = (at: number, lo: string | null): AsmData => {
+  const bytes = new Uint8Array(at + 8);
+  bytes.set([0, 0, 0, 0x28, 0, 0, 0, 0x20], 0);
+  bytes.set([0, 0, 0, 0x20, 0, 0, 0, 0x28], at);
+  return {
+    sections: new Map([['.rodata', bytes]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_HI16', sym: '.rodata', addend: 0 },
+      ...(lo === null ? [] : [{ section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: lo, addend: 0 }]),
+      ...[0, 4, at, at + 4].map((offset) => ({
+        section: '.rodata',
+        offset,
+        type: 'R_MIPS_32',
+        sym: '.text',
+        addend: 0,
+      })),
+    ],
+    symbols: new Map([
+      ['other', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+};
+const folded = (hi: string, disp: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,30 <f+0x30>',
+    ' 8:\tsll\tt6,a0,0x2',
+    ` c:\tlui\tat,${hi}`,
+    '10:\taddu\tat,at,t6',
+    `14:\tlw\tt6,${disp}(at)`,
+    '18:\tjr\tt6',
+    '1c:\tnop',
+    '20:\tjr\tra',
+    '24:\tli\tv0,5',
+    '28:\tjr\tra',
+    '2c:\tli\tv0,9',
+    '30:\tjr\tra',
+    '34:\tli\tv0,-1',
+  );
+
+test('a table whose %lo the load carries is read at both halves, past 32 and 64 KiB too', () => {
+  for (const [hi, disp, at] of [
+    ['0x0', '32', 32],
+    ['0x1', '0', 0x10000],
+    ['0x1', '-24576', 0xa000],
+  ] as const) {
+    for (const t of [MIPS_IDO, MIPS_GCC]) {
+      const out = decompile('f', folded(hi, disp), t, { asmData: foldedTable(at, '.rodata') }).source;
+      expect(out).toContain('switch (a0)');
+      expect(out).toMatch(/case 0:\s*return 5;/);
+      expect(out).toMatch(/case 1:\s*return 9;/);
+    }
+  }
+});
+
+test('a load displacement that is no paired %lo of the base declines', () => {
+  const declines = /indirect jump 'jr t6'/;
+  // No LO16: `table[a0 + 8]` off an unpaired `%hi`.
+  expect(() => decompile('f', folded('0x0', '32'), MIPS_IDO, { asmData: foldedTable(32, null) })).toThrow(declines);
+  // A LO16 on another symbol than the `lui`'s HI16, at any displacement.
+  for (const disp of ['32', '0']) {
+    expect(() => decompile('f', folded('0x0', disp), MIPS_IDO, { asmData: foldedTable(32, 'other') })).toThrow(
+      declines,
+    );
+  }
+});
+
+// IDO `-KPIC` forms the base off the GOT: `lw at,%got(T)(gp)` (GOT16, its immediate the high
+// half) and the load's own LO16, then adds gp to the gp-relative entry. The first table of a unit is
+// at displacement 0; a later one folds its `%lo` into the load (`lw t6,8(at)`), and one past 32 KiB
+// has a negative `%lo` on the next page (`lw at,1(gp) ; lw t6,-24576(at)`), all measured on ido7.1.
+const picTable = (at: number, lo: string | null): AsmData => {
+  const bytes = new Uint8Array(at + 8);
+  bytes.set([0, 0, 0, 0x2c, 0, 0, 0, 0x24], 0);
+  bytes.set([0, 0, 0, 0x24, 0, 0, 0, 0x2c], at);
+  return {
+    sections: new Map([['.rodata', bytes]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_GOT16', sym: '.rodata', addend: 0 },
+      ...(lo === null ? [] : [{ section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: lo, addend: 0 }]),
+      ...[0, 4, at, at + 4].map((offset) => ({
+        section: '.rodata',
+        offset,
+        type: 'R_MIPS_GPREL32',
+        sym: '.text',
+        addend: 0,
+      })),
+    ],
+    symbols: new Map([
+      ['other', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+};
+const pic = (got: string, disp: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,34 <f+0x34>',
+    ' 8:\tsll\tt6,a0,0x2',
+    ` c:\tlw\tat,${got}(gp)`,
+    '10:\taddu\tat,at,t6',
+    `14:\tlw\tt6,${disp}(at)`,
+    '18:\taddu\tt6,t6,gp',
+    '1c:\tjr\tt6',
+    '20:\tnop',
+    '24:\tjr\tra',
+    '28:\tli\tv0,5',
+    '2c:\tjr\tra',
+    '30:\tli\tv0,9',
+    '34:\tjr\tra',
+    '38:\tli\tv0,-1',
+  );
+
+test('an IDO -KPIC table is read at its GOT16 half and the LO16 the load carries', () => {
+  for (const [got, disp, at] of [
+    ['0', '0', 0],
+    ['1', '0', 0x10000],
+    ['0', '8', 8],
+    ['1', '14464', 0x10000 + 14464],
+    ['1', '-24576', 0x10000 - 24576],
+  ] as const) {
+    const out = decompile('f', pic(got, disp), MIPS_IDO, { asmData: picTable(at, '.rodata') }).source;
+    expect(out).toMatch(/case 0:\s*return 5;/);
+    expect(out).toMatch(/case 1:\s*return 9;/);
+  }
+  const declines = /indirect jump 'jr t6'/;
+  // A LO16 on another symbol; no LO16 at a non-zero displacement (an index offset off an unpaired
+  // base) or on a non-zero GOT16 immediate.
+  expect(() => decompile('f', pic('0', '0'), MIPS_IDO, { asmData: picTable(0, 'other') })).toThrow(declines);
+  expect(() => decompile('f', pic('0', '32'), MIPS_IDO, { asmData: picTable(32, 'other') })).toThrow(declines);
+  expect(() => decompile('f', pic('0', '8'), MIPS_IDO, { asmData: picTable(8, null) })).toThrow(declines);
+  expect(() => decompile('f', pic('1', '0'), MIPS_IDO, { asmData: picTable(0x10000, null) })).toThrow(declines);
+});
+
+/** The same object with its `.rodata` renamed `.data`: the table in a writable section. */
+const writable = (ad: AsmData): AsmData => {
+  const sec = (x: string) => (x === '.rodata' ? '.data' : x);
+  return {
+    ...ad,
+    sections: new Map([...ad.sections].map(([k, v]) => [sec(k), v])),
+    relocs: ad.relocs.map((r) => ({ ...r, section: sec(r.section), sym: sec(r.sym) })),
+    symbols: new Map([...ad.symbols].map(([k, v]) => [k, { ...v, section: sec(v.section) }])),
+  };
+};
+
+test('a table in a writable section declines: a store may retarget an entry the table read missed', () => {
+  // gcc puts a non-const computed-goto label table (`static void *t[] = {&&a, &&b}`) in `.data`,
+  // and its function may write it (`t[1] = &&c`); a switch lifted from its initial words is wrong.
+  const declines = /indirect jump 'jr t6'/;
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData }).source).toContain('switch (a0)');
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: writable(asmData) })).toThrow(declines);
+    expect(() => decompile('f', folded('0x0', '32'), t, { asmData: writable(foldedTable(32, '.rodata')) })).toThrow(
+      declines,
+    );
+  }
+});
+
+test('a table entry naming code outside the function declines loud', () => {
+  // The table's second word points past the function's last block (0x40), as one read off another
+  // function's table would.
+  const outside: AsmData = {
+    ...asmData,
+    sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x20, 0, 0, 0, 0x40])]]),
+  };
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: outside })).toThrow(
+      FrontendUnsupportedError,
+    );
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: outside })).toThrow(
+      /jump-table target is not a block boundary/,
     );
   }
 });

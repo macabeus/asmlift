@@ -603,6 +603,22 @@ test('…and refuses a base some path does not bring, or anything else reads', (
   expect(() => liftMipsLoop(mipsLoop({ arm: ['sw\tt6,4(a1)'] }))).toThrow(proof);
 });
 
+test('…and refuses a hoisted base whose table sits in a writable section', () => {
+  const { asm, at } = mipsLoop();
+  const ad = mipsTable(
+    at.get('LUI')!,
+    ['C0', 'C1', 'C2', 'C3'].map((k) => at.get(k)!),
+    at.get('LO')!,
+  );
+  const data: AsmData = {
+    ...ad,
+    sections: new Map([['.data', ad.sections.get('.rodata')!]]),
+    relocs: ad.relocs.map((r) => (r.section === '.rodata' ? { ...r, section: '.data' } : r)),
+    symbols: new Map([...ad.symbols].map(([k, v]) => [k, v.section === '.rodata' ? { ...v, section: '.data' } : v])),
+  };
+  expect(() => decompile('f', asm, MIPS_GCC, { asmData: data })).toThrow(/indirect jump 'jr v0'/);
+});
+
 /** IDO's rotated `while` loop: the bounds `sltiu` in the delay slot of the loop-entry `beqz` and in
  *  the likely slot of the latch `bnezl`, none in the bounds block itself. `entry`/`latch` replace
  *  the two slots. */

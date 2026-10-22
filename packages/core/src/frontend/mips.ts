@@ -368,11 +368,17 @@ const copiedReg = (ins: Instr): string | undefined => {
 };
 
 // A recovered dense-switch jump table (Regime B), keyed
-// by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. Two idioms are
-// handled: IDO gp-relative (`lw base,0(gp)` GOT16; `addu rV,rV,gp`
-// after the load) and KMC absolute (`lui base` HI16). Delay slots are honoured — the `beqz` delay
-// slot (which on IDO carries the DEFAULT return value `li v0,-1`) still executes before the
-// `switch_br`.
+// by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. The table base is one of:
+//   - absolute, formed in the dispatch's block: `lui at,%hi(T) ; addu at,at,rI ; lw rV,%lo(T)(at)`,
+//     the table's `%lo` folded into the load's displacement (IDO, KMC and gcc 2.7.2 non-PIC, whenever
+//     the block forms the base itself);
+//   - absolute, hoisted: `lui rH,%hi(T) ; addiu rB,rH,%lo(T)` in a loop's preheader, the load at
+//     displacement 0 (KMC and gcc 2.7.2; `HoistedDispatch`);
+//   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16 (its displacement the `%hi`), the load carrying
+//     the `%lo` LO16, and `addu rV,rV,gp` after it (the entries are gp-relative) (`inBlockTable`).
+// The table must sit in a read-only section (`tableBaseOf`).
+// Delay slots are honoured — the `beqz` delay slot (which on IDO carries the DEFAULT return value
+// `li v0,-1`) still executes before the `switch_br`.
 interface MipsJT {
   scrutReg: string;
   caseAddrs: number[];
@@ -495,8 +501,12 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     }
     return -1;
   };
-  // Is `ins` a table-base materialisation (`lui rB,hi` HI16, or `lw rB,0(gp)` GOT16) with a `.text`
-  // relocation into a data section? Returns {sym, addend} locating the table, or null.
+  // Is `ins` a table-base materialisation (`lui rB,hi` HI16, or `lw rB,hi(gp)` GOT16) with a `.text`
+  // relocation into a READ-ONLY data section? Returns {sym, addend} locating the table, or null.
+  // A writable table is refused: the table is read once, at its initial contents, and a switch
+  // lifted from it would ignore every store that retargets an entry. The compilers put a switch's
+  // table in `.rodata`/`.rdata`; what lands in `.data` is a non-const computed-goto label table
+  // (`static void *t[] = {&&a, ...}`), which its own function may write (`t[1] = &&c`).
   const tableBaseOf = (ins: Instr): { sym: string; addend: number } | null => {
     const isLui = ins.mnemonic === 'lui';
     const isGpLw = ins.mnemonic === 'lw' && ins.ops[1] !== undefined && parseMem(ins.ops[1]).base === 'gp';
@@ -508,7 +518,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       return null;
     }
     const sec = ad.symbols.get(r.sym)?.section ?? r.sym; // ".rodata" section symbol → ".rodata"
-    if (!/^\.(rodata|rdata|sdata2?|data)$/.test(sec)) {
+    if (!/^\.(rodata|rdata)$/.test(sec)) {
       return null;
     }
     return { sym: r.sym, addend: r.addend };
@@ -535,10 +545,48 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
         if (!hi || hi.sym !== lo.sym) {
           return [{ sym: '', addend: NaN }];
         }
-        const half = (o: string) => parseImm(o) & 0xffff;
-        return [{ sym: hi.sym, addend: hi.addend + ((half(instrs[p].ops[1]) << 16) + ((half(x.ops[2]) << 16) >> 16)) }];
+        return [paired(hi, parseImm(instrs[p].ops[1]), parseImm(x.ops[2]))];
       }),
     );
+  /** The table a `%hi` / `%lo` pair addresses: the high record's symbol and addend plus both
+   *  halves' immediates, the `%lo` sign-extended — REL keeps the offset in the immediates, so a
+   *  table 64 KiB into its section has a high half of 1 and one past 32 KiB has a negative `%lo`.
+   *  The high half is a `lui`'s immediate (HI16) or a `lw rB,hi(gp)`'s displacement (GOT16 on the
+   *  section symbol, whose GOT entry holds the 64 KiB page the LO16 completes). */
+  const paired = (hi: TableKey, hiImm: number, loImm: number): TableKey => ({
+    sym: hi.sym,
+    addend: hi.addend + (((hiImm & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
+  });
+  /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
+   *  The base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
+   *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
+   *  the TABLE's address, not an index offset. One rule (`paired`) for both bases: a `lui`'s HI16,
+   *  and IDO `-KPIC`'s GOT16 (`lw at,%got(T)(gp)`), whose displacement is the high half — `lw
+   *  at,1(gp)` for a table 64 KiB in, then `lw rV,-24576(at)` for one at 40 KiB, or `lw rV,8(at)`
+   *  for a later table of the unit. Refuses (null):
+   *    - a non-zero displacement with no R_MIPS_LO16 on the load — `table[i + off/4]`, the base
+   *      left unpaired. No compiler emits an unpaired HI16 or GOT16 for a table; displacement 0
+   *      with no LO16 is still read at the base's own half, the address the pair gives with a
+   *      zero `%lo`, so the hand fixtures that carry no LO16 keep lifting. An unpaired GOT16 is
+   *      read only at immediate 0: against a global symbol it names that symbol's own GOT slot,
+   *      not a page, so a non-zero immediate is no high half;
+   *    - a LO16 on another symbol, or any other relocation on the load. */
+  const inBlockTable = (base: Instr, ld: Instr, off: number): TableKey | null => {
+    const hi = tableBaseOf(base);
+    if (!hi) {
+      return null;
+    }
+    const isLui = base.mnemonic === 'lui';
+    const hiImm = isLui ? parseImm(base.ops[1]) : parseMem(base.ops[1]).off;
+    const lo = textRelocAt(ad, ld.addr);
+    if (lo === null) {
+      return off === 0 && (isLui || hiImm === 0) ? paired(hi, hiImm, 0) : null;
+    }
+    if (lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
+      return null;
+    }
+    return paired(hi, hiImm, off);
+  };
 
   const out = new Map<number, MipsJT>();
   for (let i = 0; i < instrs.length; i++) {
@@ -562,9 +610,6 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       continue;
     } // rV = *(rAddr)
     const mem = parseMem(instrs[ldIdx].ops[1]);
-    if (mem.off !== 0) {
-      continue;
-    }
     const aIdx = defBefore(mem.base, ldIdx); // rAddr = base + index
     if (aIdx < 0 || instrs[aIdx].mnemonic !== 'addu') {
       continue;
@@ -582,8 +627,9 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     ] as const) {
       const si = defBefore(idxCand, aIdx);
       const bi2 = defBefore(baseCand, aIdx);
-      // A base the dispatch's block does not form is a HOISTED one (`hoistedTable`).
-      const out = bi2 < 0 && si >= 0 ? hoistedTable(baseCand) : null;
+      // A base the dispatch's block does not form is a HOISTED one (`hoistedTable`), whose `%lo`
+      // its own `addiu` carries: the load reads displacement 0 off it.
+      const out = bi2 < 0 && si >= 0 && mem.off === 0 ? hoistedTable(baseCand) : null;
       if (si < 0 || (bi2 < 0 && !out)) {
         continue;
       }
@@ -591,7 +637,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       if (sll.mnemonic !== 'sll' || (sll.ops[2] !== '0x2' && sll.ops[2] !== '2')) {
         continue;
       } // index*4
-      const tb = out ?? tableBaseOf(instrs[bi2]);
+      const tb = out ?? inBlockTable(instrs[bi2], instrs[ldIdx], mem.off);
       if (!tb) {
         continue;
       }
@@ -1619,6 +1665,15 @@ function liftOnce(
     has: (v: Value) => highHalves.has(v) || tableBases.has(v),
     guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
   };
+  // A table entry naming an address no block of this function starts at (another function's
+  // code, read off a table that is not this dispatch's) declines here, before any arm is built.
+  const armBlock = (addr: number): number => {
+    const j = idxOf.get(addr);
+    if (j === undefined) {
+      throw new FrontendUnsupportedError(`cannot lift '${name}': jump-table target is not a block boundary`);
+    }
+    return j;
+  };
   // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
   // markers written there, by value. Not a placeholder: a case may copy one (`move v0,at`), and a
   // return or a call that skipped it would drop what the case handed on.
@@ -1631,8 +1686,8 @@ function liftOnce(
             {
               at,
               scrutReg: jt.scrutReg,
-              cases: jt.caseAddrs.map((a) => idxOf.get(a)!),
-              defaultBlock: idxOf.get(jt.defaultAddr)!,
+              cases: jt.caseAddrs.map(armBlock),
+              defaultBlock: armBlock(jt.defaultAddr),
               leaves: jt.leaves,
             },
           ];
