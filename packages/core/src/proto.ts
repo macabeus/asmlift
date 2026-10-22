@@ -593,6 +593,16 @@ export const isFloatingSpelling = (t: ParamType): boolean => floatingSpelling(t)
 interface StandardSignature extends FnProto {
   /** the return type, as its C spelling (`"void *"`, `"u32"`, `"void"`) */
   returns: ParamType;
+  /** for a BLOCK COPY, the operand each role is: it reads `[0, n)` through `src`, writes `[0, n)`
+   *  through `dst`, and keeps neither address (`blockCopyRoles`) */
+  copies?: BlockCopyRoles;
+}
+
+/** The operands of a standard block copy, by role (`StandardSignature.copies`). */
+export interface BlockCopyRoles {
+  readonly dst: number;
+  readonly src: number;
+  readonly n: number;
 }
 
 /** Signatures FIXED BY THE C STANDARD, so they are not a project fact and need no header to be
@@ -611,8 +621,19 @@ interface StandardSignature extends FnProto {
  *  standard and equally addable, and they are absent because nothing measures them — a table
  *  grown by appetite would be a table nobody priced. */
 export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
-  memcpy: { params: ['void *', 'const void *', 'u32'], returns: 'void *' },
+  memcpy: { params: ['void *', 'const void *', 'u32'], returns: 'void *', copies: { dst: 0, src: 1, n: 2 } },
 };
+
+/** The roles of `callee`'s operands where the C standard fixes it as a BLOCK COPY, or `undefined`.
+ *  ONE TABLE for every reader: the frame audit bounds the bytes a copy with a literal count reaches
+ *  (frontend/frame-objects.ts `boundedCopy`), and the constant-initializer fold reads the copy an
+ *  aggregate initializer compiles to (l3/constinit.ts). `memmove` is equally fixed, and absent for
+ *  the reason the list above is short. */
+export function blockCopyRoles(callee: unknown): BlockCopyRoles | undefined {
+  return typeof callee === 'string' && Object.hasOwn(STANDARD_SIGNATURES, callee)
+    ? STANDARD_SIGNATURES[callee].copies
+    : undefined;
+}
 
 /** Whether a declaration says the function returns NO VALUE — the one question `returnsVoid` was
  *  added for, asked through both keys that can answer it.

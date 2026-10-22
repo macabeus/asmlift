@@ -20,6 +20,7 @@
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
+import { blockCopyRoles } from '../proto';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
 import type { CallDeclarations } from './call-plan';
@@ -1331,15 +1332,6 @@ function classifyFrameUses({
   };
 }
 
-/** THE BLOCK COPIES THE C STANDARD FIXES, by the operand each role is: the copy reads `[0, n)`
- *  through its source, writes `[0, n)` through its destination, and keeps neither address. The
- *  same table as the constant-initializer fold's (l3/constinit.ts `BLOCK_COPIES`), which this
- *  frontend stage may not import; `memmove` would be equally fixed, and is absent because nothing
- *  measures it (proto.ts `STANDARD_SIGNATURES` says why that list is short too). */
-const BOUNDED_COPIES: Readonly<Record<string, { readonly dst: number; readonly src: number; readonly n: number }>> = {
-  memcpy: { dst: 0, src: 1, n: 2 },
-};
-
 // The bytes, relative to the address at operand `idx`, that a call of a standard block copy with
 // a literal, positive count reaches through it — or `undefined` for any other callee, operand or
 // count, which this does not bound, and for a copy whose result (`memcpy` returns its
@@ -1350,9 +1342,7 @@ function boundedCopy(
   facts: LiteralAddresses,
   read: ReadonlySet<Value>,
 ): { lo: number; hi: number } | undefined {
-  const callee = op.attrs.target;
-  const roles =
-    typeof callee === 'string' && Object.hasOwn(BOUNDED_COPIES, callee) ? BOUNDED_COPIES[callee] : undefined;
+  const roles = blockCopyRoles(op.attrs.target);
   if (
     roles === undefined ||
     (idx !== roles.dst && idx !== roles.src) ||

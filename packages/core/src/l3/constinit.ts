@@ -19,8 +19,8 @@
 // and the C-family emitter folds (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
 //
 // THE FOLD IS SOUND exactly when the declaration's initializer and the copy are one program:
-//   • the copy is a block copy this table knows (`BLOCK_COPIES`), a TOP-LEVEL statement of the
-//     body, so it runs once and on every path that reaches it;
+//   • the copy is a block copy the C standard fixes (proto.ts `blockCopyRoles`), a TOP-LEVEL
+//     statement of the body, so it runs once and on every path that reaches it;
 //   • its destination is a whole local integer array of the copied size — or a reservation the
 //     frame rounded up by less than a word, reached by nothing but elements inside the copy and its
 //     whole address — not volatile, and nothing before the copy mentions it but a local assigned
@@ -42,12 +42,13 @@
 // its whole address and element accesses, which each print their own width, reach it.
 //
 // Thumb is the only frontend that reads an anonymous image today. The rule is asked of the tree,
-// for any compiler, but the only copy it reads is a call (`BLOCK_COPIES`). KNOWN GAP: an INLINE
-// copy — agbcc's `ldmia`/`stmia` for a word-aligned image below its memcpy sizes, lw/sw or
+// for any compiler, but the only copy it reads is a call (proto.ts `blockCopyRoles`). KNOWN GAP: an
+// INLINE copy — agbcc's `ldmia`/`stmia` for a word-aligned image below its memcpy sizes, lw/sw or
 // lwl/lwr+swl/swr (IDO, gcc 2.7.2, KMC), lwz/stw (mwcc) — declines, naming the copy it does not
 // read; no benchmark row has one, and the MIPS and PPC frontends refuse the address-taken frame
 // local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
+import { blockCopyRoles } from '../proto';
 import {
   type Expr,
   type InitAddress,
@@ -60,12 +61,6 @@ import {
   walkExprs,
 } from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
-
-/** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
- *  the destination, the source and the byte count. */
-export const BLOCK_COPIES: Readonly<Record<string, { dst: number; src: number; n: number }>> = {
-  memcpy: { dst: 0, src: 1, n: 2 },
-};
 
 /** `e` without the casts around it. */
 function bare(e: Expr): Expr {
@@ -157,9 +152,7 @@ function planFolds(sfn: SFn, image: SImage): Fold[] | string {
     if (
       s.k === 'exprstmt' &&
       s.value.k === 'call' &&
-      typeof s.value.fn === 'string' &&
-      BLOCK_COPIES[s.value.fn] !== undefined &&
-      wholeObject(s.value.args[BLOCK_COPIES[s.value.fn].src] ?? { k: 'const', value: 0 }) === image.name
+      wholeObject(s.value.args[blockCopyRoles(s.value.fn)?.src ?? -1] ?? { k: 'const', value: 0 }) === image.name
     ) {
       copies.push(i);
     }
@@ -189,7 +182,7 @@ function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
   const elem = (image.type as Extract<IrType, { kind: 'array' }>).elem as Extract<IrType, { kind: 'int' }>;
   const size = byteSize(image.type)!;
   const call = (sfn.body[at] as Extract<Stmt, { k: 'exprstmt' }>).value as Extract<Expr, { k: 'call' }>;
-  const roles = BLOCK_COPIES[call.fn as string];
+  const roles = blockCopyRoles(call.fn)!;
   if (constantValue(call.args[roles.n] ?? { k: 'var', name: '' }) !== size) {
     return `whose copy does not move its whole ${size} bytes`;
   }
