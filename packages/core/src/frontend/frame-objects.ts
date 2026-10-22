@@ -2424,7 +2424,22 @@ function provenParts(
   ) {
     return whole;
   }
-  return parts;
+  // …and a part starts only where a compiler places a local array of its own: at a WORD boundary
+  // (agbcc pads `u8 a[18]` to 20, so a split there declares `b` at sp+20 where the target had it
+  // at sp+18), and never as ONE byte, which declared alone is a `u8` scalar whose address nothing
+  // takes — kept in a register, it drops the frame byte and the store the target made. Such a
+  // part joins the one below it, and the lowest one byte joins the one above: fewer parts only
+  // ever read as the one object does, so this costs a split, never a value.
+  const merged: { from: number; to: number }[] = [];
+  for (const p of parts) {
+    const last = merged.at(-1);
+    if (last !== undefined && (p.from % 4 !== 0 || p.to - p.from === 1 || last.to - last.from === 1)) {
+      last.to = p.to;
+    } else {
+      merged.push({ ...p });
+    }
+  }
+  return merged.length > 1 ? merged : whole;
 }
 
 /** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width

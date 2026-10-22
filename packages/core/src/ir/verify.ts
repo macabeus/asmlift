@@ -223,10 +223,11 @@ export function verify(fn: Fn): void {
               );
             }
             // …and a PART of the one object (frame-objects.ts `provenParts`) is such storage too
-            if (op.attrs.part !== undefined && (op.attrs.part !== true || count < 2)) {
-              throw new VerifyError(
-                `'laddr' part must be true on storage of two or more bytes, got ${String(op.attrs.part)}`,
-              );
+            if (op.attrs.part !== undefined && op.attrs.part !== true) {
+              throw new VerifyError(`'laddr' part must be true, got ${String(op.attrs.part)}`);
+            }
+            if (op.attrs.part === true && count < 2) {
+              throw new VerifyError(`'laddr' part must be storage of two or more bytes, got ${count}`);
             }
             // …and storage accessed at two widths over one byte names the VIEWS a union of it
             // declares (frame-objects.ts `unionViews`): one per element width in bytes, negative

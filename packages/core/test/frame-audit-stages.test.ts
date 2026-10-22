@@ -601,6 +601,28 @@ describe('keepAsOneObject', () => {
     };
     expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
   });
+
+  // `at` bytes stored at sp+0 and read back, then a copy of `n` bytes to sp+`at` read at its [1]
+  const below = (at: number, n: number): Block => {
+    const [x, s] = [value(), value()];
+    const [a, b, k] = [laddr(0), laddr(at), konst(n)];
+    const ops = [a, b, k, store(a.results[0], x, 0, at)];
+    ops.push(call('memcpy', b.results[0], s, k.results[0]), load(a.results[0], 0, 1), load(b.results[0], 1, 1), ret());
+    return { params: [x, s], ops };
+  };
+
+  test('keeps one object where a part would be one byte or start off a word boundary', () => {
+    // `struct { u8 n; u8 name[7]; } s; s.n = x; memcpy(s.name, src, 7)`: declared alone, the
+    // one-byte part is a `u8` scalar agbcc keeps in a register (and verify refuses the stamp)
+    expect(objectsOf(withKept(below(1, 7)))).toEqual([[0, 8]]);
+    // `struct { u16 n; u8 name[6]; }`: agbcc would place a separate `u8 name[6]` at sp+4
+    expect(objectsOf(withKept(below(2, 6)))).toEqual([[0, 8]]);
+    // …and at a word boundary the split stands
+    expect(objectsOf(withKept(below(4, 4)))).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+  });
   const withKept = (blk: Block): Block => {
     kept(blk);
     return blk;
