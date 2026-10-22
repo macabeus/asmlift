@@ -3948,8 +3948,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // dropped, which structuring otherwise refuses on both sides), and `gMain.state++` through a
     // phi of two loads of one literal. The phi's every address misses DMA3's control halfword, so
     // each read is bounded — and the per-object model then refuses the sp-direct store under the
-    // capture. Without the proof the read reached the frame and the one object held it; the proof
-    // must not take that lift away, so the frame is one object again, as before the proof.
+    // capture. Without the proof the read reaches the frame and the one object holds it; the proof
+    // must not take that lift away, so the frame stays one object.
     test('a window the miss proof bounds keeps the one-object answer the unbounded read had', () => {
       const shared =
         'tc:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr3, .L9\n\tcmp\tr0, #1\n\tbhi\t.L7\n' +
@@ -3977,7 +3977,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // 0x85000001}; gEnts[i].f = 1;` (gEnts a literal 0x03003440, stride 8): the 32-bit transfer off
     // sp+2 reaches buf[0] at sp+0 — a reach the per-object model refuses at the object gate. The
     // tail store misses the control halfword, so the window is bounded, but without that proof it
-    // reached the frame and the one object held it; that lift stands.
+    // reaches the frame and the one object holds it; that lift stands.
     test('a gate that rejects a window the miss proof bounded still asks for the one object', () => {
       const v2 =
         'v2:\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x18\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n' +
@@ -4457,8 +4457,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here). DMA1
   // or DMA2, and never DMA3's control halfword, which `addressRangeOf` proves (`[0x40000BC,
   // 0x40000C8]` plus 12 bytes misses 0x40000DE): the two DMA3 transfers each read one object, and
-  // the function is accepted object by object, its phi stores pinned where the second arm
-  // overwrites them. With the phi able to pick DMA3 itself (`#0x18`, hand-edited), the stores may
+  // the function is accepted object by object, the first three phi stores pinned because the
+  // next three overwrite them. With the phi able to pick DMA3 itself (`#0x18`, hand-edited), the stores may
   // re-arm it, the frame is one object, and every phi store is pinned.
   test('a phi of device registers is a device store too', () => {
     const eitherChannel = (step: string) =>

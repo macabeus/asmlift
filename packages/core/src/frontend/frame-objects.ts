@@ -1626,8 +1626,7 @@ function readWindow(
  *  0x04000000 that span covers 0x040000DE, and still no `i` lands on it. Not "the transfer is
  *  over": an immediate transfer is, but a later store that sets the enable bit again reloads the
  *  source register and reads the frame anew (GBATEK, DMA control bit 15), which is what this
- *  guards against. A store this cannot bound on every value is the unresolved pointer it always
- *  was. */
+ *  guards against. A store this cannot bound on every value stays an unresolved pointer. */
 function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
   const r = facts.addressRangeOf(op.operands[0]);
   if (r === undefined) {
@@ -1720,8 +1719,6 @@ function chooseFrameModel({
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): ModelChoice {
-  // A window `misses` bounded keeps the answer on offer that its unbounded read had: the proof lets
-  // the per-object model describe the frame where it can, and takes no lift away where it cannot.
   const unboundedAt = new Set(
     [...windows]
       .filter(([, w]) => (w.lo === -Infinity && w.hi === Infinity) || w.sparedByMiss === true)

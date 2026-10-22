@@ -1837,7 +1837,7 @@ past it. How far a device reads is target data too (`capabilities.readSourceCont
 control halfword), read per transfer, and an unresolved store after the transfer is handed the
 address — through a pointer, or to a name no symbol map places — leaves the read unbounded, unless
 no address it may hold overlaps that halfword (`addressRangeOf`, ir/bits.ts `stridedRange`: a
-placed base plus a `u8` index times 8 is every eighth word of an interval, a pointer parameter is
+placed base plus a `u8` index times 8 is every eighth address of an interval, a pointer parameter is
 nothing). What no fact about one function can check is stated as a premise instead: a callee or an
 interrupt handler arms only a transfer it set up itself, source register first, so neither a call
 on the path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
