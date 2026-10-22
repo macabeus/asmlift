@@ -32,7 +32,7 @@ import {
 } from './candcache';
 import { type BenchCommand, benchCommandRefusal } from './candcache-bench';
 import { candidateReadsRefusal } from './candcache-reads';
-import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
+import { declarationsKeptWithHeaders, renderDeclarations, selfDeclaredContext } from './declare';
 import { loadedCodeDigest, loadedPackageDigest } from './loaded-code';
 import { stripShellComments } from './shell-text';
 
@@ -638,12 +638,13 @@ const PROBE = 'int asmlift_prelude_probe;\n';
 // legal C (unlike a duplicate typedef or struct), and the headers world does NOT
 // necessarily supply them — a PREPROCESSED context has no macros left at all, so dropping
 // these turns a macro-named candidate into `undeclared identifier`. They are emitted in
-// both worlds for that reason.
+// both worlds for that reason, and so are global register variables, whose names the lift made up
+// and no header declares.
 // The self-declared half is CORE's composition (declare.ts selfDeclaredContext), not a second
 // copy of `C_TYPEDEFS + decls` — the webapp's scorer calls the same function, so the two
 // scoring worlds cannot drift on what a candidate was compiled in.
 const preludeFor = (world: boolean, declarations?: string): string =>
-  world ? selfDeclaredContext(declarations) : macroDefinesOf(declarations);
+  world ? selfDeclaredContext(declarations) : declarationsKeptWithHeaders(declarations);
 
 /** A verdict as the caller's contract wants it: the object path, or a throw — a
  *  `CompilerRejection` when the template ran to completion and said no, so that a ranking driver

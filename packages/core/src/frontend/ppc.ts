@@ -139,7 +139,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, registerLiveIns } from './ssa';
+import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -681,7 +681,18 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
 /** Whether any of `body` names a callee-saved general register (`isCalleeSaved`), as an operand or
  *  a memory base, that the prologue did not save — the mark of hand-written asm, since compiled
  *  code saves such a register before it touches it. A save routine or `stmw` names only its first
- *  register, and saves it, so either is in `saved`. */
+ *  register, and saves it, so either is in `saved`.
+ *
+ *  A GLOBAL REGISTER VARIABLE'S register (`target.globalRegisterVariables`) does not count: it is
+ *  the one callee-saved register COMPILED code names unsaved, and the live-in model reads it as that
+ *  global (`registerLiveIns`). Counted, it would make the detector and the model disagree about one
+ *  register, and drop the bound a compiled body's own declaration states: mwcc 2.4.2's
+ *  `register int g __asm__("r14"); int f(int a) { int x, y; if (a) { x = a; y = a + 1; } … a * g`
+ *  homes x and y in r4/r5, and `f(s32)` would lift as `f(s32 a0, s32 a1, s32 a2)` with no note. The
+ *  blind side is a hand-written entry point handed inputs in r14..r28 and in argument registers
+ *  past its declaration, which then reads those as `uninit_<reg>`; asm that names no other unsaved
+ *  callee-saved register is byte-for-byte the compiled shape. No function of the ac, mp4 or Pikmin
+ *  builds names an unsaved r14..r28 at all. */
 const namesUnsavedCalleeSaved = (
   body: readonly Instr[],
   target: TargetDescription,
@@ -690,7 +701,9 @@ const namesUnsavedCalleeSaved = (
   body.some((ins) =>
     ins.ops.some((op) => {
       const reg = op.includes('(') ? parseMem(op).base : op;
-      return isCalleeSaved(target, reg) && !saved.has(reg);
+      return (
+        isCalleeSaved(target, reg) && !saved.has(reg) && !Object.hasOwn(target.globalRegisterVariables?.regs ?? {}, reg)
+      );
     }),
   );
 
@@ -721,12 +734,34 @@ const namesUnsavedCalleeSaved = (
  *  below its frame address (`addi r11,r1,N`), and each floating-point save (`stfd`, or the FPR
  *  routine), which this frontend refuses elsewhere but which still bounds where a local may lie.
  *  Null where a save's offset cannot be named: r1's depth at it, or the routine's frame address, is
- *  unknown. */
+ *  unknown.
+ *
+ *  A SAVE IS RELOADED. In a function that returns, an `stw` of a callee-saved register that no
+ *  reload of it from r1 answers anywhere — an `lwz` of it, an `lmw` or restore routine reaching it —
+ *  saves nothing: the caller gets the register back as the body left it, so the word is a value.
+ *  mwcc 2.4 stores a file-scope global register variable passed on the stack exactly so, in the
+ *  entry block — `register int g __asm__("r14"); return k(1, …, 8, g) + g;` is `stw r14,8(r1); bl k`
+ *  and no reload of r14 — and counting it as a save would turn the read of `g` after the call into
+ *  `uninit_r14` and drop the ninth argument. Which word a reload reads is judged where it is
+ *  lowered (`restoreFrom`). A function with no return keeps the entry-block reading. */
 function prologueSavedRegs(
   entry: readonly Instr[],
   target: TargetDescription,
   r1At: ReadonlyMap<Instr, number | string>,
+  blocks: readonly PpcBlock[],
 ): { regs: ReadonlySet<string>; offsets: number[] | null } {
+  const code = blocks.flatMap((b) => [...b.body, ...(b.branch ? [b.branch] : [])]);
+  const returns = blocks.some((b) => b.synthReturn) || code.some((ins) => isReturn(ins) || isCondReturn(ins));
+  const reloaded = (r: string) =>
+    code.some((ins) => {
+      const routine = saveRoutineOf(target, ins);
+      return routine
+        ? routine.restore && !routine.fpr && Number(r.slice(1)) >= routine.first
+        : ins.ops[1]?.includes('(') === true &&
+            parseMem(ins.ops[1]).base === 'r1' &&
+            ((ins.mnemonic === 'lwz' && ins.ops[0] === r) ||
+              (ins.mnemonic === 'lmw' && Number(r.slice(1)) >= Number(ins.ops[0]?.slice(1))));
+    });
   const regs = new Set<string>();
   const named = new Set<string>();
   const offsets: number[] = [];
@@ -758,7 +793,9 @@ function prologueSavedRegs(
     } else if (/^(stw|stmw|stfd)$/.test(ins.mnemonic) && s?.includes('(') && parseMem(s).base === 'r1') {
       const first = ins.mnemonic === 'stmw' ? Number(d.slice(1)) : 0;
       const n = ins.mnemonic === 'stmw' ? 32 - first : 1;
-      for (let k = 0; k < n; k++) {
+      // A single `stw` no reload answers, in a function that returns, saves nothing (see below).
+      const unanswered = ins.mnemonic === 'stw' && isCalleeSaved(target, d) && returns && !reloaded(d);
+      for (let k = 0; k < (unanswered ? 0 : n); k++) {
         const reg = ins.mnemonic === 'stmw' ? `r${first + k}` : d;
         if (ins.mnemonic !== 'stfd' && !named.has(reg)) {
           regs.add(reg);
@@ -1345,7 +1382,7 @@ function liftPrelude(
     succIdx.unshift([1]);
   }
   const r1At = r1Displacements(blocks, succIdx);
-  const saves = prologueSavedRegs(entryBody, target, r1At);
+  const saves = prologueSavedRegs(entryBody, target, r1At, blocks);
   const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal, ownDeclaration);
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
@@ -1529,17 +1566,18 @@ function liftOnce(
     fpPrecision(reached, (m) => FP_ARITH[m]?.width ?? (FP_CROSSINGS.has(m) ? null : undefined)),
     ownDeclared ? ownDeclarationOf(name, prototypes, contextOwnProto) : undefined,
   );
+  const liveIns = registerLiveIns(
+    target,
+    savedRegs,
+    !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () =>
-      registerLiveIns(
-        target,
-        savedRegs,
-        !ownDeclared ? undefined : (contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
-      ),
+    () => ({ ...liveIns, saveSite: 'store or save routine in its entry block' }),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
+    liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 
@@ -1785,6 +1823,9 @@ function liftOnce(
   // A slot is one kind for the whole function: a word both saved and stored with a value has no
   // single reading, and refuses.
   const saveSlots = new Map<number, string>();
+  // Each reload (`lwz`, `lmw`, restore routine) that restores a save, and the registers it restores:
+  // a save holds only while every path restores it after its last write (`refuseSavedRegisterLeaks`).
+  const restoredBy = new Map<Instr, ReadonlySet<string>>();
   // AN INCOMING STACK WORD HAS ONE NAME, `@sarg<k>`, for its loads and its stores: the EABI passes
   // integer argument word k >= 8 at entry r1 + 8 + 4(k - 8), in the caller's parameter area past
   // its back chain and link-register save word (`corpus/probe-mwcc-frame.c`, `in9`/`in10`). A read
@@ -2077,6 +2118,7 @@ function liftOnce(
         );
       }
       if (reg !== 'r1') {
+        restoredBy.set(ins, new Set([...(restoredBy.get(ins) ?? []), reg]));
         const caller = mkValue(T.unk(32));
         nonValues.set(caller, { kind: 'restored', reg, addr: ins.addr });
         writeVar(reg, bi, caller);
@@ -2114,7 +2156,10 @@ function liftOnce(
       }
       // Any other save stores what the register held at entry: nothing defined it on any path. An
       // argument register nothing defined holds the argument, which is a value.
-      if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
+      // …save a global register variable's: compiled code stores one only as a value, the outgoing
+      // stack argument `k(1, …, 8, g)` is (`stw r14,8(r1)`), and the builder records no definition
+      // for it (its writes are stores to the global), so "nothing defined it" is no evidence of a save.
+      if (!isArg && !liveIns.globalRegs?.has(srcReg) && !ssa.hasReachingDef(srcReg, bi)) {
         saveInto(ins, srcReg, off, mem);
         return true;
       }
@@ -3674,6 +3719,18 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  refuseSavedRegisterLeaks(
+    name,
+    blocks.map((b) => ({
+      instrs: [...b.body, ...(b.branch ? [b.branch] : [])],
+      returns: b.synthReturn === true || (b.branch !== null && (isReturn(b.branch) || isCondReturn(b.branch))),
+    })),
+    preds,
+    new Set([...saveSlots.values()].filter((r) => isCalleeSaved(target, r))),
+    // a call preserves every callee-saved register, and a restore routine is a restore
+    (ins, r) => !ins.mnemonic.startsWith('b') && mayWriteGpr(ins, r),
+    restoredBy,
+  );
   returnUntouchedArg();
   // What f1 holds at each return, and, where the home is undecided and f1 holds a float this function
   // computed on every path into every return, that float — read now, before the SSA is finished.

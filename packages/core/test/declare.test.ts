@@ -6,8 +6,10 @@
 // skipped so the candidate fails loud, never a silently-wrong declaration).
 import { expect, test } from 'vitest';
 
-import { renderDeclarations } from '../src/declare';
+import { declarationsKeptWithHeaders, renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
+import { enumerateCandidates } from '../src/rank';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 const ref = (name: string, info: Omit<SymbolRef['info'], 'name'>): SymbolRef => ({
   name,
@@ -271,4 +273,38 @@ test('a returned struct and a global of its tag share one definition', () => {
   ]);
   expect(out.match(/struct Blob64 \{/g)).toHaveLength(1);
   expect(out).toContain('typedef struct Blob64 Blob64;\nBlob64 makeblob(const void *);\n');
+});
+
+// A GLOBAL REGISTER VARIABLE (SymbolInfo.globalRegister): the lift's name for a callee-saved register
+// no prologue saved, declared in that register — typed as a name-only global is — and kept in the
+// headers world, where no header declares the made-up name.
+test('a global register variable declares itself in its register, in both worlds', () => {
+  const out = renderDeclarations([
+    { ...ref('greg_r8', { kind: 'data', globalRegister: 'r8' }), access: { width: 4, signed: true } },
+    { ...ref('greg_r16', { kind: 'data', globalRegister: '$16' }), holdsPointer: true },
+    ref('gX', { kind: 'data' }),
+  ]);
+  expect(out).toBe('register s32 greg_r8 __asm__("r8");\nregister void *greg_r16 __asm__("$16");\nextern u32 gX;\n');
+  expect(declarationsKeptWithHeaders(out)).toBe(
+    'register s32 greg_r8 __asm__("r8");\nregister void *greg_r16 __asm__("$16");\n',
+  );
+});
+
+// mwcc 2.4 declares them only as a run from r14 ("gaps between assigned global register variables are
+// not permitted"), so a body reading r15 declares r14 too, and one reading r14 nothing more.
+test('a compiler that declares global registers only as a run gets the ones below the body`s', () => {
+  const run = (body: string) =>
+    (enumerateCandidates('f', `0 <f>:\n${body}`, PPC_MWCC)[0].symbolRefs ?? []).map((r) => [
+      r.name,
+      r.info.globalRegister,
+    ]);
+  expect(run('0:\tadd     r3,r3,r15\n4:\tblr\n')).toEqual([
+    ['greg_r15', 'r15'],
+    ['greg_r14', 'r14'],
+  ]);
+  expect(run('0:\tadd     r3,r3,r14\n4:\tblr\n')).toEqual([['greg_r14', 'r14']]);
+  // agbcc takes any of r4-r11 alone
+  expect(
+    (enumerateCandidates('f', 'f:\n\tmov\tr0, r9\n\tbx\tlr\n', ARMV4T_AGBCC)[0].symbolRefs ?? []).map((r) => r.name),
+  ).toEqual(['greg_r9']);
 });

@@ -25,7 +25,7 @@ import { T } from '../ir/types';
 import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
-import type { TargetDescription } from '../target';
+import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads, unreadPairHalf } from './dead-reads';
@@ -75,6 +75,7 @@ import {
   stackArgKey,
   stackArgSlots,
   stackSlotKey,
+  unifyRegisterSpellings,
 } from './ssa';
 import {
   type OutgoingArgs,
@@ -385,8 +386,9 @@ const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp:
 
 // Registers Thumb-1's `push` cannot name, in every spelling this ISA's asm uses for them. Saving
 // one takes agbcc's `mov rLow, rHi; push {rLow}`, which is why the prologue's save set has to read
-// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: nothing here normalises
-// a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
+// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: a register keeps the
+// name it was written with, and only a function that writes one two ways is rewritten to one of them
+// (`unifyRegisterSpellings` in `readThumbText`), so `sl` and `r10` are never both keys of one lift.
 const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
 
 /** The operands of a `cmp` whose flags are still live — the whole of the condition state this
@@ -2626,6 +2628,18 @@ function liftOnce(
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
   refuseReturnsNotThroughCallersLr(name, cfg);
+  // The fill reads a `pop` as transparent, so a callee-saved register one fills with another
+  // register's word is a write no op shows: refused here, after the return proof, which judges the
+  // same words for lr and has its own answer for a pop that takes lr's.
+  const [foreign] = fill.poppedForeign;
+  if (foreign !== undefined) {
+    const [reg, at] = foreign;
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${at.mnemonic} ${at.ops.join(', ')}' loads a word that is not ${reg}'s own save ` +
+        `into callee-saved ${reg}, and ${reg} reaches a return so, unrestored — the caller sees the write, which ` +
+        'no C statement spells',
+    );
+  }
 
   pairs.refuseWordReturns();
   // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
@@ -2713,6 +2727,12 @@ const canonReg = (r: string): string | null => {
   return /^r(\d|1[0-5])$/.test(t) ? t : (REG_ALIAS[t] ?? null);
 };
 const regIndex = (r: string): number => Number(r.slice(1));
+/** A push/pop/ldm list in the order the machine moves it, canonical names (`canonReg`): by register
+ *  number, lowest address first. Null where a name is not a register. */
+const byRegNumber = (list: readonly string[]): string[] | null => {
+  const regs = list.map(canonReg);
+  return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
+};
 // Registers `ins` may write, besides sp and besides a `pop`'s list (the proof reads both itself).
 // OVER-approximate: naming a register here that the instruction does not write costs a decline,
 // and missing one costs a wrong return. 'all' for a call, and for anything this cannot read.
@@ -2811,11 +2831,6 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
         `saved lr in — jump tables / computed gotos / register tail calls not supported`,
     );
   };
-  // A pop/ldm list in the order the machine fills it: by register number, lowest address first.
-  const byNumber = (list: readonly string[]): string[] | null => {
-    const regs = list.map(canonReg);
-    return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
-  };
 
   // Run one block from its in-state, asking each return as it is reached; the out-state.
   const run = (b: number, inState: LrState): LrState => {
@@ -2829,7 +2844,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
       const isPop =
         mn === 'pop' || ((mn === 'ldmia' || mn === 'ldmfd') && isSpReg((ins.ops[0] ?? '').replace(/!$/, '')));
       if (isPop) {
-        const list = byNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
+        const list = byRegNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
         if (list === null || list.length === 0) {
           if (xfer === 'return') {
             refuse(ins);
@@ -2855,7 +2870,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
           refuse(ins);
         }
       } else if (mn === 'push') {
-        const list = byNumber(regListOf(ins.ops) ?? []);
+        const list = byRegNumber(regListOf(ins.ops) ?? []);
         const k = list?.findIndex((r) => regs.has(r)) ?? -1;
         if (list !== null && k >= 0 && depth !== null) {
           slot = depth + 4 * list.length - 4 * k;
@@ -2984,6 +2999,12 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
 function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels, aliasOf } = decode(name, asm, farJumpMark);
+  // Everything below keys a register by its spelling, so a function that writes one two ways
+  // (`sl` and `r10`) is read in one of them.
+  unifyRegisterSpellings(
+    rawBlocks.flatMap((b) => b.instrs),
+    ARM_REGISTER_ALIASES,
+  );
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.
   const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
@@ -4504,8 +4525,9 @@ const CALLEE_SAVED_LOW_REGS: ReadonlySet<string> = new Set(['r4', 'r5', 'r6', 'r
 // that the compiler homed a local in the register, which it may only do after saving it. Asm that
 // saves nothing follows no such convention, and some of it really is handed live values there:
 // the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
-// takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
-// signature and stored through reads of registers nothing ever wrote.
+// reads r4/r5 with no prologue at all — classified by the ABI alone it stored through reads of
+// registers nothing ever wrote. Unsaved, they are global register variables
+// (`LiveInModel.globalRegs`), which is what agbcc compiles `register u8 *p asm("r4")` to.
 //
 // PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
 // agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
@@ -4562,6 +4584,294 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
     }
   }
   return { saved, carriers };
+}
+
+/** WHAT A `push` SAVES AROUND EVERY USE, ON EVERY PATH — the prologue's (`prologueSavedRegs`) and
+ *  any other. A register the function names nowhere before a `push` of it, nor after the `pop`
+ *  that restores it, along any path from the entry, and that every path restores before it
+ *  returns, is saved as surely as one the prologue saves (`saved`): its writes are undone and its
+ *  entry value is the caller's, so it is a local's home like the prologue's
+ *  (`LiveInModel.uninitRegs`). Hand-written asm saves late: `cmp r0, #0; beq .L1; push {r4}; …;
+ *  pop {r4}; .L1: bx lr` uses r4 only between its save and its restore. A `push` is nothing but a
+ *  save and a `pop` nothing but a restore, which is what lets this read them anywhere; MIPS's `sw`
+ *  and PPC's `stw` also store a value (a global register variable passed on the stack is
+ *  `sw s0,16(sp)`), so those frontends read saves only in the entry block.
+ *
+ *  A high register is saved through the `mov rLow, rHi` that stages it, and that `mov` is the
+ *  save's, provided `rLow` reaches the `push` unchanged — PROLOGUESAVEDREGS' RULE, here past the
+ *  leading run too, so the two readings of one idiom agree: `mov r0, r8; add r0, #1; push {r0}`
+ *  saves no r8. It is restored by `pop {rLow}; mov rHi, rLow` likewise, and that `pop` restores no
+ *  `rLow`: agbcc's `pop {r3, r4}; mov r8, r3; mov sl, r4; pop {r4-r7}` hands r4 sl's word first.
+ *
+ *  THE RESTORE ENDS THE SAVE. Past it the register holds the caller's value again, so a read there
+ *  is the caller's value and a write there is one the caller sees, neither of them a local's —
+ *  and the fill keeps the `pop` transparent, so a read would see the function's last write
+ *  (`push {r4}; mov r4, #5; pop {r4}; mov r0, r4` would lift `return 5;`). For the same reason a save
+ *  that some path carries unrestored to a return the frame is balanced at — a `push` whose word is
+ *  popped into another register or dropped with `add sp` — saved nothing on that path. A return
+ *  with the word still on the stack is an input whose epilogue was left out, and is not asked: the
+ *  blind side is hand-written asm that returns with its frame unbalanced, which no caller survives.
+ *
+ *  A RESTORE IS THE REGISTER'S OWN WORD, not its name. The walk keeps the stack word by word —
+ *  whose entry value each pushed word holds — and a `pop` (or a staging pop's `mov rHi, rLow`)
+ *  restores a register only when the word it loads is that register's: `push {r4, r5}; pop {r5};
+ *  pop {r4}` names both and swaps the caller's r4 and r5, and agbcc's staging with its two `mov`s
+ *  crossed swaps r8 and r9. A push labels a word with a register only while that register still
+ *  holds its entry value (`dirty`): pushed again after a write, a foreign pop or a save dropped
+ *  with `add sp`, it pushes a value of the function's, and the pop of that word restores nothing.
+ *  Where paths as deep disagree about a word, the word is no register's. Such a pop is a write the
+ *  caller sees that the fill, reading the `pop` as transparent, never shows, so a callee-saved
+ *  register one reaches a balanced return with is `leaked`, and refused outright (after the
+ *  return proof, `poppedForeign`). The blind side: where the stack is not known — paths that
+ *  disagree about its depth, a move of sp the frame walk cannot follow, a store through a
+ *  register-indexed sp address — a restore is read by name, and a store through a copy of sp
+ *  into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
+ *  asks the same word question of lr alone, on its own walk.
+ *
+ *  `misSaved` is every register a save or a restore names that some path uses outside a save, or
+ *  returns with still saved: a `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`),
+ *  a `push` past a read, a use past the restore, a staged `push {r3}` of r8 popped into r1. Its
+ *  writes are not all the caller's and its entry value is no global's, so `registerLiveIns`
+ *  refuses it rather than spell it either way. "Uses" is any naming in an operand, read or write. */
+const CALL_CLOBBERS = ['r0', 'r1', 'r2', 'r3', 'r12', 'r14'];
+const ALL_REGS = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r14'];
+function bodySavedRegs(
+  blocks: readonly AsmBlock[],
+  preds: readonly (readonly number[])[],
+): { saved: ReadonlySet<string>; misSaved: ReadonlySet<string>; leaked: ReadonlyMap<string, Instr> } {
+  // What each instruction saves, restores and otherwise names; the staging `mov`s first.
+  const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
+  const restoresHi = new Set<Instr>(); // `mov rHi, rLow` where rLow was popped unchanged
+  const stagingPops = new Map<Instr, Set<string>>(); // a `pop`'s rLow that a `mov rHi, rLow` restores through
+  for (const b of blocks) {
+    const staged = new Map<string, Instr>(); // low register ← the `mov` that put a high one there
+    const popped = new Map<string, Instr>(); // low register ← the `pop` that filled it
+    for (const x of b.instrs) {
+      const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [];
+      if (x.mnemonic === 'push') {
+        list.forEach((r) => staged.has(r) && savesHi.set(staged.get(r)!, staged.get(r)!.ops[1]));
+      }
+      const isMov = /^movs?$/.test(x.mnemonic);
+      const from = isMov && HIGH_REGS.has(x.ops[0] ?? '') ? popped.get(x.ops[1] ?? '') : undefined;
+      if (from !== undefined) {
+        restoresHi.add(x);
+        stagingPops.set(from, (stagingPops.get(from) ?? new Set()).add(x.ops[1]));
+      }
+      const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? list : regWritesOf(x);
+      if (writes === 'all') {
+        staged.clear();
+        popped.clear();
+      } else {
+        for (const w of writes) {
+          staged.delete(w);
+          popped.delete(w);
+        }
+      }
+      if (x.mnemonic === 'pop') {
+        list.forEach((r) => popped.set(r, x));
+      } else if (isMov && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
+        staged.set(x.ops[0], x);
+      }
+    }
+  }
+  const namedBy = (x: Instr): string[] => [
+    ...(x.ops.join(',').match(/(?<![\w.#])(r1[0-5]|r\d|sb|sl|fp|ip)(?![\w])/g) ?? []),
+    ...(/^(ldm|stm)/.test(x.mnemonic) ? (regListOf(x.ops.slice(1)) ?? []) : []),
+  ];
+  const savedSomewhere = new Set<string>();
+  const restoredSomewhere = new Set<string>();
+  const usedUnsaved = new Set<string>();
+  const unrestored = new Set<string>(); // still saved at a balanced return on some path
+  // Forward dataflow over two sets: the registers saved on EVERY path into each block (`cur`, a
+  // must-set; null: not reached yet) and on SOME path (`open`, a may-set) — a use needs the first,
+  // a return must find the second empty — and the frame depth (`makeFrameWalk`; null where paths
+  // disagree or it is not exact).
+  //
+  // And the STACK, word by word (`stack`, top last; null where paths disagree about its depth or a
+  // move of sp is not exact; a word null where they disagree about it): whose entry value each pushed word holds, so that a restore is a restore only when the
+  // word its `pop` loads is that register's own. `pop {r5}; pop {r4}` after `push {r4, r5}` NAMES
+  // both registers and restores neither — it swaps the caller's r4 and r5.
+  type Stack = readonly (string | null)[];
+  // `clobbered` (a may-set) is each callee-saved register a pop has loaded another word into since
+  // its last restore, with that pop: the fill reads a `pop` as transparent, so no write of the body
+  // shows it, and one that reaches a balanced return is refused here (`leaked`).
+  type State = {
+    cur: Set<string>;
+    open: Set<string>;
+    depth: number | null;
+    stack: Stack | null;
+    clobbered: Map<string, Instr>;
+    dirty: Set<string>;
+  };
+  // `dirty` (a may-set) is each register that may no longer hold its entry value: written, or loaded
+  // by a pop from a word not its own, since the entry or its last restore. A push labels a word with
+  // a register only while it is not: `push {r4}; mov r4, r0; add sp, #4; push {r4}; pop {r4}` pushes
+  // a0 the second time, and that pop is no restore — however its push named the register.
+  const stateIn: (State | null)[] = blocks.map((_, i) =>
+    i === 0 ? { cur: new Set(), open: new Set(), depth: 0, stack: [], clobbered: new Map(), dirty: new Set() } : null,
+  );
+  const leaked = new Map<string, Instr>();
+  const word = (r: string) => canonReg(r) ?? r;
+  const walk = (b: number, record: boolean): State => {
+    const cur = new Set(stateIn[b]!.cur);
+    const open = new Set(stateIn[b]!.open);
+    const clobbered = new Map(stateIn[b]!.clobbered);
+    const dirty = new Set(stateIn[b]!.dirty);
+    const frame = makeFrameWalk({ argRegs: [], start: stateIn[b]!.depth });
+    let stack: (string | null)[] | null = stateIn[b]!.stack === null ? null : [...stateIn[b]!.stack!];
+    const holds = new Map<string, string>(); // low register ← the high one a save's staging `mov` copied
+    const loaded = new Map<string, string | null>(); // a staging pop's low register ← whose word it loaded
+    for (const x of blocks[b].instrs) {
+      const before = frame.depthNow();
+      frame.step(x);
+      const after = frame.depthNow();
+      const saves = x.mnemonic === 'push' ? (regListOf(x.ops) ?? []) : savesHi.has(x) ? [savesHi.get(x)!] : [];
+      const named =
+        x.mnemonic === 'pop'
+          ? (regListOf(x.ops) ?? []).filter((r) => !stagingPops.get(x)?.has(r))
+          : restoresHi.has(x)
+            ? [x.ops[0]]
+            : [];
+      // Which of them the word they load really restores: all, by name, where the stack is not known.
+      let own: ((r: string) => boolean) | null = null;
+      const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? byRegNumber(regListOf(x.ops) ?? []) : null;
+      if (x.mnemonic === 'push') {
+        // a push stores its highest-numbered register deepest
+        // a word is a register's own only while that register holds its entry value (`dirty`)
+        const label = (r: string) => (dirty.has(holds.get(r) ?? r) ? null : (holds.get(r) ?? r));
+        stack = stack === null || list === null ? null : [...stack, ...list.map(label).reverse()];
+      } else if (x.mnemonic === 'pop') {
+        if (stack === null || list === null || stack.length < list.length) {
+          stack = null;
+        } else {
+          const popped = new Map(list.map((r) => [r, stack!.pop()!] as const));
+          own = (r) => popped.get(word(r)) === word(r);
+          stagingPops.get(x)?.forEach((r) => loaded.set(word(r), popped.get(word(r)) ?? null));
+        }
+      } else if (restoresHi.has(x)) {
+        const from = loaded.get(word(x.ops[1]));
+        own = stack === null || from === undefined ? null : (r) => from === word(r);
+      } else if (stack !== null && /^str[bh]?$/.test(x.mnemonic) && isSpReg(parseAddr(x.ops[1] ?? '').base)) {
+        // a store into a pushed word replaces what it holds
+        const { off, regOff } = parseAddr(x.ops[1] ?? '');
+        if (regOff !== undefined) {
+          stack = null;
+        } else if (Math.floor(off / 4) < stack.length) {
+          stack[stack.length - 1 - Math.floor(off / 4)] = null;
+        }
+      } else if (stack !== null && before !== after) {
+        // any other move of sp (`sub sp, #8`, `add sp, #4`) pushes or drops whole anonymous words
+        const words = before === null || after === null || (after - before) % 4 !== 0 ? null : (after - before) / 4;
+        stack =
+          words === null || stack.length + words < 0
+            ? null
+            : words > 0
+              ? [...stack, ...Array<null>(words).fill(null)]
+              : stack.slice(0, stack.length + words);
+      }
+      const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : regWritesOf(x);
+      if (writes === 'all') {
+        holds.clear();
+        // a call leaves the registers the ABI has it preserve; anything else unread may write any
+        (/^(bl|blx|swi)$/.test(x.mnemonic) ? CALL_CLOBBERS : ALL_REGS).forEach((r) => dirty.add(r));
+      } else {
+        writes.forEach((r) => {
+          holds.delete(word(r));
+          dirty.add(word(r));
+        });
+      }
+      if (savesHi.has(x)) {
+        holds.set(word(x.ops[0]), word(savesHi.get(x)!));
+      }
+      const restores = own === null ? named : named.filter(own);
+      const uses =
+        x.mnemonic === 'push'
+          ? []
+          : savesHi.has(x)
+            ? [x.ops[0]]
+            : [...named, ...namedBy(x), ...(x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : [])];
+      if (record) {
+        saves.forEach((r) => savedSomewhere.add(r));
+        named.forEach((r) => restoredSomewhere.add(r));
+        uses.filter((r) => !cur.has(r)).forEach((r) => usedUnsaved.add(r));
+      }
+      saves
+        .filter((r) => !uses.includes(r))
+        .forEach((r) => {
+          cur.add(r);
+          open.add(r);
+        });
+      restores.forEach((r) => {
+        cur.delete(r);
+        open.delete(r);
+        clobbered.delete(word(r));
+        dirty.delete(word(r));
+      });
+      // A pop that loads another register's word writes this one and restores nothing: it is no
+      // longer saved, and its own save, still open, is unrestored at a balanced return.
+      named
+        .filter((r) => !restores.includes(r))
+        .forEach((r) => {
+          cur.delete(r);
+          if (/^r([4-9]|1[01])$/.test(word(r))) {
+            clobbered.set(word(r), x);
+          }
+        });
+      // Only a return the frame is balanced at: one with the `push` still on the stack is an
+      // input whose epilogue was left out (a fragment, a fixture), which the prologue's reading
+      // has always taken as restored.
+      if (record && classifyXfer(x) === 'return' && frame.depthNow() === 0) {
+        open.forEach((r) => unrestored.add(r));
+        clobbered.forEach((at, r) => leaked.has(r) || leaked.set(r, at));
+      }
+    }
+    return { cur, open, depth: frame.depthNow(), stack, clobbered, dirty };
+  };
+  const sameStack = (x: Stack | null, y: Stack | null) =>
+    x === null || y === null ? x === y : x.length === y.length && x.every((w, i) => w === y[i]);
+  // Paths whose stacks are as deep keep each word they agree on, and the rest is no register's: a
+  // pop of it restores nothing. Paths that disagree about the depth leave the stack unknown.
+  const joinStacks = (xs: readonly (Stack | null)[]): Stack | null =>
+    xs.some((x) => x === null || x.length !== xs[0]!.length)
+      ? null
+      : xs[0]!.map((w, i) => (xs.every((x) => x![i] === w) ? w : null));
+  const sameSet = (x: ReadonlySet<string>, y: ReadonlySet<string>) =>
+    x.size === y.size && [...x].every((r) => y.has(r));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 1; b < blocks.length; b++) {
+      const ins = preds[b].filter((p) => stateIn[p] !== null).map((p) => walk(p, false));
+      if (ins.length === 0) {
+        continue;
+      }
+      const cur = new Set([...ins[0].cur].filter((r) => ins.every((s) => s.cur.has(r))));
+      const open = new Set(ins.flatMap((s) => [...s.open]));
+      const depth = ins.every((s) => s.depth === ins[0].depth) ? ins[0].depth : null;
+      const stack = joinStacks(ins.map((s) => s.stack));
+      const clobbered = new Map(ins.flatMap((s) => [...s.clobbered]));
+      const dirty = new Set(ins.flatMap((s) => [...s.dirty]));
+      const was = stateIn[b];
+      if (
+        was === null ||
+        was.cur.size !== cur.size ||
+        was.open.size !== open.size ||
+        was.depth !== depth ||
+        !sameStack(was.stack, stack) ||
+        was.clobbered.size !== clobbered.size ||
+        !sameSet(was.dirty, dirty)
+      ) {
+        stateIn[b] = { cur, open, depth, stack, clobbered, dirty };
+        changed = true;
+      }
+    }
+  }
+  blocks.forEach((_, b) => stateIn[b] !== null && walk(b, true));
+  const mis = (r: string) => usedUnsaved.has(r) || unrestored.has(r);
+  return {
+    saved: new Set([...savedSomewhere].filter((r) => !mis(r))),
+    misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter(mis)),
+    leaked,
+  };
 }
 
 /** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from
@@ -5048,6 +5358,9 @@ interface ThumbFill {
   readonly staleIdiomValues: Map<Value, StaleIdiomRead>;
   /** What an elided dispatch left at each case target's entry, by block index. */
   readonly caseEntries: ReadonlyMap<number, CaseEntry>;
+  /** Each callee-saved register a `pop` loads another word into and that reaches a balanced return
+   *  so (`bodySavedRegs`'s `leaked`), with that pop: refused once the return proof has run. */
+  readonly poppedForeign: ReadonlyMap<string, Instr>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -5093,17 +5406,31 @@ function thumbFillOf(
   // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.
   // The register half needs both of its facts, and they come from different places. The target says
   // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
-  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
-  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
-  // the treatment a target claiming no partition gets. The save is asked only of the registers the
-  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
-  // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
-  // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
-  // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
-  const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
-    ...frame.partition,
-    ...registerLiveIns(target, frame.savedRegs, contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target)),
-  }));
+  // saved, and so could have homed a local in — in its prologue, or by a `push` ahead of every use
+  // (`bodySavedRegs`). A register in only the first is one the function shares with every other: a
+  // global register variable, or a refusal where the target cannot spell one. The save is asked only
+  // of the registers the ABI requires preserving: `target.scratchRegs` need none, so demanding one
+  // there would refuse a local the compiler was entitled to put in place with no prologue at all.
+  // `registerLiveIns` (frontend/ssa.ts) composes it, as it does for PPC. The function's own
+  // declaration bounds the argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past
+  // a two-parameter one.
+  // A prologue save that some path uses past its restore, or carries to a return unrestored, is
+  // `misSaved` and no save: the prologue's reading of it sees only the `push`.
+  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);
+  const liveIns = registerLiveIns(
+    target,
+    new Set([...frame.savedRegs, ...body.saved].filter((r) => !body.misSaved.has(r))),
+    contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
+    body.misSaved,
+  );
+  const ssa = makeSsaBuilder(
+    name,
+    cfg.asmBlocks.length,
+    cfg.preds,
+    () => ({ ...frame.partition, ...liveIns, saveSite: '`push` ahead of every use' }),
+    undefined,
+    liveIns.globalRegs,
+  );
   const statics = makeLocalStatics();
   const operands = thumbOperands({
     name,
@@ -5143,6 +5470,7 @@ function thumbFillOf(
     },
     staleIdiomValues: new Map(),
     caseEntries: elidedCaseEntries(cfg, text.tables),
+    poppedForeign: body.leaked,
   };
 }
 

@@ -16,7 +16,7 @@ import { type SymbolRef, collectSymbolRefs, ownReturnDefinition } from './l3/sym
 import type { FnProto, Prototypes } from './proto';
 import { storeSigned, storedConstantSign } from './raise/storesign';
 import { type SymbolInfo, accessSignedness } from './symbols';
-import { C_TYPEDEFS, type TargetDescription } from './target';
+import { C_TYPEDEFS, type TargetDescription, globalRegisterSymbol } from './target';
 
 /** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
  *  declaration synthesis (declare.ts) uses when the map has no shape. The map knows only the
@@ -232,7 +232,12 @@ export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
     for (const op of b.ops) {
       if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
         const sym = op.attrs.sym;
-        out.set(sym, { name: sym, kind: 'data', ...(qualifiedNames.has(sym) ? { volatile: true } : {}) });
+        out.set(sym, {
+          name: sym,
+          kind: 'data',
+          ...(qualifiedNames.has(sym) ? { volatile: true } : {}),
+          ...(typeof op.attrs.globalRegister === 'string' ? { globalRegister: op.attrs.globalRegister } : {}),
+        });
       }
     }
   }
@@ -252,6 +257,26 @@ export function initAddressSymbols(fn: Fn): Map<string, SymbolInfo> {
     }
   }
   return out;
+}
+
+/** The global register variables a compiler that declares them only as a contiguous run
+ *  (`globalRegisterVariables.contiguous`, mwcc 2.4: "gaps between assigned global register variables
+ *  are not permitted") needs declared below the highest one `refs` names, and they do not. Each is a
+ *  word nothing reads, declared only so the one the body uses is legal. */
+function globalRegisterFillers(
+  refs: readonly SymbolRef[],
+  target: Pick<TargetDescription, 'globalRegisterVariables'>,
+): SymbolRef[] {
+  const run = target.globalRegisterVariables?.contiguous ?? [];
+  const named = new Set(refs.flatMap((r) => (r.info.globalRegister === undefined ? [] : [r.info.globalRegister])));
+  const top = Math.max(-1, ...[...named].map((r) => run.indexOf(r)));
+  return run
+    .slice(0, top + 1)
+    .filter((r) => !named.has(r))
+    .map((r) => {
+      const name = globalRegisterSymbol(r);
+      return { name, info: { name, kind: 'data', globalRegister: r }, synthesized: true };
+    });
 }
 
 /** The reference collector one enumeration uses, over ONE dictionary. A factory rather than a
@@ -277,7 +302,7 @@ export function makeRefCollector(ctx: {
   /** the project's prototype table — what lets a CALL TARGET be declared rather than refused */
   prototypes: Prototypes;
   /** the target the lift ran for, whose ABI says which declared types a printed prototype carries */
-  target: Pick<TargetDescription, 'doubleArgWords'>;
+  target: Pick<TargetDescription, 'doubleArgWords' | 'globalRegisterVariables'>;
   /** reports a refusal at most once per (name, reason); the caller owns the dedup */
   refuse: (name: string, reason: RefusedDeclarationReason) => void;
   /** the function's own declaration — stated, or the context's own entry — whose struct return a
@@ -360,6 +385,7 @@ export function makeRefCollector(ctx: {
       }
       return [{ ...r, ...(access ? { access } : {}), ...synthesized }];
     });
+    refs.push(...globalRegisterFillers(refs, target));
     const returned = ownReturnDefinition(tree, own);
     if (returned !== undefined) {
       refs.push(returned);

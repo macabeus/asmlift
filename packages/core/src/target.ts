@@ -262,10 +262,11 @@ export interface TargetDescription {
    *  on PPC it is `r0`, `r11` and `r12`, where mwcc homes a leaf's uninitialised locals (PPC_MWCC).
    *
    *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
-   *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
-   *  partition gets. OVER-stating it is the unsound direction — a callee-saved register listed here
-   *  is classified with no evidence at all, which is the defect the save half exists to close. Every
-   *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
+   *  the frontend cannot find is read as one the callee must preserve, and a read of it before any
+   *  write refuses (frontend/ssa.ts `LiveInModel.unsavedCalleeSavedRegs`). OVER-stating it is the
+   *  unsound direction — a callee-saved register listed here is classified with no evidence at all,
+   *  which is the defect the save half exists to close. Every entry must appear in `nonArgRegs`;
+   *  the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
   /** Of `scratchRegs`, the ones something outside the C calling convention hands an input in. On
    *  PPC that is mwcc's RUNTIME: its register save routines take their frame address in r11
@@ -284,6 +285,16 @@ export interface TargetDescription {
    *
    *  Every entry must appear in `scratchRegs`; the frontend refuses a target where one does not. */
   hiddenInputRegs?: readonly string[];
+  /** FILE-SCOPE GLOBAL REGISTER VARIABLES this compiler accepts (`register T g __asm__("r8");`):
+   *  each callee-saved register a translation unit may bind a global to, keyed by its disassembly
+   *  spelling and valued by the name `__asm__` takes. gcc's `globalize_reg` (agbcc regclass.c
+   *  :587-611) makes such a register fixed and call-used, so no prologue saves it: a callee-saved
+   *  register a function reads before writing, or writes, WITHOUT saving it is one of these, and
+   *  the lift reads and writes it as that global (frontend/ssa.ts `LiveInModel.globalRegs`).
+   *  `contiguous` is the order a compiler that declares them only as a contiguous run requires
+   *  them in: declaring one declares every register before it. ABSENT ⇒ the compiler has no
+   *  spelling for one, and such a read or write refuses (`unsavedCalleeSavedRegs`). */
+  globalRegisterVariables?: { regs: Readonly<Record<string, string>>; contiguous?: readonly string[] };
   /** Registers a CALL destroys: after one, they hold whatever the callee left there, and no value
    *  this function computed. The frontends hand this to the SSA builder so a read of one past a
    *  call refuses instead of resolving to the pre-call definition (frontend/ssa.ts).
@@ -1170,6 +1181,22 @@ export interface TargetDescription {
   };
 }
 
+/** THE SPELLINGS ONE REGISTER HAS in an ISA's asm, as `[number, alias]` pairs — the one place they
+ *  are stated. A frontend keys registers by spelling, so a function that names one register two
+ *  ways is rewritten to one of them first (frontend/ssa.ts `unifyRegisterSpellings`, which both
+ *  frontends hand these tables); and every register list a target states names both spellings of a
+ *  pair or neither, which `target-register-aliases.test.ts` checks against these tables. A pair
+ *  missing here splits one register into two partition keys: saved as `sl` and written as `r10`, its
+ *  writes read as a global's the epilogue undoes. */
+export const ARM_REGISTER_ALIASES: readonly (readonly [string, string])[] = [
+  ['r9', 'sb'],
+  ['r10', 'sl'],
+  ['r11', 'fp'],
+  ['r12', 'ip'],
+];
+/** O32's `$30`, which objdump prints `s8` and hand-written asm also writes `fp` (`ARM_REGISTER_ALIASES`). */
+export const O32_REGISTER_ALIASES: readonly (readonly [string, string])[] = [['s8', 'fp']];
+
 export const ARMV4T_AGBCC: TargetDescription = {
   id: 'armv4t',
   compiler: 'agbcc',
@@ -1186,6 +1213,17 @@ export const ARMV4T_AGBCC: TargetDescription = {
   // `mov ip, r1` in two switch arms, no save anywhere, and a `mov r0, ip` past a third arm that
   // writes nothing — an uninitialised local by construction.
   scratchRegs: ['r12', 'ip'],
+  // MEASURED at the canonical flags, `register int g __asm__("rN")` for each of r4-r11: `f(){ return
+  // g; }` is `add r0, r4, #0` / `mov r0, r8` / `mov r0, sl`, and `s(a){ g = a; }` the reverse, with no
+  // save. agbcc prints r9 as `r9`, r10 as `sl` and r11 as `fp`; hand-written asm also writes `sb`.
+  globalRegisterVariables: {
+    regs: {
+      ...Object.fromEntries(['r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11'].map((r) => [r, r])),
+      sb: 'r9',
+      sl: 'r10',
+      fp: 'r11',
+    },
+  },
   // AAPCS: r0-r3 pass arguments and return, r12 (`ip`) is the intra-procedure-call scratch, and lr
   // holds the return address the `bl` itself overwrites. agbcc's own machine description says the
   // same (`thumb.h` CALL_USED_REGISTERS). Both spellings of r12 for the reason `nonArgRegs` carries
@@ -1544,6 +1582,17 @@ export const MIPS_GCC: TargetDescription = {
   nonArgRegs: O32_NON_ARG_REGS,
   scratchRegs: O32_SCRATCH_REGS,
   hiddenInputRegs: O32_SCRATCH_REGS,
+  // MEASURED on gcc2.7.2kmc and gcc2.7.2 at their canonical flags: `register int g __asm__("$16");
+  // int f(void){ return g; }` is `jr ra; move v0,s0`, and `$23`/`$30` give s7/s8. KMC's `-fno-asm`
+  // rejects the bare `asm(` spelling, which is why every target spells `__asm__`. IDO 7.1 has no
+  // such declaration (its cfe rejects both spellings), so MIPS_IDO states none.
+  globalRegisterVariables: {
+    regs: {
+      ...Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`s${i}`, `$${16 + i}`])),
+      s8: '$30',
+      fp: '$30',
+    },
+  },
   kernelRegs: ['k0', 'k1'],
   runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
@@ -1683,6 +1732,14 @@ export const PPC_MWCC: TargetDescription = {
   // r11 is the save routines' frame address and r12 `__ptmf_scall`'s member-function pointer: a
   // read of either that no path's definition joins refuses instead of minting `uninit_r11`.
   hiddenInputRegs: ['r11', 'r12'],
+  // MEASURED on 2.4.2 and 2.4.7 at -O4,p: `register int g __asm__("r14"); int f(void){ return g; }`
+  // is `mr r3,r14`. They accept r14..r28 only ("supports 15 registers beginning with r14") and no
+  // gap among them ("nothing at 'r19' not permitted"), in any declaration order. 2.3.3 refuses the
+  // storage class, so `mwcc_233_163n` drops this field.
+  globalRegisterVariables: {
+    regs: Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`r${14 + i}`, `r${14 + i}`])),
+    contiguous: Array.from({ length: 15 }, (_, i) => `r${14 + i}`),
+  },
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third
@@ -1767,6 +1824,10 @@ export const PPC_MWCC: TargetDescription = {
   },
 };
 
+/** CodeWarrior 2.3.3b163n (Pikmin): `PPC_MWCC` but for the one declaration a probe refuted there —
+ *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one. */
+export const PPC_MWCC_233: TargetDescription = { ...PPC_MWCC, globalRegisterVariables: undefined };
+
 /** A toolchain: one compiler binary, named as decomp.me names it. Several toolchains may share a
  *  description (`MIPS_GCC` serves two), and each keeps its own evidence. */
 export interface ToolchainTarget {
@@ -1840,7 +1901,8 @@ export const TOOLCHAIN_TARGETS = {
     description: PPC_MWCC,
   },
   // The other two CodeWarrior builds the GameCube projects compile with: 2.3.3b163n (Pikmin's whole
-  // game tree) and 2.4.7b107 (Mario Party 4's DOL). Both SHARE `PPC_MWCC`, and on their own evidence
+  // game tree) and 2.4.7b107 (Mario Party 4's DOL). Both SHARE `PPC_MWCC` (2.3.3 less the global
+  // register variables it refuses, `PPC_MWCC_233`), and on their own evidence
   // rather than because they are the same compiler family: `test/matching/ppc-compiler-behaviors.test.ts`
   // re-runs both of its probes on each binary at the flags that build's rows compile at, and each
   // reads as the description says. What moves those readings is the optimisation level — at `-O0,p`
@@ -1852,7 +1914,7 @@ export const TOOLCHAIN_TARGETS = {
   // are two different sets, neither of which is "the" one. See `canonicalFlags` above.
   mwcc_233_163n: {
     family: 'mwcc',
-    description: PPC_MWCC,
+    description: PPC_MWCC_233,
   },
   mwcc_247_107: {
     family: 'mwcc',
@@ -1986,6 +2048,10 @@ export function structureOptionsFor(
     ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),
   };
 }
+
+/** The global a register `globalRegisterVariables` names is lifted as (`asmName` its `__asm__`
+ *  name: `greg_r8`, and `greg_r16` for MIPS `$16`). */
+export const globalRegisterSymbol = (asmName: string): string => `greg_${asmName.replace(/^\$/, 'r')}`;
 
 /** The candidate prelude: a `typedef` for every name in the scalar vocabulary. PRINTED from
  *  `proto.ts`'s `PRELUDE_TYPEDEFS` rather than spelled out, because the other reader of that

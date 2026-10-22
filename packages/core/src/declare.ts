@@ -222,6 +222,14 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       lines.push(`#define ${name} ${info.macroBody}`);
       continue;
     }
+    // A GLOBAL REGISTER VARIABLE declares itself in its register (SymbolInfo.globalRegister), typed
+    // as a name-only global is: a pointer where the body stores or meets one, else the word the
+    // body accesses.
+    if (info.globalRegister !== undefined) {
+      const t = holdsPointer ? 'void *' : `${intType(access?.width ?? 4, access?.signed ?? true) ?? 's32'} `;
+      lines.push(`register ${t}${name} __asm__("${info.globalRegister}");`);
+      continue;
+    }
     // A CALL TARGET the project declared completely — its own prototype, re-spelled from the
     // parameter and return type texts the project wrote. This is the one declaration here that
     // is load-bearing for the CALL and not only for the name: an implicit declaration is `int`,
@@ -362,18 +370,23 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   return lines.length ? lines.join('\n') + '\n' : '';
 }
 
-/** The object-like `#define`s out of a rendered declaration block.
+/** THE LINES OF A RENDERED DECLARATION BLOCK THAT THE HEADERS WORLD KEEPS: its object-like
+ *  `#define`s and its global register variables. Everything else there is owned by the injected
+ *  headers (a duplicate typedef or struct definition is a C89 hard error), and these two are not:
  *
- *  Address-cast macro defines are the one part of a synthesized block that must survive into the
- *  HEADERS world too. Everything else there is owned by the injected headers (a duplicate typedef
- *  or struct definition is a C89 hard error), but a duplicate `#define` with an identical body is
- *  legal — and a PREPROCESSED project context has no macros left at all, so dropping these turns a
- *  macro-named candidate into an `undeclared identifier` rather than a spelling choice. */
-export function macroDefinesOf(declarations: string | undefined): string {
+ *  - an address-cast macro, because a duplicate `#define` with an identical body is legal — and a
+ *    PREPROCESSED project context has no macros left at all, so dropping these turns a macro-named
+ *    candidate into an `undeclared identifier` rather than a spelling choice;
+ *  - a global register variable (`register T greg_r8 __asm__("r8");`, SymbolInfo.globalRegister),
+ *    because no header declares the name the lift made up for it.
+ *
+ *  Chosen by each line's leading keyword, which `renderDeclarations` prints for these two kinds
+ *  only: a new kind of line it prints with either keyword rides into the headers world too. */
+export function declarationsKeptWithHeaders(declarations: string | undefined): string {
   if (!declarations) {
     return '';
   }
-  const lines = declarations.split('\n').filter((l) => l.startsWith('#define '));
+  const lines = declarations.split('\n').filter((l) => l.startsWith('#define ') || l.startsWith('register '));
   return lines.length ? lines.join('\n') + '\n' : '';
 }
 

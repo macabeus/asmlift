@@ -888,12 +888,14 @@ describe('the derived rank survives the round trip back into strides', () => {
         }
         const asm = thumb(
           'f',
-          `\tldr\tr7, .L3\n${strides
+          `\tpush\t{r5, r6, r7}\n\tldr\tr7, .L3\n${strides
             .map((st, n) => `\tmov\tr6, #${st}\n\tmul\tr${n}, r6\n`)
             .join('')}\tmov\tr5, r0\n${strides
             .slice(1)
             .map((_, n) => `\tadd\tr5, r5, r${n + 1}\n`)
-            .join('')}\tadd\tr5, r5, r7\n\tldr${width === 1 ? 'b' : width === 2 ? 'h' : ''}\tr0, [r5]`,
+            .join(
+              '',
+            )}\tadd\tr5, r5, r7\n\tldr${width === 1 ? 'b' : width === 2 ? 'h' : ''}\tr0, [r5]\n\tpop\t{r5, r6, r7}`,
           '.word\tgTbl',
         );
         const si = derive('f', asm).get('gTbl');

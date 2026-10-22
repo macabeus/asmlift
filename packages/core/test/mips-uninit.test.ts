@@ -294,9 +294,25 @@ describe('the register half: scratch and saved registers', () => {
 
   // The save is the frontend's half of the rule: without it the register may be a value handed
   // over by asm that follows no ABI, so it keeps the parameter it always had.
-  test('an s-register nothing saved, or that was read before its store, stays a parameter', () => {
-    expect(src(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_GCC)).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/);
-    expect(src(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/);
+  // …and one nothing saved, or read before its store, is no local of this function and no argument
+  // either: a C caller passes a1 in a1, never in s1. gcc compiles `register int g __asm__("$17");`
+  // to exactly that read, so where gcc is the compiler it is that global; IDO has no such
+  // declaration, and refuses.
+  test('an s-register nothing saved, or that was read before its store, is a global register variable', () => {
+    expect(src(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_GCC)).toBe('s32 f(s32 a0) {\n    return greg_r17 + a0;\n}\n');
+    // (a global's register is one compiled code never saves, so its store after the read is a
+    // value — the global's, at that point — and the reload puts that value back in the global)
+    expect(src(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    v0 = greg_r17;\n    greg_r17 = greg_r17;\n    return v0 + a0;\n}\n',
+    );
+    const refused = /it reads callee-saved s1 before writing it, and no store in its entry block saves s1/;
+    expect(lift(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_IDO)).toThrow(refused);
+    expect(lift(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_IDO)).toThrow(refused);
+    // …and a write is the global's store, which IDO refuses too
+    expect(src(['0:\tjr\tra', '4:\tmove\ts0,a0'], MIPS_GCC)).toBe('void f(s32 a0) {\n    greg_r16 = a0;\n}\n');
+    expect(lift(['0:\tjr\tra', '4:\tmove\ts0,a0'], MIPS_IDO)).toThrow(
+      /it writes callee-saved s0, and no store in its entry block saves s0/,
+    );
   });
 
   test('an argument register read first stays a parameter', () => {

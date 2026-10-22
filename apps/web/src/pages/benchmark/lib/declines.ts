@@ -26,16 +26,16 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 289 distinct decline messages (the texts reached by
+// `packages/core/src` throws 293 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 105 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       29  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, alignment fill that depends on the function's base
 //                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
@@ -43,7 +43,8 @@
 //                               `bl` whose target this asm defines as a data label, an unmarked `bl`
 //                               to a label of this function (a call thunk), a call
 //                               through `sp` or `lr`, a return that does not jump through the
-//                               caller's lr, and the reaching-compare throw
+//                               caller's lr, a `pop` that loads a callee-saved register with a word
+//                               not its own save and returns so, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
@@ -79,6 +80,14 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ssa.ts          7  a register read round a cycle through the entry block with no join,
+//                               a struct one call hands back in the return register passed on
+//                               as the next guessed call's first argument, or copied into another
+//                               of a guessed call's arguments, an incoming stack
+//                               argument past the words the function's own declaration fills, and a
+//                               callee-saved register the function never saved read before any
+//                               write or written (a global register variable), and a write to a
+//                               saved MIPS or PowerPC register that reaches a return unrestored
 //   frontend/call-plan.ts    5  a call returning a struct through a hidden pointer whose parameters
 //                               nothing sizes, one whose declaration the lifted source cannot print (a
 //                               type it has no spelling for, or a bare parameter count that states
@@ -90,11 +99,6 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          4  a register read round a cycle through the entry block with no join,
-//                               a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument, or copied into another
-//                               of a guessed call's arguments, and an incoming stack
-//                               argument past the words the function's own declaration fills
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
 //   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
 //                               callee handed back in it, where the callee's leftover bits are no value

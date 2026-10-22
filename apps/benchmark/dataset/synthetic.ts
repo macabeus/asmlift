@@ -13117,6 +13117,69 @@ export const SYNTHETIC: SynthSpec[] = [
       retarm1_tail: { returnsVoid: true },
     },
   },
+  // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
+  // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
+  // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a
+  // write (`g = a;`) the caller sees. Each compiler takes its own register set
+  // (`globalRegisterVariables` in core target.ts); mwcc 2.4 only as a run from r14, so `_r15` declares
+  // r14 beside it. IDO 7.1 and mwcc 2.3.3 reject the declaration, so they have no row.
+  ...(
+    [
+      ['', ['agbcc'], '__asm__("r8")'],
+      ['_s0', ['gcc2.7.2kmc', 'gcc2.7.2'], '__asm__("$16")'],
+      ['_r15', ['mwcc_242_81'], '__asm__("r15")'],
+    ] as const
+  ).flatMap(([suffix, toolchains, reg]): SynthSpec[] => {
+    const decl = `${suffix === '_r15' ? 'register int g0 __asm__("r14"); ' : ''}register int g ${reg};\n`;
+    // one argument past the registers: a0..a3 on O32, r3..r10 on the EABI
+    const regArgs = suffix === '_r15' ? 8 : 4;
+    const ks = Array.from({ length: regArgs }, (_, i) => `${i + 1}, `).join('');
+    const kParams = Array(regArgs + 1)
+      .fill('int')
+      .join(',');
+    return [
+      {
+        sym: `grv_read${suffix}`,
+        src: `${decl}int grv_read${suffix}(void){ return g; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+      },
+      {
+        sym: `grv_add${suffix}`,
+        src: `${decl}int grv_add${suffix}(int a){ return a + g; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+      },
+      {
+        sym: `grv_write${suffix}`,
+        src: `${decl}void grv_write${suffix}(int a){ g = a; }`,
+        features: ['global'],
+        toolchains: [...toolchains],
+        ctx: `void grv_write${suffix}(int);`,
+        proto: { [`grv_write${suffix}`]: { returnsVoid: true } },
+      },
+      // …passed as an argument past the registers: gcc and KMC store it to 16(sp), mwcc to 8(r1),
+      // in the entry block, and never reload it — a store, not a save, so the word is the call's
+      // last argument (mwcc's parameter area is not modelled, so its rows refuse; so does agbcc's
+      // `str` to [sp], which is why it has none).
+      ...(suffix === ''
+        ? []
+        : [
+            [`grv_stkarg${suffix}`, `int grv_stkarg${suffix}(void){ return k(${ks}g) + g; }`, 'int', 'void'],
+            [`grv_stkargw${suffix}`, `void grv_stkargw${suffix}(int a){ g = a; k(${ks}g); }`, 'void', 'int'],
+          ].map(([sym, body, ret, params]): SynthSpec => ({
+            sym,
+            src: `${decl}int k(${kParams});\n${body}`,
+            features: ['global'],
+            toolchains: [...toolchains],
+            ctx: `int k(${kParams});\n${ret} ${sym}(${params});`,
+            proto: {
+              k: { params: regArgs + 1 },
+              ...(ret === 'void' ? { [sym]: { returnsVoid: true } } : {}),
+            },
+          }))),
+    ];
+  }),
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

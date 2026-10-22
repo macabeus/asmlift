@@ -1708,13 +1708,47 @@ of the same game whose C declares that local uninitialised (`CheckTileCollisionV
 Measuring the save costs one scan of the entry block's leading run, in the module that had already
 walked that prologue for `localArea` — `mov rLow, rHi; push {rLow}` counts as a save of `rHi`, which
 is how agbcc saves r8-sl and how every high-register inhabitant here is saved. Whole effect on the
-corpus: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` get their signature back; the
-three `SoundMainBTM` (`mov ip, r4`, no prologue either) go back to the fabricated trailing parameter
-they had before this capability existed, which is an over-count and not a wrong answer.
+corpus when it landed: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` got their
+two-pointer signature back, and the three `SoundMainBTM` (`mov ip, r4`, no prologue either) went
+back to the trailing parameter they had before. Both readings were later found wrong — the registers
+they read there are no parameters at all — and the next paragraph says what they are now.
 
-The gap this leaves is one direction only. A register in the ABI list that the prologue did not save
-falls back to being a parameter — the treatment a target declaring no partition gets — so what the
-model cannot describe costs an invented argument, never an invented local.
+A `push` past that leading run is a save too, where nothing on any path uses the register before
+it (`bodySavedRegs`): hand-written asm saves late (`beq .L1; push {r4}; …; pop {r4}`), and a `push`
+is nothing but a save. Its `pop` ends the save: past the restore the register is the caller's again,
+so a use there, a save whose word is popped into another register or dropped with `add sp`, and a
+use ahead of the save on some path all leave a register that is neither a local nor a global, and
+it refuses — the prologue's save included. Which `pop` restores is a question about WORDS, not
+names: the walk tracks whose entry value each pushed word holds, so `push {r4, r5}; pop {r5}; pop
+{r4}` — both names popped, the caller's r4 and r5 swapped — restores neither, and a callee-saved
+register a pop fills with another register's word and carries to a return refuses outright (the
+fill reads the `pop` as transparent, so no write of the body would show it). Matched by name, that
+shape and agbcc's r8/sl staging with its two `mov`s crossed lifted as if restored. A word is a
+register's own only while the register still held its entry value when pushed: re-pushed after a
+write, a foreign pop or an `add sp` that dropped its save, it holds the function's value, and its
+pop restores nothing. Paths as deep that disagree about a word make that word no register's; only
+paths that disagree about the depth leave the stack unknown and a restore read by name. The O32 and PowerPC frontends keep the entry-block
+reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
+the stack as `sw s0,16(sp)`, and mwcc as `stw r14,8(r1)`, in the entry block itself. So there a
+store is a save only where some reload of the register from the stack answers it, and never for
+a register the function reads as a global register variable; and a save holds only while every
+path restores it after its last write (`refuseSavedRegisterLeaks`), the counterpart of the `pop`
+that ends a Thumb save: a write past the restore, a reload from another word, or a return the
+restore never reaches leaves the caller a value the C never assigns, and refuses. And the register is keyed by its spelling throughout, so a function
+that writes one register two ways (`sl` and `r10`, `s8` and `fp`) is read in one of them
+(`unifyRegisterSpellings`); saved as one and used as the other, it read as never saved.
+
+A register in the ABI list that the prologue did not save is no argument either: a C caller passes
+nothing there, so naming it a parameter puts a value in the signature the caller would hand over in
+`r0`-`r3`. Compiled code reaches that shape one way, a FILE-SCOPE GLOBAL REGISTER VARIABLE
+(`register int g __asm__("r8");` — gcc's `globalize_reg`, regclass.c:587-611, makes the register
+fixed and call-used, so no prologue saves it), and `return g;` / `g = a;` compile to exactly the
+unsaved read and write. So the model's third list is that register: where the compiler can declare
+one (`globalRegisterVariables` — agbcc r4-r11, gcc 2.7.2 and KMC s0-s8, mwcc 2.4.2/2.4.7 r14-r28 as
+a run from r14), every read of it is a load of that global and every write a store, which a call in
+between may change like any global's; `ChnVolSetAsm` lifts to `((u8 *)greg_r4)[18]`, byte-exact
+against agbcc's own compile of `register u8 *ra __asm__("r4")`. Where it cannot (IDO 7.1, mwcc
+2.3.3, PowerPC r29-r31), the read and the write refuse (`unsavedCalleeSavedRegs`).
 
 O32 needs the same clause for the opposite reason. Its scratch set is thirteen registers (`at`,
 `v0`/`v1`, `t0`-`t9`) where Thumb's is `ip` alone, so the save is no evidence there, and hand-written

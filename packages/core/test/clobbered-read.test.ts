@@ -68,7 +68,7 @@ describe('what a call clobbers', () => {
     // …and every description the registry names is reached, so the loop cannot pass by running
     // over an empty registry.
     expect(seen).toContain(MIPS_GCC);
-    expect(seen.size).toBe(4);
+    expect(seen.size).toBe(5);
   });
 
   // THE ALIASING `readGuessedArg` RESTS ON IS PER-TARGET, and two of the four do not have it.

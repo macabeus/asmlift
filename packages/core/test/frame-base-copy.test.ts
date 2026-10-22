@@ -582,7 +582,10 @@ describe('the audit judges each frame object on its own bytes', () => {
           '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x8\n\tbl\tmemcpy\n' +
             `\tmov\tr1, sp\n\tadd\tr0, r1, r4\n${access}`,
           '0x8',
-        ) + '.L3:\n\t.word\ttbl\n';
+        )
+          // r5 holds the stored value, so this one saves it too
+          .replace('\tpush\t{r4, lr}\n', '\tpush\t{r4, r5, lr}\n')
+          .replace('\tpop\t{r4}\n', '\tpop\t{r4, r5}\n') + '.L3:\n\t.word\ttbl\n';
 
       test('a byte load at the indexed address is an element of the declared bytes', () => {
         expect(lift(indexed('\tldrb\tr0, [r0]\n')).source).toContain('u8 sp0[8];');

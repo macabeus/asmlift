@@ -122,12 +122,12 @@ test('an adjacent `@ha`/`@l` pair recovers the named global', () => {
 test('a pair eleven instructions apart folds — the pairing never looks at adjacency', () => {
   // pikmin:searchKanjiCode__FUs's shape: the `lis` is hoisted to the top of the prologue and its
   // `addi` lands after six unrelated instructions. 26% of the corpus's pairs are not adjacent.
-  const filler = [2, 3, 4, 5, 6, 7].map((k) => `  ${k}0:\tli      r${k + 20},${k}\n`).join('');
+  const filler = [2, 3, 4, 5, 6, 7].map((k) => `  ${k}0:\tli      r${k + 3},${k}\n`).join('');
   const asm =
     '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
     filler +
-    '  80:\taddi    r29,r4,0\n\t\t\t82: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
-    '  84:\tlbz     r3,0(r29)\n  88:\tblr\n';
+    '  80:\taddi    r11,r4,0\n\t\t\t82: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    '  84:\tlbz     r3,0(r11)\n  88:\tblr\n';
   expect(dis('searchKanji', asm)).toContain('kanji_convert_table');
 });
 

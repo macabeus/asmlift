@@ -27,7 +27,7 @@ import { T } from '../ir/types';
 import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
-import type { TargetDescription } from '../target';
+import { O32_REGISTER_ALIASES, type TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
 import { callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads } from './dead-reads';
@@ -94,7 +94,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, registerLiveIns } from './ssa';
+import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns, unifyRegisterSpellings } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1443,6 +1443,8 @@ function liftOnce(
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
+  // $30 has two names, and everything below keys a register by its spelling.
+  unifyRegisterSpellings(instrs, O32_REGISTER_ALIASES);
   // Headerless input — a raw fragment, and every Splat listing — says where the function starts
   // only by its first line.
   const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
@@ -1597,10 +1599,19 @@ function liftOnce(
   // bounds the argument registers (`ownArgumentWordsOn`): KMC and gcc 2.7.2 home a local in a2/a3
   // past a two-parameter one.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width ?? FP_CONVERT[m]?.width ?? FP_COMPARE[m]?.width);
-  const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
+  const savedRegs = prologueSavedRegs(
+    [...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])],
+    target,
+    instrs,
+  );
   // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
   // builder asks for before that claims no frame, which only refuses more.
   let ownedFrameOf: (() => { from: number; to: number } | undefined) | undefined;
+  const liveIns = registerLiveIns(
+    target,
+    savedRegs,
+    options.contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
+  );
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
@@ -1608,15 +1619,13 @@ function liftOnce(
     () => {
       const owned = ownedFrameOf?.();
       return {
-        ...registerLiveIns(
-          target,
-          savedRegs,
-          options.contextOwnWords ?? ownArgumentWordsOn(name, prototypes[name], target),
-        ),
+        ...liveIns,
+        saveSite: 'store in its entry block',
         ...(owned === undefined ? {} : { ownedLocals: owned }),
       };
     },
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
+    liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
@@ -1759,6 +1768,9 @@ function liftOnce(
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
   const restores = new Map<Value, { reg: string; addr: number }>();
+  // Each `lw` that restores a save, and the register it restores: a save holds only while every path
+  // restores it after its last write (`refuseSavedRegisterLeaks`).
+  const restoredBy = new Map<Instr, ReadonlySet<string>>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`):
   // IDO's `lw zero`, which `write` drops, so the load's value is recorded here or nowhere.
@@ -2766,6 +2778,7 @@ function liftOnce(
           }
           const caller = mkValue(T.unk(32));
           restores.set(caller, { reg: d, addr: ins.addr });
+          restoredBy.set(ins, new Set([d]));
           write(d, caller);
           return;
         }
@@ -2820,7 +2833,11 @@ function liftOnce(
       // slot's value in SSA, do NOT emit a `store` through `sp`. A never-reloaded spill (the ABI
       // home-slot store) then has no uses and simply drops. See isStackPtr / spSlotSafe.
       if (spSlotSafe && isStackPtr(base) && width === 4) {
-        if (savedByCallee(srcReg) && ssa.holdsEntryValue(srcReg, bi)) {
+        // A global register variable's register is never saved — compiled code stores it only as a
+        // value, the outgoing stack argument `k(1, 2, 3, 4, g)` is (`sw s0,16(sp)`) — and the builder
+        // records no definition for one (its writes are stores to the global), so "still holds the
+        // entry value" is no evidence of a save there.
+        if (savedByCallee(srcReg) && !liveIns.globalRegs?.has(srcReg) && ssa.holdsEntryValue(srcReg, bi)) {
           refuseMixedSlot(ins, mem, off, 'save');
           saveSlots.set(off, srcReg);
           return;
@@ -3109,6 +3126,17 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  refuseSavedRegisterLeaks(
+    name,
+    blocks.map((b) => ({
+      instrs: [...b.body, ...(b.delay ? [b.delay] : [])],
+      returns: b.branch !== null && isReturn(b.branch) && b.branch.ops[0] === 'ra',
+    })),
+    preds,
+    new Set([...saveSlots.values()].filter((r) => r !== 'ra')),
+    (ins, r) => writtenReg(ins) === r,
+    restoredBy,
+  );
   // What the float home holds at each return, and, where the home is undecided and holds a float on
   // every path into every return, that float — read now, before the SSA is finished.
   const homes = fpu ? returns.map(({ bi }) => floatHomeAt(ssa, fpu.returnReg, bi)) : [];
@@ -3247,18 +3275,34 @@ function takesFrameAddress(ins: Instr): boolean {
  *  block, so never this one) before any instruction NAMES that register, read or written. What it
  *  stores is then what the caller left there, which is the half of `LiveInModel.uninitRegs` the
  *  frontend owes: a compiler homes a local in a callee-saved register only after saving it, so a
- *  def-less read of a saved one is that local, uninitialised, and of an unsaved one stays the
- *  parameter it would have been. "Nothing named it first" is PPC's condition
+ *  def-less read of a saved one is that local, uninitialised, and of an unsaved one is a global
+ *  register variable's or refuses (`registerLiveIns`). "Nothing named it first" is PPC's condition
  *  (`prologueSavedRegs` there): a read before the store would be a use of the caller's value. A
- *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all. */
-function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+ *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all.
+ *
+ *  A SAVE IS RELOADED. In a function that returns, a store no `lw` of the same register from `sp`
+ *  ever answers saves nothing: the caller gets the register back as the body left it, so the word
+ *  is a value. gcc 2.7.2 and KMC put exactly such a store in the entry block for a file-scope
+ *  global register variable passed on the stack — `register int g __asm__("$16"); return k(1, 2,
+ *  3, 4, g) + g;` is `sw s0,16(sp); jal k` and no reload of s0 — and counting it as a save would
+ *  turn the read of `g` after the call into `uninit_s0` and drop the fifth argument. Any `lw` of the
+ *  register from `sp` will do, whatever its word: which word a restore reads is judged where it is
+ *  lowered. A function with no return keeps the entry-block reading: nothing reaches a caller. */
+function prologueSavedRegs(
+  entry: readonly Instr[],
+  target: TargetDescription,
+  code: readonly Instr[],
+): ReadonlySet<string> {
   const saved = new Set<string>();
   const named = new Set<string>();
   const calleeSaved = (r: string) => isMipsReg(r) && !r.startsWith('$') && !target.callerSaved.includes(r);
+  const returns = code.some((ins) => ins.mnemonic === 'jr' && ins.ops[0] === 'ra');
+  const reloaded = (r: string) =>
+    code.some((ins) => ins.mnemonic === 'lw' && ins.ops[0] === r && isStackPtr(parseMem(ins.ops[1] ?? '').base));
   for (const ins of entry) {
     const [src, mem] = ins.ops;
     if (ins.mnemonic === 'sw' && src !== undefined && mem !== undefined && isStackPtr(parseMem(mem).base)) {
-      if (calleeSaved(src) && !named.has(src)) {
+      if (calleeSaved(src) && !named.has(src) && (!returns || reloaded(src))) {
         saved.add(src);
       }
     }

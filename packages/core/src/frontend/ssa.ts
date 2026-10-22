@@ -33,6 +33,7 @@ import {
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
+import { globalRegisterSymbol } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
@@ -266,14 +267,15 @@ export interface LiveInModel {
    *  saved the register (so it is one the compiler was free to home a local in). The ABI half alone
    *  describes the CALLER, and asm that follows no ABI — hand-written, or a mid-function fragment,
    *  which klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed live values
-   *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
-   *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
+   *  in registers it never saved. Passing the ABI list unfiltered left the MP2K engine's
+   *  `ChnVolSetAsm` storing through `uninit_r4`, silently; such a read is
+   *  `unsavedCalleeSavedRegs`' instead.
    *
    *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it. Thumb reads
-   *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
-   *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
-   *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
-   *  leading run meets by construction; MIPS reads its entry block the same way
+   *  its `push`es (`savedRegs`; past the prologue, `bodySavedRegs`). PPC reads every save in the
+   *  entry block of a register nothing before it named (`prologueSavedRegs`), because mwcc
+   *  interleaves its saves with the body (`stw r31; mr r31,r3; stw r30`); "nothing named it first"
+   *  is the condition Thumb's leading run meets by construction; MIPS reads its entry block the same way
    *  (frontend/mips.ts `prologueSavedRegs`). A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
    *
@@ -299,6 +301,34 @@ export interface LiveInModel {
    *  carried round a loop meets its own next value at the loop header. Meeting no such join, it is
    *  the input, and `finish` refuses rather than spell it `uninit_<reg>`. */
   hiddenInputRegs?: readonly string[];
+  /** Registers the ABI requires a callee to PRESERVE (`target.nonArgRegs` less `target.scratchRegs`)
+   *  that this function did NOT save — the third side of the register partition. No caller passes
+   *  an argument in one, and the compiler homed no local of this function there, so a value it holds
+   *  on entry is one the function shares with every other: a FILE-SCOPE GLOBAL REGISTER VARIABLE
+   *  (`register int g asm("r8");`), which is exactly what agbcc, gcc 2.7.2, KMC and mwcc 2.4 compile
+   *  `return g;` to (`mov r0, r8`, `move v0,s0`, `mr r3,r14`). gcc's `globalize_reg` (regclass.c)
+   *  marks such a register fixed and call-used, so no prologue saves it. A def-less read of one
+   *  refuses: naming it a parameter puts a value in the signature that a C caller would pass in an
+   *  argument register. A WRITE to one is visible to the caller just the same. Both refuse in
+   *  `finish`, of the finished function — unless the compiler can spell the global, which is
+   *  `globalRegs`.
+   *
+   *  Disjoint from `argRegs` and `uninitRegs`, checked with them. */
+  unsavedCalleeSavedRegs?: readonly string[];
+  /** Of `unsavedCalleeSavedRegs`, the ones the function does save or restore, but not around every
+   *  use or not restored at every return (a `pop` with no `push` before it, a `push` past a read, a
+   *  use past the restore). Refused like the rest, and named apart only so the refusal says what it
+   *  saw. */
+  misSavedRegs?: readonly string[];
+  /** Where the frontend looks for the saves it measures, for those refusals to name: the partition
+   *  is only as wide as that look, and a save it does not read is still a save. */
+  saveSite?: string;
+  /** The registers of `unsavedCalleeSavedRegs`' kind the target can declare a global register
+   *  variable in (`target.globalRegisterVariables`), each to the name `__asm__` takes. Every read of
+   *  one is a load of that global and every write a store to it, so a call between two reads may
+   *  change it, as it may change any global. Disjoint from the other three lists, checked with
+   *  them. */
+  globalRegs?: ReadonlyMap<string, string>;
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
    *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
@@ -342,6 +372,14 @@ function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
         `and one the ABI does not pass arguments in`,
     );
   }
+  const unsaved = [...(m.unsavedCalleeSavedRegs ?? []), ...(m.globalRegs?.keys() ?? [])];
+  const twice = unsaved.filter((r, i) => args.includes(r) || m.uninitRegs?.includes(r) || unsaved.indexOf(r) !== i);
+  if (twice.length > 0) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists ${twice.join(', ')} as an unsaved callee-saved ` +
+        `register AND as an argument register or an uninitialised local's home`,
+    );
+  }
   return m;
 }
 
@@ -363,13 +401,45 @@ export function assertScratchRegsPartitioned(target: {
   return scratchRegs;
 }
 
+/** ONE SPELLING PER REGISTER, WHERE A FUNCTION WRITES ONE REGISTER TWO WAYS. The builder keys a
+ *  register by its operand text, and so does every save measurement a frontend makes, so `sl` and
+ *  `r10` (or O32's `s8` and `fp`) would be two variables and two partition entries for one register:
+ *  `mov sl, r0; mov r0, r10` would return a second parameter where the machine returns the first,
+ *  and a register saved as `s8` and written as `fp` would read as never saved, its writes as a
+ *  global's. `pairs`
+ *  is each register's two spellings, the one kept first. Only a function that names BOTH of a pair
+ *  is rewritten — every other keeps the spelling it was written in, and with it the name of any local
+ *  homed there — and an alias is rewritten wherever it stands as a whole word of an operand, so a
+ *  memory operand's base (`8(fp)`) is too. */
+export function unifyRegisterSpellings(
+  instrs: Iterable<{ ops: string[] }>,
+  pairs: readonly (readonly [keep: string, alias: string])[],
+): void {
+  const all = [...instrs];
+  const words = new Set(all.flatMap((ins) => ins.ops.flatMap((op) => op.match(/[A-Za-z_$.][\w$.]*/g) ?? [])));
+  for (const [keep, alias] of pairs) {
+    if (!words.has(keep) || !words.has(alias)) {
+      continue;
+    }
+    const re = new RegExp(`(?<![\\w$.])${alias}(?![\\w$.])`, 'g');
+    for (const ins of all) {
+      ins.ops = ins.ops.map((op) => op.replace(re, keep));
+    }
+  }
+}
+
 /** THE REGISTER HALF OF THE LIVE-IN MODEL (`LiveInModel.uninitRegs` and `argRegs`), composed here
  *  once for every frontend that claims it, so that no frontend can drop a half of the rule. A
  *  register is an uninitialised local's home when the ABI passes no argument in it
  *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
  *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
- *  of its own prologue. A target stating no `nonArgRegs` claims no partition and gets an empty
- *  model, so every def-less read stays a parameter.
+ *  of its saves. The rest — callee-saved, and not saved — is `globalRegs` where the target can
+ *  declare a global register variable there and `unsavedCalleeSavedRegs` where it cannot, or where
+ *  the function saves or restores it but not around every use of it (`misSaved`, a measurement only
+ *  Thumb makes, whose `push` and `pop` are nothing but saves and restores): compiled code never saves
+ *  a global register variable's register, and asm that saves one restores it too, so its writes are
+ *  not the caller's and its entry value is no global's. A target stating no `nonArgRegs` claims no
+ *  partition and gets an empty model, so every def-less read stays a parameter.
  *
  *  THE FUNCTION'S OWN DECLARATION MOVES THE PARTITION'S EDGE. `ownWords` is how many argument
  *  words it can fill (`proto.ts` `ownArgumentWords`, an upper bound), and an argument register at
@@ -385,10 +455,21 @@ export function registerLiveIns(
     nonArgRegs?: readonly string[];
     scratchRegs?: readonly string[];
     hiddenInputRegs?: readonly string[];
+    globalRegisterVariables?: { regs: Readonly<Record<string, string>> };
   },
   savedRegs: ReadonlySet<string>,
   ownWords?: number,
-): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs' | 'ownArgWords'> {
+  misSaved: ReadonlySet<string> = new Set(),
+): Pick<
+  LiveInModel,
+  | 'uninitRegs'
+  | 'argRegs'
+  | 'hiddenInputRegs'
+  | 'ownArgWords'
+  | 'unsavedCalleeSavedRegs'
+  | 'misSavedRegs'
+  | 'globalRegs'
+> {
   const scratchRegs = assertScratchRegsPartitioned(target);
   for (const r of target.hiddenInputRegs ?? []) {
     if (!scratchRegs.has(r)) {
@@ -399,6 +480,8 @@ export function registerLiveIns(
     return {};
   }
   const filled = ownWords === undefined ? target.argRegs.length : Math.min(ownWords, target.argRegs.length);
+  const unsaved = target.nonArgRegs.filter((r) => !scratchRegs.has(r) && !savedRegs.has(r));
+  const spelled = target.globalRegisterVariables?.regs ?? {};
   return {
     uninitRegs: [
       ...target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
@@ -406,8 +489,84 @@ export function registerLiveIns(
     ],
     argRegs: target.argRegs.slice(0, filled),
     hiddenInputRegs: target.hiddenInputRegs,
+    unsavedCalleeSavedRegs: unsaved.filter((r) => !Object.hasOwn(spelled, r) || misSaved.has(r)),
+    misSavedRegs: unsaved.filter((r) => misSaved.has(r)),
+    globalRegs: new Map(
+      unsaved.filter((r) => Object.hasOwn(spelled, r) && !misSaved.has(r)).map((r) => [r, spelled[r]]),
+    ),
     ...(ownWords === undefined ? {} : { ownArgWords: ownWords }),
   };
+}
+
+/** REFUSE A WRITE TO A SAVED REGISTER THAT THE CALLER SEES. A register the frontend read as saved
+ *  (its save store, `LiveInModel.uninitRegs`) is a local's home, and the lift drops what is left
+ *  in it at a return — right only if every path restores it after its last write. A write past the
+ *  restore (`lw s0,4(sp); move s0,a0; jr ra`), a reload from a word that is not its save, or a
+ *  return its restore never reaches leaves the caller holding a value the C never assigns, so the
+ *  function refuses here rather than drop it. MIPS and PowerPC read a save as an ordinary store in
+ *  the entry block, so this is asked once the blocks are filled; Thumb asks the same of its
+ *  `push`/`pop` pairs in `bodySavedRegs`.
+ *
+ *  A forward may-dataflow over the asm: a register is DIRTY from a write (`writes`) until a restore
+ *  of it (`restores`: the instructions the frontend lowered as reloading its save word), and dirty
+ *  at the end of a block that returns is the refusal. Compiled code restores every saved register
+ *  in its epilogue, after its last write, so it never fires there; a path that never writes the
+ *  register needs no restore. */
+export function refuseSavedRegisterLeaks<I extends { addr: number }>(
+  name: string,
+  blocks: readonly { instrs: readonly I[]; returns: boolean }[],
+  preds: readonly (readonly number[])[],
+  saved: ReadonlySet<string>,
+  writes: (ins: I, reg: string) => boolean,
+  restores: ReadonlyMap<I, ReadonlySet<string>>,
+): void {
+  if (saved.size === 0) {
+    return;
+  }
+  // register → the address of a write no restore has answered since, on some path
+  const outs: (Map<string, number> | null)[] = blocks.map(() => null);
+  const transfer = (b: number, dirty: Map<string, number>) => {
+    for (const ins of blocks[b].instrs) {
+      for (const r of saved) {
+        if (restores.get(ins)?.has(r)) {
+          dirty.delete(r);
+        } else if (writes(ins, r)) {
+          dirty.set(r, ins.addr);
+        }
+      }
+    }
+    return dirty;
+  };
+  const inOf = (b: number) => {
+    const dirty = new Map<string, number>();
+    for (const p of preds[b]) {
+      outs[p]?.forEach((at, r) => dirty.has(r) || dirty.set(r, at));
+    }
+    return dirty;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    blocks.forEach((_, b) => {
+      if (b !== 0 && !preds[b].some((p) => outs[p] !== null)) {
+        return;
+      }
+      const out = transfer(b, inOf(b));
+      if (outs[b] === null || out.size !== outs[b]!.size) {
+        outs[b] = out;
+        changed = true;
+      }
+    });
+  }
+  blocks.forEach((blk, b) => {
+    const [leak] = blk.returns ? [...(outs[b] ?? [])] : [];
+    if (leak !== undefined) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the write to saved ${leak[0]} at 0x${leak[1].toString(16)} reaches a return ` +
+          `with no restore of ${leak[0]} after it, so the caller sees it — no C local spells a write ` +
+          'that outlives the function',
+      );
+    }
+  });
 }
 
 /** A read whose register may be holding a callee's leftover — see `refuseStaleCallerSavedReads`. */
@@ -462,6 +621,10 @@ export function makeSsaBuilder(
    *  phi. A register FILE, not a register: the FPU's keys are floats wherever they arrive, and every
    *  other key is `unknown` for type recovery to settle. */
   keyType: (key: string) => IrType | undefined = () => undefined,
+  /** `LiveInModel.globalRegs`, which every read and write consults — so it is handed over when the
+   *  builder is made, not when the model is first used. The frontend passes the same map in its
+   *  model, where it is checked against the other lists. */
+  globalRegs: ReadonlyMap<string, string> = new Map(),
 ): SsaBuilder {
   const unset = (key: string): IrType => keyType(key) ?? T.unk(32);
   let modelMemo: LiveInModel | null = null;
@@ -470,7 +633,33 @@ export function makeSsaBuilder(
   // function that reads the mis-listed register. A contradictory or half-declared partition is a
   // bug in the TARGET, not an unliftable function, so it throws a plain Error: a decline would
   // report the target's typo as a property of the input, once per function, forever.
-  const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
+  const model = (): LiveInModel => (modelMemo ??= sameGlobalRegs(checkedLiveInModel(name, liveInOf())));
+  // The model's `globalRegs` is the copy checked against the other lists, and the builder's own the
+  // one every read and write consults: two copies of one fact, which must be one.
+  const sameGlobalRegs = (m: LiveInModel): LiveInModel => {
+    const theirs = m.globalRegs ?? new Map<string, string>();
+    if (theirs.size !== globalRegs.size || [...theirs].some(([r, n]) => globalRegs.get(r) !== n)) {
+      throw new Error(`lifting '${name}': the live-in model's global registers are not the ones the builder was given`);
+    }
+    return m;
+  };
+  // What the refusals of unsaved callee-saved registers say of their saves (`misSavedRegs`).
+  const unsavedWhy = (regs: readonly string[]): string => {
+    const mis = regs.filter((r) => model().misSavedRegs?.includes(r));
+    const never = regs.filter((r) => !mis.includes(r));
+    return [
+      ...(mis.length
+        ? [
+            `saves or restores ${mis.join(', ')} but not around every use of it, restored at every return, on every path`,
+          ]
+        : []),
+      ...(never.length ? [`no ${model().saveSite ?? 'save this lift reads'} saves ${never.join(', ')}`] : []),
+    ].join(', and ');
+  };
+  // What compiled code means by such a register — but not by one the function saves and breaks the
+  // save of (`misSavedRegs`), which the measurement has shown is no global's.
+  const globalNote = (regs: readonly string[]): string =>
+    regs.some((r) => model().misSavedRegs?.includes(r)) ? '' : ' (a global register variable)';
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
@@ -677,7 +866,56 @@ export function makeSsaBuilder(
   };
 
   const frameWrites = new Set<Value>();
+  // Every key some instruction wrote, for `finish` to find a write to an unsaved callee-saved
+  // register (`LiveInModel.unsavedCalleeSavedRegs`).
+  const writtenKeys = new Set<string>();
+  // A GLOBAL REGISTER VARIABLE (`LiveInModel.globalRegs`) is memory, not an SSA variable: each
+  // read loads the global and each write stores it, at the point the instruction runs, so nothing
+  // is forwarded across a call that may change it and the caller sees every write. Appended to the
+  // block being filled, which is where a frontend puts the op that reads or writes the register.
+  const globalLoads = new Set<Value>();
+  const globalCell = (reg: string, b: number): Value => {
+    if (filled[b]) {
+      throw new Error(`lifting '${name}': global register ${reg} accessed in block ${b} after it was filled`);
+    }
+    const asmName = globalRegs.get(reg)!;
+    const cell = mkValue(T.unk(32));
+    irBlocks[b].ops.push(
+      mkOp('gaddr', { results: [cell], attrs: { sym: globalRegisterSymbol(asmName), globalRegister: asmName } }),
+    );
+    return cell;
+  };
+  // A load of one nothing reads is a frontend reading the register for a question of its own (MIPS
+  // asks of an `addu` operand more than once), not an instruction's read: reading a register does
+  // nothing, so it goes, with its address.
+  const dropUnreadGlobalRegisterLoads = (): void => {
+    if (globalRegs.size === 0) {
+      return;
+    }
+    const read = new Set<Value>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        op.operands.forEach((v) => read.add(v));
+        op.successors.forEach((s) => s.args.forEach((v) => read.add(v)));
+      }
+    }
+    for (const blk of irBlocks) {
+      const dead = new Set<Value>();
+      for (const op of blk.ops) {
+        if (op.opcode === 'load' && !read.has(op.results[0]) && globalLoads.has(op.results[0])) {
+          dead.add(op.results[0]);
+          dead.add(op.operands[0]);
+        }
+      }
+      blk.ops = blk.ops.filter((op) => !op.results.some((r) => dead.has(r)));
+    }
+  };
   const writeVar = (reg: string, b: number, v: Value) => {
+    if (globalRegs.has(reg)) {
+      irBlocks[b].ops.push(mkOp('store', { operands: [globalCell(reg, b), v], attrs: { off: 0, width: 4 } }));
+      return;
+    }
+    writtenKeys.add(reg);
     if (slotKeyOffset(reg) !== null || reg.startsWith(STACK_ARG_PREFIX)) {
       frameWrites.add(v);
     }
@@ -699,6 +937,15 @@ export function makeSsaBuilder(
     lastWriteAt[b].set(reg, writeCount[b]++);
   };
   const readVar = (reg: string, b: number): Value => {
+    if (globalRegs.has(reg)) {
+      const loaded = mkValue(T.unk(32));
+      globalLoads.add(loaded);
+      const cell = globalCell(reg, b);
+      irBlocks[b].ops.push(
+        mkOp('load', { operands: [cell], results: [loaded], attrs: { off: 0, width: 4, signed: true } }),
+      );
+      return loaded;
+    }
     const v = readAny(reg, b);
     noteStaleCandidate(reg, b, v);
     return v;
@@ -764,6 +1011,10 @@ export function makeSsaBuilder(
       // a measurement: a caller cannot pass a value in a register the ABI does not pass arguments
       // in, so a read of one before any write is an uninitialised local.
       const off = slotKeyOffset(reg);
+      if (globalRegs.has(reg)) {
+        // only `readVar` reads one, and never through the SSA: a live-in here would be a parameter
+        throw new Error(`lifting '${name}': global register ${reg} read as an SSA variable`);
+      }
       if (off !== null && !inRange(off, model().ownedLocals) && !inRange(off, model().callerParams)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${reg} is read on a path that never stores it, and lies outside ` +
@@ -1693,6 +1944,7 @@ export function makeSsaBuilder(
           }
         }
       }
+      dropUnreadGlobalRegisterLoads();
       markCopiedUndefs();
       collapseUndefinedJoins();
       simplifyTrivialPhis(fn, dropPhiRecord);
@@ -1764,6 +2016,24 @@ export function makeSsaBuilder(
               `(partially-initialised local, or storage this function does not own) — not modelled`,
           );
         }
+        // …AND NEITHER MAY A CALLEE-SAVED REGISTER THIS FUNCTION NEVER SAVED
+        // (`LiveInModel.unsavedCalleeSavedRegs`): no caller passes an argument there, so as a
+        // parameter it would be read from the argument register a C caller fills instead.
+        if (key !== undefined && koff === null && model().unsavedCalleeSavedRegs?.includes(key)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': it reads callee-saved ${key} before writing it, and ${unsavedWhy([key])} — ` +
+              `a value no caller passes as an argument${globalNote([key])} — not modelled`,
+          );
+        }
+      }
+      // A write to one is handed back to the caller (a global register variable's store,
+      // `mov r8, r0`): no C local spells it, and dropping it drops an effect.
+      const leaked = (model().unsavedCalleeSavedRegs ?? []).filter((r) => writtenKeys.has(r));
+      if (leaked.length > 0) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': it writes callee-saved ${leaked.join(', ')}, and ${unsavedWhy(leaked)} — ` +
+            `the caller sees the write${globalNote(leaked)} — not modelled`,
+        );
       }
     },
   };

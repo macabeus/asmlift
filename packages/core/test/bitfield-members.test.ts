@@ -368,7 +368,7 @@ describe('refusals — the honest mask spelling stays', () => {
     // a byte store to the very cell, between the load and the store: the load may not sink past it
     const alias =
       'f:\n\tldr\tr1, .L1\n\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n\tldrb\tr2, [r1]\n' +
-      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, #0x7\n\tstrb\tr4, [r1]\n' +
+      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr3, #0x7\n\tstrb\tr3, [r1]\n' +
       '\torr\tr0, r2\n\tstrb\tr0, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
     const src = runW(alias);
     expect(src).not.toContain('gState.hearts =');
@@ -383,7 +383,7 @@ describe('what this fold does NOT police', () => {
     // neither one. A symbol-wide alias query would refuse here and buy no ordering.
     const disjoint =
       'f:\n\tldr\tr1, .L1\n\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n\tldrb\tr2, [r1]\n' +
-      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, #0x7\n\tstrb\tr4, [r1, #0x5]\n' +
+      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr3, #0x7\n\tstrb\tr3, [r1, #0x5]\n' +
       '\torr\tr0, r2\n\tstrb\tr0, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
     const src = runW(disjoint);
     expect(src).toContain('gState.hearts = (u32)(a0 << 30) >> 30;');

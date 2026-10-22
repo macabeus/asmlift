@@ -153,12 +153,15 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   // with `sideA()` inside the loop, which is what the asm does. What still reaches the decline is
   // an `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists.
   const loop = (body: string) => `\tmov\tr4, #3\n.Llp:\n${body}\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n`;
+  // the counter lives in callee-saved r4, so the function saves it
+  const saving = (arms: string[]) =>
+    conv(arms).replace('f:\n', 'f:\n\tpush\t{r4}\n').replace('.Lend:\n\tbx\tlr\n', '.Lend:\n\tpop\t{r4}\n\tbx\tlr\n');
   // `sideB` takes one argument, so `sideA`'s result rides the loop's exit edge into it
   const intoNext = { ...SIDES, sideB: { params: 1, returns: 's32' } };
   // The dispatch scales into r2 and loads the table through r3 here: case 1 reads r0, which conv's
   // idiom would leave holding the case's code address on the case edge (a read that declines).
   const viaR2 = (arms: string[]) =>
-    conv(arms).replace(
+    saving(arms).replace(
       '\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n',
       '\tlsl\tr2, r1, #0x2\n\tldr\tr3, .Lp\n\tadd\tr2, r2, r3\n\tldr\tr2, [r2]\n\tmov\tpc, r2\n',
     );
@@ -173,7 +176,7 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
     }),
   ).toThrow(/inlines a 'opaque' from inside the loop/);
   // control: the SAME loop in a closed arm keeps the call inside the loop and recovers.
-  const closed = convSrc([loop('\tbl\tsideA\n') + LEAVE, '\tbl\tsideB\n' + LEAVE]);
+  const closed = lift(saving([loop('\tbl\tsideA\n') + LEAVE, '\tbl\tsideB\n' + LEAVE]));
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
 });
 

@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import type { AsmData } from '../src/frontend/asmdata';
 import { PpcUnsupportedError, lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
-import { PPC_MWCC, targetFor } from '../src/target';
+import { PPC_MWCC, PPC_MWCC_233, targetFor } from '../src/target';
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 /** `dis` on a target that claims no start offset past which it never loads its outgoing area. */
@@ -647,20 +647,29 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       'c:\tadd     r3,r3,r31\n10:\tmtlr    r0\n14:\tblr\n';
     expect(dis('ur', routine)).toBe(uninit('ur'));
     // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
-    // there, so the entry value stays what the caller handed over.
-    expect(dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toBe('s32 un(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
-    expect(
+    // there, and no caller passes an argument in r31 either, so the read refuses.
+    const unsaved =
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/;
+    expect(() => dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toThrow(unsaved);
+    expect(() =>
       dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
-    ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    ).toThrow(unsaved);
     // Saved only after the function READ it: a value handed over, which the save preserves. Counting
     // that save would mint `uninit_r31` for the read before it.
-    expect(
+    expect(() =>
       dis(
         'ur1',
         '0:\tstwu    r1,-16(r1)\n4:\tadd     r3,r3,r31\n8:\tstw     r31,12(r1)\nc:\tlwz     r31,12(r1)\n' +
           '10:\taddi    r1,r1,16\n14:\tblr\n',
       ),
-    ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    ).toThrow(unsaved);
+    // r14..r28 are where 2.4.2 and 2.4.7 declare a global register variable (`register int g
+    // __asm__("r14"); return g;` is `mr r3,r14`), so an unsaved one is that global; 2.3.3 has no
+    // such declaration
+    expect(dis('ug', '0:\tadd     r3,r3,r14\n4:\tblr\n')).toBe('s32 ug(s32 a0) {\n    return a0 + greg_r14;\n}\n');
+    expect(() => decompile('ug', '0 <ug>:\n0:\tadd     r3,r3,r14\n4:\tblr\n', PPC_MWCC_233)).toThrow(
+      /it reads callee-saved r14 before writing it, and no store or save routine in its entry block saves r14/,
+    );
   });
   // mwcc 2.3.3 homes `uninitfirst(s32 k, s32 *p)`'s locals in r5..r10, which no caller of a
   // two-parameter function fills; without its own declaration each read is a made-up parameter
@@ -683,6 +692,65 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /reads the two halves of a 64-bit value/,
     );
     expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
+  });
+  // A global register variable's register is the one callee-saved register compiled code names
+  // unsaved, so naming it is no mark of hand-written asm, and the bound holds. mwcc 2.4.2 at the
+  // canonical flags, `register int g __asm__("r14"); int f(int a){ int x,y,z,w; if (a) { x = a;
+  // y = a+1; } return (x*y)+(z*w)+(a*g); }`: x and y are homed in r4/r5, and counting r14 as
+  // hand-written would drop the declaration and read them as `f(s32 a0, s32 a1, s32 a2)`.
+  test('a global register variable keeps the own declaration bounding a compiled body', () => {
+    const GRV =
+      '0 <f>:\n0:\tcmpwi   r3,0\n4:\tbeq-    10 <f+0x10>\n8:\tmr      r4,r3\nc:\taddi    r5,r3,1\n' +
+      '10:\tmullw   r3,r3,r14\n14:\tmullw   r0,r0,r0\n18:\tmullw   r4,r4,r5\n1c:\tadd     r3,r0,r3\n' +
+      '20:\tadd     r3,r4,r3\n24:\tblr\n';
+    const r = decompile('f', GRV, PPC_MWCC, { prototypes: { f: { params: ['s32'], returns: 's32' } } });
+    expect(r.source).toMatch(/^s32 f\(s32 a0\) \{/m);
+    expect(r.source).toContain('greg_r14');
+    // a callee-saved register no compiler can hold a global in still marks the body hand-written
+    const r31 = GRV.replace('r3,r3,r14', 'r3,r3,r31');
+    expect(() => decompile('f', r31, PPC_MWCC, { prototypes: { f: { params: ['s32'], returns: 's32' } } })).toThrow(
+      /callee-saved r31/,
+    );
+  });
+  // A global register variable passed as an outgoing stack argument is STORED, never saved: mwcc
+  // 2.4.2, `register int g __asm__("r14"); int k(int,…,int /*9*/); int se(void){ return
+  // k(1,2,3,4,5,6,7,8,g) + g; }`, stores r14 to 8(r1) in the entry block and never reloads it.
+  // Read as r14's save, the ninth argument would vanish and the read after the call become
+  // `uninit_r14`; written first (`g = a; k(…, g);`), the store would be a save of a register the
+  // builder never saw written, and the call would lose the argument the same way. The word is a value,
+  // so the call refuses it as any stack argument.
+  test('a global register variable stored as a stack argument is that argument, not a save', () => {
+    const se =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tli      r3,1\nc:\tli      r4,2\n10:\tstw     r0,20(r1)\n' +
+      '14:\tli      r5,3\n18:\tli      r6,4\n1c:\tli      r7,5\n20:\tstw     r14,8(r1)\n24:\tli      r8,6\n' +
+      '28:\tli      r9,7\n2c:\tli      r10,8\n30:\tbl      30 <f+0x30>\n\t\t\t30: R_PPC_REL24\tk\n' +
+      '34:\tlwz     r0,20(r1)\n38:\tadd     r3,r14,r3\n3c:\tmtlr    r0\n40:\taddi    r1,r1,16\n44:\tblr\n';
+    const sf =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tmr      r14,r3\nc:\tli      r3,1\n10:\tstw     r0,20(r1)\n' +
+      '14:\tli      r4,2\n18:\tli      r5,3\n1c:\tli      r6,4\n20:\tstw     r14,8(r1)\n24:\tli      r7,5\n' +
+      '28:\tli      r8,6\n2c:\tli      r9,7\n30:\tli      r10,8\n34:\tbl      34 <f+0x34>\n' +
+      '\t\t\t34: R_PPC_REL24\tk\n38:\tlwz     r0,20(r1)\n3c:\tmtlr    r0\n40:\taddi    r1,r1,16\n44:\tblr\n';
+    for (const body of [se, sf]) {
+      expect(() => dis('f', body)).toThrow(/outgoing stack arguments not modelled — the undeclared call to 'k'/);
+      expect(() => decompile('f', `0 <f>:\n${body}`, PPC_MWCC, { prototypes: { k: { params: 9 } } })).toThrow(
+        /'k' is declared with 9 parameters and the argument registers carry 8/,
+      );
+    }
+  });
+  // A SAVE HOLDS ONLY WHILE EVERY PATH RESTORES IT AFTER ITS LAST WRITE (`refuseSavedRegisterLeaks`).
+  // Each of these leaves the caller's r31 changed, which the C — r31 a local — never says: a write
+  // past the restore would lift `return a0;`, as would a reload from a word that is not the save.
+  test('a write to a saved register that reaches a return with no restore after it refuses', () => {
+    const leak = /the write to saved r31 at 0x10 reaches a return with no restore of r31 after it/;
+    const frame = (mid: string) =>
+      `0:\tstwu    r1,-16(r1)\n4:\tstw     r31,12(r1)\n8:\taddi    r31,r3,1\n${mid}` +
+      '14:\taddi    r1,r1,16\n18:\tblr\n';
+    expect(() => dis('f', frame('c:\tlwz     r31,12(r1)\n10:\tmr      r31,r3\n'))).toThrow(leak);
+    expect(() => dis('f', frame('c:\tstw     r31,8(r1)\n10:\tlwz     r31,8(r1)\n'))).toThrow(leak);
+    // restored after its last write, as compiled code does, it is a local
+    expect(dis('f', frame('c:\tmr      r3,r31\n10:\tlwz     r31,12(r1)\n'))).toBe(
+      's32 f(s32 a0) {\n    return a0 + 1;\n}\n',
+    );
   });
   // The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
   // `liftWithinContextBound`). mwcc 2.4.2's `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0);
@@ -715,23 +783,24 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       'f: its context declaration `s32 f(s32, s32)` fills 2 argument words, and the body reads r5 past them — ' +
         'kept as a parameter, which the header contradicts',
     ]);
-    // a hand-written body is bounded by no declaration, stated or not
-    const hand = decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC, {
-      ownContextProto: { params: [], returnsVoid: true },
-    });
-    expect(hand.source).toBe(decompile('h', '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n', PPC_MWCC).source);
-    expect(hand.ownArityNotes).toEqual([]);
+    // a hand-written body handed r31 refuses, declared or not
+    const hand = '0 <h>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
+    expect(() => decompile('h', hand, PPC_MWCC, { ownContextProto: { params: [], returnsVoid: true } })).toThrow(
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/,
+    );
   });
   // ac-decomp's ks_nes_core.cpp `asm` entry points: `ksNesInit03__Fv` is `stw r7,5612(r31); blr`,
   // its inputs r7 and r31 set by the emulator core that branches to it. Its C++ type `void ()` is
-  // no register interface, and read as one it would turn r7 into `uninit_r7`. A callee-saved register
-  // named with no save marks the body hand-written, and no declaration bounds it.
+  // no register interface, and read as one it would turn r7 into `uninit_r7`; and r31 is no argument
+  // register, so no C signature hands it over. The body refuses, declared or not.
   test('a body naming an unsaved callee-saved register is not bounded by its declaration', () => {
     const asm = '0 <ksNesInit03__Fv>:\n0:\tstw     r7,5612(r31)\n4:\tblr\n';
-    expect(decompile('ksNesInit03__Fv', asm, PPC_MWCC).source).not.toContain('uninit_');
-    expect(
-      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }).source,
-    ).not.toContain('uninit_');
+    const refused =
+      /it reads callee-saved r31 before writing it, and no store or save routine in its entry block saves r31/;
+    expect(() => decompile('ksNesInit03__Fv', asm, PPC_MWCC)).toThrow(refused);
+    expect(() =>
+      decompile('ksNesInit03__Fv', asm, PPC_MWCC, { prototypes: { ksNesInit03__Fv: { params: 0 } } }),
+    ).toThrow(refused);
     // compiled code saves r31 before it touches it, and keeps the bound
     const saved =
       '0 <f>:\n0:\tstw     r31,-4(r1)\n4:\tmr      r31,r5\n8:\tadd     r3,r3,r31\nc:\tlwz     r31,-4(r1)\n10:\tblr\n';
@@ -787,10 +856,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => decompile('sh', '0 <sh>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', hiddenOutside)).toThrow(
       /hidden-input register r13 is not among the scratch registers/,
     );
-    // A target stating no scratch registers keeps the parameter, and one that lists a scratch
-    // register outside its non-argument registers is a target bug, refused before any lift.
+    // A target stating no scratch registers claims r0 is preserved and refuses the read, one
+    // stating no partition at all keeps the parameter, and one that lists a scratch register outside
+    // its non-argument registers is a target bug, refused before any lift.
     const none = { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined };
-    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none).source).toBe(
+    expect(() => decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none)).toThrow(
+      /it reads callee-saved r0 before writing it/,
+    );
+    const noPartition = { ...none, nonArgRegs: undefined };
+    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', noPartition).source).toBe(
       's32 sn(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     );
     const bad = { ...PPC_MWCC, scratchRegs: ['r3'] };
@@ -886,7 +960,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // `li`s; `head` goes between the store and them.
   const s9 = (sym: string, head: string, tail: (at: number) => string) => {
     let asm = pro(24) + 'c:\tstw     r3,8(r1)\n' + head;
-    let at = 0x10 + (head ? 4 : 0);
+    let at = 0x10 + 4 * head.split('\n').filter(Boolean).length;
     for (let k = 1; k <= 8; k++, at += 4) {
       asm += `${at.toString(16)}:\tli      r${k + 2},${k}\n`;
     }
@@ -908,8 +982,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => disUnclaimed('s9a', after)).toThrow(ninth);
     const before = s9(
       's9b',
-      '10:\tlwz     r31,8(r1)\n',
-      (at) => `${at.toString(16)}:\tmr      r3,r31\n` + epi(at + 4, 24),
+      '10:\tstw     r31,20(r1)\n14:\tlwz     r31,8(r1)\n',
+      (at) => `${at.toString(16)}:\tmr      r3,r31\n${(at + 4).toString(16)}:\tlwz     r31,20(r1)\n` + epi(at + 8, 24),
     );
     expect(() => disUnclaimed('s9b', before)).toThrow(ninth);
     // …but mwcc loads no word of its parameter area (`compilerBehaviors.outgoingAreaNeverLoadedFrom`),

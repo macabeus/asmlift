@@ -129,3 +129,17 @@ test('a register partition with only one side declared cannot be checked, and re
   const ssa = readDefLess('r4', () => ({}));
   expect(definedBy(ssa, 'r4')).toEqual({ undefKeys: [], paramKeys: ['r4'] });
 });
+
+test('a model naming global registers the builder was not handed is refused, not read as parameters', () => {
+  // The builder consults its own copy of `globalRegs` at every read and write, and the model's copy
+  // is the one checked against the other lists: a frontend that put them in the model only would
+  // send a def-less read of r8 past both, back to a parameter.
+  const globalRegs = new Map([['r8', 'r8']]);
+  expect(() => readDefLess('r8', () => ({ argRegs: ['r0'], globalRegs }))).toThrow(
+    /the live-in model's global registers are not the ones the builder was given/,
+  );
+  const ssa = makeSsaBuilder('f', 1, [[]], () => ({ argRegs: ['r0'], globalRegs }), undefined, globalRegs);
+  ssa.irBlocks[0].ops.push(mkOp('ret', { operands: [ssa.readVar('r8', 0)] }));
+  ssa.markFilled(0);
+  expect(() => ssa.finish()).not.toThrow();
+});
