@@ -340,9 +340,9 @@ function asElement(e: Expr, by: ReadonlyMap<string, Fold>): Expr {
   if (inner.k !== 'index' || (inner.lead?.length ?? 0) > 0 || inner.baseElem !== undefined) {
     return inner;
   }
-  const base = inner.base;
-  const name = base.k === 'addr' || base.k === 'var' ? base.name : undefined;
-  const fold = name === undefined ? undefined : by.get(name);
+  // the object the base names whole, as the fold's own census of element accesses reads it (`uses`)
+  const name = wholeObject(inner.base);
+  const fold = name === null ? undefined : by.get(name);
   const elem = fold?.type.kind === 'array' ? fold.type.elem : undefined;
   if (elem?.kind !== 'int' || elem.width !== inner.width * 8 || elem.signed !== inner.signed) {
     return inner;
