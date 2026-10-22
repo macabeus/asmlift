@@ -19,8 +19,8 @@
 // and the C-family emitter folds (backend/cfamily.ts), the same seam l3/slotorder.ts uses.
 //
 // THE FOLD IS SOUND exactly when the declaration's initializer and the copy are one program:
-//   • the copy is a block copy this table knows (`BLOCK_COPIES`), a TOP-LEVEL statement of the
-//     body, so it runs once and on every path that reaches it;
+//   • the copy is a block copy the C standard fixes (proto.ts `blockCopyRoles`), a TOP-LEVEL
+//     statement of the body, so it runs once and on every path that reaches it;
 //   • its destination is a whole local integer array of the copied size — or a reservation the
 //     frame rounded up by less than a word, reached by nothing but elements inside the copy and its
 //     whole address — not volatile, and nothing before the copy mentions it but a local assigned
@@ -28,9 +28,12 @@
 //     initializer runs at entry, the copy at its own position);
 //   • its source is the whole image, which nothing but such copies mentions, and whose size is the
 //     count — one image may fill several locals, since the compiler places one per identical
-//     constant (varasm.c `output_constant_def`), each into its own local. KNOWN GAP: Thumb's
-//     frame audit reserves a frame's address-taken bytes as one local, so two arrays refuse at the
-//     size check, whether or not they share an image;
+//     constant (varasm.c `output_constant_def`), each into its own local. Several arrays in one
+//     frame are each their own local where the frame audit proves the boundaries between them
+//     (frontend/frame-objects.ts `provenParts`). KNOWN GAP: where it keeps the frame's
+//     address-taken bytes as one local instead — a neighbour handed to a callee nothing bounds, or
+//     a compiler whose placement of such arrays is not known (target.ts `addressTakenArrayOrder`)
+//     — the image refuses at the size check;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare). An element it relocates holds an address, spelled as
 //     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same
@@ -40,20 +43,25 @@
 // its whole address and element accesses, which each print their own width, reach it.
 //
 // Thumb is the only frontend that reads an anonymous image today. The rule is asked of the tree,
-// for any compiler, but the only copy it reads is a call (`BLOCK_COPIES`). KNOWN GAP: an INLINE
-// copy — agbcc's `ldmia`/`stmia` for a word-aligned image below its memcpy sizes, lw/sw or
+// for any compiler, but the only copy it reads is a call (proto.ts `blockCopyRoles`). KNOWN GAP: an
+// INLINE copy — agbcc's `ldmia`/`stmia` for a word-aligned image below its memcpy sizes, lw/sw or
 // lwl/lwr+swl/swr (IDO, gcc 2.7.2, KMC), lwz/stw (mwcc) — declines, naming the copy it does not
 // read; no benchmark row has one, and the MIPS and PPC frontends refuse the address-taken frame
 // local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
-import { type Expr, type InitAddress, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
+import { blockCopyRoles } from '../proto';
+import {
+  type Expr,
+  type InitAddress,
+  type SFn,
+  type SImage,
+  type Stmt,
+  mapExprChildren,
+  mapStmtExprs,
+  mentionedName,
+  walkExprs,
+} from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
-
-/** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
- *  the destination, the source and the byte count. */
-export const BLOCK_COPIES: Readonly<Record<string, { dst: number; src: number; n: number }>> = {
-  memcpy: { dst: 0, src: 1, n: 2 },
-};
 
 /** `e` without the casts around it. */
 function bare(e: Expr): Expr {
@@ -145,9 +153,7 @@ function planFolds(sfn: SFn, image: SImage): Fold[] | string {
     if (
       s.k === 'exprstmt' &&
       s.value.k === 'call' &&
-      typeof s.value.fn === 'string' &&
-      BLOCK_COPIES[s.value.fn] !== undefined &&
-      wholeObject(s.value.args[BLOCK_COPIES[s.value.fn].src] ?? { k: 'const', value: 0 }) === image.name
+      wholeObject(s.value.args[blockCopyRoles(s.value.fn)?.src ?? -1] ?? { k: 'const', value: 0 }) === image.name
     ) {
       copies.push(i);
     }
@@ -177,7 +183,7 @@ function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
   const elem = (image.type as Extract<IrType, { kind: 'array' }>).elem as Extract<IrType, { kind: 'int' }>;
   const size = byteSize(image.type)!;
   const call = (sfn.body[at] as Extract<Stmt, { k: 'exprstmt' }>).value as Extract<Expr, { k: 'call' }>;
-  const roles = BLOCK_COPIES[call.fn as string];
+  const roles = blockCopyRoles(call.fn)!;
   if (constantValue(call.args[roles.n] ?? { k: 'var', name: '' }) !== size) {
     return `whose copy does not move its whole ${size} bytes`;
   }
@@ -323,6 +329,28 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
   return null;
 }
 
+/** `e` with every access to a folded local that reads one of its elements AS that element spelled
+ *  `a[k]` on the local itself. The structurer spelled the access against the type the frame audit
+ *  gave the local — bytes, unsigned — so a read of the element type this pass gives it (`s8`, from
+ *  the image) came out through the local's address and a cast, `((s8 *)a)[5]`. The two are one C
+ *  value and not one compile: agbcc re-forms `sp + 0x15` for the cast where `b[5]` reads through
+ *  the base it already holds for `b`'s copy (`ldrsb r0, [r5, r0]`). An access of another width or
+ *  signedness keeps its cast, which is the element type it spells. */
+function asElement(e: Expr, by: ReadonlyMap<string, Fold>): Expr {
+  const inner = mapExprChildren(e, (c) => asElement(c, by));
+  if (inner.k !== 'index' || (inner.lead?.length ?? 0) > 0 || inner.baseElem !== undefined) {
+    return inner;
+  }
+  // the object the base names whole, as the fold's own census of element accesses reads it (`uses`)
+  const name = wholeObject(inner.base);
+  const fold = name === null ? undefined : by.get(name);
+  const elem = fold?.type.kind === 'array' ? fold.type.elem : undefined;
+  if (elem?.kind !== 'int' || elem.width !== inner.width * 8 || elem.signed !== inner.signed) {
+    return inner;
+  }
+  return { ...inner, base: { k: 'var', name: name! }, subscript: true };
+}
+
 /** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
  *  the copies gone and the image with them. Throws where one does not fold: structure() refused
  *  that function already, so a tree that reaches here unfoldable was made so by a later pass. */
@@ -341,7 +369,7 @@ export function foldConstantImages(sfn: SFn): SFn {
     const by = new Map(plan.map((f) => [f.local, f]));
     out = {
       ...out,
-      body: out.body.filter((_, i) => !copies.has(i)),
+      body: out.body.filter((_, i) => !copies.has(i)).map((st) => mapStmtExprs(st, (e) => asElement(e, by))),
       locals: out.locals.map((l) => {
         const f = by.get(l.name);
         return f === undefined

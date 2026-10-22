@@ -12384,14 +12384,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //      controls (kmc matches; mwcc's residue is the object's extent from the reservation and its
   //      `lbzx`+`extsb` element sign, not this walk).
   //   2. imgpair / imgone (sub_0804D0B0). TWO brace-initialised locals in one frame (`s8 a[16]` from
-  //      .LC184, `u8 b[16]` from .LC186, each `bl memcpy` of 16). The frame audit declares a captured
-  //      object by its RESERVATION, so the object at sp is `u8 sp0[32]` and the second local is
-  //      `(u32)sp0 + 16`; the constant-init fold (l3/constinit.ts `planCopy`) then finds a 16-byte
-  //      image filling a 32-byte local and refuses. imgone (one image) MATCHes; a second address-taken
-  //      object of ANY kind beside the image declines in these words. agbcc only: the one-image control
-  //      itself fails elsewhere on the other three (ido7.1 lifts the image as `(s32 *)&.data` and no
-  //      candidate compiles; gcc2.7.2kmc refuses the copy's `swl`; mwcc_242_81 its anonymous constant
-  //      pool entry) — the local-aggregate-init gap on each, its own future row. Ablation-pinned.
+  //      .LC184, `u8 b[16]` from .LC186, each `bl memcpy` of 16). Each memcpy destination is a writer
+  //      without bound, so the frame audit gives the one-object answer (frame-objects.ts
+  //      `keepAsOneObject`), declared as one `u8 sp0[32]` — and a 16-byte image cannot fill that
+  //      (l3/constinit.ts `planCopy`). MATCH where the one object splits at each literal-count
+  //      memcpy no use reads across (frame-objects.ts `provenParts`), so both images fold, and an
+  //      element of a part is named (`b[5]`, structure.ts `frameArrayElement`; the fold's own
+  //      element type, l3/constinit.ts `asElement`, for imgswap's signed image there): through a cast
+  //      agbcc re-forms sp+0x15 where `b[5]` reads through the base it holds for the memcpy. imgone
+  //      (one image) MATCHes. imgnbr keeps the decline: a `u32` handed to `h` beside the image is an
+  //      escape nothing bounds, so the bytes stay one `u8[20]`. cpypair is the split without images,
+  //      declared in each compiler's placement order and alignment (target.ts
+  //      `addressTakenArrayOrder`, `addressTakenArrayAlignment`) and not split on mwcc_242_81, which
+  //      has neither. agbcc only for the images: the one-image control fails elsewhere on the other
+  //      three (ido7.1 lifts the image as `(s32 *)&.data` and no candidate compiles; gcc2.7.2kmc
+  //      refuses the copy's `swl`; mwcc_242_81 its anonymous constant pool entry) — the
+  //      local-aggregate-init gap on each, its own future row. Ablation-pinned, the split
+  //      instrumented.
   //   3. spillu8byte / spillu8word (sub_0800D188, sub_08016EEC; one site, instrumented on both). A
   //      `u8` local agbcc gives no register is promoted to SImode (thumb.h:344 PROMOTE_MODE), spilled
   //      as a word (reload1.c:2274 → `str`), and a QImode use of it is alter_subreg's `(mem:QI slot)`
@@ -12560,6 +12569,41 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgone(u32 i);',
     proto: { imgone: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgswap',
+    // imgpair with the images swapped, so the SIGNED one is the part at sp+16: its element type is
+    // the image's (`s8`), which only the constant-init fold knows, so the fold spells the read as
+    // that element (l3/constinit.ts `asElement`); through the cast agbcc re-forms sp+0x15.
+    src:
+      'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\n' +
+      'void imgswap(u32 i){ u8 a[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70}; s8 b[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; gO[i].x = a[3]; gO[i].y = b[5]; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid imgswap(u32 i);',
+    proto: { imgswap: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgnbr',
+    src:
+      'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid h(u32 *);\n' +
+      'void imgnbr(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; u32 x; h(&x); gO[i].x = a[3] + x; }',
+    features: ['array'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\nextern struct O gO[16];\nvoid h(u32 *);\nvoid imgnbr(u32 i);',
+    proto: { imgnbr: { returnsVoid: true }, h: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'cpypair',
+    // imgpair's split without images: two arrays two copies fill. Sixty-four bytes for `stkidx`'s
+    // reason: the tables are fitted from the asm as words, and gcc open-codes a copy from an
+    // aligned source as `ldmia`/`stmia` below that size — a different function around the split.
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gS1[64];\nextern const u8 gS2[64];\n' +
+      'u32 cpypair(void){ u8 a[64]; u8 b[64]; memcpy(a, gS1, 64); memcpy(b, gS2, 64); return a[3] + b[5]; }',
+    features: ['stack-addr', 'array'],
+    toolchains: ALL,
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gS1[64];\nextern const u8 gS2[64];\nu32 cpypair(void);',
   },
   {
     sym: 'spillu8byte',

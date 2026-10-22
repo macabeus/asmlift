@@ -111,6 +111,28 @@ test('a local reached only by elements takes the image’s element, and the sign
   expect(cBackend.emit({ ...sfn, retType: T.s(16) })).toContain('    s16 sp0[2] = { 1, -1 };\n');
 });
 
+test('a read of the element the fold declares is spelled as that element, not through a cast', () => {
+  // the structurer spelled `((s8 *)&sp0)[1]` against the frame audit's `u8`; the image makes the
+  // local `s8`, and agbcc compiles the cast and the element differently once the base is held
+  const bytes = image([1, -1, 3, 4], 1, true);
+  const read = (signed: boolean): Expr => ({
+    k: 'index',
+    base: { k: 'addr', name: 'sp0' },
+    idx: c(1),
+    width: 1,
+    signed,
+  });
+  const ret = (signed: boolean): Stmt => ({ k: 'return', value: read(signed) });
+  const signed = foldConstantImages(fn([copy('sp0', '.LC0', 4), ret(true)], bytes4, bytes));
+  expect(signed.body).toEqual([{ k: 'return', value: { ...read(true), base: v('sp0'), subscript: true } }]);
+  expect(cBackend.emit({ ...fn([copy('sp0', '.LC0', 4), ret(true)], bytes4, bytes), retType: T.s(8) })).toContain(
+    '    return sp0[1];\n',
+  );
+  // …and a read of another signedness keeps the cast that spells it
+  const both = fn([copy('sp0', '.LC0', 4), use(read(false)), ret(true)], bytes4, bytes);
+  expect(cBackend.emit({ ...both, retType: T.s(8) })).toContain('    g(((u8 *)sp0)[1]);\n');
+});
+
 test('an image written as a string literal is spelled as one', () => {
   const str = image([0x68, 0x69, 0], 1, false, { string: true });
   expect(

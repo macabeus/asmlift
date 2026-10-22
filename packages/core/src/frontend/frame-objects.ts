@@ -20,6 +20,7 @@
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
+import { blockCopyRoles } from '../proto';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
 import type { CallDeclarations } from './call-plan';
@@ -396,7 +397,17 @@ export function auditFrameObjects({
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
-    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, returnsWithoutHiddenPointer, fail });
+    keepAsOneObject({
+      oneObject,
+      irBlocks,
+      objects,
+      uses,
+      usedSlotOffsets,
+      returnsWithoutHiddenPointer,
+      arrayOrder: target.compilerBehaviors.addressTakenArrayOrder,
+      arrayAlignment: target.compilerBehaviors.addressTakenArrayAlignment,
+      fail,
+    });
     return { policy: 'one-object', sinks };
   }
   const shapes = objectShapes({
@@ -1037,6 +1048,15 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+  /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
+   *  literal-count block copy proves them (`boundedCopy`), `null` where nothing does, and `into`
+   *  where the copy WRITES them (the address is its destination, not its source). Only the split
+   *  of the one object reads this (`provenParts`); the escape windows keep the copy as an
+   *  unbounded writer, which is what puts that one object on offer at all (`chooseFrameModel`). */
+  readonly escapeExtents: ReadonlyMap<
+    number,
+    readonly ({ readonly lo: number; readonly hi: number; readonly into: boolean } | null)[]
+  >;
   readonly fixed: readonly {
     readonly op: Op;
     readonly at: number;
@@ -1157,6 +1177,12 @@ function classifyFrameUses({
   // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
   // value, whose members are the struct's declared ones (`objectShapes`)
   const memberRefusals: [number, string][] = [];
+  const escapeExtents = new Map<number, ({ lo: number; hi: number; into: boolean } | null)[]>();
+  // …and every value something reads, since a copy whose returned destination is read hands the
+  // address on to a use nothing here follows
+  const readValues = new Set<Value>(
+    irBlocks.flatMap((b) => b.ops.flatMap((op) => [...op.operands, ...(op.successors ?? []).flatMap((sx) => sx.args)])),
+  );
   // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
   // touches, whether it reads them, and whether its address is this frame's on every path — what
   // `storedNeverRead` asks of a frame that makes a call
@@ -1217,6 +1243,10 @@ function classifyFrameUses({
         }
         if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
           escaped.add(off); // the address ESCAPES as a value — the point of the capability
+          const copied = op.opcode === 'call' ? boundedCopy(op, idx, facts, readValues) : undefined;
+          (escapeExtents.get(off) ?? escapeExtents.set(off, []).get(off)!).push(
+            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi, into: copied.into },
+          );
           const handedTo = op.opcode === 'store' ? facts.readsThrough(op) : [];
           const read = op.opcode === 'call' ? transferRead(op, idx, off, target, facts) : undefined;
           if (read !== undefined) {
@@ -1308,8 +1338,32 @@ function classifyFrameUses({
     indexed,
     members,
     memberRefusal: memberRefusals.find(([off]) => !returnTemps.has(off) && !byValueReads.has(off))?.[1],
+    escapeExtents,
     fixed,
   };
+}
+
+// The bytes, relative to the address at operand `idx`, that a call of a standard block copy with
+// a literal, positive count reaches through it, and whether it writes them (`idx` is its
+// destination) — or `undefined` for any other callee, operand or count, which this does not
+// bound, and for a copy whose result (`memcpy` returns its destination) anything in `read` uses.
+function boundedCopy(
+  op: Op,
+  idx: number,
+  facts: LiteralAddresses,
+  read: ReadonlySet<Value>,
+): { lo: number; hi: number; into: boolean } | undefined {
+  const roles = blockCopyRoles(op.attrs.target);
+  if (
+    roles === undefined ||
+    (idx !== roles.dst && idx !== roles.src) ||
+    op.operands.length <= roles.n ||
+    op.results.some((r) => read.has(r))
+  ) {
+    return undefined;
+  }
+  const n = facts.constOf(op.operands[roles.n]);
+  return n !== undefined && Number.isInteger(n) && n > 0 ? { lo: 0, hi: n, into: idx === roles.dst } : undefined;
 }
 
 // The bytes a block transfer that took the address at `idx` reads, when `idx` is its source and
@@ -2103,8 +2157,10 @@ function failIfSlotKeysIt(
 /** ONE OBJECT IN MEMORY, the answer a device read or a callee write nothing bounds is given
  *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
  *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
- *  holds (`writerNotKept` says which writers it can hold), and every access inside it is a
- *  cast-spelled access to that array, or a view of the union it is declared as where two widths
+ *  holds (`writerNotKept` says which writers it can hold) — or one per part, where the accesses
+ *  prove the bytes are several objects no use reads across (`provenParts`) — and every access
+ *  inside it is a cast-spelled access to that array (an element of a part, by its index:
+ *  structure.ts `frameArrayElement`), or a view of the union it is declared as where two widths
  *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
@@ -2118,6 +2174,8 @@ function keepAsOneObject({
   uses,
   usedSlotOffsets,
   returnsWithoutHiddenPointer,
+  arrayOrder,
+  arrayAlignment,
   fail,
 }: {
   oneObject: FrameRange;
@@ -2126,6 +2184,8 @@ function keepAsOneObject({
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
+  arrayOrder: TargetDescription['compilerBehaviors']['addressTakenArrayOrder'];
+  arrayAlignment: TargetDescription['compilerBehaviors']['addressTakenArrayAlignment'];
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -2218,15 +2278,34 @@ function keepAsOneObject({
   // nothing here sees, so a spin on such a byte compiles unqualified; the per-object stamp has the
   // same gap (`stampObjects`: not on an ordinary `&local` argument).
   const reread = uses.publishedToWriter.size > 0;
-  const object = mkOp('laddr', {
-    results: [mkValue(T.unk(32))],
-    attrs: { off: from, width: 1, signed: false, count: to - from },
-  });
+  // …and declared as SEVERAL objects where the accesses prove the bytes are several
+  // (`provenParts`), each rewritten on its own: an access through a member at `k` lands on the
+  // part that holds `k`, at `k` less the part's start. Only on a compiler that places address-
+  // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
+  // parts are declared in that order, or the recompile swaps their addresses. And at a known
+  // alignment (`addressTakenArrayAlignment`), which says where a part may start.
+  const parts =
+    twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
+      ? provenParts({ from, to }, objects, uses, arrayAlignment)
+      : [{ from, to }];
+  // …stamped `part` where there are several: storage a copy proved one object of the source's, so
+  // its bytes are that object's elements rather than the one object's mix of members and spills,
+  // and the emitter may name them as elements (structure.ts `frameArrayElement`)
+  const laddrs = parts.map(({ from: lo, to: hi }) =>
+    mkOp('laddr', {
+      results: [mkValue(T.unk(32))],
+      attrs: { off: lo, width: 1, signed: false, count: hi - lo, ...(parts.length > 1 ? { part: true } : {}) },
+    }),
+  );
+  const partOf = (at: number) => parts.findIndex((p) => at >= p.from && at < p.to);
+  const object = laddrs[0];
   const base = object.results[0];
   const memberAt = new Map<Value, number>();
   for (const op of [...objects.values()].flat()) {
     memberAt.set(op.results[0], op.attrs.off as number);
   }
+  const baseAt = (at: number) => laddrs[partOf(at)].results[0];
+  const startAt = (at: number) => parts[partOf(at)].from;
   // The qualifier goes on every access the classification judged one (`accessOps`) — through a
   // member, a runtime index into one, or a phi that carries one (`p = c ? buf : gOther; while
   // (*p == 0);`). Only an access through a member is rebased: a phi's incoming member is
@@ -2240,14 +2319,17 @@ function keepAsOneObject({
         op.attrs = { ...op.attrs, volatile: true };
       }
       if (access && at !== undefined) {
-        op.operands = [base, ...op.operands.slice(1)];
-        op.attrs = { ...op.attrs, off: (op.attrs.off as number) + at - from };
+        op.operands = [baseAt(at), ...op.operands.slice(1)];
+        op.attrs = { ...op.attrs, off: (op.attrs.off as number) + at - startAt(at) };
       }
       op.operands.forEach((v) => memberAt.has(v) && stillUsed.add(v));
       (op.successors ?? []).forEach((sx) => sx.args.forEach((v) => memberAt.has(v) && stillUsed.add(v)));
     }
   }
-  const atBase = (v: Value): Value => (memberAt.get(v) === from ? base : v);
+  const atBase = (v: Value): Value => {
+    const at = memberAt.get(v);
+    return at !== undefined && at === startAt(at) ? baseAt(at) : v;
+  };
   for (const blk of irBlocks) {
     blk.ops = blk.ops.flatMap((op) => {
       const at = op.opcode === 'laddr' ? memberAt.get(op.results[0]) : undefined;
@@ -2256,13 +2338,13 @@ function keepAsOneObject({
         (op.successors ?? []).forEach((sx) => (sx.args = sx.args.map(atBase)));
         return [op];
       }
-      if (!stillUsed.has(op.results[0]) || at === from) {
+      if (!stillUsed.has(op.results[0]) || at === startAt(at)) {
         return [];
       }
       const by = mkValue(T.unk(32));
       return [
-        mkOp('const', { results: [by], attrs: { value: at - from } }),
-        mkOp('add', { operands: [base, by], results: op.results }),
+        mkOp('const', { results: [by], attrs: { value: at - startAt(at) } }),
+        mkOp('add', { operands: [baseAt(at), by], results: op.results }),
       ];
     });
   }
@@ -2281,7 +2363,104 @@ function keepAsOneObject({
     }
     object.attrs = { ...object.attrs, views: unionViews(irBlocks, base) };
   }
-  irBlocks[0].ops.unshift(object);
+  irBlocks[0].ops.unshift(...(arrayOrder === 'descending' ? [...laddrs].reverse() : laddrs));
+}
+
+/** THE PARTS THE ACCESSES PROVE `[from, to)` IS MADE OF, lowest first — or the whole range, one
+ *  part, wherever they do not. A part is a maximal run of bytes that overlapping uses chain
+ *  together — a fixed-offset access, a struct passed by value, and an escape a standard block copy
+ *  with a literal count bounds (`escapeExtents`) each name the bytes they touch — and a run that
+ *  merely abuts the one below it starts a new part only where such a copy starts — and so must
+ *  the lowest part, or nothing is split. Two brace-initialised arrays side by side are agbcc's
+ *  `memcpy(a, .LC0, 16); memcpy(b, .LC2, 16)`, and declared as one `u8[32]` neither image can be
+ *  folded into its own local (l3/constinit.ts).
+ *
+ *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
+ *  (it names no byte, so it may reach every one), an escape nothing bounds (a callee or a holder
+ *  that may reach any byte from the address it was given), a byte no use names (nothing says
+ *  which side it belongs to), or a use through a member that lands outside the part its own
+ *  address lies in (`&a[16]` read at [-1]: one pointer walking two parts is one object). The
+ *  union views of two widths at one byte are not split either (the caller asks only without
+ *  them). An access straddling two runs chains them into one part by construction. */
+function provenParts(
+  { from, to }: FrameRange,
+  objects: ReadonlyMap<number, readonly Op[]>,
+  uses: FrameUses,
+  alignment: number,
+): FrameRange[] {
+  const whole = [{ from, to }];
+  if (uses.indexed.size > 0) {
+    return whole;
+  }
+  const touched: { owner: number; lo: number; hi: number }[] = [];
+  for (const [op, { off }] of uses.accessOps) {
+    const at = off + (op.attrs.off as number);
+    touched.push({ owner: off, lo: at, hi: at + (op.attrs.width as number) });
+  }
+  for (const [off, reads] of uses.byValueReads) {
+    reads.forEach(({ type }) =>
+      touched.push({ owner: off, lo: off, hi: off + (type.kind === 'struct' ? (type.size ?? Infinity) : Infinity) }),
+    );
+  }
+  for (const [off, extents] of uses.escapeExtents) {
+    for (const e of extents) {
+      if (e === null) {
+        return whole;
+      }
+      touched.push({ owner: off, ...e });
+    }
+  }
+  // …and a boundary only where a bounded copy starts: an address handed to `memcpy` is where
+  // the source put an object it fills. A run starting anywhere else is bytes reached from below,
+  // which says nothing of where one object ends — the one-object relift reads every slot through
+  // an address of its own, so a struct spilled word by word and read through its base shows a
+  // run per word, and is one object at every word. The LOWEST part is held to the same test
+  // (below): where it is only stores, a copy above it is as likely `memcpy(&buf[4], s, 12)` into
+  // the middle of one array as the start of a second one, and declared as two the recompile
+  // reads `buf[6]` through a base it holds where the target re-formed sp+6. Only a copy's
+  // DESTINATION counts: a copy reading OUT of the frame says where the source took bytes from,
+  // which is as likely `memcpy(g, &w[2], 8)` from the middle of one array as a second object.
+  const starts = new Set([...uses.escapeExtents.values()].flat().flatMap((e) => (e?.into ? [e.lo] : [])));
+  const parts: { from: number; to: number }[] = [];
+  for (const { lo, hi } of [...touched].sort((a, b) => a.lo - b.lo)) {
+    const last = parts.at(-1);
+    if (last !== undefined && (lo < last.to || (lo === last.to && !starts.has(lo)))) {
+      last.to = Math.max(last.to, hi);
+    } else {
+      parts.push({ from: lo, to: hi });
+    }
+  }
+  const tiles =
+    parts.length > 1 &&
+    parts[0].from === from &&
+    parts.at(-1)!.to === to &&
+    parts.every((p, i) => i === 0 || parts[i - 1].to === p.from);
+  const partOf = (at: number) => parts.findIndex((p) => at >= p.from && at < p.to);
+  if (
+    !tiles ||
+    [...objects.keys()].some((off) => partOf(off) < 0) ||
+    touched.some(({ owner, lo }) => partOf(owner) !== partOf(lo))
+  ) {
+    return whole;
+  }
+  // …and a part starts only where the compiler places a local array of its own: at a multiple of
+  // its `alignment` (agbcc pads `u8 a[18]` to 20, so a split there declares `b` at sp+20 where the
+  // target had it at sp+18; gcc 2.7.2 on MIPS starts every one at a multiple of 8, so a part at
+  // sp+20 is placed at sp+24 and the frame grows), and never as ONE byte, which declared alone is
+  // a `u8` scalar whose address nothing takes — kept in a register, it drops the frame byte and
+  // the store the target made. Such a part joins the one below it, and the lowest one byte joins
+  // the one above: fewer parts only ever read as the one object does, so this costs a split,
+  // never a value.
+  const merged: { from: number; to: number }[] = [];
+  for (const p of parts) {
+    const last = merged.at(-1);
+    if (last !== undefined && (p.from % alignment !== 0 || p.to - p.from === 1 || last.to - last.from === 1)) {
+      last.to = p.to;
+    } else {
+      merged.push({ ...p });
+    }
+  }
+  return merged.length > 1 && merged.every((p) => starts.has(p.from)) ? merged : whole;
 }
 
 /** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width

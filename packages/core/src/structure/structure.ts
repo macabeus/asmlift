@@ -4410,6 +4410,38 @@ export function structure(
       ? { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: f.name, dot: true }
       : null;
   };
+  // A PART OF THE ONE FRAME OBJECT a copy proved one object of the source's (frame-objects.ts
+  // `provenParts`, stamped `part`) is read and written through the element an access names exactly
+  // — at a whole element, inside the array, of the element's width, and of the type the cast it
+  // replaces would spell (a load's alone, as for a struct member) — `sp16[5]`, not
+  // `((u8 *)sp16)[5]`. The two are one C value, and not one compile: with a second array at sp+16
+  // whose address agbcc already holds for its `memcpy`, `b[5]` reads `ldrb [r4, #0x5]` through it
+  // while the cast re-forms `sp + 0x15`. Only a part: the one object's bytes are members and spills
+  // of any type, which the cast spells honestly, and a lone array at sp+0 compiles the same either
+  // way. Unqualified only, like the member.
+  const frameArrayElement = (op: Op, off: number, width: number, signed: boolean | null): Expr | null => {
+    const d = defs.get(op.operands[0]);
+    if (d?.opcode !== 'laddr' || d.attrs.part !== true || d.attrs.views !== undefined) {
+      return null;
+    }
+    const t = laddrType(d);
+    if (t.kind !== 'array' || t.elem.kind !== 'int' || t.elem.width !== width * 8 || qualifiedBy(op) !== null) {
+      return null;
+    }
+    if (off < 0 || off % width !== 0 || off / width >= (d.attrs.count as number)) {
+      return null;
+    }
+    return signed === null || spellsAccessType(t.elem.signed, width, signed)
+      ? {
+          k: 'index',
+          base: { k: 'var', name: laddrName.get(d)! },
+          idx: { k: 'const', value: off / width },
+          width,
+          signed: t.elem.signed,
+          subscript: true,
+        }
+      : null;
+  };
   // A FLOATING MEMBER READ AS ITS INTEGER BITS is spelled `*(s32 *)&s`, which C converts wherever
   // a float is what the reader takes (`gF = *(s32 *)&s;` against `float gF` is `bl __floatsisf` on
   // agbcc, a `cvt` on MIPS), which the bytes never did. So such a read is spelled only where every
@@ -5001,6 +5033,15 @@ export function structure(
       );
       if (member !== null) {
         return member;
+      }
+      const element = frameArrayElement(
+        d,
+        d.attrs.off as number,
+        d.attrs.width as number,
+        (d.attrs.signed as boolean) ?? false,
+      );
+      if (element !== null) {
+        return element;
       }
       refuseFloatMemberRead(d);
       const access = memAccess(
@@ -5624,7 +5665,7 @@ export function structure(
           out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
           continue;
         }
-        const member = frameStructMember(op, off, width, null);
+        const member = frameStructMember(op, off, width, null) ?? frameArrayElement(op, off, width, null);
         if (member !== null) {
           floatBitsStoreTarget(op.operands[1], member);
           out.push({ k: 'store', lval: member, value: intoPtrCell(member, expr(op.operands[1])) });

@@ -7,7 +7,7 @@ import { expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { decompile } from '../src/pipeline';
-import type { Prototypes } from '../src/proto';
+import { type Prototypes, blockCopyRoles } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // four incoming parameters, all live at the call — `r3` is kept by a copy so it has a reaching
@@ -101,4 +101,12 @@ test('…and the lift declines through its own channel rather than crashing', ()
   expect(() =>
     decompile('f', captureAtArg0, ARMV4T_AGBCC, { prototypes: JSON.parse('{"g": null}') as Prototypes }),
   ).toThrow(/`g` takes it at argument 0 and nothing says what that callee returns/);
+});
+
+// One table names the block copies for the frame audit and the constant-initializer fold alike.
+test('a standard block copy names its operands by role, and nothing else is one', () => {
+  expect(blockCopyRoles('memcpy')).toEqual({ dst: 0, src: 1, n: 2 });
+  expect(blockCopyRoles('g')).toBeUndefined();
+  expect(blockCopyRoles('toString')).toBeUndefined();
+  expect(blockCopyRoles(undefined)).toBeUndefined();
 });

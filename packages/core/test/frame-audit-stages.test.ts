@@ -6,7 +6,7 @@ import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 const {
   addressFlow,
@@ -254,6 +254,29 @@ describe('classifyFrameUses', () => {
     expect(uses.accesses.get(0)).toEqual([{ width: 1, signed: false, isLoad: false }]);
   });
 
+  // `memcpy(a, src, 16)` writes exactly a's 16 bytes; a count it cannot read, or another callee,
+  // bounds nothing — and the copy stays a writer for the escape windows either way
+  test('records the bytes a literal-count memcpy reaches through each frame address, and no bound otherwise', () => {
+    const escapes = (callee: string, literal: boolean) => {
+      const src = value();
+      const n = value();
+      const a = laddr(4);
+      const b = laddr(0);
+      const count = konst(16);
+      const ops = [a, b, count, call(callee, a.results[0], src, literal ? count.results[0] : n)];
+      ops.push(call(callee, src, b.results[0], literal ? count.results[0] : n), ret());
+      const { uses } = classify([{ params: [src, n], ops }], { owned: { from: 0, to: 20 } });
+      expect([...uses.passedToWriter].sort()).toEqual([0, 4]);
+      return Object.fromEntries(uses.escapeExtents);
+    };
+    expect(escapes('memcpy', true)).toEqual({
+      0: [{ lo: 0, hi: 16, into: false }],
+      4: [{ lo: 4, hi: 20, into: true }],
+    });
+    expect(escapes('memcpy', false)).toEqual({ 0: [null], 4: [null] });
+    expect(escapes('g', true)).toEqual({ 0: [null], 4: [null] });
+  });
+
   test('records a runtime index apart from the accesses that type the object', () => {
     const i = value();
     const a = laddr(0);
@@ -452,19 +475,19 @@ describe('frameEscapes', () => {
 
 // The second audit, which judges the bytes a first one asked to keep as one object.
 describe('keepAsOneObject', () => {
-  const kept = (blk: Block) =>
+  const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC, to = 8) =>
     auditFrameObjects({
       name: 'f',
       irBlocks: [blk],
-      ownedLocals: { from: 0, to: 8 },
-      declaredLocals: { from: 0, to: 8 },
+      ownedLocals: { from: 0, to },
+      declaredLocals: { from: 0, to },
       usedSlotOffsets: new Set(),
       capturedObjectIsTheWholeFrame: false,
       movedCaptures: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
-      target: ARMV4T_AGBCC,
-      oneObject: { from: 0, to: 8 },
+      target,
+      oneObject: { from: 0, to },
     });
   // `u8 sp[4]; u32 sp4; h(x, sp, &sp4); return sp[0];` — two out-parameters of one callee, at
   // arguments 1 and 2, with `callee` taking the first at argument 0 instead when given
@@ -514,4 +537,166 @@ describe('keepAsOneObject', () => {
     const sret = mkOp('call', { operands: [a.results[0]], results: [s], attrs: { target: 'mk', sret: true } });
     expect(() => kept({ params: [], ops: [a, sret, ret()] })).toThrow('is where `mk` returns its struct');
   });
+
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[3] + b[1];` with each part's copy
+  // `n` bytes long, and `extra` the uses added after the copies
+  const copies = (
+    n: [number, number],
+    extra: (a: Value, b: Value, i: Value) => Op[] = (a, b) => [load(a, 3, 1), load(b, 1, 1)],
+  ) => {
+    const [s, t, i] = [value(), value(), value()];
+    const a = laddr(0);
+    const b = laddr(4);
+    const [na, nb] = [konst(n[0]), konst(n[1])];
+    const ops = [a, b, na, nb, call('memcpy', a.results[0], s, na.results[0])];
+    ops.push(call('memcpy', b.results[0], t, nb.results[0]), ...extra(a.results[0], b.results[0], i), ret());
+    return { params: [s, t, i], ops };
+  };
+  const objectsOf = (blk: Block) =>
+    blk.ops.filter((op) => op.opcode === 'laddr').map((op) => [op.attrs.off, op.attrs.count]);
+
+  test('splits the one object where literal-count copies and fixed accesses prove two', () => {
+    const blk = copies([4, 4]);
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(objectsOf(blk)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    const [a, b] = blk.ops;
+    const loads = blk.ops.filter((op) => op.opcode === 'load');
+    expect(loads.map((op) => [op.operands[0], op.attrs.off])).toEqual([
+      [a.results[0], 3],
+      [b.results[0], 1],
+    ]);
+    const calls = blk.ops.filter((op) => op.opcode === 'call');
+    expect(calls.map((op) => op.operands[0])).toEqual([a.results[0], b.results[0]]);
+  });
+
+  test('keeps one object where a use proves no boundary between two addresses', () => {
+    // a copy over both parts, then a read through the second address
+    expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
+    // the copies chain: the first one's last two bytes are the second's first two
+    expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
+    // a runtime index into the lower part may reach the upper one
+    const indexed = copies([4, 4], (a, b, i) => {
+      const at = mkOp('add', { operands: [a, i], results: [value()] });
+      return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
+    });
+    expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // the upper part handed to a callee nothing bounds
+    expect(objectsOf(withKept(copies([4, 4], (a, b) => [load(a, 3, 1), call('g', b)])))).toEqual([[0, 8]]);
+    // a byte no use names: [6, 8) is touched by nothing
+    expect(objectsOf(withKept(copies([4, 2])))).toEqual([[0, 8]]);
+    // a read through the lower address that lands in the upper part
+    expect(objectsOf(withKept(copies([4, 4], (a) => [load(a, 5, 1)])))).toEqual([[0, 8]]);
+    // the destination the first copy returns, read past its count: `p = memcpy(a, s, 4); p[5]`
+    const returned = copies([4, 4]);
+    const first = returned.ops.find((op) => op.opcode === 'call')!;
+    first.results = [value()];
+    returned.ops.splice(-1, 0, load(first.results[0], 5, 1));
+    expect(objectsOf(withKept(returned))).toEqual([[0, 8]]);
+    // words stored side by side, each through an address of its own, and no copy starting at
+    // either: the one-object relift's spill of a struct passed by value
+    const [a, b, v] = [laddr(0), laddr(4), value()];
+    const words: Block = {
+      params: [v],
+      ops: [a, b, store(a.results[0], v, 0, 4), store(b.results[0], v, 0, 4), load(a.results[0], 1, 1), ret()],
+    };
+    expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
+  });
+
+  // the parts are declared in the order the compiler places address-taken arrays against their
+  // declarations, and not split at all on a compiler whose order is not known
+  test('declares the parts in the target order, and keeps one object where the order is unknown', () => {
+    const order = (o: 'descending' | undefined) => ({
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, addressTakenArrayOrder: o },
+    });
+    const descending = copies([4, 4]);
+    kept(descending, order('descending'));
+    expect(objectsOf(descending)).toEqual([
+      [4, 4],
+      [0, 4],
+    ]);
+    const unknown = copies([4, 4]);
+    kept(unknown, order(undefined));
+    expect(objectsOf(unknown)).toEqual([[0, 8]]);
+  });
+
+  // `at` bytes stored at sp+0 and read back, then a copy of `n` bytes to sp+`at` read at its [1]
+  const below = (at: number, n: number): Block => {
+    const [x, s] = [value(), value()];
+    const [a, b, k] = [laddr(0), laddr(at), konst(n)];
+    const ops = [a, b, k, store(a.results[0], x, 0, at)];
+    ops.push(call('memcpy', b.results[0], s, k.results[0]), load(a.results[0], 0, 1), load(b.results[0], 1, 1), ret());
+    return { params: [x, s], ops };
+  };
+  // a copy of `at` bytes to sp+0 and one of `n` bytes to sp+`at`, read at [0] and [1]
+  const pair = (at: number, n: number): Block => {
+    const [s, t] = [value(), value()];
+    const [a, b, ka, kb] = [laddr(0), laddr(at), konst(at), konst(n)];
+    const ops = [a, b, ka, kb, call('memcpy', a.results[0], s, ka.results[0])];
+    ops.push(call('memcpy', b.results[0], t, kb.results[0]), load(a.results[0], 0, 1), load(b.results[0], 1, 1), ret());
+    return { params: [s, t], ops };
+  };
+
+  test('keeps one object where a part would be one byte or start off a word boundary', () => {
+    // `struct { u8 n; u8 name[7]; } s; memcpy(&s, src, 1); memcpy(s.name, src2, 7)`: declared
+    // alone, the one-byte part is a `u8` scalar agbcc keeps in a register (and verify refuses the stamp)
+    expect(objectsOf(withKept(pair(1, 7)))).toEqual([[0, 8]]);
+    // `struct { u16 n; u8 name[6]; }`: agbcc would place a separate `u8 name[6]` at sp+4
+    expect(objectsOf(withKept(pair(2, 6)))).toEqual([[0, 8]]);
+    // …and at a word boundary the split stands
+    expect(objectsOf(withKept(pair(4, 4)))).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+  });
+
+  // gcc 2.7.2 on MIPS starts every address-taken array at a multiple of 8: `u8 a[4]` and `u8 b[12]`
+  // are at sp+16 and sp+24, so a copy to sp+4 is the middle of one array there, not a second one
+  test("splits only at the target's array alignment, and not at all where it is unknown", () => {
+    const aligned = (n: 8 | undefined) => ({
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, addressTakenArrayAlignment: n },
+    });
+    const off8 = pair(4, 4);
+    kept(off8, aligned(8));
+    expect(objectsOf(off8)).toEqual([[0, 8]]);
+    const at8 = pair(8, 8);
+    kept(at8, aligned(8), 16);
+    expect(objectsOf(at8)).toEqual([
+      [0, 8],
+      [8, 8],
+    ]);
+    const unknown = pair(8, 8);
+    kept(unknown, aligned(undefined), 16);
+    expect(objectsOf(unknown)).toEqual([[0, 16]]);
+  });
+
+  // `u8 buf[8]; buf[0..3] = x; memcpy(&buf[4], s, 4)`: a copy into the middle of one array, below
+  // which only stores lie, proves no second object — declared as two, agbcc's recompile reads
+  // `buf[5]` through the base it holds for the copy where the target re-formed sp+5
+  test('keeps one object where the lowest part starts at no copy', () => {
+    expect(objectsOf(withKept(below(4, 4)))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(below(1, 7)))).toEqual([[0, 8]]);
+  });
+
+  // `u32 w[4]; w[0..3] = …; memcpy(g1, w, 8); memcpy(g2, &w[2], 8)`: two copies reading OUT of
+  // one array start no object — declared as two, agbcc's recompile holds the upper half's base in
+  // a saved register where the target re-formed sp+8 for each store
+  test('keeps one object where the parts start only at copies reading out of it', () => {
+    const [x, g1, g2] = [value(), value(), value()];
+    const [a, b, k] = [laddr(0), laddr(8), konst(8)];
+    const ops = [a, b, k, store(a.results[0], x, 0, 4), store(a.results[0], x, 4, 4), store(b.results[0], x, 0, 4)];
+    ops.push(store(b.results[0], x, 4, 4), call('memcpy', g1, a.results[0], k.results[0]));
+    ops.push(call('memcpy', g2, b.results[0], k.results[0]), ret());
+    const blk = { params: [x, g1, g2], ops };
+    kept(blk, ARMV4T_AGBCC, 16);
+    expect(objectsOf(blk)).toEqual([[0, 16]]);
+  });
+  const withKept = (blk: Block): Block => {
+    kept(blk);
+    return blk;
+  };
 });
