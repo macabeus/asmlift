@@ -438,6 +438,30 @@ test('an IDO -KPIC table is read at its GOT16 half and the LO16 the load carries
   expect(() => decompile('f', pic('0', '0'), MIPS_IDO, { asmData: picTable(0, 'other') })).toThrow(declines);
 });
 
+/** The same object with its `.rodata` renamed `.data`: the table in a writable section. */
+const writable = (ad: AsmData): AsmData => {
+  const sec = (x: string) => (x === '.rodata' ? '.data' : x);
+  return {
+    ...ad,
+    sections: new Map([...ad.sections].map(([k, v]) => [sec(k), v])),
+    relocs: ad.relocs.map((r) => ({ ...r, section: sec(r.section), sym: sec(r.sym) })),
+    symbols: new Map([...ad.symbols].map(([k, v]) => [k, { ...v, section: sec(v.section) }])),
+  };
+};
+
+test('a table in a writable section declines: a store may retarget an entry the table read missed', () => {
+  // gcc puts a non-const computed-goto label table (`static void *t[] = {&&a, &&b}`) in `.data`,
+  // and its function may write it (`t[1] = &&c`); a switch lifted from its initial words is wrong.
+  const declines = /indirect jump 'jr t6'/;
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData }).source).toContain('switch (a0)');
+    expect(() => decompile('f', dispatch('sll\tt6,a0,0x2', 't6'), t, { asmData: writable(asmData) })).toThrow(declines);
+    expect(() => decompile('f', folded('0x0', '32'), t, { asmData: writable(foldedTable(32, '.rodata')) })).toThrow(
+      declines,
+    );
+  }
+});
+
 test('a table entry naming code outside the function declines loud', () => {
   // The table's second word points past the function's last block (0x40), as one read off another
   // function's table would.

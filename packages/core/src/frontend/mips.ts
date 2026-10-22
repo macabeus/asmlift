@@ -377,6 +377,7 @@ const copiedReg = (ins: Instr): string | undefined => {
 //   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16, the load carrying the `%lo` LO16, and
 //     `addu rV,rV,gp` after it (the entries are gp-relative); only at displacement 0
 //     (`inBlockTable`).
+// The table must sit in a read-only section (`tableBaseOf`).
 // Delay slots are honoured — the `beqz` delay slot (which on IDO carries the DEFAULT return value
 // `li v0,-1`) still executes before the `switch_br`.
 interface MipsJT {
@@ -502,7 +503,11 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     return -1;
   };
   // Is `ins` a table-base materialisation (`lui rB,hi` HI16, or `lw rB,0(gp)` GOT16) with a `.text`
-  // relocation into a data section? Returns {sym, addend} locating the table, or null.
+  // relocation into a READ-ONLY data section? Returns {sym, addend} locating the table, or null.
+  // A writable table is refused: the table is read once, at its initial contents, and a switch
+  // lifted from it would ignore every store that retargets an entry. The compilers put a switch's
+  // table in `.rodata`/`.rdata`; what lands in `.data` is a non-const computed-goto label table
+  // (`static void *t[] = {&&a, ...}`), which its own function may write (`t[1] = &&c`).
   const tableBaseOf = (ins: Instr): { sym: string; addend: number } | null => {
     const isLui = ins.mnemonic === 'lui';
     const isGpLw = ins.mnemonic === 'lw' && ins.ops[1] !== undefined && parseMem(ins.ops[1]).base === 'gp';
@@ -514,7 +519,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
       return null;
     }
     const sec = ad.symbols.get(r.sym)?.section ?? r.sym; // ".rodata" section symbol → ".rodata"
-    if (!/^\.(rodata|rdata|sdata2?|data)$/.test(sec)) {
+    if (!/^\.(rodata|rdata)$/.test(sec)) {
       return null;
     }
     return { sym: r.sym, addend: r.addend };
