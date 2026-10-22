@@ -1836,11 +1836,11 @@ about frame LAYOUT: a device reading past the object it was given is as wrong as
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
 control halfword), read per transfer, and an unresolved store after the transfer is handed the
 address — through a pointer, or to a name no symbol map places — leaves the read unbounded, unless
-every address it may hold lies off that halfword (`addressRangeOf`: a placed base plus a `u8` index
-is an interval, a pointer parameter is not). What
-no fact about one function can check is stated as a premise instead: a callee or an interrupt
-handler arms only a transfer it set up itself, source register first, so neither a call on the
-path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
+no address it may hold overlaps that halfword (`addressRangeOf`, ir/bits.ts `stridedRange`: a
+placed base plus a `u8` index times 8 is every eighth word of an interval, a pointer parameter is
+nothing). What no fact about one function can check is stated as a premise instead: a callee or an
+interrupt handler arms only a transfer it set up itself, source register first, so neither a call
+on the path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
 unbounded — a device's read or a callee's write — and every writer of the frame is one the
 whole-area argument holds (none at all, or a callee handed the address as an argument that may
 write through it, which a block transfer reading its source is not, with any store of the address

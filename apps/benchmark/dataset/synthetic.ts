@@ -12490,14 +12490,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //      forward from the arming store (frame-objects.ts `readWindow`), and a store it could resolve
   //      only to a point made the walk unbounded: the escape reached the temp
   //      (`reaches-another-object`), and the one-object answer is withheld because a callee's return
-  //      storage is a writer it cannot hold (`writerNotKept`). LIFTED by bounding the tail store's
-  //      addresses (device-pins.ts `addressRangeOf`): `gEnts[i].f`, `i` a u8, lands in
-  //      `base + 4 + [0, 255*8]`, which misses the control halfword. dmasretx is the same body over
-  //      `extern struct Ent gEnts[]` placed by a map, as the real base is a name; dmaptr stores
-  //      through a pointer parameter and stays declined (control). The real function still declines
-  //      in the census configuration: its base gUnk_03003590 is a NOTYPE linker global the ELF map
-  //      does not carry, so the name places nowhere. agbcc only: the other three decline the scalar
-  //      control on the published address itself (no `readOnlyAddressSinks` off the GBA).
+  //      storage is a writer it cannot hold (`writerNotKept`). The synthetic row LIFTS by bounding
+  //      the tail store's addresses (device-pins.ts `addressRangeOf`): `gEnts[i].f`, `i` a u8,
+  //      lands at `base + 4 + 8 * [0, 255]`, which misses the control halfword. dmasretx is the same
+  //      body over `extern struct Ent gEnts[]` placed by a map, as the real base is a name; dmaptr
+  //      stores through a pointer parameter and stays declined (control). The CENSUS ROW DOES NOT
+  //      MOVE: the real sub_080202D4 still declines with the same message, for a gap of its own
+  //      that is not this audit's — its base gUnk_03003590 is a NOTYPE linker global (kleod.elf
+  //      .symtab, kleod.map) that the CLI's ELF symbol map does not carry, so the name places
+  //      nowhere (cli symbols-provider.ts `symbolMapFromElf`). Placed, the same audit bounds it.
+  //      agbcc only: the other three decline the scalar control on the published address itself
+  //      (no `readOnlyAddressSinks` off the GBA).
   //  13. spillhsret (sub_0803D4AC). A spilled local READ BACK NARROWER than it was stored, beside a
   //      struct-return temp: a promoted `u16` spilled as a word (a slot the SSA model keys) and reloaded
   //      `mov r2, sp / ldrh r2, [r2, #4]` because Thumb admits an sp-relative offset only at word size
