@@ -13131,6 +13131,12 @@ export const SYNTHETIC: SynthSpec[] = [
     ] as const
   ).flatMap(([suffix, toolchains, reg]): SynthSpec[] => {
     const decl = `${suffix === '_r15' ? 'register int g0 __asm__("r14"); ' : ''}register int g ${reg};\n`;
+    // one argument past the registers: a0..a3 on O32, r3..r10 on the EABI
+    const regArgs = suffix === '_r15' ? 8 : 4;
+    const ks = Array.from({ length: regArgs }, (_, i) => `${i + 1}, `).join('');
+    const kParams = Array(regArgs + 1)
+      .fill('int')
+      .join(',');
     return [
       {
         sym: `grv_read${suffix}`,
@@ -13152,6 +13158,26 @@ export const SYNTHETIC: SynthSpec[] = [
         ctx: `void grv_write${suffix}(int);`,
         proto: { [`grv_write${suffix}`]: { returnsVoid: true } },
       },
+      // …passed as an argument past the registers: gcc and KMC store it to 16(sp), mwcc to 8(r1),
+      // in the entry block, and never reload it — a store, not a save, so the word is the call's
+      // last argument (mwcc's parameter area is not modelled, so its rows refuse; so does agbcc's
+      // `str` to [sp], which is why it has none).
+      ...(suffix === ''
+        ? []
+        : [
+            [`grv_stkarg${suffix}`, `int grv_stkarg${suffix}(void){ return k(${ks}g) + g; }`, 'int', 'void'],
+            [`grv_stkargw${suffix}`, `void grv_stkargw${suffix}(int a){ g = a; k(${ks}g); }`, 'void', 'int'],
+          ].map(([sym, body, ret, params]): SynthSpec => ({
+            sym,
+            src: `${decl}int k(${kParams});\n${body}`,
+            features: ['global'],
+            toolchains: [...toolchains],
+            ctx: `int k(${kParams});\n${ret} ${sym}(${params});`,
+            proto: {
+              k: { params: regArgs + 1 },
+              ...(ret === 'void' ? { [sym]: { returnsVoid: true } } : {}),
+            },
+          }))),
     ];
   }),
 ];

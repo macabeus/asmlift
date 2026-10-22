@@ -712,6 +712,31 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /callee-saved r31/,
     );
   });
+  // A global register variable passed as an outgoing stack argument is STORED, never saved: mwcc
+  // 2.4.2, `register int g __asm__("r14"); int k(int,…,int /*9*/); int se(void){ return
+  // k(1,2,3,4,5,6,7,8,g) + g; }`, stores r14 to 8(r1) in the entry block and never reloads it.
+  // Read as r14's save, the ninth argument vanished and the read after the call became
+  // `uninit_r14`; written first (`g = a; k(…, g);`), the store was a save of a register the
+  // builder never saw written, and the call lost the argument the same way. The word is a value,
+  // so the call refuses it as any stack argument.
+  test('a global register variable stored as a stack argument is that argument, not a save', () => {
+    const se =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tli      r3,1\nc:\tli      r4,2\n10:\tstw     r0,20(r1)\n' +
+      '14:\tli      r5,3\n18:\tli      r6,4\n1c:\tli      r7,5\n20:\tstw     r14,8(r1)\n24:\tli      r8,6\n' +
+      '28:\tli      r9,7\n2c:\tli      r10,8\n30:\tbl      30 <f+0x30>\n\t\t\t30: R_PPC_REL24\tk\n' +
+      '34:\tlwz     r0,20(r1)\n38:\tadd     r3,r14,r3\n3c:\tmtlr    r0\n40:\taddi    r1,r1,16\n44:\tblr\n';
+    const sf =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tmr      r14,r3\nc:\tli      r3,1\n10:\tstw     r0,20(r1)\n' +
+      '14:\tli      r4,2\n18:\tli      r5,3\n1c:\tli      r6,4\n20:\tstw     r14,8(r1)\n24:\tli      r7,5\n' +
+      '28:\tli      r8,6\n2c:\tli      r9,7\n30:\tli      r10,8\n34:\tbl      34 <f+0x34>\n' +
+      '\t\t\t34: R_PPC_REL24\tk\n38:\tlwz     r0,20(r1)\n3c:\tmtlr    r0\n40:\taddi    r1,r1,16\n44:\tblr\n';
+    for (const body of [se, sf]) {
+      expect(() => dis('f', body)).toThrow(/outgoing stack arguments not modelled — the undeclared call to 'k'/);
+      expect(() => decompile('f', `0 <f>:\n${body}`, PPC_MWCC, { prototypes: { k: { params: 9 } } })).toThrow(
+        /'k' is declared with 9 parameters and the argument registers carry 8/,
+      );
+    }
+  });
   // The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
   // `liftWithinContextBound`). mwcc 2.4.2's `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0);
   // while (zq(a) != 5) sl(); return gX; }`: r5/r6 reach only the guessed calls `zq` and `sl`.

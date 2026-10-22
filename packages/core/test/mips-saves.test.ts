@@ -4,6 +4,7 @@
 // register writes nothing a read may use, and every other use of the word refuses.
 import { expect, test } from 'vitest';
 
+import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
@@ -173,5 +174,64 @@ test('one register spelt `s8` and `fp` in one function is one saved register', (
     for (const target of [MIPS_GCC, MIPS_IDO]) {
       expect(decompile('f', obj(...lines), target).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
     }
+  }
+});
+
+// A file-scope global register variable passed as an outgoing stack argument is STORED, never saved:
+// gcc 2.7.2 and KMC, `register int g __asm__("$16"); int k(int,int,int,int,int);`, put the store in
+// the entry block. Read as s0's save, the fifth argument vanished from the call — `int se(void){
+// return k(1,2,3,4,g) + g; }` lifted `k(1, 2, 3, 4) + uninit_s0`, and `void sf(int a){ g = a;
+// k(1,2,3,4,g); }` lifted `greg_r16 = a0; k(1, 2, 3, 4)`. The word is a value, so the call either
+// takes it (declared) or refuses (undeclared).
+test('a global register variable stored as a stack argument is that argument, not a save', () => {
+  const se = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tli\ta0,1',
+    '8:\tli\ta1,2',
+    'c:\tli\ta2,3',
+    '10:\tli\ta3,4',
+    '14:\tsw\tra,24(sp)',
+    '18:\tjal\t0 <f>',
+    '1c:\tsw\ts0,16(sp)',
+    '20:\tlw\tra,24(sp)',
+    '24:\taddu\tv0,v0,s0',
+    '28:\tjr\tra',
+    '2c:\taddiu\tsp,sp,32',
+  ];
+  const sf = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tmove\ts0,a0',
+    '8:\tli\ta0,1',
+    'c:\tli\ta1,2',
+    '10:\tli\ta2,3',
+    '14:\tli\ta3,4',
+    '18:\tsw\tra,24(sp)',
+    '1c:\tjal\t0 <f>',
+    '20:\tsw\ts0,16(sp)',
+    '24:\tlw\tra,24(sp)',
+    '28:\tjr\tra',
+    '2c:\taddiu\tsp,sp,32',
+  ];
+  const call = (at: number): AsmData => ({
+    sections: new Map(),
+    relocs: [{ section: '.text', offset: at, type: 'R_MIPS_26', sym: 'k', addend: 0 }],
+    symbols: new Map(),
+    symbolCount: 0,
+    bigEndian: true,
+  });
+  const k5 = { prototypes: { k: { params: 5 } } };
+  expect(decompile('f', obj(...se), MIPS_GCC, { ...k5, asmData: call(0x18) }).source).toBe(
+    's32 f(void) {\n    return k(1, 2, 3, 4, greg_r16) + greg_r16;\n}\n',
+  );
+  expect(decompile('f', obj(...sf), MIPS_GCC, { ...k5, asmData: call(0x1c) }).source).toBe(
+    's32 f(s32 a0) {\n    greg_r16 = a0;\n    return k(1, 2, 3, 4, greg_r16);\n}\n',
+  );
+  for (const [body, at] of [
+    [se, 0x18],
+    [sf, 0x1c],
+  ] as const) {
+    expect(() => decompile('f', obj(...body), MIPS_GCC, { asmData: call(at) })).toThrow(
+      /outgoing stack arguments not modelled — the undeclared call to 'k' at 0x1[8c] fills a0..a3, and the word stored to 16\(sp\)/,
+    );
   }
 });

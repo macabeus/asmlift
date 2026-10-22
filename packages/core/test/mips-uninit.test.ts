@@ -300,10 +300,10 @@ describe('the register half: scratch and saved registers', () => {
   // declaration, and refuses.
   test('an s-register nothing saved, or that was read before its store, is a global register variable', () => {
     expect(src(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_GCC)).toBe('s32 f(s32 a0) {\n    return greg_r17 + a0;\n}\n');
-    // (a global's register is one compiled code never saves, so a save of it after the read is asm
-    // keeping a value it was handed, and the restore that puts it back is what refuses)
-    expect(lift(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toThrow(
-      /the caller's s1, which the 'lw' at 0xc restores, reaches a value this function computes with/,
+    // (a global's register is one compiled code never saves, so its store after the read is a
+    // value — the global's, at that point — and the reload puts that value back in the global)
+    expect(src(SAVED_S1(['4:\taddu\tv0,s1,a0', '8:\tsw\ts1,4(sp)']), MIPS_GCC)).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    v0 = greg_r17;\n    greg_r17 = greg_r17;\n    return v0 + a0;\n}\n',
     );
     const refused = /it reads callee-saved s1 before writing it, and no store in its entry block saves s1/;
     expect(lift(['0:\tjr\tra', '4:\taddu\tv0,s1,a0'], MIPS_IDO)).toThrow(refused);

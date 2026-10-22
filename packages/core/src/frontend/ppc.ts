@@ -734,12 +734,34 @@ const namesUnsavedCalleeSaved = (
  *  below its frame address (`addi r11,r1,N`), and each floating-point save (`stfd`, or the FPR
  *  routine), which this frontend refuses elsewhere but which still bounds where a local may lie.
  *  Null where a save's offset cannot be named: r1's depth at it, or the routine's frame address, is
- *  unknown. */
+ *  unknown.
+ *
+ *  A SAVE IS RELOADED. In a function that returns, an `stw` of a callee-saved register that no
+ *  reload of it from r1 answers anywhere — an `lwz` of it, an `lmw` or restore routine reaching it —
+ *  saves nothing: the caller gets the register back as the body left it, so the word is a value.
+ *  mwcc 2.4 stores a file-scope global register variable passed on the stack exactly so, in the
+ *  entry block — `register int g __asm__("r14"); return k(1, …, 8, g) + g;` is `stw r14,8(r1); bl k`
+ *  and no reload of r14 — and counting it as a save turned the read of `g` after the call into
+ *  `uninit_r14` and dropped the ninth argument. Which word a reload reads is judged where it is
+ *  lowered (`restoreFrom`). A function with no return keeps the entry-block reading. */
 function prologueSavedRegs(
   entry: readonly Instr[],
   target: TargetDescription,
   r1At: ReadonlyMap<Instr, number | string>,
+  blocks: readonly PpcBlock[],
 ): { regs: ReadonlySet<string>; offsets: number[] | null } {
+  const code = blocks.flatMap((b) => [...b.body, ...(b.branch ? [b.branch] : [])]);
+  const returns = blocks.some((b) => b.synthReturn) || code.some((ins) => isReturn(ins) || isCondReturn(ins));
+  const reloaded = (r: string) =>
+    code.some((ins) => {
+      const routine = saveRoutineOf(target, ins);
+      return routine
+        ? routine.restore && !routine.fpr && Number(r.slice(1)) >= routine.first
+        : ins.ops[1]?.includes('(') === true &&
+            parseMem(ins.ops[1]).base === 'r1' &&
+            ((ins.mnemonic === 'lwz' && ins.ops[0] === r) ||
+              (ins.mnemonic === 'lmw' && Number(r.slice(1)) >= Number(ins.ops[0]?.slice(1))));
+    });
   const regs = new Set<string>();
   const named = new Set<string>();
   const offsets: number[] = [];
@@ -771,7 +793,9 @@ function prologueSavedRegs(
     } else if (/^(stw|stmw|stfd)$/.test(ins.mnemonic) && s?.includes('(') && parseMem(s).base === 'r1') {
       const first = ins.mnemonic === 'stmw' ? Number(d.slice(1)) : 0;
       const n = ins.mnemonic === 'stmw' ? 32 - first : 1;
-      for (let k = 0; k < n; k++) {
+      // A single `stw` no reload answers, in a function that returns, saves nothing (see below).
+      const unanswered = ins.mnemonic === 'stw' && isCalleeSaved(target, d) && returns && !reloaded(d);
+      for (let k = 0; k < (unanswered ? 0 : n); k++) {
         const reg = ins.mnemonic === 'stmw' ? `r${first + k}` : d;
         if (ins.mnemonic !== 'stfd' && !named.has(reg)) {
           regs.add(reg);
@@ -1358,7 +1382,7 @@ function liftPrelude(
     succIdx.unshift([1]);
   }
   const r1At = r1Displacements(blocks, succIdx);
-  const saves = prologueSavedRegs(entryBody, target, r1At);
+  const saves = prologueSavedRegs(entryBody, target, r1At, blocks);
   const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal, ownDeclaration);
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
@@ -2128,7 +2152,10 @@ function liftOnce(
       }
       // Any other save stores what the register held at entry: nothing defined it on any path. An
       // argument register nothing defined holds the argument, which is a value.
-      if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
+      // …save a global register variable's: compiled code stores one only as a value, the outgoing
+      // stack argument `k(1, …, 8, g)` is (`stw r14,8(r1)`), and the builder records no definition
+      // for it (its writes are stores to the global), so "nothing defined it" is no evidence of a save.
+      if (!isArg && !liveIns.globalRegs?.has(srcReg) && !ssa.hasReachingDef(srcReg, bi)) {
         saveInto(ins, srcReg, off, mem);
         return true;
       }

@@ -1599,7 +1599,11 @@ function liftOnce(
   // bounds the argument registers (`ownArgumentWordsOn`): KMC and gcc 2.7.2 home a local in a2/a3
   // past a two-parameter one.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width ?? FP_CONVERT[m]?.width ?? FP_COMPARE[m]?.width);
-  const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
+  const savedRegs = prologueSavedRegs(
+    [...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])],
+    target,
+    instrs,
+  );
   // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
   // builder asks for before that claims no frame, which only refuses more.
   let ownedFrameOf: (() => { from: number; to: number } | undefined) | undefined;
@@ -2825,7 +2829,11 @@ function liftOnce(
       // slot's value in SSA, do NOT emit a `store` through `sp`. A never-reloaded spill (the ABI
       // home-slot store) then has no uses and simply drops. See isStackPtr / spSlotSafe.
       if (spSlotSafe && isStackPtr(base) && width === 4) {
-        if (savedByCallee(srcReg) && ssa.holdsEntryValue(srcReg, bi)) {
+        // A global register variable's register is never saved — compiled code stores it only as a
+        // value, the outgoing stack argument `k(1, 2, 3, 4, g)` is (`sw s0,16(sp)`) — and the builder
+        // records no definition for one (its writes are stores to the global), so "still holds the
+        // entry value" is no evidence of a save there.
+        if (savedByCallee(srcReg) && !liveIns.globalRegs?.has(srcReg) && ssa.holdsEntryValue(srcReg, bi)) {
           refuseMixedSlot(ins, mem, off, 'save');
           saveSlots.set(off, srcReg);
           return;
@@ -3255,15 +3263,31 @@ function takesFrameAddress(ins: Instr): boolean {
  *  def-less read of a saved one is that local, uninitialised, and of an unsaved one stays the
  *  parameter it would have been. "Nothing named it first" is PPC's condition
  *  (`prologueSavedRegs` there): a read before the store would be a use of the caller's value. A
- *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all. */
-function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+ *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all.
+ *
+ *  A SAVE IS RELOADED. In a function that returns, a store no `lw` of the same register from `sp`
+ *  ever answers saves nothing: the caller gets the register back as the body left it, so the word
+ *  is a value. gcc 2.7.2 and KMC put exactly such a store in the entry block for a file-scope
+ *  global register variable passed on the stack — `register int g __asm__("$16"); return k(1, 2,
+ *  3, 4, g) + g;` is `sw s0,16(sp); jal k` and no reload of s0 — and counting it as a save turned
+ *  the read of `g` after the call into `uninit_s0` and dropped the fifth argument. Any `lw` of the
+ *  register from `sp` will do, whatever its word: which word a restore reads is judged where it is
+ *  lowered. A function with no return keeps the entry-block reading: nothing reaches a caller. */
+function prologueSavedRegs(
+  entry: readonly Instr[],
+  target: TargetDescription,
+  code: readonly Instr[],
+): ReadonlySet<string> {
   const saved = new Set<string>();
   const named = new Set<string>();
   const calleeSaved = (r: string) => isMipsReg(r) && !r.startsWith('$') && !target.callerSaved.includes(r);
+  const returns = code.some((ins) => ins.mnemonic === 'jr' && ins.ops[0] === 'ra');
+  const reloaded = (r: string) =>
+    code.some((ins) => ins.mnemonic === 'lw' && ins.ops[0] === r && isStackPtr(parseMem(ins.ops[1] ?? '').base));
   for (const ins of entry) {
     const [src, mem] = ins.ops;
     if (ins.mnemonic === 'sw' && src !== undefined && mem !== undefined && isStackPtr(parseMem(mem).base)) {
-      if (calleeSaved(src) && !named.has(src)) {
+      if (calleeSaved(src) && !named.has(src) && (!returns || reloaded(src))) {
         saved.add(src);
       }
     }
