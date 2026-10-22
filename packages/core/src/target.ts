@@ -534,9 +534,10 @@ export interface TargetDescription {
     spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
     // Which way this compiler places the ADDRESS-TAKEN local arrays of one frame against their
     // DECLARATION order: `ascending` = the earlier-declared array takes the lower address. Read
-    // where the frame audit declares the one object as several (frame-objects.ts `provenParts`),
-    // so the recompile puts each part back at its own offset. Absent REFUSES that split: the one
-    // object stays one array.
+    // where the frame audit declares the one object as several (frame-objects.ts
+    // `keepAsOneObject`, which declares the parts `provenParts` finds in this order), so the
+    // recompile puts each part back at its own offset. Absent REFUSES that split: the one object
+    // stays one array.
     //
     // MEASURED on `u8 a[64]; u8 b[32]; u8 c[48];`, each filled by a `memcpy`, at canonical flags:
     // agbcc a@0 b@64 c@96; gcc2.7.2 and gcc2.7.2kmc a@16 b@80 c@112; ido7.1 a@104 b@72 c@24 (the
