@@ -601,9 +601,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // THE COMPILER'S ANONYMOUS CONSTANT READ OTHER THAN AS ONE LOCAL'S INITIALIZER
     // (`structure/structure.ts`, both throws, the refusal `l3/constinit.ts` plans): agbcc copies a
     // local aggregate's initializer out of an anonymous `.LC` image, and the emitter spells that
-    // image only as the initializer of the locals its copies fill. Its first row is `imgpair`
-    // on agbcc, two indexed tables filled from one image, which the audit widens into one 32-byte
-    // object that is not an integer array of the image's 16 bytes (`imgone`, one table, lifts).
+    // image only as the initializer of the locals its copies fill. Its row is `imgnbr` on agbcc,
+    // a table filled from an image beside a word handed to a callee nothing bounds, which the audit
+    // keeps with it as one 20-byte object that is not an integer array of the image's 16 bytes
+    // (`imgone`, the table alone, and `imgpair`, two tables the audit splits, lift).
     key: 'local-image',
     label: "A local's initializer image the copies do not fill as one array (agbcc's anonymous .LC data)",
     pattern: /reads the compiler's anonymous constant/,
