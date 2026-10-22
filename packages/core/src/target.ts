@@ -543,6 +543,17 @@ export interface TargetDescription {
     // agbcc a@0 b@64 c@96; gcc2.7.2 and gcc2.7.2kmc a@16 b@80 c@112; ido7.1 a@104 b@72 c@24 (the
     // reverse); mwcc_242_81 a@88 b@8 c@40, neither order — so absent there.
     addressTakenArrayOrder?: 'ascending' | 'descending';
+    // The frame-offset multiple this compiler starts each address-taken `u8` array of a frame at,
+    // whatever its size. Read by the same split (frame-objects.ts `provenParts`): a boundary off
+    // this multiple is never where two of the source's arrays met, and a part declared there is
+    // placed at the next multiple by the recompile, moving it and growing the frame. Absent
+    // REFUSES the split, as `addressTakenArrayOrder` does.
+    //
+    // MEASURED on `u8 a[na]; u8 b[nb];`, each filled by a `memcpy` and both handed to a callee, at
+    // canonical flags, for na x nb = 4x12, 12x12, 6x10, 8x8, 20x16, 2x14: agbcc puts b at sp+4,
+    // 12, 8, 8, 20, 4 (4); gcc2.7.2 and gcc2.7.2kmc a@16 and b@24, 32, 24, 24, 40, 24 (8:
+    // BIGGEST_ALIGNMENT on MIPS, for a BLKmode local); ido7.1 b@24 and a@36, 36, 40, 32, 44, 44 (4).
+    addressTakenArrayAlignment?: 4 | 8;
     // Does this compiler's C front end take a DESIGNATED array element in an initializer —
     // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
     // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
@@ -1364,6 +1375,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     designatedInitializers: true, // agbcc compiles `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'ascending',
     addressTakenArrayOrder: 'ascending', // MEASURED, the probe at the field
+    addressTakenArrayAlignment: 4, // MEASURED, the probe at the field
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
     stagesOutgoingArgsInFrame: true,
@@ -1539,6 +1551,7 @@ export const MIPS_IDO: TargetDescription = {
     // declaration ranks. Shipping a direction before the partition orders by argument index.
     spillSlotOrder: 'unknown',
     addressTakenArrayOrder: 'descending', // MEASURED, the probe at the field
+    addressTakenArrayAlignment: 4, // MEASURED, the probe at the field
     // MEASURED, the probe at the field: the local ends at the frame top, above `ra` and the spills.
     o32LocalArea: 'above-saved-registers',
     // MEASURED off the same probe (`twice`, `owns`): O32's outgoing area is the frame bottom, an
@@ -1699,6 +1712,7 @@ export const MIPS_GCC: TargetDescription = {
     designatedInitializers: true, // both gcc 2.7.2 builds compile `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'unknown',
     addressTakenArrayOrder: 'ascending', // MEASURED on both toolchains, the probe at the field
+    addressTakenArrayAlignment: 8, // MEASURED on both toolchains, the probe at the field
     // MEASURED on BOTH toolchains this description serves, the probe at the field: identical
     // layouts, the local right above the 8-aligned outgoing area and under the saves.
     o32LocalArea: 'above-outgoing-area',

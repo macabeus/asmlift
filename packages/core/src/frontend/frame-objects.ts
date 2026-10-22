@@ -405,6 +405,7 @@ export function auditFrameObjects({
       usedSlotOffsets,
       returnsWithoutHiddenPointer,
       arrayOrder: target.compilerBehaviors.addressTakenArrayOrder,
+      arrayAlignment: target.compilerBehaviors.addressTakenArrayAlignment,
       fail,
     });
     return { policy: 'one-object', sinks };
@@ -2172,6 +2173,7 @@ function keepAsOneObject({
   usedSlotOffsets,
   returnsWithoutHiddenPointer,
   arrayOrder,
+  arrayAlignment,
   fail,
 }: {
   oneObject: FrameRange;
@@ -2181,6 +2183,7 @@ function keepAsOneObject({
   usedSlotOffsets: ReadonlySet<number>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   arrayOrder: TargetDescription['compilerBehaviors']['addressTakenArrayOrder'];
+  arrayAlignment: TargetDescription['compilerBehaviors']['addressTakenArrayAlignment'];
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -2277,9 +2280,12 @@ function keepAsOneObject({
   // (`provenParts`), each rewritten on its own: an access through a member at `k` lands on the
   // part that holds `k`, at `k` less the part's start. Only on a compiler that places address-
   // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
-  // parts are declared in that order, or the recompile swaps their addresses.
+  // parts are declared in that order, or the recompile swaps their addresses. And at a known
+  // alignment (`addressTakenArrayAlignment`), which says where a part may start.
   const parts =
-    twoWidths === undefined && arrayOrder !== undefined ? provenParts({ from, to }, objects, uses) : [{ from, to }];
+    twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
+      ? provenParts({ from, to }, objects, uses, arrayAlignment)
+      : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
   // and the emitter may name them as elements (structure.ts `frameArrayElement`)
@@ -2378,6 +2384,7 @@ function provenParts(
   { from, to }: FrameRange,
   objects: ReadonlyMap<number, readonly Op[]>,
   uses: FrameUses,
+  alignment: number,
 ): FrameRange[] {
   const whole = [{ from, to }];
   if (uses.indexed.size > 0) {
@@ -2432,16 +2439,17 @@ function provenParts(
   ) {
     return whole;
   }
-  // …and a part starts only where a compiler places a local array of its own: at a WORD boundary
-  // (agbcc pads `u8 a[18]` to 20, so a split there declares `b` at sp+20 where the target had it
-  // at sp+18), and never as ONE byte, which declared alone is a `u8` scalar whose address nothing
+  // …and a part starts only where the compiler places a local array of its own: at a multiple of
+  // its `alignment` (agbcc pads `u8 a[18]` to 20, so a split there declares `b` at sp+20 where the
+  // target had it at sp+18; gcc 2.7.2 on MIPS starts every one at a multiple of 8, so a part at
+  // sp+20 is placed at sp+24 and the frame grows), and never as ONE byte, which declared alone is a `u8` scalar whose address nothing
   // takes — kept in a register, it drops the frame byte and the store the target made. Such a
   // part joins the one below it, and the lowest one byte joins the one above: fewer parts only
   // ever read as the one object does, so this costs a split, never a value.
   const merged: { from: number; to: number }[] = [];
   for (const p of parts) {
     const last = merged.at(-1);
-    if (last !== undefined && (p.from % 4 !== 0 || p.to - p.from === 1 || last.to - last.from === 1)) {
+    if (last !== undefined && (p.from % alignment !== 0 || p.to - p.from === 1 || last.to - last.from === 1)) {
       last.to = p.to;
     } else {
       merged.push({ ...p });

@@ -472,19 +472,19 @@ describe('frameEscapes', () => {
 
 // The second audit, which judges the bytes a first one asked to keep as one object.
 describe('keepAsOneObject', () => {
-  const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC) =>
+  const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC, to = 8) =>
     auditFrameObjects({
       name: 'f',
       irBlocks: [blk],
-      ownedLocals: { from: 0, to: 8 },
-      declaredLocals: { from: 0, to: 8 },
+      ownedLocals: { from: 0, to },
+      declaredLocals: { from: 0, to },
       usedSlotOffsets: new Set(),
       capturedObjectIsTheWholeFrame: false,
       movedCaptures: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
       target,
-      oneObject: { from: 0, to: 8 },
+      oneObject: { from: 0, to },
     });
   // `u8 sp[4]; u32 sp4; h(x, sp, &sp4); return sp[0];` — two out-parameters of one callee, at
   // arguments 1 and 2, with `callee` taking the first at argument 0 instead when given
@@ -648,6 +648,27 @@ describe('keepAsOneObject', () => {
       [0, 4],
       [4, 4],
     ]);
+  });
+
+  // gcc 2.7.2 on MIPS starts every address-taken array at a multiple of 8: `u8 a[4]` and `u8 b[12]`
+  // are at sp+16 and sp+24, so a copy to sp+4 is the middle of one array there, not a second one
+  test("splits only at the target's array alignment, and not at all where it is unknown", () => {
+    const aligned = (n: 8 | undefined) => ({
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, addressTakenArrayAlignment: n },
+    });
+    const off8 = pair(4, 4);
+    kept(off8, aligned(8));
+    expect(objectsOf(off8)).toEqual([[0, 8]]);
+    const at8 = pair(8, 8);
+    kept(at8, aligned(8), 16);
+    expect(objectsOf(at8)).toEqual([
+      [0, 8],
+      [8, 8],
+    ]);
+    const unknown = pair(8, 8);
+    kept(unknown, aligned(undefined), 16);
+    expect(objectsOf(unknown)).toEqual([[0, 16]]);
   });
 
   // `u8 buf[8]; buf[0..3] = x; memcpy(&buf[4], s, 4)`: a copy into the middle of one array, below
