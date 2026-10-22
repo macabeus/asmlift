@@ -1,8 +1,9 @@
 // UNIT tests for `addressRangeOf` (frontend/device-pins.ts over ir/bits.ts `stridedRange`): every
-// address a value may hold, as a strided unsigned interval, over hand-built IR. The frame-object audit asks it whether a store
-// through a computed pointer can reach a DMA channel's control halfword (frame-objects.ts
-// `readWindow`); an answer narrower than the machine's values there turns a refusal into a
-// frame word modelled as unread, so each refusal below is pinned as firmly as each answer.
+// address a value may hold, as a strided unsigned interval, over hand-built IR. The frame-object
+// audit asks it whether a store through a computed pointer can reach a DMA channel's control
+// halfword (frame-objects.ts `readWindow`); an answer narrower than the machine's values there
+// turns a refusal into a frame word modelled as unread, so each refusal below is pinned as firmly
+// as each answer.
 import { describe, expect, test } from 'vitest';
 
 import { literalAddresses } from '../src/frontend/device-pins';

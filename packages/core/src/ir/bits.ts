@@ -671,7 +671,12 @@ const RANGE_BUDGET = 256;
  *  words are the sum's integer range moved into one word, when it fits one; a sum whose range
  *  crosses a multiple of 2^32 holds words on both sides of zero, which no interval names. Exact is
  *  not the point: an answer must hold every word the machine can compute there, and a wider one
- *  only proves less. */
+ *  only proves less.
+ *
+ *  KNOWN GAP: a signed narrow index bounds nothing. Every leaf is unsigned (`provableBits` reads a
+ *  signed value as 32 bits), and each in-edge of a param is moved into one word before the union,
+ *  so `8 * (s8)i` — [-1024, 1016], across zero — names no interval even with a signed leaf. Both
+ *  would have to change; no real GBA DMA function measured yet needs either. */
 export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
