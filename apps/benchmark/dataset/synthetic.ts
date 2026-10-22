@@ -12376,10 +12376,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      to the bytes at that displacement (`foldMovedCaptures`) — also agbcc's `a[i]` on an array
   //      above a 5-argument call's outgoing word, `mov r0,sp / add r0,r0,r4 / add r0,#4` — and so
   //      does a load's own displacement (`ldrb r0,[r0,#1]`, a field of an element struct), so the
-  //      verdict does not depend on where agbcc puts the literal. stkhidx
-  //      is the `s16 a[32]` / `ldrsh` twin. `u8` (`stkidx`) is the `ldrb [r0]` control. ido7.1,
-  //      gcc2.7.2kmc and mwcc_242_81 put a constant offset in the displacement (mwcc folds it into the
-  //      base, `addi r3,r1,11`, before its `lbzx`), so the walk has no inhabitant there; they are
+  //      verdict does not depend on where agbcc puts the literal. stkhidx is the `s16 a[32]` /
+  //      `ldrsh` twin. `u8` (`stkidx`) is the `ldrb [r0]` control. ido7.1, gcc2.7.2kmc and
+  //      mwcc_242_81 never load a literal index register: the MIPS compilers put a constant offset in
+  //      the load's displacement (moved like agbcc's, e.g. gcc2.7.2's `lh 2(v)` after an sp index
+  //      sum) and mwcc folds it into the base, `addi r3,r1,11`, before its `lbzx`. Here they are
   //      controls (kmc matches; mwcc's residue is the object's extent from the reservation and its
   //      `lbzx`+`extsb` element sign, not this walk).
   //   2. imgpair / imgone (sub_0804D0B0). TWO brace-initialised locals in one frame (`s8 a[16]` from

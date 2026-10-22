@@ -498,8 +498,7 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
  *  AN INDEX INTO A CAPTURE, MOVED BY A NONZERO CONSTANT, IS THE SAME INDEX INTO THE CAPTURE AT THE
  *  SUM. agbcc spells `a[i]` on a local at [sp,#k) as the frame base plus the index, moved after:
  *  `mov r0, sp / add r0, r0, r4 / add r0, #0x4` or `add r0, r0, sp / add r0, #0x4` — the bytes
- *  `add r0, sp, #0x4 / add r0, r0, r4` reach, and here the same IR: `add(add(laddr@a, i), k)` is
- *  re-minted as `add(laddr@(a+k), i)`, and the inner sum and capture are dropped when nothing else
+ *  `add r0, sp, #0x4 / add r0, r0, r4` reach, so `add(add(laddr@a, i), k)` is re-minted as `add(laddr@(a+k), i)`, and the inner sum and capture are dropped when nothing else
  *  reads them. The object at [sp,#a) is often the outgoing-argument word (a 5-argument call beside
  *  the array), which the index never touches. Zero is left alone: `add(sum, 0)` is agbcc's
  *  `mov r1, #0x0 / ldrsb r0, [r0, r1]`, which `indexedAccess` judges where the register put it.
@@ -509,8 +508,7 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
  *  store's own nonzero displacement on the sum is the same move: `ldrb r0, [r0, #0x1]` (the field
  *  agbcc reads unsigned) and `mov r1, #0x1 / ldrsb r0, [r0, r1]` (signed) reach the same byte, so
  *  the access is re-pointed at `add(laddr@(a+d), i)` with displacement 0, and the verdict does not
- *  depend on where the literal sits. The moves are iterated to a fixpoint, so a use laid out in a
- *  block before its sum's is moved too.
+ *  depend on where the literal sits.
  *
  *  Returns every `laddr` that survives, in block order. */
 function foldMovedCaptures(
@@ -538,9 +536,6 @@ function foldMovedCaptures(
     for (const blk of irBlocks) {
       blk.ops = blk.ops.flatMap((op) => {
         const [x, y] = op.operands;
-        // …and a load or store that displaces the index by its own immediate, `ldrb r0, [r0, #0x1]`,
-        // reaches the bytes `mov r1, #0x1 / ldrsb r0, [r0, r1]` does, so it is moved the same way:
-        // its address becomes the index into the capture at the sum, accessed at displacement 0
         const sum0 = (op.opcode === 'load' || op.opcode === 'store') && x !== undefined ? indexOf.get(x) : undefined;
         const disp = (op.attrs.off as number | undefined) ?? 0;
         if (sum0 !== undefined && disp !== 0) {
@@ -1345,13 +1340,14 @@ function transferRead(
 // `add r0, r1, r4 / mov r1, #0x0 / ldrsb r1, [r0, r1]` is `a[i]` on an `s8 a[n]` local. So the
 // uses of an `add` of the sum and a `const` are judged at that displacement. One `add` deep: agbcc
 // emits one `mov` per load, and no other compiler emits a literal index register. Only
-// displacement 0 is the indexed element. A nonzero literal on a sum whose base is a capture never
+// displacement 0 is the indexed element. A nonzero `const` on a sum whose base is a capture never
 // arrives here: `foldMovedCaptures` has already moved the index to the object at the sum, which is
 // what agbcc's `mov r0, sp / add r0, r0, r4 / add r0, #0x4` is (an array above the outgoing word),
 // and what `mov r1, #0x3 / ldrsb r1, [r0, r1]` and a load's own displacement, `ldrb r0, [r0,
-// #0x1]` (a field of an element struct, or `a[i + 1]`), reach. What is left nonzero — a literal or
-// a displacement on an index into a capture a phi carries, or a displacement on top of the zero
-// literal, which no compiler emits — refuses naming the displacement.
+// #0x1]` (a field of an element struct, or `a[i + 1]`), reach. What is left nonzero — a constant
+// computed rather than loaded as a `const`, a literal or a displacement on an index into a capture
+// a phi carries, or a displacement on top of the zero literal, which no compiler emits — refuses
+// naming the displacement.
 //
 // The element is judged here and left where the register put it, so it is spelled with the
 // literal: `*(s16 *)((u32)sp0 + (a0 << 1) + 0)`. Re-pointing it at the sum spells
