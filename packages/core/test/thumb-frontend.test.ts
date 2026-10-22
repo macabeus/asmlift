@@ -3862,11 +3862,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // and the struct-return temp beside the published `tmp` is its own object. Verbatim agbcc,
     // `struct Ent { u16 x; u16 y; u8 f; u8 pad[3]; }`: `if (k) { s = mk(gEnts[i].x); gEnts[i].x =
     // s.a; } else { tmp = 0xFFFF; DMA3 = &tmp, 0x05000200, 0x81000010; } gEnts[i].f = 1;` with `i`
-    // a `u8`, so the tail store lands in `base + 4 + [0, 255*8]`. The base is a literal
+    // a `u8`, so the tail store lands at `base + 4 + 8 * [0, 255]`. The base is a literal
     // (synthetic:dmasret) or `extern struct Ent gEnts[]` (dmasretx): a name resolves only where a
-    // map places it, and placed at 0x04000000 its range covers 0x040000de, so it may re-arm.
-    // Through a pointer parameter (dmaptr) nothing bounds the store. Every refusal keeps the
-    // decline it had: the escape reaches `mk`'s return storage, a writer the one object cannot hold.
+    // map places it. Placed at 0x04000000 the span covers 0x040000de, but the stride steps over
+    // it (0x04000004 + 8i is never 0x040000de or 0x040000df), so that placement lifts too; placed
+    // at 0x040000da, i = 0 writes the control halfword's low byte and may re-arm. Through a
+    // pointer parameter (dmaptr) nothing bounds the store. Every refusal keeps the decline it had:
+    // the escape reaches `mk`'s return storage, a writer the one object cannot hold.
     test('a computed store whose every address misses the control halfword cannot re-arm the channel', () => {
       const dma =
         '.L3:\n\tmov\tr1, sp\n\tldr\tr2, .L7\n\tadd\tr0, r2, #0\n\tstrh\tr0, [r1]\n\tldr\tr0, .L7+0x4\n' +
@@ -3931,8 +3933,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(named).toContain('    volatile u16 sp0;');
       const reachesTheTemp = /the one object cannot hold every writer: .* where `mk` returns its struct/;
       expect(() => decompile('dmasretx', dmasretx, ARMV4T_AGBCC, protos('dmasretx'))).toThrow(reachesTheTemp);
+      expect(
+        decompile('dmasretx', dmasretx, ARMV4T_AGBCC, { ...protos('dmasretx'), symbols: placed(0x04000000) }).source,
+      ).toContain('    volatile u16 sp0;');
       expect(() =>
-        decompile('dmasretx', dmasretx, ARMV4T_AGBCC, { ...protos('dmasretx'), symbols: placed(0x04000000) }),
+        decompile('dmasretx', dmasretx, ARMV4T_AGBCC, { ...protos('dmasretx'), symbols: placed(0x040000da) }),
       ).toThrow(reachesTheTemp);
       expect(() => decompile('dmaptr', dmaptr, ARMV4T_AGBCC, protos('dmaptr'))).toThrow(reachesTheTemp);
     });

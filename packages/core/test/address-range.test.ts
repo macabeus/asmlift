@@ -1,5 +1,5 @@
-// UNIT tests for `addressRangeOf` (frontend/device-pins.ts): every address a value may hold, as
-// an unsigned interval, over hand-built IR. The frame-object audit asks it whether a store
+// UNIT tests for `addressRangeOf` (frontend/device-pins.ts over ir/bits.ts `stridedRange`): every
+// address a value may hold, as a strided unsigned interval, over hand-built IR. The frame-object audit asks it whether a store
 // through a computed pointer can reach a DMA channel's control halfword (frame-objects.ts
 // `readWindow`); an answer narrower than the machine's values there turns a refusal into a
 // frame word modelled as unread, so each refusal below is pinned as firmly as each answer.
@@ -56,7 +56,7 @@ describe('addressRangeOf — what a computed address may be', () => {
     br(left, join, [left.op('shl', { imm: 3 }, [i])]);
     br(right, join, [right.op('shl', { imm: 3 }, [i])]);
     const addr = join.op('add', {}, [q, join.op('const', { value: 0x3003440 })]);
-    expect(rangeIn([entry, left, right, join], addr)).toEqual({ lo: 0x3003440, hi: 0x3003440 + 255 * 8 });
+    expect(rangeIn([entry, left, right, join], addr)).toEqual({ lo: 0x3003440, hi: 0x3003440 + 255 * 8, stride: 8 });
   });
 
   test('a block param whose in-edges pass a constant and a u8 is their union', () => {
@@ -72,7 +72,7 @@ describe('addressRangeOf — what a computed address may be', () => {
     const base = join.op('gaddr', { sym: 'gUnk_03003590' });
     const addr = join.op('add', {}, [join.op('shl', { imm: 3 }, [q]), base]);
     const symbols: SymbolMap = new Map([[0x3003590, [{ name: 'gUnk_03003590', kind: 'data' }]]]);
-    expect(rangeIn([entry, right, join], addr, symbols)).toEqual({ lo: 0x3003590, hi: 0x3003590 + 255 * 8 });
+    expect(rangeIn([entry, right, join], addr, symbols)).toEqual({ lo: 0x3003590, hi: 0x3003590 + 255 * 8, stride: 8 });
     // the same name unplaced is an unresolved pointer, and so is a name placed at two addresses
     expect(rangeIn([entry, right, join], addr)).toBeUndefined();
     const twice: SymbolMap = new Map([
@@ -99,17 +99,21 @@ describe('addressRangeOf — what a computed address may be', () => {
     const entry = block([p]);
     expect(rangeIn([entry], entry.op('load', { off: 0, width: 4, signed: false }, [p]))).toBeUndefined();
     expect(rangeIn([entry], entry.op('load', { off: 0, width: 1, signed: true }, [p]))).toBeUndefined();
-    expect(rangeIn([entry], entry.op('load', { off: 0, width: 2, signed: false }, [p]))).toEqual({ lo: 0, hi: 0xffff });
-    expect(rangeIn([entry], entry.op('zext', { width: 8 }, [p]))).toEqual({ lo: 0, hi: 0xff });
+    expect(rangeIn([entry], entry.op('load', { off: 0, width: 2, signed: false }, [p]))).toEqual({
+      lo: 0,
+      hi: 0xffff,
+      stride: 1,
+    });
+    expect(rangeIn([entry], entry.op('zext', { width: 8 }, [p]))).toEqual({ lo: 0, hi: 0xff, stride: 1 });
   });
 
   test('a mask and a zero-fill shift bound their result whatever they take; a shift left carries it', () => {
     const p = v();
     const entry = block([p]);
     const m = entry.op('const', { value: 0x1f });
-    expect(rangeIn([entry], entry.op('and', {}, [p, m]))).toEqual({ lo: 0, hi: 0x1f });
-    expect(rangeIn([entry], entry.op('and', { imm: 0xff }, [p]))).toEqual({ lo: 0, hi: 0xff });
-    expect(rangeIn([entry], entry.op('shr_u', { imm: 28 }, [p]))).toEqual({ lo: 0, hi: 15 });
+    expect(rangeIn([entry], entry.op('and', {}, [p, m]))).toEqual({ lo: 0, hi: 0x1f, stride: 1 });
+    expect(rangeIn([entry], entry.op('and', { imm: 0xff }, [p]))).toEqual({ lo: 0, hi: 0xff, stride: 1 });
+    expect(rangeIn([entry], entry.op('shr_u', { imm: 28 }, [p]))).toEqual({ lo: 0, hi: 15, stride: 1 });
     expect(rangeIn([entry], entry.op('shr_s', { imm: 28 }, [p]))).toBeUndefined();
     // a shift left of an unbounded value bounds nothing
     expect(rangeIn([entry], entry.op('shl', { imm: 3 }, [p]))).toBeUndefined();
@@ -124,9 +128,37 @@ describe('addressRangeOf — what a computed address may be', () => {
     const low = entry.op('const', { value: 0x10 });
     expect(rangeIn([entry], entry.op('sub', {}, [low, i]))).toBeUndefined();
     const k = entry.op('const', { value: 0x100 });
-    expect(rangeIn([entry], entry.op('sub', {}, [k, i]))).toEqual({ lo: 1, hi: 0x100 });
+    expect(rangeIn([entry], entry.op('sub', {}, [k, i]))).toEqual({ lo: 1, hi: 0x100, stride: 1 });
     // shifted out of the word
     expect(rangeIn([entry], entry.op('shl', { imm: 28 }, [i]))).toBeUndefined();
+  });
+
+  test('the stride is the gcd of every term, the same value counted once, and of where merged arms start', () => {
+    // agbcc's `ch * 12`, `((ch << 1) + ch) << 2`: the two `ch` terms add before the shift scales them
+    const p = v();
+    const entry = block([p]);
+    const ch = u8Of(entry, p);
+    const twelve = entry.op('shl', { imm: 2 }, [entry.op('add', {}, [entry.op('shl', { imm: 1 }, [ch]), ch])]);
+    const base = entry.op('const', { value: 0x40000b0 });
+    expect(rangeIn([entry], entry.op('add', {}, [base, twelve]))).toEqual({
+      lo: 0x40000b0,
+      hi: 0x40000b0 + 255 * 12,
+      stride: 12,
+    });
+    // a constant that was negative is the same word: the sum moves into the word it fits
+    const back = entry.op('const', { value: -8 });
+    expect(rangeIn([entry], entry.op('add', {}, [entry.op('add', {}, [base, twelve]), back]))).toEqual({
+      lo: 0x40000a8,
+      hi: 0x40000a8 + 255 * 12,
+      stride: 12,
+    });
+    // two channels merged by a branch: DMA1 or DMA2's source register, 12 apart
+    const q = v();
+    const join = block([q]);
+    const left = block();
+    condBr(entry, p, [left, []], [join, [entry.op('const', { value: 0x40000c8 })]]);
+    br(left, join, [left.op('const', { value: 0x40000bc })]);
+    expect(rangeIn([entry, left, join], q)).toEqual({ lo: 0x40000bc, hi: 0x40000c8, stride: 12 });
   });
 
   test('a value whose range depends on itself through a loop bounds nothing', () => {

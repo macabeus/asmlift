@@ -17,6 +17,7 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
+import { linearFactor } from '../ir/bits';
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
@@ -692,7 +693,7 @@ function frameAddressFacts(
     }
     for (const [lit, index] of [d.operands, [...d.operands].reverse()]) {
       const from = literalAddrOf(lit);
-      const stride = from === undefined ? 0 : factorOf(addresses, index);
+      const stride = from === undefined ? 0 : linearFactor({ defs: defOf, constOf: addresses.constOf }, index);
       if (from !== undefined && readOnlySinks.has(from + off) && stride > 0 && stride % sinkSpacing === 0) {
         return [...readOnlySinks].filter((s) => (s - (from + off)) % stride === 0);
       }
@@ -700,47 +701,6 @@ function frameAddressFacts(
     return [];
   };
   return { ...addresses, readsThrough };
-}
-
-// `v` as a sum of runtime values times constants, plus a constant (the `1` key): agbcc's `ch *
-// 12` is `((ch << 1) + ch) << 2`, which is 12 times `ch` only once the two `ch` terms are added.
-// Undefined past what this can read.
-function linearOf(facts: LiteralAddresses, v: Value, depth = 0): Map<Value | 1, number> | undefined {
-  const c = facts.constOf(v);
-  if (c !== undefined) {
-    return new Map([[1, c]]);
-  }
-  const d = facts.defOf.get(v);
-  if (d === undefined || depth > 8) {
-    return new Map([[v, 1]]);
-  }
-  const scaled = (x: Value, by: number) => {
-    const l = linearOf(facts, x, depth + 1);
-    return l && new Map([...l].map(([t, k]) => [t, k * by] as const));
-  };
-  const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : facts.constOf(d.operands[1]);
-  if (d.opcode === 'shl' && k !== undefined && k >= 0 && k < 31) {
-    return scaled(d.operands[0], 2 ** k);
-  }
-  if (d.opcode === 'mul' && d.operands.length === 2 && k !== undefined) {
-    return scaled(d.operands[0], k);
-  }
-  if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
-    const x = linearOf(facts, d.operands[0], depth + 1);
-    const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
-    if (x === undefined || y === undefined) {
-      return undefined;
-    }
-    y.forEach((n, t) => x.set(t, (x.get(t) ?? 0) + n));
-    return x;
-  }
-  return new Map([[v, 1]]);
-}
-
-// A number every value of `v` is a multiple of, or 0 when this cannot name one.
-function factorOf(facts: LiteralAddresses, v: Value): number {
-  const l = linearOf(facts, v);
-  return l === undefined ? 0 : [...l.values()].reduce(gcd, 0);
 }
 
 /** A FRAME BASE ADDRESSED THROUGH IS NOT A CAPTURE. Thumb-1 gives `ldr`/`str` an `[sp,#imm]`
@@ -1539,8 +1499,9 @@ const unbounded = (why: string): ReadWindow => ({ lo: -Infinity, hi: Infinity, w
  *  the control stores that bound it are the ones reachable in between. Each has to be a literal
  *  the target decodes. A store through a pointer this cannot resolve — one that is this frame's
  *  on only some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves
- *  the read unbounded, unless every address it may hold misses that halfword (`misses`) — as does a transfer never armed here at all. An unbounded device read
- *  says which of those it met (`why`): each is a different capability to build. A block transfer
+ *  the read unbounded; so does a transfer never armed here at all. A store whose every address
+ *  misses that halfword (`misses`) is not such a store. An unbounded device read says which of
+ *  those it met (`why`): each is a different capability to build. A block transfer
  *  that took the address as its source adds the bytes its control word reads (`calleeReads`).
  *
  *  A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
@@ -1647,23 +1608,33 @@ function readWindow(
   return { lo, hi, why: 'that reads through it' };
 }
 
-/** A store through a computed pointer that provably misses the control halfword at `cnt`: every
- *  address its base may hold (`addressRangeOf`), displaced and widened by the store's own bytes,
- *  lies wholly below `cnt` or wholly at or above `cnt + 2`. agbcc's `gEnts[i].f = 1` after a
- *  transfer, `i` a `u8`, writes somewhere in `0x3003444 + [0, 255*8]`, and no `i` makes that
- *  the channel's control register — so it cannot re-arm the channel, and the window stays where
- *  the literal stores put it. Not "the transfer is over": an immediate transfer is, but a later
- *  store that sets the enable bit again reloads the source register and reads the frame anew
- *  (GBATEK, DMA control bit 15), which is what this guards against. A store this cannot bound
- *  on every value is the unresolved pointer it always was. */
+/** A store through a computed pointer that provably misses the control halfword at `cnt`: no
+ *  address its base may hold (`addressRangeOf`, a strided interval), displaced by the store's own
+ *  offset, starts a store whose bytes overlap `[cnt, cnt + 2)`. agbcc's `gEnts[i].f = 1` after a
+ *  transfer, `i` a `u8`, writes one byte at `gEnts + 4 + 8 * [0, 255]`, and no `i` makes that the
+ *  channel's control register — so it cannot re-arm the channel, and the window stays where the
+ *  literal stores put it. The stride decides it where the interval alone cannot: placed at
+ *  0x04000000 that span covers 0x040000DE, and still no `i` lands on it. Not "the transfer is
+ *  over": an immediate transfer is, but a later store that sets the enable bit again reloads the
+ *  source register and reads the frame anew (GBATEK, DMA control bit 15), which is what this
+ *  guards against. A store this cannot bound on every value is the unresolved pointer it always
+ *  was. */
 function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
   const r = facts.addressRangeOf(op.operands[0]);
   if (r === undefined) {
     return false;
   }
-  const lo = r.lo + (op.attrs.off as number);
-  const end = r.hi + (op.attrs.off as number) + (op.attrs.width as number);
-  return lo >= 0 && end <= 2 ** 32 && (end <= cnt || lo >= cnt + 2);
+  const off = op.attrs.off as number;
+  const width = op.attrs.width as number;
+  const lo = r.lo + off;
+  const hi = r.hi + off;
+  if (lo < 0 || hi + width > 2 ** 32) {
+    return false;
+  }
+  // the first start at or above the lowest one that overlaps, against the highest that does
+  const from = cnt - width + 1;
+  const first = from <= lo || r.stride === 0 ? lo : lo + Math.ceil((from - lo) / r.stride) * r.stride;
+  return first > Math.min(hi, cnt + 1) || first < from;
 }
 
 /** Which model the audit judges the frame in. `refused` is the one mutable fact the audit

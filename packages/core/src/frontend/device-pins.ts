@@ -54,7 +54,7 @@
  *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
  *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
  *  another instruction sequence. */
-import { incomingArgs } from '../ir/bits';
+import { type RangeCtx, type StridedRange, incomingArgs, stridedRange } from '../ir/bits';
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -66,20 +66,10 @@ export interface LiteralAddresses {
   constOf(v: Value): number | undefined;
   /** the literal address `v` denotes, or undefined when this cannot say */
   literalAddrOf(v: Value): number | undefined;
-  /** every address `v` may denote, as an unsigned `[lo, hi]` (`addressRangeOf`), or undefined when
-   *  this cannot bound it */
-  addressRangeOf(v: Value): AddressRange | undefined;
+  /** every address `v` may denote, as a strided unsigned interval, or undefined when this cannot
+   *  bound it */
+  addressRangeOf(v: Value): StridedRange | undefined;
 }
-
-/** An unsigned closed interval of 32-bit words, `lo <= hi`. */
-export interface AddressRange {
-  readonly lo: number;
-  readonly hi: number;
-}
-
-const WORD_MAX = 0xffffffff;
-/** The most values one `addressRangeOf` question visits before it answers nothing. */
-const RANGE_BUDGET = 256;
 
 /** `literalAddrOf`: `const` is the bare pool word, `gaddr` is the same word after the symbol map
  *  named it, a constant shifted by a constant is the word agbcc builds without a pool (`mov r0,
@@ -144,117 +134,20 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     return undefined;
   };
   // `addressRangeOf`: where `literalAddrOf` names one address, this names every address a value
-  // may hold, as the words between two bounds. A `const` or a placed `gaddr` is its own point;
-  // a zero-fill shift right, an `and` with a constant, a `zext` and an unsigned narrow load bound
-  // their result whatever their operand holds (`(u8)x` is `lsr(lsl(x, 24), 24)` on Thumb); a shift
-  // left by a constant, an `add` and a `sub` carry their operands' bounds while no end leaves the
-  // word; a block param is the union of what its in-edges pass. Anything else — a function
-  // parameter, a word loaded from memory, a name the map does not place, a value whose own range
-  // depends on itself through a loop, a sum that may wrap — bounds nothing, and nothing is the
-  // answer. Exact is not the point: an answer must hold every value the machine can compute
-  // there, and a wider one only proves less.
-  const incoming = incomingArgs(irBlocks);
-  const entryParams = new Set(irBlocks[0]?.params ?? []);
-  // `open` is the walk's path, so a value met again on it is a cycle; `left` caps the whole walk
-  interface RangeWalk {
-    readonly open: Set<Value>;
-    left: number;
-  }
-  const addressRangeOf = (v: Value, walk: RangeWalk): AddressRange | undefined => {
-    if (walk.open.has(v) || --walk.left < 0) {
-      return undefined;
-    }
-    walk.open.add(v);
-    try {
-      return rangeOf(v, walk);
-    } finally {
-      walk.open.delete(v);
-    }
-  };
-  const rangeOf = (v: Value, walk: RangeWalk): AddressRange | undefined => {
-    const point = literalAddrOf(v);
-    if (point !== undefined) {
-      const at = point >>> 0;
-      return point === at || point === (at | 0) ? { lo: at, hi: at } : undefined;
-    }
-    const d = defOf.get(v);
-    if (d === undefined) {
-      // a block param: whatever each in-edge passes, never a function parameter
-      const ins = entryParams.has(v) ? undefined : incoming.get(v);
-      if (ins === undefined || ins.length === 0) {
-        return undefined;
-      }
-      let lo = WORD_MAX;
-      let hi = 0;
-      for (const x of ins) {
-        const r = x === undefined ? undefined : addressRangeOf(x, walk);
-        if (r === undefined) {
-          return undefined;
-        }
-        lo = Math.min(lo, r.lo);
-        hi = Math.max(hi, r.hi);
-      }
-      return { lo, hi };
-    }
-    const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : constOf(d.operands[1]);
-    switch (d.opcode) {
-      case 'shr_u': {
-        if (k === undefined || k < 0 || k > 31) {
-          return undefined;
-        }
-        // a zero-fill shift bounds its result whatever it shifts
-        const r = addressRangeOf(d.operands[0], walk) ?? { lo: 0, hi: WORD_MAX };
-        return { lo: Math.floor(r.lo / 2 ** k), hi: Math.floor(r.hi / 2 ** k) };
-      }
-      case 'shl': {
-        if (k === undefined || k < 0 || k > 31) {
-          return undefined;
-        }
-        const r = addressRangeOf(d.operands[0], walk);
-        return r === undefined ? undefined : within(r.lo * 2 ** k, r.hi * 2 ** k);
-      }
-      case 'and': {
-        // a mask bounds its result whatever it masks
-        const masks = [...d.operands.map(constOf), d.operands.length === 1 ? k : undefined].filter(
-          (m) => m !== undefined,
-        );
-        const m = masks.length > 0 ? Math.min(...masks.map((x) => x >>> 0)) : undefined;
-        return m === undefined ? undefined : { lo: 0, hi: m };
-      }
-      case 'zext':
-        return { lo: 0, hi: 2 ** (d.attrs.width as number) - 1 };
-      case 'load':
-        return d.attrs.signed === true || (d.attrs.width as number) >= 4
-          ? undefined
-          : { lo: 0, hi: 2 ** (8 * (d.attrs.width as number)) - 1 };
-      case 'add':
-      case 'sub': {
-        if (d.operands.length !== 2) {
-          return undefined;
-        }
-        const x = addressRangeOf(d.operands[0], walk);
-        const y = x === undefined ? undefined : addressRangeOf(d.operands[1], walk);
-        if (x === undefined || y === undefined) {
-          return undefined;
-        }
-        return d.opcode === 'add' ? within(x.lo + y.lo, x.hi + y.hi) : within(x.lo - y.hi, x.hi - y.lo);
-      }
-      default:
-        return undefined;
-    }
+  // may hold (ir/bits.ts `stridedRange`), a placed name being the one leaf only this module reads.
+  const rangeCtx: RangeCtx = {
+    defs: defOf,
+    constOf,
+    incoming: incomingArgs(irBlocks),
+    entry: new Set(irBlocks[0]?.params ?? []),
+    pointOf: (v) => (defOf.get(v)?.opcode === 'gaddr' ? literalAddrOf(v) : undefined),
   };
   return {
     defOf,
     constOf,
     literalAddrOf: (v) => literalAddrOf(v),
-    addressRangeOf: (v) => addressRangeOf(v, { open: new Set(), left: RANGE_BUDGET }),
+    addressRangeOf: (v) => stridedRange(rangeCtx, v),
   };
-}
-
-/** `[lo, hi]` as a word range, or undefined when either end leaves the word: a sum that may wrap
- *  denotes an address on both sides of zero, which no interval names. */
-function within(lo: number, hi: number): AddressRange | undefined {
-  return lo < 0 || hi > WORD_MAX ? undefined : { lo, hi };
 }
 
 /** Which device stores a policy pins, beside every device read. */
