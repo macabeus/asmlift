@@ -4616,12 +4616,16 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  whose entry value each pushed word holds — and a `pop` (or a staging pop's `mov rHi, rLow`)
  *  restores a register only when the word it loads is that register's: `push {r4, r5}; pop {r5};
  *  pop {r4}` names both and swaps the caller's r4 and r5, and agbcc's staging with its two `mov`s
- *  crossed swaps r8 and r9. Such a pop is a write the caller sees that the fill, reading the `pop`
- *  as transparent, never shows, so a callee-saved register one reaches a balanced return with is
- *  `leaked`, and refused outright (after the return proof, `poppedForeign`). The blind side: where
- *  the stack is not known — paths that disagree about it, a move of sp the frame walk cannot
- *  follow, a store through a register-indexed sp address — a restore is read by name, and a
- *  store through a copy of sp into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
+ *  crossed swaps r8 and r9. A push labels a word with a register only while that register still
+ *  holds its entry value (`dirty`): pushed again after a write, a foreign pop or a save dropped
+ *  with `add sp`, it pushes a value of the function's, and the pop of that word restores nothing.
+ *  Where paths as deep disagree about a word, the word is no register's. Such a pop is a write the
+ *  caller sees that the fill, reading the `pop` as transparent, never shows, so a callee-saved
+ *  register one reaches a balanced return with is `leaked`, and refused outright (after the
+ *  return proof, `poppedForeign`). The blind side: where the stack is not known — paths that
+ *  disagree about its depth, a move of sp the frame walk cannot follow, a store through a
+ *  register-indexed sp address — a restore is read by name, and a store through a copy of sp
+ *  into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
  *  asks the same word question of lr alone, on its own walk.
  *
  *  `misSaved` is every register a save or a restore names that some path uses outside a save, or
@@ -4629,6 +4633,8 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  a `push` past a read, a use past the restore, a staged `push {r3}` of r8 popped into r1. Its
  *  writes are not all the caller's and its entry value is no global's, so `registerLiveIns`
  *  refuses it rather than spell it either way. "Uses" is any naming in an operand, read or write. */
+const CALL_CLOBBERS = ['r0', 'r1', 'r2', 'r3', 'r12', 'r14'];
+const ALL_REGS = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r14'];
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
@@ -4681,8 +4687,8 @@ function bodySavedRegs(
   // a return must find the second empty — and the frame depth (`makeFrameWalk`; null where paths
   // disagree or it is not exact).
   //
-  // And the STACK, word by word (`stack`, top last; null where paths disagree or a move of sp is not
-  // exact): whose entry value each pushed word holds, so that a restore is a restore only when the
+  // And the STACK, word by word (`stack`, top last; null where paths disagree about its depth or a
+  // move of sp is not exact; a word null where they disagree about it): whose entry value each pushed word holds, so that a restore is a restore only when the
   // word its `pop` loads is that register's own. `pop {r5}; pop {r4}` after `push {r4, r5}` NAMES
   // both registers and restores neither — it swaps the caller's r4 and r5.
   type Stack = readonly (string | null)[];
@@ -4695,9 +4701,14 @@ function bodySavedRegs(
     depth: number | null;
     stack: Stack | null;
     clobbered: Map<string, Instr>;
+    dirty: Set<string>;
   };
+  // `dirty` (a may-set) is each register that may no longer hold its entry value: written, or loaded
+  // by a pop from a word not its own, since the entry or its last restore. A push labels a word with
+  // a register only while it is not: `push {r4}; mov r4, r0; add sp, #4; push {r4}; pop {r4}` pushes
+  // a0 the second time, and that pop is no restore — however its push named the register.
   const stateIn: (State | null)[] = blocks.map((_, i) =>
-    i === 0 ? { cur: new Set(), open: new Set(), depth: 0, stack: [], clobbered: new Map() } : null,
+    i === 0 ? { cur: new Set(), open: new Set(), depth: 0, stack: [], clobbered: new Map(), dirty: new Set() } : null,
   );
   const leaked = new Map<string, Instr>();
   const word = (r: string) => canonReg(r) ?? r;
@@ -4705,6 +4716,7 @@ function bodySavedRegs(
     const cur = new Set(stateIn[b]!.cur);
     const open = new Set(stateIn[b]!.open);
     const clobbered = new Map(stateIn[b]!.clobbered);
+    const dirty = new Set(stateIn[b]!.dirty);
     const frame = makeFrameWalk({ argRegs: [], start: stateIn[b]!.depth });
     let stack: (string | null)[] | null = stateIn[b]!.stack === null ? null : [...stateIn[b]!.stack!];
     const holds = new Map<string, string>(); // low register ← the high one a save's staging `mov` copied
@@ -4725,7 +4737,9 @@ function bodySavedRegs(
       const list = x.mnemonic === 'push' || x.mnemonic === 'pop' ? byRegNumber(regListOf(x.ops) ?? []) : null;
       if (x.mnemonic === 'push') {
         // a push stores its highest-numbered register deepest
-        stack = stack === null || list === null ? null : [...stack, ...list.map((r) => holds.get(r) ?? r).reverse()];
+        // a word is a register's own only while that register holds its entry value (`dirty`)
+        const label = (r: string) => (dirty.has(holds.get(r) ?? r) ? null : (holds.get(r) ?? r));
+        stack = stack === null || list === null ? null : [...stack, ...list.map(label).reverse()];
       } else if (x.mnemonic === 'pop') {
         if (stack === null || list === null || stack.length < list.length) {
           stack = null;
@@ -4758,8 +4772,13 @@ function bodySavedRegs(
       const writes = x.mnemonic === 'push' ? [] : x.mnemonic === 'pop' ? (regListOf(x.ops) ?? []) : regWritesOf(x);
       if (writes === 'all') {
         holds.clear();
+        // a call leaves the registers the ABI has it preserve; anything else unread may write any
+        (/^(bl|blx|swi)$/.test(x.mnemonic) ? CALL_CLOBBERS : ALL_REGS).forEach((r) => dirty.add(r));
       } else {
-        writes.forEach((r) => holds.delete(word(r)));
+        writes.forEach((r) => {
+          holds.delete(word(r));
+          dirty.add(word(r));
+        });
       }
       if (savesHi.has(x)) {
         holds.set(word(x.ops[0]), word(savesHi.get(x)!));
@@ -4786,6 +4805,7 @@ function bodySavedRegs(
         cur.delete(r);
         open.delete(r);
         clobbered.delete(word(r));
+        dirty.delete(word(r));
       });
       // A pop that loads another register's word writes this one and restores nothing: it is no
       // longer saved, and its own save, still open, is unrestored at a balanced return.
@@ -4805,10 +4825,18 @@ function bodySavedRegs(
         clobbered.forEach((at, r) => leaked.has(r) || leaked.set(r, at));
       }
     }
-    return { cur, open, depth: frame.depthNow(), stack, clobbered };
+    return { cur, open, depth: frame.depthNow(), stack, clobbered, dirty };
   };
   const sameStack = (x: Stack | null, y: Stack | null) =>
     x === null || y === null ? x === y : x.length === y.length && x.every((w, i) => w === y[i]);
+  // Paths whose stacks are as deep keep each word they agree on, and the rest is no register's: a
+  // pop of it restores nothing. Paths that disagree about the depth leave the stack unknown.
+  const joinStacks = (xs: readonly (Stack | null)[]): Stack | null =>
+    xs.some((x) => x === null || x.length !== xs[0]!.length)
+      ? null
+      : xs[0]!.map((w, i) => (xs.every((x) => x![i] === w) ? w : null));
+  const sameSet = (x: ReadonlySet<string>, y: ReadonlySet<string>) =>
+    x.size === y.size && [...x].every((r) => y.has(r));
   for (let changed = true; changed;) {
     changed = false;
     for (let b = 1; b < blocks.length; b++) {
@@ -4819,8 +4847,9 @@ function bodySavedRegs(
       const cur = new Set([...ins[0].cur].filter((r) => ins.every((s) => s.cur.has(r))));
       const open = new Set(ins.flatMap((s) => [...s.open]));
       const depth = ins.every((s) => s.depth === ins[0].depth) ? ins[0].depth : null;
-      const stack = ins.every((s) => sameStack(s.stack, ins[0].stack)) ? ins[0].stack : null;
+      const stack = joinStacks(ins.map((s) => s.stack));
       const clobbered = new Map(ins.flatMap((s) => [...s.clobbered]));
+      const dirty = new Set(ins.flatMap((s) => [...s.dirty]));
       const was = stateIn[b];
       if (
         was === null ||
@@ -4828,9 +4857,10 @@ function bodySavedRegs(
         was.open.size !== open.size ||
         was.depth !== depth ||
         !sameStack(was.stack, stack) ||
-        was.clobbered.size !== clobbered.size
+        was.clobbered.size !== clobbered.size ||
+        !sameSet(was.dirty, dirty)
       ) {
-        stateIn[b] = { cur, open, depth, stack, clobbered };
+        stateIn[b] = { cur, open, depth, stack, clobbered, dirty };
         changed = true;
       }
     }

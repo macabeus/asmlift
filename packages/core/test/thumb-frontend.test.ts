@@ -946,6 +946,53 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // A word is a register's own only while the register held its entry value when it was pushed:
+    // pushed again after a foreign pop, a write, or a save dropped with `add sp`, it holds the
+    // function's value, and the pop of it leaves the caller that value (r4/r5 swapped, r4 = a0).
+    test('…and a re-push of a register no longer its entry value restores nothing', () => {
+      const lift = (body: string) => () =>
+        decompile(
+          'f',
+          `f:\n\t${body
+            .split('; ')
+            .join('\n\t')
+            .replace(/\t(\.L\d+:) /g, '$1\n\t')}\n`,
+          ARMV4T_AGBCC,
+        );
+      const foreign = (pop: string, reg: string) =>
+        new RegExp(`'${pop}' loads a word that is not ${reg}'s own save into callee-saved ${reg}`);
+      expect(
+        lift('push {r4, r5, lr}; pop {r5}; pop {r4}; push {r4, r5}; mov r0, #0; pop {r4, r5}; pop {r1}; bx r1'),
+      ).toThrow(foreign('pop {r4, r5}', 'r5'));
+      expect(lift('push {r4}; mov r4, r0; add sp, #4; push {r4}; mov r0, #0; pop {r4}; bx lr')).toThrow(
+        foreign('pop {r4}', 'r4'),
+      );
+      expect(
+        lift('push {r4, lr}; mov r4, r0; add r0, r4, #1; add sp, #4; push {r4}; pop {r4}; pop {r1}; bx r1'),
+      ).toThrow(foreign('pop {r4}', 'r4'));
+      expect(lift('push {r4}; mov r4, #3; push {r4}; mov r0, #0; pop {r4}; add sp, #4; bx lr')).toThrow(
+        foreign('pop {r4}', 'r4'),
+      );
+      // agbcc's r8/r9 staging crossed, then staged again and restored in order: still swapped
+      expect(
+        lift(
+          'push {r4, r5, lr}; mov r5, r9; mov r4, r8; push {r4, r5}; pop {r3, r4}; mov r9, r3; mov r8, r4; ' +
+            'mov r5, r9; mov r4, r8; push {r4, r5}; mov r0, #0; pop {r3, r4}; mov r9, r4; mov r8, r3; pop {r4, r5}; pop {r1}; bx r1',
+        ),
+      ).toThrow(foreign('mov r9, r4', 'r9'));
+      // paths as deep that disagree about a word: on the a0 != 0 path that word is a0
+      expect(lift('push {r4}; cmp r0, #0; beq .L1; add sp, #4; push {r0}; .L1: mov r0, #0; pop {r4}; bx lr')).toThrow(
+        foreign('pop {r4}', 'r4'),
+      );
+      expect(
+        lift('push {r4, lr}; cmp r0, #0; beq .L1; add sp, #4; push {r0}; .L1: mov r0, #0; pop {r4}; pop {r1}; bx r1'),
+      ).toThrow(foreign('pop {r4}', 'r4'));
+      // …and paths that agree about it restore, whatever each writes
+      expect(lift('push {r4}; cmp r0, #0; beq .L1; mov r4, r0; add r0, r4, #1; .L1: pop {r4}; bx lr')().source).toBe(
+        's32 f(s32 a0) {\n    if (a0 != 0) a0 = a0 + 1;\n    return a0;\n}\n',
+      );
+    });
+
     // The staging `mov` is the save's only where its low register reaches the push unchanged; one
     // rewritten first pushes a value of the function's own, and saves no high register.
     test('…and a high register staged into a push through another value is still a global', () => {

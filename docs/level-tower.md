@@ -1723,7 +1723,11 @@ names: the walk tracks whose entry value each pushed word holds, so `push {r4, r
 {r4}` — both names popped, the caller's r4 and r5 swapped — restores neither, and a callee-saved
 register a pop fills with another register's word and carries to a return refuses outright (the
 fill reads the `pop` as transparent, so no write of the body would show it). Matched by name, that
-shape and agbcc's r8/sl staging with its two `mov`s crossed lifted as if restored. The O32 and PowerPC frontends keep the entry-block
+shape and agbcc's r8/sl staging with its two `mov`s crossed lifted as if restored. A word is a
+register's own only while the register still held its entry value when pushed: re-pushed after a
+write, a foreign pop or an `add sp` that dropped its save, it holds the function's value, and its
+pop restores nothing. Paths as deep that disagree about a word make that word no register's; only
+paths that disagree about the depth leave the stack unknown and a restore read by name. The O32 and PowerPC frontends keep the entry-block
 reading, because their save is an ordinary store: gcc 2.7.2 passes a global register variable on
 the stack as `sw s0,16(sp)`, and mwcc as `stw r14,8(r1)`, in the entry block itself. So there a
 store is a save only where some reload of the register from the stack answers it, and never for
