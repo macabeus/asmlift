@@ -3972,6 +3972,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toContain('*(volatile s32 *)67109076 = (u32)sp0 + 4;');
     });
 
+    // …AND THE SAME WINDOW IS ASKED AS UNBOUNDED WHERE AN ESCAPE GATE REJECTS IT, not only where a
+    // shape refuses. Compiled, `vu16 buf[2]; buf[0]=a; buf[1]=a+1; DMA3 = {&buf[1], 0x05000200,
+    // 0x85000001}; gEnts[i].f = 1;` (gEnts a literal 0x03003440, stride 8): the 32-bit transfer off
+    // sp+2 reaches buf[0] at sp+0 — a reach the per-object model refuses at the object gate. The
+    // tail store misses the control halfword, so the window is bounded, but without that proof it
+    // reached the frame and the one object held it; that lift stands.
+    test('a gate that rejects a window the miss proof bounded still asks for the one object', () => {
+      const v2 =
+        'v2:\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x18\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n' +
+        '\tmov\tr2, sp\n\tldrh\tr3, [r2]\n\tstrh\tr1, [r2]\n\tadd\tr1, r1, #0x1\n\tldrh\tr3, [r2, #0x2]\n' +
+        '\tstrh\tr1, [r2, #0x2]\n\tldr\tr2, .L3\n\tmov\tr1, sp\n\tadd\tr1, r1, #0x2\n\tstr\tr1, [r2]\n' +
+        '\tadd\tr2, r2, #0x4\n\tldr\tr1, .L3+0x4\n\tstr\tr1, [r2]\n\tadd\tr2, r2, #0x4\n\tldr\tr1, .L3+0x8\n' +
+        '\tstr\tr1, [r2]\n\tlsr\tr0, r0, #0x15\n\tldr\tr1, .L3+0xc\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x1\n' +
+        '\tstrb\tr1, [r0, #0x4]\n\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x5000200\n\t.word\t-0x7affffff\n\t.word\t0x3003440\n';
+      const src = decompile('v2', v2, ARMV4T_AGBCC, {
+        prototypes: { v2: { params: ['u8', 'u16'], returnsVoid: true } },
+      }).source;
+      expect(src).toContain('    u8 sp0[4];');
+      expect(src).toContain('*(volatile s32 *)67109076 = (u32)sp0 + 2;');
+      expect(src).toContain('((u8 *)((a0 << 3) + 50345024))[4] = 1;');
+    });
+
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
     // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
     // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;

@@ -431,9 +431,10 @@ export function auditFrameObjects({
   // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
   // registers, neither of them an object. Where the per-object model does describe the frame —
   // one object and nothing else in reach — it stands, and the object keeps its own type.
+  // An escape `misses` bounded is asked as the unbounded read it was without that proof
+  // (`ModelChoice.unboundedAt`): the proof may add a per-object lift, never take the one-object one.
   const answered = (e: FrameEscape): boolean =>
-    e.lo === -Infinity &&
-    e.hi === Infinity &&
+    model.unboundedAt.has(e.off) &&
     (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
   if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
     return { oneObject: { from: declared.from, to: declared.to } };
@@ -1650,6 +1651,9 @@ function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
  *  one-object answer is on offer, and read by the relift test. */
 interface ModelChoice {
   readonly onOffer: boolean;
+  /** the escapes whose read is unbounded, or was before `misses` bounded it (`sparedByMiss`) — the
+   *  one fact both the offer and the relift test (`answered`) read, so the miss proof moves neither */
+  readonly unboundedAt: ReadonlySet<number>;
   refused: boolean;
   /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead */
   shapeRefused(why: string): void;
@@ -1718,9 +1722,12 @@ function chooseFrameModel({
 }): ModelChoice {
   // A window `misses` bounded keeps the answer on offer that its unbounded read had: the proof lets
   // the per-object model describe the frame where it can, and takes no lift away where it cannot.
-  const unbounded =
-    oneObject === undefined &&
-    [...windows.values()].some((w) => (w.lo === -Infinity && w.hi === Infinity) || w.sparedByMiss === true);
+  const unboundedAt = new Set(
+    [...windows]
+      .filter(([, w]) => (w.lo === -Infinity && w.hi === Infinity) || w.sparedByMiss === true)
+      .map(([off]) => off),
+  );
+  const unbounded = oneObject === undefined && unboundedAt.size > 0;
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
   const escapeFree = oneObject === undefined && uses.escaped.size === 0;
   // A struct passed by value is ONE object of its declared type, which the call names whole; the
@@ -1728,6 +1735,7 @@ function chooseFrameModel({
   const onOffer = uses.byValueReads.size === 0 && ((unbounded && writer === null) || escapeFree);
   const model: ModelChoice = {
     onOffer,
+    unboundedAt,
     refused: false,
     shapeRefused: (why) => {
       if (!onOffer) {
