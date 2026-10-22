@@ -370,8 +370,8 @@ const copiedReg = (ins: Instr): string | undefined => {
 // A recovered dense-switch jump table (Regime B), keyed
 // by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. The table base is one of:
 //   - absolute, formed in the dispatch's block: `lui at,%hi(T) ; addu at,at,rI ; lw rV,%lo(T)(at)`,
-//     the table's `%lo` folded into the load's displacement (IDO, KMC and gcc 2.7.2 non-PIC — every
-//     benchmark MIPS row);
+//     the table's `%lo` folded into the load's displacement (IDO, KMC and gcc 2.7.2 non-PIC, whenever
+//     the block forms the base itself);
 //   - absolute, hoisted: `lui rH,%hi(T) ; addiu rB,rH,%lo(T)` in a loop's preheader, the load at
 //     displacement 0 (KMC and gcc 2.7.2; `HoistedDispatch`);
 //   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16 (its displacement the `%hi`), the load carrying
@@ -501,7 +501,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     }
     return -1;
   };
-  // Is `ins` a table-base materialisation (`lui rB,hi` HI16, or `lw rB,0(gp)` GOT16) with a `.text`
+  // Is `ins` a table-base materialisation (`lui rB,hi` HI16, or `lw rB,hi(gp)` GOT16) with a `.text`
   // relocation into a READ-ONLY data section? Returns {sym, addend} locating the table, or null.
   // A writable table is refused: the table is read once, at its initial contents, and a switch
   // lifted from it would ignore every store that retargets an entry. The compilers put a switch's
