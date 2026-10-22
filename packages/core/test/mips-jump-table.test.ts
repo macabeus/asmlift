@@ -376,6 +376,68 @@ test('a load displacement that is no paired %lo of the base declines', () => {
   }
 });
 
+// IDO `-KPIC` forms the base off the GOT: `lw at,%got(T)(gp)` (GOT16, its immediate the high
+// half) and the load's own LO16, then adds gp to the gp-relative entry. The first table of a unit is
+// at displacement 0; a later one is `lw rV,28(at)`, which stays refused (no benchmark row is PIC).
+const picTable = (at: number, lo: string | null): AsmData => {
+  const bytes = new Uint8Array(at + 8);
+  bytes.set([0, 0, 0, 0x2c, 0, 0, 0, 0x24], 0);
+  bytes.set([0, 0, 0, 0x24, 0, 0, 0, 0x2c], at);
+  return {
+    sections: new Map([['.rodata', bytes]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_GOT16', sym: '.rodata', addend: 0 },
+      ...(lo === null ? [] : [{ section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: lo, addend: 0 }]),
+      ...[0, 4, at, at + 4].map((offset) => ({
+        section: '.rodata',
+        offset,
+        type: 'R_MIPS_GPREL32',
+        sym: '.text',
+        addend: 0,
+      })),
+    ],
+    symbols: new Map([
+      ['other', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+    ]),
+    symbolCount: 2,
+    bigEndian: true,
+  };
+};
+const pic = (got: string, disp: string) =>
+  obj(
+    ' 0:\tsltiu\tat,a0,0x2',
+    ' 4:\tbeqz\tat,34 <f+0x34>',
+    ' 8:\tsll\tt6,a0,0x2',
+    ` c:\tlw\tat,${got}(gp)`,
+    '10:\taddu\tat,at,t6',
+    `14:\tlw\tt6,${disp}(at)`,
+    '18:\taddu\tt6,t6,gp',
+    '1c:\tjr\tt6',
+    '20:\tnop',
+    '24:\tjr\tra',
+    '28:\tli\tv0,5',
+    '2c:\tjr\tra',
+    '30:\tli\tv0,9',
+    '34:\tjr\tra',
+    '38:\tli\tv0,-1',
+  );
+
+test('an IDO -KPIC table is read at its GOT16 half and the LO16 the load carries', () => {
+  for (const [got, at] of [
+    ['0', 0],
+    ['1', 0x10000],
+  ] as const) {
+    const out = decompile('f', pic(got, '0'), MIPS_IDO, { asmData: picTable(at, '.rodata') }).source;
+    expect(out).toMatch(/case 0:\s*return 5;/);
+    expect(out).toMatch(/case 1:\s*return 9;/);
+  }
+  const declines = /indirect jump 'jr t6'/;
+  // A later table's folded `%lo` on a GOT16 base, and a LO16 on another symbol.
+  expect(() => decompile('f', pic('0', '32'), MIPS_IDO, { asmData: picTable(32, '.rodata') })).toThrow(declines);
+  expect(() => decompile('f', pic('0', '0'), MIPS_IDO, { asmData: picTable(0, 'other') })).toThrow(declines);
+});
+
 test('a table entry naming code outside the function declines loud', () => {
   // The table's second word points past the function's last block (0x40), as one read off another
   // function's table would.

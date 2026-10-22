@@ -368,11 +368,17 @@ const copiedReg = (ins: Instr): string | undefined => {
 };
 
 // A recovered dense-switch jump table (Regime B), keyed
-// by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. Two idioms are
-// handled: IDO gp-relative (`lw base,0(gp)` GOT16; `addu rV,rV,gp`
-// after the load) and KMC absolute (`lui base` HI16). Delay slots are honoured — the `beqz` delay
-// slot (which on IDO carries the DEFAULT return value `li v0,-1`) still executes before the
-// `switch_br`.
+// by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. The table base is one of:
+//   - absolute, formed in the dispatch's block: `lui at,%hi(T) ; addu at,at,rI ; lw rV,%lo(T)(at)`,
+//     the table's `%lo` folded into the load's displacement (IDO, KMC and gcc 2.7.2 non-PIC — every
+//     benchmark MIPS row);
+//   - absolute, hoisted: `lui rH,%hi(T) ; addiu rB,rH,%lo(T)` in a loop's preheader, the load at
+//     displacement 0 (KMC and gcc 2.7.2; `HoistedDispatch`);
+//   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16, the load carrying the `%lo` LO16, and
+//     `addu rV,rV,gp` after it (the entries are gp-relative); only at displacement 0
+//     (`inBlockTable`).
+// Delay slots are honoured — the `beqz` delay slot (which on IDO carries the DEFAULT return value
+// `li v0,-1`) still executes before the `switch_br`.
 interface MipsJT {
   scrutReg: string;
   caseAddrs: number[];
@@ -548,11 +554,17 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
   /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
    *  A `lui` base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
    *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
-   *  the TABLE's address, not an index offset. Refuses (null):
-   *    - a non-zero displacement with no R_MIPS_LO16 on the load — `table[i + off/4]`, the `lui`
-   *      left unpaired;
+   *  the TABLE's address, not an index offset. IDO `-KPIC`'s GOT16 base (`lw at,%got(T)(gp)`)
+   *  pairs with the load's LO16 the same way for the section symbol a table is addressed through:
+   *  the GOT16 immediate is the high half (`lw at,1(gp)` for a table 64 KiB in). Refuses (null):
+   *    - a non-zero displacement with no R_MIPS_LO16 on the load — `table[i + off/4]`, the base
+   *      left unpaired. No compiler emits an unpaired HI16 or GOT16 for a table; displacement 0
+   *      with no LO16 is still read at the base's own half, the address the pair gives with a
+   *      zero `%lo`, so the hand fixtures that carry no LO16 keep lifting;
    *    - a LO16 on another symbol, or any other relocation on the load;
-   *    - a non-zero displacement on a GOT16 base, which no compiler here emits (no ido row is PIC). */
+   *    - a non-zero displacement on a GOT16 base. IDO `-KPIC` emits one for every table of a unit
+   *      after the first (`lw rV,28(at)`); it is refused, and no row pins it, because no
+   *      benchmark row is PIC. */
   const inBlockTable = (base: Instr, ld: Instr, off: number): TableKey | null => {
     const hi = tableBaseOf(base);
     if (!hi) {
@@ -560,7 +572,17 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     }
     const lo = textRelocAt(ad, ld.addr);
     if (base.mnemonic !== 'lui') {
-      return off === 0 && lo === null ? hi : null;
+      const gotHi = parseMem(base.ops[1]).off;
+      if (off !== 0) {
+        return null;
+      }
+      if (lo === null) {
+        return gotHi === 0 ? hi : null;
+      }
+      if (lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
+        return null;
+      }
+      return { sym: hi.sym, addend: hi.addend + ((gotHi & 0xffff) << 16) };
     }
     if (lo === null ? off !== 0 : lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
       return null;
@@ -1645,9 +1667,6 @@ function liftOnce(
     has: (v: Value) => highHalves.has(v) || tableBases.has(v),
     guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
   };
-  // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
-  // markers written there, by value. Not a placeholder: a case may copy one (`move v0,at`), and a
-  // return or a call that skipped it would drop what the case handed on.
   // A table entry naming an address no block of this function starts at (another function's
   // code, read off a table that is not this dispatch's) declines here, before any arm is built.
   const armBlock = (addr: number): number => {
@@ -1657,6 +1676,9 @@ function liftOnce(
     }
     return j;
   };
+  // What an elided dispatch left at each case target's entry (jump-table.ts `caseEntries`), and the
+  // markers written there, by value. Not a placeholder: a case may copy one (`move v0,at`), and a
+  // return or a call that skipped it would drop what the case handed on.
   const entries = caseEntries(
     blocks.flatMap((b, at) => {
       const jt = b.branch ? jts.get(b.branch.addr) : undefined;
