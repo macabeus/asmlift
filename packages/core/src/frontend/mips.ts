@@ -374,9 +374,8 @@ const copiedReg = (ins: Instr): string | undefined => {
 //     benchmark MIPS row);
 //   - absolute, hoisted: `lui rH,%hi(T) ; addiu rB,rH,%lo(T)` in a loop's preheader, the load at
 //     displacement 0 (KMC and gcc 2.7.2; `HoistedDispatch`);
-//   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16, the load carrying the `%lo` LO16, and
-//     `addu rV,rV,gp` after it (the entries are gp-relative); only at displacement 0
-//     (`inBlockTable`).
+//   - PIC, IDO `-KPIC`: `lw at,%got(T)(gp)` GOT16 (its displacement the `%hi`), the load carrying
+//     the `%lo` LO16, and `addu rV,rV,gp` after it (the entries are gp-relative) (`inBlockTable`).
 // The table must sit in a read-only section (`tableBaseOf`).
 // Delay slots are honoured — the `beqz` delay slot (which on IDO carries the DEFAULT return value
 // `li v0,-1`) still executes before the `switch_br`.
@@ -546,53 +545,47 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
         if (!hi || hi.sym !== lo.sym) {
           return [{ sym: '', addend: NaN }];
         }
-        return [paired(hi, instrs[p], parseImm(x.ops[2]))];
+        return [paired(hi, parseImm(instrs[p].ops[1]), parseImm(x.ops[2]))];
       }),
     );
-  /** The table a `lui %hi` / `%lo` pair addresses: the HI16 record's symbol and addend plus both
+  /** The table a `%hi` / `%lo` pair addresses: the high record's symbol and addend plus both
    *  halves' immediates, the `%lo` sign-extended — REL keeps the offset in the immediates, so a
-   *  table 64 KiB into its section is `lui 1` and one past 32 KiB has a negative `%lo`. */
-  const paired = (hi: TableKey, lui: Instr, loImm: number): TableKey => ({
+   *  table 64 KiB into its section has a high half of 1 and one past 32 KiB has a negative `%lo`.
+   *  The high half is a `lui`'s immediate (HI16) or a `lw rB,hi(gp)`'s displacement (GOT16 on the
+   *  section symbol, whose GOT entry holds the 64 KiB page the LO16 completes). */
+  const paired = (hi: TableKey, hiImm: number, loImm: number): TableKey => ({
     sym: hi.sym,
-    addend: hi.addend + (((parseImm(lui.ops[1]) & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
+    addend: hi.addend + (((hiImm & 0xffff) << 16) + (((loImm & 0xffff) << 16) >> 16)),
   });
   /** The table a base the dispatch's block forms addresses, read with the load's displacement `off`.
-   *  A `lui` base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
+   *  The base pairs with the load: IDO, KMC and gcc 2.7.2 fold the table's `%lo` into the `lw`
    *  whenever the block forms the base, so `lw rV,%lo(T+K)(at)`'s displacement is the low half of
-   *  the TABLE's address, not an index offset. IDO `-KPIC`'s GOT16 base (`lw at,%got(T)(gp)`)
-   *  pairs with the load's LO16 the same way for the section symbol a table is addressed through:
-   *  the GOT16 immediate is the high half (`lw at,1(gp)` for a table 64 KiB in). Refuses (null):
+   *  the TABLE's address, not an index offset. One rule (`paired`) for both bases: a `lui`'s HI16,
+   *  and IDO `-KPIC`'s GOT16 (`lw at,%got(T)(gp)`), whose displacement is the high half — `lw
+   *  at,1(gp)` for a table 64 KiB in, then `lw rV,-24576(at)` for one at 40 KiB, or `lw rV,8(at)`
+   *  for a later table of the unit. Refuses (null):
    *    - a non-zero displacement with no R_MIPS_LO16 on the load — `table[i + off/4]`, the base
    *      left unpaired. No compiler emits an unpaired HI16 or GOT16 for a table; displacement 0
    *      with no LO16 is still read at the base's own half, the address the pair gives with a
-   *      zero `%lo`, so the hand fixtures that carry no LO16 keep lifting;
-   *    - a LO16 on another symbol, or any other relocation on the load;
-   *    - a non-zero displacement on a GOT16 base. IDO `-KPIC` emits one for every table of a unit
-   *      after the first (`lw rV,28(at)`); it is refused, and no row pins it, because no
-   *      benchmark row is PIC. */
+   *      zero `%lo`, so the hand fixtures that carry no LO16 keep lifting. An unpaired GOT16 is
+   *      read only at immediate 0: against a global symbol it names that symbol's own GOT slot,
+   *      not a page, so a non-zero immediate is no high half;
+   *    - a LO16 on another symbol, or any other relocation on the load. */
   const inBlockTable = (base: Instr, ld: Instr, off: number): TableKey | null => {
     const hi = tableBaseOf(base);
     if (!hi) {
       return null;
     }
+    const isLui = base.mnemonic === 'lui';
+    const hiImm = isLui ? parseImm(base.ops[1]) : parseMem(base.ops[1]).off;
     const lo = textRelocAt(ad, ld.addr);
-    if (base.mnemonic !== 'lui') {
-      const gotHi = parseMem(base.ops[1]).off;
-      if (off !== 0) {
-        return null;
-      }
-      if (lo === null) {
-        return gotHi === 0 ? hi : null;
-      }
-      if (lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
-        return null;
-      }
-      return { sym: hi.sym, addend: hi.addend + ((gotHi & 0xffff) << 16) };
+    if (lo === null) {
+      return off === 0 && (isLui || hiImm === 0) ? paired(hi, hiImm, 0) : null;
     }
-    if (lo === null ? off !== 0 : lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
+    if (lo.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
       return null;
     }
-    return paired(hi, base, off);
+    return paired(hi, hiImm, off);
   };
 
   const out = new Map<number, MipsJT>();
