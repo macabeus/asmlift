@@ -1181,6 +1181,22 @@ export interface TargetDescription {
   };
 }
 
+/** THE SPELLINGS ONE REGISTER HAS in an ISA's asm, as `[number, alias]` pairs — the one place they
+ *  are stated. A frontend keys registers by spelling, so a function that names one register two
+ *  ways is rewritten to one of them first (frontend/ssa.ts `unifyRegisterSpellings`, which both
+ *  frontends hand these tables); and every register list a target states names both spellings of a
+ *  pair or neither, which `target-register-aliases.test.ts` checks against these tables. A pair
+ *  missing here splits one register into two partition keys: saved as `sl` and written as `r10`, its
+ *  writes read as a global's the epilogue undoes. */
+export const ARM_REGISTER_ALIASES: readonly (readonly [string, string])[] = [
+  ['r9', 'sb'],
+  ['r10', 'sl'],
+  ['r11', 'fp'],
+  ['r12', 'ip'],
+];
+/** O32's `$30`, which objdump prints `s8` and hand-written asm also writes `fp` (`ARM_REGISTER_ALIASES`). */
+export const O32_REGISTER_ALIASES: readonly (readonly [string, string])[] = [['s8', 'fp']];
+
 export const ARMV4T_AGBCC: TargetDescription = {
   id: 'armv4t',
   compiler: 'agbcc',
@@ -2033,6 +2049,10 @@ export function structureOptionsFor(
   };
 }
 
+/** The global a register `globalRegisterVariables` names is lifted as (`asmName` its `__asm__`
+ *  name: `greg_r8`, and `greg_r16` for MIPS `$16`). */
+export const globalRegisterSymbol = (asmName: string): string => `greg_${asmName.replace(/^\$/, 'r')}`;
+
 /** The candidate prelude: a `typedef` for every name in the scalar vocabulary. PRINTED from
  *  `proto.ts`'s `PRELUDE_TYPEDEFS` rather than spelled out, because the other reader of that
  *  vocabulary decides which type texts asmlift may PRINT into a candidate, and a second copy of
@@ -2040,10 +2060,6 @@ export function structureOptionsFor(
  *
  *  The decomp checkouts all define the same names, and the harness keeps typedefs per NAME against
  *  the vendored ctx, so a unit that already has them gets no redefinition. */
-/** The global a register `globalRegisterVariables` names is lifted as (`asmName` its `__asm__`
- *  name: `greg_r8`, and `greg_r16` for MIPS `$16`). */
-export const globalRegisterSymbol = (asmName: string): string => `greg_${asmName.replace(/^\$/, 'r')}`;
-
 export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typedef ${base} ${name};`).join('')}\n`;
 
 /** Each declared callee's parameter types, where one can be PRINTED as a cast — the argument

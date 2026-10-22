@@ -25,7 +25,7 @@ import { T } from '../ir/types';
 import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
-import type { TargetDescription } from '../target';
+import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads, unreadPairHalf } from './dead-reads';
@@ -2990,12 +2990,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   // (`sl` and `r10`) is read in one of them.
   unifyRegisterSpellings(
     rawBlocks.flatMap((b) => b.instrs),
-    [
-      ['r9', 'sb'],
-      ['r10', 'sl'],
-      ['r11', 'fp'],
-      ['r12', 'ip'],
-    ],
+    ARM_REGISTER_ALIASES,
   );
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.

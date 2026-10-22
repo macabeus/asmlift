@@ -27,7 +27,7 @@ import { T } from '../ir/types';
 import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
-import type { TargetDescription } from '../target';
+import { O32_REGISTER_ALIASES, type TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
 import { callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads } from './dead-reads';
@@ -1444,7 +1444,7 @@ function liftOnce(
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
   // $30 has two names, and everything below keys a register by its spelling.
-  unifyRegisterSpellings(instrs, [['s8', 'fp']]);
+  unifyRegisterSpellings(instrs, O32_REGISTER_ALIASES);
   // Headerless input — a raw fragment, and every Splat listing — says where the function starts
   // only by its first line.
   const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
