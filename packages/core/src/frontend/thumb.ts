@@ -4606,7 +4606,7 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  THE RESTORE ENDS THE SAVE. Past it the register holds the caller's value again, so a read there
  *  is the caller's value and a write there is one the caller sees, neither of them a local's —
  *  and the fill keeps the `pop` transparent, so a read would see the function's last write
- *  (`push {r4}; mov r4, #5; pop {r4}; mov r0, r4` lifted `return 5;`). For the same reason a save
+ *  (`push {r4}; mov r4, #5; pop {r4}; mov r0, r4` would lift `return 5;`). For the same reason a save
  *  that some path carries unrestored to a return the frame is balanced at — a `push` whose word is
  *  popped into another register or dropped with `add sp` — saved nothing on that path. A return
  *  with the word still on the stack is an input whose epilogue was left out, and is not asked: the
@@ -4620,9 +4620,9 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
  *  as transparent, never shows, so a callee-saved register one reaches a balanced return with is
  *  `leaked`, and refused outright (after the return proof, `poppedForeign`). The blind side: where
  *  the stack is not known — paths that disagree about it, a move of sp the frame walk cannot
- *  follow, a store through a register-indexed sp address — a restore is read by name as before,
- *  and a store through a copy of sp into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
- *  asks the same word question of lr alone, on its own walk; the two are not yet one.
+ *  follow, a store through a register-indexed sp address — a restore is read by name, and a
+ *  store through a copy of sp into a pushed word is not seen. `refuseReturnsNotThroughCallersLr`
+ *  asks the same word question of lr alone, on its own walk.
  *
  *  `misSaved` is every register a save or a restore names that some path uses outside a save, or
  *  returns with still saved: a `pop {r4}` with no `push` before it (`mov r0, r4; pop {r4}; bx lr`),
@@ -5378,11 +5378,12 @@ function thumbFillOf(
   // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
   // saved, and so could have homed a local in — in its prologue, or by a `push` ahead of every use
   // (`bodySavedRegs`). A register in only the first is one the function shares with every other: a
-  // global register variable, or a refusal where the target cannot spell one. The save is asked only of the registers the
-  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
-  // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
-  // (frontend/ssa.ts) composes it, as it does for PPC. The function's own declaration bounds the
-  // argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past a two-parameter one.
+  // global register variable, or a refusal where the target cannot spell one. The save is asked only
+  // of the registers the ABI requires preserving: `target.scratchRegs` need none, so demanding one
+  // there would refuse a local the compiler was entitled to put in place with no prologue at all.
+  // `registerLiveIns` (frontend/ssa.ts) composes it, as it does for PPC. The function's own
+  // declaration bounds the argument registers (`ownArgumentWordsOn`): agbcc homes a local in r3 past
+  // a two-parameter one.
   // A prologue save that some path uses past its restore, or carries to a return unrestored, is
   // `misSaved` and no save: the prologue's reading of it sees only the `push`.
   const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);

@@ -13119,8 +13119,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
   // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
-  // / `mr r3,r14` — a callee-saved register read before any write, which the lift used to name a
-  // parameter, and a write (`g = a;`) it used to drop. Each compiler takes its own register set
+  // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a
+  // write (`g = a;`) the caller sees. Each compiler takes its own register set
   // (`globalRegisterVariables` in core target.ts); mwcc 2.4 only as a run from r14, so `_r15` declares
   // r14 beside it. IDO 7.1 and mwcc 2.3.3 reject the declaration, so they have no row.
   ...(

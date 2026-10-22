@@ -697,7 +697,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // unsaved, so naming it is no mark of hand-written asm, and the bound holds. mwcc 2.4.2 at the
   // canonical flags, `register int g __asm__("r14"); int f(int a){ int x,y,z,w; if (a) { x = a;
   // y = a+1; } return (x*y)+(z*w)+(a*g); }`: x and y are homed in r4/r5, and counting r14 as
-  // hand-written dropped the declaration and read them as `f(s32 a0, s32 a1, s32 a2)`.
+  // hand-written would drop the declaration and read them as `f(s32 a0, s32 a1, s32 a2)`.
   test('a global register variable keeps the own declaration bounding a compiled body', () => {
     const GRV =
       '0 <f>:\n0:\tcmpwi   r3,0\n4:\tbeq-    10 <f+0x10>\n8:\tmr      r4,r3\nc:\taddi    r5,r3,1\n' +
@@ -715,9 +715,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // A global register variable passed as an outgoing stack argument is STORED, never saved: mwcc
   // 2.4.2, `register int g __asm__("r14"); int k(int,…,int /*9*/); int se(void){ return
   // k(1,2,3,4,5,6,7,8,g) + g; }`, stores r14 to 8(r1) in the entry block and never reloads it.
-  // Read as r14's save, the ninth argument vanished and the read after the call became
-  // `uninit_r14`; written first (`g = a; k(…, g);`), the store was a save of a register the
-  // builder never saw written, and the call lost the argument the same way. The word is a value,
+  // Read as r14's save, the ninth argument would vanish and the read after the call become
+  // `uninit_r14`; written first (`g = a; k(…, g);`), the store would be a save of a register the
+  // builder never saw written, and the call would lose the argument the same way. The word is a value,
   // so the call refuses it as any stack argument.
   test('a global register variable stored as a stack argument is that argument, not a save', () => {
     const se =
@@ -739,7 +739,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
   // A SAVE HOLDS ONLY WHILE EVERY PATH RESTORES IT AFTER ITS LAST WRITE (`refuseSavedRegisterLeaks`).
   // Each of these leaves the caller's r31 changed, which the C — r31 a local — never says: a write
-  // past the restore lifted `return a0;`, as did a reload from a word that is not the save.
+  // past the restore would lift `return a0;`, as would a reload from a word that is not the save.
   test('a write to a saved register that reaches a return with no restore after it refuses', () => {
     const leak = /the write to saved r31 at 0x10 reaches a return with no restore of r31 after it/;
     const frame = (mid: string) =>

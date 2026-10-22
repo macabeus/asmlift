@@ -1768,8 +1768,9 @@ function liftOnce(
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
   const restores = new Map<Value, { reg: string; addr: number }>();
-  const restoredBy = new Map<Instr, ReadonlySet<string>>(); // each `lw` that restores a save, and what
-  // A store of a callee-saved register is a save only while every path restores it after its last write.
+  // Each `lw` that restores a save, and the register it restores: a save holds only while every path
+  // restores it after its last write (`refuseSavedRegisterLeaks`).
+  const restoredBy = new Map<Instr, ReadonlySet<string>>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`):
   // IDO's `lw zero`, which `write` drops, so the load's value is recorded here or nowhere.
@@ -3274,8 +3275,8 @@ function takesFrameAddress(ins: Instr): boolean {
  *  block, so never this one) before any instruction NAMES that register, read or written. What it
  *  stores is then what the caller left there, which is the half of `LiveInModel.uninitRegs` the
  *  frontend owes: a compiler homes a local in a callee-saved register only after saving it, so a
- *  def-less read of a saved one is that local, uninitialised, and of an unsaved one stays the
- *  parameter it would have been. "Nothing named it first" is PPC's condition
+ *  def-less read of a saved one is that local, uninitialised, and of an unsaved one is a global
+ *  register variable's or refuses (`registerLiveIns`). "Nothing named it first" is PPC's condition
  *  (`prologueSavedRegs` there): a read before the store would be a use of the caller's value. A
  *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all.
  *
@@ -3283,8 +3284,8 @@ function takesFrameAddress(ins: Instr): boolean {
  *  ever answers saves nothing: the caller gets the register back as the body left it, so the word
  *  is a value. gcc 2.7.2 and KMC put exactly such a store in the entry block for a file-scope
  *  global register variable passed on the stack — `register int g __asm__("$16"); return k(1, 2,
- *  3, 4, g) + g;` is `sw s0,16(sp); jal k` and no reload of s0 — and counting it as a save turned
- *  the read of `g` after the call into `uninit_s0` and dropped the fifth argument. Any `lw` of the
+ *  3, 4, g) + g;` is `sw s0,16(sp); jal k` and no reload of s0 — and counting it as a save would
+ *  turn the read of `g` after the call into `uninit_s0` and drop the fifth argument. Any `lw` of the
  *  register from `sp` will do, whatever its word: which word a restore reads is judged where it is
  *  lowered. A function with no return keeps the entry-block reading: nothing reaches a caller. */
 function prologueSavedRegs(

@@ -156,8 +156,9 @@ test('a caller-saved t-register stored with nothing in it is no save, so reloadi
 });
 
 // $30 is `s8` and `fp` both: saved under one name and used under the other, it is still saved. Read
-// as two registers, the body's write went to a global register variable the epilogue undoes
-// (`greg_r30 = a0 + 1`), and on IDO, which can spell none, the lift refused a function it reads right.
+// as two registers, the body's write would go to a global register variable the epilogue undoes
+// (`greg_r30 = a0 + 1`), and on IDO, which can spell none, the lift would refuse a function it reads
+// right.
 test('one register spelt `s8` and `fp` in one function is one saved register', () => {
   for (const [save, use] of [
     ['s8', 'fp'],
@@ -180,9 +181,9 @@ test('one register spelt `s8` and `fp` in one function is one saved register', (
 
 // A file-scope global register variable passed as an outgoing stack argument is STORED, never saved:
 // gcc 2.7.2 and KMC, `register int g __asm__("$16"); int k(int,int,int,int,int);`, put the store in
-// the entry block. Read as s0's save, the fifth argument vanished from the call — `int se(void){
-// return k(1,2,3,4,g) + g; }` lifted `k(1, 2, 3, 4) + uninit_s0`, and `void sf(int a){ g = a;
-// k(1,2,3,4,g); }` lifted `greg_r16 = a0; k(1, 2, 3, 4)`. The word is a value, so the call either
+// the entry block. Read as s0's save, the fifth argument would vanish from the call — `int se(void){
+// return k(1,2,3,4,g) + g; }` would lift `k(1, 2, 3, 4) + uninit_s0`, and `void sf(int a){ g = a;
+// k(1,2,3,4,g); }` `greg_r16 = a0; k(1, 2, 3, 4)`. The word is a value, so the call either
 // takes it (declared) or refuses (undeclared).
 test('a global register variable stored as a stack argument is that argument, not a save', () => {
   const se = [
@@ -239,8 +240,8 @@ test('a global register variable stored as a stack argument is that argument, no
 
 // A SAVE HOLDS ONLY WHILE EVERY PATH RESTORES IT AFTER ITS LAST WRITE (`refuseSavedRegisterLeaks`).
 // Each of these leaves the caller's s0 changed, which the C — s0 a local — never says: a write past
-// the restore lifted `void f(s32 a0) { return; }`, and a reload from a word that is not the save,
-// `return;` as well. Hand-written shapes: compiled code restores in its epilogue, after every write.
+// the restore would lift `void f(s32 a0) { return; }`, and a reload from a word that is not the
+// save `return;` as well. Hand-written shapes: compiled code restores in its epilogue, after every write.
 test('a write to a saved register that reaches a return with no restore after it refuses', () => {
   const leak = /the write to saved s0 at 0x(c|10) reaches a return with no restore of s0 after it/;
   for (const target of [MIPS_GCC, MIPS_IDO]) {

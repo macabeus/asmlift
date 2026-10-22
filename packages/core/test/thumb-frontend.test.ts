@@ -771,7 +771,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
     // A callee-saved register staged before anything saved it is no save of its own: the `push`
     // holds r8's value, so r4's entry value is lost and the function returns with r8's in r4 — a
-    // write the caller sees. Lifted as `return a0 + uninit_r8;` (#337 to here) it was dropped.
+    // write the caller sees, which `return a0 + uninit_r8;` would drop.
     const unsaved =
       'h2:\n\tmov\tr4, r8\n\tpush\t{r4, lr}\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tmov\tr8, r4\n' +
       '\tpop\t{r1}\n\tbx\tr1\n';
@@ -783,8 +783,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   describe('a register the prologue never saved is not one the compiler homed a local in', () => {
     // The MP2K engine's hand-written `ChnVolSetAsm` — vendored in klonoa, sa3 and pokeemerald
     // alike — receives two pointers in r4/r5 by a private convention and has no prologue at all.
-    // Classified by the ABI alone it came out storing through `uninit_r4`; read as parameters it came
-    // out `f(u8 *a0, u8 *a1)`, which a C caller hands over in r0/r1. What the machine does is share
+    // Classified by the ABI alone it would store through `uninit_r4`; read as parameters it would be
+    // `f(u8 *a0, u8 *a1)`, which a C caller hands over in r0/r1. What the machine does is share
     // the values with the caller in registers it expects preserved: a global register variable, and
     // `register u8 *ra __asm__("r4");` compiles to exactly these bytes.
     const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
@@ -876,7 +876,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
           `it ${rw} callee-saved ${reg}${rw === 'reads' ? ' before writing it' : ''}, and saves or restores ${reg} but not around every use of it, restored at every return, on every path`,
         );
       const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
-      // a read past the restore was the function's own last write (`return 5;`), or `uninit_r8`
+      // a read past the restore would see the function's own last write (`return 5;`), or `uninit_r8`
       expect(lift('push {r4}; mov r4, #5; pop {r4}; mov r0, r4; bx lr')).toThrow(mis('writes', 'r4'));
       expect(
         lift(
@@ -886,7 +886,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(lift('add r0, #1; mov r3, r8; push {r3}; mov r8, r0; pop {r3}; mov r8, r3; mov r0, r8; bx lr')).toThrow(
         mis('reads', 'r8'),
       );
-      // a write past the restore is the caller's, and was dropped
+      // a write past the restore is the caller's, which the lift would drop
       expect(lift('add r0, #1; push {r4}; mov r4, #5; add r0, r0, r4; pop {r4}; mov r4, r0; bx lr')).toThrow(
         mis('writes', 'r4'),
       );
@@ -901,7 +901,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(lift('push {r4}; mov r4, r0; add r0, r4, #1; add sp, #4; bx lr')).toThrow(
         /the caller sees the write — not modelled/,
       );
-      // …where a return with the word still pushed is an epilogue the input left out, read as before
+      // …where a return with the word still pushed is an epilogue the input left out, read as restored
       expect(
         decompile('f', 'f:\n\tpush\t{r4}\n\tmov\tr4, r0\n\tadd\tr0, r4, #1\n\tbx\tlr\n', ARMV4T_AGBCC).source,
       ).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
@@ -914,8 +914,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     // A pop restores a register only from the word that register's own push left: one that names
     // the register but loads another word rewrites it, and the pop being transparent to the fill,
-    // the C dropped that write. Each of these left the caller's r4/r5 (or r8/r9) swapped or holding
-    // a0, and lifted as if restored.
+    // the C would drop that write. Each of these leaves the caller's r4/r5 (or r8/r9) swapped or
+    // holding a0, and read by name would lift as if restored.
     test('…and restores one only from the word its own push left', () => {
       const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
       const foreign = (pop: string, reg: string) =>
@@ -957,7 +957,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // `sl` and `r10` are one register: saved under one spelling and used under the other, it is
-    // still saved — read as two, its writes became a global's the epilogue undoes.
+    // still saved — read as two, its writes would be a global's the epilogue undoes.
     test('one register spelt two ways in one function is one register', () => {
       const sl =
         'f:\n\tpush\t{r7, lr}\n\tmov\tr7, sl\n\tpush\t{r7}\n\tmov\tsl, r0\n\tmov\tr0, r10\n\tadd\tr0, r0, #1\n' +

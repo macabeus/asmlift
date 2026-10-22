@@ -685,10 +685,10 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
  *
  *  A GLOBAL REGISTER VARIABLE'S register (`target.globalRegisterVariables`) does not count: it is
  *  the one callee-saved register COMPILED code names unsaved, and the live-in model reads it as that
- *  global (`registerLiveIns`). Counted, it made the detector and the model disagree about one
- *  register, and dropped the bound a compiled body's own declaration states: mwcc 2.4.2's
+ *  global (`registerLiveIns`). Counted, it would make the detector and the model disagree about one
+ *  register, and drop the bound a compiled body's own declaration states: mwcc 2.4.2's
  *  `register int g __asm__("r14"); int f(int a) { int x, y; if (a) { x = a; y = a + 1; } … a * g`
- *  homes x and y in r4/r5, and `f(s32)` lifted as `f(s32 a0, s32 a1, s32 a2)` with no note. The
+ *  homes x and y in r4/r5, and `f(s32)` would lift as `f(s32 a0, s32 a1, s32 a2)` with no note. The
  *  blind side is a hand-written entry point handed inputs in r14..r28 and in argument registers
  *  past its declaration, which then reads those as `uninit_<reg>`; asm that names no other unsaved
  *  callee-saved register is byte-for-byte the compiled shape. No function of the ac, mp4 or Pikmin
@@ -741,8 +741,8 @@ const namesUnsavedCalleeSaved = (
  *  saves nothing: the caller gets the register back as the body left it, so the word is a value.
  *  mwcc 2.4 stores a file-scope global register variable passed on the stack exactly so, in the
  *  entry block — `register int g __asm__("r14"); return k(1, …, 8, g) + g;` is `stw r14,8(r1); bl k`
- *  and no reload of r14 — and counting it as a save turned the read of `g` after the call into
- *  `uninit_r14` and dropped the ninth argument. Which word a reload reads is judged where it is
+ *  and no reload of r14 — and counting it as a save would turn the read of `g` after the call into
+ *  `uninit_r14` and drop the ninth argument. Which word a reload reads is judged where it is
  *  lowered (`restoreFrom`). A function with no return keeps the entry-block reading. */
 function prologueSavedRegs(
   entry: readonly Instr[],

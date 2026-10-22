@@ -272,10 +272,10 @@ export interface LiveInModel {
    *  `unsavedCalleeSavedRegs`' instead.
    *
    *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it. Thumb reads
-   *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
-   *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
-   *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
-   *  leading run meets by construction; MIPS reads its entry block the same way
+   *  its `push`es (`savedRegs`; past the prologue, `bodySavedRegs`). PPC reads every save in the
+   *  entry block of a register nothing before it named (`prologueSavedRegs`), because mwcc
+   *  interleaves its saves with the body (`stw r31; mr r31,r3; stw r30`); "nothing named it first"
+   *  is the condition Thumb's leading run meets by construction; MIPS reads its entry block the same way
    *  (frontend/mips.ts `prologueSavedRegs`). A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
    *
@@ -315,9 +315,10 @@ export interface LiveInModel {
    *
    *  Disjoint from `argRegs` and `uninitRegs`, checked with them. */
   unsavedCalleeSavedRegs?: readonly string[];
-  /** Of `unsavedCalleeSavedRegs`, the ones the function does save or restore — only not before
-   *  every use (a `pop` with no `push` before it, or a `push` past a read). Refused like the rest,
-   *  and named apart only so the refusal says what it saw. */
+  /** Of `unsavedCalleeSavedRegs`, the ones the function does save or restore, but not around every
+   *  use or not restored at every return (a `pop` with no `push` before it, a `push` past a read, a
+   *  use past the restore). Refused like the rest, and named apart only so the refusal says what it
+   *  saw. */
   misSavedRegs?: readonly string[];
   /** Where the frontend looks for the saves it measures, for those refusals to name: the partition
    *  is only as wide as that look, and a save it does not read is still a save. */
@@ -403,8 +404,9 @@ export function assertScratchRegsPartitioned(target: {
 /** ONE SPELLING PER REGISTER, WHERE A FUNCTION WRITES ONE REGISTER TWO WAYS. The builder keys a
  *  register by its operand text, and so does every save measurement a frontend makes, so `sl` and
  *  `r10` (or O32's `s8` and `fp`) would be two variables and two partition entries for one register:
- *  `mov sl, r0; mov r0, r10` returned a second parameter where the machine returns the first, and a
- *  register saved as `s8` and written as `fp` read as never saved, its writes as a global's. `pairs`
+ *  `mov sl, r0; mov r0, r10` would return a second parameter where the machine returns the first,
+ *  and a register saved as `s8` and written as `fp` would read as never saved, its writes as a
+ *  global's. `pairs`
  *  is each register's two spellings, the one kept first. Only a function that names BOTH of a pair
  *  is rewritten — every other keeps the spelling it was written in, and with it the name of any local
  *  homed there — and an alias is rewritten wherever it stands as a whole word of an operand, so a
