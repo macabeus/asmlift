@@ -693,6 +693,25 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
     expect(lifted({ variadicParams: ['s32'], returns: 's32' })).toBe(param);
   });
+  // A global register variable's register is the one callee-saved register compiled code names
+  // unsaved, so naming it is no mark of hand-written asm, and the bound holds. mwcc 2.4.2 at the
+  // canonical flags, `register int g __asm__("r14"); int f(int a){ int x,y,z,w; if (a) { x = a;
+  // y = a+1; } return (x*y)+(z*w)+(a*g); }`: x and y are homed in r4/r5, and counting r14 as
+  // hand-written dropped the declaration and read them as `f(s32 a0, s32 a1, s32 a2)`.
+  test('a global register variable keeps the own declaration bounding a compiled body', () => {
+    const GRV =
+      '0 <f>:\n0:\tcmpwi   r3,0\n4:\tbeq-    10 <f+0x10>\n8:\tmr      r4,r3\nc:\taddi    r5,r3,1\n' +
+      '10:\tmullw   r3,r3,r14\n14:\tmullw   r0,r0,r0\n18:\tmullw   r4,r4,r5\n1c:\tadd     r3,r0,r3\n' +
+      '20:\tadd     r3,r4,r3\n24:\tblr\n';
+    const r = decompile('f', GRV, PPC_MWCC, { prototypes: { f: { params: ['s32'], returns: 's32' } } });
+    expect(r.source).toMatch(/^s32 f\(s32 a0\) \{/m);
+    expect(r.source).toContain('greg_r14');
+    // a callee-saved register no compiler can hold a global in still marks the body hand-written
+    const r31 = GRV.replace('r3,r3,r14', 'r3,r3,r31');
+    expect(() => decompile('f', r31, PPC_MWCC, { prototypes: { f: { params: ['s32'], returns: 's32' } } })).toThrow(
+      /callee-saved r31/,
+    );
+  });
   // The declaration context's OWN entry bounds the same registers SOFTLY (pipeline.ts
   // `liftWithinContextBound`). mwcc 2.4.2's `int oc_ph(short a, int b){ if (gX) k4(a, b, 2, 0);
   // while (zq(a) != 5) sl(); return gX; }`: r5/r6 reach only the guessed calls `zq` and `sl`.

@@ -683,10 +683,16 @@ const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
  *  code saves such a register before it touches it. A save routine or `stmw` names only its first
  *  register, and saves it, so either is in `saved`.
  *
- *  A GLOBAL REGISTER VARIABLE'S register (`target.globalRegisterVariables`) counts too, though
- *  compiled code never saves one: hand-written entry points are handed inputs in r14.. as well, and
- *  read as compiled code a declaration that bounds nothing turns their argument registers into
- *  `uninit_<reg>` — where a compiled body dropping the bound only over-counts its parameters. */
+ *  A GLOBAL REGISTER VARIABLE'S register (`target.globalRegisterVariables`) does not count: it is
+ *  the one callee-saved register COMPILED code names unsaved, and the live-in model reads it as that
+ *  global (`registerLiveIns`). Counted, it made the detector and the model disagree about one
+ *  register, and dropped the bound a compiled body's own declaration states: mwcc 2.4.2's
+ *  `register int g __asm__("r14"); int f(int a) { int x, y; if (a) { x = a; y = a + 1; } … a * g`
+ *  homes x and y in r4/r5, and `f(s32)` lifted as `f(s32 a0, s32 a1, s32 a2)` with no note. The
+ *  blind side is a hand-written entry point handed inputs in r14..r28 and in argument registers
+ *  past its declaration, which then reads those as `uninit_<reg>`; asm that names no other unsaved
+ *  callee-saved register is byte-for-byte the compiled shape. No function of the ac, mp4 or Pikmin
+ *  builds names an unsaved r14..r28 at all. */
 const namesUnsavedCalleeSaved = (
   body: readonly Instr[],
   target: TargetDescription,
@@ -695,7 +701,9 @@ const namesUnsavedCalleeSaved = (
   body.some((ins) =>
     ins.ops.some((op) => {
       const reg = op.includes('(') ? parseMem(op).base : op;
-      return isCalleeSaved(target, reg) && !saved.has(reg);
+      return (
+        isCalleeSaved(target, reg) && !saved.has(reg) && !Object.hasOwn(target.globalRegisterVariables?.regs ?? {}, reg)
+      );
     }),
   );
 
