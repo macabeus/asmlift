@@ -12367,13 +12367,22 @@ export const SYNTHETIC: SynthSpec[] = [
   // (jump.c find_cross_jump) is behind eight of the fourteen.
   //
   //   1. stksidx (sub_0804CFD0). `s8 a[64]` at a runtime index times a global halfword. Thumb has no
-  //      `ldrsb rd,[rn,#imm]`; agbcc's `*extendqisi2_insn` (thumb.md:461-487) spells the signed byte
-  //      `ldrb/lsl #24/asr #24` only when the loaded value lands in the base register, and otherwise
-  //      `mov r1,#0 / ldrsb r1,[r0,r1]` — a register-offset load through a zero register, which the
-  //      frontend lowers as `add` + load@0, so the frame audit sees the indexed address flow into an
-  //      `add` and refuses (frame-objects.ts `indexedAccess`). `u8` (`stkidx`) and `s8` with the
-  //      multiplier in a parameter register both MATCH. ido7.1 / gcc2.7.2kmc / mwcc_242_81 lift it
-  //      (controls; kmc matches). Ablation-pinned.
+  //      `ldrsb`/`ldrsh` with an immediate, so agbcc's `*extendqisi2_insn`/`*extendhisi2_insn`
+  //      (thumb.md:411-505) load the WHOLE constant displacement into a register — `mov r1,#0 /
+  //      ldrsb r1,[r0,r1]` for the element itself, `mov r1,#3` three bytes past it — and the
+  //      frontend lowers that register-offset load as `add` + load@0. The frame audit judges the
+  //      uses of an `add` of a literal 0 to the indexed address as the element (frame-objects.ts
+  //      `indexedAccess`), which LIFTS (MATCH) and stays signed. A nonzero literal moves the index
+  //      to the bytes at that displacement (`foldMovedCaptures`) — also agbcc's `a[i]` on an array
+  //      above a 5-argument call's outgoing word, `mov r0,sp / add r0,r0,r4 / add r0,#4` — and so
+  //      does a load's own displacement (`ldrb r0,[r0,#1]`, a field of an element struct), so the
+  //      verdict does not depend on where agbcc puts the literal. stkhidx is the `s16 a[32]` /
+  //      `ldrsh` twin. `u8` (`stkidx`) is the `ldrb [r0]` control. ido7.1, gcc2.7.2kmc and
+  //      mwcc_242_81 never load a literal index register: the MIPS compilers put a constant offset in
+  //      the load's displacement (moved like agbcc's, e.g. gcc2.7.2's `lh 2(v)` after an sp index
+  //      sum) and mwcc folds it into the base, `addi r3,r1,11`, before its `lbzx`. Here they are
+  //      controls (kmc matches; mwcc's residue is the object's extent from the reservation and its
+  //      `lbzx`+`extsb` element sign, not this walk).
   //   2. imgpair / imgone (sub_0804D0B0). TWO brace-initialised locals in one frame (`s8 a[16]` from
   //      .LC184, `u8 b[16]` from .LC186, each `bl memcpy` of 16). The frame audit declares a captured
   //      object by its RESERVATION, so the object at sp is `u8 sp0[32]` and the second local is
@@ -12519,6 +12528,18 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'void *memcpy(void *, const void *, unsigned long);\nstruct E { u16 w; u8 k; u8 pad; };\nextern struct E gE;\nextern s16 gOut;\nvoid stksidx(u32 i);',
     proto: { stksidx: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkhidx',
+    // `stksidx` at a halfword: `s16 a[32]` is `mov r1, #0x0 / ldrsh r1, [r0, r1]` on agbcc, the same
+    // register-offset load through a constant register.
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nstruct E { u16 w; u8 k; u8 pad; };\nextern struct E gE;\nextern s16 gOut;\n' +
+      'extern const s16 gBlob[32];\nvoid stkhidx(u32 i){ s16 a[32]; memcpy(&a[0], gBlob, sizeof a); gOut += a[i] * gE.w; }',
+    features: ['stack-addr', 'array', 'variable-index', 'sign-extend'],
+    toolchains: ALL,
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nstruct E { u16 w; u8 k; u8 pad; };\nextern struct E gE;\nextern s16 gOut;\nvoid stkhidx(u32 i);',
+    proto: { stkhidx: { returnsVoid: true } },
   },
   {
     sym: 'imgpair',
