@@ -498,8 +498,9 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
  *  AN INDEX INTO A CAPTURE, MOVED BY A NONZERO CONSTANT, IS THE SAME INDEX INTO THE CAPTURE AT THE
  *  SUM. agbcc spells `a[i]` on a local at [sp,#k) as the frame base plus the index, moved after:
  *  `mov r0, sp / add r0, r0, r4 / add r0, #0x4` or `add r0, r0, sp / add r0, #0x4` — the bytes
- *  `add r0, sp, #0x4 / add r0, r0, r4` reach, so `add(add(laddr@a, i), k)` is re-minted as `add(laddr@(a+k), i)`, and the inner sum and capture are dropped when nothing else
- *  reads them. The object at [sp,#a) is often the outgoing-argument word (a 5-argument call beside
+ *  `add r0, sp, #0x4 / add r0, r0, r4` reach, so `add(add(laddr@a, i), k)` is re-minted as
+ *  `add(laddr@(a+k), i)`, and the inner sum and capture are dropped when nothing else reads them.
+ *  The object at [sp,#a) is often the outgoing-argument word (a 5-argument call beside
  *  the array), which the index never touches. Zero is left alone: `add(sum, 0)` is agbcc's
  *  `mov r1, #0x0 / ldrsb r0, [r0, r1]`, which `indexedAccess` judges where the register put it.
  *  The rebased object is held to every rule an object at a+k is held to, so a displaced FIELD of a
