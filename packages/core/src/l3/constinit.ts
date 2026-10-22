@@ -28,9 +28,11 @@
 //     initializer runs at entry, the copy at its own position);
 //   • its source is the whole image, which nothing but such copies mentions, and whose size is the
 //     count — one image may fill several locals, since the compiler places one per identical
-//     constant (varasm.c `output_constant_def`), each into its own local. KNOWN GAP: Thumb's
-//     frame audit reserves a frame's address-taken bytes as one local, so two arrays refuse at the
-//     size check, whether or not they share an image;
+//     constant (varasm.c `output_constant_def`), each into its own local. Several arrays in one
+//     frame are each their own local where the frame audit proves the boundaries between them
+//     (frontend/frame-objects.ts `provenParts`). KNOWN GAP: where it keeps the frame's
+//     address-taken bytes as one local instead — a neighbour handed to a callee nothing bounds —
+//     the image refuses at the size check;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare). An element it relocates holds an address, spelled as
 //     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same

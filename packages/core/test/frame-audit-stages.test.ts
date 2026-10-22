@@ -534,4 +534,75 @@ describe('keepAsOneObject', () => {
     const sret = mkOp('call', { operands: [a.results[0]], results: [s], attrs: { target: 'mk', sret: true } });
     expect(() => kept({ params: [], ops: [a, sret, ret()] })).toThrow('is where `mk` returns its struct');
   });
+
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[3] + b[1];` with each part's copy
+  // `n` bytes long, and `extra` the uses added after the copies
+  const copies = (
+    n: [number, number],
+    extra: (a: Value, b: Value, i: Value) => Op[] = (a, b) => [load(a, 3, 1), load(b, 1, 1)],
+  ) => {
+    const [s, t, i] = [value(), value(), value()];
+    const a = laddr(0);
+    const b = laddr(4);
+    const [na, nb] = [konst(n[0]), konst(n[1])];
+    const ops = [a, b, na, nb, call('memcpy', a.results[0], s, na.results[0])];
+    ops.push(call('memcpy', b.results[0], t, nb.results[0]), ...extra(a.results[0], b.results[0], i), ret());
+    return { params: [s, t, i], ops };
+  };
+  const objectsOf = (blk: Block) =>
+    blk.ops.filter((op) => op.opcode === 'laddr').map((op) => [op.attrs.off, op.attrs.count]);
+
+  test('splits the one object where literal-count copies and fixed accesses prove two', () => {
+    const blk = copies([4, 4]);
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(objectsOf(blk)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    const [a, b] = blk.ops;
+    const loads = blk.ops.filter((op) => op.opcode === 'load');
+    expect(loads.map((op) => [op.operands[0], op.attrs.off])).toEqual([
+      [a.results[0], 3],
+      [b.results[0], 1],
+    ]);
+    const calls = blk.ops.filter((op) => op.opcode === 'call');
+    expect(calls.map((op) => op.operands[0])).toEqual([a.results[0], b.results[0]]);
+  });
+
+  test('keeps one object where a use proves no boundary between two addresses', () => {
+    // a copy over both parts, then a read through the second address
+    expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
+    // the copies chain: the first one's last two bytes are the second's first two
+    expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
+    // a runtime index into the lower part may reach the upper one
+    const indexed = copies([4, 4], (a, b, i) => {
+      const at = mkOp('add', { operands: [a, i], results: [value()] });
+      return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
+    });
+    expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // the upper part handed to a callee nothing bounds
+    expect(objectsOf(withKept(copies([4, 4], (a, b) => [load(a, 3, 1), call('g', b)])))).toEqual([[0, 8]]);
+    // a byte no use names: [6, 8) is touched by nothing
+    expect(objectsOf(withKept(copies([4, 2])))).toEqual([[0, 8]]);
+    // a read through the lower address that lands in the upper part
+    expect(objectsOf(withKept(copies([4, 4], (a) => [load(a, 5, 1)])))).toEqual([[0, 8]]);
+    // the destination the first copy returns, read past its count: `p = memcpy(a, s, 4); p[5]`
+    const returned = copies([4, 4]);
+    const first = returned.ops.find((op) => op.opcode === 'call')!;
+    first.results = [value()];
+    returned.ops.splice(-1, 0, load(first.results[0], 5, 1));
+    expect(objectsOf(withKept(returned))).toEqual([[0, 8]]);
+    // words stored side by side, each through an address of its own, and no copy starting at
+    // either: the one-object relift's spill of a struct passed by value
+    const [a, b, v] = [laddr(0), laddr(4), value()];
+    const words: Block = {
+      params: [v],
+      ops: [a, b, store(a.results[0], v, 0, 4), store(b.results[0], v, 0, 4), load(a.results[0], 1, 1), ret()],
+    };
+    expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
+  });
+  const withKept = (blk: Block): Block => {
+    kept(blk);
+    return blk;
+  };
 });
