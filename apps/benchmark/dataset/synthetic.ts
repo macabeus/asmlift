@@ -12533,9 +12533,141 @@ export const SYNTHETIC: SynthSpec[] = [
   //      at its return when its own declaration says void (frontend/mips.ts). The real sub_0801DFC4 reaches
   //      this through three `goto`s whose goto-free spelling is a different object, so the FUNCTION
   //      stays set aside under the no-goto rule; the row pins the guard.
-  // Still set aside, each one function: sub_0801D6B0's second blocker, a return tail shared by a loop
-  // exit and post-loop code (the `goto` set-aside; sound); sub_0803D4AC's by-value parameter byte read
-  // (same site as 13, not isolated); EntityCreate's and sub_0801DFC4's far-jump relays (lowered).
+  //
+  // THIRD PASS, measured on 0.10.0 (2eeaf8ca, 2026-10-22): 36 of 0.9.0's 49 declines lift, and 15
+  // functions decline — 13 of those 49, plus sub_0801F648 and sub_08021AD4, which lifted on 0.9.0 and
+  // now meet #364's fail-closed dispatch gate. Items 15-23 attribute fourteen of the 15, each to its
+  // first blocker, instrumented or ablated on the real function and on the row; "next" links were
+  // measured by ablating the first. sub_080202D4 is the exception: item 12's audit now bounds its
+  // store, but the base it stores through, gUnk_03003590, is a NOTYPE GLOBAL in iwram, and
+  // @gba-kit/debug-info's ELF symbol filter (dist/symbols.js) keeps a NOTYPE symbol only when it is
+  // SHN_ABS — it drops 950 of kleod.elf's. Patched to SHN_ABS, the function lifts. A synthetic row has
+  // no ELF, so this gap needs an ELF-fixture test in the CLI or a fix in that package, not a row.
+  //  15. jt_rndsame / jt_rndst / jt_rndvoid (sub_0801F648, sub_08021AD4, sub_0803F9EC, sub_08040F1C, and
+  //      sub_08042E64's first link). A call, in an elided jump table's case, to a callee the header
+  //      declares K&R (`u8 thunk_GetRandomValue();`, include/rand.h). agbcc compiles `rnd()` against
+  //      `u8 rnd();` and against `u8 rnd(void);` to the same bytes, so the caller cannot decide the
+  //      arity: the guess counts r0, which the dispatch or the case's stores left there, and #364's
+  //      dispatch pass-through gate (frontend/jump-table.ts `refuseDispatchUnlockedPassThrough`)
+  //      refuses it. Ablation-pinned: `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the four,
+  //      and sub_08042E64 then stops on item 18. The arity is knowable from the CALLEE: kleod's thunk is
+  //      `bx pc; nop; b GetRandomValue`, and GetRandomValue (ARM) writes r0-r3 before it reads any of
+  //      them; DWARF records nothing (it is asm-defined), and call sites prove nothing. jt_rndsame
+  //      carries the callee's body in the same asm and declines: the gap (stating `params: 0`, a
+  //      simulated fix, lifts it at 2/60). jt_rndst has no body and must STAY declined, the soundness
+  //      control. jt_rndvoid states `(void)` and lifts at 3/60, the control. kleod also needs the body
+  //      read from the project ELF and through the ARM veneer, which a synthetic row cannot carry (core
+  //      tests). agbcc only: ido7.1 and gcc2.7.2kmc lift the shape as `rnd(a0)` (the over-count no gate
+  //      catches) and mwcc_242_81 lifts `rnd()`. Item 21's sret2knr turns on the same K&R arity at a
+  //      different gate.
+  //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
+  //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
+  //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
+  //      which falls into a `str; b ret` the third arm also enters, apart from the loop's own exit
+  //      store. structure.ts `earlyReturnArm` owns a block only when the arm's entry dominates it or
+  //      when the block is effectful and entered by arms only, so no arm owns the pure tail: it lands
+  //      after the loop, and hazards.ts `loopEscapeHazard` fires ("do-while condition or a post-loop
+  //      value reads a pre-update loop variable"). Instrument-pinned; ablated, the real function lifts
+  //      at 45/117 and the row at 46/114. The row is the real function minus its `continue`: every
+  //      smaller spelling lets the exit and return stores share a register and lifts as break arms —
+  //      sretpuretail_exit is one (control). mwcc_242_81 returns the struct in r3 and lifts both
+  //      (controls); ido7.1 (`swl`) and gcc2.7.2kmc/gcc2.7.2 (sret frame as sp data) decline first, off.
+  //  17. retpost_tail / retpost_notail (sub_0801D6B0's set-aside below, generalised). A `return` inside
+  //      a loop whose effectful tail (`*out = r;`) post-loop code ALSO enters: agbcc cross-jumps the
+  //      two `*out = r` into the code before the return label (jump.c:1970), and gcc2.7.2kmc and
+  //      gcc2.7.2 do the same in the `jr ra` delay slot. `earlyReturnArm` refuses an effectful tail a
+  //      non-body path enters, so `foreverShape` finds no exit: "unrecovered back-edge".
+  //      Instrument-pinned on agbcc and gcc2.7.2. The source is goto-free, so writing the tail in each
+  //      arm is a buildable fix. ido7.1 and mwcc_242_81 keep the tails apart and lift (controls);
+  //      retpost_notail, with no post-loop effect before the shared store, lifts on all five.
+  //  18. jt_xjdef / jt_xjcase, with jt_xjdef_ctl / jt_xjcase_ctl (EntityCreate, sub_08042E64; one cause,
+  //      instrumented on both). TWO arms enter one sibling arm: arms whose source ends in the same
+  //      `X; break;` as another are cross-jumped after reload (toplev.c:3141-3145 `jump_optimize(…,
+  //      JUMP_CROSS_JUMP, …)`; jump.c:1961-1993, `find_cross_jump` :2687, `do_cross_jump` :2836), each
+  //      `b` pointed at the start of the identical sequence, INTO the sibling's entry. EntityCreate's
+  //      STAR and LARGE_DREAM_STONE end with the default's `unkC_2 = arg6;` and both enter the default
+  //      block, a hole target and so a case arm too (jt_xjdef). In sub_08042E64, case 3 falls into
+  //      case 4 under `if (…) break;` (item 6's shape) while case 9's `yPosBg2 = …; break;` is
+  //      cross-jumped into case 4's identical body (jt_xjcase; the kleod source spells it with gotos).
+  //      switch-recover.ts `chainArms` reads both entries as fall-throughs into one target, and C
+  //      reaches an arm by falling from only one, so it refuses ("case arms do not linearize"). The fix
+  //      this gates writes the shared tail again in every arm but the one above it. One arm
+  //      cross-jumped (the `_ctl` rows) MATCHes. gcc2.7.2kmc and gcc2.7.2 cross-jump the same way and
+  //      decline with the same words; ido7.1 and mwcc_242_81 keep each tail and MATCH. jt_xjdef is off
+  //      ido7.1: its residue, the hole spelled `case 4:`, is its control's too. Next links (ablating
+  //      this one): EntityCreate stops at item 19's refusal; sub_08042E64 at this gap from the other
+  //      side ("falls through into an arm that is not the next one emitted").
+  //  19. sw_fallpre / sw_fallpre_ctl (sub_08014760, and EntityCreate's second link). A fall-through
+  //      into a case whose block takes a value the dispatch handed it, which the falling arm computes
+  //      for itself. agbcc's gcse PRE makes the loop's `i + 1` fully redundant: `pre_insert` puts it in
+  //      the header before the bounds test (gcse.c:4337, `insert_insn_end_bb` :4210), the falling arm's
+  //      own `gK[i + 1]` copies its sum into the same register (`pre_insert_copy_insn` :4400), and
+  //      `pre_delete` (:4508) drops the latch's copy — so the case fallen into has a block parameter fed
+  //      `i + 1` both by the switch edge and by the arm. structure.ts `armRefusal` refuses: re-running
+  //      the edge copy on the fall-through path could overwrite what the arm computed. Here it would
+  //      recompute the SAME value, which is what the fix has to prove (value numbering, as
+  //      raise/unthread.ts does). With `-fno-gcse` the object lifts; `gK[i]` in the arm
+  //      (sw_fallpre_ctl) gives PRE nothing to do and MATCHes. agbcc only: GCC 2.7.2 has no gcse, so
+  //      gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 lift the row with its control's residue, and ido7.1
+  //      declines both first on a MIPS-frontend jump-table target that is not a block boundary.
+  //      EntityCreate's case 8 falls into case 9 with four such edge copies (item 8's PRE extras in
+  //      its second table's dispatch, r5, r6, r8, r9); that spelling did not reproduce small in five
+  //      tries, so the row pins the site, not EntityCreate's spelling of it.
+  //  20. spillu8max (sub_0800D188, sub_08016EEC; instrumented on both). Item 3's spilled promoted u8,
+  //      read narrow as the left operand of a `?:` join (`m = max(m, t)`): reload gives the address copy
+  //      its own register and the join's hard register the load (`add r3, sp, #0x28 / ldrb r1, [r3]`),
+  //      so the copy does not die at its load and thumb.ts `narrowSlotReloads` keeps it a capture. That
+  //      capture also takes the slot from every accepted reload (`otherCaptureOffsets`), and
+  //      frame-objects.ts `objectShapes` refuses the widths (4 vs 1). spillu8byte, whose byte goes
+  //      straight to a `strb`, is the control (MATCH). Ablated (the load accepted with no deadness
+  //      check), spillu8max lifts at 25/120 with the `?:` spelled if/else. Next on the real functions:
+  //      sub_0800D188 meets item 21; sub_08016EEC meets a jump table whose arms do not linearize
+  //      (switch machinery). agbcc only, for item 3's reason.
+  //  21. sret2knr / sret2void (sub_08022CA0; sub_0800D188's second link). A struct-return temp at
+  //      [sp,#0] is folded only where thumb.ts `noCallTakesAStackWord`, and a call to a K&R `()` callee
+  //      (`u8 thunk_GetRandomValue();` again, item 15) counts as one that may take a stack word, so the
+  //      `ldr [sp]` stays an SSA slot under the temp: "one byte, two models". Overcautious on agbcc:
+  //      locals sit at sp plus the outgoing area (thumb.h:600-621, ACCUMULATE_OUTGOING_ARGS :628,
+  //      STARTING_FRAME_OFFSET :573), and a compiled 5-argument call, prototyped or K&R, moves both
+  //      temps to sp+4/sp+8 — so a declared sret `mov r0, sp` alone proves no call takes a stack word.
+  //      sret2void (`u8 rnd(void);`, stated in its proto as a ctx's callees are not carried) MATCHes
+  //      (control). Two temps because one is covered by the
+  //      one-word-frame licence. With the thunk's arity stated the real function lifts, with one
+  //      ASMLIFT_ERROR in the `cmn` lowering (item 7's machinery). agbcc only: the gate is Thumb's;
+  //      ido7.1 declines earlier on sp as data, and gcc2.7.2kmc and gcc2.7.2 MATCH sret2knr. A
+  //      body-proven arity (item 15's fix) would close this row too, from the other side.
+  //  22. bvhome / bvhomereg / bvown (sub_0803D4AC, the by-value set-aside of item 13, attributed). An
+  //      OWN by-value struct parameter, 7 bytes rounded to 8, DImode in r1:r2: reload spills it at entry
+  //      (`str r1, [sp, #8] / str r2, [sp, #0xc]`), one member is read through the word (`ldr; lsl;
+  //      lsr`), and the s8 at byte 4 is read `mov r0, sp / ldrb r0, [r0, #0xc]`. The reload is found,
+  //      then dropped as an argument's home (thumb.ts `argumentHomes`), so a byte object sits over slot
+  //      12; the one-object answer that lifts a home with no sret beside it (bvown, MATCH) is withheld
+  //      because the sret temps escape. Delta-reduced from the real C (516 → 93 asm lines) and
+  //      instrument-pinned on both. Next link (the home rule ablated): the parameter is spelled
+  //      `s32 a1, s32 a2` (68/108); bvhomereg, which keeps p in registers, pins that link today
+  //      (32/66). agbcc only: the MIPS lanes decline on sp as data, and mwcc does not compile it.
+  //  23. imgidx / imgspill / cpyidx / cpyspill (sub_0804D0B0: why item 2's split does not fire on the
+  //      real function). frame-objects.ts `provenParts` returns the whole range for two reasons: (a) a
+  //      runtime index into a part (`sp0[(u8)(...)*2]`, imgidx/cpyidx), and (b) once (a) is ablated,
+  //      the `arg0` word spill at [sp,#0x20] (imgspill/cpyspill): reload allocates spill slots after the
+  //      arrays (thumb.h:569/573, the frame grows up; reload1.c:2274), and a run that abuts the part
+  //      below without being a copy destination joins it, so `b` becomes u8[20] and .LC186 cannot fill
+  //      it. The image rows are agbcc only, for item 2's reason; imgpair is their control. The cpy rows
+  //      carry the cause on every lane, cpypair their control: cpyidx is the index refusal
+  //      (instrumented on agbcc, gcc2.7.2kmc and ido7.1); cpyspill is one cause down three paths —
+  //      agbcc absorbs the spills into the top part, ido7.1 puts them below the arrays so the lowest
+  //      part is no copy start, gcc2.7.2 leaves a pad gap so the runs do not tile; gcc2.7.2kmc keeps
+  //      them in registers and splits (its residue is other machinery), and mwcc_242_81 never splits.
+  //      Both state `memcpy` in their proto: undeclared, gcc 2.7.2 (no `-fno-builtin`) open-codes the
+  //      candidate's copy, and cpyidx then reads 65/66 against the declared 12/25.
+  //      Two fixes, a PREDICTION each until built: whole-word fixed accesses outside every copy extent
+  //      stay out of the parts; and an index based at a part's copy destination stays in that part,
+  //      which needs adjudication (the gate's author rejected it: "it may reach every one").
+  // Still set aside, each one function: sub_0801D6B0, whose FIRST blocker is now item 17's shared
+  // return tail (its block_25 arms pass as break arms today), and whose goto-free spelling compiles to
+  // 905 lines against the ROM's 877, 274 of them differing — so the function stays set aside under the
+  // no-goto rule while the row pins the guard; sub_0801DFC4's far-jump relays (lowered); EntityCreate's
+  // relays fire no refusal (instrumented).
   {
     sym: 'stksidx',
     src:
@@ -13241,6 +13373,604 @@ export const SYNTHETIC: SynthSpec[] = [
       Ping: { params: 1, returnsVoid: true },
       Pong: { params: 1, returnsVoid: true },
       retarm1_tail: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_rndsame',
+    src:
+      'extern u8 gR;\nu8 rnd() { return gR; }\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndsame(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
+    // no `dense`: the tag's floor reads the first definition in `src`, which is `rnd`'s
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 gR;\nu8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndsame(s32 i);',
+    proto: { jt_rndsame: { returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndst',
+    src:
+      'extern u8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndst(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndst(s32 i);',
+    proto: { jt_rndst: { returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndvoid',
+    src:
+      'extern u8 rnd(void);\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndvoid(s32 i)\n{\n    switch (i) {\n' +
+      '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 rnd(void);\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndvoid(s32 i);',
+    proto: { jt_rndvoid: { returnsVoid: true }, rnd: { params: 0, returns: 'u8' } },
+  },
+  {
+    sym: 'sretpuretail',
+    src:
+      'struct Pick { u16 at; u8 kind; u8 pad; };\n' +
+      'struct Seg { u16 lo, mid, hi, end; u8 kind; u8 pad; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\n' +
+      'extern struct SegTab *gSegTab;\nstruct Pick sretpuretail(u16 arg1, u16 arg2, u8 arg3)\n{\n' +
+      '    s32 t;\n    struct Pick p;\n    u32 i;\n\n    p.at = -1;\n' +
+      '    for (i = 0; i < gSegTab->count; i++) {\n        if (arg1 < gSegTab->segs[i].lo)\n' +
+      '            return p;\n        if (gSegTab->segs[i].mid == gSegTab->segs[i].end) {\n' +
+      '            if (((arg2 - arg3) <= gSegTab->segs[i].mid) && (gSegTab->segs[i].mid <= arg2)) {\n' +
+      '                p.at = gSegTab->segs[i].mid;\n' +
+      '                p.kind = gSegTab->segs[i].kind;\n                return p;\n' +
+      '            }\n        } else {\n' +
+      '            t = (((gSegTab->segs[i].end - gSegTab->segs[i].mid) * (arg1 - gSegTab->segs[i].lo)) / (gSegTab->segs[i].hi - gSegTab->segs[i].lo)) + gSegTab->segs[i].mid;\n' +
+      '            if ((t >= (arg2 - arg3)) && (t <= (arg2 + 3))) {\n                p.at = t;\n' +
+      '                p.kind = gSegTab->segs[i].kind;\n                return p;\n' +
+      '            }\n        }\n    }\n    return p;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx:
+      'struct Pick { u16 at; u8 kind; u8 pad; };\n' +
+      'struct Seg { u16 lo, mid, hi, end; u8 kind; u8 pad; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\n' +
+      'extern struct SegTab *gSegTab;\nstruct Pick sretpuretail(u16 arg1, u16 arg2, u8 arg3);',
+    proto: {
+      sretpuretail: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct Pick',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'at', type: 'u16' },
+            { name: 'kind', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'sretpuretail_exit',
+    src:
+      'struct Pick { u16 at; u8 kind; u8 pad; };\n' +
+      'struct Seg { u16 lo, mid, hi, end; u8 kind; u8 pad; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\n' +
+      'extern struct SegTab *gSegTab;\n' +
+      'struct Pick sretpuretail_exit(u16 arg1, u16 arg2, u8 arg3)\n{\n    s32 t;\n' +
+      '    struct Pick p;\n    u32 i;\n\n    p.at = -1;\n' +
+      '    for (i = 0; i < gSegTab->count; i++) {\n        if (gSegTab->segs[i].hi < arg1)\n' +
+      '            continue;\n        if (arg1 < gSegTab->segs[i].lo)\n            return p;\n' +
+      '        if (gSegTab->segs[i].mid == gSegTab->segs[i].end) {\n' +
+      '            if (gSegTab->segs[i].mid <= arg2) {\n' +
+      '                p.at = gSegTab->segs[i].mid;\n' +
+      '                p.kind = gSegTab->segs[i].kind;\n                return p;\n' +
+      '            }\n        } else {\n' +
+      '            t = (((gSegTab->segs[i].end - gSegTab->segs[i].mid) * (arg1 - gSegTab->segs[i].lo)) / (gSegTab->segs[i].hi - gSegTab->segs[i].lo)) + gSegTab->segs[i].mid;\n' +
+      '            if (t <= arg2) {\n                p.at = t;\n' +
+      '                p.kind = gSegTab->segs[i].kind;\n                return p;\n' +
+      '            }\n        }\n    }\n    return p;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx:
+      'struct Pick { u16 at; u8 kind; u8 pad; };\n' +
+      'struct Seg { u16 lo, mid, hi, end; u8 kind; u8 pad; };\n' +
+      'struct SegTab { u16 unk0; u16 count; struct Seg *segs; };\n' +
+      'extern struct SegTab *gSegTab;\n' +
+      'struct Pick sretpuretail_exit(u16 arg1, u16 arg2, u8 arg3);',
+    proto: {
+      sretpuretail_exit: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct Pick',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'at', type: 'u16' },
+            { name: 'kind', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'retpost_tail',
+    src:
+      'extern u8 gTab[16];\nextern u8 gCount, gMiss;\nextern s32 gInit;\n' +
+      'void retpost_tail(u8 x, s32 *out)\n{\n    s32 r;\n    u8 i;\n\n    r = gInit;\n' +
+      '    for (i = 0; i < gCount; i++) {\n        if (gTab[i] == x) {\n            *out = r;\n' +
+      '            return;\n        }\n    }\n    gMiss = 1;\n    *out = r;\n}',
+    features: ['branch'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u8 gTab[16];\nextern u8 gCount, gMiss;\nextern s32 gInit;\nvoid retpost_tail(u8 x, s32 *out);',
+    proto: { retpost_tail: { returnsVoid: true } },
+  },
+  {
+    sym: 'retpost_notail',
+    src:
+      'extern u8 gTab[16];\nextern u8 gCount, gMiss;\nextern s32 gInit;\n' +
+      'void retpost_notail(u8 x, s32 *out)\n{\n    s32 r;\n    u8 i;\n\n    r = gInit;\n' +
+      '    for (i = 0; i < gCount; i++) {\n        if (gTab[i] == x) {\n            *out = r;\n' +
+      '            return;\n        }\n    }\n    *out = r;\n}',
+    features: ['branch'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u8 gTab[16];\nextern u8 gCount, gMiss;\nextern s32 gInit;\nvoid retpost_notail(u8 x, s32 *out);',
+    proto: { retpost_notail: { returnsVoid: true } },
+  },
+  {
+    sym: 'jt_xjdef',
+    src:
+      'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void jt_xjdef(s32 id, s32 v)\n{\n    switch (id) {\n    case 0: f(1); break;\n    case 1: g(2); break;\n' +
+      '    case 2: h(v); gOut = v; break;\n    case 3: m(v); gOut = v; break;\n    case 5: q(7); break;\n    default: gOut = v; break;\n    }\n    r(0);\n}',
+    features: ['dense', 'switch-arms'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid jt_xjdef(s32 id, s32 v);',
+    proto: {
+      jt_xjdef: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_xjdef_ctl',
+    src:
+      'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void jt_xjdef_ctl(s32 id, s32 v)\n{\n    switch (id) {\n    case 0: f(1); break;\n    case 1: g(2); break;\n' +
+      '    case 2: h(v); gOut = v; break;\n    case 3: m(v); break;\n    case 5: q(7); break;\n    default: gOut = v; break;\n    }\n    r(0);\n}',
+    features: ['dense', 'switch-arms'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid jt_xjdef_ctl(s32 id, s32 v);',
+    proto: {
+      jt_xjdef_ctl: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_xjcase',
+    src:
+      'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void jt_xjcase(s32 id, s32 v)\n{\n    switch (id) {\n    case 0: f(1); break;\n    case 1: if (v == 3) break; g(v);\n' +
+      '    case 2: gOut = v; break;\n    case 3: h(v); gOut = v; break;\n    case 4: m(5); break;\n    case 5: q(7); break;\n    }\n    r(0);\n}',
+    features: ['fallthrough', 'break', 'dense'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid jt_xjcase(s32 id, s32 v);',
+    proto: {
+      jt_xjcase: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_xjcase_ctl',
+    src:
+      'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\n' +
+      'void jt_xjcase_ctl(s32 id, s32 v)\n{\n    switch (id) {\n    case 0: f(1); break;\n    case 1: if (v == 3) break; g(v);\n' +
+      '    case 2: gOut = v; break;\n    case 3: h(v); break;\n    case 4: m(5); break;\n    case 5: q(7); break;\n    }\n    r(0);\n}',
+    features: ['fallthrough', 'break', 'dense'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'extern s32 gOut;\nvoid f(s32 x);\nvoid g(s32 x);\nvoid h(s32 x);\nvoid m(s32 x);\nvoid q(s32 x);\nvoid r(s32 x);\nvoid jt_xjcase_ctl(s32 id, s32 v);',
+    proto: {
+      jt_xjcase_ctl: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+      r: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sw_fallpre',
+    src:
+      'extern u8 gId[], gK[];\nextern s32 gX[];\nvoid f(u32 x);\nvoid g(u32 x);\nvoid h(u32 x);\nvoid m(u32 x);\n' +
+      'void sw_fallpre(u32 n)\n{\n    u32 i;\n    for (i = 0; i < n; i++) {\n        switch (gId[i]) {\n' +
+      '        case 0: f(i); break;\n        case 1: g(i); break;\n        case 2: case 3: if (gK[i + 1] != 0) break;\n' +
+      '        case 4: case 5: if (gX[i] > 7) h(i); break;\n        case 6: m(i); break;\n        }\n    }\n}',
+    features: ['fallthrough', 'break', 'dense'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 gId[], gK[];\nextern s32 gX[];\nvoid f(u32 x);\nvoid g(u32 x);\nvoid h(u32 x);\nvoid m(u32 x);\nvoid sw_fallpre(u32 n);',
+    proto: {
+      sw_fallpre: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sw_fallpre_ctl',
+    src:
+      'extern u8 gId[], gK[];\nextern s32 gX[];\nvoid f(u32 x);\nvoid g(u32 x);\nvoid h(u32 x);\nvoid m(u32 x);\n' +
+      'void sw_fallpre_ctl(u32 n)\n{\n    u32 i;\n    for (i = 0; i < n; i++) {\n        switch (gId[i]) {\n' +
+      '        case 0: f(i); break;\n        case 1: g(i); break;\n        case 2: case 3: if (gK[i] != 0) break;\n' +
+      '        case 4: case 5: if (gX[i] > 7) h(i); break;\n        case 6: m(i); break;\n        }\n    }\n}',
+    features: ['fallthrough', 'break', 'dense'],
+    toolchains: ['agbcc'],
+    ctx: 'extern u8 gId[], gK[];\nextern s32 gX[];\nvoid f(u32 x);\nvoid g(u32 x);\nvoid h(u32 x);\nvoid m(u32 x);\nvoid sw_fallpre_ctl(u32 n);',
+    proto: {
+      sw_fallpre_ctl: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'spillu8max',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      '#define max(a, b) ((a) >= (b) ? (a) : (b))\n' +
+      'extern u8 gTbl[];\n' +
+      'extern u32 gA[16];\n' +
+      'extern u8 gOut8;\n' +
+      'extern u32 gOut;\n' +
+      'extern u16 gOut16;\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8max(u32 k){ u32 v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13; u32 i; struct S4 s; u8 m;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];v8=gA[8];v9=gA[9];v10=gA[10];v11=gA[11];v12=gA[12];v13=gA[13];\n' +
+      ' m = gTbl[k];\n' +
+      ' for(i=0;i<k;i++){ sink(v0+i,v1+i,v2+i,v3+i); sink(v4+i,v5+i,v6+i,v7+i); sink(v8+i,v9+i,v10+i,v11+i); sink(v12+i,v13+i,0,0); }\n' +
+      ' s = mk(k, 0, 0x10); gOut16 = s.a;\n' +
+      ' gOut8 = max(m, gTbl[k + 1]); return v0; }',
+    features: ['narrow', 'promotion', 'struct-return', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 spillu8max(u32 k);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'sret2knr',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'u8 rnd();\n' +
+      'extern u16 gOut16;\n' +
+      'extern u8 gOut8;\n' +
+      'void sret2knr(u16 k)\n' +
+      '{\n' +
+      '    struct S4 s;\n' +
+      '    struct S4 t;\n' +
+      '    s = mk(k, 0, 0x10);\n' +
+      '    gOut16 = s.a;\n' +
+      '    t = mk(k, 1, 0x18);\n' +
+      '    gOut16 = t.a;\n' +
+      '    gOut8 = rnd();\n' +
+      '}',
+    features: ['struct-return'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'u8 rnd();\n' +
+      'extern u16 gOut16;\n' +
+      'extern u8 gOut8;\n' +
+      'void sret2knr(u16 k);',
+    proto: {
+      rnd: { returns: 'u8' },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'sret2void',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'u8 rnd(void);\n' +
+      'extern u16 gOut16;\n' +
+      'extern u8 gOut8;\n' +
+      'void sret2void(u16 k)\n' +
+      '{\n' +
+      '    struct S4 s;\n' +
+      '    struct S4 t;\n' +
+      '    s = mk(k, 0, 0x10);\n' +
+      '    gOut16 = s.a;\n' +
+      '    t = mk(k, 1, 0x18);\n' +
+      '    gOut16 = t.a;\n' +
+      '    gOut8 = rnd();\n' +
+      '}',
+    features: ['struct-return'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'u8 rnd(void);\n' +
+      'extern u16 gOut16;\n' +
+      'extern u8 gOut8;\n' +
+      'void sret2void(u16 k);',
+    proto: {
+      rnd: { params: 0, returns: 'u8' },
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'bvhome',
+    src:
+      'struct P { u8 a; u8 b; u8 c; s8 d; s8 e; u8 f; u8 g; };\n' +
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct Ent { u16 x; u16 y; u8 pad[24]; };\n' +
+      'struct St { u8 f0:4; u8 on:1; u8 f5:3; s8 vel; };\n' +
+      'struct Lim { u8 pad[0x1b]; u8 limit; };\n' +
+      'extern struct Ent gEnts[];\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern struct St gSt;\n' +
+      'extern u32 gFrame;\n' +
+      'extern struct Lim *gLim;\n' +
+      'void bvhome(u8 i, struct P p)\n' +
+      '{\n' +
+      '    struct S4 s;\n' +
+      '    struct S4 t;\n' +
+      '    u16 y;\n' +
+      '    u32 v;\n' +
+      '\n' +
+      '    y = gEnts[i].y;\n' +
+      '    if (gSt.on) {\n' +
+      '        s = mk(gEnts[i].x, gEnts[i].y, 0x18);\n' +
+      '        v = s.a;\n' +
+      '        if (gLim->limit <= v) {\n' +
+      '            gEnts[i].y = y;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    if (p.e != 0) {\n' +
+      '        y = gEnts[i].y;\n' +
+      '        if ((gFrame & p.c) == p.c) {\n' +
+      '            if ((gSt.vel >> 4) > p.e) {\n' +
+      '                gSt.vel = p.e << 4;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        t = mk(gEnts[i].x, gEnts[i].y, 0x18);\n' +
+      '        v = t.a;\n' +
+      '        if (gLim->limit <= v) {\n' +
+      '            gEnts[i].y = y & 0xFFF8;\n' +
+      '        }\n' +
+      '    }\n' +
+      '}',
+    features: ['struct', 'struct-return', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct P { u8 a; u8 b; u8 c; s8 d; s8 e; u8 f; u8 g; };\n' +
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct Ent { u16 x; u16 y; u8 pad[24]; };\n' +
+      'struct St { u8 f0:4; u8 on:1; u8 f5:3; s8 vel; };\n' +
+      'struct Lim { u8 pad[0x1b]; u8 limit; };\n' +
+      'extern struct Ent gEnts[];\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern struct St gSt;\n' +
+      'extern u32 gFrame;\n' +
+      'extern struct Lim *gLim;\n' +
+      'void bvhome(u8 i, struct P p);',
+    proto: {
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'bvhomereg',
+    src:
+      'struct P { u8 a; u8 b; u8 c; s8 d; s8 e; u8 f; u8 g; };\n' +
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct Ent { u16 x; u16 y; u8 pad[24]; };\n' +
+      'struct St { u8 f0:4; u8 on:1; u8 f5:3; s8 vel; };\n' +
+      'struct Lim { u8 pad[0x1b]; u8 limit; };\n' +
+      'extern struct Ent gEnts[];\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern struct St gSt;\n' +
+      'extern u32 gFrame;\n' +
+      'extern struct Lim *gLim;\n' +
+      'void bvhomereg(u8 i, struct P p)\n' +
+      '{\n' +
+      '    struct S4 t;\n' +
+      '    u16 y;\n' +
+      '    u32 v;\n' +
+      '\n' +
+      '    if (p.e != 0) {\n' +
+      '        y = gEnts[i].y;\n' +
+      '        if ((gFrame & p.c) == p.c) {\n' +
+      '            if ((gSt.vel >> 4) > p.e) {\n' +
+      '                gSt.vel = p.e << 4;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        t = mk(gEnts[i].x, gEnts[i].y, 0x18);\n' +
+      '        v = t.a;\n' +
+      '        if (gLim->limit <= v) {\n' +
+      '            gEnts[i].y = y & 0xFFF8;\n' +
+      '        }\n' +
+      '    }\n' +
+      '}',
+    features: ['struct', 'struct-return'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct P { u8 a; u8 b; u8 c; s8 d; s8 e; u8 f; u8 g; };\n' +
+      'struct S4 { u16 a; u8 b; u8 pad; };\n' +
+      'struct Ent { u16 x; u16 y; u8 pad[24]; };\n' +
+      'struct St { u8 f0:4; u8 on:1; u8 f5:3; s8 vel; };\n' +
+      'struct Lim { u8 pad[0x1b]; u8 limit; };\n' +
+      'extern struct Ent gEnts[];\n' +
+      'extern struct S4 mk(u16 x, u16 y, u8 z);\n' +
+      'extern struct St gSt;\n' +
+      'extern u32 gFrame;\n' +
+      'extern struct Lim *gLim;\n' +
+      'void bvhomereg(u8 i, struct P p);',
+    proto: {
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    sym: 'bvown',
+    src: 'struct P { u16 a, b, c, d; s8 e; }; int bvown(struct P p){ return p.a + p.c - p.e; }',
+    features: ['struct'],
+    toolchains: ['agbcc'],
+    ctx: 'struct P { u16 a, b, c, d; s8 e; }; int bvown(struct P p);',
+  },
+  {
+    sym: 'imgidx',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void imgidx(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; u8 b[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70}; gO[i].x = a[i * 2 + 1]; gO[i].y = b[i * 2]; }',
+    features: ['array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void imgidx(u32 i);',
+    proto: { imgidx: { returnsVoid: true } },
+  },
+  {
+    sym: 'imgspill',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void imgspill(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; u8 b[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70};\n' +
+      ' u32 v0,v1,v2,v3,v4,v5,v6,v7; gO[0].x = a[3]; gO[0].y = b[5];\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];\n' +
+      ' sink(v0,v1,v2,v3); sink(v4,v5,v6,v7); sink(v0+v4,v1+v5,v2+v6,v3+v7);\n' +
+      ' gA[i] = v0+v1+v2+v3+v4+v5+v6+v7; }',
+    features: ['array', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void imgspill(u32 i);',
+    proto: { imgspill: { returnsVoid: true }, sink: { params: 4, returnsVoid: true } },
+  },
+  {
+    sym: 'cpyidx',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'u32 cpyidx(u32 i){ u8 a[64]; u8 b[64]; memcpy(a, gS1, 64); memcpy(b, gS2, 64); return a[3] + b[i]; }',
+    features: ['stack-addr', 'array', 'variable-index'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'u32 cpyidx(u32 i);',
+    proto: { memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' } },
+  },
+  {
+    sym: 'cpyspill',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'extern u32 gOut;\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void cpyspill(u32 i){ u8 a[64]; u8 b[64]; u32 v0,v1,v2,v3,v4,v5,v6,v7; memcpy(a, gS1, 64); memcpy(b, gS2, 64); gOut = a[3] + b[5];\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];\n' +
+      ' sink(v0,v1,v2,v3); sink(v4,v5,v6,v7); sink(v0+v4,v1+v5,v2+v6,v3+v7);\n' +
+      ' gA[i] = v0+v1+v2+v3+v4+v5+v6+v7; }',
+    features: ['stack-addr', 'array', 'multi-arg'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'extern u32 gOut;\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void cpyspill(u32 i);',
+    proto: {
+      cpyspill: { returnsVoid: true },
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
     },
   },
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
