@@ -486,6 +486,44 @@ describe('keptInRelift', () => {
   });
 });
 
+// The first audit's answer where it asks for the one object: which bytes it asks for.
+describe('reliftRange', () => {
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[3] + b[1];` in a `to`-byte area,
+  // with `slots` the words the slot model keyed and `handB` handing `b` to a callee nothing bounds
+  const asked = (to: number, slots: number[], handB = false) => {
+    const [s, t] = [value(), value()];
+    const [a, b, k] = [laddr(0), laddr(4), konst(4)];
+    const ops = [a, b, k, call('memcpy', a.results[0], s, k.results[0])];
+    ops.push(handB ? call('g', b.results[0]) : call('memcpy', b.results[0], t, k.results[0]));
+    ops.push(load(a.results[0], 3, 1), load(b.results[0], 1, 1), ret());
+    return auditFrameObjects({
+      name: 'f',
+      irBlocks: [{ params: [s, t], ops }],
+      ownedLocals: { from: 0, to },
+      declaredLocals: { from: 0, to },
+      usedSlotOffsets: new Set(slots),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+    });
+  };
+
+  test('hands a spill slot past every copy back to the slot model', () => {
+    expect(asked(12, [8])).toEqual({ oneObject: { from: 0, to: 8 } });
+    // …and the word nothing touches between it and the arrays
+    expect(asked(16, [12])).toEqual({ oneObject: { from: 0, to: 8 } });
+  });
+
+  test('keeps the whole area where a word could be reached through the object', () => {
+    // a callee nothing bounds may reach the slot word
+    expect(asked(12, [8], true)).toEqual({ oneObject: { from: 0, to: 12 } });
+    // a word nothing touches, with no scalar beyond it, is the arrays' own
+    expect(asked(12, [])).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+});
+
 // The second audit, which judges the bytes a first one asked to keep as one object.
 describe('keepAsOneObject', () => {
   const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC, to = 8) =>

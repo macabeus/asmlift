@@ -744,3 +744,105 @@ describe("an unsized call's outgoing area ends at the loaded-word bound", () => 
     expect(() => measure()).toThrow(/nothing declares the callee of the `jal` at 0xc/);
   });
 });
+
+// `u8 a[16], b[16]; u32 v0..v7; memcpy(a, p, 16); memcpy(b, q, 16); v0..v7 = g[0..7];` three
+// `sink` calls, `return a[3] + b[5] + v0 + … + v7;` at ido7.1 -O2: the eight values spill to
+// sp+32..60, BELOW the arrays at sp+64 and sp+80. Kept in the one object the spill words join the
+// lower part, so the split's lowest part starts at no copy; handed back to the slot model
+// (`reliftRange`, `keptInRelift`), the copies tile what is left and it splits.
+const SPILLBELOW_IDO = [
+  '0:\taddiu\tsp,sp,-96',
+  '4:\tsw\ts0,24(sp)',
+  '8:\tsw\ta1,100(sp)',
+  'c:\tmove\ta1,a0',
+  '10:\tmove\ts0,a2',
+  '14:\tsw\tra,28(sp)',
+  '18:\tsw\ta0,96(sp)',
+  '1c:\taddiu\ta0,sp,80',
+  '20:\tjal\t0 <f>',
+  '24:\tli\ta2,16',
+  '28:\taddiu\ta0,sp,64',
+  '2c:\tlw\ta1,100(sp)',
+  '30:\tjal\t0 <f>',
+  '34:\tli\ta2,16',
+  '38:\tlw\tt6,16(s0)',
+  '3c:\tlw\ta0,0(s0)',
+  '40:\tlw\ta1,4(s0)',
+  '44:\tlw\ta2,8(s0)',
+  '48:\tlw\ta3,12(s0)',
+  '4c:\tsw\tt6,44(sp)',
+  '50:\tlw\tt7,20(s0)',
+  '54:\tsw\tt7,40(sp)',
+  '58:\tlw\tt8,24(s0)',
+  '5c:\tsw\tt8,36(sp)',
+  '60:\tlw\tt9,28(s0)',
+  '64:\tsw\ta0,60(sp)',
+  '68:\tsw\ta1,56(sp)',
+  '6c:\tsw\ta2,52(sp)',
+  '70:\tsw\ta3,48(sp)',
+  '74:\tjal\t0 <f>',
+  '78:\tsw\tt9,32(sp)',
+  '7c:\tlw\ts0,44(sp)',
+  '80:\tlw\ta1,40(sp)',
+  '84:\tlw\ta2,36(sp)',
+  '88:\tlw\ta3,32(sp)',
+  '8c:\tjal\t0 <f>',
+  '90:\tmove\ta0,s0',
+  '94:\tlw\tt0,60(sp)',
+  '98:\tlw\tt1,56(sp)',
+  '9c:\tlw\tt2,40(sp)',
+  'a0:\tlw\tt3,52(sp)',
+  'a4:\tlw\tt4,36(sp)',
+  'a8:\tlw\tt5,48(sp)',
+  'ac:\tlw\tt6,32(sp)',
+  'b0:\taddu\ta0,t0,s0',
+  'b4:\taddu\ta1,t1,t2',
+  'b8:\taddu\ta2,t3,t4',
+  'bc:\tjal\t0 <f>',
+  'c0:\taddu\ta3,t5,t6',
+  'c4:\tlbu\tt7,69(sp)',
+  'c8:\tlbu\tt8,83(sp)',
+  'cc:\tlw\tt0,60(sp)',
+  'd0:\tlw\tt2,56(sp)',
+  'd4:\tlw\tt4,52(sp)',
+  'd8:\taddu\tt9,t7,t8',
+  'dc:\tlw\tt6,48(sp)',
+  'e0:\taddu\tt1,t9,t0',
+  'e4:\taddu\tt3,t1,t2',
+  'e8:\tlw\tt9,40(sp)',
+  'ec:\taddu\tt5,t3,t4',
+  'f0:\tlw\tt1,36(sp)',
+  'f4:\taddu\tt7,t5,t6',
+  'f8:\tlw\tra,28(sp)',
+  'fc:\taddu\tt8,t7,s0',
+  '100:\tlw\tt3,32(sp)',
+  '104:\taddu\tt0,t8,t9',
+  '108:\tlw\ts0,24(sp)',
+  '10c:\taddu\tt2,t0,t1',
+  '110:\taddiu\tsp,sp,96',
+  '114:\tjr\tra',
+  '118:\taddu\tv0,t2,t3',
+  '11c:\tnop',
+];
+
+test('spill words below two copied arrays go back to the slot model, and the arrays split', () => {
+  const out = src(
+    SPILLBELOW_IDO,
+    [
+      [0x20, 'R_MIPS_26', 'memcpy'],
+      [0x30, 'R_MIPS_26', 'memcpy'],
+      [0x74, 'R_MIPS_26', 'sink'],
+      [0x8c, 'R_MIPS_26', 'sink'],
+      [0xbc, 'R_MIPS_26', 'sink'],
+    ],
+    MIPS_IDO,
+    {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  );
+  expect(out).toContain('    u8 sp80[16];\n    u8 sp64[16];\n');
+  expect(out).not.toMatch(/sp32|sp64\[(?:-|[2-9]\d)/);
+  expect(out).toContain('memcpy(sp80, a0, 16);\n    memcpy(sp64, a1, 16);');
+  expect(out).toContain('return sp64[5] + sp80[3] + ');
+});

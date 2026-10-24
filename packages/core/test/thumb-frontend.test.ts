@@ -4231,6 +4231,90 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         expect(src).toContain('    u8 sp0[16];\n    u8 sp16[16];\n');
         expect(src).toContain('memcpy(sp0, &gS1, 16);\n    memcpy(sp16, &gS2, 16);\n    return sp0[3] + sp16[5];');
       });
+      // the same pair with eight values live across two `sink` calls, at agbcc -O2: reload puts the
+      // eighth one's spill slot ABOVE the arrays, at [sp,#0x20] (the Thumb frame grows up). Kept in
+      // the one object it would join `b`; handed back to the slot model (`reliftRange`), it is a
+      // local again and the copies tile what is left.
+      test('a spill slot above two copied arrays goes back to the slot model, and the arrays split', () => {
+        const spill =
+          '\t.align\t2, 0\n' +
+          '\t.thumb_func\n' +
+          'f:\n' +
+          '\tpush\t{r4, r5, r6, r7, lr}\n' +
+          '\tmov\tr7, sl\n' +
+          '\tmov\tr6, r9\n' +
+          '\tmov\tr5, r8\n' +
+          '\tpush\t{r5, r6, r7}\n' +
+          '\tadd\tsp, sp, #-0x24\n' +
+          '\tldr\tr1, .L3\n' +
+          '\tmov\tr0, sp\n' +
+          '\tmov\tr2, #0x10\n' +
+          '\tbl\tmemcpy\n' +
+          '\tadd\tr4, sp, #0x10\n' +
+          '\tldr\tr1, .L3+0x4\n' +
+          '\tadd\tr0, r4, #0\n' +
+          '\tmov\tr2, #0x10\n' +
+          '\tbl\tmemcpy\n' +
+          '\tmov\tr0, sp\n' +
+          '\tldrb\tr0, [r0, #0x3]\n' +
+          '\tldrb\tr1, [r4, #0x5]\n' +
+          '\tadd\tr0, r0, r1\n' +
+          '\tldr\tr1, .L3+0x8\n' +
+          '\tstr\tr0, [r1]\n' +
+          '\tldr\tr0, .L3+0xc\n' +
+          '\tldr\tr4, [r0]\n' +
+          '\tldr\tr5, [r0, #0x4]\n' +
+          '\tldr\tr6, [r0, #0x8]\n' +
+          '\tldr\tr1, [r0, #0xc]\n' +
+          '\tmov\tr8, r1\n' +
+          '\tldr\tr1, [r0, #0x10]\n' +
+          '\tmov\tr9, r1\n' +
+          '\tldr\tr1, [r0, #0x14]\n' +
+          '\tmov\tsl, r1\n' +
+          '\tldr\tr7, [r0, #0x18]\n' +
+          '\tldr\tr0, [r0, #0x1c]\n' +
+          '\tstr\tr0, [sp, #0x20]\n' +
+          '\tadd\tr0, r4, #0\n' +
+          '\tadd\tr1, r5, #0\n' +
+          '\tadd\tr2, r6, #0\n' +
+          '\tmov\tr3, r8\n' +
+          '\tbl\tsink\n' +
+          '\tmov\tr0, r9\n' +
+          '\tmov\tr1, sl\n' +
+          '\tadd\tr2, r7, #0\n' +
+          '\tldr\tr3, [sp, #0x20]\n' +
+          '\tbl\tsink\n' +
+          '\tadd\tr4, r4, r5\n' +
+          '\tadd\tr4, r4, r6\n' +
+          '\tadd\tr4, r4, r8\n' +
+          '\tadd\tr4, r4, r9\n' +
+          '\tadd\tr4, r4, sl\n' +
+          '\tadd\tr4, r4, r7\n' +
+          '\tldr\tr0, [sp, #0x20]\n' +
+          '\tadd\tr4, r4, r0\n' +
+          '\tldr\tr1, .L3+0x8\n' +
+          '\tstr\tr4, [r1]\n' +
+          '\tadd\tsp, sp, #0x24\n' +
+          '\tpop\t{r3, r4, r5}\n' +
+          '\tmov\tr8, r3\n' +
+          '\tmov\tr9, r4\n' +
+          '\tmov\tsl, r5\n' +
+          '\tpop\t{r4, r5, r6, r7}\n' +
+          '\tpop\t{r0}\n' +
+          '\tbx\tr0\n' +
+          '.L4:\n' +
+          '\t.align\t2, 0\n' +
+          '.L3:\n' +
+          '\t.word\tgS1\n' +
+          '\t.word\tgS2\n' +
+          '\t.word\tgOut\n' +
+          '\t.word\tgA\n';
+        const prototypes = { sink: { params: 4, returnsVoid: true }, f: { returnsVoid: true } };
+        const src = decompile('f', spill, ARMV4T_AGBCC, { prototypes }).source;
+        expect(src).toContain('    u8 sp0[16];\n    u8 sp16[16];\n');
+        expect(src).toContain('sink(v4, v5, v6, v7);');
+        expect(src).not.toContain('sp32');
+      });
       test('an array a callee nothing bounds is handed keeps the one object', () => {
         const handed = copies('\tadd\tr0, r4, #0\n\tbl\tfill\n');
         const prototypes = { fill: { params: ['u8 *'], returnsVoid: true } };

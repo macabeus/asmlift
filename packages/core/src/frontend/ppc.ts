@@ -1631,6 +1631,8 @@ function liftOnce(
   // re-minted as the `laddr` of the sum), handed to the audit so a base only the move read is
   // dropped rather than judged as a capture (`foldMovedCaptures`).
   const laddrAt = new Map<Value, number>();
+  // …and of those, the ones a direct r1 access in the local area was lowered to, not a capture
+  const directAccesses = new Set<Value>();
   const movedCaptures = new Set<Value>();
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
@@ -2441,7 +2443,9 @@ function liftOnce(
       }
       const local = inLocalArea(ins, mem, width);
       if (local !== undefined) {
-        return { base: emitLaddr(local), off: 0 };
+        const at = emitLaddr(local);
+        directAccesses.add(at);
+        return { base: at, off: 0 };
       }
       assertOrdinaryMem(mem);
       const { off, base } = parseMem(mem);
@@ -3903,6 +3907,7 @@ function liftOnce(
         loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound(-frame.size) + frame.size },
       capturedObjectIsTheWholeFrame: false,
       movedCaptures,
+      directAccesses,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
       symbols: undefined,
       target,

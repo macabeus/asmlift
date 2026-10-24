@@ -1981,6 +1981,8 @@ function liftOnce(
   // The frame offset each `laddr` this lift emitted names, and the deferred `sp + index` sums
   // (`emitLaddr`, `materialize`) — function-scoped, since a register holding one crosses blocks.
   const laddrAt = new Map<Value, number>();
+  // …and of those, the ones a direct `off(sp)` access in the local area was lowered to, not a capture
+  const directAccesses = new Set<Value>();
   const frameSums = new Map<Value, FrameSum>();
   // Every capture this lift moved into another (`addiu rD,rCapture,k` re-minted as the `laddr` of
   // the sum, or `addu` deferring one into a `FrameSum`), handed to the audit as Thumb hands its
@@ -2745,7 +2747,9 @@ function liftOnce(
             `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} saves the caller's ${stored} inside the local area, a frame this does not describe`,
           );
         }
-        return emitLaddr(off);
+        const at = emitLaddr(off);
+        directAccesses.add(at);
+        return at;
       }
       const raw = rawFrame(base);
       const sum = raw === undefined ? undefined : frameSums.get(raw);
@@ -3228,6 +3232,7 @@ function liftOnce(
       loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound },
       capturedObjectIsTheWholeFrame: false,
       movedCaptures,
+      directAccesses,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
       symbols,
       target,

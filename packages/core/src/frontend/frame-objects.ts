@@ -53,6 +53,11 @@ export interface FrameObjectAudit {
   escapesReliedOn?: ReadonlySet<number>;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
+  /** the `laddr`s the frontend minted for a DIRECT frame access (`off(sp)` inside its local area)
+   *  rather than for a captured address: a word reached only through them is one its slot model
+   *  lifts again outside a relift's bytes (`reliftRange`). Thumb, which lifts a direct word access
+   *  as a slot, has none. */
+  directAccesses?: ReadonlySet<Value>;
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
@@ -102,7 +107,7 @@ export const landsOnArea = (area: FrameRange, at: number, width: number): boolea
 
 /** Whether a `width`-byte access at `at` inside a frontend's local area is MEMORY in a relift that
  *  keeps `kept` as one object: inside it, yes; wholly outside, no — a word the first audit handed
- *  back to the slot model; across its edge, refused, half memory and half slot. */
+ *  back to the slot model (`reliftRange`); across its edge, refused, half memory and half slot. */
 export function keptInRelift(kept: FrameRange, at: number, width: number, what: () => string, name: string): boolean {
   if (at >= kept.from && at + width <= kept.to) {
     return true;
@@ -374,6 +379,7 @@ export function auditFrameObjects({
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
+  directAccesses = new Set(),
   returnsWithoutHiddenPointer,
   symbols,
   target,
@@ -454,7 +460,16 @@ export function auditFrameObjects({
     model.unboundedAt.has(e.off) &&
     (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
   if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
-    return { oneObject: { from: declared.from, to: declared.to } };
+    return {
+      oneObject: reliftRange({
+        declared,
+        objects,
+        uses,
+        usedSlotOffsets,
+        directAccesses,
+        disambiguatesFrameLocals: target.compilerBehaviors.disambiguatesFrameLocals,
+      }),
+    };
   }
   const failWithheld: Refuse = (why) => fail(model.withheld(why));
   for (const [off, width] of shapes.overSlot) {
@@ -470,6 +485,88 @@ export function auditFrameObjects({
   }
   stampObjects(objects, shapes, uses);
   return { policy: 'per-object', sinks };
+}
+
+/** THE BYTES THE ONE-OBJECT RELIFT KEEPS: the declared local area, less the words at either end
+ *  that are a scalar's and nothing else's — a word the slot model keys and no access names, or one
+ *  the frontend reached only by direct whole-word accesses (`directAccesses`), which escapes
+ *  nowhere — and, past such a word, words nothing touches at all. Each frontend lifts a word
+ *  outside the range with its slot model (Thumb `isFrameObjectAccess`, MIPS and PPC
+ *  `keptInRelift`), so the one object is the bytes its escapes and accesses reach, and
+ *  `provenParts` can split it where they tile: agbcc's reload puts spill slots ABOVE the arrays
+ *  (the Thumb frame grows up, thumb.h:569/573, reload1.c:2274), ido7.1 puts them below, and gcc
+ *  2.7.2 leaves a pad word between (each array starts at a multiple of 8); kept in the one object,
+ *  such a word joins the part beside it.
+ *
+ *  Only where a split is possible at all: two or more copies with a literal count fill the area.
+ *  Anywhere else the words stay the one object's, since a struct member only stored (`s.y = c`)
+ *  looks the same as a spill, and a local in its place lets the recompile drop the store.
+ *
+ *  Nothing is handed back where a word might be reached through the object: an escape no literal
+ *  count bounds, a bounded one whose bytes cover the word, or a runtime index — unless every
+ *  index is based at a copy's destination on a compiler that does not tell frame locals apart
+ *  (`disambiguatesFrameLocals`), the premise `provenParts` keeps an index in its part on. */
+function reliftRange({
+  declared,
+  objects,
+  uses,
+  usedSlotOffsets,
+  directAccesses,
+  disambiguatesFrameLocals,
+}: {
+  declared: FrameRange;
+  objects: ReadonlyMap<number, readonly Op[]>;
+  uses: FrameUses;
+  usedSlotOffsets: ReadonlySet<number>;
+  directAccesses: ReadonlySet<Value>;
+  disambiguatesFrameLocals: boolean | undefined;
+}): FrameRange {
+  const whole = { from: declared.from, to: declared.to };
+  const extents = [...uses.escapeExtents.values()].flat();
+  const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
+  const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
+  if (bounded.length < extents.length || fills.size < 2) {
+    return whole;
+  }
+  if (
+    uses.indexed.size > 0 &&
+    (disambiguatesFrameLocals !== false || ![...uses.indexed.keys()].every((o) => fills.has(o)))
+  ) {
+    return whole;
+  }
+  const handedBack = (w: number, pastScalar: boolean): boolean => {
+    if (bounded.some((e) => overlaps(w, 4, e.lo, e.hi - e.lo))) {
+      return false;
+    }
+    if ([...usedSlotOffsets].some((s) => s !== w && overlaps(s, 4, w, 4))) {
+      return false;
+    }
+    const touching = uses.fixed.filter((f) => overlaps(f.at, f.width, w, 4));
+    const owners = [...objects.keys()].filter((o) => overlaps(o, 1, w, 4));
+    if (usedSlotOffsets.has(w) || touching.length === 0) {
+      // …and past one, a word nothing touches: no value lives in it either way
+      return owners.length === 0 && touching.length === 0 && (usedSlotOffsets.has(w) || pastScalar);
+    }
+    return (
+      owners.length === 1 &&
+      owners[0] === w &&
+      !uses.escaped.has(w) &&
+      !uses.indexed.has(w) &&
+      uses.useCount.get(w) === (uses.accesses.get(w)?.length ?? 0) &&
+      touching.every((f) => {
+        const by = uses.accessOps.get(f.op);
+        return f.at === w && f.width === 4 && by?.off === w && directAccesses.has(by.through);
+      })
+    );
+  };
+  let { from, to } = whole;
+  while (to - from > 4 && handedBack(to - 4, to < whole.to)) {
+    to -= 4;
+  }
+  while (to - from > 4 && handedBack(from, from > whole.from)) {
+    from += 4;
+  }
+  return { from, to };
 }
 
 /** Refuses the whole function, naming the address-taken local as what it cannot lift. */
