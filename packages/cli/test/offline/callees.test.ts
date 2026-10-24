@@ -259,4 +259,19 @@ describe('the note on a body-bounded callee says what the run did', () => {
     const plain = guessedArityNote(dump, 'f', t, { f: { returnsVoid: true } }, undefined, undefined, bound);
     expect(plain).toMatch(/called with no argument, as their own body in this input reads none: rnd\n$/);
   });
+
+  // a `.s` declares its functions, and a `bl` to one is a callee, not a long branch
+  it('names a callee the same `.s` defines as a function', () => {
+    const s =
+      '\t.globl\trnd\n\t.type\t rnd,function\n\t.thumb_func\nrnd:\n\tmov\tr0, #7\n\tbx\tlr\n' +
+      '\t.thumb_func\nrd1:\n\tadd\tr0, r0, #1\n\tbx\tlr\n' +
+      '\tthumb_func_start rd2\nrd2:\n\tadd\tr0, r0, r1\n\tbx\tlr\n' +
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n\tbl\trnd\n\tbl\trd1\n' +
+      '\tbl\trd2\n\tbl\t.L2\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(calleeNames(s, 'f')).toEqual(['rnd', 'rd1', 'rd2']);
+    const bound = calleeBodyBoundOf('f', s, ARMV4T_AGBCC, {});
+    const note = guessedArityNote(s, 'f', ARMV4T_AGBCC, undefined, undefined, undefined, bound);
+    expect(note).toContain('rd1 (at most 1: its body here reads no more), rd2 (at most 2');
+    expect(note).toMatch(/reads none: rnd\n$/);
+  });
 });
