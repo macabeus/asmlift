@@ -577,12 +577,13 @@ describe('keepAsOneObject', () => {
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
     // the copies chain: the first one's last two bytes are the second's first two
     expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
-    // a runtime index into the lower part may reach the upper one
-    const indexed = copies([4, 4], (a, b, i) => {
-      const at = mkOp('add', { operands: [a, i], results: [value()] });
-      return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
+    // a runtime index based in the middle of the lower part: nothing says which array it reads
+    const midIndexed = copies([4, 4], (a, b, i) => {
+      const mid = laddr(2);
+      const at = mkOp('add', { operands: [mid.results[0], i], results: [value()] });
+      return [mid, at, load(at.results[0], 0, 1), load(a, 3, 1), load(b, 1, 1)];
     });
-    expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(midIndexed))).toEqual([[0, 8]]);
     // the upper part handed to a callee nothing bounds
     expect(objectsOf(withKept(copies([4, 4], (a, b) => [load(a, 3, 1), call('g', b)])))).toEqual([[0, 8]]);
     // a byte no use names: [6, 8) is touched by nothing
@@ -603,6 +604,35 @@ describe('keepAsOneObject', () => {
       ops: [a, b, store(a.results[0], v, 0, 4), store(b.results[0], v, 0, 4), load(a.results[0], 1, 1), ret()],
     };
     expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
+  });
+
+  // `memcpy(a, s, 4); memcpy(b, t, 4); return a[i] + b[1];`: an index based at a copy's
+  // destination stays in that part only where the compiler does not tell two frame locals apart —
+  // there the recompile reads the bytes the one object would, an index that walks off `a` included
+  test('keeps a runtime index in the part it is based at only where the compiler does not tell locals apart', () => {
+    const indexed = () =>
+      copies([4, 4], (a, b, i) => {
+        const at = mkOp('add', { operands: [a, i], results: [value()] });
+        return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
+      });
+    const tells = (d: boolean | undefined) => ({
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, disambiguatesFrameLocals: d },
+    });
+    const split = indexed();
+    kept(split, tells(false));
+    expect(objectsOf(split)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    // the indexed load is rebased onto the lower part's own object
+    const at = split.ops.find((op) => op.opcode === 'add')!;
+    expect(at.operands[0]).toBe(split.ops[0].results[0]);
+    for (const d of [true, undefined]) {
+      const whole = indexed();
+      kept(whole, tells(d));
+      expect(objectsOf(whole)).toEqual([[0, 8]]);
+    }
   });
 
   // the parts are declared in the order the compiler places address-taken arrays against their

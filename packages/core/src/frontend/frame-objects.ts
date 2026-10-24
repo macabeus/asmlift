@@ -407,6 +407,7 @@ export function auditFrameObjects({
       returnsWithoutHiddenPointer,
       arrayOrder: target.compilerBehaviors.addressTakenArrayOrder,
       arrayAlignment: target.compilerBehaviors.addressTakenArrayAlignment,
+      disambiguatesFrameLocals: target.compilerBehaviors.disambiguatesFrameLocals,
       fail,
     });
     return { policy: 'one-object', sinks };
@@ -2182,6 +2183,7 @@ function keepAsOneObject({
   returnsWithoutHiddenPointer,
   arrayOrder,
   arrayAlignment,
+  disambiguatesFrameLocals,
   fail,
 }: {
   oneObject: FrameRange;
@@ -2192,6 +2194,7 @@ function keepAsOneObject({
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   arrayOrder: TargetDescription['compilerBehaviors']['addressTakenArrayOrder'];
   arrayAlignment: TargetDescription['compilerBehaviors']['addressTakenArrayAlignment'];
+  disambiguatesFrameLocals: TargetDescription['compilerBehaviors']['disambiguatesFrameLocals'];
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -2289,10 +2292,12 @@ function keepAsOneObject({
   // part that holds `k`, at `k` less the part's start. Only on a compiler that places address-
   // taken arrays in a known order against their declarations (`addressTakenArrayOrder`): the
   // parts are declared in that order, or the recompile swaps their addresses. And at a known
-  // alignment (`addressTakenArrayAlignment`), which says where a part may start.
+  // alignment (`addressTakenArrayAlignment`), which says where a part may start. A runtime index
+  // stays in its part only where the compiler does not tell two frame locals apart
+  // (`disambiguatesFrameLocals`).
   const parts =
     twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
-      ? provenParts({ from, to }, objects, uses, arrayAlignment)
+      ? provenParts({ from, to }, objects, uses, arrayAlignment, disambiguatesFrameLocals === false)
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
@@ -2381,8 +2386,15 @@ function keepAsOneObject({
  *  `memcpy(a, .LC0, 16); memcpy(b, .LC2, 16)`, and declared as one `u8[32]` neither image can be
  *  folded into its own local (l3/constinit.ts).
  *
+ *  A RUNTIME INDEX names no byte, so it may reach every one, and it splits only where
+ *  `indexStaysInPart` (the compiler does not tell two frame locals apart,
+ *  `disambiguatesFrameLocals`) and it is based at the start of a part, where a copy put one of
+ *  the source's arrays: declared apart, the recompile then reads and writes every byte the one
+ *  object would, an index that walks off its array included. A compiler that does tell them
+ *  apart serves a stale value wherever the source's index crossed into the other array.
+ *
  *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
- *  (it names no byte, so it may reach every one), an escape nothing bounds (a callee or a holder
+ *  the rule above does not keep, an escape nothing bounds (a callee or a holder
  *  that may reach any byte from the address it was given), a byte no use names (nothing says
  *  which side it belongs to), or a use through a member that lands outside the part its own
  *  address lies in (`&a[16]` read at [-1]: one pointer walking two parts is one object). The
@@ -2393,9 +2405,10 @@ function provenParts(
   objects: ReadonlyMap<number, readonly Op[]>,
   uses: FrameUses,
   alignment: number,
+  indexStaysInPart: boolean,
 ): FrameRange[] {
   const whole = [{ from, to }];
-  if (uses.indexed.size > 0) {
+  if (uses.indexed.size > 0 && !indexStaysInPart) {
     return whole;
   }
   const touched: { owner: number; lo: number; hi: number }[] = [];
@@ -2466,7 +2479,11 @@ function provenParts(
       merged.push({ ...p });
     }
   }
-  return merged.length > 1 && merged.every((p) => starts.has(p.from)) ? merged : whole;
+  return merged.length > 1 &&
+    merged.every((p) => starts.has(p.from)) &&
+    [...uses.indexed.keys()].every((off) => merged.some((p) => p.from === off))
+    ? merged
+    : whole;
 }
 
 /** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width
