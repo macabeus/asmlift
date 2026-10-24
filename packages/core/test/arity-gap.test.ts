@@ -457,6 +457,28 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     expect(decompile('f', fr, ARMV4T_AGBCC).source).toContain('rd2(1, 2, 5, sp0)');
     expect(decompile('f', `${rd2}${fr}`, ARMV4T_AGBCC).source).toContain('    rd2(1, 2);\n');
   });
+  // `int g4(int, int, int, int); int un(); int f(int a, int b, int c, int d) { g4(a, b, c, d); return
+  // un(a, b, c, d); }`, un reading only a: agbcc copies the arguments back from their callee-saved
+  // homes for the second call. The copy names the same values g4 read, and it is still a write made
+  // for this call alone, so past the bound it stays an argument, as with no body
+  test('a copy made for the call is an argument past the bound, though an earlier call read its value', () => {
+    const fwd = (callee: string) =>
+      '\t.thumb_func\nf:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+      '\tadd\tr6, r2, #0\n\tadd\tr7, r3, #0\n\tbl\tg4\n\tadd\tr0, r4, #0\n\tadd\tr1, r5, #0\n' +
+      `\tadd\tr2, r6, #0\n\tadd\tr3, r7, #0\n\tbl\t${callee}\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const g4: Prototypes = { g4: { params: 4, returnsVoid: true } };
+    for (const [callee, body] of [
+      ['rd1', rd1],
+      ['rd0', rd0],
+    ]) {
+      expect(decompile('f', fwd(callee), ARMV4T_AGBCC, { prototypes: g4 }).source).toContain(
+        `${callee}(a0, a1, a2, a3)`,
+      );
+      expect(decompile('f', `${body}${fwd(callee)}`, ARMV4T_AGBCC, { prototypes: g4 }).source).toContain(
+        `${callee}(a0, a1, a2, a3)`,
+      );
+    }
+  });
   // `gp = 3; gq = rd1(a);` leaves the store's 3 in r1 above r0's a, which rd1 reads: dropping r0
   // would drop the a, so the gap refuses as it does with no body
   test('a gap below the bound refuses whatever lies above it', () => {

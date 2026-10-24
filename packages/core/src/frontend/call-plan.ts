@@ -941,11 +941,26 @@ export function callDeclarations(
     let bodyMemo: { words: number | undefined } | undefined;
     const bodyWords = (): number | undefined =>
       unstated ? (bodyMemo ??= { words: calleeBodyBound?.(callee!) }).words : undefined;
-    // whether some op lowered so far reads `v`: the call being lowered is not one yet
-    const readSoFar = (v: Value): boolean =>
-      ssa.irBlocks.some((b) =>
-        b.ops.some((o) => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v))),
+    // whether an op lowered so far reads `v`: the call being lowered is not one yet
+    const reads = (o: Op, v: Value): boolean => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v));
+    const readSoFar = (v: Value): boolean => ssa.irBlocks.some((b) => b.ops.some((o) => reads(o, v)));
+    // WHETHER WHAT ARGUMENT REGISTER `r` HOLDS WAS LEFT THERE BY A WRITE MADE FOR SOMETHING ELSE: a
+    // question about the register's last WRITE, not about its value. Where the call's own block wrote
+    // it, only a read since that write counts — `mov r0, #5; strh r0, [r1]; bl rnd` left the store's
+    // 5 in r0, while `add r1, r5, #0; bl un` is a copy made for this call, whose value an earlier call
+    // read (`g4(a, b, c, d); un(a, b, c, d)` forwards the same arguments twice, and agbcc and mwcc
+    // copy them back from callee-saved homes). A copy names no new value, so the value-level question
+    // cannot tell those two apart. KNOWN GAP: a register last written in another block is still asked
+    // of its value, which cuts such a copy made in a predecessor.
+    const leftover = (r: string): boolean => {
+      const at = ssa.lastWriteOp(r, bi);
+      const since = at === undefined ? undefined : ssa.irBlocks[bi].ops.slice(at);
+      return ssa.holdsValue(
+        r,
+        bi,
+        (v) => mayPass(v, r) && (since === undefined ? readSoFar(v) : since.some((o) => reads(o, v))),
       );
+    };
     const unreadByBody = (r: string): boolean => {
       const words = bodyWords();
       return words !== undefined && target.argRegs.indexOf(r) >= words;
@@ -974,7 +989,7 @@ export function callDeclarations(
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
             bound: bodyWords,
-            leftover: (r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && readSoFar(v)),
+            leftover,
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>

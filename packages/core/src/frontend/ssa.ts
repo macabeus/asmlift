@@ -125,6 +125,11 @@ export interface SsaBuilder {
   /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
    *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
   writtenSinceCall(reg: string, b: number): boolean;
+  /** How many ops block `b` held when it last wrote `reg` so far, or `undefined` where `b` has not
+   *  written it: every op at or past that index came after the write. A copy (`add r1, r5, #0`) names
+   *  no new value, so this is how a question about one WRITE of a register is asked, where its value
+   *  was read before the write too (frontend/call-plan.ts `leftover`). */
+  lastWriteOp(reg: string, b: number): number | undefined;
   /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
    *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
    *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
@@ -744,6 +749,8 @@ export function makeSsaBuilder(
   // every ISA with no frontend code. Per block, because the consumer asks a per-EDGE question.
   const writeCount: number[] = irBlocks.map(() => 0);
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
+  // the ops block `b` held at each register's last write in it (`lastWriteOp`)
+  const lastWriteOp: Array<Map<string, number>> = irBlocks.map(() => new Map());
   const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
   fn.writeOrder = writeOrder;
 
@@ -935,6 +942,7 @@ export function makeSsaBuilder(
     decidedLocal[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
+    lastWriteOp[b].set(reg, irBlocks[b].ops.length);
   };
   const readVar = (reg: string, b: number): Value => {
     if (globalRegs.has(reg)) {
@@ -1655,6 +1663,7 @@ export function makeSsaBuilder(
     entryValue,
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
+    lastWriteOp: (reg: string, b: number) => lastWriteOp[b].get(reg),
     writtenOnEveryPath: (reg, b, stop, visit) => {
       // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
       // which a back edge brings, and a cycle adds no path the first visit did not judge
@@ -2115,9 +2124,10 @@ export function fallbackArgc(
      *  reading r0 — so it never caps what the caller set up for the call: such a register stays
      *  counted, and a value above a gap still decides the gap below it (`decide`). It answers only
      *  for registers at or past it, whose being arguments changes nothing the callee computes:
-     *    - one that is a `leftover` stops the count, as no compiler sets up an argument the callee
-     *      never reads with a value it needed elsewhere (`gH = 5; gA = rnd()` leaves the store's 5 in
-     *      r0, which the guess took as `rnd(5)`);
+     *    - one that is a `leftover` stops the count: a write something else read since, which the
+     *      call found there (`gH = 5; gA = rnd()` leaves the store's 5 in r0, which the guess took as
+     *      `rnd(5)`). A copy made for the call is none, whatever read its value before
+     *      (`g4(a, b, c, d); un(a, b, c, d)` copies a..d back from their homes for `un`);
      *    - a gap starting there, under a register that is a leftover or that no proof makes an
      *      argument, stops the count at the gap rather than refuse.
      *  A gap BELOW the bound refuses as ever, whatever lies above it: the callee may read it, and it
@@ -2126,8 +2136,9 @@ export function fallbackArgc(
      *  and mwcc, a count capped at the bound lifted `rd1(a, 2)` as `rd1()` and `tick(5)`, to a body
      *  reading none, as `tick()`. */
     bound?: () => number | undefined;
-    /** whether what reaches argument register `reg` is a value something other than the call has
-     *  read so far: set up for something else, and left there. Asked only at or past `bound`. */
+    /** whether what reaches argument register `reg` was written for something other than the call,
+     *  which read it since, and left there (frontend/call-plan.ts `leftover`). Asked only at or past
+     *  `bound`. */
     leftover?: (reg: string) => boolean;
   },
 ): number {
