@@ -49,7 +49,7 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
-import type { CalleeBodyBound } from './callee-body';
+import { type CalleeBodyBound, asksCalleeBody } from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -264,6 +264,9 @@ export function callDeclarations(
   /** the argument words a callee's own body reads at most, where it is in the input
    *  (frontend/callee-body.ts) — asked of a named call no declaration lays out */
   calleeBodyBound?: CalleeBodyBound,
+  /** the callees taken at every argument register that may still hold its entry value
+   *  (`LiftOptions.entryReadCalls`) */
+  entryReadCalls?: ReadonlySet<string>,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -930,11 +933,23 @@ export function callDeclarations(
     // list is asked: a list nothing here can size, or a variadic one, still states parameters the
     // call must be handed (`refuseShortOfDeclared`).
     const stated = callee === undefined ? undefined : known(prototypes, callee);
-    const bodyWords =
-      callee !== undefined && p.widths === null && !declaresParams(stated) && stated?.variadicParams === undefined
-        ? calleeBodyBound?.(callee)
+    const unstated = callee !== undefined && p.widths === null && asksCalleeBody(stated);
+    const bodyWords = unstated ? calleeBodyBound?.(callee!) : undefined;
+    // A CALL THE BODY BOUND READS AT EVERY INCOMING VALUE IT MAY BE HANDED (`entryReadCalls`): up to
+    // the highest argument register that some path into the call leaves unwritten since the entry.
+    // A register a call destroyed on every path holds nothing of this function's arguments, so a
+    // read of it could add nothing to what the body reads of them, and it is not taken: taken, a
+    // callee making two calls that nothing declares refused its own lift, and lost its bound.
+    const entryWords =
+      unstated && entryReadCalls?.has(callee!) === true
+        ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
         : undefined;
-    const widths = p.widths === null && bodyWords === 0 ? [] : p.widths;
+    const widths =
+      entryWords !== undefined
+        ? Array.from({ length: entryWords }, () => 32)
+        : p.widths === null && bodyWords === 0
+          ? []
+          : p.widths;
     const { returns } = p;
     const cap = bodyWords ?? target.argRegs.length;
     // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if

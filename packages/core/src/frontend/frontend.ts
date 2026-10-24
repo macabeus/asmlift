@@ -95,4 +95,8 @@ export interface LiftOptions {
    *  (frontend/callee-body.ts), asked of a call whose arity no declaration states. pipeline.ts
    *  `liftStamped` supplies it on every lift; absent, nothing is bounded. */
   calleeBodyBound?: CalleeBodyBound;
+  /** The callees whose calls are taken at every argument register that may still hold this
+   *  function's own incoming value at the call, where no declaration lays the call out: how
+   *  frontend/callee-body.ts lifts a callee's body to bound what it reads. Absent, none is. */
+  entryReadCalls?: ReadonlySet<string>;
 }

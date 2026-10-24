@@ -1337,6 +1337,7 @@ function liftPrelude(
   jts: Map<number, PpcJT>,
   ownDeclaration?: () => OwnDeclaration | undefined,
   calleeBodyBound?: CalleeBodyBound,
+  entryReadCalls?: ReadonlySet<string>,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -1393,6 +1394,7 @@ function liftPrelude(
     ppcRefusal,
     ownDeclaration,
     calleeBodyBound,
+    entryReadCalls,
   );
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
@@ -1449,7 +1451,8 @@ function liftOnce(
     contextOwnWords,
     contextOwnProto,
     calleeBodyBound,
-  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound'>,
+    entryReadCalls,
+  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound' | 'entryReadCalls'>,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1531,6 +1534,7 @@ function liftOnce(
     jts,
     () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
     calleeBodyBound,
+    entryReadCalls,
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 

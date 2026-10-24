@@ -397,9 +397,10 @@ function bodyBoundsIn(
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
 ): CalleeBodyBound {
-  return calleeBodyBounds(name, asm, target, table, (callee, calleeTable) =>
+  return calleeBodyBounds(name, asm, target, table, (callee, calleeTable, entryReadCalls) =>
     liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
       calleeBodyBound: () => undefined,
+      entryReadCalls,
     }),
   );
 }

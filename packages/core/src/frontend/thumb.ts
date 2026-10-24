@@ -2603,7 +2603,10 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
-  options: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound'>,
+  options: Pick<
+    LiftOptions,
+    'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
+  >,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
   const { cfg, frame, ssa, pairs, statics } = fill;
@@ -5480,7 +5483,11 @@ function thumbFillOf(
     contextOwnProto,
     ownMemoryReturn,
     calleeBodyBound,
-  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound'> = {},
+    entryReadCalls,
+  }: Pick<
+    LiftOptions,
+    'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
+  > = {},
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -5495,6 +5502,7 @@ function thumbFillOf(
     },
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
     calleeBodyBound,
+    entryReadCalls,
   );
   const frame = measureThumbFrame({
     name,
