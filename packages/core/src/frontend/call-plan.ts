@@ -1080,11 +1080,14 @@ export function callDeclarations(
     // count, or past the bound a call through an argument register sets, that a value reaches.
     // The gap refusal has already fired on any such register past a guess; past the bound, the
     // register leaves the call silently, and the frontend says whether it knows that one to be an
-    // argument all the same.
+    // argument all the same. A register at or past what the callee's own body reads is no
+    // argument of it whatever it holds, so it is not asked: read only where the count already asked
+    // the body, the one place the bound left a register out (`fallbackArgc`'s `bound`).
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+      const readTo = bodyMemo?.words ?? target.argRegs.length;
       site.leftOut(
         target.argRegs
-          .slice(argc)
+          .slice(argc, Math.max(argc, readTo))
           .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );
