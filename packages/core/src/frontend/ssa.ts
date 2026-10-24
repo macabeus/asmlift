@@ -2108,6 +2108,10 @@ export function fallbackArgc(
      *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
+    /** how many argument words the callee's own body reads at most (frontend/callee-body.ts): the
+     *  count stops there. A register at or past it is still SEEN, so a gap below it with a value
+     *  above refuses as ever (the callee may read the gap register); a gap at or past it does not. */
+    cap?: number;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -2121,9 +2125,10 @@ export function fallbackArgc(
   const top = parkedAt < 0 ? argRegs.length : parkedAt;
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
+  const cap = opts.cap ?? argRegs.length;
   const run = (from: number): number => {
     let n = from;
-    while (n < top && setUp(n)) {
+    while (n < Math.min(top, cap) && setUp(n)) {
       // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
       // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
       // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
@@ -2152,6 +2157,9 @@ export function fallbackArgc(
     return n;
   };
   let n = run(floor);
+  if (n >= cap) {
+    return cap;
+  }
   // A GAP BELOW A REGISTER THAT HOLDS A VALUE refuses, unless the frontend decides it: then the run
   // goes on through the gap and the register above it, and the next gap is asked the same.
   //
@@ -2184,6 +2192,9 @@ export function fallbackArgc(
         if (!opts.decide?.([], argRegs[above], refuse)) {
           refuse();
         }
+      }
+      if (n >= cap) {
+        return cap;
       }
       k = n;
     }

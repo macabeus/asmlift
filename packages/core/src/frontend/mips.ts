@@ -1717,6 +1717,7 @@ function liftOnce(
     { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
     () => ownDeclarationOf(name, prototypes, options.contextOwnProto),
+    options.calleeBodyBound,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
   // in a function that has one refuses: which floating-point registers a callee reads, returns in

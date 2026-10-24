@@ -14,6 +14,7 @@ import {
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { returnedStruct, structLocalType } from './frontend/call-plan';
+import { calleeBodyBounds } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
@@ -347,6 +348,16 @@ export function liftStamped(
   // a refusal about the return's width that the declared struct explains waits for the proof
   let deferred: ((unproved: string) => never) | undefined;
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
+  // what each callee whose body is in this input reads of its arguments, lifted from that body as a
+  // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
+  const calleeBodyBound =
+    liftOptions?.calleeBodyBound ??
+    calleeBodyBounds(name, asm, target, table, (callee, calleeTable) =>
+      liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
+        calleeBodyBound: () => undefined,
+      }),
+    );
+  const options = { ...liftOptions, calleeBodyBound };
   const fn = liftWithinContextBound(
     name,
     asm,
@@ -356,8 +367,8 @@ export function liftStamped(
     symbols,
     contextGlobals,
     bytes === undefined
-      ? liftOptions
-      : { ...liftOptions, ownMemoryReturn: { bytes, defer: (refuse) => void (deferred ??= refuse) } },
+      ? options
+      : { ...options, ownMemoryReturn: { bytes, defer: (refuse) => void (deferred ??= refuse) } },
     split.ownContextProto,
     notes,
   );
