@@ -53,6 +53,20 @@ export function calleeBodyBounds(
   };
 }
 
+/** Every name a `.weak` directive marks, in each spelling GNU as reads: one name or a comma-separated
+ *  list (`.weak other, cb`), with a comment after it (`@` on ARM, `#` on MIPS and PowerPC). */
+function weakNames(asm: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of asm.matchAll(/^\s*\.weak\s+([^\n@#;]*)/gm)) {
+    m[1]
+      .split(',')
+      .map((n) => n.trim())
+      .filter((n) => n !== '')
+      .forEach((n) => out.add(n));
+  }
+  return out;
+}
+
 const escaped = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** What a callee's entry says of its return, and nothing of its parameters or of its own context
@@ -81,7 +95,7 @@ function bodyBound(
 ): number | undefined {
   const name = escaped(callee);
   const defined = new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm');
-  if (callee === self || !defined.test(asm) || new RegExp(`^\\s*\\.weak\\s+${name}\\s*$`, 'm').test(asm)) {
+  if (callee === self || !defined.test(asm) || weakNames(asm).has(callee)) {
     return undefined;
   }
   const helpers = helperPrototypes(target);

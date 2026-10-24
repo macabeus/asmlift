@@ -60,6 +60,20 @@ describe('the argument words a callee in the same input reads at most', () => {
       read(boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description), ['rnd', 'rd1', 'thk', 'ind', 'wk', 'st']),
     ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 'none', wk: 'none', st: 'none' });
   });
+  // GNU as reads `.weak` with a list of names and a comment after them
+  test.each(['\t.weak\tother, cb', '\t.weak\tcb @ the default', '\t.weak cb,other'])(
+    'a weak callee (%s) proves nothing',
+    (weak) => {
+      const asm = `\t.code\t16\n\t.text\n${weak}\n\t.thumb_func\ncb:\n\tmov\tr0, #0\n\tbx\tlr\n`;
+      expect(boundsOf(asm, TOOLCHAIN_TARGETS.agbcc.description)('cb')).toBeUndefined();
+      expect(boundsOf(asm.replace(weak, '\t.weak\tother'), TOOLCHAIN_TARGETS.agbcc.description)('cb')).toBe(0);
+    },
+  );
+  test('a callee absent from the input, and the function being lifted, prove nothing', () => {
+    const b = boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description);
+    expect(b('absent')).toBeUndefined();
+    expect(b('f')).toBeUndefined();
+  });
   test('a callee absent from the input, and the function being lifted, prove nothing', () => {
     const b = boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description);
     expect(b('absent')).toBeUndefined();
