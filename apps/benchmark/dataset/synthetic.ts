@@ -12553,8 +12553,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      and sub_08042E64 then stops on item 18. The arity is knowable from the CALLEE: kleod's thunk is
   //      `bx pc; nop; b GetRandomValue`, and GetRandomValue (ARM) writes r0-r3 before it reads any of
   //      them; DWARF records nothing (it is asm-defined), and call sites prove nothing. jt_rndsame
-  //      carries the callee's body in the same asm: frontend/callee-body.ts bounds the arity by that
-  //      body (none read: the call takes no argument), and the row lifts (stating `params: 0` lifts it
+  //      carries the callee's body in the same asm: frontend/callee-body.ts bounds what that body
+  //      reads (none), so the 5 case 0's store left in r0 is a leftover past the bound and no argument,
+  //      and the row lifts (stating `params: 0` lifts it
   //      at 3/60, the control's number). jt_rndst has no body and must STAY declined on agbcc, the
   //      soundness control; jt_rndfwd's body forwards to an undeclared `g` and jt_rndread's reads r0,
   //      so neither bounds the guess below one and both stay declined on agbcc too (controls).
