@@ -1,5 +1,6 @@
+import { calleeBodyBoundOf } from '@asmlift/core/pipeline';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
 import { calleeNames, guessedArityCallees, guessedArityNote } from '../../src/callees';
@@ -187,5 +188,38 @@ describe('guessedArityNote', () => {
     expect(note).toContain('thunk_HeapFree');
     expect(note).toContain('--proto');
     expect(note.endsWith('\n')).toBe(true);
+  });
+});
+
+// A callee whose body is in the same input bounds its arity (core frontend/callee-body.ts): one that
+// reads no argument is called with none and is no guess; one that reads fewer than every argument
+// register is still guessed, at most that many.
+describe('a callee bounded by its own body in the input', () => {
+  // `objdump -dr` of an O32 object holding the callees beside the lifted function
+  const dump = [
+    '00000000 <rnd>:',
+    '   0:\tjr\tra',
+    '   4:\tli\tv0,7',
+    '00000008 <rd1>:',
+    '   8:\tjr\tra',
+    '   c:\taddiu\tv0,a0,1',
+    '00000010 <f>:',
+    '  10:\tjal\t0 <rnd>',
+    '\t\t\t10: R_MIPS_26\trnd',
+    '  18:\tjal\t8 <rd1>',
+    '\t\t\t18: R_MIPS_26\trd1',
+    '  20:\tjal\t0 <rnd>',
+    '\t\t\t20: R_MIPS_26\tg',
+  ].join('\n');
+  it('is not named a guess where it reads none, and carries its bound where it reads some', () => {
+    const t = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description;
+    const bound = calleeBodyBoundOf('f', dump, t, {});
+    expect([bound('rnd'), bound('rd1'), bound('g')]).toEqual([0, 1, undefined]);
+    expect(guessedArityCallees(dump, 'f', t)).toEqual(['rnd', 'rd1', 'g']);
+    expect(guessedArityCallees(dump, 'f', t, undefined, undefined, undefined, bound)).toEqual(['rd1', 'g']);
+    const note = guessedArityNote(dump, 'f', t, undefined, undefined, undefined, bound);
+    expect(note).toContain('2 callee(s) have no declared arity, guessed from the argument registers: rd1 (at most 1');
+    expect(note).toContain('1 callee(s) have no declared arity and are called with no argument, as their own body');
+    expect(note).toMatch(/reads none: rnd\n$/);
   });
 });
