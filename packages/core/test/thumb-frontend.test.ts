@@ -126,6 +126,13 @@ describe("a return is a return only through the caller's lr, read from the frame
       'bx r1',
     ],
     ['a `pop {pc}` of a local', '\tpush\t{lr}\n\tsub\tsp, #8\n\tmov\tr0, #5\n\tpop\t{pc}\n', 'pop {pc}'],
+    // lr itself, once written: a tail jump to g with every argument register live, not a return
+    [
+      'lr after `mov lr, r4`',
+      '\tpush\t{r4, lr}\n\tldr\tr4, .Lg\n\tmov\tlr, r4\n\tpop\t{r4}\n\tbx\tlr\n.Lg:\n\t.word\tg\n',
+      'bx lr',
+    ],
+    ["lr a `pop {lr}` filled from r4's word", '\tpush\t{r4, lr}\n\tpop\t{lr}\n\tadd\tsp, #4\n\tbx\tlr\n', 'bx lr'],
   ])('a return through %s declines', (_, body, bx) => {
     expect(() => dc('f', body)).toThrow(
       new RegExp(`indirect/computed jump '${bx}' is not a return through the caller's lr`),

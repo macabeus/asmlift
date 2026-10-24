@@ -2524,10 +2524,10 @@ function recoverJumpTable(
 //   - a store, a call, a transfer, a flag READ (`adc`/`sbc`), or any other mnemonic;
 //   - a write to the loaded target (it is what `mov pc` jumps through), or to sp/pc/lr. A write to
 //     the scrutinee is admitted: the switch does not read it after the extras, and the case blocks
-//     read what the extras left there on the hardware too. lr is refused because the lifter reads
-//     `bx lr` as a return by the register's name (`refuseReturnsNotThroughCallersLr`'s NOT ASKED):
-//     a case's `bx lr` after `mov lr, r3` would lift as `return`, where the hardware jumps to r3.
-//     PRE never inserts an lr write, so the refusal costs no compiled dispatch;
+//     read what the extras left there on the hardware too. lr is refused as the register a case's
+//     `bx lr` returns through: a write to it here makes that `bx lr` a jump, which only the return
+//     proof (`refuseReturnsNotThroughCallersLr`) would otherwise have to catch. PRE never inserts
+//     an lr write, so the refusal costs no compiled dispatch;
 //   - a read of a register the idiom wrote (index, table pointer, target) before an extra rewrote it:
 //     the idiom is not lifted, so such a read would see the value from before the dispatch.
 // The reason is returned so the decline can name it (`readThumbText`'s indirect-jump refusal).
@@ -2803,10 +2803,19 @@ interface LrState {
  *  far-jump relay's lowering needs and does not itself prove (`lowerFarJumpRelays`): with every
  *  return reading the CALLER's lr, the lr a relay writes cannot be what a return jumps to.
  *
- *  NOT ASKED: `bx lr` and `mov pc, lr` are returns by the register's name, whether or not a call
- *  has since overwritten lr. A compiler saves lr before it calls, so no compiled function reaches
- *  that case. The far-jump relay does not lean on it: its lowering declines any function in which
- *  an instruction other than the entry `push` names lr.
+ *  `bx lr` and `mov pc, lr` are asked the same question: lr itself must still hold the caller's lr,
+ *  so an instruction that writes lr by name before one (`mov lr, r4`, `pop {lr}`, `ldr lr, …`)
+ *  declines. Read by the register's name instead, `push {r4, lr}; ldr r4, =g; mov lr, r4; pop {r4};
+ *  bx lr` — a tail jump to g with every argument register live — lifted as a return, and a caller
+ *  whose call to it no declaration lays out took that lift's one parameter as the callee's whole
+ *  arity (frontend/callee-body.ts). A compiler returns through the word it saved lr in, so no
+ *  compiled function reaches the refusal.
+ *
+ *  NOT ASKED: a CALL's write of lr. `bl g; bx lr` returns to the instruction after the call on the
+ *  hardware, and lifts as `g(); return;`. No compiler emits it (one saves lr before it calls), and
+ *  many call tests' fixtures are written so, so a call leaves lr held. The far-jump relay leans on
+ *  neither: its lowering declines any function in which an instruction other than the entry `push`
+ *  names lr.
  *
  *  Blocks no path from the entry reaches are not asked: they never run. */
 function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
@@ -2863,10 +2872,9 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
           }
         }
       } else if (xfer === 'return') {
-        // `bx rN`: the register itself must hold the caller's lr. `bx lr` and `mov pc, lr` are
-        // returns by name (see the doc comment).
+        // `bx rN`, `bx lr` and `mov pc, lr` alike: the register must still hold the caller's lr.
         const via = canonReg(mn === 'bx' ? (ins.ops[0] ?? '') : (ins.ops[1] ?? ''));
-        if (via !== LR && (via === null || !regs.has(via))) {
+        if (via === null || !regs.has(via)) {
           refuse(ins);
         }
       } else if (mn === 'push') {
@@ -2904,7 +2912,12 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
       }
     }
     return { depth: walk.depthNow(), slot, regs };
+          // a call's own write of lr is not asked (see the doc comment)
+          const kept = /^(bl|blx|swi)$/.test(mn) && regs.has(LR);
   };
+          if (kept) {
+            regs.add(LR);
+          }
 
   const inStates = new Map<number, LrState>([[0, { depth: 0, slot: null, regs: new Set([LR]) }]]);
   const work = [0];
