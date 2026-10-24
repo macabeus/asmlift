@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 108 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -56,10 +56,10 @@
 //                               element by a recovered row subscript, and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        13  a relocation with an addend, a non-numeric immediate, the caller's
+//   frontend/mips.ts        12  a relocation with an addend, a non-numeric immediate, the caller's
 //                               value a restore writes read as a value (at the read, or through a
 //                               merge), five refusals about a disassembly the reader cannot account
-//                               for, a `jal` relocated against a section, one in a delay slot, one whose own slot is not the next word of its block, and a
+//                               for, a `jal` in a delay slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
 //   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
 //                               r1, a load into r1, its own base loaded or stored, a relocation
@@ -763,12 +763,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // A call no relocation names: the assembler resolved its target to an offset in this section,
     // so there is no callee to call by name. PowerPC's `bl` (`frontend/ppc.ts` `case 'bl'`) and
-    // MIPS's `jal` (`frontend/mips.ts`) say it in the same words; a `jal` relocated against a
-    // section is the MIPS sibling and stays in the residue. Hand-written asm only, and its rows are
-    // the decline witnesses `synthetic:bllocal:*`.
+    // MIPS's `jal` (`frontend/mips.ts`) say it in the same words; its rows are the decline witnesses
+    // `synthetic:bllocal:*`. A `jal` relocated against a section (`frontend/mips.ts`, the same
+    // question asked of the relocation's symbol) is the MIPS sibling: gcc2.7.2kmc and gcc2.7.2
+    // relocate a call to a function of the same object against `.text`
+    // (`synthetic:jt_rndsame:gcc2.7.2kmc`).
     key: 'unnamed-callee',
     label: 'Calls no relocation names (a `bl` or `jal` to an offset in this section)',
-    pattern: /has no callee symbol — no R_\w+ relocation names it/,
+    pattern: /has no callee symbol — no R_\w+ relocation names it|a callee known only by its offset/,
   },
   {
     // A read of a register the ABI reserves to the kernel (`TargetDescription.kernelRegs`, O32's
