@@ -953,6 +953,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // The same holds of a scratch register, which no return hands back saved: a pop that fills one
+    // with another word is a copy the fill never makes, and read by name `push {r1}; pop {r0}`
+    // lifted `return a0` for a function returning a1. Only the return idiom, a `bx` through the
+    // register straight after, uses such a word, and as where to go rather than as a value.
+    test('…and fills a scratch register with another word only to return through it', () => {
+      const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
+      const copy = (pop: string, reg: string) =>
+        new RegExp(`'${pop}' loads a word that is not ${reg}'s own into ${reg}, which is then used as a value`);
+      expect(lift('push {r1}; pop {r0}; bx lr')).toThrow(copy('pop {r0}', 'r0'));
+      expect(lift('push {r1}; pop {r2}; mov r0, r2; bx lr')).toThrow(copy('pop {r2}', 'r2'));
+      // a word the function wrote before pushing it is no register's either: read by name, `g() + 1`
+      // where the machine returns 6
+      expect(lift('push {lr}; mov r1, #5; push {r1}; bl g; pop {r0}; add r0, #1; pop {r1}; bx r1')).toThrow(
+        copy('pop {r0}', 'r0'),
+      );
+      // …and one nothing reads after it is no copy anyone sees
+      expect(lift('push {r4, lr}; mov r0, #5; pop {r2, r3}; bx r3')().source).toContain('return 5;');
+      // the return idioms: lr's word into a scratch register, the `bx` straight after it or past
+      // the variadic save's release
+      expect(lift('push {lr}; bl g; pop {r1}; bx r1')().source).toContain('g();');
+      expect(lift('push {r0, r1, r2, r3}; push {lr}; bl g; pop {r3}; add sp, #0x10; bx r3')().source).toContain('g();');
+    });
+
     // A word is a register's own only while the register held its entry value when it was pushed:
     // pushed again after a foreign pop, a write, or a save dropped with `add sp`, it holds the
     // function's value, and the pop of it leaves the caller that value (r4/r5 swapped, r4 = a0).

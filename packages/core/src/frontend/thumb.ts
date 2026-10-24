@@ -2649,6 +2649,20 @@ function liftOnce(
   const argSlots = stackArgSlots(registerArgSlots(target.argRegs), target.argRegs);
   mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
+  // A scratch register a `pop` fills with another word is a copy the fill never makes: `push {r1};
+  // pop {r0}; bx lr` returns a1, and read by name it lifted `return a0`. Asked after the SSA's own
+  // refusals, which name a register misused across its save before the copy that misuse makes. A
+  // return hands r0 back unless the function's own declaration says it returns nothing.
+  const declaredVoid = (prototypes[name] ?? options.contextOwnProto?.proto)?.returnsVoid === true;
+  const [copy] = [...fill.poppedCopies, ...(declaredVoid ? [] : fill.poppedReturns)];
+  if (copy !== undefined) {
+    const [reg, at] = copy;
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${at.mnemonic} ${at.ops.join(', ')}' loads a word that is not ${reg}'s own ` +
+        `into ${reg}, which is then used as a value — a pop is read as restoring each register it names, ` +
+        'so the copy it makes is not modelled',
+    );
+  }
 
   // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
   // before the audit judges the frame objects, that one among them.
@@ -2895,7 +2909,12 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
       } else if (!isSpReg(ins.ops[0])) {
         const writes = regWritesOf(ins);
         if (writes === 'all') {
+          // a call's own write of lr is not asked (see the doc comment)
+          const kept = /^(bl|blx|swi)$/.test(mn) && regs.has(LR);
           regs.clear();
+          if (kept) {
+            regs.add(LR);
+          }
         } else {
           const src = /^movs?$/.test(mn) ? canonReg(ins.ops[1] ?? '') : null;
           const copies = src !== null && regs.has(src);
@@ -2912,12 +2931,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
       }
     }
     return { depth: walk.depthNow(), slot, regs };
-          // a call's own write of lr is not asked (see the doc comment)
-          const kept = /^(bl|blx|swi)$/.test(mn) && regs.has(LR);
   };
-          if (kept) {
-            regs.add(LR);
-          }
 
   const inStates = new Map<number, LrState>([[0, { depth: 0, slot: null, regs: new Set([LR]) }]]);
   const work = [0];
@@ -4651,7 +4665,13 @@ const ALL_REGS = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
-): { saved: ReadonlySet<string>; misSaved: ReadonlySet<string>; leaked: ReadonlyMap<string, Instr> } {
+): {
+  saved: ReadonlySet<string>;
+  misSaved: ReadonlySet<string>;
+  leaked: ReadonlyMap<string, Instr>;
+  copied: ReadonlyMap<string, Instr>;
+  returned: ReadonlyMap<string, Instr>;
+} {
   // What each instruction saves, restores and otherwise names; the staging `mov`s first.
   const savesHi = new Map<Instr, string>(); // `mov rLow, rHi` ⇒ rHi, where rLow is pushed unchanged
   const restoresHi = new Set<Instr>(); // `mov rHi, rLow` where rLow was popped unchanged
@@ -4724,6 +4744,10 @@ function bodySavedRegs(
     i === 0 ? { cur: new Set(), open: new Set(), depth: 0, stack: [], clobbered: new Map(), dirty: new Set() } : null,
   );
   const leaked = new Map<string, Instr>();
+  const copied = new Map<string, Instr>();
+  const returned = new Map<string, Instr>();
+  const succs: number[][] = blocks.map(() => []);
+  preds.forEach((ps, at) => ps.forEach((p) => succs[p].push(at)));
   const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
@@ -4734,7 +4758,7 @@ function bodySavedRegs(
     let stack: (string | null)[] | null = stateIn[b]!.stack === null ? null : [...stateIn[b]!.stack!];
     const holds = new Map<string, string>(); // low register ← the high one a save's staging `mov` copied
     const loaded = new Map<string, string | null>(); // a staging pop's low register ← whose word it loaded
-    for (const x of blocks[b].instrs) {
+    for (const [i, x] of blocks[b].instrs.entries()) {
       const before = frame.depthNow();
       frame.step(x);
       const after = frame.depthNow();
@@ -4828,6 +4852,13 @@ function bodySavedRegs(
           cur.delete(r);
           if (/^r([4-9]|1[01])$/.test(word(r))) {
             clobbered.set(word(r), x);
+          } else if (record && own !== null && /^r([0-3]|12)$/.test(word(r))) {
+            // a scratch register: the fill never makes the copy, so a later use of it is refused
+            const use = readsBeforeWrite(blocks, succs, b, i + 1, word(r));
+            const into = use === 'read' ? copied : use === 'returned' ? returned : undefined;
+            if (into !== undefined && !into.has(word(r))) {
+              into.set(word(r), x);
+            }
           }
         });
       // Only a return the frame is balanced at: one with the `push` still on the stack is an
@@ -4884,7 +4915,58 @@ function bodySavedRegs(
     saved: new Set([...savedSomewhere].filter((r) => !mis(r))),
     misSaved: new Set([...savedSomewhere, ...restoredSomewhere].filter(mis)),
     leaked,
+    copied,
+    returned,
   };
+}
+
+/** Whether some path from instruction `from` of block `b` uses what scratch register `reg` holds
+ *  there as a VALUE before writing it: 'read' for an operand that reads it (a `push` of it among
+ *  them) or a call (which may be handed r0-r3), else 'returned' where a return may hand it back (r0
+ *  or r1), which is a use only in a function not declared to return nothing. A `bx` through it is
+ *  the return idiom `pop {r1}; bx r1` (agbcc's `pop {r3}; add sp, #0x10; bx r3` after a variadic
+ *  save), which uses the word as where to go; a write that reads no `reg` ends the path. Any
+ *  spelling of the register counts (`ip` is r12). */
+function readsBeforeWrite(
+  blocks: readonly AsmBlock[],
+  succs: readonly (readonly number[])[],
+  b: number,
+  from: number,
+  reg: string,
+): 'read' | 'returned' | false {
+  const names = (x: Instr): boolean =>
+    expandRegList(
+      x.ops
+        .join(' ')
+        .toLowerCase()
+        .replace(/[[\]{}!#]/g, ' ')
+        .split(/[,\s]+/)
+        .filter(Boolean),
+    ).some((t) => canonReg(t) === reg);
+  const seen = new Set<number>();
+  let returned = false;
+  // true where this path reads it; a path that returns it notes so and reads nothing
+  const path = (at: number, start: number): boolean => {
+    for (const x of blocks[at].instrs.slice(start)) {
+      const mn = x.mnemonic;
+      if (classifyXfer(x) === 'return') {
+        returned ||= !(mn === 'bx' && canonReg(x.ops[0] ?? '') === reg) && (reg === 'r0' || reg === 'r1');
+        return false;
+      }
+      if (/^(bl|blx|swi)$/.test(mn)) {
+        return reg !== 'r12';
+      }
+      if (names(x)) {
+        const dest = canonReg(x.ops[0] ?? '');
+        const writesOnly =
+          mn === 'pop' ||
+          ((DEST_ONLY.test(mn) || SINGLE_LOAD.test(mn)) && dest === reg && !names({ ...x, ops: x.ops.slice(1) }));
+        return !writesOnly;
+      }
+    }
+    return succs[at].some((s) => !seen.has(s) && (seen.add(s), path(s, 0)));
+  };
+  return path(b, from) ? 'read' : returned ? 'returned' : false;
 }
 
 /** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from
@@ -5374,6 +5456,12 @@ interface ThumbFill {
   /** Each callee-saved register a `pop` loads another word into and that reaches a balanced return
    *  so (`bodySavedRegs`'s `leaked`), with that pop: refused once the return proof has run. */
   readonly poppedForeign: ReadonlyMap<string, Instr>;
+  /** Each caller-saved register a `pop` loads another word into without going straight to a `bx`
+   *  through it (`bodySavedRegs`'s `copied`), with that pop: refused once the return proof has run. */
+  readonly poppedCopies: ReadonlyMap<string, Instr>;
+  /** …and each one a return may hand back so (`bodySavedRegs`'s `returned`): refused unless the
+   *  function's own declaration returns nothing. */
+  readonly poppedReturns: ReadonlyMap<string, Instr>;
 }
 
 /** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
@@ -5486,6 +5574,8 @@ function thumbFillOf(
     staleIdiomValues: new Map(),
     caseEntries: elidedCaseEntries(cfg, text.tables),
     poppedForeign: body.leaked,
+    poppedCopies: body.copied,
+    poppedReturns: body.returned,
   };
 }
 
