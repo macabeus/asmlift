@@ -429,11 +429,23 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     const gap = f('\tmov\tr1, #0x2\n\tbl\trd0\n');
     expect(decompile('f', gap, ARMV4T_AGBCC).source).toContain('rd0(a0, 2)');
     expect(decompile('f', `${rd0}${gap}`, ARMV4T_AGBCC).source).toContain('rd0()');
-    // rd1 reads r0: the gap below the set r1 is decided as f's own argument passed on, as without
-    // the bound, and only r1 leaves the call
-    expect(decompile('f', `${rd1}${f('\tmov\tr1, #0x2\n\tbl\trd1\n')}`, ARMV4T_AGBCC).source).toContain('rd1(a0)');
-    // …and where nothing decides it (r1 is a store's value), r0 is still f's argument or nothing
+    // rd1 reads r0 alone, so r1 is no argument of it whatever it holds, and says nothing of r0: the
+    // call is the one a bare `bl rd1` lifts to, r1 a constant or a store's value
+    const bare = decompile('f', `${rd1}${f('\tbl\trd1\n')}`, ARMV4T_AGBCC).source;
+    expect(bare).toContain('rd1()');
+    expect(decompile('f', `${rd1}${f('\tmov\tr1, #0x2\n\tbl\trd1\n')}`, ARMV4T_AGBCC).source).toContain('rd1()');
     const stored = f('\tldr\tr2, .L3\n\tmov\tr1, #0x3\n\tstr\tr1, [r2]\n\tbl\trd1\n') + '.L3:\n\t.word\tgp\n';
-    expect(() => decompile('f', `${rd1}${stored}`, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+    expect(decompile('f', `${rd1}${stored}`, ARMV4T_AGBCC).source).toContain('rd1()');
+    // …and with no body to bound it, the store's r1 above the gap still refuses
+    expect(() => decompile('f', stored, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+  });
+  // a callee reading r0 and r1 (`rd2`): a value in r1, below the bound, above a gap at r0 refuses as
+  // ever, and one in r3, past it, does not
+  test('a value above the gap refuses only below the bound', () => {
+    const rd2 = '\t.thumb_func\nrd2:\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
+    const at = (reg: string) =>
+      `${rd2}${f(`\tldr\tr2, .L3\n\tmov\t${reg}, #0x3\n\tstr\t${reg}, [r2]\n\tbl\trd2\n`)}.L3:\n\t.word\tgp\n`;
+    expect(() => decompile('f', at('r1'), ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+    expect(decompile('f', at('r3'), ARMV4T_AGBCC).source).toContain('rd2()');
   });
 });

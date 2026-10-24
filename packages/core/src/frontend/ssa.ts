@@ -2109,8 +2109,13 @@ export function fallbackArgc(
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
     /** how many argument words the callee's own body reads at most (frontend/callee-body.ts): the
-     *  count stops there. A register at or past it is still SEEN, so a gap below it with a value
-     *  above refuses as ever (the callee may read the gap register); a gap at or past it does not. */
+     *  count stops there, and a register at or past it is not seen at all. The gap rule refuses on
+     *  a value ABOVE a gap, which says the caller set up an argument there and so the gap holds
+     *  arguments too; a register the callee never reads is no argument, so a value in it says
+     *  nothing of the gap below. Seen, it gave one question two answers: with r3 written and r0 at
+     *  its incoming value, a call to a callee that reads r0 alone refused `r3 holds a value and r0
+     *  holds none`, where with r3 untouched the same r0 lifted `rd1()`. A gap below the bound with a
+     *  value above it, still below the bound, refuses as ever. */
     cap?: number;
   },
 ): number {
@@ -2171,7 +2176,7 @@ export function fallbackArgc(
   // lift `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` `g(a0, a2 + 1, a2)` on all seven
   // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
   // argument.
-  for (let k = n + 1; k < top; k++) {
+  for (let k = n + 1; k < Math.min(top, cap); k++) {
     if (setUp(k)) {
       const [gapAt, setAt] = [n, k];
       const refuse = () =>
