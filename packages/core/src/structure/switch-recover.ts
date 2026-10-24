@@ -284,16 +284,30 @@ function singleton(r: Ranges): number | null {
  *  so read as written that is two fall-throughs into one arm and `chainArms` refuses it — but the
  *  source had one fall-through at most.
  *
- *  WHICH ENTRANT FALLS. At most one entrant keeps its fall-through: the one the caller's arm-order
- *  policy (`order`, before the chain moves anything) puts DIRECTLY ABOVE the sibling. Every other
- *  entrant gets the sibling's region written out again under its own arm: its exit becomes a
- *  closed `break` over the two regions. No entrant above it ⇒ every entrant copies. That is the
- *  compiler's own reading of the source: a compiler whose arms follow its layout
- *  (`switchArmsFollowLayout`, agbcc) kept the copy its layout neighbour runs into, and one that
- *  orders arms by case value (KMC, gcc 2.7.2) kept the copy the arm below in case order runs into.
- *  Letting the other neighbour fall, or copying into every entrant, recompiles to a different
- *  choice of which copy survives. A `default:` is pinned last by C, so the arm above it is the last
- *  arm of `order`.
+ *  WHICH ENTRANT FALLS IS NOT IN THE ASM, so it is a ranked choice (`/tail-copies`,
+ *  rank-variations.ts), never a fixed default. The cross-jump keeps ONE copy of the tail and
+ *  says nothing about which arm the source wrote it under, and one compiler at one set of flags
+ *  answers both ways: KMC `-O2` and gcc 2.7.2 `-O1` lay arm bodies out in SOURCE order, and a
+ *  source whose fall-through arm is written directly above its target in case order recompiles
+ *  only with that arm falling, while one whose arms are written out of case order (`case 3`,
+ *  `case 2`, `case 1`) recompiles nearer with every entrant holding its own copy. Neither the
+ *  layout nor the case order decides it: the copy the cross-jump kept is not the source's
+ *  fall-through, so the arm that physically runs into the tail can be the wrong faller too.
+ *
+ *  - `faller` (the default): at most one entrant keeps its fall-through, the one the caller's
+ *    arm-order policy (`order`, before the chain moves anything) puts DIRECTLY ABOVE the sibling —
+ *    on `switchArmsFollowLayout` targets (agbcc) its layout neighbour, elsewhere the arm before it in
+ *    case order. Every other entrant copies; no entrant above it ⇒ every entrant copies.
+ *  - not `faller`: every entrant copies, whichever arm sits above the sibling.
+ *
+ *  Either way each copying entrant gets the sibling's region written out again under its own arm:
+ *  its exit becomes a closed `break` over the two regions.
+ *
+ *  A `default:` SIBLING takes the LAST arm of `order` as the arm above it: that is where `chainArms`
+ *  puts a default that an arm falls into, at the end. It is not always where the label is printed —
+ *  a target that prints `default:` at its layout position (`defaultLayoutPos`) can put it between two
+ *  cases, and then the arm the source wrote above it is not `order`'s last, and its entrants all copy
+ *  (a measured agbcc shape of that kind still recompiles to its target).
  *
  *  A `default:` SIBLING MAY BE CODE THE SOURCE WROTE AFTER THE SWITCH. Where the other arms
  *  `return` from a void function they reach the same epilogue the default block does, so
@@ -313,6 +327,7 @@ export function copySharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,
   exitOf: ReadonlyMap<Block, ArmExit>,
+  faller: boolean,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   const entrants = new Map<Block, Block[]>();
@@ -328,7 +343,7 @@ export function copySharedFallTargets(
       continue;
     }
     const at = to === dflt ? order.length : order.indexOf(to);
-    const above = at > 0 ? order[at - 1] : undefined;
+    const above = faller && at > 0 ? order[at - 1] : undefined;
     for (const e of from) {
       const x = exitOf.get(e)!;
       if (e !== above && x.kind === 'fallthrough') {

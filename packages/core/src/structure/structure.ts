@@ -45,7 +45,8 @@
 // into the `default:` — refuse in `chainArms`, which answers null. In a jump table (Regime B), two
 // or more arms entering a sibling that itself ends the switch are the one exception: a cross-jump
 // makes that shape out of arms with a common tail, and `copySharedFallTargets` writes the tail back
-// into all of them but one. Regime A keeps the refusal, since its if-recovery already lifts.
+// into all of them but one, or into all of them under the `/tail-copies` variation. Regime A keeps
+// the refusal, since its if-recovery already lifts.
 import { globalBaseOf } from '../ir/alias';
 import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
@@ -1353,6 +1354,29 @@ function reHomesParamMerge(
   return firstRejection(gates, c) === null;
 }
 
+/** Whether some jump table has a target block (a case's or the default's) entered from two or more
+ *  blocks other than its dispatch — the shape a cross-jumped arm tail leaves, and the only one in
+ *  which `/tail-copies` (`copyEveryTailEntrant`) can structure a different tree. What rank.ts
+ *  gates that variation's enumeration on.
+ *
+ *  An OVER-approximation, the safe direction for a gate that only decides whether to enumerate:
+ *  a block two arms reach is two entrants only if each arm's walk ends there (`analyzeArmExit`),
+ *  only if the sibling itself ends the switch, and only if THE COPIES are read at all — where they
+ *  are not, the two settings structure one tree and the tree dedup collapses the pair. Two arms
+ *  that fall into the sibling end on two distinct in-edges, because a block both walks reached
+ *  before it would be shared by two arms and end neither walk as a fall-through. Structural, so it
+ *  cannot answer differently per symbol-map setting. */
+export function hasSharedSwitchEntry(fn: Fn): boolean {
+  const preds = predecessorBlocks(fn);
+  return fn.blocks.some((b) => {
+    const term = b.ops[b.ops.length - 1];
+    return (
+      term?.opcode === 'switch_br' &&
+      term.successors.some((sx) => new Set(preds.get(sx.block)!.filter((pr) => pr !== b)).size >= 2)
+    );
+  });
+}
+
 /** One name offered to one block parameter, as `CARRIER_NAME_GATES` judges it.
  *
  *  THE FIELDS ARE LAZY, and that is a cost decision rather than a style one. `canTakeName` runs per
@@ -1608,6 +1632,12 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  compiler laid out is two-sided inside one compiler, so the differ referees it per row. Inert
    *  on an unmeasured pred, where the proxy is already what runs. */
   preferDefPosCopyOrder?: boolean;
+  /** In a jump table where two or more arms enter one sibling arm's body (a cross-jumped tail),
+   *  write that body back into EVERY entrant instead of letting the one the arm-order policy puts
+   *  above the sibling keep its fall-through (`copySharedFallTargets`). rank.ts's `/tail-copies`
+   *  variation: which arm the source wrote the tail under is not in the asm, and one compiler answers
+   *  both ways, so the differ referees it. Inert where no switch has such a sibling. */
+  copyEveryTailEntrant?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A compiler behavior, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
@@ -1990,6 +2020,7 @@ function assertDefaultAccepts(
     anchorConstCopies: false,
     anchorLoopEntryConsts: false,
     followEarlyReturns: false,
+    copyEveryTailEntrant: false,
   };
   if (memo === undefined) {
     structure(fn, reset, hooks);
@@ -2512,6 +2543,7 @@ export function structure(
     senseFromFoldEvidence = false,
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
+    copyEveryTailEntrant = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
     switchArmsFollowLayout = false,
@@ -2640,7 +2672,8 @@ export function structure(
     homeMergeFeeds ||
     homeEscapingExtensions ||
     anchorConstCopies ||
-    followEarlyReturns
+    followEarlyReturns ||
+    copyEveryTailEntrant
   ) {
     assertDefaultAccepts(fn, opts, hooks, memo);
   }
@@ -6209,10 +6242,10 @@ export function structure(
         // A table whose default block is ALSO a case target is that case's arm, not a separate
         // one: it is already in `preChain`, and `defaultLayoutPos` withholds the label's position.
         const dflt = defEdge.block !== at && !armOf.has(defEdge.block) ? defEdge.block : null;
-        // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies,
-        // all but the one the arm-order policy puts above it (`copySharedFallTargets`, and THE
-        // COPIES below for when it is asked).
-        const exits = copies ? copySharedFallTargets(preChain, dflt, walked) : walked;
+        // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies:
+        // all but the one the arm-order policy puts above it, or under `/tail-copies` all of them
+        // (`copySharedFallTargets`, and THE COPIES below for when it is asked).
+        const exits = copies ? copySharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant) : walked;
         const falls = [...exits.values()].some((e) => e.kind === 'fallthrough');
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);
         const refusal = chain === null ? null : armRefusal(exits, chain);
@@ -6369,11 +6402,18 @@ export function structure(
       }
       // THE COPIES: TWO ARMS A CROSS-JUMP SENT INTO ONE SIBLING'S BODY. Read as written they are two
       // fall-throughs into one arm, which no linear order spells; `copySharedFallTargets` writes
-      // the sibling's body back into every entrant but the one the arm-order policy puts above it.
-      // A third reading, asked LAST and adopted only where it declines nothing, for the reason the
-      // retry is: where either reading above spells, it is legal C already, and this one must
-      // turn a decline into a lift, never one lift into another nor one decline's stated reason
-      // into another's.
+      // the sibling's body back into every entrant but the one the arm-order policy puts above it
+      // (into all of them under `/tail-copies`, the ranked choice between the two). A third
+      // reading, asked LAST and adopted only where it declines nothing, for the reason the retry
+      // is: where either reading above spells, it is legal C already, and this one must turn a
+      // decline into a lift, never one lift into another.
+      //
+      // "DECLINES NOTHING" IS THIS STAGE'S VERDICT, NOT THE BACKEND'S. A target language whose
+      // `case` cannot fall through (Pascal) refuses the reading as written, and the copies can take
+      // away every fall-through, so the switch structures. A backend that then refuses the function
+      // for something else (a struct-typed value, a `return` inside a case, a narrow local) declines
+      // it under THAT reason instead of "no fall-through": the outcome stays a decline, and the
+      // reason it gives is the obstacle that is actually left.
       //
       // NEVER ON THE `stop` READING. There the default block is a sibling, every plain `break`
       // reads as falling into it, and copying it would write the code after the switch into every

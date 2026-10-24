@@ -957,6 +957,35 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: STRUCTURE,
     seeAlso: ['flip-join', 'flip-branch', 'sense', 'connective'],
   },
+  'tail-copies': {
+    title: 'Shared switch tail copied into every arm',
+    summary: 'every `case` that runs into the tail a cross-jump kept gets its own copy of it',
+    detail:
+      'When several `case` arms end in the same code, the compiler keeps one copy and the other arms jump ' +
+      "into it, so they all enter one arm's body. By default the arm placed directly above that body keeps " +
+      'falling into it and the others get a copy. This gives every one of them its own copy.',
+    compilerBehavior:
+      'Which arm the source wrote the shared code under is not in the assembly. On KMC and gcc 2.7.2, an ' +
+      'arm written above its target in case order wants the fall-through, and arms written out of case ' +
+      'order want the copies.',
+    offeredWhen: {
+      when: "A jump table in this lift's raised function has a target that two or more other blocks enter.",
+      decidedBy: { symbol: 'hasSharedSwitchEntry', file: STRUCTURE },
+    },
+    example: {
+      compiler: 'gcc',
+      unit:
+        'extern s32 gOut; void f(s32); void g(s32); void h(s32); void m(s32); void r(s32);\n' +
+        'void example(s32 id, s32 v) { switch (id) { @ } r(0); }',
+      before:
+        'case 0: f(1); break; case 1: g(v); case 2: gOut = v; break; case 3: h(v); gOut = v; break; case 4: m(5); break;',
+      after:
+        'case 0: f(1); break; case 1: g(v); gOut = v; break; case 2: gOut = v; break; case 3: h(v); gOut = v; break; case 4: m(5); break;',
+      note: 'cases 1 and 3 both enter case 2',
+    },
+    implementedIn: STRUCTURE,
+    seeAlso: ['unmerge', 'shared-tail'],
+  },
 
   // ── respell ─────────────────────────────────────────────────────────────────────────────────
   unmerge: {

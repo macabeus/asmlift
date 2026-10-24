@@ -4,7 +4,9 @@ import { expect, test } from 'vitest';
 import { type AsmData, parseAsmData } from '../src/frontend/asmdata';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (...lines: string[]) =>
@@ -487,11 +489,19 @@ test('a table entry naming code outside the function declines loud', () => {
 });
 
 // TWO ARMS A CROSS-JUMP SENT INTO ONE CASE BODY, ON MIPS. KMC gcc 2.7.2 `-O2` for
-// `synthetic:jt_xjcase:gcc2.7.2kmc`, verbatim: case 1 jumps into case 2's `gOut = v` (0x64) and
-// case 3, laid out directly above it, runs into it. KMC orders arms by case value, not by layout,
-// so the arm ABOVE case 2 is case 1: it keeps the fall-through and case 3 owns the copy — the
-// spelling that recompiles to this object, where the agbcc spelling (case 3 falls, case 1 copies)
-// is 28 objdump lines off. Failed loud ("do not linearize") before `copySharedFallTargets`.
+// `synthetic:jt_xjcase:gcc2.7.2kmc`, verbatim. The source writes case 1 (`if (v == 3) break; g(v);`)
+// directly above case 2 and falls into it, and case 3 (`h(v); gOut = v;`) below. KMC lays the bodies
+// out in that source order, and its cross-jump then kept case 3's `gOut = v` (0x64) and pointed the
+// table's case 2 slot into it: case 3 runs into 0x64 and case 1 JUMPS to it. So the arm laid out
+// above the shared tail is not the source's fall-through. asmlift's MIPS_GCC arm order is ascending
+// case value (it does not declare `switchArmsFollowLayout`), which here puts case 1 above case 2:
+// the default lets it fall and gives case 3 the copy, the spelling that recompiles to this object.
+// Case 3 falling (case 1 copies) and every entrant copying are each 28 objdump lines off. Failed
+// loud ("do not linearize") before `copySharedFallTargets`.
+const XJ_MIPS_PROTOS = Object.fromEntries([
+  ['jt_xjcase', { returnsVoid: true }],
+  ...['f', 'g', 'h', 'm', 'q', 'r'].map((s) => [s, { params: 1, returnsVoid: true }]),
+]);
 test('two table arms entering one case body: the arm the CASE ORDER puts above it falls (MIPS_GCC)', () => {
   const dump =
     'SYMBOL TABLE:\n' +
@@ -554,14 +564,23 @@ test('two table arms entering one case body: the arm the CASE ORDER puts above i
     ]
       .map((l) => `   ${l}\n`)
       .join('');
-  const out = decompile('jt_xjcase', asm, MIPS_GCC, {
-    asmData: parseAsmData(dump, dump, dump, true),
-    prototypes: Object.fromEntries([
-      ['jt_xjcase', { returnsVoid: true }],
-      ...['f', 'g', 'h', 'm', 'q', 'r'].map((s) => [s, { params: 1, returnsVoid: true }]),
-    ]),
-  }).source;
+  const asmData = parseAsmData(dump, dump, dump, true);
+  const out = decompile('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS }).source;
   expect(out).toMatch(
     /case 1:\s+if \(a1 == 3\) break;\s+g\(a1\);\s+case 2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+gOut = a1;\s+break;/,
+  );
+  // `/tail-copies`, the ranked alternative: every entrant owns a copy and nothing falls. Which one
+  // the source wrote is not in the asm (an out-of-case-order source on the same compiler wants this
+  // one), so the fan carries both and the differ referees.
+  const cands = enumerateCandidates('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS });
+  const copied = cands.filter((c) => hasVariation(c.variations, 'tail-copies'));
+  expect(copied.length).toBeGreaterThan(0);
+  for (const c of copied) {
+    expect(c.source).toMatch(
+      /case 1:\s+if \(a1 != 3\) \{\s+g\(a1\);\s+gOut = a1;\s+\}\s+break;\s+case 2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+gOut = a1;\s+break;/,
+    );
+  }
+  expect(cands.some((c) => !hasVariation(c.variations, 'tail-copies') && /g\(a1\);\s+case 2:/.test(c.source))).toBe(
+    true,
   );
 });

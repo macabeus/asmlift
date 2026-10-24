@@ -41,7 +41,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge, hasSharedSwitchEntry } from './structure/structure';
 import type { VariationName } from './variation-tokens';
 
 /** The STRUCTURE VARIATIONS — the boolean candidate dimensions crossed into every enumeration
@@ -74,7 +74,8 @@ export interface StructureVariation {
     | 'signedCmp'
     | 'freshMerge'
     | 'copyDefPos'
-    | 'siteSense';
+    | 'siteSense'
+    | 'tailCopies';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
@@ -375,6 +376,30 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
         ),
       ),
     strip: false,
+  },
+  // `/tail-copies` — WHICH ARM KEEPS A CROSS-JUMPED TAIL (structure.ts `copyEveryTailEntrant`,
+  // switch-recover.ts `copySharedFallTargets`). A compiler that cross-jumps keeps one copy of the
+  // code two or more jump-table arms end in, so those arms all enter one sibling arm's body. The
+  // default writes the body back into every entrant but the one the arm-order policy puts directly
+  // above the sibling, which keeps its fall-through; this writes it into every entrant. Which arm
+  // the source wrote the tail under is not in the asm, and one compiler answers both ways at one
+  // set of flags: on KMC `-O2` and gcc 2.7.2 `-O1`, `synthetic:jt_xjcase` (case 1 written above
+  // case 2 and falling into it) recompiles only from the default, while the same arms written
+  // out of case order (`case 3`, `case 2`, `case 1`) are 24 objdump lines off from the default
+  // and 4 from this. So the differ referees it per row, like `/copy-defpos`.
+  //
+  // Gated on `hasSharedSwitchEntry`, a structural over-approximation of the shape on this lift's
+  // own fn: a jump table with a target two or more other blocks enter. Where the copies are not read
+  // the pair is one tree and the dedup collapses it before any compile. In the strip closure, and
+  // reset by `assertDefaultAccepts`: where the target language has no fall-through (Pascal) the
+  // default can still decline on the one fall-through it keeps, and copying every entrant would
+  // structure what the default refused.
+  {
+    flag: 'tailCopies',
+    name: 'tail-copies',
+    options: (on) => ({ copyEveryTailEntrant: on }),
+    perLiftGate: hasSharedSwitchEntry,
+    strip: true,
   },
 ];
 

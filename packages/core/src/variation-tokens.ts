@@ -93,6 +93,7 @@ const TOKENS = [
   { name: 'fresh-merge', variationKind: 'structure' },
   { name: 'copy-defpos', variationKind: 'structure' },
   { name: 'site-sense', variationKind: 'structure' },
+  { name: 'tail-copies', variationKind: 'structure' },
   // respell: the structured tree rewritten
   { name: 'unmerge', variationKind: 'respell' },
   { name: 'argbase', variationKind: 'respell' },
