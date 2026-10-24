@@ -1,6 +1,5 @@
-import { calleeBodyBoundOf, decompile } from '@asmlift/core/pipeline';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
 import { calleeNames, guessedArityCallees, guessedArityNote } from '../../src/callees';
@@ -191,77 +190,10 @@ describe('guessedArityNote', () => {
   });
 });
 
-// A callee whose body is in the same input bounds its arity (core frontend/callee-body.ts): one that
-// reads no argument is called with none and is no guess; one that reads fewer than every argument
-// register is still guessed, at most that many.
-describe('a callee bounded by its own body in the input', () => {
-  // `objdump -dr` of an O32 object holding the callees beside the lifted function
-  const dump = [
-    '00000000 <rnd>:',
-    '   0:\tjr\tra',
-    '   4:\tli\tv0,7',
-    '00000008 <rd1>:',
-    '   8:\tjr\tra',
-    '   c:\taddiu\tv0,a0,1',
-    '00000010 <f>:',
-    '  10:\tjal\t0 <rnd>',
-    '\t\t\t10: R_MIPS_26\trnd',
-    '  18:\tjal\t8 <rd1>',
-    '\t\t\t18: R_MIPS_26\trd1',
-    '  20:\tjal\t0 <rnd>',
-    '\t\t\t20: R_MIPS_26\tg',
-  ].join('\n');
-  it('is not named a guess where it reads none, and carries its bound where it reads some', () => {
-    const t = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description;
-    const bound = calleeBodyBoundOf('f', dump, t, {});
-    expect([bound('rnd'), bound('rd1'), bound('g')]).toEqual([0, 1, undefined]);
-    expect(guessedArityCallees(dump, 'f', t)).toEqual(['rnd', 'rd1', 'g']);
-    expect(guessedArityCallees(dump, 'f', t, undefined, undefined, undefined, bound)).toEqual(['rd1', 'g']);
-    const note = guessedArityNote(dump, 'f', t, undefined, undefined, undefined, bound);
-    expect(note).toContain('2 callee(s) have no declared arity, guessed from the argument registers: rd1 (at most 1');
-    expect(note).toContain('1 callee(s) have no declared arity and are called with no argument, as their own body');
-    expect(note).toMatch(/reads none: rnd\n$/);
-  });
-});
-
-// The note reads the bound where the lowering asks it, and on every input format the bound reads.
-describe('the note on a body-bounded callee says what the run did', () => {
-  // `objdump -dr` of a PowerPC object: f hands rnd a 5 in r3, and rnd's body reads no argument
-  const dump = [
-    '00000000 <rnd>:',
-    '   0:\tli      r3,7',
-    '   4:\tblr',
-    '00000008 <f>:',
-    '   8:\tstwu    r1,-16(r1)',
-    '   c:\tmflr    r0',
-    '  10:\tstw     r0,20(r1)',
-    '  14:\tli      r3,5',
-    '  18:\tbl      18 <f+0x10>',
-    '\t\t\t18: R_PPC_REL24\trnd',
-    '  1c:\tlwz     r0,20(r1)',
-    '  20:\tmtlr    r0',
-    '  24:\taddi    r1,r1,16',
-    '  28:\tblr',
-  ].join('\n');
-  // a typed list nothing can size still states parameters: the lowering guesses `rnd(5)` and never
-  // asks the body, so the note must not say rnd was called with no argument
-  it('asks no bound of a callee whose entry states a parameter list', () => {
-    const t = PPC_MWCC;
-    const prototypes = { f: { returnsVoid: true }, rnd: { params: ['Mystery'] } };
-    const bound = calleeBodyBoundOf('f', dump, t, { prototypes });
-    expect(bound('rnd')).toBe(0);
-    expect(decompile('f', dump, t, { prototypes }).source).toContain('rnd(5)');
-    expect(decompile('f', dump, t, { prototypes: { f: { returnsVoid: true } } }).source).toContain('rnd()');
-    const note = guessedArityNote(dump, 'f', t, prototypes, undefined, undefined, bound);
-    expect(note).toContain('guessed from the argument registers: rnd —');
-    expect(note).not.toContain('called with no argument');
-    // with no entry for it, the body is asked and the call has no argument
-    const plain = guessedArityNote(dump, 'f', t, { f: { returnsVoid: true } }, undefined, undefined, bound);
-    expect(plain).toMatch(/called with no argument, as their own body in this input reads none: rnd\n$/);
-  });
-
-  // a `.s` declares its functions, and a `bl` to one is a callee, not a long branch
-  it('names a callee the same `.s` defines as a function', () => {
+// A `.s` declares its functions, and a `bl` to one is a callee whose arity is guessed, not a long
+// branch: dropping it hid the note about every callee whose body sits in the same file.
+describe('a callee the same `.s` defines', () => {
+  it('is named, and named in the note', () => {
     const s =
       '\t.globl\trnd\n\t.type\t rnd,function\n\t.thumb_func\nrnd:\n\tmov\tr0, #7\n\tbx\tlr\n' +
       '\t.thumb_func\nrd1:\n\tadd\tr0, r0, #1\n\tbx\tlr\n' +
@@ -269,9 +201,6 @@ describe('the note on a body-bounded callee says what the run did', () => {
       '\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n\tbl\trnd\n\tbl\trd1\n' +
       '\tbl\trd2\n\tbl\t.L2\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
     expect(calleeNames(s, 'f')).toEqual(['rnd', 'rd1', 'rd2']);
-    const bound = calleeBodyBoundOf('f', s, ARMV4T_AGBCC, {});
-    const note = guessedArityNote(s, 'f', ARMV4T_AGBCC, undefined, undefined, undefined, bound);
-    expect(note).toContain('rd1 (at most 1: its body here reads no more), rd2 (at most 2');
-    expect(note).toMatch(/reads none: rnd\n$/);
+    expect(guessedArityNote(s, 'f', ARMV4T_AGBCC)).toContain('guessed from the argument registers: rnd, rd1, rd2 —');
   });
 });

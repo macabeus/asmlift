@@ -11,7 +11,6 @@
 // and nothing here can change what is emitted.
 import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
-import { type CalleeBodyBound, asksCalleeBody } from '@asmlift/core/frontend/callee-body';
 import { type Prototypes, calleeDeclaration, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
 import { helperPrototypes } from '@asmlift/core/runtime-helpers';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
@@ -64,9 +63,8 @@ const CALL = /^\s*(?:bl|blx|jal)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?
  *  A `bl` whose target is a label defined in the same asm is NOT a call: agbcc emits `bl` as an
  *  intra-function long branch (one klonoa function is 28 KB of it), and treating those targets as
  *  callees would bury the real ones — UNLESS the asm declares that label a function
- *  (`functionLabels`): then it is a callee whose body is here, the one kind of callee the body
- *  bound (core frontend/callee-body.ts) reads, and dropping it hid every note about it on `.s`
- *  input. The function's own name is dropped too — a recursive call needs no external arity. */
+ *  (`functionLabels`): then it is a callee whose arity is guessed like any other's, and dropping it
+ *  hid the note about it on `.s` input. The function's own name is dropped too — a recursive call needs no external arity. */
 export function calleeNames(asm: string, self?: string, relocs?: readonly Reloc[]): string[] {
   const all = asm.split('\n');
   const [from, to] = ownRange(all, self);
@@ -157,10 +155,8 @@ export function guessedArityCallees(
   prototypes?: Prototypes,
   symbols?: SymbolMap,
   relocs?: readonly Reloc[],
-  bodyBound?: CalleeBodyBound,
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
-  const asked = askedBound(prototypes, bodyBound);
   const helpers = helperPrototypes(target);
   return calleeNames(asm, self, relocs).filter((n) => {
     // read at the declaration the lowering reads it at: a compiler's runtime helper (`__divsi3`,
@@ -172,21 +168,9 @@ export function guessedArityCallees(
       byValueRefusal(at, target) === undefined &&
       variadicRefusal(prototypes !== undefined && Object.hasOwn(prototypes, n) ? prototypes[n] : undefined) ===
         undefined &&
-      declared?.get(n)?.signature === undefined &&
-      asked(n) !== 0
+      declared?.get(n)?.signature === undefined
     );
   });
-}
-
-/** The body bound as the lowering asks it (`asksCalleeBody`): only of a callee whose entry states no
- *  parameter list. Asked of every guessed callee, the note said a callee declared `(Mystery)` was
- *  called with no argument while the run emitted `rnd(5)`. */
-function askedBound(prototypes: Prototypes | undefined, bodyBound: CalleeBodyBound | undefined) {
-  return (n: string): number | undefined =>
-    bodyBound !== undefined &&
-    asksCalleeBody(prototypes !== undefined && Object.hasOwn(prototypes, n) ? prototypes[n] : undefined)
-      ? bodyBound(n)
-      : undefined;
 }
 
 /** The one stderr line, or '' when every callee's arity was declared. */
@@ -197,26 +181,10 @@ export function guessedArityNote(
   prototypes?: Prototypes,
   symbols?: SymbolMap,
   relocs?: readonly Reloc[],
-  bodyBound?: CalleeBodyBound,
 ): string {
-  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs, bodyBound);
-  const asked = askedBound(prototypes, bodyBound);
-  // the callees the lowering called with no argument because their own body here reads none
-  const unread = bodyBound
-    ? guessedArityCallees(asm, self, target, prototypes, symbols, relocs).filter((n) => asked(n) === 0)
-    : [];
-  const named = guessed.map((n) => {
-    const k = asked(n);
-    return k === undefined || k >= target.argRegs.length ? n : `${n} (at most ${k}: its body here reads no more)`;
-  });
-  return (
-    (guessed.length === 0
-      ? ''
-      : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
-        `${named.join(', ')} — pass --proto '{"${guessed[0]}":{"params":N}}' if a guess is wrong\n`) +
-    (unread.length === 0
-      ? ''
-      : `asmlift: [proto] ${unread.length} callee(s) have no declared arity and are called with no argument, ` +
-        `as their own body in this input reads none: ${unread.join(', ')}\n`)
-  );
+  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
+  return guessed.length === 0
+    ? ''
+    : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
+        `${guessed.join(', ')} — pass --proto '{"${guessed[0]}":{"params":N}}' if a guess is wrong\n`;
 }

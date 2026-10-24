@@ -17,7 +17,7 @@ import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { type OnGap, calleeBodyBoundOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type OnGap, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
@@ -764,15 +764,7 @@ export async function runCli(
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
-  const protoNote = guessedArityNote(
-    asm,
-    name,
-    unitTarget,
-    prototypes,
-    symbols,
-    asmData?.relocs,
-    calleeBodyBoundOf(name, asm, unitTarget, { prototypes, asmData, symbols, contextGlobals, ownContextProto }),
-  );
+  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>
     notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');
