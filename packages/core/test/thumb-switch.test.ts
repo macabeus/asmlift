@@ -980,3 +980,66 @@ test('a guessed arity that counts a value its block stored DECLINES where a park
   // control: arguments the case set up after the store lift
   expect(decompile('f', asm('\tmov\tr0, #0x7\n\tmov\tr1, #0x8\n'), ARMV4T_AGBCC).source).toMatch(/g\(7, 8\);/);
 });
+
+// ── arms a cross-jump sent into one sibling's body ───────────────────────────────────────────────
+// agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix, `synthetic:jt_xjcase:agbcc` and
+// `synthetic:jt_xjdef:agbcc` verbatim. Its cross-jumping keeps one copy of a tail several arms end
+// in and points the rest at it, so two arms enter one sibling arm's body and C, which drops into an
+// arm from above along one edge only, has no linear order for them. Both failed loud ("do not
+// linearize") before `copySharedFallTargets`; the spellings asserted below recompile to the target.
+const XJ_PROTOS = {
+  prototypes: Object.fromEntries([
+    ['jt_xjcase', { returnsVoid: true }],
+    ['jt_xjdef', { returnsVoid: true }],
+    ...['f', 'g', 'h', 'm', 'q', 'r'].map((s) => [s, { params: 1, returnsVoid: true }]),
+  ]),
+};
+
+test('two jump-table arms entering one case body: the LAYOUT neighbour falls, the other owns a copy', () => {
+  // Case 1 jumps into case 2's `gOut = v` and case 3, laid out directly above it, runs into it.
+  // agbcc's arms follow its layout, so case 3 is the arm above case 2 and keeps the fall-through.
+  const out = decompile(
+    'jt_xjcase',
+    'jt_xjcase:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n' +
+      '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L11\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+      '.L11:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L13\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n' +
+      '.L4:\n\tmov\tr0, #0x1\n\tbl\tf\n\tb\t.L3\n' +
+      '.L5:\n\tcmp\tr4, #0x3\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L13\n' +
+      '.L8:\n\tadd\tr0, r4, #0\n\tbl\th\n' +
+      '.L13:\n\tldr\tr0, .L16\n\tstr\tr4, [r0]\n\tb\t.L3\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\tgOut\n' +
+      '.L9:\n\tmov\tr0, #0x5\n\tbl\tm\n\tb\t.L3\n' +
+      '.L10:\n\tmov\tr0, #0x7\n\tbl\tq\n' +
+      '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n',
+    ARMV4T_AGBCC,
+    XJ_PROTOS,
+  ).source;
+  expect(out).toMatch(
+    /case 1:\s+if \(a1 != 3\) \{\s+g\(a1\);\s+gOut = a1;\s+\}\s+break;\s+case 3:\s+h\(a1\);\s+case 2:\s+gOut = a1;\s+break;/,
+  );
+  expect(count(out, 'gOut = a1;')).toBe(2);
+});
+
+test('two jump-table arms entering the HOLE arm, with no entrant above it, both own a copy', () => {
+  // The default block is also the table's hole (case 4), so it is a case arm; cases 2 and 3 jump
+  // into it, and the arm laid out above it is case 5, which does not. Nobody falls.
+  const out = decompile(
+    'jt_xjdef',
+    'jt_xjdef:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L9\t@cond_branch\n' +
+      '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+      '.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L9\n\t.word\t.L8\n' +
+      '.L4:\n\tmov\tr0, #0x1\n\tbl\tf\n\tb\t.L3\n' +
+      '.L5:\n\tmov\tr0, #0x2\n\tbl\tg\n\tb\t.L3\n' +
+      '.L6:\n\tadd\tr0, r4, #0\n\tbl\th\n\tb\t.L9\n' +
+      '.L7:\n\tadd\tr0, r4, #0\n\tbl\tm\n\tb\t.L9\n' +
+      '.L8:\n\tmov\tr0, #0x7\n\tbl\tq\n\tb\t.L3\n' +
+      '.L9:\n\tldr\tr0, .L13\n\tstr\tr4, [r0]\n' +
+      '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L14:\n\t.align\t2, 0\n.L13:\n\t.word\tgOut\n',
+    ARMV4T_AGBCC,
+    XJ_PROTOS,
+  ).source;
+  expect(out).toMatch(/case 2:\s+h\(a1\);\s+gOut = a1;\s+break;\s+case 3:\s+m\(a1\);\s+gOut = a1;\s+break;/);
+  expect(out).toMatch(/case 5:\s+q\(7\);\s+break;\s+case 4:\s+gOut = a1;\s+break;/);
+});

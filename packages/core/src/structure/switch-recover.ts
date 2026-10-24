@@ -276,6 +276,62 @@ function singleton(r: Ranges): number | null {
   return r.length === 1 && r[0][0] === r[0][1] ? r[0][0] : null;
 }
 
+/** TWO OR MORE ARMS ENTERING ONE SIBLING'S BODY, put back as copies of it. A compiler that
+ *  cross-jumps (agbcc's and gcc 2.7.2's `jump.c` cross-jumping, KMC's with it) finds two arms
+ *  ending in the same code as a sibling arm and keeps one copy, so `case 1: g(v); gOut = v;
+ *  break; case 2: gOut = v; break; case 3: h(v); gOut = v; break;` comes back with case 1 and
+ *  case 3 both entering case 2's `gOut = v`. C drops into an arm from above along one edge only,
+ *  so read as written that is two fall-throughs into one arm and `chainArms` refuses it — but the
+ *  source had one fall-through at most.
+ *
+ *  WHICH ENTRANT FALLS. At most one entrant keeps its fall-through: the one the caller's arm-order
+ *  policy (`order`, before the chain moves anything) puts DIRECTLY ABOVE the sibling. Every other
+ *  entrant gets the sibling's region written out again under its own arm: its exit becomes a
+ *  closed `break` over the two regions. No entrant above it ⇒ every entrant copies. Measured
+ *  against each row's own target (synthetic jt_xjcase / jt_xjdef): agbcc declares
+ *  `switchArmsFollowLayout`, and its layout neighbour falling with the other entrant copying
+ *  recompiles byte-identical; KMC and gcc 2.7.2 order by case value, and THEIR arm above falling
+ *  recompiles byte-identical, while the layout neighbour falling there, or every entrant copying,
+ *  is 28 objdump lines off on both — with three copies of one tail those two keep a different
+ *  one. A `default:` is pinned last by C, so the arm above it is the last arm of `order`.
+ *
+ *  ONLY OVER A CLOSED SIBLING. The copy is the sibling's region walked again inside the entrant's
+ *  arm, so it is spelled only where that region ends the switch: the sibling's own exit a `break`
+ *  WITH a region — it reaches no sibling of its own and leaves through no block the switch does
+ *  not dominate. A sibling that falls on, or leaves sideways, stays two-into-one for `chainArms`
+ *  to refuse, as before. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
+ *  entrant once the sibling is no longer a sibling — its walk reaches the sibling's blocks, and
+ *  they reach the merge and nothing else — so it is assembled here rather than walked again. */
+export function copySharedFallTargets(
+  order: readonly Block[],
+  dflt: Block | null,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+): Map<Block, ArmExit> {
+  const out = new Map(exitOf);
+  const entrants = new Map<Block, Block[]>();
+  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+    const x = exitOf.get(e);
+    if (x?.kind === 'fallthrough') {
+      entrants.set(x.to, [...(entrants.get(x.to) ?? []), e]);
+    }
+  }
+  for (const [to, from] of entrants) {
+    const own = exitOf.get(to);
+    if (from.length < 2 || own?.kind !== 'break' || own.region === undefined) {
+      continue;
+    }
+    const at = to === dflt ? order.length : order.indexOf(to);
+    const above = at > 0 ? order[at - 1] : undefined;
+    for (const e of from) {
+      const x = exitOf.get(e)!;
+      if (e !== above && x.kind === 'fallthrough') {
+        out.set(e, { kind: 'break', region: new Set([...x.region, ...own.region]) });
+      }
+    }
+  }
+  return out;
+}
+
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
  *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
  *  which is the caller's own arm-order policy — so with no fall-through every chain is a
@@ -1150,7 +1206,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
     const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
     const preChain = [...armsByBlock.keys()];
-    const entries = chainArms(preChain, dfltArm, exitOf);
+    // Where the arms as read do not linearize, arms a cross-jump sent into one sibling's body get
+    // that body back as copies, all but the one the arm-order policy above puts over it — Regime
+    // B's third reading (structure.ts, THE COPIES), under the same two conditions: asked only
+    // where the chain refuses, and only at a merge the switch HAS, never `stop`, where every plain
+    // `break` reads as falling into the default.
+    let armExit: Map<Block, ArmExit> = exitOf;
+    let entries = chainArms(preChain, dfltArm, armExit);
+    if (entries === null && ipdom.get(b)) {
+      armExit = copySharedFallTargets(preChain, dfltArm, exitOf);
+      entries = chainArms(preChain, dfltArm, armExit);
+    }
     if (entries === null) {
       return null;
     }
@@ -1158,7 +1224,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // left it alone, every position still means what that policy said it meant.
     const orderIntact = entries.every((e, i) => e === preChain[i]);
     const fallsInto = (blk: Block): Block | null => {
-      const x = exitOf.get(blk);
+      const x = armExit.get(blk);
       return x?.kind === 'fallthrough' ? x.to : null;
     };
     // THE DISPATCH HOIST. Every edge the tree walk is about to COLLAPSE — from any test block, to
@@ -1229,13 +1295,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
-        body: structureArm(blk, to ?? merge, merge, exitOf.get(blk)),
+        body: structureArm(blk, to ?? merge, merge, armExit.get(blk)),
         fallsThrough: to !== null,
       });
     }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
-    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, exitOf.get(defaultBlk)) : [];
+    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, armExit.get(defaultBlk)) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
     // into it and no other subtree jumps there — the two references the tree walk can count.

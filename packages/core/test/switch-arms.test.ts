@@ -683,14 +683,40 @@ test('\u2026and on a compiler with no layout rule the CHAIN re-threads the table
   expect(out).toMatch(/case 3:[\s\S]*?\n\s*case 0:/);
 });
 
-test('TWO jump-table arms falling into ONE still fails LOUD', () => {
-  // Regime B has no second recovery, so a shape no linear order spells is an error, not a
-  // fallback — the same three refusals `chainArms` states for the comparison tree.
-  const twoIntoOne = table('', 5, liveFall).replace(
-    '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n',
-    '.L6:\n' + liveFall + '\tb\t.L5\n',
-  );
-  expect(() => of(twoIntoOne)).toThrow(/do not linearize/);
+// Case 3 falls into case 0 and case 4 jumps into it too: a cross-jump left ONE copy of case 0's
+// body for three arms.
+const twoIntoOne = table('', 5, liveFall).replace(
+  '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n',
+  '.L6:\n' + liveFall + '\tb\t.L5\n',
+);
+
+test('TWO jump-table arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
+  // Before `copySharedFallTargets`, `chainArms` refused this outright (two fall-throughs into
+  // one arm) and Regime B failed the whole function loud. The arm-order policy (agbcc's layout)
+  // puts case 3 directly above case 0, so case 3 keeps the fall-through and case 4 gets case 0's
+  // body written out under its own label.
+  const out = of(twoIntoOne);
+  expect(armOrder(out)).toEqual([3, 0, 4, 1, 2]);
+  expect(out).toMatch(/case 3:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+case 0:\s+v0 = a1 \+ 1;\s+break;/);
+  expect(out).toMatch(/case 4:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+v0 = a1 \+ 1;\s+break;/);
+});
+
+test('…and on a compiler with no layout rule the arm above is the TABLE order’s', () => {
+  // Table order is 0, 1, 2, 3, 4: no entrant sits directly above case 0, so both entrants copy.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', twoIntoOne, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(armOrder(out)).toEqual([0, 1, 2, 3, 4]);
+  expect(count(out, 'v0 = a1 + 1;')).toBe(3);
+  expect(out).not.toMatch(/case 3:[^}]*?\n\s*case 0:/);
+});
+
+test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LOUD', () => {
+  // The copy is the shared arm's region walked inside each entrant, which spells only where that
+  // region ends the switch. Case 0 running on into case 1 does not, so this stays two-into-one,
+  // and Regime B, which has no second recovery, refuses it as `chainArms` does.
+  const fallsOn = twoIntoOne.replace('.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L7\n');
+  expect(() => of(fallsOn)).toThrow(/do not linearize/);
 });
 
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
@@ -1078,7 +1104,11 @@ const threeCase = (c0: string, c1: string, c2: string) =>
   // still falls through on the other and is not the shape that fixture wants.
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
 
-test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
+test('TWO arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
+  // C reaches an arm from above only once, so as written this is two fall-throughs into case 1,
+  // which `chainArms` refuses (and Regime A declined to if-recovery). A cross-jump makes exactly
+  // this shape out of `case 2: *p = 3; *p = 2; break;`, so case 2 gets case 1's body back and
+  // case 0, the arm directly above case 1, keeps its fall-through.
   const out = of(
     threeCase(
       '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
@@ -1086,8 +1116,39 @@ test('TWO arms falling into ONE decline — C reaches an arm from above only onc
       '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
     ),
   );
-  expect(armOrder(out)).not.toContain(1);
-  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(out).toMatch(/case 0:\s+\*a1 = 1;\s+case 1:\s+\*a1 = 2;\s+break;\s+case 2:\s+\*a1 = 3;\s+\*a1 = 2;\s+break;/);
+});
+
+test('a comparison tree agbcc cross-jumped two arms of comes back as the source it compiles from', () => {
+  // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix for `case 1: g(v); gOut = v; break;
+  // case 5: gOut = v; break; case 9: h(v); gOut = v; break;`: case 1 jumps into case 5's store and
+  // case 9, laid out directly above it, runs into it. The lift below recompiles to the same code
+  // (only the label numbers differ).
+  const out = decompile(
+    't',
+    't:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n' +
+      '\tcmp\tr0, #0x5\n\tbeq\t.L10\t@cond_branch\n\tcmp\tr0, #0x5\n\tbgt\t.L9\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n' +
+      '.L9:\n\tcmp\tr0, #0x9\n\tbeq\t.L6\t@cond_branch\n\tb\t.L3\n' +
+      '.L4:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L10\n' +
+      '.L6:\n\tadd\tr0, r4, #0\n\tbl\th\n' +
+      '.L10:\n\tldr\tr0, .L11\n\tstr\tr4, [r0]\n' +
+      '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L12:\n\t.align\t2, 0\n.L11:\n\t.word\tgOut\n',
+    ARMV4T_AGBCC,
+    {
+      prototypes: {
+        t: { returnsVoid: true },
+        g: { params: 1, returnsVoid: true },
+        h: { params: 1, returnsVoid: true },
+        r: { params: 1, returnsVoid: true },
+      },
+    },
+  ).source;
+  expect(out).toMatch(
+    /case 1:\s+g\(a1\);\s+gOut = a1;\s+break;\s+case 9:\s+h\(a1\);\s+case 5:\s+gOut = a1;\s+break;\s+\}/,
+  );
 });
 
 test('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {

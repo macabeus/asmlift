@@ -42,7 +42,9 @@
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
-// into the `default:` — refuse in `chainArms`, which answers null.
+// into the `default:` — refuse in `chainArms`, which answers null. Two arms entering a sibling that
+// itself ends the switch are the one exception: a cross-jump makes that shape out of arms with a
+// common tail, and `copySharedFallTargets` writes the tail back into all of them but one.
 import { globalBaseOf } from '../ir/alias';
 import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
@@ -159,7 +161,7 @@ import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
-import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
+import { type ArmExit, type SwitchBoundCase, copySharedFallTargets, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
 // struct pointer (raise/structs.ts), the byte offset resolves to a NAMED field (`base->field_<off>`);
@@ -6185,7 +6187,7 @@ export function structure(
       // A default edge the dispatch never takes: a frontend whose dispatch is entered only past a
       // bounds test that already sent every other value elsewhere says so with `exhaustive`.
       const deadDefaultEdge = term.attrs.exhaustive === true;
-      const readArms = (at: Block | null) => {
+      const readArms = (at: Block | null, copies = false) => {
         // The blocks an arm could fall INTO. The default block counts only when it is a block of
         // its own: when it IS the merge, "the default" is just where the switch ends, and an arm
         // reaching it is a plain `break`.
@@ -6197,16 +6199,20 @@ export function structure(
         // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
         // block, so no two sort keys can be equal and the tie-break Regime A needs on shared bodies
         // has nothing to decide here.
-        const exits = new Map<Block, ArmExit>();
+        const walked = new Map<Block, ArmExit>();
         for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
-          if (!exits.has(entry)) {
-            exits.set(entry, analyzeArmExit(entry, b, at, siblings));
+          if (!walked.has(entry)) {
+            walked.set(entry, analyzeArmExit(entry, b, at, siblings));
           }
         }
-        const falls = [...exits.values()].some((e) => e.kind === 'fallthrough');
         // A table whose default block is ALSO a case target is that case's arm, not a separate
         // one: it is already in `preChain`, and `defaultLayoutPos` withholds the label's position.
         const dflt = defEdge.block !== at && !armOf.has(defEdge.block) ? defEdge.block : null;
+        // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies,
+        // all but the one the arm-order policy puts above it (`copySharedFallTargets`, and THE
+        // COPIES below for when it is asked).
+        const exits = copies ? copySharedFallTargets(preChain, dflt, walked) : walked;
+        const falls = [...exits.values()].some((e) => e.kind === 'fallthrough');
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);
         const refusal = chain === null ? null : armRefusal(exits, chain);
         return { exits, falls, chain, refusal, declines: chain === null || refusal !== null };
@@ -6345,18 +6351,41 @@ export function structure(
       // construction, but not one with a body: a hole runs what an unmatched value runs, and ending
       // the switch there spells it `case 1: break;`. The rule above refuses an arm that is NOT the
       // default edge's target, whose body would move after the switch, and only that arm.
+      let over: Block | null = null;
       if (joined === null && read.declines) {
         const found = followOverReturns(b, stop, defEdge.block);
         const pastEnd = (end: Block): boolean =>
           leftOutOf(b, reachFrom, defEdge.block).some((s) =>
             [s, ...reachFrom(s)].some((x) => x !== b && layoutIndex(x) > layoutIndex(end)),
           );
-        const over = found !== null && (found === defEdge.block || !armOf.has(found)) && !pastEnd(found) ? found : null;
+        over = found !== null && (found === defEdge.block || !armOf.has(found)) && !pastEnd(found) ? found : null;
         const retry = over === null ? null : readArms(over);
         if (retry !== null && !retry.declines) {
           hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(over!) });
           merge = over;
           read = retry;
+        }
+      }
+      // THE COPIES: TWO ARMS A CROSS-JUMP SENT INTO ONE SIBLING'S BODY. Read as written they are two
+      // fall-throughs into one arm, which no linear order spells; `copySharedFallTargets` writes
+      // the sibling's body back into every entrant but the one the arm-order policy puts above it.
+      // A third reading, asked LAST and adopted only where it declines nothing, for the reason the
+      // retry is: where either reading above spells, it is legal C already, and this one must
+      // turn a decline into a lift, never one lift into another nor one decline's stated reason
+      // into another's.
+      //
+      // NEVER ON THE `stop` READING. There the default block is a sibling, every plain `break`
+      // reads as falling into it, and copying it would write the code after the switch into every
+      // arm. So it is read at a merge the switch HAS — post-dominance's, or the retry's.
+      const copyAt = joined !== null ? merge : over;
+      if (read.declines && copyAt !== null) {
+        const copied = readArms(copyAt, true);
+        if (!copied.declines) {
+          if (copyAt !== merge) {
+            hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(copyAt) });
+          }
+          merge = copyAt;
+          read = copied;
         }
       }
       const exitOf = read.exits;
