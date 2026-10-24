@@ -488,6 +488,40 @@ describe('what this lowering cannot carry out refuses', () => {
     expect(lift(DELAY_ARG, [[8, 'R_MIPS_26', '.text']])).toThrow(/is relocated against the section '\.text'/);
   });
 
+  // gcc2.7.2 and KMC relocate a call to a function of the same object against `.text`: the jump's
+  // field holds the target's section offset over four, and the symbol table names what starts there
+  test('a callee named by a section symbol is the function at the offset its field holds', () => {
+    const text = new Uint8Array(0x28);
+    text.set([0x0c, 0x00, 0x00, 0x08], 8); // jal 0x20
+    const sym = (value: number, index: number) => ({ section: '.text', value, size: 8, index });
+    const ad = (names: [string, number][]): AsmData => ({
+      ...relocs([[8, 'R_MIPS_26', '.text']]),
+      sections: new Map([['.text', text]]),
+      symbols: new Map([
+        ['f', sym(0, 1)],
+        ...names.map(([n, v], k): [string, ReturnType<typeof sym>] => [n, sym(v, k + 2)]),
+      ]),
+    });
+    const listing = `${obj(DELAY_ARG)}00000020 <g>:\n  20:\tjr\tra\n  24:\tnop\n`;
+    const g = { g: { params: 1, returns: 's32' } };
+    expect(decompile('f', listing, MIPS_GCC, { asmData: ad([['g', 0x20]]), prototypes: g }).source).toContain(
+      'g(a0 + 1) + 1',
+    );
+    // no one name starts at the offset: the call keeps the section, and refuses
+    for (const names of [
+      [],
+      [
+        ['g', 0x20],
+        ['g_alias', 0x20],
+      ],
+      [['g', 0x24]],
+    ] as [string, number][][]) {
+      expect(() => decompile('f', listing, MIPS_GCC, { asmData: ad(names), prototypes: g })).toThrow(
+        /is relocated against the section '\.text'/,
+      );
+    }
+  });
+
   test('a jal no relocation names', () => {
     expect(lift(DELAY_ARG, [])).toThrow(/'jal' at 0x8 has no callee symbol/);
   });

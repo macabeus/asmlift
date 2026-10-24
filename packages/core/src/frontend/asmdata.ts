@@ -45,7 +45,8 @@ export interface AsmSymbol {
   index: number;
 }
 
-const readU32 = (b: Uint8Array, off: number, big: boolean): number =>
+/** The word at byte `off` of `b`, in the object's byte order. */
+export const readU32 = (b: Uint8Array, off: number, big: boolean): number =>
   big
     ? ((b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3]) >>> 0
     : ((b[off + 3] << 24) | (b[off + 2] << 16) | (b[off + 1] << 8) | b[off]) >>> 0;
