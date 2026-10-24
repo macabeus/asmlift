@@ -14,7 +14,7 @@ import {
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { returnedStruct, structLocalType } from './frontend/call-plan';
-import { calleeBodyBounds } from './frontend/callee-body';
+import { type CalleeBodyBound, calleeBodyBounds } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
@@ -351,12 +351,7 @@ export function liftStamped(
   // what each callee whose body is in this input reads of its arguments, lifted from that body as a
   // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
   const calleeBodyBound =
-    liftOptions?.calleeBodyBound ??
-    calleeBodyBounds(name, asm, target, table, (callee, calleeTable) =>
-      liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
-        calleeBodyBound: () => undefined,
-      }),
-    );
+    liftOptions?.calleeBodyBound ?? bodyBoundsIn(name, asm, target, table, asmData, symbols, contextGlobals);
   const options = { ...liftOptions, calleeBodyBound };
   const fn = liftWithinContextBound(
     name,
@@ -389,6 +384,44 @@ export function liftStamped(
   refuseNarrowReturnsOfWideDeclaration(fn, name, own);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));
   return fn;
+}
+
+/** Each callee's body bound (frontend/callee-body.ts) as a lift of `name` under `table` reads it: every
+ *  callee lifted from the same input, under the same table, map and context, reading no bodies. */
+function bodyBoundsIn(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  table: Prototypes,
+  asmData: AsmData | undefined,
+  symbols: SymbolMap | undefined,
+  contextGlobals: ContextGlobals | undefined,
+): CalleeBodyBound {
+  return calleeBodyBounds(name, asm, target, table, (callee, calleeTable) =>
+    liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
+      calleeBodyBound: () => undefined,
+    }),
+  );
+}
+
+/** The body bound a `decompile` of `name` under `opts` reads for its callees — for a caller that
+ *  reports on the run (cli/callees.ts) rather than lifting. */
+export function calleeBodyBoundOf(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
+): CalleeBodyBound {
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  return bodyBoundsIn(
+    name,
+    asm,
+    target,
+    prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
+    opts.asmData,
+    opts.symbols,
+    opts.contextGlobals,
+  );
 }
 
 /** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
