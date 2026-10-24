@@ -1104,11 +1104,10 @@ const threeCase = (c0: string, c1: string, c2: string) =>
   // still falls through on the other and is not the shape that fixture wants.
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
 
-test('TWO arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
-  // C reaches an arm from above only once, so as written this is two fall-throughs into case 1,
-  // which `chainArms` refuses (and Regime A declined to if-recovery). A cross-jump makes exactly
-  // this shape out of `case 2: *p = 3; *p = 2; break;`, so case 2 gets case 1's body back and
-  // case 0, the arm directly above case 1, keeps its fall-through.
+test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
+  // A cross-jump makes exactly this shape out of `case 2: *p = 3; *p = 2; break;`, and Regime B
+  // reads it back as copies. Regime A does not: `chainArms` refuses, and if-recovery lifts it,
+  // so a copy reading here would trade one lift for another (switch-recover.ts, NO COPIES HERE).
   const out = of(
     threeCase(
       '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
@@ -1116,15 +1115,15 @@ test('TWO arms entering ONE closed arm: the arm above it falls, the other owns a
       '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
     ),
   );
-  expect(armOrder(out)).toEqual([0, 1, 2]);
-  expect(out).toMatch(/case 0:\s+\*a1 = 1;\s+case 1:\s+\*a1 = 2;\s+break;\s+case 2:\s+\*a1 = 3;\s+\*a1 = 2;\s+break;/);
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
 });
 
-test('a comparison tree agbcc cross-jumped two arms of comes back as the source it compiles from', () => {
+test('a comparison tree agbcc cross-jumped two arms of stays with if-recovery', () => {
   // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix for `case 1: g(v); gOut = v; break;
   // case 5: gOut = v; break; case 9: h(v); gOut = v; break;`: case 1 jumps into case 5's store and
-  // case 9, laid out directly above it, runs into it. The lift below recompiles to the same code
-  // (only the label numbers differ).
+  // case 9, laid out directly above it, runs into it. Two arms entering one: no switch, the lift
+  // if-recovery gives.
   const out = decompile(
     't',
     't:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n' +
@@ -1146,9 +1145,9 @@ test('a comparison tree agbcc cross-jumped two arms of comes back as the source 
       },
     },
   ).source;
-  expect(out).toMatch(
-    /case 1:\s+g\(a1\);\s+gOut = a1;\s+break;\s+case 9:\s+h\(a1\);\s+case 5:\s+gOut = a1;\s+break;\s+\}/,
-  );
+  expect(out).not.toMatch(/switch/);
+  expect(out).toMatch(/g\(a1\);/);
+  expect(out).toMatch(/h\(a1\);/);
 });
 
 test('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {

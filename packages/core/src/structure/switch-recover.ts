@@ -287,13 +287,20 @@ function singleton(r: Ranges): number | null {
  *  WHICH ENTRANT FALLS. At most one entrant keeps its fall-through: the one the caller's arm-order
  *  policy (`order`, before the chain moves anything) puts DIRECTLY ABOVE the sibling. Every other
  *  entrant gets the sibling's region written out again under its own arm: its exit becomes a
- *  closed `break` over the two regions. No entrant above it ⇒ every entrant copies. Measured
- *  against each row's own target (synthetic jt_xjcase / jt_xjdef): agbcc declares
- *  `switchArmsFollowLayout`, and its layout neighbour falling with the other entrant copying
- *  recompiles byte-identical; KMC and gcc 2.7.2 order by case value, and THEIR arm above falling
- *  recompiles byte-identical, while the layout neighbour falling there, or every entrant copying,
- *  is 28 objdump lines off on both — with three copies of one tail those two keep a different
- *  one. A `default:` is pinned last by C, so the arm above it is the last arm of `order`.
+ *  closed `break` over the two regions. No entrant above it ⇒ every entrant copies. That is the
+ *  compiler's own reading of the source: a compiler whose arms follow its layout
+ *  (`switchArmsFollowLayout`, agbcc) kept the copy its layout neighbour runs into, and one that
+ *  orders arms by case value (KMC, gcc 2.7.2) kept the copy the arm below in case order runs into.
+ *  Letting the other neighbour fall, or copying into every entrant, recompiles to a different
+ *  choice of which copy survives. A `default:` is pinned last by C, so the arm above it is the last
+ *  arm of `order`.
+ *
+ *  A `default:` SIBLING MAY BE CODE THE SOURCE WROTE AFTER THE SWITCH. Where the other arms
+ *  `return` from a void function they reach the same epilogue the default block does, so
+ *  post-dominance ends the switch there, and arms that `break` to the code after the switch read as
+ *  falling into the default block. The copies then write that code into each of them: the same
+ *  program, not the source's spelling (which would end the switch at the default block and spell
+ *  the other arms `return`, a reading nothing makes yet).
  *
  *  ONLY OVER A CLOSED SIBLING. The copy is the sibling's region walked again inside the entrant's
  *  arm, so it is spelled only where that region ends the switch: the sibling's own exit a `break`
@@ -1206,17 +1213,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
     const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
     const preChain = [...armsByBlock.keys()];
-    // Where the arms as read do not linearize, arms a cross-jump sent into one sibling's body get
-    // that body back as copies, all but the one the arm-order policy above puts over it — Regime
-    // B's third reading (structure.ts, THE COPIES), under the same two conditions: asked only
-    // where the chain refuses, and only at a merge the switch HAS, never `stop`, where every plain
-    // `break` reads as falling into the default.
-    let armExit: Map<Block, ArmExit> = exitOf;
-    let entries = chainArms(preChain, dfltArm, armExit);
-    if (entries === null && ipdom.get(b)) {
-      armExit = copySharedFallTargets(preChain, dfltArm, exitOf);
-      entries = chainArms(preChain, dfltArm, armExit);
-    }
+    // NO COPIES HERE. Arms a cross-jump sent into one sibling's body do not linearize, and Regime
+    // B reads them back as copies (structure.ts, THE COPIES) because its only alternative is a loud
+    // failure. Regime A's alternative is if-recovery, which LIFTS: a copy reading here would replace
+    // one lift with another, the choice between two legal spellings of one CFG that only a ranked
+    // variation may make (docs/level-tower.md). Measured on comparison trees agbcc and KMC
+    // cross-jumped, the switch spelling was nearer the target on some and further on others, and no
+    // corpus row reaches this point, so the refusal stands and if-recovery answers.
+    const entries = chainArms(preChain, dfltArm, exitOf);
     if (entries === null) {
       return null;
     }
@@ -1224,7 +1228,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // left it alone, every position still means what that policy said it meant.
     const orderIntact = entries.every((e, i) => e === preChain[i]);
     const fallsInto = (blk: Block): Block | null => {
-      const x = armExit.get(blk);
+      const x = exitOf.get(blk);
       return x?.kind === 'fallthrough' ? x.to : null;
     };
     // THE DISPATCH HOIST. Every edge the tree walk is about to COLLAPSE — from any test block, to
@@ -1295,13 +1299,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
-        body: structureArm(blk, to ?? merge, merge, armExit.get(blk)),
+        body: structureArm(blk, to ?? merge, merge, exitOf.get(blk)),
         fallsThrough: to !== null,
       });
     }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
-    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, armExit.get(defaultBlk)) : [];
+    const defBody = defaultBlk ? structureArm(defaultBlk, merge, merge, exitOf.get(defaultBlk)) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
     // into it and no other subtree jumps there — the two references the tree walk can count.

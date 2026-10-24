@@ -42,9 +42,10 @@
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
-// into the `default:` — refuse in `chainArms`, which answers null. Two arms entering a sibling that
-// itself ends the switch are the one exception: a cross-jump makes that shape out of arms with a
-// common tail, and `copySharedFallTargets` writes the tail back into all of them but one.
+// into the `default:` — refuse in `chainArms`, which answers null. In a jump table (Regime B), two
+// or more arms entering a sibling that itself ends the switch are the one exception: a cross-jump
+// makes that shape out of arms with a common tail, and `copySharedFallTargets` writes the tail back
+// into all of them but one. Regime A keeps the refusal, since its if-recovery already lifts.
 import { globalBaseOf } from '../ir/alias';
 import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
@@ -6376,7 +6377,11 @@ export function structure(
       //
       // NEVER ON THE `stop` READING. There the default block is a sibling, every plain `break`
       // reads as falling into it, and copying it would write the code after the switch into every
-      // arm. So it is read at a merge the switch HAS — post-dominance's, or the retry's.
+      // arm. So it is read at a merge the switch HAS — post-dominance's, or the retry's. That narrows
+      // the shape and does not rule it out: where the other arms `return` into the epilogue the
+      // default block also reaches, post-dominance's merge IS that epilogue, and arms that `break`
+      // to the code after the switch get it as copies (`copySharedFallTargets`, a `default:`
+      // sibling). The same program, where the reading before it failed loud.
       const copyAt = joined !== null ? merge : over;
       if (read.declines && copyAt !== null) {
         const copied = readArms(copyAt, true);
