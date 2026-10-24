@@ -108,6 +108,7 @@ import {
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
+  keptInRelift,
   landsOnArea,
   liftWithRelift,
 } from './frame-objects';
@@ -1619,7 +1620,11 @@ function liftOnce(
           `across an edge of the local area, r1+${frame.area.from} up to r1+${frame.area.to} — part memory, part slot`,
       );
     }
-    return at;
+    // …and in a relift, a word of the area outside the bytes kept as one object keeps the slot model
+    return oneObject === undefined ||
+      keptInRelift(oneObject, at, width, () => `'${ins.mnemonic}' at 0x${ins.addr.toString(16)}`, name)
+      ? at
+      : undefined;
   };
   // The frame offset each `laddr` this lift emitted names — function-scoped, since a register
   // holding one crosses blocks — and every capture moved into another (`addi rD,rCapture,k`

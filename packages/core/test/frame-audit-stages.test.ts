@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
-import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
+import { type FrameRange, __testing, auditFrameObjects, keptInRelift } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
@@ -470,6 +470,19 @@ describe('frameEscapes', () => {
         unaccountedWord: undefined,
       },
     ]);
+  });
+});
+
+// A relift's routing of a local-area word against the bytes kept as one object.
+describe('keptInRelift', () => {
+  test('a relift lifts a word outside the kept bytes as a slot, and refuses one across their edge', () => {
+    const at = () => 'the access';
+    expect(keptInRelift({ from: 8, to: 40 }, 8, 4, at, 'f')).toBe(true);
+    expect(keptInRelift({ from: 8, to: 40 }, 40, 4, at, 'f')).toBe(false);
+    expect(keptInRelift({ from: 8, to: 40 }, 4, 4, at, 'f')).toBe(false);
+    expect(() => keptInRelift({ from: 8, to: 40 }, 38, 4, at, 'f')).toThrow(
+      'the access reaches across an edge of the bytes [sp,#8) to [sp,#40) kept as one object',
+    );
   });
 });
 

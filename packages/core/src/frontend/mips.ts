@@ -61,6 +61,7 @@ import {
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
+  keptInRelift,
   landsOnArea,
   liftWithRelift,
   nameMergedSretObjects,
@@ -1888,7 +1889,12 @@ function liftOnce(
           `local area, sp+${frame.area.from} up to sp+${frame.area.to} — part memory, part slot`,
       );
     }
-    return true;
+    // …and in a relift, only the bytes the first audit asked to keep as one object are memory: a
+    // word of the area outside them is one it handed back to the slot model (`keptInRelift`)
+    return (
+      oneObject === undefined ||
+      keptInRelift(oneObject, off, width, () => `'${ins.mnemonic}' at 0x${ins.addr.toString(16)}`, name)
+    );
   };
 
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every

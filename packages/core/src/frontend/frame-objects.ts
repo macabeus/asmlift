@@ -100,6 +100,22 @@ export function areaAboveOutgoing({
 export const landsOnArea = (area: FrameRange, at: number, width: number): boolean =>
   at < area.to && at + width > area.from;
 
+/** Whether a `width`-byte access at `at` inside a frontend's local area is MEMORY in a relift that
+ *  keeps `kept` as one object: inside it, yes; wholly outside, no — a word the first audit handed
+ *  back to the slot model; across its edge, refused, half memory and half slot. */
+export function keptInRelift(kept: FrameRange, at: number, width: number, what: () => string, name: string): boolean {
+  if (at >= kept.from && at + width <= kept.to) {
+    return true;
+  }
+  if (at >= kept.to || at + width <= kept.from) {
+    return false;
+  }
+  throw new FrontendUnsupportedError(
+    `cannot lift '${name}': address-taken stack local — ${what()} reaches across an edge of the bytes ` +
+      `[sp,#${kept.from}) to [sp,#${kept.to}) kept as one object — part memory, part slot`,
+  );
+}
+
 /** What an audit answers instead of a refusal when a device may read the frame, or a callee write
  *  it, without bound: lift again with `oneObject` set to these bytes. */
 export interface FrameObjectRelift {
