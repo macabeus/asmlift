@@ -969,7 +969,7 @@ export function callDeclarations(
     // the highest argument register that some path into the call leaves unwritten since the entry.
     // A register a call destroyed on every path holds nothing of this function's arguments, so a
     // read of it could add nothing to what the body reads of them, and it is not taken: taken, a
-    // callee making two calls that nothing declares refused its own lift, and lost its bound.
+    // callee making two calls that nothing declares would refuse its own lift, and lose its bound.
     const entryWords =
       unstated && entryReadCalls?.has(callee!) === true
         ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)

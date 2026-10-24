@@ -2,8 +2,9 @@
 // in which every call nothing lays out is taken at every argument register that may still hold the
 // callee's incoming value there, read for its entry parameters. Each ISA's listing holds a callee
 // that reads none, one that reads the first argument, a thunk forwarding to an undeclared callee,
-// one calling through a register, and one that clears every argument register before two undeclared
-// calls.
+// and one that clears every argument register before two undeclared calls. The Thumb and MIPS ones
+// add a call through a register, and the Thumb one a `.weak` callee, one reading a stack word, and
+// two undeclared calls with nothing cleared before them.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -84,7 +85,7 @@ describe('the argument words a callee in the same input reads at most', () => {
     ).toEqual({ rnd: 0, rd1: 1, thk: 4, ind: 'none', wk: 'none', st: 'none' });
   });
   // A call the first one destroyed every argument register before holds none of the callee's
-  // arguments: taken at all four, h read registers g destroyed and the lift of `two` refused
+  // arguments: taken at all four, h would read registers g destroyed, and the lift of `two` refuse
   test('a second undeclared call reads no argument the first destroyed', () => {
     expect(read(boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description), ['two', 'late'])).toEqual({ two: 0, late: 4 });
   });

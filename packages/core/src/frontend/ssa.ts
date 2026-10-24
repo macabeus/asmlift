@@ -2132,9 +2132,7 @@ export function fallbackArgc(
      *      argument, stops the count at the gap rather than refuse.
      *  A gap BELOW the bound refuses as ever, whatever lies above it: the callee may read it, and it
      *  holds this function's own incoming value or nothing. `gp = 3; gq = rd1(a)` leaves the store's 3
-     *  in r1 above r0's a, and stopping there would drop the `a` rd1 reads. Measured on agbcc, IDO
-     *  and mwcc, a count capped at the bound lifted `rd1(a, 2)` as `rd1()` and `tick(5)`, to a body
-     *  reading none, as `tick()`. */
+     *  in r1 above r0's a, and stopping there would drop the `a` rd1 reads. */
     bound?: () => number | undefined;
     /** whether what reaches argument register `reg` was written for something other than the call,
      *  which read it since, and left there (frontend/call-plan.ts `leftover`). Asked only at or past

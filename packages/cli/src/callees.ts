@@ -63,8 +63,8 @@ const CALL = /^\s*(?:bl|blx|jal)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?
  *  A `bl` whose target is a label defined in the same asm is NOT a call: agbcc emits `bl` as an
  *  intra-function long branch (one klonoa function is 28 KB of it), and treating those targets as
  *  callees would bury the real ones — UNLESS the asm declares that label a function
- *  (`functionLabels`): then it is a callee whose arity is guessed like any other's, and dropping it
- *  hid the note about it on `.s` input. The function's own name is dropped too — a recursive call needs no external arity. */
+ *  (`functionLabels`): then it is a callee whose arity is guessed like any other's. The function's
+ *  own name is dropped too — a recursive call needs no external arity. */
 export function calleeNames(asm: string, self?: string, relocs?: readonly Reloc[]): string[] {
   const all = asm.split('\n');
   const [from, to] = ownRange(all, self);

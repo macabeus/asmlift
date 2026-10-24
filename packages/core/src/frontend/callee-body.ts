@@ -19,7 +19,7 @@
 // (frontend/ssa.ts `mintArgSlotHoles`). That count is an UPPER bound on the argument words the
 // callee reads. A register an earlier call destroyed on every path is not taken: it holds none of
 // the callee's arguments, and a read of it would only make the lift refuse (`push {lr}; mov r0-r3,
-// #0; bl g; bl h` lost its bound so, while it reads none).
+// #0; bl g; bl h` would lose its bound so, though it reads none).
 //
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);

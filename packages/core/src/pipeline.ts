@@ -389,8 +389,8 @@ export function liftStamped(
 
 /** The bounds already read, per caller table as handed to `liftStamped`, each with what else it was
  *  read under. A ranked run lifts one function a dozen times under one table, and each callee body
- *  is a lift of the whole input, so reading it once per lift doubled the lift time of a 738-function
- *  sa3 unit. Keyed by identity: a table rebuilt reads its bounds again, which costs and never lies. */
+ *  is a lift of the whole input, so reading it once per lift would double the lift time of a large
+ *  unit. Keyed by identity: a table rebuilt reads its bounds again, which costs and never lies. */
 const boundsRead = new WeakMap<
   Prototypes,
   Array<{

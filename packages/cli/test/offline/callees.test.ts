@@ -191,7 +191,7 @@ describe('guessedArityNote', () => {
 });
 
 // A `.s` declares its functions, and a `bl` to one is a callee whose arity is guessed, not a long
-// branch: dropping it hid the note about every callee whose body sits in the same file.
+// branch, so the note names every callee whose body sits in the same file.
 describe('a callee the same `.s` defines', () => {
   it('is named, and named in the note', () => {
     const s =

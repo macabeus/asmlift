@@ -955,7 +955,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     // The same holds of a scratch register, which no return hands back saved: a pop that fills one
     // with another word is a copy the fill never makes, and read by name `push {r1}; pop {r0}`
-    // lifted `return a0` for a function returning a1. Only the return idiom, a `bx` through the
+    // would lift `return a0` for a function returning a1. Only the return idiom, a `bx` through the
     // register straight after, uses such a word, and as where to go rather than as a value.
     test('…and fills a scratch register with another word only to return through it', () => {
       const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);

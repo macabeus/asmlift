@@ -767,8 +767,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // MIPS's `jal` (`frontend/mips.ts`) say it in the same words; its rows are the decline witnesses
     // `synthetic:bllocal:*`. A `jal` relocated against a section (`frontend/mips.ts`, the same
     // question asked of the relocation's symbol) is the MIPS sibling: gcc2.7.2kmc and gcc2.7.2
-    // relocate a call to a function of the same object against `.text`
-    // (`synthetic:jt_rndsame:gcc2.7.2kmc`).
+    // relocate a call to a function of the same object against `.text`, and it is what is left
+    // where the symbol table names no one function at the offset the jump's field holds.
     key: 'unnamed-callee',
     label: 'Calls no relocation names (a `bl` or `jal` to an offset in this section)',
     pattern: /has no callee symbol — no R_\w+ relocation names it|a callee known only by its offset/,

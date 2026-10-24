@@ -1357,8 +1357,8 @@ function decode(
   if (funcLabels.length > 0) {
     const fi = funcLabels.indexOf(name);
     if (fi !== -1) {
-      // each label's first item, read in one pass: one search per function label made the slicing
-      // of a 160k-line unit with 380 functions the whole cost of every lift of it
+      // each label's first item, read in one pass: a search per function label costs labels × lines
+      // on every lift, and a callee body bound lifts the whole unit once per callee it asks
       const firstAt = new Map<string, number>();
       allFlat.forEach((f, k) => {
         if (f.label !== undefined && !firstAt.has(f.label)) {
@@ -2661,7 +2661,7 @@ function liftOnce(
   mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
   // A scratch register a `pop` fills with another word is a copy the fill never makes: `push {r1};
-  // pop {r0}; bx lr` returns a1, and read by name it lifted `return a0`. Asked after the SSA's own
+  // pop {r0}; bx lr` returns a1, and read by name it would lift `return a0`. Asked after the SSA's own
   // refusals, which name a register misused across its save before the copy that misuse makes. A
   // return hands r0 back unless the function's own declaration says it returns nothing.
   const declaredVoid = (prototypes[name] ?? options.contextOwnProto?.proto)?.returnsVoid === true;
@@ -2831,9 +2831,9 @@ interface LrState {
  *  `bx lr` and `mov pc, lr` are asked the same question: lr itself must still hold the caller's lr,
  *  so an instruction that writes lr by name before one (`mov lr, r4`, `pop {lr}`, `ldr lr, …`)
  *  declines. Read by the register's name instead, `push {r4, lr}; ldr r4, =g; mov lr, r4; pop {r4};
- *  bx lr` — a tail jump to g with every argument register live — lifted as a return, and a caller
- *  whose call to it no declaration lays out took that lift's one parameter as the callee's whole
- *  arity (frontend/callee-body.ts). A compiler returns through the word it saved lr in, so no
+ *  bx lr` — a tail jump to g with every argument register live — would lift as a return, and a
+ *  caller whose call to it no declaration lays out would take that lift's one parameter as the
+ *  callee's whole arity (frontend/callee-body.ts). A compiler returns through the word it saved lr in, so no
  *  compiled function reaches the refusal.
  *
  *  NOT ASKED: a CALL's write of lr. `bl g; bx lr` returns to the instruction after the call on the
@@ -5467,8 +5467,9 @@ interface ThumbFill {
   /** Each callee-saved register a `pop` loads another word into and that reaches a balanced return
    *  so (`bodySavedRegs`'s `leaked`), with that pop: refused once the return proof has run. */
   readonly poppedForeign: ReadonlyMap<string, Instr>;
-  /** Each caller-saved register a `pop` loads another word into without going straight to a `bx`
-   *  through it (`bodySavedRegs`'s `copied`), with that pop: refused once the return proof has run. */
+  /** Each caller-saved register a `pop` loads another word into and some path then reads as a value
+   *  before writing it (`bodySavedRegs`'s `copied`, `readsBeforeWrite`), with that pop: refused once
+   *  the return proof has run. */
   readonly poppedCopies: ReadonlyMap<string, Instr>;
   /** …and each one a return may hand back so (`bodySavedRegs`'s `returned`): refused unless the
    *  function's own declaration returns nothing. */
