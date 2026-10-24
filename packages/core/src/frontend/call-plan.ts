@@ -49,6 +49,7 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
+import type { CalleeBodyBound } from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -260,6 +261,9 @@ export function callDeclarations(
   fail: FrontendRefusal,
   /** the function's own declaration, where one binds its body — asked as a call is lowered */
   ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
+  /** the argument words a callee's own body reads at most, where it is in the input
+   *  (frontend/callee-body.ts) — asked of a named call no declaration lays out */
+  calleeBodyBound?: CalleeBodyBound,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -914,9 +918,25 @@ export function callDeclarations(
     // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
     // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
     // the same answer the callee would get with no prototype at all.
-    const { widths, returns } = p;
     // the leading arguments a variadic declaration states, where the rest is guessed
-    const floor = widths === null ? variadicFloor(callee) : 0;
+    const floor = p.widths === null ? variadicFloor(callee) : 0;
+    // WHAT THE CALLEE'S OWN BODY READS, where it is in the input and nothing lays the call out
+    // (frontend/callee-body.ts): at most `bodyWords` argument words. None at all decides the call at
+    // no argument, as a declaration would: what the caller left in an argument register is no
+    // argument of a callee that never reads it, whether or not the source passed it, so neither the
+    // gap rule nor a dispatch gate has anything left to refuse. A bound above none caps the guess
+    // and leaves it a guess under every gate: a register at or past the bound is no argument, and
+    // one below it is still the open question it was. Only a callee whose entry states no parameter
+    // list is asked: a list nothing here can size, or a variadic one, still states parameters the
+    // call must be handed (`refuseShortOfDeclared`).
+    const stated = callee === undefined ? undefined : known(prototypes, callee);
+    const bodyWords =
+      callee !== undefined && p.widths === null && !declaresParams(stated) && stated?.variadicParams === undefined
+        ? calleeBodyBound?.(callee)
+        : undefined;
+    const widths = p.widths === null && bodyWords === 0 ? [] : p.widths;
+    const { returns } = p;
+    const cap = bodyWords ?? target.argRegs.length;
     // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
     // that proof fails once the function is lifted
     const decided: Array<{ value: Value; refuse: () => void }> = [];
@@ -929,6 +949,7 @@ export function callDeclarations(
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
+            cap,
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>
@@ -980,6 +1001,7 @@ export function callDeclarations(
       const markedAt = target.argRegs.findIndex(
         (r, k) =>
           k >= floor &&
+          k < cap &&
           ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
       );
       parkedInArgs ||= markedAt >= 0;
@@ -1044,7 +1066,7 @@ export function callDeclarations(
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
       site.leftOut(
         target.argRegs
-          .slice(argc)
+          .slice(argc, cap)
           .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );

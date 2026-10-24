@@ -70,6 +70,7 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
+import type { CalleeBodyBound } from './callee-body';
 import {
   type Declarations,
   computedOnlyToReturn,
@@ -1335,6 +1336,7 @@ function liftPrelude(
   prototypes: Prototypes,
   jts: Map<number, PpcJT>,
   ownDeclaration?: () => OwnDeclaration | undefined,
+  calleeBodyBound?: CalleeBodyBound,
 ) {
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -1383,7 +1385,15 @@ function liftPrelude(
   }
   const r1At = r1Displacements(blocks, succIdx);
   const saves = prologueSavedRegs(entryBody, target, r1At, blocks);
-  const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal, ownDeclaration);
+  const calls = callDeclarations(
+    name,
+    target,
+    prototypes,
+    PPC_CALL_LOWERING,
+    ppcRefusal,
+    ownDeclaration,
+    calleeBodyBound,
+  );
   // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
   // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
   // access inside it, any width, is MEMORY through an `laddr` the shared frame-object audit then
@@ -1435,7 +1445,11 @@ function liftOnce(
   asmData: AsmData | undefined,
   declarations: Declarations,
   oneObject: FrameRange | undefined,
-  { contextOwnWords, contextOwnProto }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto'>,
+  {
+    contextOwnWords,
+    contextOwnProto,
+    calleeBodyBound,
+  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'calleeBodyBound'>,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
@@ -1516,6 +1530,7 @@ function liftOnce(
     prototypes,
     jts,
     () => (!ownDeclared ? undefined : ownDeclarationOf(name, prototypes, contextOwnProto)),
+    calleeBodyBound,
   );
   const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 

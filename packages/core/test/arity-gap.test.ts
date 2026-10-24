@@ -385,3 +385,55 @@ describe('on Thumb (agbcc), a decided gap proves only the register above it', ()
     );
   });
 });
+
+// A CALLEE WHOSE BODY IS IN THE SAME INPUT BOUNDS ITS GUESSED ARITY (frontend/callee-body.ts): no
+// argument word read decides the call at none, and a bound above none caps the guess.
+describe('on Thumb (agbcc), a callee body in the same input bounds the arity guess', () => {
+  // `u8 rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = rnd(); break; … } }`, the
+  // agbcc output of synthetic:jt_rndsame:agbcc: case 0 leaves its store's 5 in r0 at `bl rnd`
+  const rnd = '\t.thumb_func\nrnd:\n\tldr\tr0, .L3\n\tldrb\tr0, [r0]\n\tbx\tlr\n\t.align\t2, 0\n.L3:\n\t.word\tgR\n';
+  const caller =
+    '\t.thumb_func\njt_rndsame:\n\tpush\t{r4, lr}\n\tcmp\tr0, #0x6\n\tbhi\t.L6\n\tlsl\tr0, r0, #0x2\n' +
+    '\tldr\tr1, .L17\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n\t.align\t2, 0\n.L17:\n\t.word\t.L14\n' +
+    '\t.align\t2, 0\n.L14:\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n\t.word\t.L11\n\t.word\t.L12\n' +
+    '\t.word\t.L13\n.L7:\n\tldr\tr1, .L19\n\tmov\tr0, #0x5\n\tstrh\tr0, [r1]\n\tbl\trnd\n\tldr\tr1, .L19+0x4\n' +
+    '\tb\t.L16\n\t.align\t2, 0\n.L19:\n\t.word\tgH\n\t.word\tgA\n.L8:\n\tldr\tr1, .L21\n\tmov\tr0, #0x1\n\tb\t.L16\n' +
+    '\t.align\t2, 0\n.L21:\n\t.word\tgB\n.L9:\n\tldr\tr4, .L23\n\tbl\trnd\n\tmov\tr1, #0x3\n\tand\tr1, r1, r0\n' +
+    '\tstrb\tr1, [r4]\n\tb\t.L6\n\t.align\t2, 0\n.L23:\n\t.word\tgA\n.L10:\n\tldr\tr1, .L25\n\tmov\tr0, #0x7\n' +
+    '\tb\t.L16\n\t.align\t2, 0\n.L25:\n\t.word\tgC\n.L11:\n\tbl\trnd\n\tldr\tr1, .L27\n\tb\t.L16\n\t.align\t2, 0\n' +
+    '.L27:\n\t.word\tgB\n.L12:\n\tldr\tr1, .L29\n\tmov\tr0, #0x9\n\tstrh\tr0, [r1]\n\tb\t.L6\n\t.align\t2, 0\n' +
+    '.L29:\n\t.word\tgH\n.L13:\n\tbl\trnd\n\tldr\tr1, .L31\n.L16:\n\tstrb\tr0, [r1]\n.L6:\n\tpop\t{r4}\n\tpop\t{r0}\n' +
+    '\tbx\tr0\n\t.align\t2, 0\n.L31:\n\t.word\tgC\n';
+  const prototypes: Prototypes = { jt_rndsame: { returnsVoid: true }, rnd: { returns: 'u8' } };
+  test('a callee that reads no argument is called with none, in a dispatch the guess would refuse', () => {
+    const src = decompile('jt_rndsame', `\t.code\t16\n\t.text\n${rnd}${caller}`, ARMV4T_AGBCC, { prototypes }).source;
+    expect(src).toContain('rnd()');
+    expect(src).not.toMatch(/rnd\([^)]/);
+  });
+  test('…and the same caller with no body for it still refuses (synthetic:jt_rndst:agbcc)', () => {
+    expect(() => decompile('jt_rndsame', `\t.code\t16\n\t.text\n${caller}`, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /has no prototype, and r0, which the count takes, holds a value an effect of its block uses/,
+    );
+  });
+  // a callee reading only r0 (`rd1`), and one reading none (`rd0`)
+  const rd1 = '\t.thumb_func\nrd1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
+  const rd0 = '\t.thumb_func\nrd0:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+  const f = (body: string) => `\t.thumb_func\nf:\n\tpush\t{lr}\n${body}\tpop\t{r1}\n\tbx\tr1\n`;
+  test('a bound of one caps a guess of three', () => {
+    const three = f('\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tbl\trd1\n');
+    expect(decompile('f', three, ARMV4T_AGBCC).source).toContain('rd1(1, 2, 3)');
+    expect(decompile('f', `${rd1}${three}`, ARMV4T_AGBCC).source).toContain('rd1(1)');
+  });
+  test('a gap past the bound is no question, and one below it is the question it was', () => {
+    // with no body, r1's constant decides the gap below it (`decideGap`)
+    const gap = f('\tmov\tr1, #0x2\n\tbl\trd0\n');
+    expect(decompile('f', gap, ARMV4T_AGBCC).source).toContain('rd0(a0, 2)');
+    expect(decompile('f', `${rd0}${gap}`, ARMV4T_AGBCC).source).toContain('rd0()');
+    // rd1 reads r0: the gap below the set r1 is decided as f's own argument passed on, as without
+    // the bound, and only r1 leaves the call
+    expect(decompile('f', `${rd1}${f('\tmov\tr1, #0x2\n\tbl\trd1\n')}`, ARMV4T_AGBCC).source).toContain('rd1(a0)');
+    // …and where nothing decides it (r1 is a store's value), r0 is still f's argument or nothing
+    const stored = f('\tldr\tr2, .L3\n\tmov\tr1, #0x3\n\tstr\tr1, [r2]\n\tbl\trd1\n') + '.L3:\n\t.word\tgp\n';
+    expect(() => decompile('f', `${rd1}${stored}`, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+  });
+});

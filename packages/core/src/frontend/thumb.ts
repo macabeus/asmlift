@@ -2603,7 +2603,7 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
-  options: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn'>,
+  options: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound'>,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
   const { cfg, frame, ssa, pairs, statics } = fill;
@@ -5378,7 +5378,8 @@ function thumbFillOf(
     contextOwnWords,
     contextOwnProto,
     ownMemoryReturn,
-  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn'> = {},
+    calleeBodyBound,
+  }: Pick<LiftOptions, 'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound'> = {},
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -5392,6 +5393,7 @@ function thumbFillOf(
       throw new FrontendUnsupportedError(message);
     },
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
+    calleeBodyBound,
   );
   const frame = measureThumbFrame({
     name,
