@@ -26,16 +26,16 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 293 distinct decline messages (the texts reached by
+// `packages/core/src` throws 294 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 108 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, alignment fill that depends on the function's base
 //                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
@@ -44,7 +44,8 @@
 //                               to a label of this function (a call thunk), a call
 //                               through `sp` or `lr`, a return that does not jump through the
 //                               caller's lr, a `pop` that loads a callee-saved register with a word
-//                               not its own save and returns so, and the reaching-compare throw
+//                               not its own save and returns so, a `pop` that copies another word
+//                               into a scratch register read as a value, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
