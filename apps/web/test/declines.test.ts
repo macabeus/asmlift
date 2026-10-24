@@ -1431,7 +1431,7 @@ describe('the classifier is measured against the messages core can throw, not on
     // The one no published marker can show. `jump-table target is not a block boundary` is a
     // strict superstring of `not a block boundary`, so ppc.ts's recovered-dispatch refusal matches
     // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
-    // every `switch-shapes` row in it declines on `the jump table's case arms do not linearize`.
+    // no `switch-shapes` row in it declines on that ppc.ts message.
     'switch-shapes > block-boundary',
     // thumb.ts's refusals of a function-scope static read from a literal pool open with the pool
     // reader's own prefix, which `pool-word-shape` is keyed on; the static is the answer.
