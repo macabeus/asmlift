@@ -861,9 +861,13 @@ value, so a forwarding thunk bounds at every register. The bound says what the c
 what the caller passes: a source call hands an unused parameter, or a K&R call extra arguments, all
 the same. So it never caps the count, and `setx(a + 1, 4)`, `tick(5)` and `rd1(a, b, 7)` lift as
 they do without the body. The bound answers only for registers at or past it, since whether those
-are arguments changes nothing the callee computes. A counted register there that holds a value
-something else read first stops the count there, so `gH = 5; gA = rnd()` with rnd reading nothing
-lifts `rnd()`. A gap starting there stops the count below it instead of refusing. The jump-table
+are arguments changes nothing the callee computes. A counted register there whose last write
+something else read since stops the count there, so `gH = 5; gA = rnd()` with rnd reading nothing
+lifts `rnd()`. The question is about the WRITE, not the value: `g4(a, b, c, d); un(a, b, c, d)`
+copies a..d back from their homes for `un`, values `g4` read first, and those copies stay arguments.
+The bound counts the body's entry parameters, so it is none where that count is not one per argument
+word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
+back through a hidden pointer. A gap starting there stops the count below it instead of refusing. The jump-table
 dispatch gate (`refuseDispatchUnlockedPassThrough`) excuses a register there. A gap below the bound
 refuses as ever, whatever lies above it: the callee may read that register, and it holds the
 function's own incoming value or nothing. In `gp = 3; gq = rd1(a)` the store's 3 sits in r1 above

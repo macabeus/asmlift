@@ -28,12 +28,26 @@
 //     lift alone does not say the callee is here);
 //   - the input marks the callee `.weak`, which another definition may replace at link time;
 //   - the callee does not lift, inside or outside the input (a lift that fails proves nothing);
-//   - the callee makes a call through a register, whose arity nothing here can force.
+//   - the callee makes a call through a register, whose arity nothing here can force;
+//   - the callee's entry declares a struct or union return: one handed back through memory takes a
+//     hidden pointer the lift reads as no entry parameter, so its count is one argument word short
+//     (`struct Big mk(x)` reads r0 and r1 and lifts one parameter);
+//   - the callee takes a floating-point parameter: the count is of PARAMETERS, and the callers ask
+//     it as an argument-register INDEX. One per word holds only where every parameter is a word in
+//     its own register: o32 passes a leading double in $f12, which shadows a0 and a1, so
+//     `int hdx(double d, int x)` lifts two parameters and reads x from a2, index 2.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
 import type { Fn } from '../ir/core';
-import { type FnProto, type Prototypes, calleeDeclaration, declaredCallArgs, declaresParams } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  calleeDeclaration,
+  declaredCallArgs,
+  declaresAggregateReturn,
+  declaresParams,
+} from '../proto';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
@@ -109,7 +123,12 @@ function bodyBound(
 ): number | undefined {
   const name = escaped(callee);
   const defined = new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm');
-  if (callee === self || !defined.test(asm) || weakNames(asm).has(callee)) {
+  if (
+    callee === self ||
+    !defined.test(asm) ||
+    weakNames(asm).has(callee) ||
+    declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
+  ) {
     return undefined;
   }
   const helpers = helperPrototypes(target);
@@ -140,7 +159,8 @@ function bodyBound(
       }
     }
     if (guessed.size === 0) {
-      return fn.blocks[0].params.length;
+      const { params } = fn.blocks[0];
+      return params.some((p) => p.type.kind === 'float') ? undefined : params.length;
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
     // too, so the call is taken at the incoming values rather than at what the guess counted

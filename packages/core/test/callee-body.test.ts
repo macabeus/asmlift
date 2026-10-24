@@ -111,6 +111,18 @@ describe('the argument words a callee in the same input reads at most', () => {
       expect(boundsOf(asm.replace(weak, '\t.weak\tother'), TOOLCHAIN_TARGETS.agbcc.description)('cb')).toBe(0);
     },
   );
+  // `struct Big mk(x)` takes the hidden destination in r0 and x in r1, and its lift reads the
+  // destination as no entry parameter: one parameter for two argument words
+  test('a callee declared to return a struct proves nothing', () => {
+    const mk =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nmk:\n\tstr\tr1, [r0]\n\tmov\tr1, #0x0\n\tstr\tr1, [r0, #0x4]\n' +
+      '\tstr\tr1, [r0, #0x8]\n\tbx\tlr\n';
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    expect(boundsOf(mk, t)('mk')).toBe(2);
+    const members = ['a', 'b', 'c'].map((name) => ({ name, type: 's32' }));
+    const big: Prototypes = { mk: { returns: 'struct Big', returnLayout: { kind: 'struct', members } } };
+    expect(boundsOf(mk, t, undefined, big)('mk')).toBeUndefined();
+  });
   test('a callee absent from the input, and the function being lifted, prove nothing', () => {
     const b = boundsOf(thumb, TOOLCHAIN_TARGETS.agbcc.description);
     expect(b('absent')).toBeUndefined();
@@ -162,6 +174,19 @@ describe('the argument words a callee in the same input reads at most', () => {
       ind: 'none',
       two: 0,
     });
+  });
+
+  // `int hdx(double d, int x) { return x + (int)d; }` at gcc2.7.2 -O1: d arrives in $f12, which
+  // shadows a0 and a1, and x in a2. Two entry parameters, read from argument index 2: a count of
+  // parameters is no count of argument words, so there is no bound
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s: a floating-point parameter proves nothing', (id) => {
+    const hdx =
+      '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n' +
+      '00000000 <hdx>:\n   0:\ttrunc.w.d\t$f0,$f12\n   4:\tmfc1\tv0,$f0\n   8:\tnop\n   c:\tjr\tra\n' +
+      '  10:\taddu\tv0,a2,v0\n';
+    const t = TOOLCHAIN_TARGETS[id].description;
+    expect(liftStamped('hdx', hdx, t, {}, undefined, undefined, undefined).blocks[0].params).toHaveLength(2);
+    expect(boundsOf(hdx, t)('hdx')).toBeUndefined();
   });
 
   const ppc =
