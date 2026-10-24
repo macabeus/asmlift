@@ -322,12 +322,17 @@ function singleton(r: Ranges): number | null {
  *  not dominate. A sibling that falls on, or leaves sideways, stays two-into-one for `chainArms`
  *  to refuse, as before. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
  *  entrant once the sibling is no longer a sibling — its walk reaches the sibling's blocks, and
- *  they reach the merge and nothing else — so it is assembled here rather than walked again. */
+ *  they reach the merge and nothing else — so it is assembled here rather than walked again.
+ *
+ *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
+ *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
+ *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`. */
 export function copySharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,
   exitOf: ReadonlyMap<Block, ArmExit>,
   faller: boolean,
+  onFallerKept?: () => void,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   const entrants = new Map<Block, Block[]>();
@@ -344,6 +349,9 @@ export function copySharedFallTargets(
     }
     const at = to === dflt ? order.length : order.indexOf(to);
     const above = faller && at > 0 ? order[at - 1] : undefined;
+    if (above !== undefined && from.includes(above)) {
+      onFallerKept?.();
+    }
     for (const e of from) {
       const x = exitOf.get(e)!;
       if (e !== above && x.kind === 'fallthrough') {

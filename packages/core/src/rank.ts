@@ -2310,6 +2310,8 @@ export function enumerateCandidates(
           const settingsForLift = usableStructureSettings.filter((s) =>
             offForThisLift.every((variation) => !s[variation.flag]),
           );
+          // Per setting key structured in THIS pass, the `offWitness` hooks its structuring fired.
+          const witnessed = new Map<string, Set<NonNullable<StructureVariation['offWitness']>>>();
           // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
           // refuses to let the variation unlock a function the default declines, but it can only see its own
           // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
@@ -2324,6 +2326,22 @@ export function enumerateCandidates(
           for (const s of settingsForLift) {
             const key = s.variations.join('/');
             if (alternative && droppedDefault.has(key)) {
+              continue;
+            }
+            // THE OFF-SIBLING WITNESS (`StructureVariation.offWitness`): a setting whose variation's
+            // OFF sibling structured without firing the witness would rebuild that sibling's tree, so
+            // it is skipped and reported as the tree dedup it is. A sibling not structured in this
+            // pass (dropped, or skipped above) witnessed nothing, and the setting runs as before.
+            if (
+              STRUCTURE_VARIATIONS.some((variation) => {
+                if (variation.offWitness === undefined || !s[variation.flag]) {
+                  return false;
+                }
+                const seen = witnessed.get(s.variations.filter((v) => v !== variation.name).join('/'));
+                return seen !== undefined && !seen.has(variation.offWitness);
+              })
+            ) {
+              opts.onTreeDeduped?.();
               continue;
             }
             if (
@@ -2345,6 +2363,14 @@ export function enumerateCandidates(
             // which it re-derives from its map on every call, so both branch senses structure the same
             // recovered function without re-lifting.
             let sfn: SFn;
+            const fired = new Set<NonNullable<StructureVariation['offWitness']>>();
+            const witnessHooks = Object.fromEntries(
+              STRUCTURE_VARIATIONS.flatMap((variation) =>
+                variation.offWitness !== undefined && !s[variation.flag]
+                  ? [[variation.offWitness, () => fired.add(variation.offWitness!)]]
+                  : [],
+              ),
+            );
             try {
               sfn = structureChecked(
                 fn,
@@ -2366,9 +2392,10 @@ export function enumerateCandidates(
                   ),
                   ...(alternative ? { followEarlyReturns: true } : {}),
                 },
-                undefined,
+                witnessHooks,
                 acceptsMemo,
               );
+              witnessed.set(key, fired);
             } catch (e) {
               if (e instanceof DefaultAcceptsMemoMisuse) {
                 throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation

@@ -969,8 +969,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'arm written above its target in case order wants the fall-through, and arms written out of case ' +
       'order want the copies.',
     offeredWhen: {
-      when: "A jump table in this lift's raised function has a target that two or more other blocks enter.",
-      decidedBy: { symbol: 'hasSharedSwitchEntry', file: STRUCTURE },
+      when: "Structuring this lift without it left a jump-table arm falling into a sibling arm's body that another arm also enters.",
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
     },
     example: {
       compiler: 'gcc',

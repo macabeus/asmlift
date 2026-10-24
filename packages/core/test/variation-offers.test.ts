@@ -135,7 +135,8 @@ describe('every gate reference resolves', () => {
   test("a structure variation points at its entry's gate, or at the table where that gate is written inline", async () => {
     const bad: string[] = [];
     for (const v of STRUCTURE_VARIATIONS) {
-      const gate = v.sharedGate ?? v.perLiftGate;
+      // `offWitness` is decided inside the structuring, so its pointer is the table entry itself.
+      const gate = v.sharedGate ?? v.perLiftGate ?? v.offWitness;
       const p = pointerOf(VARIATION_DEFINITIONS[v.name].offeredWhen);
       if (gate === undefined || p === undefined) {
         bad.push(`${v.name}: ${gate === undefined ? 'no gate' : 'no pointer'}`);

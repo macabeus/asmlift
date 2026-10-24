@@ -7,8 +7,12 @@
 import { expect, test } from 'vitest';
 
 import { pascalBackend } from '../src/backend/pascal';
-import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { frontendFor } from '../src/frontend/registry';
+import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { type FnProto, declaresVoidReturn } from '../src/proto';
+import { enumerateCandidates } from '../src/rank';
+import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
 // The dispatch idiom, shared by every case below: bounds guard → `lsl #2` → pool load of the table
@@ -995,25 +999,23 @@ const XJ_PROTOS = {
   ]),
 };
 
+const XJCASE_ASM =
+  'jt_xjcase:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n' +
+  '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+  '.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L11\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+  '.L11:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L13\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tbl\tf\n\tb\t.L3\n' +
+  '.L5:\n\tcmp\tr4, #0x3\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L13\n' +
+  '.L8:\n\tadd\tr0, r4, #0\n\tbl\th\n' +
+  '.L13:\n\tldr\tr0, .L16\n\tstr\tr4, [r0]\n\tb\t.L3\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\tgOut\n' +
+  '.L9:\n\tmov\tr0, #0x5\n\tbl\tm\n\tb\t.L3\n' +
+  '.L10:\n\tmov\tr0, #0x7\n\tbl\tq\n' +
+  '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+
 test('two jump-table arms entering one case body: the LAYOUT neighbour falls, the other owns a copy', () => {
   // Case 1 jumps into case 2's `gOut = v` and case 3, laid out directly above it, runs into it.
   // agbcc's arms follow its layout, so case 3 is the arm above case 2 and keeps the fall-through.
-  const out = decompile(
-    'jt_xjcase',
-    'jt_xjcase:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n' +
-      '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
-      '.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L11\n\t.align\t2, 0\n\t.align\t2, 0\n' +
-      '.L11:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L13\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n' +
-      '.L4:\n\tmov\tr0, #0x1\n\tbl\tf\n\tb\t.L3\n' +
-      '.L5:\n\tcmp\tr4, #0x3\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L13\n' +
-      '.L8:\n\tadd\tr0, r4, #0\n\tbl\th\n' +
-      '.L13:\n\tldr\tr0, .L16\n\tstr\tr4, [r0]\n\tb\t.L3\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\tgOut\n' +
-      '.L9:\n\tmov\tr0, #0x5\n\tbl\tm\n\tb\t.L3\n' +
-      '.L10:\n\tmov\tr0, #0x7\n\tbl\tq\n' +
-      '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n',
-    ARMV4T_AGBCC,
-    XJ_PROTOS,
-  ).source;
+  const out = decompile('jt_xjcase', XJCASE_ASM, ARMV4T_AGBCC, XJ_PROTOS).source;
   expect(out).toMatch(
     /case 1:\s+if \(a1 != 3\) \{\s+g\(a1\);\s+gOut = a1;\s+\}\s+break;\s+case 3:\s+h\(a1\);\s+case 2:\s+gOut = a1;\s+break;/,
   );
@@ -1042,4 +1044,96 @@ test('two jump-table arms entering the HOLE arm, with no entrant above it, both 
   ).source;
   expect(out).toMatch(/case 2:\s+h\(a1\);\s+gOut = a1;\s+break;\s+case 3:\s+m\(a1\);\s+gOut = a1;\s+break;/);
   expect(out).toMatch(/case 5:\s+q\(7\);\s+break;\s+case 4:\s+gOut = a1;\s+break;/);
+});
+
+// WHERE `/tail-copies` CAN CHANGE THE TREE, read off the structuring itself. The two settings of
+// `copyEveryTailEntrant` read different arm exits only where an entrant is left FALLING into a
+// cross-jumped sibling, which the structuring reports (`StructureHooks.onTailFallerKept`), and
+// rank.ts structures the `/tail-copies` setting only where its OFF sibling reported one. Neither
+// direction is a property of the raised CFG alone: nearly every switch's post-switch code is entered
+// by two or more breaking arms and is no sibling at all (it is the switch's merge), and two
+// entrants can reach their sibling through one block they share, so over a single in-edge.
+const fallerKept = (name: string, asm: string, prototypes: Record<string, FnProto>): number => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, prototypes);
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, prototypes[name]);
+  let fired = 0;
+  structure(fn, structureOptionsFor(ARMV4T_AGBCC, declaresVoidReturn(prototypes[name]), prototypes), {
+    onTailFallerKept: () => fired++,
+  });
+  return fired;
+};
+
+test('a plain jump table whose arms all break to the code after it keeps no faller: no /tail-copies', () => {
+  // Every arm reaches .L3 (the default target AND the post-switch code), so .L3 has four
+  // non-dispatch entrants — and is the switch's merge, never a sibling an arm falls into.
+  const plain =
+    'jt_plain:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x3\n\tbhi\t.L3\t@cond_branch\n' +
+    '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L11\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+    '.L11:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n' +
+    '.L4:\n\tmov\tr0, #0x1\n\tbl\tf\n\tb\t.L3\n' +
+    '.L5:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L3\n' +
+    '.L6:\n\tadd\tr0, r4, #0\n\tbl\th\n\tb\t.L3\n' +
+    '.L7:\n\tmov\tr0, #0x5\n\tbl\tm\n' +
+    '.L3:\n\tmov\tr0, #0x0\n\tbl\tr\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+  const prototypes = { ...XJ_PROTOS.prototypes, jt_plain: { returnsVoid: true } };
+  expect(fallerKept('jt_plain', plain, prototypes)).toBe(0);
+  expect(fallerKept('jt_xjcase', XJCASE_ASM, prototypes)).toBeGreaterThan(0);
+  const cands = enumerateCandidates('jt_plain', plain, ARMV4T_AGBCC, { prototypes });
+  expect(cands.length).toBeGreaterThan(0);
+  expect(cands.some((c) => c.variations.includes('tail-copies'))).toBe(false);
+});
+
+test('two entrants sharing a cross-jumped block before the default sibling: /tail-copies is offered', () => {
+  // agbcc -O2 for `case 0: if (g(v) == 0) return; gData[2] = 7; break; … case 4: if (k(v) == 0)
+  // return; gData[2] = 7; break; default: gData[2] = 7; break;` then `gData[0] = v;`. The cross-jump
+  // keeps one `cmp r0, #0; beq` (.L13): case 0 jumps to it, case 4 runs into it, and it runs into
+  // the default (.L11), whose only non-dispatch entrant is therefore .L13 itself.
+  const t5 =
+    't5:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L11\t@cond_branch\n' +
+    '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L12\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+    '.L12:\n\t.word\t.L4\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n' +
+    '.L4:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tb\t.L13\n' +
+    '.L6:\n\tadd\tr0, r4, #0\n\tbl\th\n\tb\t.L2\n' +
+    '.L7:\n\tldr\tr1, .L16\n\tmov\tr0, #0x5\n\tstrh\tr0, [r1, #0x6]\n\tb\t.L3\n' +
+    '.L17:\n\t.align\t2, 0\n.L16:\n\t.word\tgData\n' +
+    '.L8:\n\tadd\tr0, r4, #0\n\tbl\tdd\n\tb\t.L2\n' +
+    '.L9:\n\tadd\tr0, r4, #0\n\tbl\tk\n' +
+    '.L13:\n\tcmp\tr0, #0\n\tbeq\t.L2\t@cond_branch\n' +
+    '.L11:\n\tldr\tr1, .L18\n\tmov\tr0, #0x7\n\tstrh\tr0, [r1, #0x4]\n' +
+    '.L3:\n\tstrh\tr4, [r1]\n' +
+    '.L2:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+    '.L19:\n\t.align\t2, 0\n.L18:\n\t.word\tgData\n';
+  const prototypes: Record<string, FnProto> = {
+    t5: { params: 2, returnsVoid: true },
+    g: { params: 1 },
+    k: { params: 1 },
+    h: { params: 1, returnsVoid: true },
+    dd: { params: 1, returnsVoid: true },
+  };
+  expect(fallerKept('t5', t5, prototypes)).toBeGreaterThan(0);
+  const cands = enumerateCandidates('t5', t5, ARMV4T_AGBCC, { prototypes });
+  // The default lets case 4, the arm laid out above the default, fall into it…
+  expect(
+    cands.some(
+      (c) =>
+        !c.variations.includes('tail-copies') &&
+        /case 4:\s+v0 = k\(a1\);\s+if \(v0 == 0\) return;\s+default:/.test(c.source),
+    ),
+  ).toBe(true);
+  // …and `/tail-copies` gives case 4 its own copy too, so no arm falls.
+  const copied = cands.filter((c) => c.variations.includes('tail-copies'));
+  expect(copied.length).toBeGreaterThan(0);
+  expect(
+    copied.some((c) =>
+      /case 4:\s+v0 = k\(a1\);\s+if \(v0 != 0\) \{\s+\(\(u16 \*\)&gData\)\[2\] = 7;\s+\} else \{\s+return;\s+\}\s+break;\s+default:/.test(
+        c.source,
+      ),
+    ),
+  ).toBe(true);
+  for (const c of copied) {
+    expect(c.source).not.toMatch(/return;\s+default:/);
+  }
 });
