@@ -508,8 +508,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // IT DOES NOT REMOVE THE ORDERING DEPENDENCY. `jump-table target is not a block boundary` is a
     // strict SUPERSTRING of `not a block boundary`, so `frontend/ppc.ts`'s recovered-dispatch
     // refusal matches this class AND `block-boundary`, and it is attributed here only because this
-    // class is listed first. The artifact cannot show it — every `switch-shapes` row declines on
-    // "the jump table's case arms do not linearize" — so `declines.test.ts` checks the overlap
+    // class is listed first. The artifact cannot show it — no `switch-shapes` row declines on the
+    // ppc.ts message — so `declines.test.ts` checks the overlap
     // table over core's own messages as well as over the published markers, and this pair is in it.
     //
     // ONE PRODUCER, FIVE REFUSALS, AND ONLY ONE OF THEM SAYS "linearize". `structure/structure.ts`

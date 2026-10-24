@@ -276,6 +276,92 @@ function singleton(r: Ranges): number | null {
   return r.length === 1 && r[0][0] === r[0][1] ? r[0][0] : null;
 }
 
+/** TWO OR MORE ARMS ENTERING ONE SIBLING'S BODY, put back as copies of it. A compiler that
+ *  cross-jumps (agbcc's and gcc 2.7.2's `jump.c` cross-jumping, KMC's with it) finds two arms
+ *  ending in the same code as a sibling arm and keeps one copy, so `case 1: g(v); gOut = v;
+ *  break; case 2: gOut = v; break; case 3: h(v); gOut = v; break;` comes back with case 1 and
+ *  case 3 both entering case 2's `gOut = v`. C drops into an arm from above along one edge only,
+ *  so read as written that is two fall-throughs into one arm and `chainArms` refuses it — but the
+ *  source had one fall-through at most.
+ *
+ *  WHICH ENTRANT FALLS IS NOT IN THE ASM, so it is a ranked choice (`/tail-copies`,
+ *  rank-variations.ts), never a fixed default. The cross-jump keeps ONE copy of the tail and
+ *  says nothing about which arm the source wrote it under, and one compiler at one set of flags
+ *  answers both ways: KMC `-O2` and gcc 2.7.2 `-O1` lay arm bodies out in SOURCE order, and a
+ *  source whose fall-through arm is written directly above its target in case order recompiles
+ *  only with that arm falling, while one whose arms are written out of case order (`case 3`,
+ *  `case 2`, `case 1`) recompiles nearer with every entrant holding its own copy. Neither the
+ *  layout nor the case order decides it: the copy the cross-jump kept is not the source's
+ *  fall-through, so the arm that physically runs into the tail can be the wrong faller too.
+ *
+ *  - `faller` (the default): at most one entrant keeps its fall-through, the one the caller's
+ *    arm-order policy (`order`, before the chain moves anything) puts DIRECTLY ABOVE the sibling —
+ *    on `switchArmsFollowLayout` targets (agbcc) its layout neighbour, elsewhere the arm before it in
+ *    case order. Every other entrant copies; no entrant above it ⇒ every entrant copies.
+ *  - not `faller`: every entrant copies, whichever arm sits above the sibling.
+ *
+ *  Either way each copying entrant gets the sibling's region written out again under its own arm:
+ *  its exit becomes a closed `break` over the two regions.
+ *
+ *  A `default:` SIBLING takes the LAST arm of `order` as the arm above it: that is where `chainArms`
+ *  puts a default that an arm falls into, at the end. It is not always where the label is printed —
+ *  a target that prints `default:` at its layout position (`defaultLayoutPos`) can put it between two
+ *  cases, and then the arm the source wrote above it is not `order`'s last, and its entrants all copy
+ *  (a measured agbcc shape of that kind still recompiles to its target).
+ *
+ *  A `default:` SIBLING MAY BE CODE THE SOURCE WROTE AFTER THE SWITCH. Where the other arms
+ *  `return` from a void function they reach the same epilogue the default block does, so
+ *  post-dominance ends the switch there, and arms that `break` to the code after the switch read as
+ *  falling into the default block. The copies then write that code into each of them: the same
+ *  program, not the source's spelling (which would end the switch at the default block and spell
+ *  the other arms `return`, a reading nothing makes yet).
+ *
+ *  ONLY OVER A CLOSED SIBLING. The copy is the sibling's region walked again inside the entrant's
+ *  arm, so it is spelled only where that region ends the switch: the sibling's own exit a `break`
+ *  WITH a region — it reaches no sibling of its own and leaves through no block the switch does
+ *  not dominate. A sibling that falls on, or leaves sideways, stays two-into-one for `chainArms`
+ *  to refuse. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
+ *  entrant once the sibling is no longer a sibling — its walk reaches the sibling's blocks, and
+ *  they reach the merge and nothing else — so it is assembled here rather than walked again.
+ *
+ *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
+ *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
+ *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`. */
+export function copySharedFallTargets(
+  order: readonly Block[],
+  dflt: Block | null,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  faller: boolean,
+  onFallerKept?: () => void,
+): Map<Block, ArmExit> {
+  const out = new Map(exitOf);
+  const entrants = new Map<Block, Block[]>();
+  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+    const x = exitOf.get(e);
+    if (x?.kind === 'fallthrough') {
+      entrants.set(x.to, [...(entrants.get(x.to) ?? []), e]);
+    }
+  }
+  for (const [to, from] of entrants) {
+    const own = exitOf.get(to);
+    if (from.length < 2 || own?.kind !== 'break' || own.region === undefined) {
+      continue;
+    }
+    const at = to === dflt ? order.length : order.indexOf(to);
+    const above = faller && at > 0 ? order[at - 1] : undefined;
+    if (above !== undefined && from.includes(above)) {
+      onFallerKept?.();
+    }
+    for (const e of from) {
+      const x = exitOf.get(e)!;
+      if (e !== above && x.kind === 'fallthrough') {
+        out.set(e, { kind: 'break', region: new Set([...x.region, ...own.region]) });
+      }
+    }
+  }
+  return out;
+}
+
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
  *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
  *  which is the caller's own arm-order policy — so with no fall-through every chain is a
@@ -1150,6 +1236,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
     const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
     const preChain = [...armsByBlock.keys()];
+    // NO COPIES HERE. Arms a cross-jump sent into one sibling's body do not linearize, and Regime
+    // B reads them back as copies (structure.ts, THE COPIES) because its only alternative is a loud
+    // failure. Regime A's alternative is if-recovery, which LIFTS: a copy reading here would replace
+    // one lift with another, the choice between two legal spellings of one CFG that only a ranked
+    // variation may make (docs/level-tower.md). On comparison trees agbcc and KMC cross-jumped,
+    // the switch spelling measured nearer the target on some and further on others, and no corpus
+    // row reaches this point, so the refusal stands and if-recovery answers.
     const entries = chainArms(preChain, dfltArm, exitOf);
     if (entries === null) {
       return null;

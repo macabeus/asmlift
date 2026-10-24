@@ -1,10 +1,12 @@
 // MIPS dense switch recovery (`sltiu at,k,N ; beqz at,DEF ; …sll…; addu; lw; jr`).
 import { expect, test } from 'vitest';
 
-import type { AsmData } from '../src/frontend/asmdata';
+import { type AsmData, parseAsmData } from '../src/frontend/asmdata';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (...lines: string[]) =>
@@ -484,4 +486,100 @@ test('a table entry naming code outside the function declines loud', () => {
       /jump-table target is not a block boundary/,
     );
   }
+});
+
+// TWO ARMS A CROSS-JUMP SENT INTO ONE CASE BODY, ON MIPS. KMC gcc 2.7.2 `-O2` for
+// `synthetic:jt_xjcase:gcc2.7.2kmc`, verbatim. The source writes case 1 (`if (v == 3) break; g(v);`)
+// directly above case 2 and falls into it, and case 3 (`h(v); gOut = v;`) below. KMC lays the bodies
+// out in that source order, and its cross-jump then kept case 3's `gOut = v` (0x64) and pointed the
+// table's case 2 slot into it: case 3 runs into 0x64 and case 1 JUMPS to it. So the arm laid out
+// above the shared tail is not the source's fall-through. asmlift's MIPS_GCC arm order is ascending
+// case value (it does not declare `switchArmsFollowLayout`), which here puts case 1 above case 2:
+// the default lets it fall and gives case 3 the copy, the spelling that recompiles to this object.
+// Case 3 falling (case 1 copies) and every entrant copying are each 28 objdump lines off.
+const XJ_MIPS_PROTOS = Object.fromEntries([
+  ['jt_xjcase', { returnsVoid: true }],
+  ...['f', 'g', 'h', 'm', 'q', 'r'].map((s) => [s, { params: 1, returnsVoid: true }]),
+]);
+test('two table arms entering one case body: the arm the CASE ORDER puts above it falls (MIPS_GCC)', () => {
+  const dump =
+    'SYMBOL TABLE:\n' +
+    '00000000 l    d  .text\t00000000 .text\n' +
+    '00000000 l    d  .rodata\t00000000 .rodata\n' +
+    '00000000 g     F .text\t000000a0 jt_xjcase\n' +
+    'RELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n' +
+    '0000001c R_MIPS_HI16       .rodata\n00000024 R_MIPS_LO16       .rodata\n' +
+    '00000030 R_MIPS_26         f\n0000004c R_MIPS_26         g\n0000005c R_MIPS_26         h\n' +
+    '00000064 R_MIPS_HI16       gOut\n0000006c R_MIPS_LO16       gOut\n' +
+    '00000070 R_MIPS_26         m\n00000080 R_MIPS_26         q\n00000088 R_MIPS_26         r\n\n' +
+    'RELOCATION RECORDS FOR [.rodata]:\nOFFSET   TYPE              VALUE\n' +
+    [0, 4, 8, 12, 16, 20].map((o) => `${o.toString(16).padStart(8, '0')} R_MIPS_32         .text\n`).join('') +
+    '\nContents of section .rodata:\n' +
+    ' 0000 00000030 00000040 00000064 0000005c  ...0...@...d...\\\n' +
+    ' 0010 00000070 00000080                    ...p....        \n';
+  const asm =
+    '\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <jt_xjcase>:\n' +
+    [
+      ' 0:\taddiu\tsp,sp,-24',
+      ' 4:\tsw\ts0,16(sp)',
+      ' 8:\tmove\ts0,a1',
+      ' c:\tsltiu\tv0,a0,6',
+      '10:\tbeqz\tv0,88 <jt_xjcase+0x88>',
+      '14:\tsw\tra,20(sp)',
+      '18:\tsll\tv0,a0,0x2',
+      '1c:\tlui\tat,0x0',
+      '20:\taddu\tat,at,v0',
+      '24:\tlw\tv0,0(at)',
+      '28:\tjr\tv0',
+      '2c:\tnop',
+      '30:\tjal\t0 <jt_xjcase>',
+      '34:\tli\ta0,1',
+      '38:\tj\t88 <jt_xjcase+0x88>',
+      '3c:\tnop',
+      '40:\tli\tv0,3',
+      '44:\tbeq\ts0,v0,88 <jt_xjcase+0x88>',
+      '48:\tnop',
+      '4c:\tjal\t0 <jt_xjcase>',
+      '50:\tmove\ta0,s0',
+      '54:\tj\t64 <jt_xjcase+0x64>',
+      '58:\tnop',
+      '5c:\tjal\t0 <jt_xjcase>',
+      '60:\tmove\ta0,s0',
+      '64:\tlui\tat,0x0',
+      '68:\tj\t88 <jt_xjcase+0x88>',
+      '6c:\tsw\ts0,0(at)',
+      '70:\tjal\t0 <jt_xjcase>',
+      '74:\tli\ta0,5',
+      '78:\tj\t88 <jt_xjcase+0x88>',
+      '7c:\tnop',
+      '80:\tjal\t0 <jt_xjcase>',
+      '84:\tli\ta0,7',
+      '88:\tjal\t0 <jt_xjcase>',
+      '8c:\tmove\ta0,zero',
+      '90:\tlw\tra,20(sp)',
+      '94:\tlw\ts0,16(sp)',
+      '98:\tjr\tra',
+      '9c:\taddiu\tsp,sp,24',
+    ]
+      .map((l) => `   ${l}\n`)
+      .join('');
+  const asmData = parseAsmData(dump, dump, dump, true);
+  const out = decompile('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS }).source;
+  expect(out).toMatch(
+    /case 1:\s+if \(a1 == 3\) break;\s+g\(a1\);\s+case 2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+gOut = a1;\s+break;/,
+  );
+  // `/tail-copies`, the ranked alternative: every entrant owns a copy and nothing falls. Which one
+  // the source wrote is not in the asm (an out-of-case-order source on the same compiler wants this
+  // one), so the fan carries both and the differ referees.
+  const cands = enumerateCandidates('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS });
+  const copied = cands.filter((c) => hasVariation(c.variations, 'tail-copies'));
+  expect(copied.length).toBeGreaterThan(0);
+  for (const c of copied) {
+    expect(c.source).toMatch(
+      /case 1:\s+if \(a1 != 3\) \{\s+g\(a1\);\s+gOut = a1;\s+\}\s+break;\s+case 2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+gOut = a1;\s+break;/,
+    );
+  }
+  expect(cands.some((c) => !hasVariation(c.variations, 'tail-copies') && /g\(a1\);\s+case 2:/.test(c.source))).toBe(
+    true,
+  );
 });

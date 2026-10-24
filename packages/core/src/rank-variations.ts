@@ -55,7 +55,11 @@ import type { VariationName } from './variation-tokens';
  *  that setting's own lifted fn (a map-lifted shared lift spells const bases as gaddr, which would
  *  blind the /raw-globals siblings — the /addr-home lesson). `strip` opts the variation into the
  *  dropped-sibling closure: a candidate that applies it is skipped when its default sibling (the
- *  same setting without it) failed the boundary contracts. Which of these entries `structure()`'s
+ *  same setting without it) failed the boundary contracts. `offWitness` is the exact gate where
+ *  only the structuring itself knows whether the variation can change the tree: the OFF sibling
+ *  (the same setting without it, structured earlier in the same pass) runs with that hook, and a
+ *  setting whose OFF sibling never fired it is skipped, since it would build that sibling's tree
+ *  again. Which of these entries `structure()`'s
  *  `assertDefaultAccepts` guard does NOT reset — the ones that cannot unlock a function the default
  *  declines, and so carry a written argument in place of the guard — is stated ONCE, beside that
  *  guard in structure.ts, and derived from the guard's own reset list in
@@ -74,11 +78,13 @@ export interface StructureVariation {
     | 'signedCmp'
     | 'freshMerge'
     | 'copyDefPos'
-    | 'siteSense';
+    | 'siteSense'
+    | 'tailCopies';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
+  offWitness?: 'onTailFallerKept';
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -375,6 +381,33 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
         ),
       ),
     strip: false,
+  },
+  // `/tail-copies` — WHICH ARM KEEPS A CROSS-JUMPED TAIL (structure.ts `copyEveryTailEntrant`,
+  // switch-recover.ts `copySharedFallTargets`). A compiler that cross-jumps keeps one copy of the
+  // code two or more jump-table arms end in, so those arms all enter one sibling arm's body. The
+  // default writes the body back into every entrant but the one the arm-order policy puts directly
+  // above the sibling, which keeps its fall-through; this writes it into every entrant. Which arm
+  // the source wrote the tail under is not in the asm, and one compiler answers both ways at one
+  // set of flags: on KMC `-O2` and gcc 2.7.2 `-O1`, `synthetic:jt_xjcase` (case 1 written above
+  // case 2 and falling into it) recompiles only from the default, while the same arms written
+  // out of case order (`case 3`, `case 2`, `case 1`) are 24 objdump lines off from the default
+  // and 4 from this. So the differ referees it per row, like `/copy-defpos`.
+  //
+  // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): the two settings read
+  // different exits only where an entrant is left falling into a cross-jumped sibling
+  // (`copySharedFallTargets`' `onFallerKept`), so where the OFF sibling never left one the ON setting
+  // is not structured at all. No question of the raised fn answers that ahead of the pass: a block
+  // two arms reach is no sibling where it is the switch's merge (nearly every switch's post-switch
+  // code), and two entrants can reach their sibling through one shared cross-jumped block, so one
+  // in-edge. In the strip closure, and reset by `assertDefaultAccepts`: where the target language
+  // has no fall-through (Pascal) the default can still decline on the one fall-through it keeps,
+  // and copying every entrant would structure what the default refused.
+  {
+    flag: 'tailCopies',
+    name: 'tail-copies',
+    options: (on) => ({ copyEveryTailEntrant: on }),
+    offWitness: 'onTailFallerKept',
+    strip: true,
   },
 ];
 
