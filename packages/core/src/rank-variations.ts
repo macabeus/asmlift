@@ -399,10 +399,9 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // is not structured at all. No question of the raised fn answers that ahead of the pass: a block
   // two arms reach is no sibling where it is the switch's merge (nearly every switch's post-switch
   // code), and two entrants can reach their sibling through one shared cross-jumped block, so one
-  // in-edge. In the strip closure, and
-  // reset by `assertDefaultAccepts`: where the target language has no fall-through (Pascal) the
-  // default can still decline on the one fall-through it keeps, and copying every entrant would
-  // structure what the default refused.
+  // in-edge. In the strip closure, and reset by `assertDefaultAccepts`: where the target language
+  // has no fall-through (Pascal) the default can still decline on the one fall-through it keeps,
+  // and copying every entrant would structure what the default refused.
   {
     flag: 'tailCopies',
     name: 'tail-copies',

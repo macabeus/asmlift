@@ -691,10 +691,9 @@ const twoIntoOne = table('', 5, liveFall).replace(
 );
 
 test('TWO jump-table arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
-  // Before `copySharedFallTargets`, `chainArms` refused this outright (two fall-throughs into
-  // one arm) and Regime B failed the whole function loud. The arm-order policy (agbcc's layout)
-  // puts case 3 directly above case 0, so case 3 keeps the fall-through and case 4 gets case 0's
-  // body written out under its own label.
+  // Read as written it is two fall-throughs into one arm, which `chainArms` refuses. The arm-order
+  // policy (agbcc's layout) puts case 3 directly above case 0, so case 3 keeps the fall-through and
+  // case 4 gets case 0's body written out under its own label (`copySharedFallTargets`).
   const out = of(twoIntoOne);
   expect(armOrder(out)).toEqual([3, 0, 4, 1, 2]);
   expect(out).toMatch(/case 3:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+case 0:\s+v0 = a1 \+ 1;\s+break;/);

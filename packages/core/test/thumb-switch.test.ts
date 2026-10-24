@@ -989,8 +989,8 @@ test('a guessed arity that counts a value its block stored DECLINES where a park
 // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix, `synthetic:jt_xjcase:agbcc` and
 // `synthetic:jt_xjdef:agbcc` verbatim. Its cross-jumping keeps one copy of a tail several arms end
 // in and points the rest at it, so two arms enter one sibling arm's body and C, which drops into an
-// arm from above along one edge only, has no linear order for them. Both failed loud ("do not
-// linearize") before `copySharedFallTargets`; the spellings asserted below recompile to the target.
+// arm from above along one edge only, has no linear order for them. The spellings asserted below
+// recompile to the target.
 const XJ_PROTOS = {
   prototypes: Object.fromEntries([
     ['jt_xjcase', { returnsVoid: true }],

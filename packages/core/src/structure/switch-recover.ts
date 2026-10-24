@@ -320,7 +320,7 @@ function singleton(r: Ranges): number | null {
  *  arm, so it is spelled only where that region ends the switch: the sibling's own exit a `break`
  *  WITH a region — it reaches no sibling of its own and leaves through no block the switch does
  *  not dominate. A sibling that falls on, or leaves sideways, stays two-into-one for `chainArms`
- *  to refuse, as before. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
+ *  to refuse. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
  *  entrant once the sibling is no longer a sibling — its walk reaches the sibling's blocks, and
  *  they reach the merge and nothing else — so it is assembled here rather than walked again.
  *
@@ -1240,9 +1240,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // B reads them back as copies (structure.ts, THE COPIES) because its only alternative is a loud
     // failure. Regime A's alternative is if-recovery, which LIFTS: a copy reading here would replace
     // one lift with another, the choice between two legal spellings of one CFG that only a ranked
-    // variation may make (docs/level-tower.md). Measured on comparison trees agbcc and KMC
-    // cross-jumped, the switch spelling was nearer the target on some and further on others, and no
-    // corpus row reaches this point, so the refusal stands and if-recovery answers.
+    // variation may make (docs/level-tower.md). On comparison trees agbcc and KMC cross-jumped,
+    // the switch spelling measured nearer the target on some and further on others, and no corpus
+    // row reaches this point, so the refusal stands and if-recovery answers.
     const entries = chainArms(preChain, dfltArm, exitOf);
     if (entries === null) {
       return null;

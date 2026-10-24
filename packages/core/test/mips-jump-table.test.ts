@@ -496,8 +496,7 @@ test('a table entry naming code outside the function declines loud', () => {
 // above the shared tail is not the source's fall-through. asmlift's MIPS_GCC arm order is ascending
 // case value (it does not declare `switchArmsFollowLayout`), which here puts case 1 above case 2:
 // the default lets it fall and gives case 3 the copy, the spelling that recompiles to this object.
-// Case 3 falling (case 1 copies) and every entrant copying are each 28 objdump lines off. Failed
-// loud ("do not linearize") before `copySharedFallTargets`.
+// Case 3 falling (case 1 copies) and every entrant copying are each 28 objdump lines off.
 const XJ_MIPS_PROTOS = Object.fromEntries([
   ['jt_xjcase', { returnsVoid: true }],
   ...['f', 'g', 'h', 'm', 'q', 'r'].map((s) => [s, { params: 1, returnsVoid: true }]),

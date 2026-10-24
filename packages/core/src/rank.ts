@@ -2331,7 +2331,7 @@ export function enumerateCandidates(
             // THE OFF-SIBLING WITNESS (`StructureVariation.offWitness`): a setting whose variation's
             // OFF sibling structured without firing the witness would rebuild that sibling's tree, so
             // it is skipped and reported as the tree dedup it is. A sibling not structured in this
-            // pass (dropped, or skipped above) witnessed nothing, and the setting runs as before.
+            // pass (dropped, or skipped above) witnessed nothing, and the setting is structured.
             if (
               STRUCTURE_VARIATIONS.some((variation) => {
                 if (variation.offWitness === undefined || !s[variation.flag]) {
