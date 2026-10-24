@@ -1,4 +1,4 @@
-import { calleeBodyBoundOf } from '@asmlift/core/pipeline';
+import { calleeBodyBoundOf, decompile } from '@asmlift/core/pipeline';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
@@ -221,5 +221,42 @@ describe('a callee bounded by its own body in the input', () => {
     expect(note).toContain('2 callee(s) have no declared arity, guessed from the argument registers: rd1 (at most 1');
     expect(note).toContain('1 callee(s) have no declared arity and are called with no argument, as their own body');
     expect(note).toMatch(/reads none: rnd\n$/);
+  });
+});
+
+// The note reads the bound where the lowering asks it, and on every input format the bound reads.
+describe('the note on a body-bounded callee says what the run did', () => {
+  // `objdump -dr` of a PowerPC object: f hands rnd a 5 in r3, and rnd's body reads no argument
+  const dump = [
+    '00000000 <rnd>:',
+    '   0:\tli      r3,7',
+    '   4:\tblr',
+    '00000008 <f>:',
+    '   8:\tstwu    r1,-16(r1)',
+    '   c:\tmflr    r0',
+    '  10:\tstw     r0,20(r1)',
+    '  14:\tli      r3,5',
+    '  18:\tbl      18 <f+0x10>',
+    '\t\t\t18: R_PPC_REL24\trnd',
+    '  1c:\tlwz     r0,20(r1)',
+    '  20:\tmtlr    r0',
+    '  24:\taddi    r1,r1,16',
+    '  28:\tblr',
+  ].join('\n');
+  // a typed list nothing can size still states parameters: the lowering guesses `rnd(5)` and never
+  // asks the body, so the note must not say rnd was called with no argument
+  it('asks no bound of a callee whose entry states a parameter list', () => {
+    const t = PPC_MWCC;
+    const prototypes = { f: { returnsVoid: true }, rnd: { params: ['Mystery'] } };
+    const bound = calleeBodyBoundOf('f', dump, t, { prototypes });
+    expect(bound('rnd')).toBe(0);
+    expect(decompile('f', dump, t, { prototypes }).source).toContain('rnd(5)');
+    expect(decompile('f', dump, t, { prototypes: { f: { returnsVoid: true } } }).source).toContain('rnd()');
+    const note = guessedArityNote(dump, 'f', t, prototypes, undefined, undefined, bound);
+    expect(note).toContain('guessed from the argument registers: rnd —');
+    expect(note).not.toContain('called with no argument');
+    // with no entry for it, the body is asked and the call has no argument
+    const plain = guessedArityNote(dump, 'f', t, { f: { returnsVoid: true } }, undefined, undefined, bound);
+    expect(plain).toMatch(/called with no argument, as their own body in this input reads none: rnd\n$/);
   });
 });

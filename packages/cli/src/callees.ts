@@ -11,7 +11,7 @@
 // and nothing here can change what is emitted.
 import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
-import type { CalleeBodyBound } from '@asmlift/core/frontend/callee-body';
+import { type CalleeBodyBound, asksCalleeBody } from '@asmlift/core/frontend/callee-body';
 import { type Prototypes, calleeDeclaration, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
 import { helperPrototypes } from '@asmlift/core/runtime-helpers';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
@@ -130,6 +130,7 @@ export function guessedArityCallees(
   bodyBound?: CalleeBodyBound,
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
+  const asked = askedBound(prototypes, bodyBound);
   const helpers = helperPrototypes(target);
   return calleeNames(asm, self, relocs).filter((n) => {
     // read at the declaration the lowering reads it at: a compiler's runtime helper (`__divsi3`,
@@ -142,9 +143,20 @@ export function guessedArityCallees(
       variadicRefusal(prototypes !== undefined && Object.hasOwn(prototypes, n) ? prototypes[n] : undefined) ===
         undefined &&
       declared?.get(n)?.signature === undefined &&
-      bodyBound?.(n) !== 0
+      asked(n) !== 0
     );
   });
+}
+
+/** The body bound as the lowering asks it (`asksCalleeBody`): only of a callee whose entry states no
+ *  parameter list. Asked of every guessed callee, the note said a callee declared `(Mystery)` was
+ *  called with no argument while the run emitted `rnd(5)`. */
+function askedBound(prototypes: Prototypes | undefined, bodyBound: CalleeBodyBound | undefined) {
+  return (n: string): number | undefined =>
+    bodyBound !== undefined &&
+    asksCalleeBody(prototypes !== undefined && Object.hasOwn(prototypes, n) ? prototypes[n] : undefined)
+      ? bodyBound(n)
+      : undefined;
 }
 
 /** The one stderr line, or '' when every callee's arity was declared. */
@@ -158,12 +170,13 @@ export function guessedArityNote(
   bodyBound?: CalleeBodyBound,
 ): string {
   const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs, bodyBound);
+  const asked = askedBound(prototypes, bodyBound);
   // the callees the lowering called with no argument because their own body here reads none
   const unread = bodyBound
-    ? guessedArityCallees(asm, self, target, prototypes, symbols, relocs).filter((n) => bodyBound(n) === 0)
+    ? guessedArityCallees(asm, self, target, prototypes, symbols, relocs).filter((n) => asked(n) === 0)
     : [];
   const named = guessed.map((n) => {
-    const k = bodyBound?.(n);
+    const k = asked(n);
     return k === undefined || k >= target.argRegs.length ? n : `${n} (at most ${k}: its body here reads no more)`;
   });
   return (
