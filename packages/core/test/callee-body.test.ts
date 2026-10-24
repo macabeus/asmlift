@@ -66,6 +66,14 @@ describe('the argument words a callee in the same input reads at most', () => {
     expect(b('f')).toBeUndefined();
   });
   // the thunk's own lift reads `thk(void)` while g is undeclared: its lifted signature is no bound
+  // the Thumb frontend lifts a text with no label of the name asked whole, as one function: a callee
+  // the input does not define must not be read off that lift
+  test('a callee with no label in the input proves nothing, though a lift of its name succeeds', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const one = '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(liftStamped('g', one, t, {}, undefined, undefined, undefined).blocks.length).toBeGreaterThan(0);
+    expect(boundsOf(one, t)('g')).toBeUndefined();
+  });
   test("a forwarding thunk's own lifted signature is no bound, and a declared inner callee is read as declared", () => {
     const t = TOOLCHAIN_TARGETS.agbcc.description;
     expect(liftStamped('thk', thumb, t, {}, undefined, undefined, undefined).blocks[0].params).toHaveLength(0);

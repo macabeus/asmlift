@@ -16,6 +16,9 @@
 //
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);
+//   - the input defines no label of that name: a `name:` line, an objdump `<name>:` header or a
+//     `glabel name` (the Thumb frontend lifts a text with no such label whole, as one function, so a
+//     lift alone does not say the callee is here);
 //   - the input marks the callee `.weak`, which another definition may replace at link time;
 //   - the callee does not lift, inside or outside the input (a lift that fails proves nothing);
 //   - the callee makes a call through a register, whose arity nothing here can force.
@@ -76,7 +79,9 @@ function bodyBound(
   prototypes: Prototypes,
   lift: (callee: string, table: Prototypes) => Fn,
 ): number | undefined {
-  if (callee === self || new RegExp(`^\\s*\\.weak\\s+${escaped(callee)}\\s*$`, 'm').test(asm)) {
+  const name = escaped(callee);
+  const defined = new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm');
+  if (callee === self || !defined.test(asm) || new RegExp(`^\\s*\\.weak\\s+${name}\\s*$`, 'm').test(asm)) {
     return undefined;
   }
   const helpers = helperPrototypes(target);
