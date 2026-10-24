@@ -2108,15 +2108,27 @@ export function fallbackArgc(
      *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
-    /** how many argument words the callee's own body reads at most (frontend/callee-body.ts): the
-     *  count stops there, and a register at or past it is not seen at all. The gap rule refuses on
-     *  a value ABOVE a gap, which says the caller set up an argument there and so the gap holds
-     *  arguments too; a register the callee never reads is no argument, so a value in it says
-     *  nothing of the gap below. Seen, it gave one question two answers: with r3 written and r0 at
-     *  its incoming value, a call to a callee that reads r0 alone refused `r3 holds a value and r0
-     *  holds none`, where with r3 untouched the same r0 lifted `rd1()`. A gap below the bound with a
-     *  value above it, still below the bound, refuses as ever. */
-    cap?: number;
+    /** how many argument words the callee's own body reads at most (frontend/callee-body.ts),
+     *  asked only where it can answer something. It is an upper bound on what the callee READS, and
+     *  a source call passes more than that whenever a parameter goes unused or a K&R call hands
+     *  extra arguments — `setx(a + 1, 4)` to a body reading only its first, `rd1(a, b, 7)` to one
+     *  reading r0 — so it never caps what the caller set up for the call: such a register stays
+     *  counted, and a value above a gap still decides the gap below it (`decide`). It answers only
+     *  for registers at or past it, whose being arguments changes nothing the callee computes:
+     *    - one that is a `leftover` stops the count, as no compiler sets up an argument the callee
+     *      never reads with a value it needed elsewhere (`gH = 5; gA = rnd()` leaves the store's 5 in
+     *      r0, which the guess took as `rnd(5)`);
+     *    - a gap starting there, under a register that is a leftover or that no proof makes an
+     *      argument, stops the count at the gap rather than refuse.
+     *  A gap BELOW the bound refuses as ever, whatever lies above it: the callee may read it, and it
+     *  holds this function's own incoming value or nothing. `gp = 3; gq = rd1(a)` leaves the store's 3
+     *  in r1 above r0's a, and stopping there would drop the `a` rd1 reads. Measured on agbcc, IDO
+     *  and mwcc, a count capped at the bound lifted `rd1(a, 2)` as `rd1()` and `tick(5)`, to a body
+     *  reading none, as `tick()`. */
+    bound?: () => number | undefined;
+    /** whether what reaches argument register `reg` is a value something other than the call has
+     *  read so far: set up for something else, and left there. Asked only at or past `bound`. */
+    leftover?: (reg: string) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -2130,10 +2142,16 @@ export function fallbackArgc(
   const top = parkedAt < 0 ? argRegs.length : parkedAt;
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
-  const cap = opts.cap ?? argRegs.length;
+  // whether argument register `k` lies at or past what the callee's own body reads
+  const unread = (k: number): boolean => {
+    const b = opts.bound?.();
+    return b !== undefined && k >= b;
+  };
+  // past the bound, a leftover is no argument (`bound`): leftover first, the cheaper question
+  const notPassed = (k: number): boolean => opts.leftover?.(argRegs[k]) === true && unread(k);
   const run = (from: number): number => {
     let n = from;
-    while (n < Math.min(top, cap) && setUp(n)) {
+    while (n < top && setUp(n) && !notPassed(n)) {
       // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
       // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
       // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
@@ -2161,9 +2179,12 @@ export function fallbackArgc(
     }
     return n;
   };
+  // where the run stopped at a register set up but no argument (`bound`), every one above is past
+  // the bound too, and the count ends there
+  const stoppedPast = (n: number): boolean => n < top && setUp(n);
   let n = run(floor);
-  if (n >= cap) {
-    return cap;
+  if (stoppedPast(n)) {
+    return n;
   }
   // A GAP BELOW A REGISTER THAT HOLDS A VALUE refuses, unless the frontend decides it: then the run
   // goes on through the gap and the register above it, and the next gap is asked the same.
@@ -2176,7 +2197,7 @@ export function fallbackArgc(
   // lift `g(a0, -gy, &gp)` on agbcc, `return g(a, c + 1) + 1;` `g(a0, a2 + 1, a2)` on all seven
   // toolchains, and `*(volatile int *)K; g(a, b, (short)c)` made agbcc's discarded read a fourth
   // argument.
-  for (let k = n + 1; k < Math.min(top, cap); k++) {
+  for (let k = n + 1; k < top; k++) {
     if (setUp(k)) {
       const [gapAt, setAt] = [n, k];
       const refuse = () =>
@@ -2189,17 +2210,29 @@ export function fallbackArgc(
             `value and ${argRegs[gapAt]} holds none — an argument register left at its incoming value and one ` +
             `the call does not pass look the same here, so the argument count is not decidable`,
         );
+      // the gap and the register above it are past what the callee reads: no argument it can tell
+      // from a missing one, so the count stops below the gap as at a gapless call
+      if (opts.leftover?.(argRegs[k]) === true && unread(gapAt)) {
+        return gapAt;
+      }
       if (!opts.decide?.(argRegs.slice(n, k), argRegs[k], refuse)) {
+        if (unread(gapAt)) {
+          return gapAt;
+        }
         refuse();
       }
       n = run(k);
+      const stopped = stoppedPast(n);
       for (let above = k + 1; above < n; above++) {
         if (!opts.decide?.([], argRegs[above], refuse)) {
+          if (unread(above)) {
+            return above;
+          }
           refuse();
         }
       }
-      if (n >= cap) {
-        return cap;
+      if (stopped) {
+        return n;
       }
       k = n;
     }

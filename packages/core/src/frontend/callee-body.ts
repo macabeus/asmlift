@@ -4,6 +4,10 @@
 // and on most ABIs `g()` and `g(x)` compile to the same caller bytes whenever x is already in the
 // first argument register — so the caller cannot decide it. Where the callee's own body is in the
 // input, the body can: an argument it never reads is no argument it can tell from a missing one.
+// That answers only a question about a register at or past what the body reads (frontend/ssa.ts
+// `fallbackArgc`'s `bound`, and the dispatch pass-through gate in frontend/call-plan.ts). It never
+// caps what the caller passes: a source call hands an unused parameter, or a K&R call extra
+// arguments, all the same, and a register below the bound may be read.
 //
 // THE BOUND IS A LIFT OF THE CALLEE, NOT ITS LIFTED SIGNATURE. A callee's own lifted parameters
 // rest on the same guess one level down: a forwarding thunk (`push {lr}; bl g; pop {r1}; bx r1`)
@@ -39,9 +43,7 @@ export type CalleeBodyBound = (callee: string) => number | undefined;
 
 /** Whether a call to a callee with entry `entry` asks its body at all, where nothing lays the call
  *  out: only where the entry states no parameter list. A list nothing can size, or a variadic one,
- *  still states parameters the call must be handed. The ONE condition, read by the lowering
- *  (frontend/call-plan.ts) and by the CLI's note on the run (cli/callees.ts) alike, so the note
- *  never states a bound the lift did not use. */
+ *  still states parameters the call must be handed. */
 export function asksCalleeBody(entry: FnProto | undefined): boolean {
   return !declaresParams(entry) && entry?.variadicParams === undefined;
 }

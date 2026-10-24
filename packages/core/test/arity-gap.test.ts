@@ -386,8 +386,8 @@ describe('on Thumb (agbcc), a decided gap proves only the register above it', ()
   });
 });
 
-// A CALLEE WHOSE BODY IS IN THE SAME INPUT BOUNDS ITS GUESSED ARITY (frontend/callee-body.ts): no
-// argument word read decides the call at none, and a bound above none caps the guess.
+// A CALLEE WHOSE BODY IS IN THE SAME INPUT BOUNDS WHAT IT READS (frontend/callee-body.ts), and so
+// answers a question about a register at or past that bound, never one below it.
 describe('on Thumb (agbcc), a callee body in the same input bounds the arity guess', () => {
   // `u8 rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = rnd(); break; … } }`, the
   // agbcc output of synthetic:jt_rndsame:agbcc: case 0 leaves its store's 5 in r0 at `bl rnd`
@@ -415,37 +415,46 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
       /has no prototype, and r0, which the count takes, holds a value an effect of its block uses/,
     );
   });
-  // a callee reading only r0 (`rd1`), and one reading none (`rd0`)
+  // a callee reading only r0 (`rd1`), one reading none (`rd0`), and one reading r0 and r1 (`rd2`)
   const rd1 = '\t.thumb_func\nrd1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
   const rd0 = '\t.thumb_func\nrd0:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+  const rd2 = '\t.thumb_func\nrd2:\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
   const f = (body: string) => `\t.thumb_func\nf:\n\tpush\t{lr}\n${body}\tpop\t{r1}\n\tbx\tr1\n`;
-  test('a bound of one caps a guess of three', () => {
+  // `reg` holds a 3 that a store to gp, through `addr`, read first
+  const stored = (reg: string, callee: string, addr = 'r2') =>
+    f(`\tldr\t${addr}, .L3\n\tmov\t${reg}, #0x3\n\tstr\t${reg}, [${addr}]\n\tbl\t${callee}\n`) + '.L3:\n\t.word\tgp\n';
+  // The bound is what the callee READS, never what the caller passes: an unused parameter and a
+  // K&R call's extra arguments are set up all the same, and decide the gap below them
+  test('a register the caller set up for the call alone stays an argument, past the bound too', () => {
     const three = f('\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tbl\trd1\n');
-    expect(decompile('f', three, ARMV4T_AGBCC).source).toContain('rd1(1, 2, 3)');
-    expect(decompile('f', `${rd1}${three}`, ARMV4T_AGBCC).source).toContain('rd1(1)');
-  });
-  test('a gap past the bound is no question, and one below it is the question it was', () => {
-    // with no body, r1's constant decides the gap below it (`decideGap`)
+    expect(decompile('f', `${rd1}${three}`, ARMV4T_AGBCC).source).toContain('rd1(1, 2, 3)');
+    // `tick(5)` to a body that reads none
+    expect(decompile('f', `${rd0}${f('\tmov\tr0, #0x5\n\tbl\trd0\n')}`, ARMV4T_AGBCC).source).toContain('rd0(5)');
+    // r1's constant decides the gap below it, with the body as without
     const gap = f('\tmov\tr1, #0x2\n\tbl\trd0\n');
     expect(decompile('f', gap, ARMV4T_AGBCC).source).toContain('rd0(a0, 2)');
-    expect(decompile('f', `${rd0}${gap}`, ARMV4T_AGBCC).source).toContain('rd0()');
-    // rd1 reads r0 alone, so r1 is no argument of it whatever it holds, and says nothing of r0: the
-    // call is the one a bare `bl rd1` lifts to, r1 a constant or a store's value
-    const bare = decompile('f', `${rd1}${f('\tbl\trd1\n')}`, ARMV4T_AGBCC).source;
-    expect(bare).toContain('rd1()');
-    expect(decompile('f', `${rd1}${f('\tmov\tr1, #0x2\n\tbl\trd1\n')}`, ARMV4T_AGBCC).source).toContain('rd1()');
-    const stored = f('\tldr\tr2, .L3\n\tmov\tr1, #0x3\n\tstr\tr1, [r2]\n\tbl\trd1\n') + '.L3:\n\t.word\tgp\n';
-    expect(decompile('f', `${rd1}${stored}`, ARMV4T_AGBCC).source).toContain('rd1()');
-    // …and with no body to bound it, the store's r1 above the gap still refuses
-    expect(() => decompile('f', stored, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+    expect(decompile('f', `${rd0}${gap}`, ARMV4T_AGBCC).source).toContain('rd0(a0, 2)');
+    // `caller(a, b) { rd1(a, b, 7); }`: the 7 proves r0 and r1 the caller's own, and rd1 reads r0
+    expect(decompile('f', `${rd1}${f('\tmov\tr2, #0x7\n\tbl\trd1\n')}`, ARMV4T_AGBCC).source).toContain(
+      'rd1(a0, a1, 7)',
+    );
   });
-  // a callee reading r0 and r1 (`rd2`): a value in r1, below the bound, above a gap at r0 refuses as
-  // ever, and one in r3, past it, does not
-  test('a value above the gap refuses only below the bound', () => {
-    const rd2 = '\t.thumb_func\nrd2:\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
-    const at = (reg: string) =>
-      `${rd2}${f(`\tldr\tr2, .L3\n\tmov\t${reg}, #0x3\n\tstr\t${reg}, [r2]\n\tbl\trd2\n`)}.L3:\n\t.word\tgp\n`;
-    expect(() => decompile('f', at('r1'), ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
-    expect(decompile('f', at('r3'), ARMV4T_AGBCC).source).toContain('rd2()');
+  test('past the bound, a value something else read first is no argument', () => {
+    // `gp = 3; rd0();` leaves the store's 3 in r0
+    expect(decompile('f', stored('r0', 'rd0', 'r1'), ARMV4T_AGBCC).source).toContain('rd0(3, &gp)');
+    expect(decompile('f', `${rd0}${stored('r0', 'rd0', 'r1')}`, ARMV4T_AGBCC).source).toContain('rd0()');
+    // …and a gap past the bound under one stops the count below the gap, where it refuses unbounded
+    expect(() => decompile('f', stored('r1', 'rd0'), ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+    expect(decompile('f', `${rd0}${stored('r1', 'rd0')}`, ARMV4T_AGBCC).source).toContain('rd0()');
+  });
+  // `gp = 3; gq = rd1(a);` leaves the store's 3 in r1 above r0's a, which rd1 reads: dropping r0
+  // would drop the a, so the gap refuses as it does with no body
+  test('a gap below the bound refuses whatever lies above it', () => {
+    for (const asm of [stored('r1', 'rd1'), `${rd1}${stored('r1', 'rd1')}`]) {
+      expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
+    }
+    expect(() => decompile('f', `${rd2}${stored('r3', 'rd2')}`, ARMV4T_AGBCC)).toThrow(
+      /holds a value and r0 holds none/,
+    );
   });
 });

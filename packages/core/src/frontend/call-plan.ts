@@ -271,10 +271,12 @@ export function callDeclarations(
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
-  // dispatch's marker reached a guessed call's argument registers, and the first guessed count
-  // the bytes cannot tell from another, as its refusal
+  // dispatch's marker reached a guessed call's argument registers, and every guessed count the
+  // bytes cannot tell from another, in the order they were lowered, each with its refusal. `unread`
+  // says the register lies past what the callee's own body reads (frontend/callee-body.ts), which
+  // excuses it: asked only as the gate would refuse, so no body is lifted where it would not.
   let parkedInArgs = false;
-  let passThrough: { call: string; reg: string; why: string } | undefined;
+  const passThrough: Array<{ call: string; reg: string; why: string; unread: () => boolean }> = [];
   // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
   // the low half is the return register (already excluded) and `lower` writes the high one itself
   // from the callee's own result. The two arms of one rule: where the callee hands a register back,
@@ -924,17 +926,30 @@ export function callDeclarations(
     // the leading arguments a variadic declaration states, where the rest is guessed
     const floor = p.widths === null ? variadicFloor(callee) : 0;
     // WHAT THE CALLEE'S OWN BODY READS, where it is in the input and nothing lays the call out
-    // (frontend/callee-body.ts): at most `bodyWords` argument words. None at all decides the call at
-    // no argument, as a declaration would: what the caller left in an argument register is no
-    // argument of a callee that never reads it, whether or not the source passed it, so neither the
-    // gap rule nor a dispatch gate has anything left to refuse. A bound above none caps the guess
-    // and leaves it a guess under every gate: a register at or past the bound is no argument, and
-    // one below it is still the open question it was. Only a callee whose entry states no parameter
-    // list is asked: a list nothing here can size, or a variadic one, still states parameters the
-    // call must be handed (`refuseShortOfDeclared`).
+    // (frontend/callee-body.ts): at most `bodyWords()` argument words. It answers only a refusal
+    // about registers at or past it — the gap rule's (`fallbackArgc`'s `bound`) and the dispatch
+    // pass-through gate's — since whether those are arguments changes nothing the callee computes.
+    // It never caps the count: it bounds what the callee READS, and a source call passes more
+    // whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
+    // set up for the call stays an argument (`tick(5)` to a body that reads none, `rd1(a, b, 7)` to
+    // one that reads r0, whose 7 also proves r0 is the caller's own a passed on). Asked lazily, as a
+    // refusal would fire, so a call no gate questions lifts no body. Only a callee whose entry
+    // states no parameter list is asked: a list nothing here can size, or a variadic one, still
+    // states parameters the call must be handed (`refuseShortOfDeclared`).
     const stated = callee === undefined ? undefined : known(prototypes, callee);
     const unstated = callee !== undefined && p.widths === null && asksCalleeBody(stated);
-    const bodyWords = unstated ? calleeBodyBound?.(callee!) : undefined;
+    let bodyMemo: { words: number | undefined } | undefined;
+    const bodyWords = (): number | undefined =>
+      unstated ? (bodyMemo ??= { words: calleeBodyBound?.(callee!) }).words : undefined;
+    // whether some op lowered so far reads `v`: the call being lowered is not one yet
+    const readSoFar = (v: Value): boolean =>
+      ssa.irBlocks.some((b) =>
+        b.ops.some((o) => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v))),
+      );
+    const unreadByBody = (r: string): boolean => {
+      const words = bodyWords();
+      return words !== undefined && target.argRegs.indexOf(r) >= words;
+    };
     // A CALL THE BODY BOUND READS AT EVERY INCOMING VALUE IT MAY BE HANDED (`entryReadCalls`): up to
     // the highest argument register that some path into the call leaves unwritten since the entry.
     // A register a call destroyed on every path holds nothing of this function's arguments, so a
@@ -944,14 +959,8 @@ export function callDeclarations(
       unstated && entryReadCalls?.has(callee!) === true
         ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
         : undefined;
-    const widths =
-      entryWords !== undefined
-        ? Array.from({ length: entryWords }, () => 32)
-        : p.widths === null && bodyWords === 0
-          ? []
-          : p.widths;
+    const widths = entryWords !== undefined ? Array.from({ length: entryWords }, () => 32) : p.widths;
     const { returns } = p;
-    const cap = bodyWords ?? target.argRegs.length;
     // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
     // that proof fails once the function is lifted
     const decided: Array<{ value: Value; refuse: () => void }> = [];
@@ -964,7 +973,8 @@ export function callDeclarations(
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
-            cap,
+            bound: bodyWords,
+            leftover: (r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && readSoFar(v)),
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>
@@ -1016,45 +1026,38 @@ export function callDeclarations(
       const markedAt = target.argRegs.findIndex(
         (r, k) =>
           k >= floor &&
-          k < cap &&
           ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
       );
       parkedInArgs ||= markedAt >= 0;
-      if (passThrough === undefined) {
-        const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
-        const last = target.argRegs[argc - 1];
-        // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
-        const since = new Set<number>([bi]);
-        const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
-        const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
-        // what an effect those blocks made so far reads
-        const effectReads = new Set(
-          [...since].flatMap((at) =>
-            ssa.irBlocks[at].ops.flatMap((op) =>
-              (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
-            ),
+      const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
+      const last = target.argRegs[argc - 1];
+      // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
+      const since = new Set<number>([bi]);
+      const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
+      const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
+      // what an effect those blocks made so far reads
+      const effectReads = new Set(
+        [...since].flatMap((at) =>
+          ssa.irBlocks[at].ops.flatMap((op) =>
+            (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
           ),
-        );
-        const stored = target.argRegs
-          .slice(floor, argc)
-          .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
-        const leftIncoming =
-          markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
-        if (!lastWritten) {
-          passThrough = {
-            call,
-            reg: last,
-            why: 'the last register the count takes, holds a value some path since the dispatch did not write',
-          };
-        } else if (stored !== undefined) {
-          passThrough = { call, reg: stored, why: 'which the count takes, holds a value an effect of its block uses' };
-        } else if (leftIncoming !== undefined) {
-          passThrough = {
-            call,
-            reg: leftIncoming,
-            why: "which the count leaves out below a dispatch's register, holds its incoming value",
-          };
-        }
+        ),
+      );
+      const stored = target.argRegs
+        .slice(floor, argc)
+        .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
+      const leftIncoming =
+        markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
+      // each the lowest register of its kind, so one past the body's bound has none below it
+      const open = (reg: string, why: string) => passThrough.push({ call, reg, why, unread: () => unreadByBody(reg) });
+      if (!lastWritten) {
+        open(last, 'the last register the count takes, holds a value some path since the dispatch did not write');
+      }
+      if (stored !== undefined) {
+        open(stored, 'which the count takes, holds a value an effect of its block uses');
+      }
+      if (leftIncoming !== undefined) {
+        open(leftIncoming, "which the count leaves out below a dispatch's register, holds its incoming value");
       }
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
@@ -1081,7 +1084,7 @@ export function callDeclarations(
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
       site.leftOut(
         target.argRegs
-          .slice(argc, cap)
+          .slice(argc)
           .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );
@@ -1267,10 +1270,11 @@ export function callDeclarations(
     lower,
     heldAtUndeclaredCall,
     refuseDispatchUnlockedPassThrough: (caseStateRead) => {
-      if ((parkedInArgs || caseStateRead) && passThrough !== undefined) {
+      const open = parkedInArgs || caseStateRead ? passThrough.find((p) => !p.unread()) : undefined;
+      if (open !== undefined) {
         fail(
-          `cannot lift '${name}': the call ${passThrough.call} has no prototype, and ${passThrough.reg}, ` +
-            `${passThrough.why}, in a function that lifts only through what a jump-table dispatch left in its ` +
+          `cannot lift '${name}': the call ${open.call} has no prototype, and ${open.reg}, ` +
+            `${open.why}, in a function that lifts only through what a jump-table dispatch left in its ` +
             'registers — the arity guessed without a prototype and another compile to the same bytes, so the ' +
             'argument count is not decidable',
         );
