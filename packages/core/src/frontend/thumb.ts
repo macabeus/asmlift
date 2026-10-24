@@ -1357,9 +1357,17 @@ function decode(
   if (funcLabels.length > 0) {
     const fi = funcLabels.indexOf(name);
     if (fi !== -1) {
-      sliceStart = allFlat.findIndex((f) => f.label === name);
+      // each label's first item, read in one pass: one search per function label made the slicing
+      // of a 160k-line unit with 380 functions the whole cost of every lift of it
+      const firstAt = new Map<string, number>();
+      allFlat.forEach((f, k) => {
+        if (f.label !== undefined && !firstAt.has(f.label)) {
+          firstAt.set(f.label, k);
+        }
+      });
+      sliceStart = firstAt.get(name) ?? -1;
       const starts = funcLabels
-        .map((l) => allFlat.findIndex((f) => f.label === l))
+        .map((l) => firstAt.get(l) ?? -1)
         .filter((s) => s > sliceStart)
         .sort((a, b) => a - b);
       boundaries = [...starts, allFlat.length];
