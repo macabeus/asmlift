@@ -447,6 +447,16 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     expect(() => decompile('f', stored('r1', 'rd0'), ARMV4T_AGBCC)).toThrow(/r1 holds a value and r0 holds none/);
     expect(decompile('f', `${rd0}${stored('r1', 'rd0')}`, ARMV4T_AGBCC).source).toContain('rd0()');
   });
+  // `*p = 5; rd2(1, 2); return *p;` with p a frame object: the store leaves its 5 in r2 and the
+  // frame address in r3. Past rd2's bound the leftover 5 stops the count, and r3 above it, which
+  // may hold a frame address, is no argument of a callee that never reads r3, so it is not asked
+  test('a frame address past the bound is not asked as one the count left out', () => {
+    const fr =
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tsub\tsp, #0x4\n\tmov\tr3, sp\n\tmov\tr2, #0x5\n\tstr\tr2, [r3]\n' +
+      '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tbl\trd2\n\tldr\tr0, [sp]\n\tadd\tsp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', fr, ARMV4T_AGBCC).source).toContain('rd2(1, 2, 5, sp0)');
+    expect(decompile('f', `${rd2}${fr}`, ARMV4T_AGBCC).source).toContain('    rd2(1, 2);\n');
+  });
   // `gp = 3; gq = rd1(a);` leaves the store's 3 in r1 above r0's a, which rd1 reads: dropping r0
   // would drop the a, so the gap refuses as it does with no body
   test('a gap below the bound refuses whatever lies above it', () => {
