@@ -351,7 +351,8 @@ export function liftStamped(
   // what each callee whose body is in this input reads of its arguments, lifted from that body as a
   // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
   const calleeBodyBound =
-    liftOptions?.calleeBodyBound ?? bodyBoundsIn(name, asm, target, table, asmData, symbols, contextGlobals);
+    liftOptions?.calleeBodyBound ??
+    bodyBoundsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals);
   const options = { ...liftOptions, calleeBodyBound };
   const fn = liftWithinContextBound(
     name,
@@ -386,43 +387,50 @@ export function liftStamped(
   return fn;
 }
 
+/** The bounds already read, per caller table as handed to `liftStamped`, each with what else it was
+ *  read under. A ranked run lifts one function a dozen times under one table, and each callee body
+ *  is a lift of the whole input, so reading it once per lift doubled the lift time of a 738-function
+ *  sa3 unit. Keyed by identity: a table rebuilt reads its bounds again, which costs and never lies. */
+const boundsRead = new WeakMap<
+  Prototypes,
+  Array<{
+    key: readonly unknown[];
+    bound: CalleeBodyBound;
+  }>
+>();
+
 /** Each callee's body bound (frontend/callee-body.ts) as a lift of `name` under `table` reads it: every
- *  callee lifted from the same input, under the same table, map and context, reading no bodies. */
+ *  callee lifted from the same input, under the same table, map and context, reading no bodies. Kept
+ *  across lifts of the same function under the same caller table, map, data and context
+ *  (`boundsRead`). */
 function bodyBoundsIn(
   name: string,
   asm: string,
   target: TargetDescription,
+  prototypes: Prototypes,
+  ownContext: FnProto | undefined,
   table: Prototypes,
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
 ): CalleeBodyBound {
-  return calleeBodyBounds(name, asm, target, table, (callee, calleeTable, entryReadCalls) =>
+  const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals];
+  const read = boundsRead.get(prototypes) ?? [];
+  boundsRead.set(prototypes, read);
+  const hit = read.find((r) => r.key.every((k, i) => k === key[i]));
+  if (hit !== undefined) {
+    return hit.bound;
+  }
+  const bound = calleeBodyBounds(name, asm, target, table, (callee, calleeTable, entryReadCalls) =>
     liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
       calleeBodyBound: () => undefined,
       entryReadCalls,
     }),
   );
-}
-
-/** The body bound a `decompile` of `name` under `opts` reads for its callees — for a caller that
- *  reports on the run (cli/callees.ts) rather than lifting. */
-export function calleeBodyBoundOf(
-  name: string,
-  asm: string,
-  target: TargetDescription,
-  opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
-): CalleeBodyBound {
-  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
-  return bodyBoundsIn(
-    name,
-    asm,
-    target,
-    prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
-    opts.asmData,
-    opts.symbols,
-    opts.contextGlobals,
-  );
+  // a handful per table: the symbol settings a ranked run tries, never a growing list
+  read.unshift({ key, bound });
+  read.length = Math.min(read.length, 8);
+  return bound;
 }
 
 /** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
