@@ -7,7 +7,7 @@
 //   mips-linux-gnu-ld -T mips.ld -e rd0 -o callees-mips.elf callees-mips.o
 // rd0 (reads no argument) and rd1 (reads a0) are sized, wk is weak, un0 and last are FUNCs of size 0,
 // un0 with `last` after it and `last` with nothing after it in .text. The objdump spawn is faked
-// through runCli's seam with the text `mips-linux-gnu-objdump -d --no-show-raw-insn
+// through runCli's seam with the text `mips-linux-gnu-objdump -d --no-show-raw-insn -j <section>
 // --start-address=… --stop-address=…` printed for each range.
 import { type CalleeBodies, calleeBodyBounds } from '@asmlift/core/frontend/callee-body';
 import { liftStamped } from '@asmlift/core/pipeline';
@@ -417,7 +417,8 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     expect(typed.stderr).not.toContain(NOTE);
   });
   // `u8 thunk_rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = thunk_rnd(); … } }`
-  // (synthetic:jt_rndst:agbcc with the callee behind a veneer, as kleod's thunk_GetRandomValue is):
+  // (synthetic:jt_rndst:agbcc's shape, labelled jt_rndsame here, with the callee behind a veneer as
+  // kleod's thunk_GetRandomValue is):
   // case 0 leaves its store's 5 in r0 at the call, which the dispatch gate refuses to guess at
   test('a jump-table case calling it lifts, and still declines with no ELF', async () => {
     const asm =

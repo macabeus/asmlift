@@ -1,4 +1,5 @@
-// asmlift — what a callee whose body is in the same input can read of its arguments.
+// asmlift — what a callee whose body is in the same input, or handed in from outside it, can read
+// of its arguments.
 //
 // A callee nobody declared is called at a guessed arity (frontend/call-plan.ts, `fallbackArgc`),
 // and on most ABIs `g()` and `g(x)` compile to the same caller bytes whenever x is already in the
@@ -31,10 +32,11 @@
 //
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);
-//   - the input defines no label of that name: a `name:` line, an objdump `<name>:` header or a
-//     `glabel name` (the Thumb frontend lifts a text with no such label whole, as one function, so a
-//     lift alone does not say the callee is here);
-//   - the input marks the callee `.weak`, which another definition may replace at link time;
+//   - the text the body is read from (the input, or a body handed in) defines no label of that
+//     name: a `name:` line, an objdump `<name>:` header or a `glabel name` (the Thumb frontend lifts
+//     a text with no such label whole, as one function, so a lift alone does not say the callee is
+//     here);
+//   - that text marks the callee `.weak`, which another definition may replace at link time;
 //   - the callee does not lift, inside or outside the input (a lift that fails proves nothing);
 //   - the callee's lift holds an `opaque` op: an instruction no frontend models is decoded only for
 //     which registers it names, and which of them it reads is a guess (PowerPC `mtmsr r3` and MIPS

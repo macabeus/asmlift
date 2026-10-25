@@ -7,7 +7,7 @@
 // and hands the core what it reads as that callee's body.
 //
 // A RANGE IS A DEFINITION THE LINK KEPT, OR NOTHING. A callee is read only where exactly one
-// symbol of its name is defined in a code section, and that symbol is a non-weak FUNC: a weak one
+// symbol of its name is defined, in a code section, and that symbol is a non-weak FUNC: a weak one
 // is the definition a link MAY keep, and the binding is exactly what an objdump listing does not
 // show (callee-body.ts KNOWN GAP). Its range is `[value, value + size)`; a FUNC of size 0 (hand
 // written assembly declares no `.size`: 77 of kleod's 562 FUNCs) runs to the next symbol of any
@@ -18,9 +18,8 @@
 // PowerPC, objfile.ts `readsObjdumpText`) it is disassembled with the target's own objdump, in the
 // section the symbol names (objfile.ts `disasmRange`: overlays put several sections at one address).
 // The agbcc frontend reads no objdump text, so a Thumb range of an ARM image is read for one shape
-// alone: an interworking veneer, a
-// word-aligned Thumb entry of `bx pc; nop` whose ARM word after it is an unconditional `b` (core
-// frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
+// alone: an interworking veneer, a word-aligned Thumb entry of `bx pc; nop` whose ARM word after it
+// is an unconditional `b` (core frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
 // the body, and the core scans them; any other Thumb range gives no body.
 //
 // A RANGE IS ONE BODY, WHATEVER SYMBOLS SIT INSIDE IT. objdump starts a `<name>:` header at every

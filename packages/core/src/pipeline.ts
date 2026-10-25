@@ -422,8 +422,9 @@ export function liftStamped(
   // a refusal about the return's width that the declared struct explains waits for the proof
   let deferred: ((unproved: string) => never) | undefined;
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
-  // what each callee whose body is in this input reads of its arguments, lifted from that body as a
-  // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
+  // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
+  // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
+  // no bodies
   const bound =
     liftOptions.calleeBodyBound ??
     bodyBoundsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals, calleeBodies);
@@ -485,8 +486,8 @@ const boundsRead = new WeakMap<
  *  callee lifted from the same input, or from its body in `calleeBodies`, under the same table, map
  *  and context, reading no bodies. A body from outside the input is lifted with none of the input's
  *  side table, which describes the input's own object, and with only the relocations it carries
- *  (`CalleeBody.relocs`). Kept across lifts of the same function under
- *  the same caller table, map, data, context and bodies (`boundsRead`). */
+ *  (`CalleeBody.relocs`). Kept across lifts of the same function under the same caller table,
+ *  map, data, context and bodies (`boundsRead`). */
 function bodyBoundsIn(
   name: string,
   asm: string,

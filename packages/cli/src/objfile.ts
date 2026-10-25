@@ -183,9 +183,10 @@ export function asmDataForObject(
 /** `objdump -d` text for `[start, stop)` of section `section` of a LINKED image
  *  (`tools.asmlift.elf`), in the target family's disassembler and flags: the text the frontend
  *  reads, as for an object. A linked image carries no relocations, so nothing in the text a
- *  relocation would name is named, save the calls cli elf-bodies.ts names (`callRelocationOf`). The section is named because an address
- *  range alone is no place in an image with overlays: mp3's `.minigame`, `.name_81` and
- *  `.shared_board` all hold code at 0x800d9f10, and objdump prints each section that does. */
+ *  relocation would name is named, save the calls cli elf-bodies.ts names (`callRelocationOf`). The
+ *  section is named because an address range alone is no place in an image with overlays: mp3's
+ *  `.minigame`, `.name_81` and `.shared_board` all hold code at 0x800d9f10, and objdump prints each
+ *  section that does. */
 export function disasmRange(
   elf: string,
   target: TargetDescription,
