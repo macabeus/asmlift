@@ -482,3 +482,22 @@ test('a tail the exit path also runs stays post-loop for the escape check of a `
   );
   expect(() => judged(direct)).toThrow(/post-loop value reads a pre-update loop variable/);
 });
+
+/** The same loop with a tail that reads nothing of the body: the plain `do-while` reading fails (the
+ *  trampoline is no `ret` target, and the tail it enters the exit path also runs), and so does
+ *  `while (1)` without a copy. The `do-while` reading that copies the tail into the arm is kept aside
+ *  (`copyingReadings`) and wins over `while (1)` with the copy, which would spell the latch's test as
+ *  `if (!(i < n)) break;`. */
+const DOWHILE_COPIES_TAIL = DOWHILE_TAIL_READS_BODY.replace(
+  'store %0, %5 {off=0, width=4}\n  ret %5',
+  'store %0, %1 {off=0, width=4}\n  ret %1',
+);
+
+test("a `do-while` whose arm needs the exit path's tail keeps its bottom test", () => {
+  const { src, agreement, shipped } = judged(DOWHILE_COPIES_TAIL);
+  expect(src).toMatch(/do \{[\s\S]*\} while \(v\d+ < a1\);/);
+  expect(src).not.toMatch(/while \(1\)/);
+  expect(src.match(/\*\(s32 \*\)a0 = a1;/g)).toHaveLength(2);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});

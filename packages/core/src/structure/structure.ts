@@ -3360,7 +3360,9 @@ export function structure(
     // to know which edges out of the body end an iteration rather than continue it.
     // An arm that copies a tail the exit path also runs (`exitTail`) is asked for only when the reading
     // fails without one, and a reading that needs it waits (`copyingReadings`) until `while (1)` has
-    // tried every exit without it (below).
+    // tried every exit without it (below): a `do-while` whose arm copies the tail keeps its bottom test
+    // (`a \`do-while\` whose arm needs the exit path's tail keeps its bottom test`), where `while (1)`
+    // with the copy would spell it `if (!(i < n)) break;`.
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
@@ -3416,7 +3418,8 @@ export function structure(
               body: nl.body,
               arms,
             });
-    if (plain === null && !guarded) {
+    // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
+    if (plain === null) {
       copyingReadings.set(h, commit);
     } else {
       commit();
