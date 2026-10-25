@@ -269,20 +269,22 @@ describe('classifyFrameUses', () => {
       expect([...uses.passedToWriter].sort()).toEqual([0, 4]);
       return Object.fromEntries(uses.escapeExtents);
     };
-    expect(escapes('memcpy', true)).toEqual({
+    // (each bounded entry carries its call too, which the split orders indexed accesses against)
+    expect(escapes('memcpy', true)).toMatchObject({
       0: [{ lo: 0, hi: 16, into: false }],
       4: [{ lo: 4, hi: 20, into: true }],
     });
-    expect(escapes('memcpy', false)).toEqual({ 0: [null], 4: [null] });
-    expect(escapes('g', true)).toEqual({ 0: [null], 4: [null] });
+    expect(escapes('memcpy', false)).toMatchObject({ 0: [null], 4: [null] });
+    expect(escapes('g', true)).toMatchObject({ 0: [null], 4: [null] });
   });
 
   test('records a runtime index apart from the accesses that type the object', () => {
     const i = value();
     const a = laddr(0);
     const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
-    const { uses } = classify([{ params: [i], ops: [a, at, load(at.results[0], 0, 1), ret()] }]);
-    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false }]);
+    const read = load(at.results[0], 0, 1);
+    const { uses } = classify([{ params: [i], ops: [a, at, read, ret()] }]);
+    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false, op: read }]);
     expect(uses.accesses.get(0)).toEqual([]);
   });
 });
@@ -684,6 +686,33 @@ describe('keepAsOneObject', () => {
       kept(whole, tells(d));
       expect(objectsOf(whole)).toEqual([[0, 8]]);
     }
+  });
+
+  // `memcpy(a, s, 4); a[i] = x; memcpy(b, .LC0, 4); return b[1];`: the index may land in `b`
+  // before b's copy fills it, and split, l3/constinit.ts moves that copy into b's initializer at
+  // entry — ahead of the store. So an index splits only after a copy into every other part.
+  test('keeps the one object where a runtime index comes before a copy into another part', () => {
+    const tells = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, disambiguatesFrameLocals: false },
+    };
+    const between = (indexFirst: boolean) => {
+      const [s, t, i, x] = [value(), value(), value(), value()];
+      const [a, b, n] = [laddr(0), laddr(4), konst(4)];
+      const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
+      const index = [at, store(at.results[0], x, 0, 1)];
+      const copyB = call('memcpy', b.results[0], t, n.results[0]);
+      const ops = [a, b, n, call('memcpy', a.results[0], s, n.results[0])];
+      ops.push(...(indexFirst ? [...index, copyB] : [copyB, ...index]), load(b.results[0], 1, 1), ret());
+      const blk = { params: [s, t, i, x], ops };
+      kept(blk, tells);
+      return objectsOf(blk);
+    };
+    expect(between(true)).toEqual([[0, 8]]);
+    expect(between(false)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
   });
 
   // the parts are declared in the order the compiler places address-taken arrays against their

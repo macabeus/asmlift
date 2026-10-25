@@ -18,7 +18,17 @@
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
 import { linearFactor } from '../ir/bits';
-import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
+import {
+  type Block,
+  type Op,
+  type Value,
+  byValueOperands,
+  calleeName,
+  dominators,
+  mkOp,
+  mkValue,
+  successorsOf,
+} from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import { blockCopyRoles } from '../proto';
@@ -1117,17 +1127,21 @@ interface FrameUses {
   /** the calls each object is passed to BY VALUE (`foldByValueArgs`), with the struct each passes */
   readonly byValueReads: ReadonlyMap<number, readonly { readonly op: Op; readonly type: IrType }[]>;
   readonly useCount: ReadonlyMap<number, number>;
-  readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
+  readonly indexed: ReadonlyMap<
+    number,
+    readonly { readonly width: number; readonly signed: boolean; readonly op: Op }[]
+  >;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
   /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
    *  literal-count block copy proves them (`boundedCopy`), `null` where nothing does, and `into`
-   *  where the copy WRITES them (the address is its destination, not its source). Only the split
-   *  of the one object reads this (`provenParts`); the escape windows keep the copy as an
-   *  unbounded writer, which is what puts that one object on offer at all (`chooseFrameModel`). */
+   *  where the copy WRITES them (the address is its destination, not its source), with the call
+   *  that makes it. Only the split of the one object reads this (`provenParts`); the escape windows
+   *  keep the copy as an unbounded writer, which is what puts that one object on offer at all
+   *  (`chooseFrameModel`). */
   readonly escapeExtents: ReadonlyMap<
     number,
-    readonly ({ readonly lo: number; readonly hi: number; readonly into: boolean } | null)[]
+    readonly ({ readonly lo: number; readonly hi: number; readonly into: boolean; readonly op: Op } | null)[]
   >;
   readonly fixed: readonly {
     readonly op: Op;
@@ -1238,7 +1252,7 @@ function classifyFrameUses({
   // The accesses through a runtime-indexed address, per object — kept apart from `accesses`,
   // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
   // `a`.
-  const indexed = new Map<number, { width: number; signed: boolean }[]>();
+  const indexed = new Map<number, { width: number; signed: boolean; op: Op }[]>();
   for (const off of objects.keys()) {
     accesses.set(off, []);
   }
@@ -1249,7 +1263,7 @@ function classifyFrameUses({
   // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
   // value, whose members are the struct's declared ones (`objectShapes`)
   const memberRefusals: [number, string][] = [];
-  const escapeExtents = new Map<number, ({ lo: number; hi: number; into: boolean } | null)[]>();
+  const escapeExtents = new Map<number, ({ lo: number; hi: number; into: boolean; op: Op } | null)[]>();
   // …and every value something reads, since a copy whose returned destination is read hands the
   // address on to a use nothing here follows
   const readValues = new Set<Value>(
@@ -1317,7 +1331,7 @@ function classifyFrameUses({
           escaped.add(off); // the address ESCAPES as a value — the point of the capability
           const copied = op.opcode === 'call' ? boundedCopy(op, idx, facts, readValues) : undefined;
           (escapeExtents.get(off) ?? escapeExtents.set(off, []).get(off)!).push(
-            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi, into: copied.into },
+            copied === undefined ? null : { lo: off + copied.lo, hi: off + copied.hi, into: copied.into, op },
           );
           const handedTo = op.opcode === 'store' ? facts.readsThrough(op) : [];
           const read = op.opcode === 'call' ? transferRead(op, idx, off, target, facts) : undefined;
@@ -1487,7 +1501,7 @@ function indexedAccess(
   {
     indexed,
     accessOps,
-  }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
+  }: { indexed: Map<number, { width: number; signed: boolean; op: Op }[]>; accessOps: Map<Op, FrameAccessOp> },
   object: FrameAccessOp,
   sum: Value,
   constOf: (v: Value) => number | undefined,
@@ -1525,7 +1539,7 @@ function indexedAccess(
                 'only a load or store at the indexed address is modelled',
             );
           }
-          got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+          got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true, op });
           accessOps.set(op, object);
         }
       }
@@ -2407,7 +2421,7 @@ function keepAsOneObject({
   // (`disambiguatesFrameLocals`).
   const parts =
     twoWidths === undefined && arrayOrder !== undefined && arrayAlignment !== undefined
-      ? provenParts({ from, to }, objects, uses, arrayAlignment, disambiguatesFrameLocals === false)
+      ? provenParts({ from, to }, irBlocks, objects, uses, arrayAlignment, disambiguatesFrameLocals === false)
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
@@ -2502,6 +2516,12 @@ function keepAsOneObject({
  *  the source's arrays: declared apart, the recompile then reads and writes every byte the one
  *  object would, an index that walks off its array included. A compiler that does tell them
  *  apart serves a stale value wherever the source's index crossed into the other array.
+ *  And only where every indexed access FOLLOWS a copy into each other part (`copiedBefore`), so
+ *  no byte an index may reach is filled after it. asmlift's own passes tell parts apart by name:
+ *  l3/constinit.ts folds a part's image copy into its initializer, which runs at entry, once
+ *  nothing before the copy mentions that part — and an index through its neighbour does not.
+ *  `memcpy(s, g, 64); s[i] = 7; memcpy(s + 64, .LC1, 64); return s[65];` returns the image's
+ *  byte at i = 65; split, the image is in place before the store and the read returns 7.
  *
  *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
  *  the rule above does not keep, an escape nothing bounds (a callee or a holder
@@ -2512,6 +2532,7 @@ function keepAsOneObject({
  *  them). An access straddling two runs chains them into one part by construction. */
 function provenParts(
   { from, to }: FrameRange,
+  irBlocks: readonly Block[],
   objects: ReadonlyMap<number, readonly Op[]>,
   uses: FrameUses,
   alignment: number,
@@ -2589,11 +2610,42 @@ function provenParts(
       merged.push({ ...p });
     }
   }
-  return merged.length > 1 &&
-    merged.every((p) => starts.has(p.from)) &&
-    [...uses.indexed.keys()].every((off) => merged.some((p) => p.from === off))
-    ? merged
-    : whole;
+  if (
+    merged.length < 2 ||
+    !merged.every((p) => starts.has(p.from)) ||
+    ![...uses.indexed.keys()].every((off) => merged.some((p) => p.from === off))
+  ) {
+    return whole;
+  }
+  const copiedBefore = precededBy(irBlocks);
+  const copiesAt = (lo: number): Op[] =>
+    [...uses.escapeExtents.values()].flat().flatMap((e) => (e?.into && e.lo === lo ? [e.op] : []));
+  for (const [off, accesses] of uses.indexed) {
+    for (const q of merged) {
+      if (q.from !== off && !accesses.every(({ op }) => copiesAt(q.from).some((c) => copiedBefore(c, op)))) {
+        return whole;
+      }
+    }
+  }
+  return merged;
+}
+
+/** Whether op `a` runs before op `b` on every path that reaches `b`: earlier in its block, or in a
+ *  block that dominates `b`'s. */
+function precededBy(irBlocks: readonly Block[]): (a: Op, b: Op) => boolean {
+  const dom = dominators({ blocks: irBlocks });
+  const at = new Map<Op, { blk: Block; i: number }>();
+  for (const blk of irBlocks) {
+    blk.ops.forEach((op, i) => at.set(op, { blk, i }));
+  }
+  return (a, b) => {
+    const pa = at.get(a);
+    const pb = at.get(b);
+    if (pa === undefined || pb === undefined) {
+      return false;
+    }
+    return pa.blk === pb.blk ? pa.i < pb.i : dom.get(pb.blk)?.has(pa.blk) === true;
+  };
 }
 
 /** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width

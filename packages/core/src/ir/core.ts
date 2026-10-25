@@ -484,7 +484,7 @@ export function reachForward(
 }
 
 /** Predecessor map for the whole function's CFG. */
-export function predecessors(fn: Fn): Map<Block, Block[]> {
+export function predecessors(fn: { readonly blocks: readonly Block[] }): Map<Block, Block[]> {
   const preds = new Map<Block, Block[]>();
   for (const b of fn.blocks) {
     preds.set(b, []);
@@ -503,7 +503,7 @@ export function predecessors(fn: Fn): Map<Block, Block[]> {
  *  `verify` needs it to check def-dominates-use, `ir/loops.ts` to tell a back-edge from a
  *  forward one, and `raise/latch.ts` to tell a latch from a preheader. */
 
-export function dominators(fn: Fn): Map<Block, Set<Block>> {
+export function dominators(fn: { readonly blocks: readonly Block[] }): Map<Block, Set<Block>> {
   const preds = predecessors(fn);
   const all = new Set(fn.blocks);
   const dom = new Map<Block, Set<Block>>();
