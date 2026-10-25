@@ -703,7 +703,7 @@ export interface TargetDescription {
     oneWordFrameIsTheCapturedObject?: boolean;
     // A frame address this function hands out — in an argument register at a call, or stored to
     // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
-    // word from there up is a call's outgoing argument. Its one reader is the outgoing-argument
+    // word from there up is a call's outgoing argument. Its first reader is the outgoing-argument
     // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
     // THERE. Absent ⇒ a handed-out frame address explains nothing.
     //
@@ -721,8 +721,9 @@ export interface TargetDescription {
     // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
     // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
     // reads the event whole-function, it only refuses or excuses a word no call takes
-    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
-    // where no block copy fits.
+    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence for any
+    // receiver, sound only where no block copy fits; the second reader below is flow-insensitive at
+    // any frame size, for the one receiver a block copy never is.
     //
     // Its SECOND reader is the Thumb frame model's [sp,#0] capture (`frontend/thumb.ts`, beside
     // `noCallTakesAStackWord`), which reads the universal whole-function at offset 0: where the

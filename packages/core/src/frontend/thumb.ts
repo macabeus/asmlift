@@ -3644,7 +3644,7 @@ function measureThumbFrame({
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   //
-  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // ONE DECISION, THREE LICENCES. This gate and the outgoing-argument `escape` event (fed below,
   // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
   // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
   // one escape anywhere and no frame word is any call's argument — which is sound only where no
@@ -3652,6 +3652,15 @@ function measureThumbFrame({
   // leaves, at any frame size; that field says why that survives a block copy. So what this gate
   // adds is a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
   // capture in an unreachable block proves nothing"), and every "not widened" above is about it.
+  //
+  // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below), which reads
+  // the same premise flow-insensitively AT ANY FRAME SIZE — but only for ONE receiver: the frame base
+  // handed as the hidden pointer of a callee DECLARED to return a struct through memory. The
+  // block-copy base that confines this gate to one word goes to `memcpy`, never to such a callee, so
+  // that escape cannot be the residue; what it proves is agbcc's static layout (a local at [sp,#0]
+  // only where no call takes a stack word — the field's comment cites the source and the probes),
+  // not that the receiver reads anything, so it needs no load the way `loadedWordBound` does.
+  // Any other receiver at [sp,#0] stays under this gate's one-word licence.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
