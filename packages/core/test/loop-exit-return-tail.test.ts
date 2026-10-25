@@ -470,17 +470,33 @@ const DOWHILE_TAIL_READS_BODY = `fn retbody {
   ret %5
 }`;
 
+/** What the escape check is a witness for: the loop lifts to C that agrees with the IR, or the check
+ *  declines it. The decline is not the outcome asked for — `while (1)` with the copy in the arm has a
+ *  right reading of `DOWHILE_TAIL_READS_BODY`, which a `do-while` committed before its escape check
+ *  throws has no way back to — so a later fallback that lifts it passes here too. */
+const liftsRightOrEscapeDeclines = (ir: string) => {
+  let lifted: ReturnType<typeof judged>;
+  try {
+    lifted = judged(ir);
+  } catch (error) {
+    expect(String(error)).toMatch(/post-loop value reads a pre-update loop variable/);
+    return;
+  }
+  expect(lifted.agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(lifted.shipped).toEqual({ judged: 300, disagree: 0 });
+};
+
 test('a tail the exit path also runs stays post-loop for the escape check of a `do-while`', () => {
   // written in the arm (`exitTail`) but owned by none, the tail is code the exit path runs after the
   // update, where `i + i` would be re-derived from the updated name: owning what `exitTail` admits
   // lifts it, and 255 of 300 seeds disagree
-  expect(() => judged(DOWHILE_TAIL_READS_BODY)).toThrow(/post-loop value reads a pre-update loop variable/);
+  liftsRightOrEscapeDeclines(DOWHILE_TAIL_READS_BODY);
   // the same check holds the plain reading's unowned `ret` target, the arm straight into the tail
   const direct = DOWHILE_TAIL_READS_BODY.replace('cond_br %6, ^bb6(), ^bb2()', 'cond_br %6, ^bb5(), ^bb2()').replace(
     '^bb6():\n  br ^bb5()\n',
     '',
   );
-  expect(() => judged(direct)).toThrow(/post-loop value reads a pre-update loop variable/);
+  liftsRightOrEscapeDeclines(direct);
 });
 
 /** The same loop with a tail that reads nothing of the body: the plain `do-while` reading fails (the
