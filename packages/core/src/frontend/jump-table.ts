@@ -389,7 +389,10 @@ export const scaledIndexIn =
  *  address, none of which a C expression spells. Run on the filled SSA, before `finish` collapses a
  *  join of an undefined value into its other argument: a marker some operand demands, directly or
  *  through the joins that carry it, declines. A `ret` operand demands nothing under a declared
- *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). A MIXED target's scaled
+ *  `void` return, which drops it (pipeline.ts `dropVoidReturnOperands`). A narrow reload's marker
+ *  (form `narrow`) is held to the drop itself, `dropsVoidReturn`: pipeline.ts drops the operand only
+ *  for a STATED void entry, and under the context's own `void` alone the lifted `ret` still reads
+ *  the register, so the marker would print as `return uninit_r0`. A MIXED target's scaled
  *  index is settled first ({@link unsettledScaledIndices}): one that does not stand is a marker,
  *  read or not. `fail` is the frontend's own refusal. Last, `calls` refuses a guessed arity's
  *  trailing pass-through where the function lifts only through this modelling: a parked ceiling that
@@ -403,6 +406,7 @@ export function refuseStaleIdiomReads(
   own: FnProto | undefined,
   fail: FrontendRefusal,
   calls: Pick<CallDeclarations, 'refuseDispatchUnlockedPassThrough'>,
+  dropsVoidReturn: boolean = declaresVoidReturn(own),
 ): void {
   if (stale.size === 0) {
     return;
@@ -419,27 +423,31 @@ export function refuseStaleIdiomReads(
     }
   }
   const unsettled = unsettledScaledIndices(irBlocks, stale, incoming, ssa);
-  const demanded = new Set<Value>();
-  const work: Value[] = [];
-  const demand = (v: Value) => {
-    if (!demanded.has(v)) {
-      demanded.add(v);
-      work.push(v);
+  // what the ops demand, a void return's operand aside; then what that operand alone demands
+  const demandedBy = (roots: (op: Op) => boolean): Set<Value> => {
+    const demanded = new Set<Value>();
+    const work: Value[] = [];
+    const demand = (v: Value) => {
+      if (!demanded.has(v)) {
+        demanded.add(v);
+        work.push(v);
+      }
+    };
+    irBlocks.forEach((blk) => blk.ops.filter(roots).forEach((op) => op.operands.forEach(demand)));
+    while (work.length > 0) {
+      (incoming.get(work.pop()!) ?? []).forEach(demand);
     }
+    return demanded;
   };
   const voidReturn = declaresVoidReturn(own);
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      if (!(op.opcode === 'ret' && voidReturn)) {
-        op.operands.forEach(demand);
-      }
-    }
-  }
-  while (work.length > 0) {
-    (incoming.get(work.pop()!) ?? []).forEach(demand);
-  }
+  const demanded = demandedBy((op) => !(op.opcode === 'ret' && voidReturn));
+  const keptRet =
+    voidReturn && !dropsVoidReturn && [...stale.values()].some((s) => s.kind === 'marker' && s.form === 'narrow')
+      ? demandedBy((op) => op.opcode === 'ret')
+      : new Set<Value>();
   const read = [...stale].flatMap(([v, s]) =>
-    demanded.has(v) && (s.kind === 'marker' || unsettled.has(v))
+    (demanded.has(v) || (s.kind === 'marker' && s.form === 'narrow' && keptRet.has(v))) &&
+    (s.kind === 'marker' || unsettled.has(v))
       ? [s.kind === 'marker' ? s : { reg: s.reg, form: 'elided' as const }]
       : [],
   )[0];

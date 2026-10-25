@@ -5894,6 +5894,15 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     for (const f of [{ params: ['u32'], returns: 'u64' }, { params: ['u32'] }]) {
       expect(() => ownLift(r1(''), f), JSON.stringify(f)).toThrow('disagree on width (4 vs 1)');
     }
+    // The context's own `void f(u32)` proves no dropped return: pipeline.ts drops a ret operand
+    // only for a stated entry, so the lifted `ret` still reads r0, and the r0 copy there stays the
+    // capture it was. Dropped, it printed `s32 f(s32 a0)` returning `uninit_r0`.
+    const contextLift = (asm: string) =>
+      decompile('f', asm, ARMV4T_AGBCC, {
+        prototypes: { mk: P.mk },
+        ownContextProto: { params: ['u32'], returnsVoid: true },
+      }).source;
+    expect(() => contextLift(r0)).toThrow('the captured address flows into `ret`');
   });
 
   // A call reads only what it is handed (thumb.ts `frameAddressReceivers`): a declared callee its
@@ -5957,21 +5966,27 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     const ops: Op[] = [];
     const stale = new Map<Value, StaleIdiomRead>();
     ops.push(mkOp('ret', { operands: [staleMarker(ops, 'r3', { reg: 'r3', form: 'narrow', parks: false }, stale)] }));
-    const refuse = () =>
+    const refuse = (own?: Prototypes[string], dropsVoidReturn?: boolean) => () =>
       refuseStaleIdiomReads(
         'f',
         [{ params: [], ops }],
         stale,
         { everyReachingDef: () => false },
-        undefined,
+        own,
         (m) => {
           throw new Error(m);
         },
         { refuseDispatchUnlockedPassThrough: () => {} },
+        dropsVoidReturn,
       );
-    expect(refuse).toThrow(
-      "cannot lift 'f': address-taken stack local — r3 is read past the narrow slot reload that read through it",
-    );
+    const READ =
+      "cannot lift 'f': address-taken stack local — r3 is read past the narrow slot reload that read through it";
+    expect(refuse()).toThrow(READ);
+    // a void own exempts the `ret` only where the pipeline drops its operand: a stated entry, not the
+    // context's own alone
+    const VOID = { params: [], returnsVoid: true };
+    expect(refuse(VOID, false)).toThrow(READ);
+    expect(refuse(VOID, true)).not.toThrow();
   });
 
   test('a register-offset or signed narrow load is no reload of the slot', () => {

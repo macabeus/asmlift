@@ -2642,6 +2642,7 @@ function liftOnce(
       throw new FrontendUnsupportedError(m);
     },
     fill.calls,
+    declaresVoidReturn(prototypes[name]),
   );
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
@@ -3428,6 +3429,7 @@ function measureThumbFrame({
   calls,
   oneObject,
   own,
+  dropsVoidReturn,
 }: {
   name: string;
   target: TargetDescription;
@@ -3436,6 +3438,10 @@ function measureThumbFrame({
   oneObject: FrameRange | undefined;
   /** the function's own declaration (`ownDeclarationOf`), read only where it `proves` */
   own: OwnDeclaration | undefined;
+  /** whether the lift's `ret` reads nothing: a STATED void entry (`prototypes[name]`), the one
+   *  pipeline.ts `raiseRecovered` drops ret operands for. The context's own entry, proving or not,
+   *  leaves the operand in place. */
+  dropsVoidReturn: boolean;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -3804,11 +3810,15 @@ function measureThumbFrame({
   // as `readsBeforeWrite` reads a call for the save analysis (every register but r12), kleod
   // sub_08016EEC keeps two copies live, in r3 and in r6.
   //
-  // A RETURN HANDS BACK WHAT THE OWN DECLARATION RETURNS. Where it proves a void return, a return
-  // reads neither r0 nor r1 (pipeline.ts `dropVoidReturnOperands`, the exemption
-  // `refuseStaleIdiomReads` makes for the marker), and where it proves a return no wider than a word,
-  // it reads r0 alone: `add r1, sp, #4 / ldrb r0, [r1] / … / pop {r0} / bx r0` in a `void f(u32)`
-  // leaves no read of r1. Undeclared, a return may hand back the pair r0:r1.
+  // A RETURN HANDS BACK WHAT THE OWN DECLARATION RETURNS. Where a STATED entry declares a void
+  // return, a return reads neither r0 nor r1 (pipeline.ts `dropVoidReturnOperands`, the exemption
+  // `refuseStaleIdiomReads` makes for the marker), and where the own declaration proves a return no
+  // wider than a word, it reads r0 alone: `add r1, sp, #4 / ldrb r0, [r1] / … / pop {r0} / bx r0` in
+  // a `void f(u32)` leaves no read of r1. Undeclared, a return may hand back the pair r0:r1. The void
+  // reading is the stated entry's alone because the drop is: under the context's `void f(u32)` the
+  // lifted `ret` still reads r0, and an r0 copy dropped there would print as `return uninit_r0`. The
+  // word reading needs no such care, as the lifted `ret` reads r1 only through a pair the asm builds
+  // (`wideReturn`), where the marker declines.
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
@@ -3817,8 +3827,7 @@ function measureThumbFrame({
   const narrowCallClobbers = [...calls.callClobbers, target.returnReg];
   const ownProven = own?.proves === true ? own.proto : undefined;
   const returnMayHand = (r: string): boolean =>
-    !declaresVoidReturn(ownProven) &&
-    !(r !== target.returnReg && (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32);
+    !dropsVoidReturn && !(r !== target.returnReg && (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32);
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
@@ -5599,6 +5608,7 @@ function thumbFillOf(
     calls,
     oneObject,
     own: ownDeclarationOf(name, prototypes, contextOwnProto),
+    dropsVoidReturn: declaresVoidReturn(prototypes[name]),
   });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
