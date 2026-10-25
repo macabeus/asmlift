@@ -18,7 +18,7 @@ import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import { type CalleeBodies, definesLabel } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { type OnGap, calleeBodyBoundsOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type OnGap, calleeBodiesAskedOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
@@ -790,25 +790,11 @@ export async function runCli(
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
     }
   }
-  // what each of those bodies bounds, as the lift reads it, for the note
-  const bodyBound =
-    calleeBodies === undefined
-      ? undefined
-      : calleeBodyBoundsOf(name, asm, unitTarget, {
-          prototypes,
-          asmData,
-          symbols,
-          contextGlobals,
-          ownContextProto,
-          calleeBodies,
-        });
-  const bounded = new Map(
-    Object.keys(calleeBodies ?? {}).flatMap((c) => {
-      const words = bodyBound?.(c);
-      return words === undefined ? [] : [[c, words] as const];
-    }),
-  );
-  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, bounded);
+  // A body is named in the note only where the lift ASKED it (core `DecompileResult.calleeBodiesAsked`):
+  // a call asks only where a gate questions a register the caller did not set up for it, so a body
+  // read off the ELF that no call asked decided nothing, and the note must not say it did.
+  const protoNote = (asked: Readonly<Record<string, number>>) =>
+    guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, new Map(Object.entries(asked)));
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>
     notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');
@@ -930,7 +916,16 @@ export async function runCli(
           phaseReport,
           stamp,
           protoNote:
-            protoNote +
+            protoNote(
+              calleeBodiesAskedOf(name, asm, unitTarget, {
+                prototypes,
+                asmData,
+                symbols,
+                contextGlobals,
+                ownContextProto,
+                calleeBodies,
+              }),
+            ) +
             ownArityNote(
               ownArityNotesOf(name, asm, unitTarget, {
                 prototypes,
@@ -992,7 +987,7 @@ export async function runCli(
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       walkedNote +
-      protoNote +
+      protoNote(result.calleeBodiesAsked) +
       ownArityNote(result.ownArityNotes);
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {

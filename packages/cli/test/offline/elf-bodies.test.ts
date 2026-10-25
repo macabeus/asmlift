@@ -253,15 +253,29 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     expect(await call(callee, true)).toBe(withElf);
     expect(await call(callee, false)).toBe(`return ${callee}(3, &gp);`);
   });
+  // the note names a body only where the lift asked it: a gate questioned a register the call left
+  // unset. `mov r0, #5; bl thunk_rnd` sets r0 up, so nothing asks, and the 5 stays an argument the
+  // body reads none of; nor does a callee with a parameter list nothing can lay out ask its body
+  const NOTE = 'each register the call left unset checked against what its body in tools.asmlift.elf reads: ';
   test('the [proto] note names a callee its ARM body bounds, and leaves the rest guessed', async () => {
     const r = await runCli([project(true, stored('thunk_rnd') + stored('thunk_br').replace(/f:/, 'g:'))]);
-    expect(r.stderr).toContain(
-      'guessed from the argument registers within what their bodies in tools.asmlift.elf read: thunk_rnd (at most 0 argument words)',
-    );
+    expect(r.stderr).toContain(`${NOTE}thunk_rnd (at most 0 argument words)`);
     const bare = await runCli([project(false, stored('thunk_rnd'))]);
     expect(bare.stderr).toContain('guessed from the argument registers: thunk_rnd —');
     const br = await runCli([project(true, stored('thunk_br'))]);
     expect(br.stderr).toContain('guessed from the argument registers: thunk_br —');
+  });
+  test('the [proto] note names no body the lift did not ask', async () => {
+    const set =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr0, #5\n\tbl\tthunk_rnd\n\tpop\t{r1}\n\tbx\tr1\n';
+    const r = await runCli([project(true, set)]);
+    expect(r.stdout).toContain('thunk_rnd(5)');
+    expect(r.stderr).toContain('guessed from the argument registers: thunk_rnd —');
+    expect(r.stderr).not.toContain(NOTE);
+    const typed = await runCli([project(true, stored('thunk_rnd')), '--proto', '{"thunk_rnd":{"params":["Weird"]}}']);
+    expect(typed.stdout).toContain('thunk_rnd(3, &gp)');
+    expect(typed.stderr).toContain('guessed from the argument registers: thunk_rnd —');
+    expect(typed.stderr).not.toContain(NOTE);
   });
   // `u8 thunk_rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = thunk_rnd(); … } }`
   // (synthetic:jt_rndst:agbcc with the callee behind a veneer, as kleod's thunk_GetRandomValue is):

@@ -161,6 +161,12 @@ export interface DecompileResult {
    *  conflicting types. Empty where no context entry was handed over, or where the lift stayed
    *  within it. */
   ownArityNotes: string[];
+  /** WHICH BODIES HANDED IN (`DecompileOptions.calleeBodies`) THE LIFT ASKED, and what each answered
+   *  (frontend/callee-body.ts): the argument words that callee's body reads at most. A call asks only
+   *  where a gate questions a register the caller did not set up for it, and only of a callee whose
+   *  entry states no parameter list (frontend/call-plan.ts `bodyWords`), so a body handed in that no
+   *  call asked, or that answered nothing, is not here. Empty where no bodies were handed in. */
+  calleeBodiesAsked: Record<string, number>;
 }
 
 export function decompile(
@@ -198,6 +204,7 @@ function runTower(
   const prototypes = prototypesFromSymbols(opts.symbols, own.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const ownArityNotes: string[] = [];
+  const bodiesAsked = new Map<string, number | undefined>();
   const fn = liftStamped(
     name,
     asm,
@@ -206,7 +213,7 @@ function runTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies },
+    { calleeBodies: opts.calleeBodies, bodiesAsked },
     own.ownContextProto,
     ownArityNotes,
   );
@@ -278,12 +285,28 @@ function runTower(
     assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     walkedNames,
     ownArityNotes,
+    calleeBodiesAsked: answeredBodies(bodiesAsked, opts.calleeBodies),
   };
 }
 
-/** What each callee's own body reads of its arguments at most (frontend/callee-body.ts), as a lift of
- *  `name` under `opts` reads it: the same bound, from the same table, for a driver that reports it. */
-export function calleeBodyBoundsOf(
+/** The bodies handed in that a lift asked and that answered (`DecompileResult.calleeBodiesAsked`). */
+function answeredBodies(
+  asked: ReadonlyMap<string, number | undefined>,
+  bodies: CalleeBodies | undefined,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [callee, words] of asked) {
+    if (words !== undefined && bodies !== undefined && Object.hasOwn(bodies, callee)) {
+      out[callee] = words;
+    }
+  }
+  return out;
+}
+
+/** The `calleeBodiesAsked` (`DecompileResult`) of one lift under `opts`, for a caller whose result
+ *  carries none — the ranked path, whose every candidate lifts as this one does. Empty where no
+ *  bodies were handed in, or where the lift fails: the run reports that failure itself. */
+export function calleeBodiesAskedOf(
   name: string,
   asm: string,
   target: TargetDescription,
@@ -291,22 +314,28 @@ export function calleeBodyBoundsOf(
     DecompileOptions,
     'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
   >,
-): CalleeBodyBound {
+): Record<string, number> {
+  if (opts.calleeBodies === undefined) {
+    return {};
+  }
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
-  const prototypes = prototypesFromSymbols(opts.symbols, own.prototypes ?? {});
-  const table = splitOwnContext(prototypes, name, own.ownContextProto).prototypes ?? {};
-  return bodyBoundsIn(
-    name,
-    asm,
-    target,
-    prototypes,
-    own.ownContextProto,
-    table,
-    opts.asmData,
-    opts.symbols,
-    opts.contextGlobals,
-    opts.calleeBodies,
-  );
+  const asked = new Map<string, number | undefined>();
+  try {
+    liftStamped(
+      name,
+      asm,
+      target,
+      prototypesFromSymbols(opts.symbols, own.prototypes ?? {}),
+      opts.asmData,
+      opts.symbols,
+      opts.contextGlobals,
+      { calleeBodies: opts.calleeBodies, bodiesAsked: asked },
+      own.ownContextProto,
+    );
+  } catch {
+    return {};
+  }
+  return answeredBodies(asked, opts.calleeBodies);
 }
 
 /** The `[own-arity]` notes (`DecompileResult.ownArityNotes`) of one lift under `opts`, for a caller
@@ -358,8 +387,12 @@ export function stampBehaviorsFor(
 }
 
 /** What `liftStamped` is handed besides the frontend's own options: the bodies of callees found
- *  outside the input, which only the callee-body bound reads (`bodyBoundsIn`). */
-export type StampedLiftOptions = LiftOptions & { calleeBodies?: CalleeBodies };
+ *  outside the input, which only the callee-body bound reads (`bodyBoundsIn`), and a record of each
+ *  callee whose bound a call asked, with its answer (`DecompileResult.calleeBodiesAsked`). */
+export type StampedLiftOptions = LiftOptions & {
+  calleeBodies?: CalleeBodies;
+  bodiesAsked?: Map<string, number | undefined>;
+};
 
 /** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
  *  `symbols` or `contextGlobals` declares volatile stamped `declared` (raise/declared-volatile.ts)
@@ -379,7 +412,7 @@ export function liftStamped(
   ownContext?: FnProto,
   notes?: string[],
 ): Fn {
-  const { calleeBodies, ...liftOptions } = stampedOptions ?? {};
+  const { calleeBodies, bodiesAsked, ...liftOptions } = stampedOptions ?? {};
   // Its callers split the table already; split again here, where every lift passes, so that no
   // frontend is handed a marked context entry to read as a stated, hard bound.
   const split = splitOwnContext(prototypes, name, ownContext);
@@ -391,9 +424,17 @@ export function liftStamped(
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   // what each callee whose body is in this input reads of its arguments, lifted from that body as a
   // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
-  const calleeBodyBound =
+  const bound =
     liftOptions.calleeBodyBound ??
     bodyBoundsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals, calleeBodies);
+  const calleeBodyBound: CalleeBodyBound =
+    bodiesAsked === undefined
+      ? bound
+      : (callee) => {
+          const words = bound(callee);
+          bodiesAsked.set(callee, words);
+          return words;
+        };
   const options = { ...liftOptions, calleeBodyBound };
   const fn = liftWithinContextBound(
     name,
@@ -1111,6 +1152,7 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     assumedSymbols: [],
     walkedNames: [],
     ownArityNotes: [],
+    calleeBodiesAsked: {},
   };
 }
 

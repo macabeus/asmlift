@@ -901,6 +901,8 @@ cli elf-bodies.ts):
   instruction, any branch or call or other pc write but the final `bx lr`, any lr write, any sp
   use, and any instruction it does not model. The final `bx lr` reads r0 where nothing wrote it,
   as a lifted return does. It answers only on a target whose `argRegs` are the registers it counts.
+- The `[proto]` note names a body only where the lift asked it (`DecompileResult.calleeBodiesAsked`),
+  that is, where a gate questioned a register the call left unset.
 
 That is how kleod's `thunk_GetRandomValue`, a veneer to an ARM body that reads none of its
 arguments, drops the leftover values a guess handed it (`thunk_GetRandomValue(30, v7, &gEntityInfo,

@@ -190,7 +190,7 @@ describe('guessedArityNote', () => {
   });
 
   // a callee whose body outside the input bounds what it reads is still guessed, within that bound
-  it('names a callee bounded by its body in tools.asmlift.elf on a line of its own', () => {
+  it('names a callee whose body in tools.asmlift.elf the lift asked on a line of its own', () => {
     const note = guessedArityNote(
       LBG,
       'LoadBGTilemapData',
@@ -202,8 +202,8 @@ describe('guessedArityNote', () => {
     );
     expect(note.split('\n')).toEqual([
       'asmlift: [proto] 1 callee(s) have no declared arity, guessed from the argument registers: DecompressAlloc — pass --proto \'{"DecompressAlloc":{"params":N}}\' if a guess is wrong',
-      'asmlift: [proto] 1 callee(s) have no declared arity, guessed from the argument registers within what their ' +
-        'bodies in tools.asmlift.elf read: thunk_HeapFree (at most 1 argument word) — pass --proto \'{"thunk_HeapFree":{"params":N}}\' if a guess is wrong',
+      'asmlift: [proto] 1 callee(s) have no declared arity, guessed from the argument registers, each register the ' +
+        'call left unset checked against what its body in tools.asmlift.elf reads: thunk_HeapFree (at most 1 argument word) — pass --proto \'{"thunk_HeapFree":{"params":N}}\' if a guess is wrong',
       '',
     ]);
   });
