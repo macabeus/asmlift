@@ -126,6 +126,13 @@ describe("a return is a return only through the caller's lr, read from the frame
       'bx r1',
     ],
     ['a `pop {pc}` of a local', '\tpush\t{lr}\n\tsub\tsp, #8\n\tmov\tr0, #5\n\tpop\t{pc}\n', 'pop {pc}'],
+    // lr itself, once written: a tail jump to g with every argument register live, not a return
+    [
+      'lr after `mov lr, r4`',
+      '\tpush\t{r4, lr}\n\tldr\tr4, .Lg\n\tmov\tlr, r4\n\tpop\t{r4}\n\tbx\tlr\n.Lg:\n\t.word\tg\n',
+      'bx lr',
+    ],
+    ["lr a `pop {lr}` filled from r4's word", '\tpush\t{r4, lr}\n\tpop\t{lr}\n\tadd\tsp, #4\n\tbx\tlr\n', 'bx lr'],
   ])('a return through %s declines', (_, body, bx) => {
     expect(() => dc('f', body)).toThrow(
       new RegExp(`indirect/computed jump '${bx}' is not a return through the caller's lr`),
@@ -944,6 +951,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(lift('push {r4, r5}; mov r4, r0; mov r5, r1; add r0, r4, r5; pop {r4}; pop {r5}; bx lr')().source).toBe(
         's32 f(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
       );
+    });
+
+    // The same holds of a scratch register, which no return hands back saved: a pop that fills one
+    // with another word is a copy the fill never makes, and read by name `push {r1}; pop {r0}`
+    // would lift `return a0` for a function returning a1. Only the return idiom, a `bx` through the
+    // register straight after, uses such a word, and as where to go rather than as a value.
+    test('…and fills a scratch register with another word only to return through it', () => {
+      const lift = (body: string) => () => decompile('f', `f:\n\t${body.split('; ').join('\n\t')}\n`, ARMV4T_AGBCC);
+      const copy = (pop: string, reg: string) =>
+        new RegExp(`'${pop}' loads a word that is not ${reg}'s own into ${reg}, which is then used as a value`);
+      expect(lift('push {r1}; pop {r0}; bx lr')).toThrow(copy('pop {r0}', 'r0'));
+      expect(lift('push {r1}; pop {r2}; mov r0, r2; bx lr')).toThrow(copy('pop {r2}', 'r2'));
+      // a word the function wrote before pushing it is no register's either: read by name, `g() + 1`
+      // where the machine returns 6
+      expect(lift('push {lr}; mov r1, #5; push {r1}; bl g; pop {r0}; add r0, #1; pop {r1}; bx r1')).toThrow(
+        copy('pop {r0}', 'r0'),
+      );
+      // …and one nothing reads after it is no copy anyone sees
+      expect(lift('push {r4, lr}; mov r0, #5; pop {r2, r3}; bx r3')().source).toContain('return 5;');
+      // the return idioms: lr's word into a scratch register, the `bx` straight after it or past
+      // the variadic save's release
+      expect(lift('push {lr}; bl g; pop {r1}; bx r1')().source).toContain('g();');
+      expect(lift('push {r0, r1, r2, r3}; push {lr}; bl g; pop {r3}; add sp, #0x10; bx r3')().source).toContain('g();');
     });
 
     // A word is a register's own only while the register held its entry value when it was pushed:

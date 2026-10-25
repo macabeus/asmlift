@@ -1309,10 +1309,10 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 30],
+    ['frontend/thumb.ts', 31],
     ['structure/structure.ts', 21],
     ['frontend/ppc.ts', 15],
-    ['frontend/mips.ts', 13],
+    ['frontend/mips.ts', 12],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/ssa.ts', 7],

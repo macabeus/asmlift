@@ -18,6 +18,33 @@ import type { TargetDescription } from '@asmlift/core/target';
 
 /** A label DEFINED in this asm — `foo:` at the start of a line. */
 const LABEL_DEF = /^\s*([A-Za-z_.$][\w.$]*)\s*:/;
+/** A directive or macro declaring a FUNCTION by name: `.type f, %function` (agbcc writes
+ *  `.type\t f,function`), pret's `thumb_func_start f`, `glabel f`, `.ent f`. `.thumb_func` and
+ *  `.func` mark the label that follows them instead (`MARKS_NEXT`). */
+const NAMES_FUNCTION =
+  /^\s*(?:\.type\s+([A-Za-z_.$][\w.$]*)\s*,\s*[%@#]?function\b|(?:non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start|glabel|\.ent)\s+([A-Za-z_.$][\w.$]*))/;
+const MARKS_NEXT = /^\s*\.(?:thumb_func|func)\b/;
+
+/** The labels this asm declares as functions. A `bl` to one is a call to another function in the
+ *  same file, never an intra-function long branch: agbcc's long branches go to the function's own
+ *  `.L` labels, and klonoa's disassembly marks no `_08…` label it branches to as a function. */
+function functionLabels(lines: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  let pending = false;
+  for (const line of lines) {
+    const named = NAMES_FUNCTION.exec(line);
+    if (named) {
+      out.add(named[1] ?? named[2]);
+    }
+    const label = LABEL_DEF.exec(line)?.[1];
+    if (pending && label !== undefined) {
+      out.add(label);
+      pending = false;
+    }
+    pending ||= MARKS_NEXT.test(line);
+  }
+  return out;
+}
 /** The prefixes that sit in front of a mnemonic in the two dump formats this CLI also accepts:
  *  a pret-style `/* addr bytes *​/` block comment, and objdump's `  8004b60:\tf7ff fffe \t`. */
 const PREFIX = /\/\*[\s\S]*?\*\//g;
@@ -35,15 +62,17 @@ const CALL = /^\s*(?:bl|blx|jal)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?
  *
  *  A `bl` whose target is a label defined in the same asm is NOT a call: agbcc emits `bl` as an
  *  intra-function long branch (one klonoa function is 28 KB of it), and treating those targets as
- *  callees would bury the real ones. The function's own name is dropped for the same reason —
- *  a recursive call needs no external arity. */
+ *  callees would bury the real ones — UNLESS the asm declares that label a function
+ *  (`functionLabels`): then it is a callee whose arity is guessed like any other's. The function's
+ *  own name is dropped too — a recursive call needs no external arity. */
 export function calleeNames(asm: string, self?: string, relocs?: readonly Reloc[]): string[] {
   const all = asm.split('\n');
   const [from, to] = ownRange(all, self);
+  const functions = functionLabels(all);
   const defined = new Set<string>();
   for (const line of all.slice(from, to)) {
     const m = LABEL_DEF.exec(line);
-    if (m) {
+    if (m && !functions.has(m[1])) {
       defined.add(m[1]);
     }
   }

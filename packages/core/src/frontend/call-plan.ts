@@ -49,6 +49,7 @@ import { type ContextGlobals, structNamed } from '../proto-context';
 import { floatSidesOf, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import { type TargetDescription, argRegisterHoles } from '../target';
+import { type CalleeBodyBound, asksCalleeBody } from './callee-body';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { type OwnDeclaration, ownDeclarationOf } from './frontend';
 import type { HighHalves } from './high-half';
@@ -260,14 +261,22 @@ export function callDeclarations(
   fail: FrontendRefusal,
   /** the function's own declaration, where one binds its body — asked as a call is lowered */
   ownDeclaration: () => OwnDeclaration | undefined = () => ownDeclarationOf(name, prototypes, undefined),
+  /** the argument words a callee's own body reads at most, where it is in the input
+   *  (frontend/callee-body.ts) — asked of a named call no declaration lays out */
+  calleeBodyBound?: CalleeBodyBound,
+  /** the callees taken at every argument register that may still hold its entry value
+   *  (`LiftOptions.entryReadCalls`) */
+  entryReadCalls?: ReadonlySet<string>,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // `refuseDispatchUnlockedPassThrough`'s two facts, gathered as each call is lowered: whether a
-  // dispatch's marker reached a guessed call's argument registers, and the first guessed count
-  // the bytes cannot tell from another, as its refusal
+  // dispatch's marker reached a guessed call's argument registers, and every guessed count the
+  // bytes cannot tell from another, in the order they were lowered, each with its refusal. `unread`
+  // says the register lies past what the callee's own body reads (frontend/callee-body.ts), which
+  // excuses it: asked only as the gate would refuse, so no body is lifted where it would not.
   let parkedInArgs = false;
-  let passThrough: { call: string; reg: string; why: string } | undefined;
+  const passThrough: Array<{ call: string; reg: string; why: string; unread: () => boolean }> = [];
   // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
   // the low half is the return register (already excluded) and `lower` writes the high one itself
   // from the callee's own result. The two arms of one rule: where the callee hands a register back,
@@ -914,9 +923,59 @@ export function callDeclarations(
     // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
     // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
     // the same answer the callee would get with no prototype at all.
-    const { widths, returns } = p;
     // the leading arguments a variadic declaration states, where the rest is guessed
-    const floor = widths === null ? variadicFloor(callee) : 0;
+    const floor = p.widths === null ? variadicFloor(callee) : 0;
+    // WHAT THE CALLEE'S OWN BODY READS, where it is in the input and nothing lays the call out
+    // (frontend/callee-body.ts): at most `bodyWords()` argument words. It answers only a refusal
+    // about registers at or past it — the gap rule's (`fallbackArgc`'s `bound`) and the dispatch
+    // pass-through gate's — since whether those are arguments changes nothing the callee computes.
+    // It never caps the count: it bounds what the callee READS, and a source call passes more
+    // whenever a parameter goes unused or a K&R call hands extra arguments, so a register the caller
+    // set up for the call stays an argument (`tick(5)` to a body that reads none, `rd1(a, b, 7)` to
+    // one that reads r0, whose 7 also proves r0 is the caller's own a passed on). Asked lazily, as a
+    // refusal would fire, so a call no gate questions lifts no body. Only a callee whose entry
+    // states no parameter list is asked: a list nothing here can size, or a variadic one, still
+    // states parameters the call must be handed (`refuseShortOfDeclared`).
+    const stated = callee === undefined ? undefined : known(prototypes, callee);
+    const unstated = callee !== undefined && p.widths === null && asksCalleeBody(stated);
+    let bodyMemo: { words: number | undefined } | undefined;
+    const bodyWords = (): number | undefined =>
+      unstated ? (bodyMemo ??= { words: calleeBodyBound?.(callee!) }).words : undefined;
+    // whether an op lowered so far reads `v`: the call being lowered is not one yet
+    const reads = (o: Op, v: Value): boolean => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v));
+    const readSoFar = (v: Value): boolean => ssa.irBlocks.some((b) => b.ops.some((o) => reads(o, v)));
+    // WHETHER WHAT ARGUMENT REGISTER `r` HOLDS WAS LEFT THERE BY A WRITE MADE FOR SOMETHING ELSE: a
+    // question about the register's last WRITE, not about its value. Where the call's own block wrote
+    // it, only a read since that write counts — `mov r0, #5; strh r0, [r1]; bl rnd` left the store's
+    // 5 in r0, while `add r1, r5, #0; bl un` is a copy made for this call, whose value an earlier call
+    // read (`g4(a, b, c, d); un(a, b, c, d)` forwards the same arguments twice, and agbcc and mwcc
+    // copy them back from callee-saved homes). A copy names no new value, so the value-level question
+    // cannot tell those two apart. KNOWN GAP: a register last written in another block is still asked
+    // of its value, which cuts such a copy made in a predecessor.
+    const leftover = (r: string): boolean => {
+      const at = ssa.lastWriteOp(r, bi);
+      const since = at === undefined ? undefined : ssa.irBlocks[bi].ops.slice(at);
+      return ssa.holdsValue(
+        r,
+        bi,
+        (v) => mayPass(v, r) && (since === undefined ? readSoFar(v) : since.some((o) => reads(o, v))),
+      );
+    };
+    const unreadByBody = (r: string): boolean => {
+      const words = bodyWords();
+      return words !== undefined && target.argRegs.indexOf(r) >= words;
+    };
+    // A CALL THE BODY BOUND READS AT EVERY INCOMING VALUE IT MAY BE HANDED (`entryReadCalls`): up to
+    // the highest argument register that some path into the call leaves unwritten since the entry.
+    // A register a call destroyed on every path holds nothing of this function's arguments, so a
+    // read of it could add nothing to what the body reads of them, and it is not taken: taken, a
+    // callee making two calls that nothing declares would refuse its own lift, and lose its bound.
+    const entryWords =
+      unstated && entryReadCalls?.has(callee!) === true
+        ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
+        : undefined;
+    const widths = entryWords !== undefined ? Array.from({ length: entryWords }, () => 32) : p.widths;
+    const { returns } = p;
     // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
     // that proof fails once the function is lifted
     const decided: Array<{ value: Value; refuse: () => void }> = [];
@@ -929,6 +988,8 @@ export function callDeclarations(
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: mayPass,
+            bound: bodyWords,
+            leftover,
             gap: { name, at: guess.at, fail },
             floor,
             parked: (r) =>
@@ -983,41 +1044,35 @@ export function callDeclarations(
           ssa.hasReachingDef(r, bi, (v) => site.parked?.(v, r) === true || site.scaledIndex?.(v, r) === true),
       );
       parkedInArgs ||= markedAt >= 0;
-      if (passThrough === undefined) {
-        const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
-        const last = target.argRegs[argc - 1];
-        // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
-        const since = new Set<number>([bi]);
-        const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
-        const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
-        // what an effect those blocks made so far reads
-        const effectReads = new Set(
-          [...since].flatMap((at) =>
-            ssa.irBlocks[at].ops.flatMap((op) =>
-              (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
-            ),
+      const call = typeof guess.at === 'number' ? `at 0x${guess.at.toString(16)}` : guess.at;
+      const last = target.argRegs[argc - 1];
+      // the blocks since the dispatch on the way to the call: a path stops at a `switch_br`'s block
+      const since = new Set<number>([bi]);
+      const dispatch = (at: number) => ssa.irBlocks[at].ops.some((op) => op.opcode === 'switch_br');
+      const lastWritten = argc <= floor || ssa.writtenOnEveryPath(last, bi, dispatch, (at) => since.add(at));
+      // what an effect those blocks made so far reads
+      const effectReads = new Set(
+        [...since].flatMap((at) =>
+          ssa.irBlocks[at].ops.flatMap((op) =>
+            (OPCODES[op.opcode as keyof typeof OPCODES] as OpSig | undefined)?.effects ? op.operands : [],
           ),
-        );
-        const stored = target.argRegs
-          .slice(floor, argc)
-          .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
-        const leftIncoming =
-          markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
-        if (!lastWritten) {
-          passThrough = {
-            call,
-            reg: last,
-            why: 'the last register the count takes, holds a value some path since the dispatch did not write',
-          };
-        } else if (stored !== undefined) {
-          passThrough = { call, reg: stored, why: 'which the count takes, holds a value an effect of its block uses' };
-        } else if (leftIncoming !== undefined) {
-          passThrough = {
-            call,
-            reg: leftIncoming,
-            why: "which the count leaves out below a dispatch's register, holds its incoming value",
-          };
-        }
+        ),
+      );
+      const stored = target.argRegs
+        .slice(floor, argc)
+        .find((r) => ssa.holdsValue(r, bi, (v) => mayPass(v, r) && effectReads.has(v)));
+      const leftIncoming =
+        markedAt < 0 ? undefined : target.argRegs.slice(argc, markedAt).find((r) => ssa.holdsEntryValue(r, bi));
+      // each the lowest register of its kind, so one past the body's bound has none below it
+      const open = (reg: string, why: string) => passThrough.push({ call, reg, why, unread: () => unreadByBody(reg) });
+      if (!lastWritten) {
+        open(last, 'the last register the count takes, holds a value some path since the dispatch did not write');
+      }
+      if (stored !== undefined) {
+        open(stored, 'which the count takes, holds a value an effect of its block uses');
+      }
+      if (leftIncoming !== undefined) {
+        open(leftIncoming, "which the count leaves out below a dispatch's register, holds its incoming value");
       }
       guess.refuse?.(argc);
       refuseShortOfDeclared(callee, argc);
@@ -1040,11 +1095,14 @@ export function callDeclarations(
     // count, or past the bound a call through an argument register sets, that a value reaches.
     // The gap refusal has already fired on any such register past a guess; past the bound, the
     // register leaves the call silently, and the frontend says whether it knows that one to be an
-    // argument all the same.
+    // argument all the same. A register at or past what the callee's own body reads is no
+    // argument of it whatever it holds, so it is not asked: read only where the count already asked
+    // the body, the one place the bound left a register out (`fallbackArgc`'s `bound`).
     if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+      const readTo = bodyMemo?.words ?? target.argRegs.length;
       site.leftOut(
         target.argRegs
-          .slice(argc)
+          .slice(argc, Math.max(argc, readTo))
           .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => mayPass(v, r))),
         target.argRegs.slice(0, argc),
       );
@@ -1230,10 +1288,11 @@ export function callDeclarations(
     lower,
     heldAtUndeclaredCall,
     refuseDispatchUnlockedPassThrough: (caseStateRead) => {
-      if ((parkedInArgs || caseStateRead) && passThrough !== undefined) {
+      const open = parkedInArgs || caseStateRead ? passThrough.find((p) => !p.unread()) : undefined;
+      if (open !== undefined) {
         fail(
-          `cannot lift '${name}': the call ${passThrough.call} has no prototype, and ${passThrough.reg}, ` +
-            `${passThrough.why}, in a function that lifts only through what a jump-table dispatch left in its ` +
+          `cannot lift '${name}': the call ${open.call} has no prototype, and ${open.reg}, ` +
+            `${open.why}, in a function that lifts only through what a jump-table dispatch left in its ` +
             'registers — the arity guessed without a prototype and another compile to the same bytes, so the ' +
             'argument count is not decidable',
         );

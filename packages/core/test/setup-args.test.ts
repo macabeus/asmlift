@@ -13,7 +13,7 @@ import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 const P = { f: { returnsVoid: true } };
-const fn = (body: string) => `f:\n\tpush\t{lr}\n${body}\tpop\t{r0}\n\tbx\tlr\n`;
+const fn = (body: string) => `f:\n\tpush\t{lr}\n${body}\tpop\t{r1}\n\tbx\tr1\n`;
 const cands = (body: string, pool = '') => enumerateCandidates('f', fn(body) + pool, ARMV4T_AGBCC, { prototypes: P });
 
 // kleod's GameUpdate: a global read for the guard, and a call on the guarded path that sets up

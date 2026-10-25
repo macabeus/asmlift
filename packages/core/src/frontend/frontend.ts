@@ -8,6 +8,7 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
+import type { CalleeBodyBound } from './callee-body';
 import type { AsmTextFormat } from './format';
 
 export interface Frontend {
@@ -90,4 +91,12 @@ export interface LiftOptions {
   /** Called when the lift met such a slot, whichever way it answered: what rank.ts asks before
    *  enumerating `/kept-slot` at all. */
   onTailSlot?: () => void;
+  /** The argument words a callee's own body in the same input can read at most
+   *  (frontend/callee-body.ts), asked of a call whose arity no declaration states. pipeline.ts
+   *  `liftStamped` supplies it on every lift; absent, nothing is bounded. */
+  calleeBodyBound?: CalleeBodyBound;
+  /** The callees whose calls are taken at every argument register that may still hold this
+   *  function's own incoming value at the call, where no declaration lays the call out: how
+   *  frontend/callee-body.ts lifts a callee's body to bound what it reads. Absent, none is. */
+  entryReadCalls?: ReadonlySet<string>;
 }

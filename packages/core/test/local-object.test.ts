@@ -484,7 +484,7 @@ test('an alignment wider than the elements is stated, one narrower declines', ()
   // a struct of bytes: `.align 2` over `.byte`s, handed to a callee
   const struct = thumbFn(
     ['\t.section .rodata', '\t.align\t2, 0', 't.3:', '\t.byte\t0x1', '\t.byte\t0x2', '\t.short\t0x3'].join('\n'),
-    '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r0}',
+    '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r2}',
     ['t.3'],
   );
   expect(decompile('f', struct, ARMV4T_AGBCC).source).toContain(
@@ -558,7 +558,7 @@ test('the loads settle the signedness, and the definition only where no load of 
   const read = thumbFn(bytes, '\tldr\tr1, .L3\n\tldrb\tr0, [r1]', ['t.3']);
   expect(decompile('f', read, ARMV4T_AGBCC).source).toContain('    static const u8 t[2] = { 0xff, 2 };\n');
   // handed on, never loaded: the negative directive is the only word on it
-  const handed = thumbFn(bytes, '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r0}', ['t.3']);
+  const handed = thumbFn(bytes, '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r2}', ['t.3']);
   expect(decompile('f', handed, ARMV4T_AGBCC).source).toContain('    static const s8 t[2] = { -1, 2 };\n');
   // agbcc over `static const struct { s16 x; u8 id; u8 pad; } t[2] = {{-1, 5, 0}, {-2, 6, 0}};
   // return t[i].id;` — the negative is field x's `.short`, and says nothing of the byte `id`
@@ -658,7 +658,7 @@ test('a global an initializer holds the address of, hidden by a static or a para
 });
 
 test('a static named like a function this one calls declines', () => {
-  const asm = thumbFn(rodata('g.3', [1, 2]), '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tg\n\tpop\t{r0}', ['g.3']);
+  const asm = thumbFn(rodata('g.3', [1, 2]), '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tg\n\tpop\t{r2}', ['g.3']);
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
     "names a function-scope static ('g.3') whose source name 'g' is also a function this one names",
   );
@@ -672,7 +672,7 @@ test('the IR names a static by its linker name, so a map global of its source na
     rodata('tide.3', [1, 2, 3, 4]),
     [
       '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tldr\tr0, .L3+0x4\n\tmov\tr1, #0x7\n\tstr\tr1, [r0]',
-      '\tsub\tr0, r0, #0x4\n\tmov\tr1, #0x3\n\tstr\tr1, [r0]\n\tpop\t{r0}',
+      '\tsub\tr0, r0, #0x4\n\tmov\tr1, #0x3\n\tstr\tr1, [r0]\n\tpop\t{r2}',
     ].join('\n'),
     ['tide.3', 'gBase+0x4'],
   );

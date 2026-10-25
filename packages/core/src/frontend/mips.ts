@@ -28,7 +28,7 @@ import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '..
 import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import { O32_REGISTER_ALIASES, type TargetDescription } from '../target';
-import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
+import { type AsmData, readJumpTable, readU32, textRelocAt } from './asmdata';
 import { callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
@@ -313,8 +313,31 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData, freed: Rea
           `0x${ins.addr.toString(16)}): '${ins.reloc.type} ${ins.reloc.sym}' and '${r.type} ${r.sym}'`,
       );
     }
-    ins.reloc = { type: r.type, sym: r.sym, addend: 0 };
+    ins.reloc = {
+      type: r.type,
+      sym: ins.mnemonic === 'jal' ? (textCallee(r.sym, r.offset, ad) ?? r.sym) : r.sym,
+      addend: 0,
+    };
   }
+}
+
+/** THE FUNCTION A `jal` RELOCATED AGAINST `.text` ITSELF ENTERS, by name. gcc 2.7.2 and KMC relocate a
+ *  call to a function of the same object against the section, not the function's symbol (`jal 0
+ *  <rnd>` over `R_MIPS_26 .text`), so the record names no callee. MIPS objects are REL: the jump's
+ *  26-bit field holds the addend, the target's offset in the section shifted right by two. The
+ *  symbol table names the function at that offset. Undefined, and the call keeps its section
+ *  callee, which refuses: where `.text`'s bytes or the word are not in the dump, or where no one
+ *  name, or more than one, starts there. Only a `jal`'s: gcc 2.7.2 and KMC relocate a `j` against
+ *  `.text` too, and a leaf loop whose head is the entry jumps to its own function's first word, so
+ *  naming that `j` would read the loop's back edge as a tail call. */
+function textCallee(sym: string, offset: number, ad: AsmData): string | undefined {
+  const text = ad.sections.get('.text');
+  if (sym !== '.text' || text === undefined || offset + 4 > text.length) {
+    return undefined;
+  }
+  const at = (readU32(text, offset, ad.bigEndian) & 0x03ffffff) * 4;
+  const names = [...ad.symbols].filter(([n, s]) => s.section === '.text' && s.value === at && /^[A-Za-z_]\w*$/.test(n));
+  return names.length === 1 ? names[0][0] : undefined;
 }
 
 interface MipsBlock {
@@ -1717,6 +1740,8 @@ function liftOnce(
     { pairs: false, memoryReturn: true, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
     () => ownDeclarationOf(name, prototypes, options.contextOwnProto),
+    options.calleeBodyBound,
+    options.entryReadCalls,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
   // in a function that has one refuses: which floating-point registers a callee reads, returns in

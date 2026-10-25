@@ -125,6 +125,11 @@ export interface SsaBuilder {
   /** Whether block `b` WROTE `reg` since its last call so far (since its start if it made none).
    *  Only a write counts: a read leaves a definition behind but is not one (`writeVar`). */
   writtenSinceCall(reg: string, b: number): boolean;
+  /** How many ops block `b` held when it last wrote `reg` so far, or `undefined` where `b` has not
+   *  written it: every op at or past that index came after the write. A copy (`add r1, r5, #0`) names
+   *  no new value, so this is how a question about one WRITE of a register is asked, where its value
+   *  was read before the write too (frontend/call-plan.ts `leftover`). */
+  lastWriteOp(reg: string, b: number): number | undefined;
   /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
    *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
    *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
@@ -744,6 +749,8 @@ export function makeSsaBuilder(
   // every ISA with no frontend code. Per block, because the consumer asks a per-EDGE question.
   const writeCount: number[] = irBlocks.map(() => 0);
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
+  // the ops block `b` held at each register's last write in it (`lastWriteOp`)
+  const lastWriteOp: Array<Map<string, number>> = irBlocks.map(() => new Map());
   const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
   fn.writeOrder = writeOrder;
 
@@ -935,6 +942,7 @@ export function makeSsaBuilder(
     decidedLocal[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
+    lastWriteOp[b].set(reg, irBlocks[b].ops.length);
   };
   const readVar = (reg: string, b: number): Value => {
     if (globalRegs.has(reg)) {
@@ -1655,6 +1663,7 @@ export function makeSsaBuilder(
     entryValue,
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
+    lastWriteOp: (reg: string, b: number) => lastWriteOp[b].get(reg),
     writtenOnEveryPath: (reg, b, stop, visit) => {
       // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
       // which a back edge brings, and a cycle adds no path the first visit did not judge
@@ -2108,6 +2117,27 @@ export function fallbackArgc(
      *  ahead of the idiom and `bl h; mov r0,#1; bl g` in a case lifts `g(1)` — the gap rule's
      *  `setUp` walks through calls and would count r3's copy, which `h` destroyed. */
     parked?: (reg: string) => boolean;
+    /** how many argument words the callee's own body reads at most (frontend/callee-body.ts),
+     *  asked only where it can answer something. It is an upper bound on what the callee READS, and
+     *  a source call passes more than that whenever a parameter goes unused or a K&R call hands
+     *  extra arguments — `setx(a + 1, 4)` to a body reading only its first, `rd1(a, b, 7)` to one
+     *  reading r0 — so it never caps what the caller set up for the call: such a register stays
+     *  counted, and a value above a gap still decides the gap below it (`decide`). It answers only
+     *  for registers at or past it, whose being arguments changes nothing the callee computes:
+     *    - one that is a `leftover` stops the count: a write something else read since, which the
+     *      call found there (`gH = 5; gA = rnd()` leaves the store's 5 in r0, which the guess took as
+     *      `rnd(5)`). A copy made for the call is none, whatever read its value before
+     *      (`g4(a, b, c, d); un(a, b, c, d)` copies a..d back from their homes for `un`);
+     *    - a gap starting there, under a register that is a leftover or that no proof makes an
+     *      argument, stops the count at the gap rather than refuse.
+     *  A gap BELOW the bound refuses as ever, whatever lies above it: the callee may read it, and it
+     *  holds this function's own incoming value or nothing. `gp = 3; gq = rd1(a)` leaves the store's 3
+     *  in r1 above r0's a, and stopping there would drop the `a` rd1 reads. */
+    bound?: () => number | undefined;
+    /** whether what reaches argument register `reg` was written for something other than the call,
+     *  which read it since, and left there (frontend/call-plan.ts `leftover`). Asked only at or past
+     *  `bound`. */
+    leftover?: (reg: string) => boolean;
   },
 ): number {
   const accept = opts.accept ?? (() => true);
@@ -2121,9 +2151,16 @@ export function fallbackArgc(
   const top = parkedAt < 0 ? argRegs.length : parkedAt;
   // the run of argument registers the caller set up from `from`, each past a declaration's
   // stated words asked whether it still holds the incoming value
+  // whether argument register `k` lies at or past what the callee's own body reads
+  const unread = (k: number): boolean => {
+    const b = opts.bound?.();
+    return b !== undefined && k >= b;
+  };
+  // past the bound, a leftover is no argument (`bound`): leftover first, the cheaper question
+  const notPassed = (k: number): boolean => opts.leftover?.(argRegs[k]) === true && unread(k);
   const run = (from: number): number => {
     let n = from;
-    while (n < top && setUp(n)) {
+    while (n < top && setUp(n) && !notPassed(n)) {
       // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
       // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
       // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
@@ -2151,7 +2188,13 @@ export function fallbackArgc(
     }
     return n;
   };
+  // where the run stopped at a register set up but no argument (`bound`), every one above is past
+  // the bound too, and the count ends there
+  const stoppedPast = (n: number): boolean => n < top && setUp(n);
   let n = run(floor);
+  if (stoppedPast(n)) {
+    return n;
+  }
   // A GAP BELOW A REGISTER THAT HOLDS A VALUE refuses, unless the frontend decides it: then the run
   // goes on through the gap and the register above it, and the next gap is asked the same.
   //
@@ -2176,14 +2219,29 @@ export function fallbackArgc(
             `value and ${argRegs[gapAt]} holds none — an argument register left at its incoming value and one ` +
             `the call does not pass look the same here, so the argument count is not decidable`,
         );
+      // the gap and the register above it are past what the callee reads: no argument it can tell
+      // from a missing one, so the count stops below the gap as at a gapless call
+      if (opts.leftover?.(argRegs[k]) === true && unread(gapAt)) {
+        return gapAt;
+      }
       if (!opts.decide?.(argRegs.slice(n, k), argRegs[k], refuse)) {
+        if (unread(gapAt)) {
+          return gapAt;
+        }
         refuse();
       }
       n = run(k);
+      const stopped = stoppedPast(n);
       for (let above = k + 1; above < n; above++) {
         if (!opts.decide?.([], argRegs[above], refuse)) {
+          if (unread(above)) {
+            return above;
+          }
           refuse();
         }
+      }
+      if (stopped) {
+        return n;
       }
       k = n;
     }

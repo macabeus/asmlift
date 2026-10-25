@@ -12543,23 +12543,30 @@ export const SYNTHETIC: SynthSpec[] = [
   // @gba-kit/debug-info's ELF symbol filter (dist/symbols.js) keeps a NOTYPE symbol only when it is
   // SHN_ABS — it drops 950 of kleod.elf's. Patched to SHN_ABS, the function lifts. A synthetic row has
   // no ELF, so this gap needs an ELF-fixture test in the CLI or a fix in that package, not a row.
-  //  15. jt_rndsame / jt_rndst / jt_rndvoid (sub_0801F648, sub_08021AD4, sub_0803F9EC, sub_08040F1C, and
-  //      sub_08042E64's first link). A call, in an elided jump table's case, to a callee the header
-  //      declares K&R (`u8 thunk_GetRandomValue();`, include/rand.h). agbcc compiles `rnd()` against
-  //      `u8 rnd();` and against `u8 rnd(void);` to the same bytes, so the caller cannot decide the
-  //      arity: the guess counts r0, which the dispatch or the case's stores left there, and #364's
-  //      dispatch pass-through gate (frontend/jump-table.ts `refuseDispatchUnlockedPassThrough`)
-  //      refuses it. Ablation-pinned: `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the four,
-  //      and sub_08042E64 then stops on item 18. The arity is knowable from the CALLEE: kleod's thunk is
-  //      `bx pc; nop; b GetRandomValue`, and GetRandomValue (ARM) writes r0-r3 before it reads any of
-  //      them; DWARF records nothing (it is asm-defined), and call sites prove nothing. jt_rndsame
-  //      carries the callee's body in the same asm and declines: the gap (stating `params: 0`, a
-  //      simulated fix, lifts it at 2/60). jt_rndst has no body and must STAY declined, the soundness
-  //      control. jt_rndvoid states `(void)` and lifts at 3/60, the control. kleod also needs the body
-  //      read from the project ELF and through the ARM veneer, which a synthetic row cannot carry (core
-  //      tests). agbcc only: ido7.1 and gcc2.7.2kmc lift the shape as `rnd(a0)` (the over-count no gate
-  //      catches) and mwcc_242_81 lifts `rnd()`. Item 21's sret2knr turns on the same K&R arity at a
-  //      different gate.
+  //  15. jt_rndsame / jt_rndst / jt_rndvoid / jt_rndfwd / jt_rndread (sub_0801F648, sub_08021AD4,
+  //      sub_0803F9EC, sub_08040F1C, and sub_08042E64's first link). A call, in an elided jump table's
+  //      case, to a callee the header declares K&R (`u8 thunk_GetRandomValue();`, include/rand.h).
+  //      agbcc compiles `rnd()` against `u8 rnd();` and against `u8 rnd(void);` to the same bytes, so
+  //      the caller cannot decide the arity: the guess counts r0, which the dispatch or the case's
+  //      stores left there, and #364's dispatch pass-through gate (frontend/call-plan.ts
+  //      `refuseDispatchUnlockedPassThrough`) refuses it. Ablation-pinned: `--proto
+  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the four, and sub_08042E64 then stops on item
+  //      18. The arity is knowable from the CALLEE: kleod's thunk is `bx pc; nop; b GetRandomValue`,
+  //      and GetRandomValue (ARM) writes r0-r3 before it reads any of them; DWARF records nothing (it
+  //      is asm-defined), and call sites prove nothing. jt_rndsame carries the callee's body in the
+  //      same asm: frontend/callee-body.ts bounds what that body reads (none), so the 5 case 0's store
+  //      left in r0 is a leftover past the bound and no argument, and the row lifts at 2/60 (stating
+  //      `params: 0` lifts it at 3/60, the control's number: the prelude then declares
+  //      `u8 rnd(void);` rather than K&R). jt_rndst has no body and must STAY declined on agbcc, the
+  //      soundness control; jt_rndfwd's body forwards to an undeclared `g` and jt_rndread's reads r0,
+  //      so neither bounds the guess below one and both stay declined on agbcc too (controls).
+  //      jt_rndvoid states `(void)`, the lifting control. On ido7.1 the guess takes `rnd(a0)`, which
+  //      the bytes cannot tell from `rnd()` and which MATCHes; with the body there it is `rnd()`.
+  //      gcc2.7.2kmc and gcc2.7.2 relocate a call to a function of the same object against `.text`,
+  //      which the MIPS frontend names by the function the jump's field enters; every row MATCHes
+  //      there, as on ido7.1. mwcc_242_81 inlines `rnd`. kleod also needs the body read from the
+  //      project ELF and through the ARM veneer, which a synthetic row cannot carry. Item 21's
+  //      sret2knr turns on the same K&R arity at a different gate, and carries no body.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
@@ -13383,7 +13390,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
     // no `dense`: the tag's floor reads the first definition in `src`, which is `rnd`'s
     features: [],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u8 gR;\nu8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndsame(s32 i);',
     proto: { jt_rndsame: { returnsVoid: true }, rnd: { returns: 'u8' } },
   },
@@ -13394,7 +13401,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
       '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
     features: ['dense'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'u8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndst(s32 i);',
     proto: { jt_rndst: { returnsVoid: true }, rnd: { returns: 'u8' } },
   },
@@ -13408,6 +13415,32 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'u8 rnd(void);\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndvoid(s32 i);',
     proto: { jt_rndvoid: { returnsVoid: true }, rnd: { params: 0, returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndfwd',
+    src:
+      'extern u8 g();\nu8 rnd() { return g(); }\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndfwd(s32 i)' +
+      '\n{\n    switch (i) {\n' +
+      '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
+    // no `dense`: the tag's floor reads the first definition in `src`, which is `rnd`'s
+    features: [],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'u8 g();\nu8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndfwd(s32 i);',
+    proto: { jt_rndfwd: { returnsVoid: true }, rnd: { returns: 'u8' }, g: { returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndread',
+    src:
+      'extern u8 gR;\nu8 rnd(x) s32 x; { return gR + x; }\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndread(s32 i)' +
+      '\n{\n    switch (i) {\n' +
+      '    case 0: gH = 5; gA = rnd(); break;\n    case 1: gB = 1; break;\n    case 2: gA = rnd() & 3; break;\n' +
+      '    case 3: gC = 7; break;\n    case 4: gB = rnd(); break;\n    case 5: gH = 9; break;\n    case 6: gC = rnd(); break;\n    }\n}',
+    // no `dense`: the tag's floor reads the first definition in `src`, which is `rnd`'s
+    features: [],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'extern u8 gR;\nu8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndread(s32 i);',
+    proto: { jt_rndread: { returnsVoid: true }, rnd: { returns: 'u8' } },
   },
   {
     sym: 'sretpuretail',

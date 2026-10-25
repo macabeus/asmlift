@@ -189,3 +189,18 @@ describe('guessedArityNote', () => {
     expect(note.endsWith('\n')).toBe(true);
   });
 });
+
+// A `.s` declares its functions, and a `bl` to one is a callee whose arity is guessed, not a long
+// branch, so the note names every callee whose body sits in the same file.
+describe('a callee the same `.s` defines', () => {
+  it('is named, and named in the note', () => {
+    const s =
+      '\t.globl\trnd\n\t.type\t rnd,function\n\t.thumb_func\nrnd:\n\tmov\tr0, #7\n\tbx\tlr\n' +
+      '\t.thumb_func\nrd1:\n\tadd\tr0, r0, #1\n\tbx\tlr\n' +
+      '\tthumb_func_start rd2\nrd2:\n\tadd\tr0, r0, r1\n\tbx\tlr\n' +
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n\tbl\trnd\n\tbl\trd1\n' +
+      '\tbl\trd2\n\tbl\t.L2\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(calleeNames(s, 'f')).toEqual(['rnd', 'rd1', 'rd2']);
+    expect(guessedArityNote(s, 'f', ARMV4T_AGBCC)).toContain('guessed from the argument registers: rnd, rd1, rd2 —');
+  });
+});
