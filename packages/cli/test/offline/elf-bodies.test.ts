@@ -17,6 +17,7 @@ import { afterAll, describe, expect, test } from 'vitest';
 
 import { calleeBodiesFromElf, functionRange, readElfImage } from '../../src/elf-bodies';
 import { type ObjInput, runCli } from '../../src/main';
+import { disasmRange } from '../../src/objfile';
 
 const fixture = (f: string) => join(import.meta.dirname, 'fixtures/elf-bodies', f);
 const MIPS_ELF = readFileSync(fixture('callees-mips.elf'));
@@ -40,7 +41,12 @@ const MIPS_RANGES: Record<string, string> = {
 describe('a function range in the linked ELF', () => {
   const image = readElfImage(MIPS_ELF)!;
   test('a sized FUNC is its size, and a size-0 one runs to the next symbol in its section', () => {
-    expect(functionRange(image, 'rd0')).toMatchObject({ start: 0x80000400, end: 0x80000408, thumb: false });
+    expect(functionRange(image, 'rd0')).toMatchObject({
+      start: 0x80000400,
+      end: 0x80000408,
+      section: '.text',
+      thumb: false,
+    });
     expect(functionRange(image, 'rd1')).toMatchObject({ start: 0x80000408, end: 0x80000410 });
     expect(functionRange(image, 'un0')).toMatchObject({ start: 0x80000418, end: 0x80000420 });
   });
@@ -56,13 +62,22 @@ describe('a function range in the linked ELF', () => {
       MIPS_ELF,
       ['rd0', 'wk', 'last', 'un0', 'absent'],
       TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description,
-      (_elf, _t, start, stop) => {
-        asked.push(`${start.toString(16)}-${stop.toString(16)}`);
+      (_elf, _t, section, start, stop) => {
+        asked.push(`${section} ${start.toString(16)}-${stop.toString(16)}`);
         return MIPS_RANGES[`${start.toString(16)}-${stop.toString(16)}`];
       },
     );
-    expect(asked).toEqual(['80000400-80000408', '80000418-80000420']);
+    expect(asked).toEqual(['.text 80000400-80000408', '.text 80000418-80000420']);
     expect(Object.keys(read.bodies)).toEqual(['rd0', 'un0']);
+  });
+  // overlays put several sections at one address (mp3's .minigame, .name_81 and .shared_board all
+  // hold code at 0x800d9f10), and objdump prints every one an address range alone selects
+  test('the objdump of a range is scoped to the section its symbol names', () => {
+    const bin = join(scratch(), 'objdump');
+    writeFileSync(bin, '#!/bin/sh\necho "$@"\n', { mode: 0o755 });
+    expect(
+      disasmRange('x.elf', TOOLCHAIN_TARGETS['ido7.1'].description, '.minigame', 0x800d9f10, 0x800d9f3c, bin),
+    ).toBe('-d --no-show-raw-insn -j .minigame --start-address=0x800d9f10 --stop-address=0x800d9f3c x.elf\n');
   });
   test('a range objdump cannot disassemble warns, and gives no body', () => {
     const read = calleeBodiesFromElf('x.elf', MIPS_ELF, ['rd0'], TOOLCHAIN_TARGETS['ido7.1'].description, () => {
@@ -93,7 +108,7 @@ describe('CLI: a guessed callee absent from the input is bounded by its body in 
       symbolCount: 0,
       bigEndian: true,
     }),
-    disasmRange: (_elf, _t, start, stop) => {
+    disasmRange: (_elf, _t, _section, start, stop) => {
       const text = MIPS_RANGES[`${start.toString(16)}-${stop.toString(16)}`];
       if (text === undefined) {
         throw new Error(`no recorded range ${start.toString(16)}-${stop.toString(16)}`);

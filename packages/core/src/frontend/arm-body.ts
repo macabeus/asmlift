@@ -19,6 +19,19 @@
 // instruction reads before any instruction writes it. That is an UPPER bound on what the body
 // reads of its arguments, as the callee-body bound is.
 
+/** The registers the scan counts argument words in, in order: the A32 procedure call standard's. */
+export const ARM_ARGUMENT_REGISTERS: readonly string[] = ['r0', 'r1', 'r2', 'r3'];
+
+/** Whether the scan's count is a count of `target`'s argument words: where the target passes its
+ *  arguments in the registers it counts, so the caller's argument word k is the register the scan
+ *  reads as k. Read off the ABI's `argRegs`, the datum the callers of the bound index it by. */
+export function scansArgumentsOf(target: { readonly argRegs: readonly string[] }): boolean {
+  return (
+    target.argRegs.length === ARM_ARGUMENT_REGISTERS.length &&
+    target.argRegs.every((r, k) => r === ARM_ARGUMENT_REGISTERS[k])
+  );
+}
+
 /** The argument words a straight-line ARM body reads at most, or undefined (see the header). `words`
  *  are its instruction words from the entry, in order. */
 export function armArgumentWords(words: readonly number[]): number | undefined {

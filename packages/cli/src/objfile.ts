@@ -57,8 +57,13 @@ interface ObjdumpChoice {
   remedy: string;
 }
 
+/** Whether the target's frontend reads objdump text: the agbcc one reads the compiler's own `.s`,
+ *  so neither an object nor a range of a linked image (cli elf-bodies.ts) is read through objdump
+ *  for it. */
+export const readsObjdumpText = (target: TargetDescription): boolean => target.compiler !== 'agbcc';
+
 function objdumpFor(target: TargetDescription, objdumpBin?: string): ObjdumpChoice {
-  if (target.compiler === 'agbcc') {
+  if (!readsObjdumpText(target)) {
     throw new ObjectInputUnsupportedError(
       `object-file input for target '${target.id}/${target.compiler}' is not supported — its frontend reads agbcc .s text, not objdump output`,
     );
@@ -142,7 +147,7 @@ export function asmDataForObject(
   objdumpBin?: string,
   sym?: string,
 ): AsmData | undefined {
-  if (target.compiler === 'agbcc') {
+  if (!readsObjdumpText(target)) {
     return undefined;
   }
   const choice = objdumpFor(target, objdumpBin);
@@ -150,13 +155,16 @@ export function asmDataForObject(
   return parseAsmData(dump, dump, dump, true);
 }
 
-/** `objdump -d` text for `[start, stop)` of a LINKED image (`tools.asmlift.elf`), in the target
- *  family's disassembler and flags: the text the frontend reads, as for an object. A linked image
- *  carries no relocations, so nothing in the text a relocation would name is named (cli
- *  elf-bodies.ts). */
+/** `objdump -d` text for `[start, stop)` of section `section` of a LINKED image
+ *  (`tools.asmlift.elf`), in the target family's disassembler and flags: the text the frontend
+ *  reads, as for an object. A linked image carries no relocations, so nothing in the text a
+ *  relocation would name is named (cli elf-bodies.ts). The section is named because an address
+ *  range alone is no place in an image with overlays: mp3's `.minigame`, `.name_81` and
+ *  `.shared_board` all hold code at 0x800d9f10, and objdump prints each section that does. */
 export function disasmRange(
   elf: string,
   target: TargetDescription,
+  section: string,
   start: number,
   stop: number,
   objdumpBin?: string,
@@ -165,7 +173,7 @@ export function disasmRange(
   const hex = (n: number) => `0x${n.toString(16)}`;
   return run(
     choice,
-    [...choice.disasmFlags, `--start-address=${hex(start)}`, `--stop-address=${hex(stop)}`],
+    [...choice.disasmFlags, '-j', section, `--start-address=${hex(start)}`, `--stop-address=${hex(stop)}`],
     elf,
     'disassemble a callee',
   );

@@ -3,7 +3,7 @@
 // its comment; GetRandomValue's are kleod's own (kleod-syms.elf, 0x080002a0..0x080002cc).
 import { describe, expect, test } from 'vitest';
 
-import { armArgumentWords, thumbToArmVeneerTarget } from '../src/frontend/arm-body';
+import { armArgumentWords, scansArgumentsOf, thumbToArmVeneerTarget } from '../src/frontend/arm-body';
 import { calleeBodyBounds } from '../src/frontend/callee-body';
 import { decompile, liftStamped } from '../src/pipeline';
 import { TOOLCHAIN_TARGETS } from '../src/target';
@@ -103,6 +103,13 @@ describe('an ARM body handed in bounds a Thumb callee', () => {
         }),
       { thk: { kind: 'arm', words } },
     )('thk');
+  // the scan counts r0-r3, which are argument words of a target that passes its arguments there
+  test('the scan answers for exactly the targets whose argument registers it counts', () => {
+    const answers = Object.entries(TOOLCHAIN_TARGETS)
+      .filter(([, tc]) => scansArgumentsOf(tc.description))
+      .map(([, tc]) => tc.description.id);
+    expect(new Set(answers)).toEqual(new Set(['armv4t']));
+  });
   test('as its scan reads it, and on no other target', () => {
     expect(bounds(GET_RANDOM_VALUE)).toBe(0);
     expect(bounds([0xe2800001, BX_LR])).toBe(1);

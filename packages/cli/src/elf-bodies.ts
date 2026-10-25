@@ -14,9 +14,11 @@
 // kind in its section, mapping symbols included, and with nothing after it in its section there is
 // no range and no body.
 //
-// What the range is read as is the target's: on MIPS and PowerPC it is disassembled with the
-// target's own objdump, the text the frontend reads (objfile.ts `disasmRange`). The agbcc frontend
-// reads no objdump text, so a Thumb range is read for one shape alone: an interworking veneer, a
+// What the range is read as is the target's: where the frontend reads objdump text (MIPS and
+// PowerPC, objfile.ts `readsObjdumpText`) it is disassembled with the target's own objdump, in the
+// section the symbol names (objfile.ts `disasmRange`: overlays put several sections at one address).
+// The agbcc frontend reads no objdump text, so a Thumb range of an ARM image is read for one shape
+// alone: an interworking veneer, a
 // word-aligned Thumb entry of `bx pc; nop` whose ARM word after it is an unconditional `b` (core
 // frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
 // the body, and the core scans them; any other Thumb range gives no body.
@@ -28,6 +30,7 @@ import type { CalleeBodies, CalleeBody } from '@asmlift/core/frontend/callee-bod
 import type { TargetDescription } from '@asmlift/core/target';
 
 import { type Elf32, isCode, readElf32 } from './elf-section';
+import { readsObjdumpText } from './objfile';
 
 const SHT_SYMTAB = 2;
 const SHN_UNDEF = 0;
@@ -84,6 +87,8 @@ export interface FunctionRange {
   start: number;
   end: number;
   shndx: number;
+  /** that section's name, which a disassembly of the range is scoped to */
+  section: string;
   thumb: boolean;
 }
 
@@ -139,12 +144,32 @@ export function functionRange(image: ElfImage, name: string): FunctionRange | un
   if (end === undefined || start < section.addr || end > section.addr + section.size || end - start > MAX_RANGE) {
     return undefined;
   }
-  return { start, end, shndx: f.shndx, thumb: image.arm && (f.value & 1) === 1 };
+  return {
+    start,
+    end,
+    shndx: f.shndx,
+    section: sectionName(image.elf, f.shndx),
+    thumb: image.arm && (f.value & 1) === 1,
+  };
 }
 
-/** Disassembles `[start, stop)` of the ELF at a path with the target's objdump, as the frontend
- *  reads it (objfile.ts `disasmRange`): the seam the offline tests fake. */
-export type RangeDisasm = (elfPath: string, target: TargetDescription, start: number, stop: number) => string;
+/** Section `index`'s name, out of the section-name string table. */
+function sectionName(elf: Elf32, index: number): string {
+  const names = elf.sections[elf.shstrndx];
+  const at = names === undefined ? -1 : names.offset + elf.sections[index].name;
+  const end = at < 0 ? -1 : elf.bytes.indexOf(0, at);
+  return at < 0 || end < 0 ? '' : elf.bytes.toString('latin1', at, end);
+}
+
+/** Disassembles `[start, stop)` of section `section` of the ELF at a path with the target's
+ *  objdump, as the frontend reads it (objfile.ts `disasmRange`): the seam the offline tests fake. */
+export type RangeDisasm = (
+  elfPath: string,
+  target: TargetDescription,
+  section: string,
+  start: number,
+  stop: number,
+) => string;
 
 /** What reading the ELF found: the bodies, and one line per callee whose range could not be read. */
 export interface ElfBodies {
@@ -171,15 +196,18 @@ export function calleeBodiesFromElf(
     if (range === undefined) {
       continue;
     }
-    if (target.id === 'armv4t') {
+    if (!readsObjdumpText(target)) {
       const words = range.thumb ? veneeredArmWords(image, range) : undefined;
       if (words !== undefined) {
         bodies[callee] = { kind: 'arm', words };
       }
       continue;
     }
+    if (range.section === '') {
+      continue;
+    }
     try {
-      bodies[callee] = { kind: 'listing', text: disasm(elfPath, target, range.start, range.end) };
+      bodies[callee] = { kind: 'listing', text: disasm(elfPath, target, range.section, range.start, range.end) };
     } catch (e) {
       warnings.push(
         `asmlift: warning: cannot disassemble ${callee} out of tools.asmlift.elf (${e instanceof Error ? e.message : e}) — its arity stays guessed\n`,

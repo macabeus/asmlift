@@ -783,7 +783,8 @@ export async function runCli(
         readFileSync(elfPath),
         outside,
         unitTarget,
-        objInput?.disasmRange ?? ((elf, t, start, stop) => disasmRange(elf, t, start, stop, toolCfg?.objdump)),
+        objInput?.disasmRange ??
+          ((elf, t, section, start, stop) => disasmRange(elf, t, section, start, stop, toolCfg?.objdump)),
       );
       warn += read.warnings.join('');
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;

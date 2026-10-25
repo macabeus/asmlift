@@ -45,7 +45,8 @@
 // one the link keeps (cli elf-bodies.ts reads the binding off the linked ELF's symbol table). An ARM
 // body behind a Thumb veneer is not lifted at all: a straight-line scan of its words reads which
 // argument registers it reads before writing them, and answers nothing for any other shape
-// (frontend/arm-body.ts), on a Thumb target alone.
+// (frontend/arm-body.ts), and only on a target whose argument registers are the ones that scan
+// counts (`scansArgumentsOf`, read off the ABI's `argRegs`).
 // A disassembly of a linked ELF carries no relocations, and the MIPS and PowerPC frontends name a
 // callee only by its relocation, so such a body that makes any call does not lift and proves nothing.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
@@ -62,7 +63,7 @@ import {
 } from '../proto';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
-import { armArgumentWords } from './arm-body';
+import { armArgumentWords, scansArgumentsOf } from './arm-body';
 
 /** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
  *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
@@ -164,7 +165,7 @@ function bodyBound(
   }
   const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
   if (body?.kind === 'arm') {
-    return target.id === 'armv4t' ? armArgumentWords(body.words) : undefined;
+    return scansArgumentsOf(target) ? armArgumentWords(body.words) : undefined;
   }
   if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
     return undefined;
