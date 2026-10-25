@@ -554,24 +554,6 @@ export interface TargetDescription {
     // 12, 8, 8, 20, 4 (4); gcc2.7.2 and gcc2.7.2kmc a@16 and b@24, 32, 24, 24, 40, 24 (8:
     // BIGGEST_ALIGNMENT on MIPS, for a BLKmode local); ido7.1 b@24 and a@36, 36, 40, 32, 44, 44 (4).
     addressTakenArrayAlignment?: 4 | 8;
-    // Does this compiler treat two DISTINCT address-taken frame locals as never aliasing — keep a
-    // value read from one in a register across a store through a runtime index into the other, or
-    // drop a store to one it proves dead? Read by the same split (frame-objects.ts `provenParts`):
-    // where it does NOT, an index into one of the source's arrays may stay in the part it was
-    // based in, because the recompile reads and writes every byte the one object would, an index
-    // that walks off its array included. Where it does, that index may have crossed into another
-    // array in the source, and declared apart the recompile serves a stale value. Absent REFUSES:
-    // an index keeps the object whole.
-    //
-    // MEASURED on four shapes, each as `u8 a[64]; u8 b[64];` and as one `u8 s[128]`, an index into
-    // one between two accesses of the other (`corpus/frame-local-alias.txt`, read by
-    // frame-local-alias.test.ts): gcc2.7.2 and gcc2.7.2kmc compile the pair byte-identical; agbcc
-    // makes the same NUMBER of loads and stores (both bases are ADDRESS(sp), alias.c:1389-1394, and
-    // equal bases tell nothing, alias.c:789-790) but not the same object, since the split pair
-    // allocates registers differently (p1: `push {r4, r5, lr}`, the one object `{r4, lr}`), so
-    // agbcc's half of the claim is the count and the alias.c reading, not byte identity; ido7.1
-    // loads less in all four split and drops a store.
-    disambiguatesFrameLocals?: boolean;
     // Does this compiler's C front end take a DESIGNATED array element in an initializer —
     // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
     // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
@@ -1394,7 +1376,6 @@ export const ARMV4T_AGBCC: TargetDescription = {
     spillSlotOrder: 'ascending',
     addressTakenArrayOrder: 'ascending', // MEASURED, the probe at the field
     addressTakenArrayAlignment: 4, // MEASURED, the probe at the field
-    disambiguatesFrameLocals: false, // MEASURED, the probe at the field
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
     stagesOutgoingArgsInFrame: true,
@@ -1571,7 +1552,6 @@ export const MIPS_IDO: TargetDescription = {
     spillSlotOrder: 'unknown',
     addressTakenArrayOrder: 'descending', // MEASURED, the probe at the field
     addressTakenArrayAlignment: 4, // MEASURED, the probe at the field
-    disambiguatesFrameLocals: true, // MEASURED, the probe at the field
     // MEASURED, the probe at the field: the local ends at the frame top, above `ra` and the spills.
     o32LocalArea: 'above-saved-registers',
     // MEASURED off the same probe (`twice`, `owns`): O32's outgoing area is the frame bottom, an
@@ -1733,7 +1713,6 @@ export const MIPS_GCC: TargetDescription = {
     spillSlotOrder: 'unknown',
     addressTakenArrayOrder: 'ascending', // MEASURED on both toolchains, the probe at the field
     addressTakenArrayAlignment: 8, // MEASURED on both toolchains, the probe at the field
-    disambiguatesFrameLocals: false, // MEASURED on both toolchains, the probe at the field
     // MEASURED on BOTH toolchains this description serves, the probe at the field: identical
     // layouts, the local right above the 8-aligned outgoing area and under the saves.
     o32LocalArea: 'above-outgoing-area',

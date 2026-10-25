@@ -269,22 +269,20 @@ describe('classifyFrameUses', () => {
       expect([...uses.passedToWriter].sort()).toEqual([0, 4]);
       return Object.fromEntries(uses.escapeExtents);
     };
-    // (each bounded entry carries its call too, which the split orders indexed accesses against)
-    expect(escapes('memcpy', true)).toMatchObject({
+    expect(escapes('memcpy', true)).toEqual({
       0: [{ lo: 0, hi: 16, into: false }],
       4: [{ lo: 4, hi: 20, into: true }],
     });
-    expect(escapes('memcpy', false)).toMatchObject({ 0: [null], 4: [null] });
-    expect(escapes('g', true)).toMatchObject({ 0: [null], 4: [null] });
+    expect(escapes('memcpy', false)).toEqual({ 0: [null], 4: [null] });
+    expect(escapes('g', true)).toEqual({ 0: [null], 4: [null] });
   });
 
   test('records a runtime index apart from the accesses that type the object', () => {
     const i = value();
     const a = laddr(0);
     const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
-    const read = load(at.results[0], 0, 1);
-    const { uses } = classify([{ params: [i], ops: [a, at, read, ret()] }]);
-    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false, op: read }]);
+    const { uses } = classify([{ params: [i], ops: [a, at, load(at.results[0], 0, 1), ret()] }]);
+    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false }]);
     expect(uses.accesses.get(0)).toEqual([]);
   });
 });
@@ -655,7 +653,16 @@ describe('keepAsOneObject', () => {
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
     // the copies chain: the first one's last two bytes are the second's first two
     expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
-    // a runtime index based in the middle of the lower part: nothing says which array it reads
+    // a runtime index into the lower part may reach the upper one — based at the lower copy's own
+    // destination too: declared apart, the C says the index cannot reach `b`, where the target's
+    // one object lets it, and what the recompile then reads is whatever its alias analysis decides
+    // (gcc 2.7.2 keeps a word of `b` in a register across `((s32 *)a)[i] = v`)
+    const indexed = copies([4, 4], (a, b, i) => {
+      const at = mkOp('add', { operands: [a, i], results: [value()] });
+      return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
+    });
+    expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // …and based in the middle of it
     const midIndexed = copies([4, 4], (a, b, i) => {
       const mid = laddr(2);
       const at = mkOp('add', { operands: [mid.results[0], i], results: [value()] });
@@ -682,62 +689,6 @@ describe('keepAsOneObject', () => {
       ops: [a, b, store(a.results[0], v, 0, 4), store(b.results[0], v, 0, 4), load(a.results[0], 1, 1), ret()],
     };
     expect(objectsOf(withKept(words))).toEqual([[0, 8]]);
-  });
-
-  // `memcpy(a, s, 4); memcpy(b, t, 4); return a[i] + b[1];`: an index based at a copy's
-  // destination stays in that part only where the compiler does not tell two frame locals apart —
-  // there the recompile reads the bytes the one object would, an index that walks off `a` included
-  test('keeps a runtime index in the part it is based at only where the compiler does not tell locals apart', () => {
-    const indexed = () =>
-      copies([4, 4], (a, b, i) => {
-        const at = mkOp('add', { operands: [a, i], results: [value()] });
-        return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
-      });
-    const tells = (d: boolean | undefined) => ({
-      ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, disambiguatesFrameLocals: d },
-    });
-    const split = indexed();
-    kept(split, tells(false));
-    expect(objectsOf(split)).toEqual([
-      [0, 4],
-      [4, 4],
-    ]);
-    // the indexed load is rebased onto the lower part's own object
-    const at = split.ops.find((op) => op.opcode === 'add')!;
-    expect(at.operands[0]).toBe(split.ops[0].results[0]);
-    for (const d of [true, undefined]) {
-      const whole = indexed();
-      kept(whole, tells(d));
-      expect(objectsOf(whole)).toEqual([[0, 8]]);
-    }
-  });
-
-  // `memcpy(a, s, 4); a[i] = x; memcpy(b, .LC0, 4); return b[1];`: the index may land in `b`
-  // before b's copy fills it, and split, l3/constinit.ts moves that copy into b's initializer at
-  // entry — ahead of the store. So an index splits only after a copy into every other part.
-  test('keeps the one object where a runtime index comes before a copy into another part', () => {
-    const tells = {
-      ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, disambiguatesFrameLocals: false },
-    };
-    const between = (indexFirst: boolean) => {
-      const [s, t, i, x] = [value(), value(), value(), value()];
-      const [a, b, n] = [laddr(0), laddr(4), konst(4)];
-      const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
-      const index = [at, store(at.results[0], x, 0, 1)];
-      const copyB = call('memcpy', b.results[0], t, n.results[0]);
-      const ops = [a, b, n, call('memcpy', a.results[0], s, n.results[0])];
-      ops.push(...(indexFirst ? [...index, copyB] : [copyB, ...index]), load(b.results[0], 1, 1), ret());
-      const blk = { params: [s, t, i, x], ops };
-      kept(blk, tells);
-      return objectsOf(blk);
-    };
-    expect(between(true)).toEqual([[0, 8]]);
-    expect(between(false)).toEqual([
-      [0, 4],
-      [4, 4],
-    ]);
   });
 
   // the parts are declared in the order the compiler places address-taken arrays against their
