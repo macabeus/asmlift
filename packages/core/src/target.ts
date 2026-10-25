@@ -722,8 +722,7 @@ export interface TargetDescription {
     // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
     // reads the event whole-function, it only refuses or excuses a word no call takes
     // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence for any
-    // receiver, sound only where no block copy fits; the second reader below is flow-insensitive at
-    // any frame size, for the one receiver a block copy never is.
+    // receiver, sound only where no block copy fits.
     //
     // Its SECOND reader is the Thumb frame model's [sp,#0] capture (`frontend/thumb.ts`, beside
     // `noCallTakesAStackWord`), which reads the universal whole-function at offset 0: where the

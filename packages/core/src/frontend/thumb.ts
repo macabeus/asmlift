@@ -3653,14 +3653,9 @@ function measureThumbFrame({
   // adds is a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
   // capture in an unreachable block proves nothing"), and every "not widened" above is about it.
   //
-  // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below), which reads
-  // the same premise flow-insensitively AT ANY FRAME SIZE — but only for ONE receiver: the frame base
-  // handed as the hidden pointer of a callee DECLARED to return a struct through memory. The
-  // block-copy base that confines this gate to one word goes to `memcpy`, never to such a callee, so
-  // that escape cannot be the residue; what it proves is agbcc's static layout (a local at [sp,#0]
-  // only where no call takes a stack word — the field's comment cites the source and the probes),
-  // not that the receiver reads anything, so it needs no load the way `loadedWordBound` does.
-  // Any other receiver at [sp,#0] stays under this gate's one-word licence.
+  // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
+  // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
+  // struct through memory, which a block copy's base never is (why: the field's comment).
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3717,10 +3712,7 @@ function measureThumbFrame({
   // return a struct through memory it is that struct's storage: two struct-return temps,
   // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
   // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out —
-  // except where a handed-out frame address names a local
-  // (`compilerBehaviors.escapedFrameAddressNamesALocal`): the return storage at offset 0 is then
-  // itself the proof that no word of the frame is an outgoing argument, whatever the calls are
-  // (sret2knr: `u8 rnd();` beside the two temps).
+  // unless `compilerBehaviors.escapedFrameAddressNamesALocal` holds (its second reader).
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
       if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
