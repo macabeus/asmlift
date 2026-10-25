@@ -17,7 +17,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
-import { calleeBodiesFromElf, functionRange, readElfImage } from '../../src/elf-bodies';
+import {
+  calleeBodiesFromElf,
+  elfBodyCallees,
+  elfBodyCandidates,
+  functionRange,
+  readElfImage,
+} from '../../src/elf-bodies';
 import { type ObjInput, runCli } from '../../src/main';
 import { disasmRange } from '../../src/objfile';
 
@@ -331,6 +337,28 @@ describe('PowerPC: a body read off the ELF names its calls in the listing, as `o
 // thunk_br/_cond/_call one that branches, executes conditionally or calls, thunk_id one that returns
 // r0 as the caller left it; thunk_wk is weak and `plain` is a Thumb function that is no veneer. No
 // objdump is run on this path.
+// The one rule the CLI and the benchmark harness both read for which bodies a lift is handed: every
+// callee it guesses that the input does not define, none in a REL module; and the superset a reader
+// freezing bodies ahead of a lift reads, which no declaration narrows.
+describe('which callees a lift is handed a body for', () => {
+  const t = TOOLCHAIN_TARGETS.agbcc.description;
+  const asm =
+    '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tbl\tguessed\n\tbl\tdeclared\n\tbl\tinside\n' +
+    '\tpop\t{r0}\n\tbx\tr0\n\t.thumb_func\ninside:\n\tbx\tlr\n';
+  test('a guessed callee the input does not define, and no other', () => {
+    expect(elfBodyCallees(asm, 'f', t, { declared: { params: 1 } }, undefined, undefined, undefined)).toEqual([
+      'guessed',
+    ]);
+    expect(elfBodyCallees(asm, 'f', t, undefined, undefined, undefined, undefined)).toEqual(['guessed', 'declared']);
+  });
+  test('none for a function in a REL module', () => {
+    expect(elfBodyCallees(asm, 'f', t, undefined, undefined, undefined, 'm416Dll')).toEqual([]);
+  });
+  test('every callee the input does not define, whatever is declared', () => {
+    expect(elfBodyCandidates(asm, 'f', undefined)).toEqual(['guessed', 'declared']);
+  });
+});
+
 describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by the ARM body it enters', () => {
   const ARM_ELF = readFileSync(fixture('veneers-arm.elf'));
   const project = (elf: boolean, asm: string) => {

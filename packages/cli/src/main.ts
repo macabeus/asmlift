@@ -16,7 +16,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
-import { type CalleeBodies, definesLabel } from '@asmlift/core/frontend/callee-body';
+import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, calleeBodiesAskedOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
@@ -36,13 +36,13 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { guessedArityCallees, guessedArityNote } from './callees';
+import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
-import { type RangeDisasm, calleeBodiesFromElf } from './elf-bodies';
+import { type RangeDisasm, calleeBodiesFromElf, elfBodyCallees } from './elf-bodies';
 import { type FlagsInput, resolveFlags } from './flags';
 import { moduleElfPath } from './module-elf';
 import {
@@ -772,11 +772,9 @@ export async function runCli(
   // run did not use. The bodies of those the input does not define are read off the linked ELF
   // (elf-bodies.ts), and bound what each can read of its arguments as an inline body would.
   let calleeBodies: CalleeBodies | undefined;
-  if (toolCfg?.elf && moduleFlag === undefined) {
+  if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
-    const outside = guessedArityCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs).filter(
-      (c) => !definesLabel(asm, c),
-    );
+    const outside = elfBodyCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, moduleFlag);
     if (outside.length > 0) {
       const read = calleeBodiesFromElf(
         elfPath,
