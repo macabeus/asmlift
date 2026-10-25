@@ -8,9 +8,11 @@
 // that writes the tail once more, and the exit path keeps the copy written after the loop. The paths
 // are exclusive, so each runs the store once.
 //
-// What stays refused, each with a witness here or in `loop-break-exit.test.ts`: a tail the exit
-// reaches running nothing of its own is a `break` to it (`a tail the loop's own exit also runs is
-// written once, after the loop`); an exit the loop's test does not leave to — one only a mid-body
+// The exit's own code need not have an effect: agbcc cross-jumps the arm's store onto a post-loop
+// `r = 0; *out = r;` too, a register move falling into the one store (`a pure exit assignment ahead
+// of the tail`). What stays refused, each with a witness here or in `loop-break-exit.test.ts`: a
+// tail a `break` can reach is a `break` to it, and that reading comes first (`a tail the loop's own
+// exit also runs is written once, after the loop`); an exit the loop's test does not leave to — one only a mid-body
 // branch enters, which the `while` reading of two cross-jumped arms takes for its exit (`retarm2_tail`,
 // below) — and an arm leaving by a latch (`an arm another path also enters is not a \`break\` arm, and
 // the loop declines`); a tail entered
@@ -193,6 +195,48 @@ const AGBCC_RETARM2_TAIL = `retarm2_tail:
 	bx	r0
 `;
 
+/** `for (i = 0; i < gCount; i++) { if (gTab[i] == x) { *out = r; return; } } r = 0; *out = r;` at
+ *  agbcc `-O2 -mthumb-interwork`: the exit `.L4` runs only `mov r3, #0` before the `.L9` store the
+ *  arm's `beq` enters too. */
+const AGBCC_RETPRE_PURE = `retpre_pure:
+	push	{r4, r5, r6, lr}
+	lsl	r0, r0, #24
+	lsr	r4, r0, #24
+	ldr	r0, .L10
+	ldr	r3, [r0]
+	mov	r2, #0
+	ldr	r0, .L10+4
+	ldrb	r5, [r0]
+	cmp	r2, r5
+	bcs	.L4	@cond_branch
+	ldr	r6, .L10+8
+	add	r5, r0, #0
+.L6:
+	add	r0, r2, r6
+	ldrb	r0, [r0]
+	cmp	r0, r4
+	beq	.L9	@cond_branch
+	add	r0, r2, #1
+	lsl	r0, r0, #24
+	lsr	r2, r0, #24
+	ldrb	r0, [r5]
+	cmp	r2, r0
+	bcc	.L6	@cond_branch
+.L4:
+	mov	r3, #0
+.L9:
+	str	r3, [r1]
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L11:
+	.align	2, 0
+.L10:
+	.word	gInit
+	.word	gCount
+	.word	gTab
+`;
+
 describe('an early return whose tail the loop exit path also runs', () => {
   test('two cross-jumped arms are not read as an exit and an arm', () => {
     const src = decompile('retarm2_tail', AGBCC_RETARM2_TAIL, ARMV4T_AGBCC, {
@@ -214,6 +258,15 @@ describe('an early return whose tail the loop exit path also runs', () => {
       prototypes: { retpost_tail: { params: 2, returnsVoid: true } },
     }).source;
     expectRetpostTail(src);
+  });
+
+  test('agbcc: a store the exit reaches past a pure assignment is written in the arm too', () => {
+    const src = decompile('retpre_pure', AGBCC_RETPRE_PURE, ARMV4T_AGBCC, {
+      prototypes: { retpre_pure: { params: 2, returnsVoid: true } },
+    }).source;
+    expect(src).toMatch(/\{\n\s+v1 = gInit;\n\s+\*a1 = v1;\n\s+return;\n\s+\}/);
+    expect(src).toMatch(/\}\n\s+v1 = 0;\n\s+\*a1 = v1;\n/);
+    expect(src.match(/\*a1 = v1;/g)).toHaveLength(2);
   });
 
   test('gcc2.7.2kmc: the store in the `jr ra` delay slot is written in the arm and after the loop', () => {
@@ -275,12 +328,28 @@ describe('the exit-path return tail, against its own IR', () => {
   });
 
   test('a tail holding a loop of its own stays refused', () => {
+    // past the store, `do { v = more(v); } while (v == a0);`: without the cycle refusal the arm writes
+    // that loop a second time inside the first (300/300 agreement, but a loop the asm holds once)
     const cyclic = RETPOST_TAIL_IR.replace(
       '^bb5(%12: s32):\n  store %0, %12 {off=0, width=4}\n  ret %12',
-      '^bb5(%12: s32):\n  store %0, %12 {off=0, width=4}\n  %22: s32 = call %12 {target="more"}\n' +
-        '  %23: u32 = icmp_eq %22, %0\n  cond_br %23, ^bb5(%22), ^bb7()\n^bb7():\n  ret %12',
+      '^bb5(%12: s32):\n  store %0, %12 {off=0, width=4}\n  br ^bb6(%12)\n^bb6(%30: s32):\n' +
+        '  %31: s32 = call %30 {target="more"}\n  %32: u32 = icmp_eq %31, %0\n  cond_br %32, ^bb6(%31), ^bb7()\n' +
+        '^bb7():\n  ret %12',
     );
-    expect(() => judged(cyclic)).toThrow(/cannot structure/);
+    expect(() => judged(cyclic)).toThrow(/unrecovered back-edge/);
+  });
+
+  test('a pure exit assignment ahead of the tail is code of its own', () => {
+    // the exit hands the tail `0` where the arm hands it `i`: no `break` lands past that move
+    const pure = RETPOST_TAIL_IR.replace(
+      '  %11: s32 = call %10 {target="miss"}\n  br ^bb5(%10)',
+      '  %11: s32 = const {value=0}\n  br ^bb5(%11)',
+    );
+    const { src, agreement, shipped } = judged(pure);
+    expect(src).toMatch(/\{\n\s+\*\(s32 \*\)a0 = v0;\n\s+return v0;\n\s+\}/);
+    expect(src.match(/\*\(s32 \*\)a0 = v0;/g)).toHaveLength(2);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
 
