@@ -24,10 +24,10 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Thirteen passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
+// holding the call. Fourteen passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the four loop folds
-// in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`), whose
+// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
+// in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`, `unpre`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
 // `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
@@ -98,6 +98,7 @@ import {
   foldDisplacedAccesses,
 } from '@asmlift/core/raise/structs';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
+import { type RedundantParam, UNPRE_GATES, recomputeRedundantParams } from '@asmlift/core/raise/unpre';
 import { type ThreadedExit, UNTHREAD_GATES, unthreadLoopExits } from '@asmlift/core/raise/unthread';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
@@ -309,6 +310,13 @@ export const PASSES: Record<string, CensusablePass> = {
       installFold('reroll', (fn) =>
         rerollPeeledTests(fn, w[0] as readonly Gate<PeeledTest>[], w[1] as readonly Gate<FoldedTopTest>[]),
       ),
+  },
+  unpre: {
+    // raise/unpre.ts's `UNPRE_GATES` — the scope of the parameter recompute. Asked once per block
+    // parameter the fold's precondition admits (every in-edge hands one pure expression over
+    // dominating leaves), per sweep.
+    tables: [['unpre', UNPRE_GATES as readonly Gate<never>[]]],
+    install: (w) => installFold('unpre', (fn) => recomputeRedundantParams(fn, w[0] as readonly Gate<RedundantParam>[])),
   },
   'frame-objects': {
     // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.

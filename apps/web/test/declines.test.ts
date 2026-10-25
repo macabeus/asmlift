@@ -989,6 +989,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'non-compare-flags',
     'pool-word-shape',
     'structs',
+    // The last row this class held was `sw_fallpre` (a fall-through re-running a switch-edge copy),
+    // which lifts since raise/unpre.ts recomputes the parameter both edges hand it; the class's other
+    // messages are still reachable by hand-written jump tables (thumb-switch.test.ts).
+    'switch-shapes',
     'tu-scoped-name',
     'unread-data-directive',
     'unstored-slot',

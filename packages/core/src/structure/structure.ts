@@ -6300,10 +6300,13 @@ export function structure(
             // overwrite what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0
             // path calling with 5). They cannot simply be dropped either: entering that arm by its
             // own case value needs them. Hoisting them above the switch is possible but not always
-            // safe (another arm may read the same name first), so this shape declines LOUD;
-            // recovering it is future work. The one edge that needs no copies is a default edge the
-            // dispatch never takes (the op's `exhaustive` attr): nothing enters the default by it,
-            // so its copies are not emitted (`edgeCopies` below) and cannot re-run.
+            // safe (another arm may read the same name first), so this shape declines LOUD. A
+            // parameter every edge hands one pure expression over values that dominate the case
+            // does not reach here: raise/unpre.ts recomputes it in the case before structuring
+            // (gcse PRE's `i + 1`, `synthetic:sw_fallpre`), and leaves a merged constant to this
+            // refusal. The one edge that needs no copies is a default edge the dispatch never takes
+            // (the op's `exhaustive` attr): nothing enters the default by it, so its copies are not
+            // emitted (`edgeCopies` below) and cannot re-run.
             if (!(deadDefaultEdge && next.edge === defEdge) && edgeCopyRecords(b, next.edge).length > 0) {
               return {
                 at: i,

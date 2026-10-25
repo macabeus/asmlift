@@ -57,6 +57,7 @@ describe('the gate census seam', () => {
       'trampoline',
       'unthread',
       'reroll',
+      'unpre',
       'frame-objects',
     ]);
   });

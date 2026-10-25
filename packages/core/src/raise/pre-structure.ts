@@ -1,13 +1,15 @@
-// asmlift — the CFG folds that run last before structuring, after return-sinking: each rewrites a
-// loop's edges into a shape a loop spelling owns, and each is its own stage in the trace, so a
-// re-spelled function names the fold that moved its CFG.
+// asmlift — the CFG folds that run last before structuring, after return-sinking: the loop folds
+// rewrite a loop's edges into a shape a loop spelling owns, and the last one takes a parameter off a
+// switch's join (a case fallen into, or the switch's exit). Each is its own stage in the trace, so a
+// re-spelled function names the fold that moved it.
 //
-// A MUTABLE RECORD, not a sum of four calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
+// A MUTABLE RECORD, not a sum of calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
 // caller-side seam a process outside core swaps to census a fold's gate table (`pnpm bench gates`,
 // apps/benchmark/src/run/gate-census.ts). A static import binding cannot be swapped.
 import { Fn } from '../ir/core';
 import { foldEmptyLatches, foldExitTrampolines } from './latch';
 import { rerollPeeledTests } from './reroll';
+import { recomputeRedundantParams } from './unpre';
 import { unthreadLoopExits } from './unthread';
 
 export interface PreStructureFold {
@@ -29,7 +31,9 @@ export interface PreStructureFold {
  *  trampoline fold reshapes, and sits ahead of the re-roll so a loop it gives one way out is one
  *  the re-roll may then read. That place is a precaution: `synthetic:thrbreak:agbcc` and the
  *  pointer walk unthread.ts names lift the same C wherever the fold sits, so `unthread.test.ts`
- *  pins its position, not a lift that needs it. */
+ *  pins its position, not a lift that needs it. The parameter recompute (`unpre`) runs last
+ *  because that is the one place it was measured: it moves no edge, so no loop fold reads what it
+ *  leaves, and `unpre.test.ts` pins the place, not a lift that needs it. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',
@@ -50,5 +54,10 @@ export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
     id: 'reroll',
     title: 'Peeled-test re-rolling (a loop test peeled into the entry becomes the first iteration)',
     run: (fn) => rerollPeeledTests(fn),
+  },
+  {
+    id: 'unpre',
+    title: 'Redundant-parameter recomputing (a parameter every edge hands one pure expression becomes it)',
+    run: (fn) => recomputeRedundantParams(fn),
   },
 ];
