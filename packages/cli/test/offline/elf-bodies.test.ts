@@ -9,6 +9,8 @@
 // un0 with `last` after it and `last` with nothing after it in .text. The objdump spawn is faked
 // through runCli's seam with the text `mips-linux-gnu-objdump -d --no-show-raw-insn
 // --start-address=… --stop-address=…` printed for each range.
+import { type CalleeBodies, calleeBodyBounds } from '@asmlift/core/frontend/callee-body';
+import { liftStamped } from '@asmlift/core/pipeline';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,6 +80,39 @@ describe('a function range in the linked ELF', () => {
     expect(
       disasmRange('x.elf', TOOLCHAIN_TARGETS['ido7.1'].description, '.minigame', 0x800d9f10, 0x800d9f3c, bin),
     ).toBe('-d --no-show-raw-insn -j .minigame --start-address=0x800d9f10 --stop-address=0x800d9f3c x.elf\n');
+  });
+  // a symbol inside a sized FUNC (mp3's `*_VRAM_END`, af's `.L800F29C8`) starts a header objdump
+  // prints in the range, which the frontend would slice the body at
+  test('every header in a range but the callee own is dropped', () => {
+    const inner = `${head}80000408 <rd1>:\n80000408:\tjr\tra\n\n8000040c <rd1_VRAM_END>:\n8000040c:\taddiu\tv0,a0,1\n`;
+    const read = calleeBodiesFromElf(
+      'x.elf',
+      MIPS_ELF,
+      ['rd1'],
+      TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description,
+      () => inner,
+    );
+    expect(read.bodies.rd1).toEqual({
+      kind: 'listing',
+      text: `${head}80000408 <rd1>:\n80000408:\tjr\tra\n\n8000040c:\taddiu\tv0,a0,1\n`,
+    });
+    const t = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description;
+    const own = `${head}00000000 <f>:\n   0:\tjr\tra\n   4:\tnop\n`;
+    const bound = (bodies: CalleeBodies) =>
+      calleeBodyBounds(
+        'f',
+        own,
+        t,
+        {},
+        (callee, table, entryReadCalls, text) =>
+          liftStamped(callee, text, t, table, undefined, undefined, undefined, {
+            calleeBodyBound: () => undefined,
+            entryReadCalls,
+          }),
+        bodies,
+      )('rd1');
+    expect(bound(read.bodies)).toBe(1);
+    expect(bound({ rd1: { kind: 'listing', text: inner } })).toBeUndefined();
   });
   test('a range objdump cannot disassemble warns, and gives no body', () => {
     const read = calleeBodiesFromElf('x.elf', MIPS_ELF, ['rd0'], TOOLCHAIN_TARGETS['ido7.1'].description, () => {

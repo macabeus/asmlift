@@ -23,6 +23,12 @@
 // frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
 // the body, and the core scans them; any other Thumb range gives no body.
 //
+// A RANGE IS ONE BODY, WHATEVER SYMBOLS SIT INSIDE IT. objdump starts a `<name>:` header at every
+// symbol in a range (mp3's `*_VRAM_END` inside func_8010EC38_25B288_rockin_raceway, af's `.L800F29C8`,
+// the SDK's `__RAS_OSDisableInterrupts_end`), and the frontend slices a listing at its next header,
+// which would cut the callee's body there. Every header but the callee's own is dropped: branch
+// targets are read by address, never by a header's name.
+//
 // KNOWN GAP: a function in a REL module (`--module`) is read from no ELF: the module's own ELF is
 // relocatable, its sections all placed at 0, so its symbol values are no addresses to disassemble.
 import { thumbToArmVeneerTarget } from '@asmlift/core/frontend/arm-body';
@@ -207,7 +213,10 @@ export function calleeBodiesFromElf(
       continue;
     }
     try {
-      bodies[callee] = { kind: 'listing', text: disasm(elfPath, target, range.section, range.start, range.end) };
+      bodies[callee] = {
+        kind: 'listing',
+        text: withOnlyHeaderOf(disasm(elfPath, target, range.section, range.start, range.end), callee),
+      };
     } catch (e) {
       warnings.push(
         `asmlift: warning: cannot disassemble ${callee} out of tools.asmlift.elf (${e instanceof Error ? e.message : e}) — its arity stays guessed\n`,
@@ -215,6 +224,17 @@ export function calleeBodiesFromElf(
     }
   }
   return { bodies, warnings };
+}
+
+/** `listing` with every objdump `<name>:` header line but `callee`'s own dropped (see the header). */
+export function withOnlyHeaderOf(listing: string, callee: string): string {
+  return listing
+    .split('\n')
+    .filter((l) => {
+      const m = /^[0-9a-fA-F]+\s+<(.+)>:\s*$/.exec(l);
+      return m === null || m[1] === callee;
+    })
+    .join('\n');
 }
 
 /** The code section holding `addr`, and the file offset of that address in it. */

@@ -890,8 +890,10 @@ cli elf-bodies.ts):
   included. With nothing after it in its section there is no range.
 - On MIPS and PowerPC the range is disassembled with the target's objdump, scoped to the
   symbol's section (overlays put several sections at one address), and lifted as the same text
-  inline would be. A linked image carries no relocations, and those frontends name a callee only
-  by its relocation, so a body that makes any call does not lift and bounds nothing.
+  inline would be. Every `<name>:` header objdump starts at a symbol inside the range but the
+  callee's own is dropped, since the frontend slices a listing at its next header. A linked image
+  carries no relocations, and those frontends name a callee only by its relocation, so a body that
+  makes any call does not lift and bounds nothing.
 - The agbcc frontend reads no objdump text. A GBA callee written in ARM is entered through an
   interworking veneer (`bx pc; nop`, then an ARM `b sym`), and its ARM words are handed in as
   they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument
