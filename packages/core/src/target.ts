@@ -724,6 +724,33 @@ export interface TargetDescription {
     // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
     // where no block copy fits.
     escapedFrameAddressNamesALocal?: boolean;
+    // A STRUCT-RETURN TEMP AT THE FRAME BOTTOM PROVES THE OUTGOING AREA EMPTY. Where this function
+    // hands its lowest frame address as the hidden pointer of a callee declared to return a struct
+    // through memory, that address is a frame object's; every frame object sits above the whole
+    // outgoing area, and a call's struct result is never built straight into an outgoing word, so
+    // the area is zero bytes and no call in the function — declared, K&R, undeclared, through a
+    // register — takes a stack word. Its one reader is the Thumb frame model (`frontend/thumb.ts`,
+    // the [sp,#0] capture beside `noCallTakesAStackWord`), which without it keeps [sp,#0] a
+    // candidate outgoing word wherever a call nothing sizes could take one, and declines the temp
+    // as "one byte, two models". Absent ⇒ only declarations that place every argument in registers
+    // free offset 0.
+    //
+    // Set on agbcc off its source and five compiled probes (2.9-arm-000512, the rows' flags).
+    // thumb.h:573 STARTING_FRAME_OFFSET 0 with no FRAME_GROWS_DOWNWARD (:569), and :620-621 adds
+    // `current_function_outgoing_args_size` to every elimination to sp, under :628
+    // ACCUMULATE_OUTGOING_ARGS; function.c:2629 puts STACK_DYNAMIC_OFFSET past the same size, so
+    // temps and the dynamic area sit above it too. calls.c:1598-1609 precomputes into a temp every
+    // argument that contains a call whenever the call has stack arguments, so a struct-returning
+    // call inside such an argument fills a frame temp, never the outgoing slot. Compiled: `mk(..)`
+    // by value as the 5th argument, as the 1st followed by four ints, `mk(..).a` as the 5th, a
+    // 20-byte struct by value, and a 5-argument K&R `rnd(1, 2, 3, 4, 5)` beside a temp — each puts
+    // the temp at sp+4 or higher, with [sp,#0] the outgoing word.
+    //
+    // A frame whose sp moves between two accesses is refused before this is read (thumb.ts
+    // `frameDepthBlocker`), so the layout is static. Its residue is hand-written asm that builds a
+    // struct return at [sp,#0] and also stages a stack argument there for another call: that word
+    // is read as a store to the temp, and an undeclared callee's guessed arity loses it.
+    returnStorageAboveOutgoingArea?: boolean;
     // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
     // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
     // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
@@ -1391,6 +1418,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     oneWordFrameIsTheCapturedObject: true,
     // compiled: the committed probe `test/corpus/agbcc-escape.s` (`scripts/regen-outgoing-area-probes.ts`)
     escapedFrameAddressNamesALocal: true,
+    // off thumb.h/function.c/calls.c and five compiled probes, all written out at the field
+    returnStorageAboveOutgoingArea: true,
     // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
     // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr
     // (libgcc/lib1thumb.asm:595-633). Neither `sp` (the frame) nor `lr` (which the `bl` itself
