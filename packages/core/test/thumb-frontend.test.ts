@@ -3,6 +3,8 @@
 // Thumb degrades it to a loud `opaque`. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
+import { type StaleIdiomRead, refuseStaleIdiomReads, staleMarker } from '../src/frontend/jump-table';
+import { type Op, type Value, mkOp } from '../src/ir/core';
 import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import type { SymbolMap } from '../src/symbols';
@@ -5846,9 +5848,9 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     );
   });
 
-  // The copy is not lifted, so r3 keeps what it held before it: read past the load, the 9 below
-  // would stand for the address (measured with the deadness check ablated: `((u8 *)9)[1]`,
-  // `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
+  // The copy is not lifted: r3 holds a marker past it (thumb.ts `writeNarrowCopyMarker`), so with
+  // the deadness check ablated each of these still declines, on the marker's read, where the 9
+  // below once stood for the address (`((u8 *)9)[1]`, `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
   test('a copy read after its load, on any path, stays a capture', () => {
     for (const after of [
       // read again by a second load, a store through it, a store of it, and an add
@@ -5864,8 +5866,9 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     }
     // a copy in r0 a return may hand back, in a function that returns a value
     const ret =
-      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n\tbl\tmk\n\tadd\tr0, sp, #0x4\n' +
-      '\tldrb\tr1, [r0]\n\tldr\tr2, .L9\n\tstrb\tr1, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgP\n';
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+      '\tadd\tr0, sp, #0x4\n\tldrb\tr1, [r0]\n\tldr\tr2, .L9\n\tstrb\tr1, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n.L9:\n\t.word\tgP\n';
     expect(() => lift(ret)).toThrow('the captured address flows into `ret`');
   });
 
@@ -5920,6 +5923,30 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     // `mk2` keeps no outgoing word at [sp,#0], so the decline is the escape's, not the overlap's
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tbl\tmk2\n\tldrb\tr0, [r0]\n'))).toThrow(
       'the captured address at [sp,#0) is where `mk` returns its struct',
+    );
+  });
+
+  // The deadness proof picks the copies left unlifted; the marker each leaves in its register holds
+  // the lift to that proof, so a read the proof missed declines instead of reading the register's
+  // value from before the copy.
+  test("a read of a dropped copy's register declines", () => {
+    const ops: Op[] = [];
+    const stale = new Map<Value, StaleIdiomRead>();
+    ops.push(mkOp('ret', { operands: [staleMarker(ops, 'r3', { reg: 'r3', form: 'narrow', parks: false }, stale)] }));
+    const refuse = () =>
+      refuseStaleIdiomReads(
+        'f',
+        [{ params: [], ops }],
+        stale,
+        { everyReachingDef: () => false },
+        undefined,
+        (m) => {
+          throw new Error(m);
+        },
+        { refuseDispatchUnlockedPassThrough: () => {} },
+      );
+    expect(refuse).toThrow(
+      "cannot lift 'f': address-taken stack local — r3 is read past the narrow slot reload that read through it",
     );
   });
 

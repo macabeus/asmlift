@@ -3789,11 +3789,13 @@ function measureThumbFrame({
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
   // address after it. The copy is not lifted, so rD must be DEAD there: no path from the load reads
   // it before writing it (`readsBeforeWrite`), a return that may hand it back counting as a read.
-  // A CALL READS WHAT IT IS HANDED, the one receiver rule (`frameAddressReceivers`: a declared
-  // callee's argument words, every argument register where nothing declares it), plus the register
-  // it calls through (`calleeRegister`). Any other register it clobbers, r0 among them, is dead past
-  // it, and a callee-saved one still holds the copy. Read as `readsBeforeWrite` reads a call for the
-  // save analysis (every register but r12), kleod sub_08016EEC keeps two copies live, in r3 and r6.
+  // The lift holds to that proof: the dropped copy leaves a marker in rD (`writeNarrowCopyMarker`),
+  // and a read of it declines. A CALL READS WHAT IT IS HANDED, the one receiver rule
+  // (`frameAddressReceivers`: a declared callee's argument words, every argument register where
+  // nothing declares it), plus the register it calls through (`calleeRegister`). Any other register
+  // it clobbers, r0 among them, is dead past it, and a callee-saved one still holds the copy. Read
+  // as `readsBeforeWrite` reads a call for the save analysis (every register but r12), kleod
+  // sub_08016EEC keeps two copies live, in r3 and in r6.
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
@@ -6177,6 +6179,7 @@ function lowerMov(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     if (frame.slotsOk && frame.localArea > 0) {
       // a copy only a narrow slot reload reads names no object; the reload reads the slot
       if (frame.narrowReloadCopies.has(ins)) {
+        writeNarrowCopyMarker(fill, cur, reg(a));
         return;
       }
       const res = mkValue(T.unk(32));
@@ -6188,6 +6191,18 @@ function lowerMov(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   }
   const v = b?.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
   writeData(reg(a), bi, v);
+}
+
+/** What a narrow reload's unlifted copy of sp leaves in `r`: an address no C spells.
+ *  `measureThumbFrame` accepts the copy only where `r` is dead past its load, and the marker holds
+ *  the lift to that: a read of it declines (`refuseStaleIdiomReads`) rather than reading what `r`
+ *  held before the copy. */
+function writeNarrowCopyMarker(fill: ThumbFill, cur: BlockCursor, r: string): void {
+  fill.operands.writeData(
+    r,
+    cur.bi,
+    staleMarker(cur.irb.ops, r, { reg: r, form: 'narrow', parks: false }, fill.staleIdiomValues),
+  );
 }
 
 /** `add`: a frame adjustment, a 64-bit pair with the `adc` after it, a frame capture,
@@ -6214,7 +6229,8 @@ function lowerAdd(fill: ThumbFill, cur: BlockCursor, ins: Instr, ii: number): vo
   if (isSpReg(b ?? '') && !isSpReg(a ?? '') && c !== undefined && IMM_LITERAL.test(c)) {
     if (frame.slotsOk && frame.localArea > 0) {
       if (frame.narrowReloadCopies.has(ins)) {
-        return; // see lowerMov
+        writeNarrowCopyMarker(fill, cur, reg(a)); // see lowerMov
+        return;
       }
       const res = mkValue(T.unk(32));
       irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));

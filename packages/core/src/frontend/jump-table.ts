@@ -215,11 +215,12 @@ export interface ElidedDispatch {
 
 /** A MARKER ({@link staleMarker}): what the idiom left in `reg` that no C expression spells, and
  *  whether the dispatch that left it was kept (its block lifted, holding the code the compiler
- *  placed in it) or elided. A read of one declines ({@link refuseStaleIdiomReads}). */
+ *  placed in it) or elided — or, `narrow`, the copy of sp a Thumb narrow slot reload read through,
+ *  which is not lifted either. A read of one declines ({@link refuseStaleIdiomReads}). */
 export interface StaleMarker {
   kind: 'marker';
   reg: string;
-  form: 'kept' | 'elided';
+  form: 'kept' | 'elided' | 'narrow';
   /** Whether the marker stands for the register on EVERY path that brings it ({@link parkedIn}): a
    *  kept dispatch's, and an EXACT target's. A MIXED target's marker also replaced what the other
    *  paths into it brought, so it is read like any value, and its read declines. */
@@ -444,6 +445,12 @@ export function refuseStaleIdiomReads(
   )[0];
   if (read !== undefined) {
     const { reg, form } = read;
+    if (form === 'narrow') {
+      fail(
+        `cannot lift '${name}': address-taken stack local — ${reg} is read past the narrow slot reload that read ` +
+          'through it, and the lift does not model the copy of sp it holds there',
+      );
+    }
     const why =
       "which the unlifted dispatch idiom wrote — the lift would read the value from before the dispatch, not the table's " +
       'index, address or target';
