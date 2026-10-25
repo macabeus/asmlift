@@ -42,6 +42,25 @@ const SRET4TWO =
   '\tlsr\tr0, r0, #0x10\n\tcmp\tr0, r5\n\tbeq\t.L4\n\tldr\tr0, .L5+0x4\n\tstrh\tr2, [r0]\n\tldr\tr1, .L5+0x8\n' +
   '\tlsr\tr0, r2, #0x10\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tstrh\tr0, [r1]\n.L4:\n\tadd\tsp, sp, #0x8\n' +
   '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0xffff\n\t.word\tgOut\n\t.word\tgOut2\n';
+// `u8 rnd();` (K&R) and `void sret2knr(u16 k){ struct S4 s, t; s = mk(k, 0, 0x10); gOut16 = s.a;
+//  t = mk(k, 1, 0x18); gOut16 = t.a; gOut8 = rnd(); }` — two temps at [sp,#0] and [sp,#4] beside a
+//  call nothing sizes (the synthetic row `sret2knr`)
+const SRET2KNR =
+  'sret2knr:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tlsl\tr4, r4, #0x10\n' +
+  '\tlsr\tr4, r4, #0x10\n\tmov\tr0, sp\n\tadd\tr1, r4, #0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x10\n\tbl\tmk\n' +
+  '\tldr\tr0, [sp]\n\tldr\tr5, .L3\n\tstrh\tr0, [r5]\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r4, #0\n\tmov\tr2, #0x1\n' +
+  '\tmov\tr3, #0x18\n\tbl\tmk\n\tldr\tr0, [sp, #0x4]\n\tstrh\tr0, [r5]\n\tbl\trnd\n\tldr\tr1, .L3+0x4\n' +
+  '\tstrb\tr0, [r1]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+  '\t.word\tgOut16\n\t.word\tgOut8\n';
+// `void p3(u16 k){ struct S4 s; s = mk(k, 0, 0x10); gOut16 = s.a; gOut8 = rnd(1, 2, 3, 4, 5); }`
+//  with the same K&R `rnd` — the call takes a stack word, so agbcc moves the temp to [sp,#4] and
+//  stages the fifth argument at [sp,#0]
+const P3 =
+  'p3:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr1, r0, #0\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n' +
+  '\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x0\n\tmov\tr3, #0x10\n\tbl\tmk\n\tldr\tr1, [sp, #0x4]\n\tldr\tr0, .L3\n' +
+  '\tstrh\tr1, [r0]\n\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n' +
+  '\tmov\tr3, #0x4\n\tbl\trnd\n\tldr\tr1, .L3+0x4\n\tstrb\tr0, [r1]\n\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgOut16\n\t.word\tgOut8\n';
 // hand-written: [sp,#0] handed to `fill`, then staged as `five`'s fifth argument
 const FILL_THEN_FIVE =
   'c2:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
@@ -259,6 +278,38 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('    struct S4 sp0;\n    struct S4 sp4;\n    sp0 = mk(a0, 0, 16);');
     expect(source).toMatch(/if \(sp0\.a != v0\) \{\n {8}gOut = sp0\.a;\n {8}gOut2 = sp0\.b;\n {4}\}/);
     expect(source).toMatch(/if \(sp4\.a != v0\) \{\n {8}gOut = sp4\.a;\n {8}gOut2 = sp4\.b;\n {4}\}/);
+  });
+
+  // …and where a call nothing sizes could take a stack word, agbcc's layout still proves none
+  // does: every frame object sits above the whole outgoing area and no struct result is built in
+  // it (`compilerBehaviors.returnStorageAboveOutgoingArea`), so a temp at [sp,#0] means the area
+  // is empty. The K&R `rnd` keeps its guessed arity: no body in the input bounds it.
+  test('a temp at the frame base beside a call nothing sizes is an object where the layout proves it', () => {
+    const prototypes = { mk: mkab, rnd: { returns: 'u8' } };
+    const { source } = decompile('sret2knr', SRET2KNR, ARMV4T_AGBCC, { prototypes });
+    expect(source).toContain('    struct S4 sp0;\n    struct S4 sp4;\n    sp0 = mk(a0, 0, 16);\n    gOut16 = sp0.a;');
+    expect(source).toContain('    sp4 = mk(a0, 1, 24);');
+    expect(source).toContain('gOut8 = rnd(v0);');
+    // a target that does not claim the layout keeps [sp,#0] a candidate outgoing word
+    const { returnStorageAboveOutgoingArea: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    expect(() =>
+      decompile('sret2knr', SRET2KNR, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors }, { prototypes }),
+    ).toThrow('the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models');
+  });
+
+  // The control: the call that does take a stack word moves the temp off the frame base, so the
+  // base is no return storage and [sp,#0] stays the staged fifth argument, claim or no claim
+  test('a temp above a staged stack argument leaves that argument an outgoing word', () => {
+    const { returnStorageAboveOutgoingArea: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    for (const target of [ARMV4T_AGBCC, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors }]) {
+      expect(() => decompile('p3', P3, target, { prototypes: { mk: mkab, rnd: { returns: 'u8' } } })).toThrow(
+        /the store to \[sp,#0\] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument/,
+      );
+      const rnd = { params: ['s32', 's32', 's32', 's32', 's32'], returns: 'u8' };
+      expect(decompile('p3', P3, target, { prototypes: { mk: mkab, rnd } }).source).toContain(
+        '    struct S4 sp4;\n    sp4 = mk(a0, 0, 16);\n    gOut16 = sp4.a;\n    gOut8 = rnd(1, 2, 3, 4, 5);',
+      );
+    }
   });
 
   test('a frame base staged as a fifth argument is not an object', () => {

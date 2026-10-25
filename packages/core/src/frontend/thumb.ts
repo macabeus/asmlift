@@ -3707,7 +3707,11 @@ function measureThumbFrame({
   // outgoing area, and where the base is handed as the hidden pointer of a callee declared to
   // return a struct through memory it is that struct's storage: two struct-return temps,
   // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
-  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out.
+  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out —
+  // except where the compiler puts every frame object above the whole outgoing area and never
+  // builds a struct result in it (`compilerBehaviors.returnStorageAboveOutgoingArea`): there the
+  // return storage at offset 0 is itself the proof that the area is empty, whatever the calls are
+  // (sret2knr: `u8 rnd();` beside the two temps).
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
       if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
@@ -3839,7 +3843,13 @@ function measureThumbFrame({
     [...captureOffsetOf]
       .filter(([ins]) => !narrowReloadCopies.has(ins))
       .map(([, o]) => o)
-      .filter((o) => o > 0 || (o === 0 && frameBaseIsReturnStorage && noCallTakesAStackWord)),
+      .filter(
+        (o) =>
+          o > 0 ||
+          (o === 0 &&
+            frameBaseIsReturnStorage &&
+            (noCallTakesAStackWord || target.compilerBehaviors.returnStorageAboveOutgoingArea === true)),
+      ),
   );
 
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
