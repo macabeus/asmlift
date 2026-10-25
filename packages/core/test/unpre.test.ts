@@ -102,6 +102,51 @@ test('an ordinary join is not a case fallen into, and keeps its parameter (the s
   verify(fn);
 });
 
+// The switch's EXIT is the other join the gate admits: the dispatch hands it `a0 + 1` by its default
+// edge (the last successor — a bounds test straight to the loop latch, as in `synthetic:sw_fallpre`,
+// whose MATCH rests on this firing), `case 0:` hands it the same SSA value, and `case 1:` its own
+// sum. `exitFrom` names the block the third edge into the exit comes from.
+const exitIr = (exitFrom = '^bb2') => `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=1}
+  %3: s32 = add %0, %2
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_eq %0, %4
+  cond_br %5, ^bb4(), ^bb5()
+^bb5():
+  switch_br %1, ^bb1(), ^bb2(), ^bb3(%3) {cases=[0;1]}
+^bb1():
+  %6: s32 = call %0 {target="side1"}
+  br ^bb3(%3)
+^bb2():
+  %7: s32 = call %0 {target="side1"}
+  %8: s32 = const {value=1}
+  %9: s32 = add %0, %8
+  br ^bb3(%9)
+^bb4():
+  br ${exitFrom === '^bb4' ? '^bb3(%3)' : '^bb6()'}
+^bb6():
+  ret
+^bb3(%10: s32):
+  %11: s32 = call %10 {target="side1"}
+  ret
+}
+`;
+
+test("the switch's exit, entered by the default edge, is recomputed too: no `default:` arm holds a copy", () => {
+  const { n, fn, emit } = fold(exitIr());
+  expect(n).toBe(1);
+  expect(fn.blocks.slice(1).every((b) => b.params.length === 0)).toBe(true);
+  const c = emit();
+  expect(c).not.toMatch(/default:/);
+  expect(c).toMatch(/side1\(a0 \+ 1\);/);
+});
+
+test('a join the switch reaches by its default edge but code outside the switch also enters is left alone', () => {
+  // `^bb4` (before the dispatch, not dominated by it) also hands the exit `a0 + 1`
+  expect(fold(exitIr('^bb4')).n).toBe(0);
+});
+
 test('the fold runs last in the pre-structure record', () => {
   expect(PRE_STRUCTURE_FOLDS.map((f) => f.id).at(-1)).toBe('unpre');
 });

@@ -25,17 +25,31 @@
 // live at the block a name no other live value shares.
 //
 // SCOPE, not soundness (the gates the precondition does not need):
-//  • THE BLOCK IS A CASE FALLEN INTO: one in-edge is a `switch_br`'s, and every other comes from a
-//    block the dispatch dominates — an arm of that switch. That is the one join the structurer
-//    cannot spell as a variable, because the switch-edge copy would re-run on the fall path, so it
-//    declines. Everywhere else the parameter IS spellable, and which spelling the source wrote the asm
+//  • THE BLOCK IS A JOIN OF ONE SWITCH: one in-edge is a `switch_br`'s, and every other comes from a
+//    block the dispatch dominates — an arm of that switch. Two joins pass:
+//     (1) A CASE FALLEN INTO (`case 4:` above). The structurer cannot spell its parameter as a
+//         variable, because the switch-edge copy would re-run on the fall path, so it declines; the
+//         fold is what lifts it.
+//     (2) THE SWITCH'S EXIT, entered by the dispatch's default edge (the bounds test's, when the
+//         source has no `default:`) and by the arms' `break`s. Its parameter IS spellable — a copy at
+//         the end of every arm and a `default:` arm holding only the copy — so here the fold changes
+//         the spelling, not whether the function lifts. `sw_fallpre`'s MATCH rests on it: PRE's
+//         `i + 1` reaches the loop latch from every edge, the default one included, and with the
+//         exit refused (only the case fallen into recomputed) the row lifts at 6/61 as `v1 = v0 + 1;`
+//         in each arm, a `default:` arm, and `v0 = v1;` where the source has `i++`. Off the bench it
+//         also re-spells functions that already lift, host-correct both ways (4 agbcc fuzz
+//         seeds): per-arm `v2 = v0 + 1` becomes the latch's `v0 = v0 + 1`, and per-arm
+//         `v1 = a1 * 3` (a source's `u = v * 3` above the switch, which every edge hands the join)
+//         one `a1 * 3` read at the join.
+//    Everywhere else the parameter is spellable too, and which spelling the source wrote the asm
 //    does not say: a sum agbcc kept in each arm is also what a source computing it in each arm
 //    compiles to. Measured at every join (full bench, the gate lifted): `synthetic:sw_fallpre` and
 //    `synthetic:jt_pre_midg` MATCH, but `synthetic:bgshare:agbcc` and `synthetic:bgswitch:agbcc` lose
 //    their MATCH, `synthetic:sw_jtloop:agbcc` goes 8/57 -> 32/58, and 21 rows move in all. Gated, the
 //    full bench moves `sw_fallpre` alone (declined -> MATCH). The wider fold would be a lift
 //    variation, and a variation never ships a function its default declines (rank.ts), so it could
-//    not have lifted this row: the gate is what lets the default carry it.
+//    not have lifted this row: the gate is what lets the default carry it. `unpre.test.ts` pins both
+//    joins and an ordinary `if` join the gate keeps out.
 //  • the argument must be an op with operands. An operand-free argument (a constant, a symbol's
 //    address) is what a merge of `return 0;` arms or of a register the compiler set to one constant
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
@@ -60,13 +74,13 @@ const clonable = (d: Op): boolean =>
   d.opcode !== 'call' && d.results.length === 1 && !reevalUnsafe(d) && !spelledWhenDead(d) && placedAt(d) === null;
 
 export interface UnpreOptions {
-  /** lift the scope gate: recompute at every join, not only at a case fallen into. Tests only — it
+  /** lift the scope gate: recompute at every join, not only at a switch's. Tests only — it
    *  is what the gate's measurement in the header ran. */
   readonly everyJoin?: boolean;
 }
 
-/** Recompute every parameter of a case fallen into whose in-edges all hand it one pure expression;
- *  returns how many parameters it removed. */
+/** Recompute every parameter of a switch's join (a case fallen into, or the switch's exit) whose
+ *  in-edges all hand it one pure expression; returns how many parameters it removed. */
 export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): number {
   // The CFG does not change, so dominance is computed once; the def map and the homes grow with
   // each clone.
@@ -88,8 +102,9 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
       }
     }
   }
-  /** THE SCOPE GATE (see the header): a case the switch enters, every other edge from inside it. */
-  const fallenInto = (ins: readonly { from: Block; op: Op }[]): boolean => {
+  /** THE SCOPE GATE (see the header): a block the switch enters — a case, or by the default edge its
+   *  exit — whose every other edge comes from inside the switch. */
+  const switchJoin = (ins: readonly { from: Block; op: Op }[]): boolean => {
     const dispatch = ins.find((e) => e.op.opcode === 'switch_br');
     return (
       dispatch !== undefined &&
@@ -108,7 +123,7 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
     changed = false;
     for (const b of fn.blocks.slice(1)) {
       const ins = inEdges.get(b) ?? [];
-      if (ins.length < 2 || !(opts.everyJoin || fallenInto(ins))) {
+      if (ins.length < 2 || !(opts.everyJoin || switchJoin(ins))) {
         continue;
       }
       for (let k = 0; k < b.params.length;) {
