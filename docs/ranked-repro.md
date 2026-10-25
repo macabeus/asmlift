@@ -119,6 +119,24 @@ nor `--progress` and takes `--proto` from a `proto.json` it writes, and still re
 exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench fidelity` in
 `benchmark.yml`, which re-runs both repro scripts for every function.
 
+**The script reads the project's linked ELF, and the harness reads a frozen copy of what the CLI
+reads from it.** The script's `decomp.yaml` names the checkout's `tools.asmlift.elf`, so the CLI
+reads the symbol map off it, and also the body of every guessed callee the input does not define
+(cli `elf-bodies.ts`). The harness has no checkout. It reads the map out of `symbols.json.gz`, and
+the bodies out of `callee-bodies.json.gz`, which `bench vendor` writes beside it. Of those bodies
+it hands the lift the ones the CLI's own rule selects (`elfBodyCallees`).
+
+Until the bodies were vendored, the two read different inputs. The harness published
+`kleod:WorldMapScreenUnlockNewWorld:agbcc` with a guessed argument list on `thunk_GetRandomValue`,
+and the script printed `thunk_GetRandomValue()`.
+
+A project whose ELF changes, or a callee-naming change in the CLI, needs
+`pnpm bench vendor --project <p> --callee-bodies-only`. The runner refuses a row whose lift selects
+a callee the file does not name, and `test/callee-bodies-complete.test.ts` names it. A GameCube
+project's listing bodies are read with its dtk build's own `build/binutils` objdump unless
+`--objdump` names one. No PowerPC objdump is on a usual PATH, and the file records the
+`--version` line of the one used.
+
 **Run it in a gitignored directory, which is what the default gives you.** The script's step 1 is
 `bench target … --out "$PWD"`, so running it in the repo root leaves `decomp.yaml`, `ctx.i`,
 `in.asm`, `proto.json` and the script itself untracked there — and `bench run`'s dirty-tree
