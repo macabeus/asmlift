@@ -4994,9 +4994,13 @@ function readsBeforeWrite(
       }
       if (names(x)) {
         const dest = canonReg(x.ops[0] ?? '');
+        // Thumb's three-operand forms (`add rD, rN, #i`, `add rD, sp, #k`, `lsl rD, rM, #s`, `sub rD,
+        // rN, rM`) read only their sources; the two-operand ones (`add rD, #i`, `mul rD, rM`) read rD.
         const writesOnly =
           mn === 'pop' ||
-          ((DEST_ONLY.test(mn) || SINGLE_LOAD.test(mn)) && dest === reg && !names({ ...x, ops: x.ops.slice(1) }));
+          ((DEST_ONLY.test(mn) || SINGLE_LOAD.test(mn) || (WRITES_OPERAND_0.test(mn) && x.ops.length === 3)) &&
+            dest === reg &&
+            !names({ ...x, ops: x.ops.slice(1) }));
         return !writesOnly;
       }
     }

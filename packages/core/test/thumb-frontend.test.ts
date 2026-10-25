@@ -5832,7 +5832,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // #0x28 / ldrb r1, [r3]`): the copy outlives its load, and is no capture only where it is dead
   test('a copy that outlives its load and dies is no capture', () => {
     expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toContain('return (u8)(a0 + 1) + *(s32 *)&sp0;');
-    // …written again before anything reads it, on both arms of a branch
+    // …written again on one arm of a branch before anything reads it, and never read on the other
     expect(
       lift(
         fr(
@@ -5840,6 +5840,10 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
         ),
       ),
     ).toContain('(u8)(a0 + 1)');
+    // …or by a three-operand write that reads only its sources
+    expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n\tadd\tr3, r0, #0x2\n\tadd\tr0, r0, r3\n'))).toContain(
+      '(u8)(a0 + 1)',
+    );
   });
 
   // The copy is not lifted, so r3 keeps what it held before it: read past the load, the 9 below
