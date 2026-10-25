@@ -10,36 +10,33 @@
 //
 // The exit's own code need not have an effect: agbcc cross-jumps the arm's store onto a post-loop
 // `r = 0; *out = r;` too, a register move falling into the one store (`a pure exit assignment ahead
-// of the tail`). What stays refused, each with a witness here or in `loop-break-exit.test.ts`: a
-// tail a `break` can reach is a `break` to it, and that reading comes first (`a tail the loop's own
-// exit also runs is written once, after the loop`); an exit the loop's test does not leave to — one only a mid-body
-// branch enters, which the `while` reading of two cross-jumped arms takes for its exit (`retarm2_tail`,
-// below) — and an arm leaving by a latch (`an arm another path also enters is not a \`break\` arm, and
-// the loop declines`); a tail entered
-// straight from before the loop, past the exit; and a tail holding a cycle. The arm writes the tail
-// without owning it, so it stays code run after the loop for a `do-while`'s escape check, since the
-// exit path runs it there.
-// And a copy is the reading of last resort: where another exit lets every edge `break` to the tail,
-// that reading wins (`a rotated loop whose two exits can both \`break\` to the tail copies nothing`).
+// of the tail`). What stays refused is `EXIT_TAIL_GATES` (at `earlyReturnArm`), whose `guardedBy`
+// names the test that fails without each rule — here or in `loop-break-exit.test.ts`; the IR tests
+// here also drop their rule and watch the reading change. The arm writes the tail without owning it, so it stays code run
+// after the loop for a `do-while`'s escape check, since the exit path runs it there. And a copy is the
+// reading of last resort: where another exit lets every edge `break` to the tail, that reading wins
+// (`a rotated loop whose two exits can both \`break\` to the tail copies nothing`), and so does a
+// `while (1)` whose arms keep their own tails (`retarm2_tail`, below).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import type { AsmData } from '../src/frontend/asmdata';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { EXIT_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
-const judged = (ir: string) => {
+const judged = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn);
+  const sfn = structure(fn, {}, hooks);
   return {
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
@@ -156,8 +153,8 @@ const expectRetpostTail = (src: string) => {
 
 /** `synthetic:retarm2_tail`'s agbcc listing: `if (gTab[i] == 7) { Ping(i); Hit(a); return; } if
  *  (gTab[i] == 8) { Pong(i); Hit(a); return; }`, the two `Hit(a)` cross-jumped into `.L10`. The
- *  `while` reading takes the header's `Ping` edge for the loop's exit, whose path then reaches `.L10`
- *  after `Ping`: only a mid-body branch enters it, so it is an arm, and `Hit(a)` is no exit tail. */
+ *  `while` reading would take the header's `Ping` edge for the loop's exit and copy `Hit(a)` into the
+ *  `Pong` arm; `while (1)`, whose two arms each keep `Hit(a)` and need no copy, is read first. */
 const AGBCC_RETARM2_TAIL = `retarm2_tail:
 	push	{r4, lr}
 	add	r4, r0, #0
@@ -279,6 +276,9 @@ describe('an early return whose tail the loop exit path also runs', () => {
   });
 });
 
+/** `EXIT_TAIL_GATES` with one rule dropped, as `structure`'s hook takes it. */
+const withoutRule = (id: string): StructureHooks => ({ exitTailGates: without(EXIT_TAIL_GATES, id) });
+
 /** The same shape in IR, for the trace oracle: a zero-trip guard into the exit `^bb4` (`miss(i)`), a
  *  body arm into `^bb5` (`store; ret`), which the exit falls into. The header is a pure test, as the
  *  rows' `ldrb`/`lbu` is: the `while` reading then takes the arm for its exit and refuses the latch's
@@ -326,6 +326,8 @@ describe('the exit-path return tail, against its own IR', () => {
         '  cond_br %21, ^bb5(%2), ^bb1(%2)\n',
     );
     expect(() => judged(bypass)).toThrow(/unrecovered back-edge/);
+    // the refusal is the rule's: without it the arm copies the tail past the guard's own entry
+    expect(judged(bypass, withoutRule('entry-bypasses-exit')).agreement).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a tail holding a loop of its own stays refused', () => {
@@ -338,6 +340,7 @@ describe('the exit-path return tail, against its own IR', () => {
         '^bb7():\n  ret %12',
     );
     expect(() => judged(cyclic)).toThrow(/unrecovered back-edge/);
+    expect(judged(cyclic, withoutRule('tail-holds-cycle')).agreement).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a pure exit assignment ahead of the tail is code of its own', () => {
@@ -352,6 +355,52 @@ describe('the exit-path return tail, against its own IR', () => {
     expect(agreement).toEqual({ judged: 300, disagree: 0 });
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
+});
+
+/** `for (i = 0; i < n; i++) { v = t(i); if (v == a) { *a = i; return i; } if (v == 7) { hit(i);
+ *  break; } } i = 0; *a = i; return i;` with the guard into the pure exit `^bb4`: the `hit` arm
+ *  reaches the exit itself, so the exit path runs nothing the arm does not, and `hit(i); break;`
+ *  spells it. Taking the tail into that arm too, the `do-while` reading copies `i = 0; *a = i;
+ *  return i;` into it — the same program, but the exit written twice. */
+const ARM_REACHES_EXIT = `fn retcode {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %20: u32 = icmp_slt %2, %1
+  cond_br %20, ^bb1(%2), ^bb4(%2)
+^bb1(%3: s32):
+  %4: s32 = call %3 {target="t"}
+  %5: u32 = icmp_eq %4, %0
+  cond_br %5, ^bb5(%3), ^bb2()
+^bb2():
+  %6: s32 = const {value=7}
+  %7: u32 = icmp_eq %4, %6
+  cond_br %7, ^bb6(), ^bb3()
+^bb3():
+  %8: s32 = const {value=1}
+  %9: s32 = add %3, %8
+  %10: u32 = icmp_slt %9, %1
+  cond_br %10, ^bb1(%9), ^bb4(%9)
+^bb6():
+  %11: s32 = call %3 {target="hit"}
+  br ^bb4(%3)
+^bb4(%12: s32):
+  %13: s32 = const {value=0}
+  br ^bb5(%13)
+^bb5(%14: s32):
+  store %0, %14 {off=0, width=4}
+  ret %14
+}`;
+
+test('an arm that reaches the exit itself is a `break`, and copies no tail past it', () => {
+  const { src, agreement, shipped } = judged(ARM_REACHES_EXIT);
+  expect(src).toMatch(/hit\(v1\);\n\s+break;/);
+  expect(src).toContain('while (1) {');
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  // the rule is what refuses the copy: without it the `do-while` reading writes the tail in the arm
+  const copied = judged(ARM_REACHES_EXIT, withoutRule('exit-runs-nothing-of-its-own'));
+  expect(copied.src).toMatch(/hit\(v1\);\n\s+v1 = 0;\n\s+\*\(s32 \*\)a0 = v1;\n\s+return v1;/);
+  expect(copied.agreement).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** agbcc's rotated `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail();`: the `break`

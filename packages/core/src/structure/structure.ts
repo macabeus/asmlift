@@ -1952,6 +1952,8 @@ export interface StructureHooks {
   enclosingCarrierGates?: readonly Gate<EnclosingCarrier>[];
   /** `sinkablePreUpdateSlots`'s per-slot rules (`PREUPDATE_SINK_GATES`), ablatable the same way. */
   preUpdateSinkGates?: readonly Gate<SinkCandidate>[];
+  /** `earlyReturnArm`'s `exitTail` rules (`EXIT_TAIL_GATES`), ablatable the same way. */
+  exitTailGates?: readonly Gate<ExitTailCandidate>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -2418,6 +2420,67 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
 // is a FIDELITY rule, not a soundness one.
 //
+/** One block the `exitTail` count (at `earlyReturnArm`) weighs for an arm: a return tail the loop's
+ *  own exit path also runs, which the arm would write a copy of. The fields are getters, so the two
+ *  walks at the bottom of `EXIT_TAIL_GATES` run only when the rules ahead of them admit. */
+export interface ExitTailCandidate {
+  /** the arm's edge leaves from a latch, the loop's own way out */
+  readonly armLeavesByLatch: boolean;
+  /** a latch, or a path from before the loop (the zero-trip guard), enters the exit */
+  readonly exitIsTestOut: boolean;
+  /** the exit path runs a block of its own before the tail: the arm never reaches `exit` */
+  readonly exitRunsOwnBlock: boolean;
+  /** every predecessor of the block is an arm's block or on the exit's forward path */
+  readonly enteredByArmsOrExitPath: boolean;
+  /** neither the block nor anything past it holds a cycle */
+  readonly acyclicPast: boolean;
+}
+
+/** When an early-`return` arm may write a copy of a tail the loop's exit path also runs. The rules
+ *  and the argument for each are at `earlyReturnArm` ("THE EXIT PATH RUNS IT TOO"); none is sound,
+ *  since every copy runs on a path exclusive of the others. Not in the table: the count's scope — a
+ *  copy the caller asked for (`copyExitTail`), and a block with an effect the exit path runs — which
+ *  is the walk's own condition. */
+export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
+  {
+    id: 'arm-leaves-by-latch',
+    why: 'an arm leaving by a latch is the way the loop itself leaves, and a copy past it moves post-loop code into the body',
+    sound: false,
+    guardedBy: 'loop-break-exit.test.ts: an arm another path also enters is not a `break` arm, and the loop declines',
+    rejects: (c) => c.armLeavesByLatch,
+  },
+  {
+    id: 'exit-not-test-out',
+    why: 'an exit only a mid-body branch enters is another arm, not where the loop test leaves to',
+    sound: false,
+    guardedBy: 'loop-break-exit.test.ts: a shared tail the exit also reaches is refused',
+    rejects: (c) => !c.exitIsTestOut,
+  },
+  {
+    id: 'exit-runs-nothing-of-its-own',
+    why: 'where the exit path runs no code of its own before the tail, a break reaches the tail and no copy is needed',
+    sound: false,
+    guardedBy:
+      'loop-exit-return-tail.test.ts: an arm that reaches the exit itself is a `break`, and copies no tail past it',
+    rejects: (c) => !c.exitRunsOwnBlock,
+  },
+  {
+    id: 'entry-bypasses-exit',
+    why: 'a path from before the loop that skips the exit lands on the epilogue the asm holds once after the loop',
+    sound: false,
+    guardedBy:
+      'loop-exit-return-tail.test.ts: a tail also entered straight from before the loop, past the exit, stays refused',
+    rejects: (c) => !c.enteredByArmsOrExitPath,
+  },
+  {
+    id: 'tail-holds-cycle',
+    why: 'a tail holding a loop would be written once per arm where the asm holds it once',
+    sound: false,
+    guardedBy: 'loop-exit-return-tail.test.ts: a tail holding a loop of its own stays refused',
+    rejects: (c) => !c.acyclicPast,
+  },
+];
+
 // ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
 // effects may be written once per arm when the loop's own exit path does not run it
 // (`offExitPathOf`) and it holds no cycle, whoever else enters it — another arm, or a path from
@@ -2469,29 +2532,34 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // so each path runs one copy once. A copy is the reading of last resort: the caller asks for it
 // (`copyExitTail`) only once every reading of the loop has failed without it, since another exit can
 // let the arm `break` to the tail (agbcc's rotated `if (bit(i)) { x = i; break; }`, where taking the
-// `x = i` arm for the exit would copy the tail into the count test's edge). Admitted when every one
-// of these holds, each a refusal with a witness in `loop-exit-return-tail.test.ts` or
-// `loop-break-exit.test.ts`:
-//   - the exit path reaches the block after a block of its own: `exit`, which the arm never reaches.
-//     That block need not have an effect: agbcc cross-jumps `{ *out = r; return; }` onto the post-loop
-//     `r = 0; *out = r;` as well, a register move falling into the one store (`a pure exit assignment
-//     ahead of the tail`). Where the exit runs nothing a `break` could not reach past, a reading
-//     whose exit is the tail itself `break`s to it, and that reading comes first (`a tail the loop's
-//     own exit also runs is written once, after the loop`);
-//   - every predecessor is an arm's block (`onlyFromBody`) or on the exit's forward path — never an
-//     entry from before the loop that bypasses the exit (the paragraph below says why);
-//   - neither the block nor anything past it holds a cycle, so the region past it only returns, and
-//     each copy is one walk, never a loop written once per arm (`a tail holding a loop of its own
-//     stays refused`);
-//   - the exit is where the loop's test leaves to: a latch enters it, or a path from before the loop
-//     (the zero-trip guard). An exit only a mid-body branch enters is indistinguishable from an arm,
-//     and the `while` reading of `if (t[i] == 7) { Ping(i); Hit(a); return; } if (t[i] == 8) {
-//     Pong(i); Hit(a); return; }` takes the `Ping` edge for its exit and would copy `Hit(a)` past it
-//     (`synthetic:retarm2_tail:agbcc`, MATCH only through the reading that keeps both arms);
-//   - the arm does not leave by a latch, the loop's own way out. agbcc's peeled first test entering a
-//     `hit(i); break;` arm leaves no reading with the latch's target as the exit, and the one that
-//     took the arm for it would copy the post-loop `out()` into the body as an early return (`an arm
-//     another path also enters is not a \`break\` arm, and the loop declines`).
+// `x = i` arm for the exit would copy the tail into the count test's edge). The count's SCOPE is a
+// copy asked for and an effectful block the exit path runs; within it, a block is admitted when no
+// rule of `EXIT_TAIL_GATES` refuses it. The rules, in table order, and why each exists:
+//   - `arm-leaves-by-latch`: the arm does not leave by a latch, the loop's own way out. agbcc's
+//     peeled first test entering a `hit(i); break;` arm leaves no reading with the latch's target as
+//     the exit, and the one that took the arm for it would copy the post-loop `out()` into the body
+//     as an early return;
+//   - `exit-not-test-out`: the exit is where the loop's test leaves to: a latch enters it, or a path
+//     from before the loop (the zero-trip guard). An exit only a mid-body branch enters is
+//     indistinguishable from an arm: the `while` reading of `if (t[i] == 7) { Ping(i); Hit(a);
+//     return; } if (t[i] == 8) { Pong(i); Hit(a); return; }` (`synthetic:retarm2_tail:agbcc`) takes
+//     the `Ping` edge for its exit and would copy `Hit(a)` past it. That row no longer reaches the
+//     rule — `while (1)` keeps both arms without a copy and is read first — but a top-tested loop
+//     whose header leaves to a `pre()` ahead of the arms' shared tail does;
+//   - `exit-runs-nothing-of-its-own`: the exit path reaches the block after a block of its own:
+//     `exit`, which the arm never reaches. That block need not have an effect: agbcc cross-jumps `{
+//     *out = r; return; }` onto the post-loop `r = 0; *out = r;` as well, a register move falling
+//     into the one store. An arm that reaches `exit` itself is a `break` to it, which `while (1)`
+//     spells; the `do-while` reading would copy the exit's code and the tail into it;
+//   - `entry-bypasses-exit`: every predecessor is an arm's block (`onlyFromBody`) or on the exit's
+//     forward path — never an entry from before the loop that bypasses the exit (the paragraph below
+//     says why);
+//   - `tail-holds-cycle`: neither the block nor anything past it holds a cycle, so the region past it
+//     only returns, and each copy is one walk, never a loop written once per arm.
+// None is `sound`: each copy runs on a path exclusive of the others, so a refusal here picks which
+// reading of the loop is written, never whether the C means the asm. What keeps a copied tail sound
+// is that the arm does not own it (`emitDoWhile`'s escape check, `a tail the exit path also runs
+// stays post-loop for the escape check of a \`do-while\``).
 //
 // WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop that bypasses the exit
 // is sound to copy past — the paths are exclusive — but into a tail that returns it is, in the common
@@ -2516,6 +2584,7 @@ function earlyReturnArm(
   exit: Block,
   latches: readonly Block[],
   copyExitTail: boolean,
+  exitTailGates: readonly Gate<ExitTailCandidate>[] = EXIT_TAIL_GATES,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -2530,19 +2599,26 @@ function earlyReturnArm(
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
   // a return tail the loop's own exit path also runs, after a block of its own (THE EXIT PATH RUNS IT
   // TOO, above), asked for only when the caller has found no reading without it
-  const exitIsTestOut =
-    copyExitTail && !latches.includes(from) && (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
-  const exitTail = (bb: Block): boolean => {
-    if (!exitIsTestOut || offExitPath(bb) || [bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y))) {
-      return false;
-    }
-    if (!(preds.get(bb) ?? []).every((p) => armOfBody(p) || !offExitPath(p))) {
-      return false;
-    }
-    // the exit path runs a block of its own before the tail: `exit`, which the arm never reaches (so
-    // `bb` is never `exit` itself, which the loop writes after it)
-    return to !== exit && !reachFrom(to).has(exit);
-  };
+  const exitTail = (bb: Block): boolean =>
+    copyExitTail &&
+    !offExitPath(bb) &&
+    firstRejection(exitTailGates, {
+      armLeavesByLatch: latches.includes(from),
+      get exitIsTestOut() {
+        return (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
+      },
+      // `exit` itself, which the arm never reaches (so `bb` is never `exit`, which the loop writes
+      // after it)
+      get exitRunsOwnBlock() {
+        return to !== exit && !reachFrom(to).has(exit);
+      },
+      get enteredByArmsOrExitPath() {
+        return (preds.get(bb) ?? []).every((p) => armOfBody(p) || !offExitPath(p));
+      },
+      get acyclicPast() {
+        return ![bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y));
+      },
+    }) === null;
   const owned = new Set<Block>();
   const seen = new Set<Block>();
   const stack = [to];
@@ -3174,7 +3250,16 @@ export function structure(
       codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
     const owned =
       region === null
-        ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches, copyExitTail)
+        ? earlyReturnArm(
+            { dom, reachFrom, preds },
+            e.from,
+            e.to,
+            nl.body,
+            exit,
+            nl.latches,
+            copyExitTail,
+            hooks.exitTailGates,
+          )
         : null;
     return { region, owned };
   };
