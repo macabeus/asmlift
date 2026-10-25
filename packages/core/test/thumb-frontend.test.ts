@@ -5834,6 +5834,8 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // #0x28 / ldrb r1, [r3]`): the copy outlives its load, and is no capture only where it is dead
   test('a copy that outlives its load and dies is no capture', () => {
     expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toContain('return (u8)(a0 + 1) + *(s32 *)&sp0;');
+    // …and a halfword through `mov rD, sp` (sa3 EraseSaveSector's `mov r1, sp / ldrh r2, [r1]`)
+    expect(lift(fr('\tmov\tr1, sp\n\tldrh\tr0, [r1, #0x4]\n'))).toContain('return (u16)(a0 + 1) + *(s32 *)&sp0;');
     // …written again on one arm of a branch before anything reads it, and never read on the other
     expect(
       lift(
