@@ -522,6 +522,21 @@ describe('what this lowering cannot carry out refuses', () => {
     }
   });
 
+  // gcc2.7.2 and KMC relocate a `j` against `.text` as well. A leaf loop whose head is the entry
+  // jumps to its own first word, so its field lands on the function's own name: that is the loop's
+  // back edge, not a tail call (mp3 `__rmonPanic`, `while (1) {}`)
+  test('a j relocated against the section is not named, so a loop back to the entry lifts', () => {
+    const text = new Uint8Array(8);
+    text.set([0x08, 0x00, 0x00, 0x00], 0); // j 0
+    const ad: AsmData = {
+      ...relocs([[0, 'R_MIPS_26', '.text']]),
+      sections: new Map([['.text', text]]),
+      symbols: new Map([['f', { section: '.text', value: 0, size: 8, index: 1 }]]),
+    };
+    const listing = obj(['0:\tj\t0 <f>', '4:\tnop']);
+    expect(decompile('f', listing, MIPS_GCC, { asmData: ad }).source).toMatch(/while \(1\)/);
+  });
+
   test('a jal no relocation names', () => {
     expect(lift(DELAY_ARG, [])).toThrow(/'jal' at 0x8 has no callee symbol/);
   });

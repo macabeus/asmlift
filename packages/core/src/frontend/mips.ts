@@ -315,7 +315,7 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData, freed: Rea
     }
     ins.reloc = {
       type: r.type,
-      sym: r.type === 'R_MIPS_26' ? (textCallee(r.sym, r.offset, ad) ?? r.sym) : r.sym,
+      sym: ins.mnemonic === 'jal' ? (textCallee(r.sym, r.offset, ad) ?? r.sym) : r.sym,
       addend: 0,
     };
   }
@@ -327,7 +327,9 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData, freed: Rea
  *  26-bit field holds the addend, the target's offset in the section shifted right by two. The
  *  symbol table names the function at that offset. Undefined, and the call keeps its section
  *  callee, which refuses: where `.text`'s bytes or the word are not in the dump, or where no one
- *  name, or more than one, starts there. */
+ *  name, or more than one, starts there. Only a `jal`'s: gcc 2.7.2 and KMC relocate a `j` against
+ *  `.text` too, and a leaf loop whose head is the entry jumps to its own function's first word, so
+ *  naming that `j` would read the loop's back edge as a tail call. */
 function textCallee(sym: string, offset: number, ad: AsmData): string | undefined {
   const text = ad.sections.get('.text');
   if (sym !== '.text' || text === undefined || offset + 4 > text.length) {
