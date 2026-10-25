@@ -3787,14 +3787,25 @@ function measureThumbFrame({
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
   // address after it. The copy is not lifted, so rD must be DEAD there: no path from the load reads
   // it before writing it (`readsBeforeWrite`), a return that may hand it back counting as a read.
+  // A CALL READS WHAT IT IS HANDED, the one receiver rule (`frameAddressReceivers`: a declared
+  // callee's argument words, every argument register where nothing declares it), plus the register
+  // it calls through (`calleeRegister`). Any other register it clobbers is dead past it, and a
+  // callee-saved one still holds the copy. Read as `readsBeforeWrite` reads a call for the save
+  // analysis (every register but r12), kleod sub_08016EEC keeps two copies live, in r3 and in r6.
   const narrowSuccs: number[][] = asmBlocks.map(() => []);
   preds.forEach((ps, at) => ps.forEach((p) => narrowSuccs[p].push(at)));
+  const narrowCallReads = (call: Instr): readonly string[] => {
+    const through = calleeRegister(call, target);
+    return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
+  };
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
     localArea,
     target.capabilities.endianness === 'little',
-    (b, from, r) => readsBeforeWrite(asmBlocks, narrowSuccs, b, from, r) === false,
+    (b, from, r) =>
+      readsBeforeWrite(asmBlocks, narrowSuccs, b, from, r, { reads: narrowCallReads, clobbers: calls.callClobbers }) ===
+      false,
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
   const otherCaptureOffsets = new Set(
@@ -4962,13 +4973,19 @@ function bodySavedRegs(
  *  or r1), which is a use only in a function not declared to return nothing. A `bx` through it is
  *  the return idiom `pop {r1}; bx r1` (agbcc's `pop {r3}; add sp, #0x10; bx r3` after a variadic
  *  save), which uses the word as where to go; a write that reads no `reg` ends the path. Any
- *  spelling of the register counts (`ip` is r12). */
+ *  spelling of the register counts (`ip` is r12).
+ *
+ *  `calls`, where a caller passes it, reads a `bl`/`blx` by what it is handed instead: a call that
+ *  names `reg` or whose `reads` include it reads it, one that clobbers it (`clobbers`) ends the
+ *  path, and past one that does neither the callee preserved it and the walk goes on. A `swi` is
+ *  read as without it. */
 function readsBeforeWrite(
   blocks: readonly AsmBlock[],
   succs: readonly (readonly number[])[],
   b: number,
   from: number,
   reg: string,
+  calls?: { readonly reads: (call: Instr) => readonly string[]; readonly clobbers: readonly string[] },
 ): 'read' | 'returned' | false {
   const names = (x: Instr): boolean =>
     expandRegList(
@@ -4988,6 +5005,15 @@ function readsBeforeWrite(
       if (classifyXfer(x) === 'return') {
         returned ||= !(mn === 'bx' && canonReg(x.ops[0] ?? '') === reg) && (reg === 'r0' || reg === 'r1');
         return false;
+      }
+      if (calls !== undefined && (mn === 'bl' || mn === 'blx')) {
+        if (names(x) || calls.reads(x).some((r) => canonReg(r) === reg)) {
+          return true;
+        }
+        if (calls.clobbers.some((r) => canonReg(r) === reg)) {
+          return false;
+        }
+        continue;
       }
       if (/^(bl|blx|swi)$/.test(mn)) {
         return reg !== 'r12';

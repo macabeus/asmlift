@@ -5869,6 +5869,39 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => lift(ret)).toThrow('the captured address flows into `ret`');
   });
 
+  // A call reads only what it is handed (thumb.ts `frameAddressReceivers`): a declared callee its
+  // argument words, an undeclared one every argument register. Past it a clobbered register is
+  // dead and a callee-saved one still holds the copy.
+  test('a call past the load reads the copy only where it is handed it', () => {
+    const PC: Prototypes = { ...P, g1: { params: ['u32'], returns: 'u32' } };
+    const saved = (mid: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n' +
+      `\tbl\tmk\n${mid}\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const callLift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: PC }).source;
+    // a declared one-word callee is handed r0, so a copy in r2 dies at the call
+    expect(callLift(fr('\tadd\tr2, sp, #0x4\n\tldrb\tr0, [r2]\n\tbl\tg1\n'))).toContain('g1((u8)(a0 + 1))');
+    // …and a copy in r4 the callee preserves dies where the next copy of sp is written over it
+    expect(
+      callLift(
+        saved(
+          '\tadd\tr4, sp, #0x4\n\tldrb\tr0, [r4]\n\tbl\tg1\n\tadd\tr4, sp, #0x4\n\tldrb\tr4, [r4]\n\tadd\tr0, r0, r4\n',
+        ),
+      ),
+    ).toContain('g1((u8)(a0 + 1))');
+    for (const declines of [
+      // an undeclared callee may be handed every argument register
+      fr('\tadd\tr2, sp, #0x4\n\tldrb\tr0, [r2]\n\tmov\tr1, #0x1\n\tbl\tg9\n'),
+      // the copy in the register the declared callee is handed
+      fr('\tadd\tr0, sp, #0x4\n\tldrb\tr1, [r0]\n\tbl\tg1\n'),
+      // a callee-saved copy read after the call
+      saved(
+        '\tmov\tr4, #0x9\n\tadd\tr4, sp, #0x4\n\tldrb\tr0, [r4]\n\tbl\tg1\n\tldrb\tr1, [r4, #0x1]\n\tadd\tr0, r0, r1\n',
+      ),
+    ]) {
+      expect(() => callLift(declines), declines).toThrow(/address-taken stack local/);
+    }
+  });
+
   test('a copy anything else reads stays a capture', () => {
     const WIDTHS = 'the accesses through the captured address disagree on width (4 vs 1)';
     // a second load through the copy
