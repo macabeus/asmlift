@@ -22,7 +22,14 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  declaresVoidReturn,
+  ownLeadingWordRegisters,
+  ownReturnWidth,
+  wordsOf,
+} from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
@@ -3796,20 +3803,34 @@ function measureThumbFrame({
   // it clobbers, r0 among them, is dead past it, and a callee-saved one still holds the copy. Read
   // as `readsBeforeWrite` reads a call for the save analysis (every register but r12), kleod
   // sub_08016EEC keeps two copies live, in r3 and in r6.
+  //
+  // A RETURN HANDS BACK WHAT THE OWN DECLARATION RETURNS. Where it proves a void return, a return
+  // reads neither r0 nor r1 (pipeline.ts `dropVoidReturnOperands`, the exemption
+  // `refuseStaleIdiomReads` makes for the marker), and where it proves a return no wider than a word,
+  // it reads r0 alone: `add r1, sp, #4 / ldrb r0, [r1] / … / pop {r0} / bx r0` in a `void f(u32)`
+  // leaves no read of r1. Undeclared, a return may hand back the pair r0:r1.
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
   };
   // `callClobbers` leaves out r0, which the lift writes with what the call returns
   const narrowCallClobbers = [...calls.callClobbers, target.returnReg];
+  const ownProven = own?.proves === true ? own.proto : undefined;
+  const returnMayHand = (r: string): boolean =>
+    !declaresVoidReturn(ownProven) &&
+    !(r !== target.returnReg && (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32);
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
     localArea,
     target.capabilities.endianness === 'little',
-    (b, from, r) =>
-      readsBeforeWrite(asmBlocks, succs, b, from, r, { reads: narrowCallReads, clobbers: narrowCallClobbers }) ===
-      false,
+    (b, from, r) => {
+      const use = readsBeforeWrite(asmBlocks, succs, b, from, r, {
+        reads: narrowCallReads,
+        clobbers: narrowCallClobbers,
+      });
+      return use === false || (use === 'returned' && !returnMayHand(r));
+    },
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
   const otherCaptureOffsets = new Set(

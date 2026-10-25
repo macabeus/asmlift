@@ -5874,6 +5874,28 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => lift(ret)).toThrow('the captured address flows into `ret`');
   });
 
+  // A return reads what the own declaration returns (thumb.ts `returnMayHand`): nothing where it
+  // proves void, r0 alone where it proves one word. Undeclared, or wider, it may hand back r0:r1.
+  test('a copy a return cannot hand back dies there', () => {
+    const r1 = (tail: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n' +
+      `\tbl\tmk\n\tadd\tr1, sp, #0x4\n\tldrb\tr0, [r1]\n\tldr\tr2, .L9\n\tstrb\tr0, [r2]\n${tail}` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, pc}\n.L9:\n\t.word\tgP\n';
+    const ownLift = (asm: string, f: Prototypes[string]) =>
+      decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...P, f } }).source;
+    expect(ownLift(r1(''), { params: ['u32'], returnsVoid: true })).toContain('gP = (u8)(a0 + 1);');
+    expect(ownLift(r1('\tmov\tr0, #0x5\n'), { params: ['u32'], returns: 'u32' })).toContain('return 5;');
+    // …and a copy in r0 at a void return
+    const r0 = r1('')
+      .replace('add\tr1, sp, #0x4\n\tldrb\tr0, [r1]', 'add\tr0, sp, #0x4\n\tldrb\tr3, [r0]')
+      .replace('strb\tr0, [r2]', 'strb\tr3, [r2]');
+    expect(ownLift(r0, { params: ['u32'], returnsVoid: true })).toContain('gP = (u8)(a0 + 1);');
+    // a declaration that proves no return as narrow as a word keeps the r1 copy a capture
+    for (const f of [{ params: ['u32'], returns: 'u64' }, { params: ['u32'] }]) {
+      expect(() => ownLift(r1(''), f), JSON.stringify(f)).toThrow('disagree on width (4 vs 1)');
+    }
+  });
+
   // A call reads only what it is handed (thumb.ts `frameAddressReceivers`): a declared callee its
   // argument words, an undeclared one every argument register. Past it a clobbered register is
   // dead and a callee-saved one still holds the copy.
