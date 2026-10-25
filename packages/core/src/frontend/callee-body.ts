@@ -42,7 +42,10 @@
 // format is lifted exactly as the same text placed in the input would be, with no side table of
 // the input's (its relocations and jump tables are keyed by the input object's own sections). The
 // driver that hands it in answers for what the input cannot say of it: that the definition is the
-// one the link keeps (cli elf-bodies.ts reads the binding off the linked ELF's symbol table).
+// one the link keeps (cli elf-bodies.ts reads the binding off the linked ELF's symbol table). An ARM
+// body behind a Thumb veneer is not lifted at all: a straight-line scan of its words reads which
+// argument registers it reads before writing them, and answers nothing for any other shape
+// (frontend/arm-body.ts), on a Thumb target alone.
 // A disassembly of a linked ELF carries no relocations, and the MIPS and PowerPC frontends name a
 // callee only by its relocation, so such a body that makes any call does not lift and proves nothing.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
@@ -59,11 +62,14 @@ import {
 } from '../proto';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
+import { armArgumentWords } from './arm-body';
 
 /** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
  *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
- *  callee's label. */
-export type CalleeBody = { kind: 'listing'; text: string };
+ *  callee's label; `arm` is the instruction words, from its entry, of the ARM body a Thumb caller
+ *  enters through an interworking veneer, which no frontend here lifts and frontend/arm-body.ts
+ *  scans instead. */
+export type CalleeBody = { kind: 'listing'; text: string } | { kind: 'arm'; words: readonly number[] };
 
 /** The bodies a driver found outside the input, keyed by callee (`DecompileOptions.calleeBodies`). */
 export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
@@ -157,6 +163,9 @@ function bodyBound(
     return weakNames(asm).has(callee) ? undefined : liftedBound(callee, asm, target, prototypes, lift);
   }
   const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
+  if (body?.kind === 'arm') {
+    return target.id === 'armv4t' ? armArgumentWords(body.words) : undefined;
+  }
   if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
     return undefined;
   }
