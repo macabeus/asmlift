@@ -1936,11 +1936,21 @@ function liftOnce(
   //     must run at the frame's own depth, save the incoming stack words that are keyed `@sarg<k>`.
   // The caller's home `[frameSize, frameSize + 16)` is in no range, so a def-less read there still
   // refuses. Sub-word frame traffic turns the slot model off (`spSlotSafe`) and claims nothing.
+  //
+  // A RELIFT takes a frame address by construction, and claims the local area alone: there the
+  // bytes kept as one object are memory and key no slot, and every word outside them is one the
+  // first audit handed back (`reliftRange`) only where no escape is unbounded, no copy reaches it
+  // and no index runs, so nothing but its own direct accesses reaches it. kmc homes `u32 r; if (i)
+  // r = gA[9]; … if (i) gA[10] = r;` in such a word beside two copied arrays, and reads it on the
+  // path that never stored it.
   let ownedMemo: { range: { from: number; to: number } | undefined } | undefined;
   const ownedFrame = (): { from: number; to: number } | undefined =>
     (ownedMemo ??= { range: measureOwnedFrame() }).range;
   const measureOwnedFrame = (): { from: number; to: number } | undefined => {
-    if (frameSize === undefined || depthAt === null || !spSlotSafe || code.some(takesFrameAddress)) {
+    if (frameSize === undefined || depthAt === null || !spSlotSafe) {
+      return undefined;
+    }
+    if (oneObject === undefined ? code.some(takesFrameAddress) : frame === null) {
       return undefined;
     }
     for (const ins of code) {
@@ -1966,7 +1976,9 @@ function liftOnce(
       }
       throw e;
     }
-    return outgoing.widest < frameSize ? { from: outgoing.widest, to: frameSize } : undefined;
+    const from = Math.max(outgoing.widest, oneObject === undefined || frame === null ? 0 : frame.area.from);
+    const to = oneObject === undefined || frame === null ? frameSize : Math.min(frameSize, frame.area.to);
+    return from < to ? { from, to } : undefined;
   };
   ownedFrameOf = ownedFrame;
 

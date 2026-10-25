@@ -846,3 +846,108 @@ test('spill words below two copied arrays go back to the slot model, and the arr
   expect(out).toContain('memcpy(sp80, a0, 16);\n    memcpy(sp64, a1, 16);');
   expect(out).toContain('return sp64[5] + sp80[3] + ');
 });
+
+// `u32 f(u32 i, const u8 *p, const u8 *q, u32 *g){ u8 a[16], b[16]; u32 r, v0..v7; memcpy(a, p, 16);
+// memcpy(b, q, 16); v0..v7 = g[0..7]; if (i) r = g[9];` three `sink` calls, `g[i] = v0 + … + v7;
+// return r + a[3] + b[5]; }` at gcc2.7.2kmc -O2: `r` spills to sp+60 above the arrays, stored only
+// under `if (i)` and read on every path. The relift hands it back to the slot model, and the path
+// that never stored it reads an uninitialised local there, as it does in a frame no address leaves.
+const CONDSPILL_KMC = [
+  '0:\taddiu\tsp,sp,-104',
+  '4:\tsw\ta0,52(sp)',
+  '8:\taddiu\ta0,sp,16',
+  'c:\tsw\ts0,64(sp)',
+  '10:\tmove\ts0,a2',
+  '14:\tli\ta2,16',
+  '18:\tsw\ts1,68(sp)',
+  '1c:\tmove\ts1,a3',
+  '20:\tsw\tra,100(sp)',
+  '24:\tsw\ts8,96(sp)',
+  '28:\tsw\ts7,92(sp)',
+  '2c:\tsw\ts6,88(sp)',
+  '30:\tsw\ts5,84(sp)',
+  '34:\tsw\ts4,80(sp)',
+  '38:\tsw\ts3,76(sp)',
+  '3c:\tjal\t0 <f>',
+  '40:\tsw\ts2,72(sp)',
+  '44:\taddiu\ta0,sp,32',
+  '48:\tmove\ta1,s0',
+  '4c:\tjal\t0 <f>',
+  '50:\tli\ta2,16',
+  '54:\tlw\ts8,0(s1)',
+  '58:\tlw\ts0,4(s1)',
+  '5c:\tlw\ts2,8(s1)',
+  '60:\tlw\ts3,12(s1)',
+  '64:\tlw\ts4,16(s1)',
+  '68:\tlw\ts5,20(s1)',
+  '6c:\tlw\tt0,52(sp)',
+  '70:\tlw\ts6,24(s1)',
+  '74:\tlw\ts7,28(s1)',
+  '78:\tbeqz\tt0,88 <f+0x88>',
+  '7c:\tmove\ta0,s8',
+  '80:\tlw\tt0,36(s1)',
+  '84:\tsw\tt0,60(sp)',
+  '88:\tmove\ta1,s0',
+  '8c:\tmove\ta2,s2',
+  '90:\tjal\t0 <f>',
+  '94:\tmove\ta3,s3',
+  '98:\tmove\ta0,s4',
+  '9c:\tmove\ta1,s5',
+  'a0:\tmove\ta2,s6',
+  'a4:\tjal\t0 <f>',
+  'a8:\tmove\ta3,s7',
+  'ac:\taddu\ta0,s8,s4',
+  'b0:\taddu\ta1,s0,s5',
+  'b4:\taddu\ta2,s2,s6',
+  'b8:\tjal\t0 <f>',
+  'bc:\taddu\ta3,s3,s7',
+  'c0:\tlw\tt0,52(sp)',
+  'c4:\taddu\tv0,s8,s0',
+  'c8:\taddu\tv0,v0,s2',
+  'cc:\taddu\tv0,v0,s3',
+  'd0:\taddu\tv0,v0,s4',
+  'd4:\taddu\tv0,v0,s5',
+  'd8:\taddu\tv0,v0,s6',
+  'dc:\taddu\tv0,v0,s7',
+  'e0:\tsll\tv1,t0,0x2',
+  'e4:\taddu\tv1,v1,s1',
+  'e8:\tsw\tv0,0(v1)',
+  'ec:\tlbu\tv0,19(sp)',
+  'f0:\tlw\tt0,60(sp)',
+  'f4:\tlbu\tv1,37(sp)',
+  'f8:\taddu\tv0,t0,v0',
+  'fc:\taddu\tv0,v0,v1',
+  '100:\tlw\tra,100(sp)',
+  '104:\tlw\ts8,96(sp)',
+  '108:\tlw\ts7,92(sp)',
+  '10c:\tlw\ts6,88(sp)',
+  '110:\tlw\ts5,84(sp)',
+  '114:\tlw\ts4,80(sp)',
+  '118:\tlw\ts3,76(sp)',
+  '11c:\tlw\ts2,72(sp)',
+  '120:\tlw\ts1,68(sp)',
+  '124:\tlw\ts0,64(sp)',
+  '128:\tjr\tra',
+  '12c:\taddiu\tsp,sp,104',
+];
+
+test('a handed-back spill word stored on one path only is an uninitialised local on the other', () => {
+  const out = src(
+    CONDSPILL_KMC,
+    [
+      [0x3c, 'R_MIPS_26', 'memcpy'],
+      [0x4c, 'R_MIPS_26', 'memcpy'],
+      [0x90, 'R_MIPS_26', 'sink'],
+      [0xa4, 'R_MIPS_26', 'sink'],
+      [0xb8, 'R_MIPS_26', 'sink'],
+    ],
+    MIPS_GCC,
+    {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  );
+  expect(out).toContain('    u8 sp16[16];\n    u8 sp32[16];\n');
+  expect(out).toContain('if (a0 != 0) v8 = a3[9];');
+  expect(out).toContain('return v8 + sp16[3] + sp32[5];');
+});
