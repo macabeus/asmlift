@@ -3782,11 +3782,19 @@ function measureThumbFrame({
   // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
   // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
   // capture.
+  //
+  // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
+  // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
+  // address after it. The copy is not lifted, so rD must be DEAD there: no path from the load reads
+  // it before writing it (`readsBeforeWrite`), a return that may hand it back counting as a read.
+  const narrowSuccs: number[][] = asmBlocks.map(() => []);
+  preds.forEach((ps, at) => ps.forEach((p) => narrowSuccs[p].push(at)));
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
     localArea,
     target.capabilities.endianness === 'little',
+    (b, from, r) => readsBeforeWrite(asmBlocks, narrowSuccs, b, from, r) === false,
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
   const otherCaptureOffsets = new Set(
@@ -4187,10 +4195,11 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
 //
 // What this finds is a shape and not yet a licence; the copy is a capture everywhere it fails:
 //   * the copy is `mov rD, sp` or `add rD, sp, #c`, entry-reachable, and in ONE block it is read
-//     by exactly one instruction, a zero-extending `ldrb`/`ldrh` at an immediate offset from rD
-//     that writes rD itself, so the address dies at that load. Anything else that mentions rD
-//     before it (a second load, a store through it, an escape), a call, a control transfer or a
-//     write of sp ends the search, and the copy stays a capture.
+//     by exactly one instruction, a zero-extending `ldrb`/`ldrh` at an immediate offset from rD,
+//     after which the address is dead: the load writes rD itself, or it writes another register
+//     and the caller's `diesAfter` proves no path from it reads rD before writing it. Anything else
+//     that mentions rD before the load (a second load, a store through it, an escape), a call, a
+//     control transfer or a write of sp ends the search, and the copy stays a capture.
 //   * the load's bytes are the low-order part of a whole aligned word of the reserved local area.
 //     A load at any other byte of the word is not that word's value narrowed, whatever it reads.
 //   * `ldrsb`/`ldrsh` exist only register-offset in Thumb-1, and agbcc's signed use reloads a word
@@ -4206,6 +4215,7 @@ function narrowSlotReloads(
   entryReachable: ReadonlySet<number>,
   localArea: number,
   littleEndian: boolean,
+  diesAfter: (b: number, from: number, r: string) => boolean,
 ): Map<Instr, { copy: Instr; slot: number }> {
   const found = new Map<Instr, { copy: Instr; slot: number }>();
   for (const b of entryReachable) {
@@ -4221,7 +4231,8 @@ function narrowSlotReloads(
         return;
       }
       const rD = reg(d);
-      for (const ins of instrs.slice(at + 1)) {
+      for (let li = at + 1; li < instrs.length; li++) {
+        const ins = instrs[li];
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx' || classifyXfer(ins) !== null || modifiesSp(ins)) {
           return;
         }
@@ -4230,7 +4241,10 @@ function narrowSlotReloads(
         }
         const width = ins.mnemonic === 'ldrb' ? 1 : ins.mnemonic === 'ldrh' ? 2 : 0;
         const addr = ins.ops[1] === undefined ? null : parseAddr(ins.ops[1]);
-        if (width === 0 || reg(ins.ops[0] ?? '') !== rD || addr === null || reg(addr.base) !== rD || addr.regOff) {
+        if (width === 0 || addr === null || reg(addr.base) !== rD || addr.regOff) {
+          return;
+        }
+        if (reg(ins.ops[0] ?? '') !== rD && !diesAfter(b, li + 1, rD)) {
           return;
         }
         const slot = from + addr.off - (littleEndian ? 0 : 4 - width);

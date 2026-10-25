@@ -5828,10 +5828,45 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     );
   });
 
-  test('a copy anything else reads, or that outlives the load, stays a capture', () => {
+  // reload hands the load another register where the value is a `?:` join's operand (`add r3, sp,
+  // #0x28 / ldrb r1, [r3]`): the copy outlives its load, and is no capture only where it is dead
+  test('a copy that outlives its load and dies is no capture', () => {
+    expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toContain('return (u8)(a0 + 1) + *(s32 *)&sp0;');
+    // …written again before anything reads it, on both arms of a branch
+    expect(
+      lift(
+        fr(
+          '\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n\tcmp\tr0, #0x3\n\tbcs\t.La\n\tmov\tr3, #0x2\n\tadd\tr0, r0, r3\n.La:\n',
+        ),
+      ),
+    ).toContain('(u8)(a0 + 1)');
+  });
+
+  // The copy is not lifted, so r3 keeps what it held before it: read past the load, the 9 below
+  // would stand for the address (measured with the deadness check ablated: `((u8 *)9)[1]`,
+  // `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
+  test('a copy read after its load, on any path, stays a capture', () => {
+    for (const after of [
+      // read again by a second load, a store through it, a store of it, and an add
+      '\tldrb\tr2, [r3, #0x1]\n\tadd\tr0, r0, r2\n',
+      '\tmov\tr2, #0x0\n\tstrb\tr2, [r3]\n',
+      '\tldr\tr2, .L9\n\tstr\tr3, [r2]\n',
+      '\tadd\tr0, r0, r3\n',
+      // …on one arm of a branch only
+      '\tcmp\tr0, #0x3\n\tbcs\t.La\n\tmov\tr3, #0x2\n\tb\t.Lb\n.La:\n\tldrb\tr3, [r3, #0x1]\n.Lb:\n\tadd\tr0, r0, r3\n',
+    ]) {
+      const asm = fr(`\tmov\tr3, #0x9\n\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n${after}`, '.L9:\n\t.word\tgP\n');
+      expect(() => lift(asm), after).toThrow(/address-taken stack local/);
+    }
+    // a copy in r0 a return may hand back, in a function that returns a value
+    const ret =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n\tbl\tmk\n\tadd\tr0, sp, #0x4\n' +
+      '\tldrb\tr1, [r0]\n\tldr\tr2, .L9\n\tstrb\tr1, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgP\n';
+    expect(() => lift(ret)).toThrow('the captured address flows into `ret`');
+  });
+
+  test('a copy anything else reads stays a capture', () => {
     const WIDTHS = 'the accesses through the captured address disagree on width (4 vs 1)';
-    // the loaded value lands in another register, so the copy outlives the load
-    expect(() => lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toThrow(WIDTHS);
     // a second load through the copy
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr2, [r0]\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
       WIDTHS,
