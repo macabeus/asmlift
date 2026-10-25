@@ -703,7 +703,7 @@ export interface TargetDescription {
     oneWordFrameIsTheCapturedObject?: boolean;
     // A frame address this function hands out — in an argument register at a call, or stored to
     // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
-    // word from there up is a call's outgoing argument. Its one reader is the outgoing-argument
+    // word from there up is a call's outgoing argument. Its first reader is the outgoing-argument
     // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
     // THERE. Absent ⇒ a handed-out frame address explains nothing.
     //
@@ -721,8 +721,27 @@ export interface TargetDescription {
     // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
     // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
     // reads the event whole-function, it only refuses or excuses a word no call takes
-    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
-    // where no block copy fits.
+    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence for any
+    // receiver, sound only where no block copy fits.
+    //
+    // Its SECOND reader is the Thumb frame model's [sp,#0] capture (`frontend/thumb.ts`, beside
+    // `noCallTakesAStackWord`), which reads the universal whole-function at offset 0: where the
+    // frame base is handed as the hidden pointer of a callee DECLARED to return a struct through
+    // memory, it is a local's address, so no word of the frame is any call's outgoing argument and
+    // the area is empty — whatever the other calls are (sret2knr: `u8 rnd();` beside two temps).
+    // The residue cannot reach it: a block copy's base goes to `memcpy`, no struct-returning
+    // callee. That reading is agbcc's layout, and is measured beyond `f0`: thumb.h:573
+    // STARTING_FRAME_OFFSET 0 and :620-621 add `current_function_outgoing_args_size` to every
+    // elimination to sp (:628 ACCUMULATE_OUTGOING_ARGS); function.c:2629 puts STACK_DYNAMIC_OFFSET
+    // past the same size; calls.c:1598-1609 precomputes into a temp every argument containing a
+    // call whenever the call has stack arguments, so a struct result is never built straight into
+    // an outgoing word. Compiled at the rows' flags: `mk(..)` by value as the 5th argument, as the
+    // 1st followed by four ints, `mk(..).a` as the 5th, a 20-byte struct by value, and a 5-argument
+    // K&R `rnd(1, 2, 3, 4, 5)` beside a temp each put the temp at sp+4 or higher, with [sp,#0] the
+    // outgoing word. A frame whose sp moves between two accesses is refused before this is read
+    // (thumb.ts `frameDepthBlocker`). Hand-written asm that builds a struct return at [sp,#0] and
+    // also stores a stack argument there declines; one that hands that word, unstored, to an
+    // undeclared callee as its fifth argument loses it from the callee's guessed arity.
     escapedFrameAddressNamesALocal?: boolean;
     // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
     // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it

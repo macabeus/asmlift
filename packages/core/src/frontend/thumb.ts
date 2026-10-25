@@ -3644,7 +3644,7 @@ function measureThumbFrame({
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   //
-  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // ONE DECISION, THREE LICENCES. This gate and the outgoing-argument `escape` event (fed below,
   // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
   // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
   // one escape anywhere and no frame word is any call's argument — which is sound only where no
@@ -3652,6 +3652,10 @@ function measureThumbFrame({
   // leaves, at any frame size; that field says why that survives a block copy. So what this gate
   // adds is a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
   // capture in an unreachable block proves nothing"), and every "not widened" above is about it.
+  //
+  // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
+  // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
+  // struct through memory, which a block copy's base never is (why: the field's comment).
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3707,7 +3711,8 @@ function measureThumbFrame({
   // outgoing area, and where the base is handed as the hidden pointer of a callee declared to
   // return a struct through memory it is that struct's storage: two struct-return temps,
   // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
-  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out.
+  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out —
+  // unless `compilerBehaviors.escapedFrameAddressNamesALocal` holds (its second reader).
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
       if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
@@ -3839,7 +3844,13 @@ function measureThumbFrame({
     [...captureOffsetOf]
       .filter(([ins]) => !narrowReloadCopies.has(ins))
       .map(([, o]) => o)
-      .filter((o) => o > 0 || (o === 0 && frameBaseIsReturnStorage && noCallTakesAStackWord)),
+      .filter(
+        (o) =>
+          o > 0 ||
+          (o === 0 &&
+            frameBaseIsReturnStorage &&
+            (noCallTakesAStackWord || target.compilerBehaviors.escapedFrameAddressNamesALocal === true)),
+      ),
   );
 
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
