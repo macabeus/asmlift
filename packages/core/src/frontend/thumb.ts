@@ -3708,9 +3708,9 @@ function measureThumbFrame({
   // return a struct through memory it is that struct's storage: two struct-return temps,
   // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
   // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out —
-  // except where the compiler puts every frame object above the whole outgoing area and never
-  // builds a struct result in it (`compilerBehaviors.returnStorageAboveOutgoingArea`): there the
-  // return storage at offset 0 is itself the proof that the area is empty, whatever the calls are
+  // except where a handed-out frame address names a local
+  // (`compilerBehaviors.escapedFrameAddressNamesALocal`): the return storage at offset 0 is then
+  // itself the proof that no word of the frame is an outgoing argument, whatever the calls are
   // (sret2knr: `u8 rnd();` beside the two temps).
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
@@ -3848,7 +3848,7 @@ function measureThumbFrame({
           o > 0 ||
           (o === 0 &&
             frameBaseIsReturnStorage &&
-            (noCallTakesAStackWord || target.compilerBehaviors.returnStorageAboveOutgoingArea === true)),
+            (noCallTakesAStackWord || target.compilerBehaviors.escapedFrameAddressNamesALocal === true)),
       ),
   );
 

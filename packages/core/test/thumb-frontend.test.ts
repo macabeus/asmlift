@@ -5841,7 +5841,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
       lift(fr('\tadd\tr0, sp, #0x4\n\tldr\tr2, .L9\n\tstr\tr0, [r2]\n\tldrb\tr0, [r0]\n', '.L9:\n\t.word\tgP\n')),
     ).toThrow(WIDTHS);
     // a call between the copy and the load: the undeclared `mk2` no longer keeps [sp,#0] an outgoing
-    // word (`returnStorageAboveOutgoingArea`), so the decline is the escape's rather than the overlap's
+    // word (`escapedFrameAddressNamesALocal`), so the decline is the escape's rather than the overlap's
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tbl\tmk2\n\tldrb\tr0, [r0]\n'))).toThrow(
       'the captured address at [sp,#0) is where `mk` returns its struct',
     );

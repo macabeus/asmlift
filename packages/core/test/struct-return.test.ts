@@ -281,9 +281,9 @@ describe('a callee declared to return a struct through memory', () => {
   });
 
   // …and where a call nothing sizes could take a stack word, agbcc's layout still proves none
-  // does: every frame object sits above the whole outgoing area and no struct result is built in
-  // it (`compilerBehaviors.returnStorageAboveOutgoingArea`), so a temp at [sp,#0] means the area
-  // is empty. The K&R `rnd` keeps its guessed arity: no body in the input bounds it.
+  // does: a frame address handed out at a call names a local, and no word from there up is an
+  // outgoing argument (`compilerBehaviors.escapedFrameAddressNamesALocal`), so a temp at [sp,#0]
+  // means the area is empty. The K&R `rnd` keeps its guessed arity: no body in the input bounds it.
   test('a temp at the frame base beside a call nothing sizes is an object where the layout proves it', () => {
     const prototypes = { mk: mkab, rnd: { returns: 'u8' } };
     const { source } = decompile('sret2knr', SRET2KNR, ARMV4T_AGBCC, { prototypes });
@@ -291,7 +291,7 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('    sp4 = mk(a0, 1, 24);');
     expect(source).toContain('gOut8 = rnd(v0);');
     // a target that does not claim the layout keeps [sp,#0] a candidate outgoing word
-    const { returnStorageAboveOutgoingArea: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const { escapedFrameAddressNamesALocal: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
     expect(() =>
       decompile('sret2knr', SRET2KNR, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors }, { prototypes }),
     ).toThrow('the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models');
@@ -300,7 +300,7 @@ describe('a callee declared to return a struct through memory', () => {
   // The control: the call that does take a stack word moves the temp off the frame base, so the
   // base is no return storage and [sp,#0] stays the staged fifth argument, claim or no claim
   test('a temp above a staged stack argument leaves that argument an outgoing word', () => {
-    const { returnStorageAboveOutgoingArea: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const { escapedFrameAddressNamesALocal: _claim, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
     for (const target of [ARMV4T_AGBCC, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors }]) {
       expect(() => decompile('p3', P3, target, { prototypes: { mk: mkab, rnd: { returns: 'u8' } } })).toThrow(
         /the store to \[sp,#0\] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument/,

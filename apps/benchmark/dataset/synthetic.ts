@@ -12642,7 +12642,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      one-word-frame licence. With the thunk's arity stated the real function lifts, with one
   //      ASMLIFT_ERROR in the `cmn` lowering (item 7's machinery). agbcc only: the gate is Thumb's;
   //      ido7.1 declines earlier on sp as data, and gcc2.7.2kmc and gcc2.7.2 MATCH sret2knr.
-  //      LIFTED by `compilerBehaviors.returnStorageAboveOutgoingArea`: sret2knr at 3/30,
+  //      LIFTED by `compilerBehaviors.escapedFrameAddressNamesALocal`: sret2knr at 3/30,
   //      and sub_08022CA0 lifts with item 7's one ASMLIFT_ERROR (its K&R thunk already has an ELF
   //      bound of 0 words, which never caps the guess). The next link is the guessed arity `gOut8 =
   //      rnd(v0);` (r0 still holds the second temp's word): the row's asm carries no `rnd` body, so
