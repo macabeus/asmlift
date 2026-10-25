@@ -739,8 +739,9 @@ export interface TargetDescription {
     // 1st followed by four ints, `mk(..).a` as the 5th, a 20-byte struct by value, and a 5-argument
     // K&R `rnd(1, 2, 3, 4, 5)` beside a temp each put the temp at sp+4 or higher, with [sp,#0] the
     // outgoing word. A frame whose sp moves between two accesses is refused before this is read
-    // (thumb.ts `frameDepthBlocker`); hand-written asm that builds a struct return at [sp,#0] and
-    // also stages a stack argument there loses that argument from an undeclared callee's guess.
+    // (thumb.ts `frameDepthBlocker`). Hand-written asm that builds a struct return at [sp,#0] and
+    // also stores a stack argument there declines; one that hands that word, unstored, to an
+    // undeclared callee as its fifth argument loses it from the callee's guessed arity.
     escapedFrameAddressNamesALocal?: boolean;
     // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
     // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it

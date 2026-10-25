@@ -12631,9 +12631,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      sub_0800D188 meets item 21; sub_08016EEC meets a jump table whose arms do not linearize
   //      (switch machinery). agbcc only, for item 3's reason.
   //  21. sret2knr / sret2void (sub_08022CA0; sub_0800D188's second link). A struct-return temp at
-  //      [sp,#0] is folded only where thumb.ts `noCallTakesAStackWord`, and a call to a K&R `()` callee
+  //      [sp,#0] was folded only where thumb.ts `noCallTakesAStackWord`, and a call to a K&R `()` callee
   //      (`u8 thunk_GetRandomValue();` again, item 15) counts as one that may take a stack word, so the
-  //      `ldr [sp]` stays an SSA slot under the temp: "one byte, two models". Overcautious on agbcc:
+  //      `ldr [sp]` stayed an SSA slot under the temp: "one byte, two models". Overcautious on agbcc:
   //      locals sit at sp plus the outgoing area (thumb.h:600-621, ACCUMULATE_OUTGOING_ARGS :628,
   //      STARTING_FRAME_OFFSET :573), and a compiled 5-argument call, prototyped or K&R, moves both
   //      temps to sp+4/sp+8 — so a declared sret `mov r0, sp` alone proves no call takes a stack word.
