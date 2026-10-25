@@ -1138,11 +1138,11 @@ interface LoopInfo {
 // One early-`return` exit out of a loop body, and the blocks of it the loop emits inside its body
 // (`earlyReturnArm` decides which). Per-EDGE rather than flattened into per-loop sets: ownership is
 // decided against `from`, so a second edge into the same target is a separate question. Two arms'
-// `owned` sets may OVERLAP: an effectful tail only the loop's exit arms run (`armsOnly`, the
-// cross-jumped `h(i); return;` two arms end in) is owned by every arm that reaches it, and written
-// once in each. `owned` has one reader, `emitDoWhile`, which unions the arms' sets for its
-// pre-update hazard check — an overlap only repeats a block in that union — and a `while` hoists no
-// update, so it has no pre-update reads to exempt.
+// `owned` sets may OVERLAP: a tail only the loop's exit arms run (`armsOnly`, the cross-jumped
+// `h(i); return;` two arms end in) is owned by every arm that reaches it, and written once in each.
+// `owned` has one reader, `emitDoWhile`, which unions the arms' sets for its pre-update hazard check
+// — an overlap only repeats a block in that union — and a `while` hoists no update, so it has no
+// pre-update reads to exempt.
 interface LoopArm {
   from: Block;
   to: Block;
@@ -2446,6 +2446,15 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // falls to the reading whose exit runs nothing of the tail. A shared epilogue the exit also reaches
 // still has to be pure.
 //
+// A PURE block the count admits is owned as well, though no effect forces it. The arms write it
+// whether or not they own it, so owning it changes no spelling; what it changes is `emitDoWhile`'s
+// escape check, which judges every block no arm owns as code run after the loop, past the update. A
+// block only the arms enter runs ahead of the update on every path, so a read there of a loop
+// variable is the pre-update value the arm's copy renders. agbcc cross-jumps two of three
+// `p.at = …; p.kind = seg->kind; return p;` arms into one such block, reading the element pointer
+// the body computed (`synthetic:sretpuretail`); left unowned, it declined the loop as a post-loop
+// read of a pre-update variable.
+//
 // WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop is sound to copy past —
 // the paths are exclusive — but into a tail that returns it is, in the common shape, the loop's own
 // zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) { if (t[i] == 7) {
@@ -2487,7 +2496,7 @@ function earlyReturnArm(
     if (body.has(bb)) {
       return null;
     } // re-enters the loop → not an exit
-    if ((entryOwned && dom.get(bb)!.has(to)) || (bb.ops.some(effectful) && armsOnly(bb))) {
+    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
       owned.add(bb);
     } else if (bb.ops.some(effectful)) {
       return null;
