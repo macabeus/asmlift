@@ -2474,10 +2474,15 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 //     entry from before the loop that bypasses the exit (the paragraph below says why);
 //   - neither the block nor anything past it holds a cycle, so the region past it only returns, and
 //     each copy is one walk; it is not `exit` itself, which the loop writes after it;
-//   - the arm does not leave by a latch's test, the loop's own way out. agbcc's peeled first test
-//     entering a `hit(i); break;` arm leaves no reading with the latch's target as the exit, and the
-//     one that took the arm for it would copy the post-loop `out()` into the body as an early return
-//     (`an arm another path also enters is not a \`break\` arm, and the loop declines`).
+//   - the exit is where the loop's test leaves to: a latch enters it, or a path from before the loop
+//     (the zero-trip guard). An exit only a mid-body branch enters is indistinguishable from an arm,
+//     and the `while` reading of `if (t[i] == 7) { Ping(i); Hit(a); return; } if (t[i] == 8) {
+//     Pong(i); Hit(a); return; }` takes the `Ping` edge for its exit and would copy `Hit(a)` past it
+//     (`synthetic:retarm2_tail:agbcc`, MATCH only through the reading that keeps both arms);
+//   - the arm does not leave by a latch, the loop's own way out. agbcc's peeled first test entering a
+//     `hit(i); break;` arm leaves no reading with the latch's target as the exit, and the one that
+//     took the arm for it would copy the post-loop `out()` into the body as an early return (`an arm
+//     another path also enters is not a \`break\` arm, and the loop declines`).
 //
 // WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop that bypasses the exit
 // is sound to copy past — the paths are exclusive — but into a tail that returns it is, in the common
@@ -2491,14 +2496,14 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // Returns the blocks the arm OWNS — the ones the loop emits inside its body for this arm, ahead of
 // the update — or null when this is not an early-`return` arm. Not exclusive to the arm: a block the
 // `armsOnly` or `exitTail` count admits is owned by every arm that reaches it, so two arms' sets can
-// share it. `fromLatch` says the arm leaves by one of the loop's latches.
+// share it. `latches` are the loop's latches.
 function earlyReturnArm(
   { dom, reachFrom, preds }: EarlyReturnArmDeps,
   from: Block,
   to: Block,
   body: Set<Block>,
   exit: Block,
-  fromLatch: boolean,
+  latches: readonly Block[],
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -2515,8 +2520,10 @@ function earlyReturnArm(
   // RUNS IT TOO, above)
   let fromExit: Set<Block> | undefined;
   let fromTo: Set<Block> | undefined;
+  const exitIsTestOut =
+    !latches.includes(from) && (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
   const exitTail = (bb: Block): boolean => {
-    if (fromLatch || bb === exit || offExitPath(bb) || [bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y))) {
+    if (!exitIsTestOut || bb === exit || offExitPath(bb) || [bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y))) {
       return false;
     }
     if (!(preds.get(bb) ?? []).every((p) => armOfBody(p) || !offExitPath(p))) {
@@ -3148,9 +3155,7 @@ export function structure(
     const region =
       codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
     const owned =
-      region === null
-        ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches.includes(e.from))
-        : null;
+      region === null ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches) : null;
     return { region, owned };
   };
   const whileLoops = new Map<Block, WhileLoopInfo>();

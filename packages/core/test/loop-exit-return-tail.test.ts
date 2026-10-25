@@ -10,8 +10,10 @@
 //
 // What stays refused, each with a witness here or in `loop-break-exit.test.ts`: a tail the exit
 // reaches running nothing of its own is a `break` to it (`a tail the loop's own exit also runs is
-// written once, after the loop`); an arm leaving by a latch's test, which is the loop's own way out
-// (`an arm another path also enters is not a \`break\` arm, and the loop declines`); a tail entered
+// written once, after the loop`); an exit the loop's test does not leave to — one only a mid-body
+// branch enters, which the `while` reading of two cross-jumped arms takes for its exit (`retarm2_tail`,
+// below) — and an arm leaving by a latch (`an arm another path also enters is not a \`break\` arm, and
+// the loop declines`); a tail entered
 // straight from before the loop, past the exit; and a tail holding a cycle. Owned or not, the tail
 // stays code run after the loop for a `do-while`'s escape check, since the exit path runs it there.
 import { describe, expect, test } from 'vitest';
@@ -147,7 +149,64 @@ const expectRetpostTail = (src: string) => {
   expect(src.slice(src.indexOf('gMiss = 1;'))).toMatch(/^gMiss = 1;\n\s+\*a1 = v0;\n/);
 };
 
+/** `synthetic:retarm2_tail`'s agbcc listing: `if (gTab[i] == 7) { Ping(i); Hit(a); return; } if
+ *  (gTab[i] == 8) { Pong(i); Hit(a); return; }`, the two `Hit(a)` cross-jumped into `.L10`. The
+ *  `while` reading takes the header's `Ping` edge for the loop's exit, whose path then reaches `.L10`
+ *  after `Ping`: only a mid-body branch enters it, so it is an arm, and `Hit(a)` is no exit tail. */
+const AGBCC_RETARM2_TAIL = `retarm2_tail:
+	push	{r4, lr}
+	add	r4, r0, #0
+	mov	r2, #0x0
+	cmp	r2, r1
+	bcs	.L2	@cond_branch
+.L6:
+	ldr	r0, .L11
+	add	r0, r2, r0
+	ldrb	r0, [r0]
+	cmp	r0, #0x7
+	bne	.L7	@cond_branch
+	add	r0, r2, #0
+	bl	Ping
+	b	.L10
+.L12:
+	.align	2, 0
+.L11:
+	.word	gTab
+.L7:
+	cmp	r0, #0x8
+	bne	.L5	@cond_branch
+	add	r0, r2, #0
+	bl	Pong
+.L10:
+	add	r0, r4, #0
+	bl	Hit
+	b	.L2
+.L5:
+	add	r2, r2, #0x1
+	cmp	r2, r1
+	bcc	.L6	@cond_branch
+.L2:
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+`;
+
 describe('an early return whose tail the loop exit path also runs', () => {
+  test('two cross-jumped arms are not read as an exit and an arm', () => {
+    const src = decompile('retarm2_tail', AGBCC_RETARM2_TAIL, ARMV4T_AGBCC, {
+      prototypes: {
+        Hit: { params: 1, returnsVoid: true },
+        Ping: { params: 1, returnsVoid: true },
+        Pong: { params: 1, returnsVoid: true },
+        retarm2_tail: { params: 2, returnsVoid: true },
+      },
+    }).source;
+    expect(src).toContain('while (1) {');
+    expect(src).toMatch(/Ping\(v0\);\n\s+Hit\(a0\);\n\s+return;/);
+    expect(src).toMatch(/Pong\(v0\);\n\s+Hit\(a0\);\n\s+return;/);
+    expect(src.match(/Hit\(/g)).toHaveLength(2);
+  });
+
   test('agbcc: the cross-jumped store is written in the arm and after the loop', () => {
     const src = decompile('retpost_tail', AGBCC_RETPOST_TAIL, ARMV4T_AGBCC, {
       prototypes: { retpost_tail: { params: 2, returnsVoid: true } },

@@ -1106,25 +1106,15 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  // The exit now runs `pre()` and then reaches the tail too. A `break` to the tail would skip
-  // `pre()`, so the arms are no `break` arms; the tail ends in the function's `return`, so each arm
-  // writes it as an early return, and the exit path keeps the copy after the loop (`exitTail`, at
-  // `earlyReturnArm`).
-  test('a shared tail the exit reaches after code of its own is an early return in each arm', () => {
-    const { src, agreement, shipped } = judged(
+  // The exit's own `pre()` runs before the tail, but the exit leaves by the header's test with
+  // nothing entering it from before the loop, so `exitTail` (at `earlyReturnArm`) does not take it.
+  test('a shared tail the exit also reaches is refused', () => {
+    declines(
       SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
         '^bb7():\n',
         '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
       ),
     );
-    expect(src).not.toContain('break;');
-    // `hit(i); return out();` in each arm, and once after the loop under `pre()`'s test
-    expect(src.match(/hit\(v0\);\n\s+return out\(\);/g)).toHaveLength(3);
-    expect(src).toContain('    if (pre() == a1) hit(v0);\n    return out();\n}');
-    expect(src.match(/pre\(/g)).toHaveLength(1);
-    expect(src.match(/hit\(/g)).toHaveLength(3);
-    expect(agreement).toEqual({ judged: 300, disagree: 0 });
-    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {
@@ -1380,21 +1370,18 @@ describe('early-return arms of a loop nested in another', () => {
     expect(shipped).toEqual(agreement);
   });
 
-  test('a tail the inner exit also reaches forward, after `tick`, is written in each arm and after the loop', () => {
-    // the inner exit now runs into `hit` too when `tick` says so. The arms reach it without `tick`,
-    // so no `break` spells them; the tail returns, so each arm writes it, and the exit path keeps
-    // its own copy (`exitTail`, at `earlyReturnArm`)
-    const { src, agreement, shipped } = judged(
-      NESTED_RETURN_TAIL.replace(
-        '  br ^bb10(%25)\n',
-        '  %26: u32 = icmp_eq %23, %2\n  cond_br %26, ^bb5(), ^bb10(%25)\n',
+  test('a tail the inner exit also reaches forward declines loud', () => {
+    // the inner exit now runs into `hit` too when `tick` says so: the arms reach it without `tick`,
+    // so the inner loop leaves for two live merges; the inner exit leaves by the header's test, so
+    // neither arm may copy a tail the exit runs (`exitTail`, at `earlyReturnArm`)
+    expect(() =>
+      judged(
+        NESTED_RETURN_TAIL.replace(
+          '  br ^bb10(%25)\n',
+          '  %26: u32 = icmp_eq %23, %2\n  cond_br %26, ^bb5(), ^bb10(%25)\n',
+        ),
       ),
-    );
-    expect(src.match(/return hit\(a0\);/g)).toHaveLength(3);
-    expect(src.match(/tick\(/g)).toHaveLength(1);
-    expect(agreement.disagree).toBe(0);
-    expect(agreement.judged).toBeGreaterThan(100);
-    expect(shipped).toEqual(agreement);
+    ).toThrow(/unrecovered back-edge/);
   });
 });
 
