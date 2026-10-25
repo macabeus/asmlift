@@ -1,9 +1,9 @@
 // asmlift — the CFG folds that run last before structuring, after return-sinking: the loop folds
 // rewrite a loop's edges into a shape a loop spelling owns, and the last one takes a parameter off a
-// switch's join (a case fallen into, or the switch's exit). Each is its own stage in the trace, so a re-spelled function names the
-// fold that moved it.
+// switch's join (a case fallen into, or the switch's exit). Each is its own stage in the trace, so a
+// re-spelled function names the fold that moved it.
 //
-// A MUTABLE RECORD, not a sum of four calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
+// A MUTABLE RECORD, not a sum of calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
 // caller-side seam a process outside core swaps to census a fold's gate table (`pnpm bench gates`,
 // apps/benchmark/src/run/gate-census.ts). A static import binding cannot be swapped.
 import { Fn } from '../ir/core';

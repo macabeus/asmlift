@@ -166,8 +166,9 @@ test('a switch-edge value the falling arm computes for itself (gcse PRE) is reco
   expect(out).toMatch(/\}\s*(\w+) = \1 \+ 1;\s*\} while/);
 });
 
-// The dispatch computes `a0 + 1` into r2 for `case 1:`, and `case 0:` falls into it after computing
-// the same sum. Each fixture below breaks one thing a re-run of the switch-edge copy needs.
+// `case 0:` falls into `case 1:`, and both it and the dispatch compute r2 for `case 1:` the same way
+// (`dispatch`, `arm0`). Each fixture below leaves the switch edge a copy into `case 1:` that the
+// fall path must not re-run, so the structurer still refuses it.
 const recompute = (dispatch: string, arm0: string) =>
   `f:\n\tpush\t{lr}\n${dispatch}\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr3, r1, #0x2\n\tldr\tr1, .Lp\n` +
   '\tadd\tr3, r3, r1\n\tldr\tr3, [r3]\n\tmov\tpc, r3\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +

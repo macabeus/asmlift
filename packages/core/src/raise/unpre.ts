@@ -17,19 +17,19 @@
 // SOUND BY SSA: every in-edge's argument is the SAME VALUE, so reading it in the block is reading
 // it on every edge. This is ir/simplify.ts's trivial phi (`trivialPhiValue`, which this calls) with
 // identity widened to congruence, and with its waiver: a back edge that hands the parameter itself
-// hands whatever the last entry did. "The same" is `sameAtEntry` (ir/entry.ts) with an empty entry map: one opcode,
-// one set of attributes, operands the same in turn, down to LEAVES that are one SSA value on every
-// edge. The walk reads through an op only when it can be re-evaluated anywhere (`clonable`: no
+// hands whatever the last entry did. "The same" is `sameAtEntry` (ir/entry.ts) with an empty entry
+// map: one opcode, one set of attributes, operands the same in turn, down to LEAVES that are one SSA
+// value on every edge. The walk reads through an op only when it can be re-evaluated anywhere (`clonable`: no
 // effect, no memory read, nothing that traps, no placement stamp), so the expression's value is a
 // function of its leaves alone; and every leaf must be defined in a block that strictly dominates
 // the block, so it holds the same value there. C names need no argument of their own: the
 // recomputed expression is fresh SSA ops reading the leaves, and namecoalesce gives a leaf that is
 // live at the block a name no other live value shares.
 //
-// SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`, both
-// `sound: false`; a test drops one with `without()` and runs the real fold):
-//  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, and every other comes from a
-//    block the dispatch dominates — an arm of that switch. Two joins pass:
+// SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`):
+//  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, at least
+//    one comes from another block, and every other comes from a block the dispatch dominates — an
+//    arm of that switch. Two joins pass:
 //     (1) A CASE FALLEN INTO (`case 4:` above). The structurer cannot spell its parameter as a
 //         variable, because the switch-edge copy would re-run on the fall path, so it declines; the
 //         fold is what lifts it.
