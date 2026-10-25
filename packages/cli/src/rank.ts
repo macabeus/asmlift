@@ -5,6 +5,7 @@
 // differ-ranked variations, not asserted truths.
 import { cBackend } from '@asmlift/core/backend/c';
 import type { AsmData } from '@asmlift/core/frontend/asmdata';
+import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { RewritePattern } from '@asmlift/core/pattern/engine';
 import type { FnProto, Prototypes } from '@asmlift/core/proto';
@@ -40,6 +41,8 @@ export interface RankOptions {
   contextGlobals?: ContextGlobals;
   /** same contract as DecompileOptions.ownContextProto */
   ownContextProto?: FnProto;
+  /** same contract as DecompileOptions.calleeBodies */
+  calleeBodies?: CalleeBodies;
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
@@ -83,6 +86,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     symbols: opts.symbols,
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(opts.ownContextProto ? { ownContextProto: opts.ownContextProto } : {}),
+    ...(opts.calleeBodies ? { calleeBodies: opts.calleeBodies } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });

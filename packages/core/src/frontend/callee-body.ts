@@ -1,4 +1,5 @@
-// asmlift — what a callee whose body is in the same input can read of its arguments.
+// asmlift — what a callee whose body is in the same input, or handed in from outside it, can read
+// of its arguments.
 //
 // A callee nobody declared is called at a guessed arity (frontend/call-plan.ts, `fallbackArgc`),
 // and on most ABIs `g()` and `g(x)` compile to the same caller bytes whenever x is already in the
@@ -21,13 +22,26 @@
 // the callee's arguments, and a read of it would only make the lift refuse (`push {lr}; mov r0-r3,
 // #0; bl g; bl h` would lose its bound so, though it reads none).
 //
+// A RETURN READS THE RETURN REGISTER. Where the target returns in its first argument register (ARM
+// r0, PowerPC r3), a return that no path wrote that register for hands back the caller's first
+// argument: `void *id(void *p) { return p; }` is a lone `blr` and `bx lr`, which no instruction reads,
+// and its lift returns nothing and counts no parameter. So a return the lift left bare, on a path
+// from the entry that makes no call (a call destroys the register), counts the first argument word
+// as read, unless the callee's entry declares a void return. KNOWN GAP: a return in a register PAIR
+// (r0:r1, r3:r4) that nothing declares is counted for its first register only.
+//
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);
-//   - the input defines no label of that name: a `name:` line, an objdump `<name>:` header or a
-//     `glabel name` (the Thumb frontend lifts a text with no such label whole, as one function, so a
-//     lift alone does not say the callee is here);
-//   - the input marks the callee `.weak`, which another definition may replace at link time;
+//   - the text the body is read from (the input, or a body handed in) defines no label of that
+//     name: a `name:` line, an objdump `<name>:` header or a `glabel name` (the Thumb frontend lifts
+//     a text with no such label whole, as one function, so a lift alone does not say the callee is
+//     here);
+//   - that text marks the callee `.weak`, which another definition may replace at link time;
 //   - the callee does not lift, inside or outside the input (a lift that fails proves nothing);
+//   - the callee's lift holds an `opaque` op: an instruction no frontend models is decoded only for
+//     which registers it names, and which of them it reads is a guess (PowerPC `mtmsr r3` and MIPS
+//     `mtc0 a0, c0_sr` each read the argument the decode takes for written), so a lift holding one
+//     proves no more than one that fails;
 //   - the callee makes a call through a register, whose arity nothing here can force;
 //   - the callee's entry declares a struct or union return: one handed back through memory takes a
 //     hidden pointer the lift reads as no entry parameter, so its count is one argument word short
@@ -36,10 +50,25 @@
 //     it as an argument-register INDEX. One per word holds only where every parameter is a word in
 //     its own register: o32 passes a leading double in $f12, which shadows a0 and a1, so
 //     `int hdx(double d, int x)` lifts two parameters and reads x from a2, index 2.
+//
+// A BODY OUTSIDE THE INPUT (`CalleeBodies`) answers only where the input defines no label of the
+// callee's name, and is read under every rule above: a listing in the target frontend's own input
+// format is lifted exactly as the same text placed in the input would be, with no side table of
+// the input's (its relocations and jump tables are keyed by the input object's own sections). The
+// driver that hands it in answers for what the input cannot say of it: that the definition is the
+// one the link keeps (cli elf-bodies.ts reads the binding off the linked ELF's symbol table). An ARM
+// body behind a Thumb veneer is not lifted at all: a straight-line scan of its words reads which
+// argument registers it reads before writing them, and answers nothing for any other shape
+// (frontend/arm-body.ts), and only on a target whose argument registers are the ones that scan
+// counts (`scansArgumentsOf`, read off the ABI's `argRegs`).
+// A disassembly of a linked ELF carries no relocations, and the MIPS and PowerPC frontends name a
+// callee only by its relocation, so a listing body comes with the call relocations the driver
+// names off the image's own symbol table (`CalleeBody.relocs`, or relocation lines in the text where
+// the frontend reads them there): a call it cannot name stays unnamed, and the body does not lift.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import type { Fn } from '../ir/core';
+import { type Block, type Fn, successorsOf } from '../ir/core';
 import {
   type FnProto,
   type Prototypes,
@@ -47,9 +76,34 @@ import {
   declaredCallArgs,
   declaresAggregateReturn,
   declaresParams,
+  declaresVoidReturn,
 } from '../proto';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
+import { armArgumentWords, scansArgumentsOf } from './arm-body';
+import type { Reloc } from './asmdata';
+
+/** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
+ *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
+ *  callee's label, with `relocs` the relocations an object of that text would carry in its side
+ *  table (`AsmData.relocs`), for a frontend that reads them there and not in the text (MIPS);
+ *  `arm` is the instruction words, from its entry, of the ARM body a Thumb caller enters through an
+ *  interworking veneer, which no frontend here lifts and frontend/arm-body.ts scans instead. */
+export type CalleeBody =
+  { kind: 'listing'; text: string; relocs?: readonly Reloc[] } | { kind: 'arm'; words: readonly number[] };
+
+/** The bodies a driver found outside the input, keyed by callee (`DecompileOptions.calleeBodies`). */
+export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
+
+/** One function of some text lifted under a table, with no bound of its own (`calleeBodyBounds`):
+ *  the input, or a body handed in, with the relocations it carries (undefined for the input). */
+export type CalleeLift = (
+  callee: string,
+  table: Prototypes,
+  entryReadCalls: ReadonlySet<string>,
+  text: string,
+  relocs?: readonly Reloc[],
+) => Fn;
 
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
  *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBodyBound`). */
@@ -63,22 +117,30 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
 }
 
 /** The bound, read off each callee's body as a call to it is first lowered and kept for the rest.
- *  `lift` lifts one function of the same input under a table, with no bound of its own: one level
- *  of bodies is read, never the callee's callees'. */
+ *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
+ *  bound of its own: one level of bodies is read, never the callee's callees'. */
 export function calleeBodyBounds(
   self: string,
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>) => Fn,
+  lift: CalleeLift,
+  external?: CalleeBodies,
 ): CalleeBodyBound {
   const memo = new Map<string, number | undefined>();
   return (callee) => {
     if (!memo.has(callee)) {
-      memo.set(callee, bodyBound(self, callee, asm, target, prototypes, lift));
+      memo.set(callee, bodyBound(self, callee, asm, target, prototypes, lift, external));
     }
     return memo.get(callee);
   };
+}
+
+/** Whether `text` defines a label named `callee`: a `name:` line, an objdump `<name>:` header or a
+ *  `glabel name`. */
+export function definesLabel(text: string, callee: string): boolean {
+  const name = escaped(callee);
+  return new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm').test(text);
 }
 
 /** Every name a `.weak` directive marks, in each spelling GNU as reads: one name or a comma-separated
@@ -119,18 +181,40 @@ function bodyBound(
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>) => Fn,
+  lift: CalleeLift,
+  external: CalleeBodies | undefined,
 ): number | undefined {
-  const name = escaped(callee);
-  const defined = new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm');
-  if (
-    callee === self ||
-    !defined.test(asm) ||
-    weakNames(asm).has(callee) ||
-    declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-  ) {
+  if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return undefined;
   }
+  if (definesLabel(asm, callee)) {
+    return weakNames(asm).has(callee) ? undefined : liftedBound(callee, asm, target, prototypes, lift);
+  }
+  const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
+  if (body?.kind === 'arm') {
+    return scansArgumentsOf(target)
+      ? armArgumentWords(
+          body.words,
+          !declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined),
+        )
+      : undefined;
+  }
+  if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
+    return undefined;
+  }
+  return liftedBound(callee, body.text, target, prototypes, lift, body.relocs);
+}
+
+/** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
+ *  out is taken at every argument register; undefined where no lift proves it. */
+function liftedBound(
+  callee: string,
+  text: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  lift: CalleeLift,
+  relocs?: readonly Reloc[],
+): number | undefined {
   const helpers = helperPrototypes(target);
   const table: Prototypes = { ...prototypes, [callee]: returnOnly(prototypes[callee]) };
   const forced = new Set<string>();
@@ -139,13 +223,16 @@ function bodyBound(
   for (;;) {
     let fn: Fn;
     try {
-      fn = lift(callee, table, forced);
+      fn = lift(callee, table, forced, text, relocs);
     } catch {
       return undefined;
     }
     const guessed = new Set<string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
+        if (op.opcode === 'opaque') {
+          return undefined;
+        }
         if (op.opcode !== 'call') {
           continue;
         }
@@ -160,7 +247,12 @@ function bodyBound(
     }
     if (guessed.size === 0) {
       const { params } = fn.blocks[0];
-      return params.some((p) => p.type.kind === 'float') ? undefined : params.length;
+      if (params.some((p) => p.type.kind === 'float')) {
+        return undefined;
+      }
+      const passesFirst =
+        target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
+      return Math.max(params.length, passesFirst ? 1 : 0);
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
     // too, so the call is taken at the incoming values rather than at what the guess counted
@@ -169,4 +261,20 @@ function bodyBound(
       table[g] = returnOnly(Object.hasOwn(table, g) ? table[g] : undefined);
     }
   }
+}
+
+/** Whether some return of `fn` hands back nothing the lift names (a bare `ret`) on a path from the
+ *  entry that makes no call: there the return register still holds what the caller left in it. */
+function returnsUntouched(fn: Fn): boolean {
+  const callFree = new Set<Block>();
+  const work = fn.blocks.length === 0 ? [] : [fn.blocks[0]];
+  while (work.length > 0) {
+    const b = work.pop()!;
+    if (callFree.has(b) || b.ops.some((o) => o.opcode === 'call')) {
+      continue;
+    }
+    callFree.add(b);
+    work.push(...successorsOf(b));
+  }
+  return [...callFree].some((b) => b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0));
 }

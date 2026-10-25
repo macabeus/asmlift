@@ -5,7 +5,9 @@
 // What each datum drives:
 //   • id               → frontend dispatch (registry.ts)
 //   • compiler         → idiom gating (patternApplies) + the report
-//   • argRegs / returnReg → entry-param ordering and return-value read in the frontends
+//   • argRegs / returnReg → entry-param ordering and return-value read in the frontends; argRegs
+//     also says whether an ARM body's argument scan counts this target's words
+//     (frontend/arm-body.ts `scansArgumentsOf`, read by frontend/callee-body.ts)
 //   • capabilities.hwDivide → gates the MIPS hardware-divide decode (mips.ts), the soft-division
 //     pre-recovery pass, and idiom gating; a `div` on a target declaring no divider degrades to
 //     a loud opaque (exercised by packages/cli/test/matching/divmul.test.ts). `hwFloat` → idiom

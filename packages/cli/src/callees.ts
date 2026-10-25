@@ -173,7 +173,11 @@ export function guessedArityCallees(
   });
 }
 
-/** The one stderr line, or '' when every callee's arity was declared. */
+/** The stderr lines, or '' when every callee's arity was declared. A callee in `asked` (one whose
+ *  body outside the input the lift asked, with what it reads at most in argument words: core
+ *  `DecompileResult.calleeBodiesAsked`, of a body main.ts read off the linked ELF) is named on a line
+ *  of its own. Its arity is still guessed from the argument registers, and the bound never caps it:
+ *  what the body answered settled only the registers the caller did not set up for the call. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -181,10 +185,22 @@ export function guessedArityNote(
   prototypes?: Prototypes,
   symbols?: SymbolMap,
   relocs?: readonly Reloc[],
+  asked?: ReadonlyMap<string, number>,
 ): string {
-  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
-  return guessed.length === 0
-    ? ''
-    : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
-        `${guessed.join(', ')} — pass --proto '{"${guessed[0]}":{"params":N}}' if a guess is wrong\n`;
+  const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
+  const guessed = all.filter((n) => !asked?.has(n));
+  const within = all.filter((n) => asked?.has(n));
+  const remedy = (n: string) => `pass --proto '{"${n}":{"params":N}}' if a guess is wrong\n`;
+  return (
+    (guessed.length === 0
+      ? ''
+      : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
+        `${guessed.join(', ')} — ${remedy(guessed[0])}`) +
+    (within.length === 0
+      ? ''
+      : `asmlift: [proto] ${within.length} callee(s) have no declared arity, guessed from the argument registers, ` +
+        'each register the call left unset checked against what its body in tools.asmlift.elf reads: ' +
+        `${within.map((n) => `${n} (at most ${asked!.get(n)} argument word${asked!.get(n) === 1 ? '' : 's'})`).join(', ')} — ` +
+        remedy(within[0]))
+  );
 }

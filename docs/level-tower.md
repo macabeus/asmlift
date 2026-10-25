@@ -867,11 +867,56 @@ lifts `rnd()`. The question is about the WRITE, not the value: `g4(a, b, c, d); 
 copies a..d back from their homes for `un`, values `g4` read first, and those copies stay arguments.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
-back through a hidden pointer. A gap starting there stops the count below it instead of refusing. The jump-table
+back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an
+unmodelled instruction reads is the decode's guess, and PowerPC `mtmsr r3` and MIPS `mtc0 a0, …`
+read the argument the decode took for written. Where the target returns in its first argument
+register (ARM r0, PowerPC r3), a return no call-free path wrote that register for hands back the
+caller's first argument, so it counts that word as read: `void *id(void *p) { return p; }` is a lone
+`blr`, which no instruction reads. A gap starting there stops the count below it instead of refusing. The jump-table
 dispatch gate (`refuseDispatchUnlockedPassThrough`) excuses a register there. A gap below the bound
 refuses as ever, whatever lies above it: the callee may read that register, and it holds the
 function's own incoming value or nothing. In `gp = 3; gq = rd1(a)` the store's 3 sits in r1 above
 r0's `a`. Stopping there would drop the `a` that rd1 reads.
+
+A unit's assembly holds only its own functions, so the body is often elsewhere. A driver can hand
+it in (`DecompileOptions.calleeBodies`), and it is read only where the input defines no label of
+the callee's name, under every rule above. The CLI reads it off the linked ELF (`tools.asmlift.elf`,
+cli elf-bodies.ts):
+
+- A callee is read only where exactly one non-weak FUNC of its name is defined in a code section,
+  since a weak one is a definition the link may replace.
+- Its range is `[value, value + size)`. A size-0 FUNC, which hand-written assembly leaves with no
+  `.size`, runs to the next symbol of any kind in its section, mapping symbols and local labels
+  included. With nothing after it in its section there is no range.
+- On MIPS and PowerPC the range is disassembled with the target's objdump, scoped to the
+  symbol's section (overlays put several sections at one address), and lifted as the same text
+  inline would be. Every `<name>:` header objdump starts at a symbol inside the range but the
+  callee's own is dropped, since the frontend slices a listing at its next header. A linked image
+  carries no relocations, and those frontends name a callee only by its relocation, so the CLI
+  names each direct call (MIPS `jal`, PowerPC `bl`) off the image's own symbol table: a relocation
+  line under it on PowerPC, where the frontend reads `objdump -r` lines, and `CalleeBody.relocs` on
+  MIPS, lifted as a side table holding nothing else. A call is named only where its target is the
+  value of exactly one FUNC, in the callee's own section or the one code section holding that
+  address, and no other symbol defines that name: a wrong name would lay the call out by another
+  function's declaration. Any other call stays unnamed, and that body does not lift. Jumps are never
+  named, since a `j`/`b` to the entry is a loop's back edge, so a tail-calling body bounds nothing.
+  Naming a call only lets the body lift: the bound still takes every call nothing declares at every
+  argument register.
+- The agbcc frontend reads no objdump text. A GBA callee written in ARM is entered through an
+  interworking veneer (`bx pc; nop`, then an ARM `b sym`), and its ARM words are handed in as
+  they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument
+  registers r0-r3 the body reads before writing them. It answers nothing on a conditional
+  instruction, any branch or call or other pc write but the final `bx lr`, any lr write, any sp
+  use, and any instruction it does not model. The final `bx lr` reads r0 where nothing wrote it,
+  as a lifted return does. It answers only on a target whose `argRegs` are the registers it counts.
+- The `[proto]` note names a body only where the lift asked it (`DecompileResult.calleeBodiesAsked`),
+  that is, where a gate questioned a register the call left unset.
+
+That is how kleod's `thunk_GetRandomValue`, a veneer to an ARM body that reads none of its
+arguments, drops the leftover values a guess handed it (`thunk_GetRandomValue(30, v7, &gEntityInfo,
+a0)` becomes `thunk_GetRandomValue()`), and how a jump-table case calling it passes the dispatch gate.
+The harness passes no `calleeBodies`, so no benchmark row measures this: offline ELF fixtures pin it
+(cli test/offline/elf-bodies.test.ts).
 
 ## A float, across the tower
 

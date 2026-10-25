@@ -57,8 +57,38 @@ interface ObjdumpChoice {
   remedy: string;
 }
 
+/** Whether the target's frontend reads objdump text: the agbcc one reads the compiler's own `.s`,
+ *  so neither an object nor a range of a linked image (cli elf-bodies.ts) is read through objdump
+ *  for it. */
+export const readsObjdumpText = (target: TargetDescription): boolean => target.compiler !== 'agbcc';
+
+/** How the target's frontend names a direct call's callee: by a relocation of `type` on a `mnemonic`
+ *  instruction, which it reads in the listing itself where the family's disassembly flags have
+ *  objdump print relocations (`-r`: PowerPC), and out of the object's side table otherwise (MIPS,
+ *  `asmDataForObject`). A linked image carries none, so a driver that hands a range of one to the
+ *  frontend names its calls itself (cli elf-bodies.ts). Undefined where the frontend reads no
+ *  objdump text. Only the CALL: a jump that names a function (MIPS `j`, PowerPC `b`) is also a
+ *  loop's back edge to its own entry, which no relocation names (core mips.ts `textCallee`). */
+export interface CallRelocation {
+  mnemonic: string;
+  type: string;
+  inListing: boolean;
+}
+
+export function callRelocationOf(target: TargetDescription): CallRelocation | undefined {
+  if (!readsObjdumpText(target)) {
+    return undefined;
+  }
+  const ppc = target.compiler === 'mwcc';
+  return {
+    mnemonic: ppc ? 'bl' : 'jal',
+    type: ppc ? 'R_PPC_REL24' : 'R_MIPS_26',
+    inListing: (ppc ? PPC_DISASM_FLAGS : MIPS_DISASM_FLAGS).includes('-r'),
+  };
+}
+
 function objdumpFor(target: TargetDescription, objdumpBin?: string): ObjdumpChoice {
-  if (target.compiler === 'agbcc') {
+  if (!readsObjdumpText(target)) {
     throw new ObjectInputUnsupportedError(
       `object-file input for target '${target.id}/${target.compiler}' is not supported — its frontend reads agbcc .s text, not objdump output`,
     );
@@ -142,10 +172,35 @@ export function asmDataForObject(
   objdumpBin?: string,
   sym?: string,
 ): AsmData | undefined {
-  if (target.compiler === 'agbcc') {
+  if (!readsObjdumpText(target)) {
     return undefined;
   }
   const choice = objdumpFor(target, objdumpBin);
   const dump = overObject(obj, sym, (path) => run(choice, ['-s', '-r', '-t'], path, 'asmdata'));
   return parseAsmData(dump, dump, dump, true);
+}
+
+/** `objdump -d` text for `[start, stop)` of section `section` of a LINKED image
+ *  (`tools.asmlift.elf`), in the target family's disassembler and flags: the text the frontend
+ *  reads, as for an object. A linked image carries no relocations, so nothing in the text a
+ *  relocation would name is named, save the calls cli elf-bodies.ts names (`callRelocationOf`). The
+ *  section is named because an address range alone is no place in an image with overlays: mp3's
+ *  `.minigame`, `.name_81` and `.shared_board` all hold code at 0x800d9f10, and objdump prints each
+ *  section that does. */
+export function disasmRange(
+  elf: string,
+  target: TargetDescription,
+  section: string,
+  start: number,
+  stop: number,
+  objdumpBin?: string,
+): string {
+  const choice = objdumpFor(target, objdumpBin);
+  const hex = (n: number) => `0x${n.toString(16)}`;
+  return run(
+    choice,
+    [...choice.disasmFlags, '-j', section, `--start-address=${hex(start)}`, `--stop-address=${hex(stop)}`],
+    elf,
+    'disassemble a callee',
+  );
 }

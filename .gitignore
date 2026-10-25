@@ -9,6 +9,8 @@ build/
 # ...except the committed scorer fixtures (objdiff.test.ts scores these offline in CI)
 !packages/cli/test/offline/fixtures/objdiff/*.o
 *.elf
+# ...except the linked images elf-bodies.test.ts reads callee bodies out of, offline
+!packages/cli/test/offline/fixtures/elf-bodies/*.elf
 *.gba
 .DS_Store
 

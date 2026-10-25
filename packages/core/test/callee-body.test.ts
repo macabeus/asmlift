@@ -8,17 +8,29 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
-import { calleeBodyBounds } from '../src/frontend/callee-body';
-import { liftStamped } from '../src/pipeline';
+import { type CalleeBodies, calleeBodyBounds } from '../src/frontend/callee-body';
+import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { TOOLCHAIN_TARGETS, type TargetDescription } from '../src/target';
 
-const boundsOf = (asm: string, target: TargetDescription, asmData?: AsmData, prototypes: Prototypes = {}) =>
-  calleeBodyBounds('f', asm, target, prototypes, (callee, table, entryReadCalls) =>
-    liftStamped(callee, asm, target, table, asmData, undefined, undefined, {
-      calleeBodyBound: () => undefined,
-      entryReadCalls,
-    }),
+const boundsOf = (
+  asm: string,
+  target: TargetDescription,
+  asmData?: AsmData,
+  prototypes: Prototypes = {},
+  external?: CalleeBodies,
+) =>
+  calleeBodyBounds(
+    'f',
+    asm,
+    target,
+    prototypes,
+    (callee, table, entryReadCalls, text) =>
+      liftStamped(callee, text, target, table, text === asm ? asmData : undefined, undefined, undefined, {
+        calleeBodyBound: () => undefined,
+        entryReadCalls,
+      }),
+    external,
   );
 const read = (bound: (c: string) => number | undefined, names: string[]) =>
   Object.fromEntries(names.map((n) => [n, bound(n) ?? 'none']));
@@ -77,6 +89,41 @@ late:
 	pop	{r0}
 	bx	r0
 `;
+
+const mips =
+  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n' +
+  '00000000 <rnd>:\n   0:\tjr\tra\n   4:\tli\tv0,7\n' +
+  '00000008 <rd1>:\n   8:\tjr\tra\n   c:\taddiu\tv0,a0,1\n' +
+  '00000010 <thk>:\n  10:\taddiu\tsp,sp,-24\n  14:\tsw\tra,16(sp)\n  18:\tjal\t0 <rnd>\n  1c:\tnop\n' +
+  '  20:\tlw\tra,16(sp)\n  24:\tjr\tra\n  28:\taddiu\tsp,sp,24\n' +
+  '0000002c <ind>:\n  2c:\taddiu\tsp,sp,-24\n  30:\tsw\tra,16(sp)\n  34:\tjalr\ta1\n  38:\tnop\n' +
+  '  3c:\tlw\tra,16(sp)\n  40:\tjr\tra\n  44:\taddiu\tsp,sp,24\n' +
+  '00000048 <two>:\n  48:\taddiu\tsp,sp,-24\n  4c:\tsw\tra,16(sp)\n  50:\tli\ta0,0\n  54:\tli\ta1,0\n' +
+  '  58:\tli\ta2,0\n  5c:\tjal\t0 <rnd>\n  60:\tli\ta3,0\n  64:\tjal\t0 <rnd>\n  68:\tnop\n' +
+  '  6c:\tlw\tra,16(sp)\n  70:\tjr\tra\n  74:\taddiu\tsp,sp,24\n';
+
+const jal: AsmData = {
+  sections: new Map(),
+  relocs: [
+    { section: '.text', offset: 0x18, type: 'R_MIPS_26', sym: 'g', addend: 0 },
+    { section: '.text', offset: 0x5c, type: 'R_MIPS_26', sym: 'g', addend: 0 },
+    { section: '.text', offset: 0x64, type: 'R_MIPS_26', sym: 'h', addend: 0 },
+  ],
+  symbols: new Map(),
+  symbolCount: 0,
+  bigEndian: true,
+};
+
+const ppc =
+  '00000000 <rnd>:\n   0:\tli      r3,7\n   4:\tblr\n' +
+  '00000008 <rd1>:\n   8:\taddi    r3,r3,1\n   c:\tblr\n' +
+  '00000010 <thk>:\n  10:\tstwu    r1,-16(r1)\n  14:\tmflr    r0\n  18:\tstw     r0,20(r1)\n' +
+  '  1c:\tbl      1c <thk+0xc>\n\t\t\t1c: R_PPC_REL24\tg\n  20:\tlwz     r0,20(r1)\n  24:\tmtlr    r0\n' +
+  '  28:\taddi    r1,r1,16\n  2c:\tblr\n' +
+  '00000030 <two>:\n  30:\tstwu    r1,-16(r1)\n  34:\tmflr    r0\n  38:\tstw     r0,20(r1)\n' +
+  [3, 4, 5, 6, 7, 8, 9, 10].map((r, k) => `  ${(0x3c + 4 * k).toString(16)}:\tli      r${r},0\n`).join('') +
+  '  5c:\tbl      5c <two+0x2c>\n\t\t\t5c: R_PPC_REL24\tg\n  60:\tbl      60 <two+0x30>\n\t\t\t60: R_PPC_REL24\th\n' +
+  '  64:\tlwz     r0,20(r1)\n  68:\tmtlr    r0\n  6c:\taddi    r1,r1,16\n  70:\tblr\n';
 
 describe('the argument words a callee in the same input reads at most', () => {
   test('agbcc: none, the first, every register through a forwarding thunk, and no proof otherwise', () => {
@@ -145,28 +192,6 @@ describe('the argument words a callee in the same input reads at most', () => {
     expect(boundsOf(thumb, t, undefined, { g: { params: ['s32', 's32'] } })('thk')).toBe(2);
   });
 
-  const mips =
-    '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n' +
-    '00000000 <rnd>:\n   0:\tjr\tra\n   4:\tli\tv0,7\n' +
-    '00000008 <rd1>:\n   8:\tjr\tra\n   c:\taddiu\tv0,a0,1\n' +
-    '00000010 <thk>:\n  10:\taddiu\tsp,sp,-24\n  14:\tsw\tra,16(sp)\n  18:\tjal\t0 <rnd>\n  1c:\tnop\n' +
-    '  20:\tlw\tra,16(sp)\n  24:\tjr\tra\n  28:\taddiu\tsp,sp,24\n' +
-    '0000002c <ind>:\n  2c:\taddiu\tsp,sp,-24\n  30:\tsw\tra,16(sp)\n  34:\tjalr\ta1\n  38:\tnop\n' +
-    '  3c:\tlw\tra,16(sp)\n  40:\tjr\tra\n  44:\taddiu\tsp,sp,24\n' +
-    '00000048 <two>:\n  48:\taddiu\tsp,sp,-24\n  4c:\tsw\tra,16(sp)\n  50:\tli\ta0,0\n  54:\tli\ta1,0\n' +
-    '  58:\tli\ta2,0\n  5c:\tjal\t0 <rnd>\n  60:\tli\ta3,0\n  64:\tjal\t0 <rnd>\n  68:\tnop\n' +
-    '  6c:\tlw\tra,16(sp)\n  70:\tjr\tra\n  74:\taddiu\tsp,sp,24\n';
-  const jal: AsmData = {
-    sections: new Map(),
-    relocs: [
-      { section: '.text', offset: 0x18, type: 'R_MIPS_26', sym: 'g', addend: 0 },
-      { section: '.text', offset: 0x5c, type: 'R_MIPS_26', sym: 'g', addend: 0 },
-      { section: '.text', offset: 0x64, type: 'R_MIPS_26', sym: 'h', addend: 0 },
-    ],
-    symbols: new Map(),
-    symbolCount: 0,
-    bigEndian: true,
-  };
   test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s: the same five answers on O32', (id) => {
     expect(read(boundsOf(mips, TOOLCHAIN_TARGETS[id].description, jal), ['rnd', 'rd1', 'thk', 'ind', 'two'])).toEqual({
       rnd: 0,
@@ -190,16 +215,6 @@ describe('the argument words a callee in the same input reads at most', () => {
     expect(boundsOf(hdx, t)('hdx')).toBeUndefined();
   });
 
-  const ppc =
-    '00000000 <rnd>:\n   0:\tli      r3,7\n   4:\tblr\n' +
-    '00000008 <rd1>:\n   8:\taddi    r3,r3,1\n   c:\tblr\n' +
-    '00000010 <thk>:\n  10:\tstwu    r1,-16(r1)\n  14:\tmflr    r0\n  18:\tstw     r0,20(r1)\n' +
-    '  1c:\tbl      1c <thk+0xc>\n\t\t\t1c: R_PPC_REL24\tg\n  20:\tlwz     r0,20(r1)\n  24:\tmtlr    r0\n' +
-    '  28:\taddi    r1,r1,16\n  2c:\tblr\n' +
-    '00000030 <two>:\n  30:\tstwu    r1,-16(r1)\n  34:\tmflr    r0\n  38:\tstw     r0,20(r1)\n' +
-    [3, 4, 5, 6, 7, 8, 9, 10].map((r, k) => `  ${(0x3c + 4 * k).toString(16)}:\tli      r${r},0\n`).join('') +
-    '  5c:\tbl      5c <two+0x2c>\n\t\t\t5c: R_PPC_REL24\tg\n  60:\tbl      60 <two+0x30>\n\t\t\t60: R_PPC_REL24\th\n' +
-    '  64:\tlwz     r0,20(r1)\n  68:\tmtlr    r0\n  6c:\taddi    r1,r1,16\n  70:\tblr\n';
   test.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const)(
     '%s: every one of r3..r10 through the thunk',
     (id) => {
@@ -211,4 +226,152 @@ describe('the argument words a callee in the same input reads at most', () => {
       });
     },
   );
+});
+
+// A RETURN READS THE RETURN REGISTER: where it is the first argument register (r3, r0), a return
+// that no call-free path wrote it for hands back the caller's first argument, though no instruction
+// reads it (mp4's `void *hwTransAddr(void *p) { return p; }` is a lone `blr`). On MIPS the return is
+// v0, which no argument is in.
+describe('a return the body left the return register untouched for', () => {
+  const ppcRet =
+    '00000000 <idf>:\n   0:\tblr\n' +
+    '00000004 <vd>:\n   4:\tli      r4,7\n   8:\tblr\n' +
+    '0000000c <cnd>:\n   c:\tcmpwi   r4,0\n  10:\tbnelr\n  14:\tli      r3,5\n  18:\tblr\n';
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: counts the first argument word as read', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    expect(read(boundsOf(ppcRet, t), ['idf', 'vd', 'cnd', 'two'])).toEqual({ idf: 1, vd: 1, cnd: 2, two: 'none' });
+    // a call destroys r3 on every path to the return: that return hands back none of the arguments
+    expect(read(boundsOf(ppc, t), ['two'])).toEqual({ two: 0 });
+    // declared void, it returns nothing
+    const declared = { idf: { returnsVoid: true }, vd: { returnsVoid: true } };
+    expect(read(boundsOf(ppcRet, t, undefined, declared), ['idf', 'vd'])).toEqual({ idf: 0, vd: 0 });
+  });
+  test('agbcc: the same, inline and handed in', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const id =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nid:\n\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tadd\tr2, r2, #1\n' +
+      '\tstr\tr2, [r1]\n\tbx\tlr\n.L3:\n\t.word\tgN\n';
+    const caller = '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tbx\tlr\n';
+    expect(boundsOf(id, t)('id')).toBe(1);
+    expect(boundsOf(caller, t, undefined, {}, { id: { kind: 'listing', text: id } })('id')).toBe(1);
+  });
+});
+
+// AN UNMODELLED INSTRUCTION PROVES NOTHING: its `opaque` op names registers, and which of them it reads
+// is the decode's guess. PowerPC `mtmsr r3` and MIPS `mtc0 a0, …` read the argument; the decode took
+// it for written, and the lift counted no parameter (mp4 PPCMtmsr, mp3 __osSetSR). A linked image's
+// objdump names the CP0 register (`c0_sr`) where an object's prints `$12`: neither answers.
+describe('a callee whose lift holds an opaque op', () => {
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: mtmsr gives no bound', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    const text = '00000000 <mtm>:\n   0:\tmtmsr   r3\n   4:\tblr\n';
+    expect(boundsOf(text, t)('mtm')).toBeUndefined();
+    expect(boundsOf('00000000 <f>:\n   0:\tblr\n', t, undefined, {}, { mtm: { kind: 'listing', text } })('mtm')).toBe(
+      undefined,
+    );
+  });
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s: mtc0 gives no bound, in either spelling', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    for (const cp0 of ['$12', 'c0_sr']) {
+      const text = `${head}00000000 <setsr>:\n   0:\tmtc0\ta0,${cp0}\n   4:\tnop\n   8:\tjr\tra\n   c:\tnop\n`;
+      expect(boundsOf(text, t)('setsr')).toBeUndefined();
+    }
+  });
+});
+
+// A BODY THE INPUT DOES NOT HOLD (`CalleeBodies`), handed in by a driver that found it elsewhere: read
+// exactly as the same text placed in the input, and only where the input defines no label of the name
+describe('the argument words a callee body handed in from outside the input reads at most', () => {
+  const caller = '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tbx\tlr\n';
+  test('agbcc: a body handed in bounds as the same body inline', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const names = ['rnd', 'rd1', 'thk', 'ind', 'wk', 'st', 'two', 'late'];
+    const external = Object.fromEntries(names.map((n) => [n, { kind: 'listing' as const, text: thumb }]));
+    expect(read(boundsOf(caller, t, undefined, {}, external), names)).toEqual(read(boundsOf(thumb, t), names));
+    expect(read(boundsOf(caller, t), names)).toEqual(Object.fromEntries(names.map((n) => [n, 'none'])));
+  });
+  test('a label in the input answers before a body handed in, and a body without its label answers nothing', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const rd0 = '\t.thumb_func\nrd1:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+    // the input's own rd1 reads r0; the one handed in reads none
+    expect(boundsOf(thumb, t, undefined, {}, { rd1: { kind: 'listing', text: rd0 } })('rd1')).toBe(1);
+    expect(boundsOf(caller, t, undefined, {}, { rd1: { kind: 'listing', text: rd0 } })('rd1')).toBe(0);
+    // the Thumb frontend lifts a text with no label of the name whole: that is no body of it
+    expect(boundsOf(caller, t, undefined, {}, { g: { kind: 'listing', text: rd0 } })('g')).toBeUndefined();
+    // nor is a weak one, nor the function's own
+    expect(boundsOf(caller, t, undefined, {}, { wk: { kind: 'listing', text: thumb } })('wk')).toBeUndefined();
+    expect(boundsOf(caller, t, undefined, {}, { f: { kind: 'listing', text: rd0.replace('rd1', 'f') } })('f')).toBe(
+      undefined,
+    );
+  });
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)(
+    '%s: a listing handed in is lifted with none of the input object side table',
+    (id) => {
+      const t = TOOLCHAIN_TARGETS[id].description;
+      const names = ['rnd', 'rd1', 'thk', 'ind', 'two'];
+      const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+      const own = `${head}00000000 <f>:\n   0:\tjr\tra\n   4:\tnop\n`;
+      const external = Object.fromEntries(names.map((n) => [n, { kind: 'listing' as const, text: mips }]));
+      // the input's relocations name g and h in thk and two, by offsets in the input's own .text;
+      // handed in, the listing's jal is named by nothing, so a callee that calls proves nothing
+      expect(read(boundsOf(own, t, jal, {}, external), names)).toEqual({
+        rnd: 0,
+        rd1: 1,
+        thk: 'none',
+        ind: 'none',
+        two: 'none',
+      });
+    },
+  );
+  // `extern int gp; f() { gp = 3; two(); }`: the store leaves its 3 in a0 at the `jal`, and the guess
+  // passes it. `two` reads none, but makes two calls: the relocations handed in with it name them
+  // (cli elf-bodies.ts reads them off a linked image's symbols), and without them it does not lift
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)(
+    '%s: decompile: a listing handed in with the relocations of its calls lifts under them alone',
+    (id) => {
+      const t = TOOLCHAIN_TARGETS[id].description;
+      const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+      const f =
+        `${head}00000000 <f>:\n   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,16(sp)\n   8:\tlui\tv0,0x0\n` +
+        '   c:\tli\ta0,3\n  10:\tsw\ta0,0(v0)\n  14:\tjal\t0 <f>\n  18:\tnop\n  1c:\tlw\tra,16(sp)\n' +
+        '  20:\tjr\tra\n  24:\taddiu\tsp,sp,24\n';
+      // the input's own relocations, whose offsets the body's listing shares and must not read
+      const asmData: AsmData = {
+        ...jal,
+        relocs: [
+          { section: '.text', offset: 8, type: 'R_MIPS_HI16', sym: 'gp', addend: 0 },
+          { section: '.text', offset: 0x10, type: 'R_MIPS_LO16', sym: 'gp', addend: 0 },
+          { section: '.text', offset: 0x14, type: 'R_MIPS_26', sym: 'two', addend: 0 },
+          { section: '.text', offset: 0x5c, type: 'R_MIPS_26', sym: 'h', addend: 0 },
+        ],
+      };
+      const relocs = jal.relocs.filter((r) => r.offset >= 0x48);
+      const lifted = (bodies?: CalleeBodies) => decompile('f', f, t, { asmData, calleeBodies: bodies }).source;
+      expect(lifted()).toContain('two(3)');
+      expect(lifted({ two: { kind: 'listing', text: mips } })).toContain('two(3)');
+      expect(lifted({ two: { kind: 'listing', text: mips, relocs } })).toContain('two()');
+    },
+  );
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: a body handed in bounds as the same body inline', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    const names = ['rnd', 'rd1', 'thk', 'two'];
+    const own = '00000000 <f>:\n   0:\tblr\n';
+    const external = Object.fromEntries(names.map((n) => [n, { kind: 'listing' as const, text: ppc }]));
+    expect(read(boundsOf(own, t, undefined, {}, external), names)).toEqual(read(boundsOf(ppc, t), names));
+  });
+  // `gp = 3; rd0();` leaves the store's 3 in r0, which the guess passes; rd0's body, inline or handed
+  // in, says it reads none
+  test('decompile: a body handed in decides the call as the same body inline, and none leaves the guess', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const rd0 = '\t.thumb_func\nrd0:\n\tmov\tr0, #0x1\n\tbx\tlr\n';
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{lr}\n\tldr\tr1, .L3\n\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tbl\trd0\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgp\n';
+    expect(decompile('f', f, t).source).toContain('rd0(3, &gp)');
+    expect(decompile('f', `${rd0}${f}`, t).source).toContain('rd0()');
+    expect(decompile('f', f, t, { calleeBodies: { rd0: { kind: 'listing', text: rd0 } } }).source).toBe(
+      decompile('f', `${rd0}${f}`, t).source,
+    );
+  });
 });

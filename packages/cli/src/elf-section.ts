@@ -32,7 +32,7 @@ const SYM_ENTSIZE = 16;
 const SH_ENTSIZE = 40;
 const EH_SIZE = 52;
 
-interface SectionHeader {
+export interface SectionHeader {
   name: number;
   type: number;
   flags: number;
@@ -45,14 +45,14 @@ interface SectionHeader {
   entsize: number;
 }
 
-interface Elf32 {
+export interface Elf32 {
   bytes: Buffer;
   littleEndian: boolean;
   shstrndx: number;
   sections: SectionHeader[];
 }
 
-function readElf32(bytes: Uint8Array): Elf32 | undefined {
+export function readElf32(bytes: Uint8Array): Elf32 | undefined {
   const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (buf.length < EH_SIZE || buf.readUInt32BE(0) !== 0x7f454c46 || buf[4] !== 1) {
     return undefined;
@@ -86,7 +86,8 @@ function readElf32(bytes: Uint8Array): Elf32 | undefined {
 }
 
 /** A section objdump disassembles: one carrying instruction bytes of its own. */
-const isCode = (s: SectionHeader): boolean => s.type === SHT_PROGBITS && (s.flags & SHF_EXECINSTR) !== 0 && s.size > 0;
+export const isCode = (s: SectionHeader): boolean =>
+  s.type === SHT_PROGBITS && (s.flags & SHF_EXECINSTR) !== 0 && s.size > 0;
 
 export interface CodeSections {
   /** How many sections a whole-object `objdump -d` would disassemble. Zero for bytes this reader
