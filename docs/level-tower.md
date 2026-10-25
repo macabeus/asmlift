@@ -873,6 +873,34 @@ refuses as ever, whatever lies above it: the callee may read that register, and 
 function's own incoming value or nothing. In `gp = 3; gq = rd1(a)` the store's 3 sits in r1 above
 r0's `a`. Stopping there would drop the `a` that rd1 reads.
 
+A unit's assembly holds only its own functions, so the body is often elsewhere. A driver can hand
+it in (`DecompileOptions.calleeBodies`), and it is read only where the input defines no label of
+the callee's name, under every rule above. The CLI reads it off the linked ELF (`tools.asmlift.elf`,
+cli elf-bodies.ts):
+
+- A callee is read only where exactly one non-weak FUNC of its name is defined in a code section,
+  since a weak one is a definition the link may replace.
+- Its range is `[value, value + size)`. A size-0 FUNC, which hand-written assembly leaves with no
+  `.size`, runs to the next symbol of any kind in its section, mapping symbols and local labels
+  included. With nothing after it in its section there is no range.
+- On MIPS and PowerPC the range is disassembled with the target's objdump, scoped to the
+  symbol's section (overlays put several sections at one address), and lifted as the same text
+  inline would be. A linked image carries no relocations, and those frontends name a callee only
+  by its relocation, so a body that makes any call does not lift and bounds nothing.
+- The agbcc frontend reads no objdump text. A GBA callee written in ARM is entered through an
+  interworking veneer (`bx pc; nop`, then an ARM `b sym`), and its ARM words are handed in as
+  they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument
+  registers r0-r3 the body reads before writing them. It answers nothing on a conditional
+  instruction, any branch or call or other pc write but the final `bx lr`, any lr write, any sp
+  use, and any instruction it does not model. It answers only on a target whose `argRegs` are
+  the registers it counts.
+
+That is how kleod's `thunk_GetRandomValue`, a veneer to an ARM body that reads none of its
+arguments, drops the leftover values a guess handed it (`thunk_GetRandomValue(30, v7, &gEntityInfo,
+a0)` becomes `thunk_GetRandomValue()`), and how a jump-table case calling it passes the dispatch gate.
+The harness passes no `calleeBodies`, so no benchmark row measures this: offline ELF fixtures pin it
+(cli test/offline/elf-bodies.test.ts).
+
 ## A float, across the tower
 
 The one value that is not an integer of any width, and the case where the first move a reader
