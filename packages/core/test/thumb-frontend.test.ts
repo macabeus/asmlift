@@ -5873,7 +5873,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // argument words, an undeclared one every argument register. Past it a clobbered register is
   // dead and a callee-saved one still holds the copy.
   test('a call past the load reads the copy only where it is handed it', () => {
-    const PC: Prototypes = { ...P, g1: { params: ['u32'], returns: 'u32' } };
+    const PC: Prototypes = { ...P, g0: { params: [], returns: 'u32' }, g1: { params: ['u32'], returns: 'u32' } };
     const saved = (mid: string) =>
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n' +
       `\tbl\tmk\n${mid}\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
@@ -5888,6 +5888,10 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
         ),
       ),
     ).toContain('g1((u8)(a0 + 1))');
+    // …and a copy in r0 a callee is not handed dies there too: what it returns is written over it
+    expect(callLift(saved('\tadd\tr0, sp, #0x4\n\tldrb\tr4, [r0]\n\tbl\tg0\n\tadd\tr0, r0, r4\n'))).toContain(
+      'g0() + (u8)(a0 + 1)',
+    );
     for (const declines of [
       // an undeclared callee may be handed every argument register
       fr('\tadd\tr2, sp, #0x4\n\tldrb\tr0, [r2]\n\tmov\tr1, #0x1\n\tbl\tg9\n'),

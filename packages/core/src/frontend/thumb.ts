@@ -3791,20 +3791,22 @@ function measureThumbFrame({
   // it before writing it (`readsBeforeWrite`), a return that may hand it back counting as a read.
   // A CALL READS WHAT IT IS HANDED, the one receiver rule (`frameAddressReceivers`: a declared
   // callee's argument words, every argument register where nothing declares it), plus the register
-  // it calls through (`calleeRegister`). Any other register it clobbers is dead past it, and a
-  // callee-saved one still holds the copy. Read as `readsBeforeWrite` reads a call for the save
-  // analysis (every register but r12), kleod sub_08016EEC keeps two copies live, in r3 and in r6.
+  // it calls through (`calleeRegister`). Any other register it clobbers, r0 among them, is dead past
+  // it, and a callee-saved one still holds the copy. Read as `readsBeforeWrite` reads a call for the
+  // save analysis (every register but r12), kleod sub_08016EEC keeps two copies live, in r3 and r6.
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
   };
+  // `callClobbers` leaves out r0, which the lift writes with what the call returns
+  const narrowCallClobbers = [...calls.callClobbers, target.returnReg];
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
     localArea,
     target.capabilities.endianness === 'little',
     (b, from, r) =>
-      readsBeforeWrite(asmBlocks, succs, b, from, r, { reads: narrowCallReads, clobbers: calls.callClobbers }) ===
+      readsBeforeWrite(asmBlocks, succs, b, from, r, { reads: narrowCallReads, clobbers: narrowCallClobbers }) ===
       false,
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
