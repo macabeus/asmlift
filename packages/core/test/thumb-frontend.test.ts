@@ -5852,7 +5852,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
 
   // The copy is not lifted: r3 holds a marker past it (thumb.ts `writeNarrowCopyMarker`), so with
   // the deadness check ablated each of these still declines, on the marker's read, where the 9
-  // below once stood for the address (`((u8 *)9)[1]`, `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
+  // below would otherwise stand for the address (`((u8 *)9)[1]`, `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
   test('a copy read after its load, on any path, stays a capture', () => {
     for (const after of [
       // read again by a second load, a store through it, a store of it, and an add
@@ -5895,8 +5895,8 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
       expect(() => ownLift(r1(''), f), JSON.stringify(f)).toThrow('disagree on width (4 vs 1)');
     }
     // The context's own `void f(u32)` proves no dropped return: pipeline.ts drops a ret operand
-    // only for a stated entry, so the lifted `ret` still reads r0, and the r0 copy there stays the
-    // capture it was. Dropped, it printed `s32 f(s32 a0)` returning `uninit_r0`.
+    // only for a stated entry, so the lifted `ret` still reads r0, and the r0 copy there stays a
+    // capture. Dropped, it would print `s32 f(s32 a0)` returning `uninit_r0`.
     const contextLift = (asm: string) =>
       decompile('f', asm, ARMV4T_AGBCC, {
         prototypes: { mk: P.mk },

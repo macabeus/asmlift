@@ -12625,18 +12625,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //  20. spillu8max (sub_0800D188, sub_08016EEC; instrumented on both). Item 3's spilled promoted u8,
   //      read narrow as the left operand of a `?:` join (`m = max(m, t)`): reload gives the address copy
   //      its own register and the join's hard register the load (`add r3, sp, #0x28 / ldrb r1, [r3]`),
-  //      so the copy does not die at its load and thumb.ts `narrowSlotReloads` keeps it a capture. That
-  //      capture also takes the slot from every accepted reload (`otherCaptureOffsets`), and
-  //      frame-objects.ts `objectShapes` refuses the widths (4 vs 1). spillu8byte, whose byte goes
-  //      straight to a `strb`, is the control (MATCH). Ablated (the load accepted with no deadness
-  //      check), spillu8max lifts at 25/120 with the `?:` spelled if/else. agbcc only, for item 3's reason.
+  //      so the copy did not die at its load and thumb.ts `narrowSlotReloads` kept it a capture. That
+  //      capture also took the slot from every accepted reload (`otherCaptureOffsets`), and
+  //      frame-objects.ts `objectShapes` refused the widths (4 vs 1). spillu8byte, whose byte goes
+  //      straight to a `strb`, is the control (MATCH). agbcc only, for item 3's reason.
   //      LIFTED by `narrowSlotReloads` accepting a load into another register where the copy is dead
   //      after it (thumb.ts `readsBeforeWrite`, a three-operand write ending the copy, a call reading
   //      only what `frameAddressReceivers` hands it): spillu8max at 25/120, value-correct. The next
   //      link is the `?:` join and the u8 local: hand spellings compiled at canonical flags score the
   //      original 0, `u32 m` with `?:` 10, `u8 m` with if/else 24 and the lift's `u32` if/else 26, and
   //      L3 has no conditional Expr to spell the join with. Next on the real functions: sub_0800D188
-  //      meets an unrecovered back-edge into block #1022 (item 21 no longer stands before it);
+  //      meets an unrecovered back-edge into block #1022;
   //      sub_08016EEC meets a jump table whose arms do not linearize (switch machinery).
   //  21. sret2knr / sret2void (sub_08022CA0; sub_0800D188's second link). A struct-return temp at
   //      [sp,#0] was folded only where thumb.ts `noCallTakesAStackWord`, and a call to a K&R `()` callee
@@ -12655,7 +12654,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      bound of 0 words, which never caps the guess). The next link is the guessed arity `gOut8 =
   //      rnd(v0);` (r0 still holds the second temp's word): the row's asm carries no `rnd` body, so
   //      nothing in the input closes it, and the C is not wrong (the extra argument lands in r0,
-  //      which a callee that takes none never reads). sub_0800D188 now meets a back-edge first (item 20).
+  //      which a callee that takes none never reads). sub_0800D188 meets a back-edge first (item 20).
   //  22. bvhome / bvhomereg / bvown (sub_0803D4AC, the by-value set-aside of item 13, attributed). An
   //      OWN by-value struct parameter, 7 bytes rounded to 8, DImode in r1:r2: reload spills it at entry
   //      (`str r1, [sp, #8] / str r2, [sp, #0xc]`), one member is read through the word (`ldr; lsl;
