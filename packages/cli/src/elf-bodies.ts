@@ -16,10 +16,14 @@
 //
 // What the range is read as is the target's: on MIPS and PowerPC it is disassembled with the
 // target's own objdump, the text the frontend reads (objfile.ts `disasmRange`). The agbcc frontend
-// reads no objdump text, so a Thumb range gives no body here.
+// reads no objdump text, so a Thumb range is read for one shape alone: an interworking veneer, a
+// word-aligned Thumb entry of `bx pc; nop` whose ARM word after it is an unconditional `b` (core
+// frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
+// the body, and the core scans them; any other Thumb range gives no body.
 //
 // KNOWN GAP: a function in a REL module (`--module`) is read from no ELF: the module's own ELF is
 // relocatable, its sections all placed at 0, so its symbol values are no addresses to disassemble.
+import { thumbToArmVeneerTarget } from '@asmlift/core/frontend/arm-body';
 import type { CalleeBodies, CalleeBody } from '@asmlift/core/frontend/callee-body';
 import type { TargetDescription } from '@asmlift/core/target';
 
@@ -34,6 +38,9 @@ const STT_FUNC = 2;
 const SYM_ENTSIZE = 16;
 /** The longest range read: a body past it is no callee whose arguments a lift should be asked. */
 const MAX_RANGE = 0x10000;
+/** The most ARM words handed in behind a veneer: the scan answers nothing for a body that has not
+ *  returned by then. */
+const MAX_ARM_WORDS = 256;
 
 interface ElfSymbol {
   name: string;
@@ -156,12 +163,19 @@ export function calleeBodiesFromElf(
   const image = readElfImage(bytes);
   const bodies: Record<string, CalleeBody> = {};
   const warnings: string[] = [];
-  if (image === undefined || target.compiler === 'agbcc') {
+  if (image === undefined) {
     return { bodies, warnings };
   }
   for (const callee of callees) {
     const range = functionRange(image, callee);
     if (range === undefined) {
+      continue;
+    }
+    if (target.id === 'armv4t') {
+      const words = range.thumb ? veneeredArmWords(image, range) : undefined;
+      if (words !== undefined) {
+        bodies[callee] = { kind: 'arm', words };
+      }
       continue;
     }
     try {
@@ -173,4 +187,38 @@ export function calleeBodiesFromElf(
     }
   }
   return { bodies, warnings };
+}
+
+/** The code section holding `addr`, and the file offset of that address in it. */
+function codeAt(image: ElfImage, addr: number, bytes: number): number | undefined {
+  const s = image.elf.sections.find((x) => isCode(x) && x.addr <= addr && addr + bytes <= x.addr + x.size);
+  return s === undefined ? undefined : s.offset + (addr - s.addr);
+}
+
+/** The ARM words a Thumb veneer at `range` enters, up to the first `bx lr` or `MAX_ARM_WORDS`; undefined
+ *  where the range is no veneer. */
+function veneeredArmWords(image: ElfImage, range: FunctionRange): number[] | undefined {
+  const { bytes, littleEndian } = image.elf;
+  const u16 = (o: number) => (littleEndian ? bytes.readUInt16LE(o) : bytes.readUInt16BE(o));
+  const u32 = (o: number) => (littleEndian ? bytes.readUInt32LE(o) : bytes.readUInt32BE(o));
+  const at = range.end - range.start >= 4 ? codeAt(image, range.start, 8) : undefined;
+  if (at === undefined) {
+    return undefined;
+  }
+  const entry = thumbToArmVeneerTarget(range.start, u16(at), u16(at + 2), u32(at + 4));
+  if (entry === undefined) {
+    return undefined;
+  }
+  const words: number[] = [];
+  for (let k = 0; k < MAX_ARM_WORDS; k++) {
+    const o = codeAt(image, entry + 4 * k, 4);
+    if (o === undefined) {
+      break;
+    }
+    words.push(u32(o));
+    if (words[k] === 0xe12fff1e) {
+      break;
+    }
+  }
+  return words;
 }
