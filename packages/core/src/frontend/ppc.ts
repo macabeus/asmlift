@@ -108,7 +108,6 @@ import {
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
-  keptInRelift,
   landsOnArea,
   liftWithRelift,
 } from './frame-objects';
@@ -1620,19 +1619,13 @@ function liftOnce(
           `across an edge of the local area, r1+${frame.area.from} up to r1+${frame.area.to} — part memory, part slot`,
       );
     }
-    // …and in a relift, a word of the area outside the bytes kept as one object keeps the slot model
-    return oneObject === undefined ||
-      keptInRelift(oneObject, at, width, () => `'${ins.mnemonic}' at 0x${ins.addr.toString(16)}`, name)
-      ? at
-      : undefined;
+    return at;
   };
   // The frame offset each `laddr` this lift emitted names — function-scoped, since a register
   // holding one crosses blocks — and every capture moved into another (`addi rD,rCapture,k`
   // re-minted as the `laddr` of the sum), handed to the audit so a base only the move read is
   // dropped rather than judged as a capture (`foldMovedCaptures`).
   const laddrAt = new Map<Value, number>();
-  // …and of those, the ones a direct r1 access in the local area was lowered to, not a capture
-  const directAccesses = new Set<Value>();
   const movedCaptures = new Set<Value>();
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
@@ -2443,9 +2436,7 @@ function liftOnce(
       }
       const local = inLocalArea(ins, mem, width);
       if (local !== undefined) {
-        const at = emitLaddr(local);
-        directAccesses.add(at);
-        return { base: at, off: 0 };
+        return { base: emitLaddr(local), off: 0 };
       }
       assertOrdinaryMem(mem);
       const { off, base } = parseMem(mem);
@@ -3907,7 +3898,6 @@ function liftOnce(
         loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound(-frame.size) + frame.size },
       capturedObjectIsTheWholeFrame: false,
       movedCaptures,
-      directAccesses,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
       symbols: undefined,
       target,

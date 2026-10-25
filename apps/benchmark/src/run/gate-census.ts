@@ -48,6 +48,8 @@ import {
   FRAME_ESCAPE_GATES,
   FRAME_OBJECT_AUDIT,
   type FrameEscape,
+  type HandBack,
+  RELIFT_HAND_BACK_GATES,
   auditFrameObjects,
 } from '@asmlift/core/frontend/frame-objects';
 import type { Fn } from '@asmlift/core/ir/core';
@@ -310,13 +312,19 @@ export const PASSES: Record<string, CensusablePass> = {
   },
   'frame-objects': {
     // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.
-    // ONE table, asked once per escape in a lift that reaches it, rule-major, and the first
-    // rejection DECLINES the lift, so a row contributes at most one count per lift.
-    tables: [['escape', FRAME_ESCAPE_GATES as readonly Gate<never>[]]],
+    // Asked once per escape in a lift that reaches it, rule-major, and the first rejection
+    // DECLINES the lift, so a row contributes at most one count per lift. And
+    // `RELIFT_HAND_BACK_GATES`, once per end word a first audit asks to hand back to the slot
+    // model, where the first rejection keeps that word in the one object.
+    tables: [
+      ['escape', FRAME_ESCAPE_GATES as readonly Gate<never>[]],
+      ['relift', RELIFT_HAND_BACK_GATES as readonly Gate<never>[]],
+    ],
     install: (w) => {
       const restore = FRAME_OBJECT_AUDIT.run;
       const gates = w[0] as readonly Gate<FrameEscape>[];
-      FRAME_OBJECT_AUDIT.run = (audit) => auditFrameObjects({ ...audit, gates });
+      const reliftGates = w[1] as readonly Gate<HandBack>[];
+      FRAME_OBJECT_AUDIT.run = (audit) => auditFrameObjects({ ...audit, gates, reliftGates });
       return () => {
         FRAME_OBJECT_AUDIT.run = restore;
       };

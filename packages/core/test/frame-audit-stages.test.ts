@@ -6,7 +6,7 @@ import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { type FrameRange, __testing, auditFrameObjects, keptInRelift } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const {
   addressFlow,
@@ -490,14 +490,25 @@ describe('keptInRelift', () => {
 
 // The first audit's answer where it asks for the one object: which bytes it asks for.
 describe('reliftRange', () => {
-  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[3] + b[1];` in a `to`-byte area,
-  // with `slots` the words the slot model keyed and `handB` handing `b` to a callee nothing bounds
-  const asked = (to: number, slots: number[], handB = false) => {
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, nB); return a[3] + b[1];` in a `to`-byte area,
+  // with `slots` the words the slot model keyed. `b` is: copied 4 bytes (`copy`), copied `wide`
+  // bytes (8, so the copy reaches [sp,#8)), handed to a callee nothing bounds instead (`hand`),
+  // copied and then handed (`copy+hand`), or only read (`read`)
+  type B = 'copy' | 'wide' | 'hand' | 'copy+hand' | 'read';
+  const asked = (to: number, slots: number[], b: B = 'copy', target: TargetDescription = ARMV4T_AGBCC) => {
     const [s, t] = [value(), value()];
-    const [a, b, k] = [laddr(0), laddr(4), konst(4)];
-    const ops = [a, b, k, call('memcpy', a.results[0], s, k.results[0])];
-    ops.push(handB ? call('g', b.results[0]) : call('memcpy', b.results[0], t, k.results[0]));
-    ops.push(load(a.results[0], 3, 1), load(b.results[0], 1, 1), ret());
+    const [a, bo, k, k8] = [laddr(0), laddr(4), konst(4), konst(8)];
+    const ops = [a, bo, k, k8, call('memcpy', a.results[0], s, k.results[0])];
+    if (b === 'copy' || b === 'copy+hand') {
+      ops.push(call('memcpy', bo.results[0], t, k.results[0]));
+    }
+    if (b === 'wide') {
+      ops.push(call('memcpy', bo.results[0], t, k8.results[0]));
+    }
+    if (b === 'hand' || b === 'copy+hand') {
+      ops.push(call('g', bo.results[0]));
+    }
+    ops.push(load(a.results[0], 3, 1), load(bo.results[0], 1, 1), ret());
     return auditFrameObjects({
       name: 'f',
       irBlocks: [{ params: [s, t], ops }],
@@ -508,7 +519,7 @@ describe('reliftRange', () => {
       movedCaptures: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
-      target: ARMV4T_AGBCC,
+      target,
     });
   };
 
@@ -518,10 +529,24 @@ describe('reliftRange', () => {
     expect(asked(16, [12])).toEqual({ oneObject: { from: 0, to: 8 } });
   });
 
-  test('keeps the whole area where a word could be reached through the object', () => {
-    // a callee nothing bounds may reach the slot word
-    expect(asked(12, [8], true)).toEqual({ oneObject: { from: 0, to: 12 } });
-    // a word nothing touches, with no scalar beyond it, is the arrays' own
+  // `g` may write the slot word through the address it was handed
+  test('keeps every word where an escape no literal count bounds may reach it', () => {
+    expect(asked(12, [8], 'copy+hand')).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  test('keeps a word a bounded copy reaches', () => {
+    expect(asked(12, [8], 'wide')).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  // one copy fills nothing a split could use, and PPC_MWCC splits nothing (no
+  // `addressTakenArrayOrder`): handing the word back would only drop a stored-only member's store
+  test('keeps every word where no split could follow', () => {
+    expect(asked(12, [8], 'read')).toEqual({ oneObject: { from: 0, to: 12 } });
+    expect(asked(12, [8], 'copy', PPC_MWCC)).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  // a word nothing touches, with no scalar beyond it, is the arrays' own
+  test('keeps a word nothing touches where no scalar lies past it', () => {
     expect(asked(12, [])).toEqual({ oneObject: { from: 0, to: 12 } });
   });
 });
