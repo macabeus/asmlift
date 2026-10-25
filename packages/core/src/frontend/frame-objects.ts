@@ -20,7 +20,7 @@
 import { linearFactor } from '../ir/bits';
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
-import type { Gate } from '../l3/gates';
+import { type Gate, firstRejection } from '../l3/gates';
 import { blockCopyRoles } from '../proto';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
@@ -53,6 +53,11 @@ export interface FrameObjectAudit {
   escapesReliedOn?: ReadonlySet<number>;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
+  /** the `laddr`s the frontend minted for a DIRECT frame access (`off(sp)` inside its local area)
+   *  rather than for a captured address: a word reached only through them is one its slot model
+   *  lifts again outside a relift's bytes (`reliftRange`). Thumb, which lifts a direct word access
+   *  as a slot, has none. */
+  directAccesses?: ReadonlySet<Value>;
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
@@ -62,6 +67,9 @@ export interface FrameObjectAudit {
   /** the retraction rules an escape is judged by; `FRAME_ESCAPE_GATES` when absent, and a
    *  census or an ablation hands in its own (`FRAME_OBJECT_AUDIT`) */
   gates?: readonly Gate<FrameEscape>[];
+  /** the rules that keep a frame's end word in the one object (`reliftRange`);
+   *  `RELIFT_HAND_BACK_GATES` when absent, and a census or an ablation hands in its own */
+  reliftGates?: readonly Gate<HandBack>[];
   /** the bytes a first audit asked to have kept as ONE object in memory (`FrameObjectRelift`):
    *  the frontend routes every access inside them through an `laddr`, and the audit declares
    *  them one object rather than judging each offset on its own */
@@ -99,6 +107,22 @@ export function areaAboveOutgoing({
  *  made at ANOTHER depth, which that routing would misname, and draws no area where one does. */
 export const landsOnArea = (area: FrameRange, at: number, width: number): boolean =>
   at < area.to && at + width > area.from;
+
+/** Whether a `width`-byte access at `at` inside a frontend's local area is MEMORY in a relift that
+ *  keeps `kept` as one object: inside it, yes; wholly outside, no — a word the first audit handed
+ *  back to the slot model (`reliftRange`); across its edge, refused, half memory and half slot. */
+export function keptInRelift(kept: FrameRange, at: number, width: number, what: () => string, name: string): boolean {
+  if (at >= kept.from && at + width <= kept.to) {
+    return true;
+  }
+  if (at >= kept.to || at + width <= kept.from) {
+    return false;
+  }
+  throw new FrontendUnsupportedError(
+    `cannot lift '${name}': address-taken stack local — ${what()} reaches across an edge of the bytes ` +
+      `[sp,#${kept.from}) to [sp,#${kept.to}) kept as one object — part memory, part slot`,
+  );
+}
 
 /** What an audit answers instead of a refusal when a device may read the frame, or a callee write
  *  it, without bound: lift again with `oneObject` set to these bytes. */
@@ -358,10 +382,12 @@ export function auditFrameObjects({
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
+  directAccesses = new Set(),
   returnsWithoutHiddenPointer,
   symbols,
   target,
   gates = FRAME_ESCAPE_GATES,
+  reliftGates = RELIFT_HAND_BACK_GATES,
   oneObject,
 }: FrameObjectAudit): FrameObjectVerdict {
   const { laddrs: captures, foldedHere } = foldMovedCaptures(irBlocks, movedCaptures);
@@ -437,7 +463,17 @@ export function auditFrameObjects({
     model.unboundedAt.has(e.off) &&
     (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
   if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
-    return { oneObject: { from: declared.from, to: declared.to } };
+    return {
+      oneObject: reliftRange({
+        declared,
+        objects,
+        uses,
+        usedSlotOffsets,
+        directAccesses,
+        splits: splitsOneObject(target),
+        gates: reliftGates,
+      }),
+    };
   }
   const failWithheld: Refuse = (why) => fail(model.withheld(why));
   for (const [off, width] of shapes.overSlot) {
@@ -454,6 +490,151 @@ export function auditFrameObjects({
   stampObjects(objects, shapes, uses);
   return { policy: 'per-object', sinks };
 }
+
+/** THE BYTES THE ONE-OBJECT RELIFT KEEPS: the declared local area, less the words at either end
+ *  that are a scalar's and nothing else's — a word the slot model keys and no access names, or one
+ *  the frontend reached only by direct whole-word accesses (`directAccesses`), which escapes
+ *  nowhere — and, past such a word, words nothing touches at all. The frontend lifts a word
+ *  outside the range with its slot model (Thumb `isFrameObjectAccess`, MIPS `keptInRelift`; PPC
+ *  is never handed a narrowed range, `no-split-follows`), so the one object is the bytes its
+ *  escapes and accesses reach, and `provenParts` can split it where they tile: agbcc's reload puts
+ *  spill slots ABOVE the arrays (the Thumb frame grows up, thumb.h:569/573, reload1.c:2274),
+ *  ido7.1 puts them below, and gcc 2.7.2 leaves a pad word between (each array starts at a
+ *  multiple of 8); kept in the one object, such a word joins the part beside it.
+ *
+ *  A word is handed back only where no rule of `RELIFT_HAND_BACK_GATES` keeps it: a reach through
+ *  the object, or no split to follow. What makes a word a scalar's (`scalarWord`) is not tabled,
+ *  and its clauses are not each measured for soundness: a word it gets wrong meets the second
+ *  audit's refusals where an object or an access lands outside the kept bytes (`keepAsOneObject`).
+ *
+ *  The copies do NOT tell a spill from a struct member only stored (`struct { u8 a[16], b[16];
+ *  u32 y; }` with `s.y = x` and nothing reading it): that member is handed back too, and its store
+ *  drops. No value changes, since nothing reads the word through the object (an index or an
+ *  escape reaching it keeps it); what is lost is one store the target made. */
+function reliftRange({
+  declared,
+  objects,
+  uses,
+  usedSlotOffsets,
+  directAccesses,
+  splits,
+  gates,
+}: {
+  declared: FrameRange;
+  objects: ReadonlyMap<number, readonly Op[]>;
+  uses: FrameUses;
+  usedSlotOffsets: ReadonlySet<number>;
+  directAccesses: ReadonlySet<Value>;
+  splits: boolean;
+  gates: readonly Gate<HandBack>[];
+}): FrameRange {
+  const whole = { from: declared.from, to: declared.to };
+  const extents = [...uses.escapeExtents.values()].flat();
+  const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
+  const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
+  const kept = (word: number): boolean =>
+    firstRejection(gates, { word, extents, bounded, fills, splits, indexed: uses.indexed.size > 0 }) !== null;
+  const scalarWord = (w: number, pastScalar: boolean): boolean => {
+    const touching = uses.fixed.filter((f) => overlaps(f.at, f.width, w, 4));
+    const owners = [...objects.keys()].filter((o) => overlaps(o, 1, w, 4));
+    if ([...usedSlotOffsets].some((s) => s !== w && overlaps(s, 4, w, 4))) {
+      return false;
+    }
+    if (usedSlotOffsets.has(w) || touching.length === 0) {
+      // …and past one, a word nothing touches: no value lives in it either way
+      return owners.length === 0 && touching.length === 0 && (usedSlotOffsets.has(w) || pastScalar);
+    }
+    return (
+      owners.length === 1 &&
+      owners[0] === w &&
+      !uses.escaped.has(w) &&
+      uses.useCount.get(w) === (uses.accesses.get(w)?.length ?? 0) &&
+      touching.every((f) => {
+        const by = uses.accessOps.get(f.op);
+        return f.at === w && f.width === 4 && by?.off === w && directAccesses.has(by.through);
+      })
+    );
+  };
+  const handedBack = (w: number, pastScalar: boolean): boolean => !kept(w) && scalarWord(w, pastScalar);
+  let { from, to } = whole;
+  while (to - from > 4 && handedBack(to - 4, to < whole.to)) {
+    to -= 4;
+  }
+  while (to - from > 4 && handedBack(from, from > whole.from)) {
+    from += 4;
+  }
+  return { from, to };
+}
+
+/** Whether `keepAsOneObject` may split the one object on this target at all: where it places
+ *  address-taken arrays in a known order and at a known alignment. */
+function splitsOneObject(target: TargetDescription): boolean {
+  return (
+    target.compilerBehaviors.addressTakenArrayOrder !== undefined &&
+    target.compilerBehaviors.addressTakenArrayAlignment !== undefined
+  );
+}
+
+/** What `RELIFT_HAND_BACK_GATES` asks of one end word of the local area: the word, and the
+ *  function's escapes as the bytes each may reach (`FrameUses.escapeExtents`). */
+export interface HandBack {
+  readonly word: number;
+  /** every escape's extent, `null` where nothing bounds it */
+  readonly extents: readonly ({ readonly lo: number; readonly hi: number } | null)[];
+  /** the bounded ones */
+  readonly bounded: readonly { readonly lo: number; readonly hi: number }[];
+  /** where a bounded copy writes into the frame */
+  readonly fills: ReadonlySet<number>;
+  /** the target may split the one object (`splitsOneObject`) */
+  readonly splits: boolean;
+  /** some access reaches the frame through a runtime index */
+  readonly indexed: boolean;
+}
+
+/** WHAT KEEPS AN END WORD IN THE ONE OBJECT (`reliftRange`): a reach through the object that may
+ *  land on it, or no split to gain by handing it back. A word handed back is a local whose address
+ *  nothing takes, so the recompile keeps it in a register or drops its store, and whatever reached
+ *  it through the object in the source reads or writes another byte. */
+export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
+  // `struct S { u8 a[16], b[16]; u32 y; } s; … s.y = x; h(s.a, 16); g(s.b); return s.y + s.a[3];`
+  // on agbcc: `g` may write `s.y` through the address it was handed, and the target reads it back
+  {
+    id: 'escape-without-bound',
+    why: 'a callee handed an address nothing bounds may reach any byte of the frame from it',
+    sound: true,
+    guardedBy: 'frame-audit-stages.test.ts: keeps every word where an escape no literal count bounds may reach it',
+    rejects: (c) => c.bounded.length < c.extents.length,
+  },
+  // `memcpy(s + 4, src, 8)` over a slot keyed at 8 writes the word the slot model would keep
+  {
+    id: 'copy-reaches-word',
+    why: 'a block copy into or out of the frame names the bytes it moves, and this word is one of them',
+    sound: true,
+    guardedBy: 'frame-audit-stages.test.ts: keeps a word a bounded copy reaches',
+    rejects: (c) => c.bounded.some((e) => overlaps(c.word, 4, e.lo, e.hi - e.lo)),
+  },
+  // An index reaches every byte of the object it is based in, so no split follows it
+  // (`provenParts` keeps the one object whole), and a word handed back would only leave the bytes
+  // the index may reach. `*(u32 *)(s + 32) = x; return s[16 + i];` on agbcc is spelled exactly as
+  // a spill slot beside an index is.
+  {
+    id: 'runtime-index',
+    why: 'a runtime index may reach every byte of the object, this word included',
+    sound: true,
+    guardedBy: 'thumb-frontend.test.ts: a word a runtime index may reach is not handed back to the slot model',
+    rejects: (c) => c.indexed,
+  },
+  // Handing back buys a split and nothing else: two or more copies with a literal count must fill
+  // the area, on a target that splits at all (PPC_MWCC places address-taken arrays in no order
+  // `target.ts` records). Elsewhere it would only cost a stored-only member's store.
+  {
+    id: 'no-split-follows',
+    why: 'a word is handed back only so that the copies can split the one object',
+    sound: false,
+    guardedBy: 'frame-audit-stages.test.ts: keeps every word where no split could follow',
+    rejects: (c) => c.fills.size < 2 || !c.splits,
+  },
+];
 
 /** Refuses the whole function, naming the address-taken local as what it cannot lift. */
 type Refuse = (why: string) => never;

@@ -61,6 +61,7 @@ import {
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
+  keptInRelift,
   landsOnArea,
   liftWithRelift,
   nameMergedSretObjects,
@@ -1888,7 +1889,12 @@ function liftOnce(
           `local area, sp+${frame.area.from} up to sp+${frame.area.to} — part memory, part slot`,
       );
     }
-    return true;
+    // …and in a relift, only the bytes the first audit asked to keep as one object are memory: a
+    // word of the area outside them is one it handed back to the slot model (`keptInRelift`)
+    return (
+      oneObject === undefined ||
+      keptInRelift(oneObject, off, width, () => `'${ins.mnemonic}' at 0x${ins.addr.toString(16)}`, name)
+    );
   };
 
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
@@ -1930,11 +1936,21 @@ function liftOnce(
   //     must run at the frame's own depth, save the incoming stack words that are keyed `@sarg<k>`.
   // The caller's home `[frameSize, frameSize + 16)` is in no range, so a def-less read there still
   // refuses. Sub-word frame traffic turns the slot model off (`spSlotSafe`) and claims nothing.
+  //
+  // A RELIFT takes a frame address by construction, and claims the local area alone: there the
+  // bytes kept as one object are memory and key no slot, and every word outside them is one the
+  // first audit handed back (`reliftRange`) only where no escape is unbounded, no copy reaches it
+  // and no index runs, so nothing but its own direct accesses reaches it. kmc homes `u32 r; if (i)
+  // r = gA[9]; … if (i) gA[10] = r;` in such a word beside two copied arrays, and reads it on the
+  // path that never stored it.
   let ownedMemo: { range: { from: number; to: number } | undefined } | undefined;
   const ownedFrame = (): { from: number; to: number } | undefined =>
     (ownedMemo ??= { range: measureOwnedFrame() }).range;
   const measureOwnedFrame = (): { from: number; to: number } | undefined => {
-    if (frameSize === undefined || depthAt === null || !spSlotSafe || code.some(takesFrameAddress)) {
+    if (frameSize === undefined || depthAt === null || !spSlotSafe) {
+      return undefined;
+    }
+    if (oneObject === undefined ? code.some(takesFrameAddress) : frame === null) {
       return undefined;
     }
     for (const ins of code) {
@@ -1960,7 +1976,9 @@ function liftOnce(
       }
       throw e;
     }
-    return outgoing.widest < frameSize ? { from: outgoing.widest, to: frameSize } : undefined;
+    const from = Math.max(outgoing.widest, oneObject === undefined || frame === null ? 0 : frame.area.from);
+    const to = oneObject === undefined || frame === null ? frameSize : Math.min(frameSize, frame.area.to);
+    return from < to ? { from, to } : undefined;
   };
   ownedFrameOf = ownedFrame;
 
@@ -1975,6 +1993,8 @@ function liftOnce(
   // The frame offset each `laddr` this lift emitted names, and the deferred `sp + index` sums
   // (`emitLaddr`, `materialize`) — function-scoped, since a register holding one crosses blocks.
   const laddrAt = new Map<Value, number>();
+  // …and of those, the ones a direct `off(sp)` access in the local area was lowered to, not a capture
+  const directAccesses = new Set<Value>();
   const frameSums = new Map<Value, FrameSum>();
   // Every capture this lift moved into another (`addiu rD,rCapture,k` re-minted as the `laddr` of
   // the sum, or `addu` deferring one into a `FrameSum`), handed to the audit as Thumb hands its
@@ -2739,7 +2759,9 @@ function liftOnce(
             `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} saves the caller's ${stored} inside the local area, a frame this does not describe`,
           );
         }
-        return emitLaddr(off);
+        const at = emitLaddr(off);
+        directAccesses.add(at);
+        return at;
       }
       const raw = rawFrame(base);
       const sum = raw === undefined ? undefined : frameSums.get(raw);
@@ -3222,6 +3244,7 @@ function liftOnce(
       loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound },
       capturedObjectIsTheWholeFrame: false,
       movedCaptures,
+      directAccesses,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
       symbols,
       target,

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { DEAD_READ_GATES } from '../src/frontend/dead-reads';
-import { FRAME_ESCAPE_GATES } from '../src/frontend/frame-objects';
+import { FRAME_ESCAPE_GATES, RELIFT_HAND_BACK_GATES } from '../src/frontend/frame-objects';
 import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from '../src/l3/advance';
 import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from '../src/l3/argcopy';
 import {
@@ -148,6 +148,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   WITHHELD_KEY_OVER_LIVEBASE_BLOCK: withholdingKey(LIVEBASE_BLOCK_GATES, 'c:0 4 true') as readonly Gate<never>[],
   // frontend/frame-objects.ts: the retractions an escaped frame address costs
   FRAME_ESCAPE_GATES: FRAME_ESCAPE_GATES as readonly Gate<never>[],
+  // frontend/frame-objects.ts: what keeps a frame's end word in the one object
+  RELIFT_HAND_BACK_GATES: RELIFT_HAND_BACK_GATES as readonly Gate<never>[],
   // frontend/dead-reads.ts: the dead reads the lift must not stamp `volatile`
   DEAD_READ_GATES: DEAD_READ_GATES as readonly Gate<never>[],
 };

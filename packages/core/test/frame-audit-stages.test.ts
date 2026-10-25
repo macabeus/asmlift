@@ -3,10 +3,10 @@
 import { describe, expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
-import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
+import { type FrameRange, __testing, auditFrameObjects, keptInRelift } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const {
   addressFlow,
@@ -473,6 +473,82 @@ describe('frameEscapes', () => {
   });
 });
 
+// A relift's routing of a local-area word against the bytes kept as one object.
+describe('keptInRelift', () => {
+  test('a relift lifts a word outside the kept bytes as a slot, and refuses one across their edge', () => {
+    const at = () => 'the access';
+    expect(keptInRelift({ from: 8, to: 40 }, 8, 4, at, 'f')).toBe(true);
+    expect(keptInRelift({ from: 8, to: 40 }, 40, 4, at, 'f')).toBe(false);
+    expect(keptInRelift({ from: 8, to: 40 }, 4, 4, at, 'f')).toBe(false);
+    expect(() => keptInRelift({ from: 8, to: 40 }, 38, 4, at, 'f')).toThrow(
+      'the access reaches across an edge of the bytes [sp,#8) to [sp,#40) kept as one object',
+    );
+  });
+});
+
+// The first audit's answer where it asks for the one object: which bytes it asks for.
+describe('reliftRange', () => {
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, nB); return a[3] + b[1];` in a `to`-byte area,
+  // with `slots` the words the slot model keyed. `b` is: copied 4 bytes (`copy`), copied `wide`
+  // bytes (8, so the copy reaches [sp,#8)), handed to a callee nothing bounds instead (`hand`),
+  // copied and then handed (`copy+hand`), or only read (`read`)
+  type B = 'copy' | 'wide' | 'hand' | 'copy+hand' | 'read';
+  const asked = (to: number, slots: number[], b: B = 'copy', target: TargetDescription = ARMV4T_AGBCC) => {
+    const [s, t] = [value(), value()];
+    const [a, bo, k, k8] = [laddr(0), laddr(4), konst(4), konst(8)];
+    const ops = [a, bo, k, k8, call('memcpy', a.results[0], s, k.results[0])];
+    if (b === 'copy' || b === 'copy+hand') {
+      ops.push(call('memcpy', bo.results[0], t, k.results[0]));
+    }
+    if (b === 'wide') {
+      ops.push(call('memcpy', bo.results[0], t, k8.results[0]));
+    }
+    if (b === 'hand' || b === 'copy+hand') {
+      ops.push(call('g', bo.results[0]));
+    }
+    ops.push(load(a.results[0], 3, 1), load(bo.results[0], 1, 1), ret());
+    return auditFrameObjects({
+      name: 'f',
+      irBlocks: [{ params: [s, t], ops }],
+      ownedLocals: { from: 0, to },
+      declaredLocals: { from: 0, to },
+      usedSlotOffsets: new Set(slots),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target,
+    });
+  };
+
+  test('hands a spill slot past every copy back to the slot model', () => {
+    expect(asked(12, [8])).toEqual({ oneObject: { from: 0, to: 8 } });
+    // …and the word nothing touches between it and the arrays
+    expect(asked(16, [12])).toEqual({ oneObject: { from: 0, to: 8 } });
+  });
+
+  // `g` may write the slot word through the address it was handed
+  test('keeps every word where an escape no literal count bounds may reach it', () => {
+    expect(asked(12, [8], 'copy+hand')).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  test('keeps a word a bounded copy reaches', () => {
+    expect(asked(12, [8], 'wide')).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  // one copy fills nothing a split could use, and PPC_MWCC splits nothing (no
+  // `addressTakenArrayOrder`): handing the word back would only drop a stored-only member's store
+  test('keeps every word where no split could follow', () => {
+    expect(asked(12, [8], 'read')).toEqual({ oneObject: { from: 0, to: 12 } });
+    expect(asked(12, [8], 'copy', PPC_MWCC)).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+
+  // a word nothing touches, with no scalar beyond it, is the arrays' own
+  test('keeps a word nothing touches where no scalar lies past it', () => {
+    expect(asked(12, [])).toEqual({ oneObject: { from: 0, to: 12 } });
+  });
+});
+
 // The second audit, which judges the bytes a first one asked to keep as one object.
 describe('keepAsOneObject', () => {
   const kept = (blk: Block, target: TargetDescription = ARMV4T_AGBCC, to = 8) =>
@@ -577,12 +653,21 @@ describe('keepAsOneObject', () => {
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
     // the copies chain: the first one's last two bytes are the second's first two
     expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
-    // a runtime index into the lower part may reach the upper one
+    // a runtime index into the lower part may reach the upper one, even based at the lower copy's
+    // own destination: declared apart, the recompile may keep a word of `b` in a register across
+    // `((s32 *)a)[i] = v` (gcc 2.7.2 does)
     const indexed = copies([4, 4], (a, b, i) => {
       const at = mkOp('add', { operands: [a, i], results: [value()] });
       return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
     });
     expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // …and based in the middle of it
+    const midIndexed = copies([4, 4], (a, b, i) => {
+      const mid = laddr(2);
+      const at = mkOp('add', { operands: [mid.results[0], i], results: [value()] });
+      return [mid, at, load(at.results[0], 0, 1), load(a, 3, 1), load(b, 1, 1)];
+    });
+    expect(objectsOf(withKept(midIndexed))).toEqual([[0, 8]]);
     // the upper part handed to a callee nothing bounds
     expect(objectsOf(withKept(copies([4, 4], (a, b) => [load(a, 3, 1), call('g', b)])))).toEqual([[0, 8]]);
     // a byte no use names: [6, 8) is touched by nothing
