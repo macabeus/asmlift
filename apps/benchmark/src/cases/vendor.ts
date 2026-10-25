@@ -11,7 +11,9 @@
 //                      scorer's richest strategy compiles against it — and the context m2c reads
 //                      (compile/real.ts `m2cContext`), which is the same file unless CodeWarrior
 //                      preprocessed it
-// plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version).
+// plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version), and
+// out of the project's linked ELF, symbols.json.gz (the symbol map) and callee-bodies.json.gz (the
+// bodies of the rows' callees the TUs do not hold: cases/callee-bodies.ts).
 //
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU the
 // manifest assembles must declare every function it calls — enforced here, and by
@@ -27,19 +29,25 @@
 // where it says it is — its module ELF defines that symbol at that section and offset — so a wrong
 // location is refused by name rather than as a byte difference.
 import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
+import { calleeBodiesFromElf, elfBodyCandidates } from '@asmlift/cli/elf-bodies';
 import { moduleFunctionLocations } from '@asmlift/cli/module-elf';
+import { disasmRange, objdumpBinaryFor, readsObjdumpText } from '@asmlift/cli/objfile';
 import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { unitLanguage } from '@asmlift/core/codegen-flags';
+import type { Reloc } from '@asmlift/core/frontend/asmdata';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
-import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import type { TargetDescription } from '@asmlift/core/target';
+import { execSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-import { sha } from '../cache';
+import { scrubObjectHeader } from '../asm-scrub';
+import { cachedExtractAsmData, sha } from '../cache';
 import { buildRealTarget, m2cContext, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
+import { type VendoredCalleeBodies, writeVendoredCalleeBodies } from './callee-bodies';
 import { enforceCheckoutPin, git } from './checkout';
 import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
 import {
@@ -54,6 +62,7 @@ import {
   vendoredMapFile,
 } from './manifests';
 import { placedModuleElves, resolveProjectElf } from './project-elf';
+import { realCases } from './real';
 import { compareWithRom, romLocation } from './rom-function';
 
 /** An absolute path of the machine that vendored, which a preprocessed TU must not carry: the blobs
@@ -140,6 +149,90 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   }
 }
 
+/** The objdump a dtk project's own build fetches (`build/binutils`, configure.py), which a GameCube
+ *  project's listing bodies are read with where the vendor names none: no PowerPC objdump is on a
+ *  usual PATH, and the CLI's environment variable cannot be pointed at it without also reaching the
+ *  docker-run compiler wrapper, which reads the same variable inside its container. */
+function projectObjdump(root: string, target: TargetDescription): string | undefined {
+  const dtk = join(root, 'build', 'binutils', 'powerpc-eabi-objdump');
+  return target.compiler === 'mwcc' && existsSync(dtk) ? dtk : undefined;
+}
+
+/** Freeze the bodies of the project's rows' callees out of its linked ELF (cases/callee-bodies.ts):
+ *  every direct callee of every row outside a REL module that its target does not define, read off
+ *  the ELF as the CLI reads one (`calleeBodiesFromElf`). Each row's target is built from the
+ *  committed TU, as the runner builds it, so the callees are the ones its lift sees.
+ *
+ *  REFUSES rather than freezing less than the CLI reads: a row whose toolchain is not installed
+ *  here, rows whose targets read bodies differently, and a range the objdump could not disassemble
+ *  all throw, and nothing is written. */
+async function vendorCalleeBodies(man: RealManifest, root: string, outDir: string, objdump?: string): Promise<void> {
+  const project = man.project;
+  const res = resolveProjectElf(project, root);
+  if (res.elf === null) {
+    if (res.elfRel === null) {
+      writeVendoredCalleeBodies(outDir, undefined);
+      return;
+    }
+    console.warn(
+      `${project}: tools.asmlift.elf points at ${res.elfRel} but ${res.reason} — callee bodies NOT vendored`,
+    );
+    return;
+  }
+  const asked = new Set<string>();
+  const families = new Map<string, TargetDescription>();
+  for (const c of realCases({ project }).filter((x) => moduleOf(x.addr) === undefined)) {
+    if (!c.toolchain.available()) {
+      throw new Error(`${c.id}: its toolchain is not installed here, so its callees cannot be read — nothing written`);
+    }
+    const built = c.build();
+    let relocs: readonly Reloc[] | undefined;
+    try {
+      relocs = cachedExtractAsmData(built.obj, c.codegen.target, c.sym)?.relocs;
+    } catch {
+      relocs = undefined; // as rankOptionsFor reads it: no side table, the text alone names the calls
+    }
+    for (const callee of elfBodyCandidates(scrubObjectHeader(built.asm), c.sym, relocs)) {
+      asked.add(callee);
+    }
+    const t = c.codegen.target;
+    families.set(JSON.stringify([t.compiler === 'mwcc', readsObjdumpText(t)]), t);
+  }
+  if (families.size > 1) {
+    throw new Error(`${project}: its rows read callee bodies as ${families.size} different targets — nothing written`);
+  }
+  const target = [...families.values()][0];
+  const callees = [...asked].sort();
+  let vendored: VendoredCalleeBodies = { objdump: null, bodies: {}, unread: callees };
+  if (target !== undefined) {
+    const bin = readsObjdumpText(target) ? (objdump ?? projectObjdump(root, target)) : undefined;
+    const elfPath = res.elf;
+    const read = calleeBodiesFromElf(elfPath, readFileSync(elfPath), callees, target, (elf, t, section, start, stop) =>
+      disasmRange(elf, t, section, start, stop, bin).split(elfPath).join(res.elfRel),
+    );
+    if (read.warnings.length > 0) {
+      throw new Error(`${project}: refused, nothing written:\n  ${read.warnings.map((w) => w.trim()).join('\n  ')}`);
+    }
+    const version = readsObjdumpText(target)
+      ? spawnSync(objdumpBinaryFor(target, bin), ['--version'], { encoding: 'utf8' }).stdout.split('\n')[0]
+      : null;
+    vendored = {
+      objdump: version,
+      bodies: read.bodies,
+      unread: callees.filter((c) => !Object.hasOwn(read.bodies, c)),
+    };
+  }
+  const leak = JSON.stringify(vendored);
+  if (MACHINE_PATH.test(leak) || leak.includes(root)) {
+    throw new Error(`${project}: a machine path leaked into the vendored callee bodies — nothing written`);
+  }
+  writeVendoredCalleeBodies(outDir, vendored);
+  console.log(
+    `${project}: vendored ${Object.keys(vendored.bodies).length} callee bodies ` +
+      `(${vendored.unread.length} callee(s) with none in ${res.elfRel})`,
+  );
+}
+
 /** THE DECISION a module-located row is proved by, over the places its module puts `sym`
  *  ({@link moduleFunctionLocations}): null when one of them is exactly the row's section AND
  *  offset, a refusal line naming the real ones otherwise.
@@ -224,8 +317,15 @@ export function writeVendoredBlobs(
  *  invalidates the map alone. Re-preprocessing 252 TUs to fix that would churn the dataset for
  *  reasons the change does not own, and would restamp `generatedAt` (and a `dirty` flag) on
  *  provenance that did not change. The fidelity drift gate (run/symbol-drift.ts) compares the
- *  map, and only the map, against a fresh derivation. */
-export async function vendor(filterProject?: string, opts: { symbolsOnly?: boolean } = {}): Promise<void> {
+ *  map, and only the map, against a fresh derivation.
+ *
+ *  `calleeBodiesOnly`: rewrite ONLY callee-bodies.json.gz, for the same reason — its source is the
+ *  ELF and the CLI's reader of it, and the TUs it reads callees off are the committed ones. `objdump`
+ *  names the binary its listing bodies are disassembled with (`projectObjdump` otherwise). */
+export async function vendor(
+  filterProject?: string,
+  opts: { symbolsOnly?: boolean; calleeBodiesOnly?: boolean; objdump?: string } = {},
+): Promise<void> {
   const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
   for (const man of manifests) {
     // the vendored dataset must be reproducible from the pinned branch — a drifted checkout
@@ -236,6 +336,12 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       const outDir = join(REAL_DIR, 'tu', man.project);
       mkdirSync(outDir, { recursive: true });
       await vendorSymbols(man, root, outDir);
+      continue;
+    }
+    if (opts.calleeBodiesOnly) {
+      const outDir = join(REAL_DIR, 'tu', man.project);
+      mkdirSync(outDir, { recursive: true });
+      await vendorCalleeBodies(man, root, outDir, opts.objdump);
       continue;
     }
     const elf = resolveProjectElf(man.project, root);
@@ -358,5 +464,6 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         'every row EQ to the ROM',
     );
     await vendorSymbols(man, root, outDir);
+    await vendorCalleeBodies(man, root, outDir, opts.objdump);
   }
 }

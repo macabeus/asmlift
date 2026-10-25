@@ -104,6 +104,11 @@ function objdumpFor(target: TargetDescription, objdumpBin?: string): ObjdumpChoi
   };
 }
 
+/** The objdump binary a read of `target`'s objects or ranges runs: `objdumpBin` where given, and the
+ *  environment's or PATH's otherwise. What a reader records as the tool its text came from. */
+export const objdumpBinaryFor = (target: TargetDescription, objdumpBin?: string): string =>
+  objdumpFor(target, objdumpBin).bin;
+
 const run = (choice: ObjdumpChoice, args: string[], obj: string, what: string): string => {
   const r = spawnSync(choice.bin, [...args, obj], { encoding: 'utf8' });
   if (r.error) {

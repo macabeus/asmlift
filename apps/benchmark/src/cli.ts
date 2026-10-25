@@ -73,9 +73,11 @@
 //                                        #   exit 2 = nothing compared (no run behind it)
 //   pnpm bench smoke                     # one trivial fn through every available toolchain
 //   pnpm bench verify <manifest.json>    # compile-check loop for authoring real manifests
-//   pnpm bench vendor [--project p] [--symbols-only]   # freeze the real tier's preprocessed TUs
-//                                        # (needs checkouts); --symbols-only rewrites just the
-//                                        # ELF-derived symbol maps
+//   pnpm bench vendor [--project p] [--symbols-only | --callee-bodies-only] [--objdump bin]
+//                                        # freeze the real tier's preprocessed TUs (needs
+//                                        # checkouts); --symbols-only rewrites just the ELF-derived
+//                                        # symbol maps, --callee-bodies-only just the callee bodies
+//                                        # read off the ELF (--objdump: the binary that reads them)
 //   pnpm bench flags [--project p] [--only s] [--write] [--toolchain id]
 //                                        # every real unit's flags derived from its project's build
 //                                        # (needs checkouts): stored-flags status, unclassified words,
@@ -154,6 +156,10 @@ const { values: opts, positionals } = parseArgs({
     // vendor only: rewrite just the derived symbol maps, leaving the preprocessed TUs, index.json
     // and PROVENANCE.json exactly as committed (see cases/vendor.ts).
     'symbols-only': { type: 'boolean', default: false },
+    // vendor only: rewrite just the callee bodies read off the linked ELF (cases/callee-bodies.ts),
+    // and the objdump that disassembles a listing body
+    'callee-bodies-only': { type: 'boolean', default: false },
+    objdump: { type: 'string' },
     // repro only: which of the row's two scripts, and whether to execute it here.
     tool: { type: 'string' },
     run: { type: 'boolean', default: false },
@@ -884,7 +890,11 @@ switch (command) {
     break;
   case 'vendor': {
     const { vendor } = await import('./cases/vendor');
-    await vendor(opts.project, { symbolsOnly: opts['symbols-only'] });
+    await vendor(opts.project, {
+      symbolsOnly: opts['symbols-only'],
+      calleeBodiesOnly: opts['callee-bodies-only'],
+      objdump: opts.objdump,
+    });
     break;
   }
   case 'flags': {
