@@ -15,7 +15,9 @@
 // parameter, and with it the copy.
 //
 // SOUND BY SSA: every in-edge's argument is the SAME VALUE, so reading it in the block is reading
-// it on every edge. "The same" is `sameAtEntry` (ir/entry.ts) with an empty entry map: one opcode,
+// it on every edge. This is ir/simplify.ts's trivial phi (`trivialPhiValue`, which this calls) with
+// identity widened to congruence, and with its waiver: a back edge that hands the parameter itself
+// hands whatever the last entry did. "The same" is `sameAtEntry` (ir/entry.ts) with an empty entry map: one opcode,
 // one set of attributes, operands the same in turn, down to LEAVES that are one SSA value on every
 // edge. The walk reads through an op only when it can be re-evaluated anywhere (`clonable`: no
 // effect, no memory read, nothing that traps, no placement stamp), so the expression's value is a
@@ -24,8 +26,9 @@
 // recomputed expression is fresh SSA ops reading the leaves, and namecoalesce gives a leaf that is
 // live at the block a name no other live value shares.
 //
-// SCOPE, not soundness (the gates the precondition does not need):
-//  • THE BLOCK IS A JOIN OF ONE SWITCH: one in-edge is a `switch_br`'s, and every other comes from a
+// SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`, both
+// `sound: false`; a test drops one with `without()` and runs the real fold):
+//  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, and every other comes from a
 //    block the dispatch dominates — an arm of that switch. Two joins pass:
 //     (1) A CASE FALLEN INTO (`case 4:` above). The structurer cannot spell its parameter as a
 //         variable, because the switch-edge copy would re-run on the fall path, so it declines; the
@@ -50,40 +53,57 @@
 //    variation, and a variation never ships a function its default declines (rank.ts), so it could
 //    not have lifted this row: the gate is what lets the default carry it. `unpre.test.ts` pins both
 //    joins and an ordinary `if` join the gate keeps out.
-//  • the argument must be an op with operands. An operand-free argument (a constant, a symbol's
+//  • the argument must be an op with operands (`operand-free`). An operand-free argument (a constant, a symbol's
 //    address) is what a merge of `return 0;` arms or of a register the compiler set to one constant
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
 //    switch edge and a falling case hand the constant 7 (the KMC/gcc2.7.2 shape thumb-switch.test.ts
 //    pins) therefore still declines.
-import {
-  type Block,
-  type Fn,
-  type Op,
-  type Successor,
-  type Value,
-  defOpMap,
-  dominators,
-  mkValue,
-  replaceAllUsesWith,
-} from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue } from '../ir/core';
 import { placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
+import { inEdgesOf, retireParam, trivialPhiValue } from '../ir/simplify';
+import { type Gate, firstRejection } from '../l3/gates';
 
 /** May this op be evaluated again at another program point to the same value? */
 const clonable = (d: Op): boolean =>
   d.opcode !== 'call' && d.results.length === 1 && !reevalUnsafe(d) && !spelledWhenDead(d) && placedAt(d) === null;
 
-export interface UnpreOptions {
-  /** lift the scope gate: recompute at every join, not only at a switch's. Tests only — it
-   *  is what the gate's measurement in the header ran. */
-  readonly everyJoin?: boolean;
+/** A parameter the precondition admits: every in-edge (but a back edge handing the parameter itself)
+ *  hands it one pure expression over leaves that strictly dominate the block. */
+export interface RedundantParam {
+  /** one in-edge is a `switch_br`'s, another comes from elsewhere, and every other comes from a block
+   *  the dispatch dominates */
+  readonly switchJoin: boolean;
+  /** the expression is an op with operands, not a constant or a symbol's address */
+  readonly hasOperands: boolean;
 }
+
+/** THE SCOPE (the header's), as data: neither rule is needed for soundness — the precondition is —
+ *  so neither is `sound`, and a test ablates one with `without()` to run the fold at every join.
+ *  THE RESIDUE, untabled: the precondition itself (congruent arguments over `clonable` ops, leaves
+ *  that strictly dominate the block). It is what the fold IS, not a refusal of it — drop any part
+ *  and the recompute reads a different value — and the gates are asked only of a parameter it
+ *  admits, so a census counts scope refusals, not shapes the fold could never take. */
+export const UNPRE_GATES: readonly Gate<RedundantParam>[] = [
+  {
+    id: 'not-switch-join',
+    why: 'outside a switch the parameter is spellable as a variable, and recomputing it re-spells functions that match',
+    sound: false,
+    rejects: (c) => !c.switchJoin,
+  },
+  {
+    id: 'operand-free',
+    why: 'a merged constant or symbol address is a spelling the passes that merge constants own',
+    sound: false,
+    rejects: (c) => !c.hasOperands,
+  },
+];
 
 /** Recompute every parameter of a switch's join (a case fallen into, or the switch's exit) whose
  *  in-edges all hand it one pure expression; returns how many parameters it removed. */
-export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): number {
-  // The CFG does not change, so dominance is computed once; the def map and the homes grow with
-  // each clone.
+export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantParam>[] = UNPRE_GATES): number {
+  // The CFG does not change, so dominance and the in-edge index are computed once; the def map and
+  // the homes grow with each clone.
   const dom = dominators(fn);
   const defs = defOpMap(fn);
   const home = new Map<Value, Block>();
@@ -93,17 +113,9 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
       op.results.forEach((r) => home.set(r, b));
     }
   }
-  // The SUCCESSOR itself, not its `args`: `replaceAllUsesWith` gives every successor a new array.
-  const inEdges = new Map<Block, { succ: Successor; from: Block; op: Op }[]>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const s of op.successors) {
-        inEdges.set(s.block, [...(inEdges.get(s.block) ?? []), { succ: s, from: b, op }]);
-      }
-    }
-  }
-  /** THE SCOPE GATE (see the header): a block the switch enters — a case, or by the default edge its
-   *  exit — whose every other edge comes from inside the switch. */
+  const inEdges = inEdgesOf(fn);
+  /** a block the switch enters — a case, or by the default edge its exit — whose every other edge
+   *  comes from inside the switch */
   const switchJoin = (ins: readonly { from: Block; op: Op }[]): boolean => {
     const dispatch = ins.find((e) => e.op.opcode === 'switch_br');
     return (
@@ -116,6 +128,8 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
     const d = defs.get(v);
     return d !== undefined && clonable(d);
   };
+  /** structural congruence: one pure expression over the same leaves */
+  const congruent = (a: Value, b: Value) => sameAtEntry(defs, a, b, { entry: new Map(), through });
   let removed = 0;
   // A recomputed parameter can make a later block's arguments equal (a second case fallen into
   // whose argument reads the first's parameter), so sweep until a sweep removes nothing.
@@ -123,17 +137,13 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
     changed = false;
     for (const b of fn.blocks.slice(1)) {
       const ins = inEdges.get(b) ?? [];
-      if (ins.length < 2 || !(opts.everyJoin || switchJoin(ins))) {
-        continue;
-      }
+      const incoming = ins.map((e) => e.succ);
       for (let k = 0; k < b.params.length;) {
-        const first = ins[0].succ.args[k];
-        const d0 = defs.get(first);
-        const equal =
-          d0 !== undefined &&
-          d0.operands.length > 0 &&
-          clonable(d0) &&
-          ins.every((e) => sameAtEntry(defs, e.succ.args[k], first, { entry: new Map(), through }));
+        // THE trivial-phi predicate (ir/simplify.ts), held to congruence instead of identity: a back
+        // edge handing the parameter itself is waived there, for the reason it is waived for a
+        // trivial phi.
+        const first = trivialPhiValue(incoming, k, b.params[k], congruent);
+        const d0 = first === null ? undefined : defs.get(first);
         const clones: Op[] = [];
         const memo = new Map<Value, Value>();
         let leavesDominate = true;
@@ -164,22 +174,21 @@ export function recomputeRedundantParams(fn: Fn, opts: UnpreOptions = {}): numbe
           memo.set(v, out);
           return out;
         };
-        const value = equal ? clone(first) : undefined;
-        if (value === undefined || !leavesDominate) {
+        const value = first !== null && d0 !== undefined && clonable(d0) ? clone(first) : undefined;
+        if (
+          value === undefined ||
+          !leavesDominate ||
+          firstRejection(gates, { switchJoin: switchJoin(ins), hasOperands: d0!.operands.length > 0 }) !== null
+        ) {
           k++;
           continue;
         }
-        const param = b.params[k];
         b.ops.unshift(...clones);
         for (const op of clones) {
           defs.set(op.results[0], op);
           home.set(op.results[0], b);
         }
-        replaceAllUsesWith(fn, param, value);
-        b.params.splice(k, 1);
-        for (const e of ins) {
-          e.succ.args.splice(k, 1);
-        }
+        retireParam(fn, b, k, value, incoming);
         removed++;
         changed = true;
       }

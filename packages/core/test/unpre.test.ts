@@ -6,8 +6,9 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
-import { recomputeRedundantParams } from '../src/raise/unpre';
+import { UNPRE_GATES, recomputeRedundantParams } from '../src/raise/unpre';
 import { structure } from '../src/structure/structure';
 
 // `case 0:` falls into `case 1:`; the dispatch hands `case 1:` `a0` and `a0 + 1`, and `case 0:` hands
@@ -68,8 +69,41 @@ test('a recomputed leaf keeps its own name where the falling edge sets the param
 });
 
 test('a case parameter both edges hand one constant is left to the passes that spell merges of constants', () => {
-  const { n } = fold(fallIr('%0, %6', '%2'));
+  // `%2` and `%4` are both the constant 1 (`%6`, the 9, would be a real join and prove nothing)
+  const { n } = fold(fallIr('%0, %4', '%2'));
   expect(n).toBe(0);
+  // the rule that keeps it out, and the fold's own precondition holds there
+  const fn = parse(fallIr('%0, %4', '%2'));
+  expect(recomputeRedundantParams(fn, without(UNPRE_GATES, 'operand-free'))).toBe(1);
+  verify(fn);
+});
+
+// A loop inside `case 1:` whose back edge hands the parameter itself: the waiver ir/simplify.ts's
+// trivial phi takes, shared through `trivialPhiValue`.
+const LOOPED_CASE = `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=1}
+  %3: s32 = add %0, %2
+  switch_br %1, ^bb1(), ^bb2(%3), ^bb3() {cases=[0;1]}
+^bb1():
+  %4: s32 = const {value=1}
+  %5: s32 = add %0, %4
+  br ^bb2(%5)
+^bb2(%7: s32):
+  %9: s32 = call %7 {target="side1"}
+  %10: s32 = const {value=0}
+  %11: u32 = icmp_eq %9, %10
+  cond_br %11, ^bb2(%7), ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('a back edge handing the case its own parameter is waived, as for a trivial phi', () => {
+  const { n, fn, emit } = fold(LOOPED_CASE);
+  expect(n).toBe(1);
+  expect(fn.blocks[2].params).toHaveLength(0);
+  expect(emit()).toMatch(/side1\(a0 \+ 1\)/);
 });
 
 // The two arms of an `if` each compute `a0 << 2` and merge it, as agbcc does where the source wrote
@@ -98,7 +132,7 @@ test('an ordinary join is not a case fallen into, and keeps its parameter (the s
   expect(fold(IF_JOIN).n).toBe(0);
   // the same IR with the gate lifted: the fold's own precondition holds there
   const fn = parse(IF_JOIN);
-  expect(recomputeRedundantParams(fn, { everyJoin: true })).toBe(1);
+  expect(recomputeRedundantParams(fn, without(UNPRE_GATES, 'not-switch-join'))).toBe(1);
   verify(fn);
 });
 

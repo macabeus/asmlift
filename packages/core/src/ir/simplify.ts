@@ -2,7 +2,7 @@
 //
 // Peer of `pattern/engine.ts`'s `dce`: general, opcode-agnostic, and callable by anything that has
 // just changed the CFG.
-import { Block, Fn, Successor, Value, replaceAllUsesWith } from './core';
+import { Block, Fn, Op, Successor, Value, replaceAllUsesWith } from './core';
 
 /**
  * Remove block params that are really TRIVIAL PHIS — those whose incoming args, across every
@@ -55,12 +55,7 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
         if (collapsed === null) {
           continue; // a genuine join, or unreachable (no in-edges at all)
         }
-        replaceAllUsesWith(fn, param, collapsed);
-        onRemoved?.(param);
-        b.params.splice(i, 1);
-        for (const s of incoming) {
-          s.args.splice(i, 1);
-        }
+        retireParam(fn, b, i, collapsed, incoming, onRemoved);
         removed++;
         changed = true;
       }
@@ -77,14 +72,70 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  *  fixpoint and the non-mutating check below so the two cannot come to disagree about which params
  *  are trivial.
  *
+ *  `same` is the equality the args are held to. Identity by default, which is the trivial phi
+ *  proper; `raise/unpre.ts` passes structural congruence (`ir/entry.ts` `sameAtEntry`) and gets
+ *  back the FIRST arg as the class's representative, which it recomputes rather than reads. The
+ *  self-reference waiver is the same for both, and so is its argument above: the first dynamic
+ *  entry arrives on an edge that hands the representative's class.
+ *
  *  `=== null` IS THE ONLY SAFE TEST. A genuine collapse value is never null, but it CAN be
  *  `undefined` where an edge carries fewer args than the block has params — a malformed graph the
  *  verifier catches elsewhere, and one today's callers pass straight through rather than treat as
  *  "not trivial". A truthiness test would silently change that.
  */
-function trivialPhiValue(incoming: readonly Successor[], i: number, param: Value): Value | null {
-  const distinct = [...new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param))];
-  return distinct.length === 1 ? distinct[0] : null;
+export function trivialPhiValue(
+  incoming: readonly Successor[],
+  i: number,
+  param: Value,
+  same: (a: Value, b: Value) => boolean = (a, b) => a === b,
+): Value | null {
+  const args = incoming.map((s) => s.args[i]).filter((v) => v !== param);
+  if (args.length === 0) {
+    return null;
+  }
+  const first = args[0];
+  return args.every((v) => v === first || same(v, first)) ? first : null;
+}
+
+/** Retire block param `i` of `b` for `value`: every use reads `value`, and the param and each
+ *  in-edge's arg for it are spliced out. `incoming` is every successor that targets `b` — the
+ *  SUCCESSOR objects, not their `args`, which `replaceAllUsesWith` replaces. `onRemoved` runs after
+ *  the uses move and before the splice. */
+export function retireParam(
+  fn: Fn,
+  b: Block,
+  i: number,
+  value: Value,
+  incoming: readonly Successor[],
+  onRemoved?: (param: Value) => void,
+): void {
+  const param = b.params[i];
+  replaceAllUsesWith(fn, param, value);
+  onRemoved?.(param);
+  b.params.splice(i, 1);
+  for (const s of incoming) {
+    s.args.splice(i, 1);
+  }
+}
+
+/** Every in-edge, indexed by target: the successor, the block it leaves and the terminator that
+ *  carries it. ONE pass over the function, for a caller whose CFG does not change while it reads the
+ *  index (params and args may: the successor objects stay). */
+export function inEdgesOf(fn: Fn): Map<Block, { succ: Successor; from: Block; op: Op }[]> {
+  const out = new Map<Block, { succ: Successor; from: Block; op: Op }[]>();
+  for (const from of fn.blocks) {
+    for (const op of from.ops) {
+      for (const succ of op.successors) {
+        const list = out.get(succ.block);
+        if (list === undefined) {
+          out.set(succ.block, [{ succ, from, op }]);
+        } else {
+          list.push({ succ, from, op });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /**
