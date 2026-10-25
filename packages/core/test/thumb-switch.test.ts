@@ -6,8 +6,11 @@
 // output looks entirely ordinary and runs the wrong code.
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
+import { parse } from '../src/ir/parse';
+import { verify } from '../src/ir/verify';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { type FnProto, declaresVoidReturn } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
@@ -155,9 +158,13 @@ const FALLPRE_PROTOS = {
   ...Object.fromEntries(['f', 'g', 'h', 'm'].map((n) => [n, { params: 1, returnsVoid: true }])),
 };
 
-test('a switch-edge value the falling arm computes for itself (gcse PRE) DECLINES today', () => {
-  expect(() => decompile('sw_fallpre', FALLPRE, ARMV4T_AGBCC, { prototypes: FALLPRE_PROTOS })).toThrow(
-    /takes a value from the switch edge/,
+test('a switch-edge value the falling arm computes for itself (gcse PRE) is re-run under the label it falls to', () => {
+  // On the fall path the re-run `v1 = v0 + 1;` writes the value case 2 just wrote: the two edges hand
+  // `case 4:` the same pure sum over the same `v0`, and nothing on case 2's path writes `v0`.
+  const out = decompile('sw_fallpre', FALLPRE, ARMV4T_AGBCC, { prototypes: FALLPRE_PROTOS }).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toMatch(
+    /case 3:\s*if \(gK\[(\w+) \+ 1\] == 0\) \{\s*(\w+) = \1 \+ 1;\s*\} else \{\s*\2 = \1 \+ 1;\s*break;\s*\}\s*case 4:\s*case 5:\s*\2 = \1 \+ 1;\s*if \(gX\[\1\] > 7\) h\(\1\);\s*break;/,
   );
 });
 
@@ -175,6 +182,42 @@ test('a switch-edge re-run that would read a name the falling arm overwrote DECL
   // side2(9, 10) where the asm calls side2(9, a0 + 1). Equal SSA values, clobbered name.
   const asm = recompute('\tadd\tr2, r0, #0x1\n', '\tadd\tr2, r0, #0x1\n\tmov\tr0, #0x9\n');
   expect(() => decompile('f', asm, ARMV4T_AGBCC, SIDE2)).toThrow(/takes a value from the switch edge/);
+});
+
+// The same rule over parsed IR, so it is the structurer's and not the Thumb frontend's: every
+// frontend that lifts a jump table to a `switch_br` (MIPS and PPC tables too) reaches it. `case 0:`
+// hands `case 1:` the dispatch's `a0` and its own `a0 + 1`; the fixtures change what it hands it.
+const fallIr = (fallArgs: string) => `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=1}
+  %3: s32 = add %0, %2
+  switch_br %1, ^bb1(), ^bb2(%0, %3), ^bb3() {cases=[0;1]}
+^bb1():
+  %4: s32 = const {value=1}
+  %5: s32 = add %0, %4
+  %6: s32 = const {value=9}
+  br ^bb2(${fallArgs})
+^bb2(%7: s32, %8: s32):
+  %9: s32 = call %7, %8 {target="side2"}
+  br ^bb3()
+^bb3():
+  ret
+}
+`;
+const structureFall = (fallArgs: string) => {
+  const fn = parse(fallIr(fallArgs));
+  verify(fn);
+  return () => cBackend.emit(structure(fn, { returnsVoid: true }));
+};
+
+test('a fall-through that hands the switch-edge parameter an equal pure value re-runs its copy (parsed IR)', () => {
+  const out = structureFall('%0, %5')();
+  expect(out).toMatch(/case 0:\s*(\w+) = a0 \+ 1;\s*case 1:\s*\1 = a0 \+ 1;\s*side2\(a0, \1\);/);
+  // a different value from the falling arm is still the overwrite the refusal is for
+  expect(structureFall('%0, %6')).toThrow(/takes a value from the switch edge/);
+  // and so is an equal value whose name the falling edge overwrites: `a0` is `case 1:`'s first
+  // parameter, which `case 0:` sets to 9, so the re-run would compute 9 + 1
+  expect(structureFall('%6, %5')).toThrow(/takes a value from the switch edge/);
 });
 
 test('a switch-edge value read from memory the falling arm then writes DECLINES', () => {
@@ -785,8 +828,9 @@ test('a default arm that returns on its own does not name where the switch ends'
   // block: the range check sets the stored value in its delay slot, so the default arm takes it
   // from the switch edge, and case 2 sets it itself and falls into the default. The default edge's
   // `ret` is the default arm's own `return 5`, and the five `break`s reach `return 0`, laid out
-  // past it. Anchoring on the default would end the switch inside the default arm and spell every
-  // `break` as `return 0;`, so the stop reading's decline stands.
+  // past it. Anchoring on the default would end the switch inside the default arm, so it is never
+  // the reading: the stop reading spells, its `break`s as `return 0;` — the same program, and no
+  // claim about where the source's switch ended.
   const asm =
     'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x5\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
     '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
@@ -796,7 +840,16 @@ test('a default arm that returns on its own does not name where the switch ends'
     '.L7:\n\tmov\tr0, #0x6\n\tstr\tr0, [r1, #0x14]\n\tb\t.L11\n' +
     '.L8:\n\tmov\tr3, #0x7\n.L9:\n\tstr\tr3, [r1, #0x24]\n\tmov\tr0, #0x5\n\tb\t.L12\n' +
     '.L11:\n\tmov\tr0, #0x0\n.L12:\n\tbx\tlr\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+  // Both edges into the default hand it the constant 7, so re-running the switch edge's `v0 = 7;`
+  // under `default:` on case 2's path writes what case 2 wrote, and the stop reading spells: every
+  // arm returns on its own and the default keeps its `return 5`. The anchored retry is never asked.
+  const out = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).not.toContain('break;');
+  expect(out).toMatch(/case 2:\s*(\w+) = 7;\s*default:\s*\1 = 7;\s*a1\[9\] = \1;\s*return 5;/);
+  for (const k of [0, 1, 3, 4, 5]) {
+    expect(out).toMatch(new RegExp(`case ${k}:\\s*[^;]+ = ${k + 1};\\s*return 0;`));
+  }
 });
 
 test('a default arm that returns on its own does not name the end beside one `break` either', () => {
@@ -816,7 +869,13 @@ test('a default arm that returns on its own does not name the end beside one `br
     '.L50:\n\tmov\tr0, #0x5\n\tstr\tr0, [r1, #0x10]\n\tmov\tr0, #0x4\n\tb\t.L74\n' +
     '.L60:\n\tmov\tr3, #0x7\n.L64:\n\tstr\tr3, [r1, #0xc]\n\tmov\tr0, #0x5\n\tb\t.L74\n' +
     '.L70:\n\tmov\tr0, #0x0\n.L74:\n\tbx\tlr\n';
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+  // As above: case 3 and the switch edge both hand the default 7, so the re-run is admitted and the
+  // stop reading spells, with case 0's `return 0` its own and the default's `return 5` kept.
+  const out = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).not.toContain('break;');
+  expect(out).toMatch(/case 0:\s*\*a1 = 1;\s*return 0;/);
+  expect(out).toMatch(/case 3:\s*(\w+) = 7;\s*default:\s*\1 = 7;\s*a1\[3\] = \1;\s*return 5;/);
 });
 
 test('two returning arms that share a cross-jumped tail still leave the `break` arms an end', () => {
