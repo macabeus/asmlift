@@ -1135,12 +1135,13 @@ interface LoopInfo {
   preheader?: Block;
 }
 
-// One early-`return` exit out of a loop body, and the blocks of it the loop emits inside its body
-// (`earlyReturnArm` decides which). Per-EDGE rather than flattened into per-loop sets: ownership is
-// decided against `from`, so a second edge into the same target is a separate question. Two arms'
-// `owned` sets may OVERLAP: a tail only the loop's exit arms run (`armsOnly`, the cross-jumped
-// `h(i); return;` two arms end in), or a return tail the exit path also runs after a block of its own
-// (`exitTail`), is owned by every arm that reaches it, and written once in each. `owned` has one
+// One early-`return` exit out of a loop body, and the blocks of it that run ahead of the loop's
+// update on every path that reaches them (`earlyReturnArm` decides which). Per-EDGE rather than
+// flattened into per-loop sets: ownership is decided against `from`, so a second edge into the same
+// target is a separate question. Two arms' `owned` sets may OVERLAP: a tail only the loop's exit arms
+// run (`armsOnly`, the cross-jumped `h(i); return;` two arms end in) is owned by every arm that
+// reaches it, and written once in each. A return tail the exit path also runs (`exitTail`) is written
+// in the arm too, but owned by none: the exit path's copy runs it after the update. `owned` has one
 // reader, `emitDoWhile`, which unions the arms' sets for its pre-update hazard check — an overlap
 // only repeats a block in that union — and a `while` hoists no update, so it has no pre-update reads
 // to exempt.
@@ -2501,10 +2502,12 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // What it would buy is an `else` before the loop that cross-jumps into the arms' tail (agbcc's
 // `else { pong(9); hit(a); return; }`), and that lifts only through the same re-spelling.
 //
-// Returns the blocks the arm OWNS — the ones the loop emits inside its body for this arm, ahead of
-// the update — or null when this is not an early-`return` arm. Not exclusive to the arm: a block the
-// `armsOnly` or `exitTail` count admits is owned by every arm that reaches it, so two arms' sets can
-// share it. `latches` are the loop's latches.
+// Returns the blocks the arm OWNS — the ones that run ahead of the loop's update on every path that
+// reaches them — or null when this is not an early-`return` arm. The arm writes every block its walk
+// admits, owned or not: an `exitTail` block is admitted but not owned, since the exit path runs it
+// after the update. Not exclusive to the arm: a block the `armsOnly` count admits is owned by every
+// arm that reaches it, so two arms' sets can share it. `latches` are the loop's latches;
+// `exitTailGates` the refusals the `exitTail` count is held to (`EXIT_TAIL_GATES`).
 function earlyReturnArm(
   { dom, reachFrom, preds }: EarlyReturnArmDeps,
   from: Block,
@@ -2552,9 +2555,9 @@ function earlyReturnArm(
     if (body.has(bb)) {
       return null;
     } // re-enters the loop → not an exit
-    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb) || (bb.ops.some(effectful) && exitTail(bb))) {
+    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
       owned.add(bb);
-    } else if (bb.ops.some(effectful)) {
+    } else if (bb.ops.some(effectful) && !exitTail(bb)) {
       return null;
     }
     const t = bb.ops[bb.ops.length - 1];
@@ -7894,11 +7897,10 @@ export function structure(
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
     // the loop for a hazard that cannot happen. Blocks the arm merely reaches are not `owned`, and stay
-    // post-loop where the other path really does read them after the update. So does an owned block
-    // the loop's own exit path also runs (`exitTail`, at `earlyReturnArm`): the arm writes its copy
-    // ahead of the update, but the copy written after the loop reads past it.
-    const fromExit = reachForward(dw.exit, dom);
-    const owned = new Set(dw.arms.flatMap((a) => [...a.owned].filter((bb) => !fromExit.has(bb))));
+    // post-loop where the other path really does read them after the update — among them a tail the
+    // loop's own exit path also runs (`exitTail`, at `earlyReturnArm`), which the arm writes a copy of
+    // but does not own.
+    const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
     // AN EFFECT THE RENDERED TEST MAY SKIP. `movedEffect` below says this about the exit copies; the
     // bottom test is the other place an effect can change how often it runs, and here it is the

@@ -16,8 +16,9 @@
 // branch enters, which the `while` reading of two cross-jumped arms takes for its exit (`retarm2_tail`,
 // below) — and an arm leaving by a latch (`an arm another path also enters is not a \`break\` arm, and
 // the loop declines`); a tail entered
-// straight from before the loop, past the exit; and a tail holding a cycle. Owned or not, the tail
-// stays code run after the loop for a `do-while`'s escape check, since the exit path runs it there.
+// straight from before the loop, past the exit; and a tail holding a cycle. The arm writes the tail
+// without owning it, so it stays code run after the loop for a `do-while`'s escape check, since the
+// exit path runs it there.
 // And a copy is the reading of last resort: where another exit lets every edge `break` to the tail,
 // that reading wins (`a rotated loop whose two exits can both \`break\` to the tail copies nothing`).
 import { describe, expect, test } from 'vitest';
@@ -416,7 +417,7 @@ const DOWHILE_TAIL_READS_BODY = `fn retbody {
 }`;
 
 test('a tail the exit path also runs stays post-loop for the escape check of a `do-while`', () => {
-  // owned by the arm, the tail is still code the exit path runs after the update, where `i + i`
-  // would be re-derived from the updated name (255 of 300 seeds disagreed with the exemption)
+  // written in the arm but owned by none, the tail is code the exit path runs after the update, where
+  // `i + i` would be re-derived from the updated name (255 of 300 seeds disagreed with the exemption)
   expect(() => judged(DOWHILE_TAIL_READS_BODY)).toThrow(/post-loop value reads a pre-update loop variable/);
 });
