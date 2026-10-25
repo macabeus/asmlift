@@ -442,7 +442,10 @@ test('a rotated loop whose two exits can both `break` to the tail copies nothing
 
 /** A `do-while` (the header calls, so no `while` reading) whose shared tail reads `i + i`, a value the
  *  body computed from the loop variable before the update. The arm's copy reads it ahead of the
- *  update; the exit path's copy runs after the loop, past it. */
+ *  update; the exit path's copy runs after the loop, past it. The arm enters the tail through a pure
+ *  trampoline (`^bb6`), so no reading lifts it but the `exitTail` copy: an arm straight into the
+ *  `store; ret` block is a plain unowned `ret` target, which the `do-while` reading takes with no
+ *  copy at all. */
 const DOWHILE_TAIL_READS_BODY = `fn retbody {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -451,7 +454,7 @@ const DOWHILE_TAIL_READS_BODY = `fn retbody {
   %4: s32 = call %3 {target="t"}
   %5: s32 = add %3, %3
   %6: u32 = icmp_eq %4, %0
-  cond_br %6, ^bb5(), ^bb2()
+  cond_br %6, ^bb6(), ^bb2()
 ^bb2():
   %7: s32 = const {value=1}
   %8: s32 = add %3, %7
@@ -460,13 +463,22 @@ const DOWHILE_TAIL_READS_BODY = `fn retbody {
 ^bb4():
   %10: s32 = call %8 {target="miss"}
   br ^bb5()
+^bb6():
+  br ^bb5()
 ^bb5():
   store %0, %5 {off=0, width=4}
   ret %5
 }`;
 
 test('a tail the exit path also runs stays post-loop for the escape check of a `do-while`', () => {
-  // written in the arm but owned by none, the tail is code the exit path runs after the update, where
-  // `i + i` would be re-derived from the updated name (255 of 300 seeds disagreed with the exemption)
+  // written in the arm (`exitTail`) but owned by none, the tail is code the exit path runs after the
+  // update, where `i + i` would be re-derived from the updated name: owning what `exitTail` admits
+  // lifts it, and 255 of 300 seeds disagree
   expect(() => judged(DOWHILE_TAIL_READS_BODY)).toThrow(/post-loop value reads a pre-update loop variable/);
+  // the same check holds the plain reading's unowned `ret` target, the arm straight into the tail
+  const direct = DOWHILE_TAIL_READS_BODY.replace('cond_br %6, ^bb6(), ^bb2()', 'cond_br %6, ^bb5(), ^bb2()').replace(
+    '^bb6():\n  br ^bb5()\n',
+    '',
+  );
+  expect(() => judged(direct)).toThrow(/post-loop value reads a pre-update loop variable/);
 });
