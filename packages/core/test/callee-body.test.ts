@@ -324,6 +324,35 @@ describe('the argument words a callee body handed in from outside the input read
       });
     },
   );
+  // `extern int gp; f() { gp = 3; two(); }`: the store leaves its 3 in a0 at the `jal`, and the guess
+  // passes it. `two` reads none, but makes two calls: the relocations handed in with it name them
+  // (cli elf-bodies.ts reads them off a linked image's symbols), and without them it does not lift
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)(
+    '%s: decompile: a listing handed in with the relocations of its calls lifts under them alone',
+    (id) => {
+      const t = TOOLCHAIN_TARGETS[id].description;
+      const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+      const f =
+        `${head}00000000 <f>:\n   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,16(sp)\n   8:\tlui\tv0,0x0\n` +
+        '   c:\tli\ta0,3\n  10:\tsw\ta0,0(v0)\n  14:\tjal\t0 <f>\n  18:\tnop\n  1c:\tlw\tra,16(sp)\n' +
+        '  20:\tjr\tra\n  24:\taddiu\tsp,sp,24\n';
+      // the input's own relocations, whose offsets the body's listing shares and must not read
+      const asmData: AsmData = {
+        ...jal,
+        relocs: [
+          { section: '.text', offset: 8, type: 'R_MIPS_HI16', sym: 'gp', addend: 0 },
+          { section: '.text', offset: 0x10, type: 'R_MIPS_LO16', sym: 'gp', addend: 0 },
+          { section: '.text', offset: 0x14, type: 'R_MIPS_26', sym: 'two', addend: 0 },
+          { section: '.text', offset: 0x5c, type: 'R_MIPS_26', sym: 'h', addend: 0 },
+        ],
+      };
+      const relocs = jal.relocs.filter((r) => r.offset >= 0x48);
+      const lifted = (bodies?: CalleeBodies) => decompile('f', f, t, { asmData, calleeBodies: bodies }).source;
+      expect(lifted()).toContain('two(3)');
+      expect(lifted({ two: { kind: 'listing', text: mips } })).toContain('two(3)');
+      expect(lifted({ two: { kind: 'listing', text: mips, relocs } })).toContain('two()');
+    },
+  );
   test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: a body handed in bounds as the same body inline', (id) => {
     const t = TOOLCHAIN_TARGETS[id].description;
     const names = ['rnd', 'rd1', 'thk', 'two'];

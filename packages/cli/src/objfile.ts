@@ -62,6 +62,31 @@ interface ObjdumpChoice {
  *  for it. */
 export const readsObjdumpText = (target: TargetDescription): boolean => target.compiler !== 'agbcc';
 
+/** How the target's frontend names a direct call's callee: by a relocation of `type` on a `mnemonic`
+ *  instruction, which it reads in the listing itself where the family's disassembly flags have
+ *  objdump print relocations (`-r`: PowerPC), and out of the object's side table otherwise (MIPS,
+ *  `asmDataForObject`). A linked image carries none, so a driver that hands a range of one to the
+ *  frontend names its calls itself (cli elf-bodies.ts). Undefined where the frontend reads no
+ *  objdump text. Only the CALL: a jump that names a function (MIPS `j`, PowerPC `b`) is also a
+ *  loop's back edge to its own entry, which no relocation names (core mips.ts `textCallee`). */
+export interface CallRelocation {
+  mnemonic: string;
+  type: string;
+  inListing: boolean;
+}
+
+export function callRelocationOf(target: TargetDescription): CallRelocation | undefined {
+  if (!readsObjdumpText(target)) {
+    return undefined;
+  }
+  const ppc = target.compiler === 'mwcc';
+  return {
+    mnemonic: ppc ? 'bl' : 'jal',
+    type: ppc ? 'R_PPC_REL24' : 'R_MIPS_26',
+    inListing: (ppc ? PPC_DISASM_FLAGS : MIPS_DISASM_FLAGS).includes('-r'),
+  };
+}
+
 function objdumpFor(target: TargetDescription, objdumpBin?: string): ObjdumpChoice {
   if (!readsObjdumpText(target)) {
     throw new ObjectInputUnsupportedError(
@@ -158,7 +183,7 @@ export function asmDataForObject(
 /** `objdump -d` text for `[start, stop)` of section `section` of a LINKED image
  *  (`tools.asmlift.elf`), in the target family's disassembler and flags: the text the frontend
  *  reads, as for an object. A linked image carries no relocations, so nothing in the text a
- *  relocation would name is named (cli elf-bodies.ts). The section is named because an address
+ *  relocation would name is named, save the calls cli elf-bodies.ts names (`callRelocationOf`). The section is named because an address
  *  range alone is no place in an image with overlays: mp3's `.minigame`, `.name_81` and
  *  `.shared_board` all hold code at 0x800d9f10, and objdump prints each section that does. */
 export function disasmRange(

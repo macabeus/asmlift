@@ -60,7 +60,9 @@
 // (frontend/arm-body.ts), and only on a target whose argument registers are the ones that scan
 // counts (`scansArgumentsOf`, read off the ABI's `argRegs`).
 // A disassembly of a linked ELF carries no relocations, and the MIPS and PowerPC frontends name a
-// callee only by its relocation, so such a body that makes any call does not lift and proves nothing.
+// callee only by its relocation, so a listing body comes with the call relocations the driver
+// names off the image's own symbol table (`CalleeBody.relocs`, or relocation lines in the text where
+// the frontend reads them there): a call it cannot name stays unnamed, and the body does not lift.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
@@ -77,19 +79,29 @@ import {
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
+import type { Reloc } from './asmdata';
 
 /** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
  *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
- *  callee's label; `arm` is the instruction words, from its entry, of the ARM body a Thumb caller
- *  enters through an interworking veneer, which no frontend here lifts and frontend/arm-body.ts
- *  scans instead. */
-export type CalleeBody = { kind: 'listing'; text: string } | { kind: 'arm'; words: readonly number[] };
+ *  callee's label, with `relocs` the relocations an object of that text would carry in its side
+ *  table (`AsmData.relocs`), for a frontend that reads them there and not in the text (MIPS);
+ *  `arm` is the instruction words, from its entry, of the ARM body a Thumb caller enters through an
+ *  interworking veneer, which no frontend here lifts and frontend/arm-body.ts scans instead. */
+export type CalleeBody =
+  { kind: 'listing'; text: string; relocs?: readonly Reloc[] } | { kind: 'arm'; words: readonly number[] };
 
 /** The bodies a driver found outside the input, keyed by callee (`DecompileOptions.calleeBodies`). */
 export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
 
-/** One function of some text lifted under a table, with no bound of its own (`calleeBodyBounds`). */
-export type CalleeLift = (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>, text: string) => Fn;
+/** One function of some text lifted under a table, with no bound of its own (`calleeBodyBounds`):
+ *  the input, or a body handed in, with the relocations it carries (undefined for the input). */
+export type CalleeLift = (
+  callee: string,
+  table: Prototypes,
+  entryReadCalls: ReadonlySet<string>,
+  text: string,
+  relocs?: readonly Reloc[],
+) => Fn;
 
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
  *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBodyBound`). */
@@ -188,7 +200,7 @@ function bodyBound(
   if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
     return undefined;
   }
-  return liftedBound(callee, body.text, target, prototypes, lift);
+  return liftedBound(callee, body.text, target, prototypes, lift, body.relocs);
 }
 
 /** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
@@ -199,6 +211,7 @@ function liftedBound(
   target: TargetDescription,
   prototypes: Prototypes,
   lift: CalleeLift,
+  relocs?: readonly Reloc[],
 ): number | undefined {
   const helpers = helperPrototypes(target);
   const table: Prototypes = { ...prototypes, [callee]: returnOnly(prototypes[callee]) };
@@ -208,7 +221,7 @@ function liftedBound(
   for (;;) {
     let fn: Fn;
     try {
-      fn = lift(callee, table, forced, text);
+      fn = lift(callee, table, forced, text, relocs);
     } catch {
       return undefined;
     }

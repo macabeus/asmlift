@@ -892,8 +892,16 @@ cli elf-bodies.ts):
   symbol's section (overlays put several sections at one address), and lifted as the same text
   inline would be. Every `<name>:` header objdump starts at a symbol inside the range but the
   callee's own is dropped, since the frontend slices a listing at its next header. A linked image
-  carries no relocations, and those frontends name a callee only by its relocation, so a body that
-  makes any call does not lift and bounds nothing.
+  carries no relocations, and those frontends name a callee only by its relocation, so the CLI
+  names each direct call (MIPS `jal`, PowerPC `bl`) off the image's own symbol table: a relocation
+  line under it on PowerPC, where the frontend reads `objdump -r` lines, and `CalleeBody.relocs` on
+  MIPS, lifted as a side table holding nothing else. A call is named only where its target is the
+  value of exactly one FUNC, in the callee's own section or the one code section holding that
+  address, and no other symbol defines that name: a wrong name would lay the call out by another
+  function's declaration. Any other call stays unnamed, and that body does not lift. Jumps are never
+  named, since a `j`/`b` to the entry is a loop's back edge, so a tail-calling body bounds nothing.
+  Naming a call only lets the body lift: the bound still takes every call nothing declares at every
+  argument register.
 - The agbcc frontend reads no objdump text. A GBA callee written in ARM is entered through an
   interworking veneer (`bx pc; nop`, then an ARM `b sym`), and its ARM words are handed in as
   they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument

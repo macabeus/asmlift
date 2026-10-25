@@ -12,7 +12,7 @@ import {
   assertResolved,
   assertTypesRecovered,
 } from './contracts';
-import type { AsmData } from './frontend/asmdata';
+import type { AsmData, Reloc } from './frontend/asmdata';
 import { returnedStruct, structLocalType } from './frontend/call-plan';
 import { type CalleeBodies, type CalleeBodyBound, calleeBodyBounds } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
@@ -484,7 +484,8 @@ const boundsRead = new WeakMap<
 /** Each callee's body bound (frontend/callee-body.ts) as a lift of `name` under `table` reads it: every
  *  callee lifted from the same input, or from its body in `calleeBodies`, under the same table, map
  *  and context, reading no bodies. A body from outside the input is lifted with none of the input's
- *  side table, which describes the input's own object. Kept across lifts of the same function under
+ *  side table, which describes the input's own object, and with only the relocations it carries
+ *  (`CalleeBody.relocs`). Kept across lifts of the same function under
  *  the same caller table, map, data, context and bodies (`boundsRead`). */
 function bodyBoundsIn(
   name: string,
@@ -510,11 +511,17 @@ function bodyBoundsIn(
     asm,
     target,
     table,
-    (callee, calleeTable, entryReadCalls, text) =>
-      liftStamped(callee, text, target, calleeTable, text === asm ? asmData : undefined, symbols, contextGlobals, {
-        calleeBodyBound: () => undefined,
-        entryReadCalls,
-      }),
+    (callee, calleeTable, entryReadCalls, text, relocs) =>
+      liftStamped(
+        callee,
+        text,
+        target,
+        calleeTable,
+        text === asm ? asmData : relocs === undefined ? undefined : relocsOnly(relocs, target),
+        symbols,
+        contextGlobals,
+        { calleeBodyBound: () => undefined, entryReadCalls },
+      ),
     calleeBodies,
   );
   // a handful per table: the symbol settings a ranked run tries, never a growing list
@@ -522,6 +529,16 @@ function bodyBoundsIn(
   read.length = Math.min(read.length, 8);
   return bound;
 }
+
+/** A side table holding a body's own relocations and nothing of the input's object: no section
+ *  bytes, so no jump table reads, and no symbols. */
+const relocsOnly = (relocs: readonly Reloc[], target: TargetDescription): AsmData => ({
+  sections: new Map(),
+  relocs: [...relocs],
+  symbols: new Map(),
+  symbolCount: 0,
+  bigEndian: target.capabilities.endianness === 'big',
+});
 
 /** THE CONTEXT'S OWN ENTRY BOUNDS THE ARGUMENT REGISTERS, SOFTLY: an argument register past the
  *  words it fills (`ownArgumentWordsOn`, the layout a stated entry gets) is lifted as an uninitialised

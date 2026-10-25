@@ -130,7 +130,7 @@ describe('CLI: a guessed callee absent from the input is bounded by its body in 
     '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
     '   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,16(sp)\n   8:\tlui\tv0,0x0\n   c:\tli\ta0,3\n  10:\tsw\ta0,0(v0)\n' +
     '  14:\tjal\t0 <f>\n  18:\tnop\n  1c:\tlw\tra,16(sp)\n  20:\tjr\tra\n  24:\taddiu\tsp,sp,24\n';
-  const seam = (callee: string): ObjInput => ({
+  const seam = (callee: string, ranges: Record<string, string> = MIPS_RANGES): ObjInput => ({
     disasm: () => caller,
     asmData: () => ({
       sections: new Map(),
@@ -144,25 +144,31 @@ describe('CLI: a guessed callee absent from the input is bounded by its body in 
       bigEndian: true,
     }),
     disasmRange: (_elf, _t, _section, start, stop) => {
-      const text = MIPS_RANGES[`${start.toString(16)}-${stop.toString(16)}`];
+      const text = ranges[`${start.toString(16)}-${stop.toString(16)}`];
       if (text === undefined) {
         throw new Error(`no recorded range ${start.toString(16)}-${stop.toString(16)}`);
       }
       return text;
     },
   });
-  const project = (elf: boolean) => {
+  const project = (elf: boolean, image = 'callees-mips.elf') => {
     const root = scratch();
-    copyFileSync(fixture('callees-mips.elf'), join(root, 'callees-mips.elf'));
+    copyFileSync(fixture(image), join(root, image));
     writeFileSync(
       join(root, 'decomp.yaml'),
       'name: test\nplatform: n64\nversions: []\ntools:\n  asmlift:\n    target: gcc2.7.2kmc\n' +
-        (elf ? '    elf: callees-mips.elf\n' : ''),
+        (elf ? `    elf: ${image}\n` : ''),
     );
     return join(root, 'f.o');
   };
-  const call = async (callee: string, elf: boolean) => {
-    const r = await runCli([project(elf), '--name', 'f'], () => MIPS_ELF, seam(callee));
+  const call = async (
+    callee: string,
+    elf: boolean,
+    image?: string,
+    ranges?: Record<string, string>,
+    more: string[] = [],
+  ) => {
+    const r = await runCli([project(elf, image), '--name', 'f', ...more], () => MIPS_ELF, seam(callee, ranges));
     expect(r.stderr).not.toContain('[lift]');
     return r.stdout
       .split('\n')
@@ -181,6 +187,139 @@ describe('CLI: a guessed callee absent from the input is bounded by its body in 
   ])('%s', async (callee, withElf, without) => {
     expect(await call(callee, true)).toBe(withElf);
     expect(await call(callee, false)).toBe(without);
+  });
+
+  // fixtures/elf-bodies/calls-mips.elf is built from calls-mips.s, calls-mips-dup.s and calls-mips.ld:
+  //   mips-linux-gnu-as -mips2 -o calls-mips.o calls-mips.s
+  //   mips-linux-gnu-as -mips2 -o calls-mips-dup.o calls-mips-dup.s
+  //   mips-linux-gnu-ld -N -T calls-mips.ld -e cj -o calls-mips.elf calls-mips.o calls-mips-dup.o
+  // Each c* body makes one `jal`: cj hands its a0 on to rd1, and the rest zero a0 in the slot, so
+  // where the callee is declared one word they read none of their own. A linked image names no
+  // call, so the frontend could lift none of them; the call is named off the image's symbols where
+  // one name is certain: not for rd1b (aliased as rd1alias), dup (a static of two objects) or ovl_a
+  // from .text (.ovl_a and .ovl_b both hold its address), but for ovl_a from its own overlay.
+  describe('a body that makes a call', () => {
+    const at = (a: number, k: number) => (a + k).toString(16);
+    const framed = (name: string, a: number, target: string, slot: string, section = '.text') =>
+      `\ncalls-mips.elf:     file format elf32-tradbigmips\n\n\nDisassembly of section ${section}:\n\n` +
+      `${at(a, 0)} <${name}>:\n${at(a, 0)}:\taddiu\tsp,sp,-24\n${at(a, 4)}:\tsw\tra,16(sp)\n` +
+      `${at(a, 8)}:\tjal\t${target}\n${at(a, 12)}:\t${slot}\n${at(a, 16)}:\tlw\tra,16(sp)\n` +
+      `${at(a, 20)}:\tjr\tra\n${at(a, 24)}:\taddiu\tsp,sp,24\n`;
+    // what mips-linux-gnu-objdump -d --no-show-raw-insn -j <section> prints for each range
+    const CALL_RANGES: Record<string, string> = {
+      '80000418-80000434': framed('cj', 0x80000418, '80000400 <rd1>', 'nop'),
+      '80000434-80000450': framed('cz', 0x80000434, '80000400 <rd1>', 'move\ta0,zero'),
+      '80000450-8000046c': framed('calias', 0x80000450, '80000408 <rd1alias>', 'move\ta0,zero'),
+      '8000046c-80000488': framed('cdup', 0x8000046c, '80000410 <dup>', 'move\ta0,zero'),
+      '80000488-800004a4': framed('covl', 0x80000488, '80100000 <ovl_a>', 'move\ta0,zero'),
+      '80100008-80100024': framed('cin_a', 0x80100008, '80100000 <ovl_a>', 'move\ta0,zero', '.ovl_a'),
+    };
+    const declared = ['--proto', '{"rd1":{"params":["s32"]},"rd1b":{},"rd1alias":{},"dup":{},"ovl_a":{}}'];
+    const declaredNone = declared[1].replace(/\{\}/g, '{"params":[]}');
+    test('each call one name is certain for gets its R_MIPS_26, and no other does', () => {
+      const read = calleeBodiesFromElf(
+        'x.elf',
+        readFileSync(fixture('calls-mips.elf')),
+        ['cj', 'calias', 'cdup', 'covl', 'cin_a'],
+        TOOLCHAIN_TARGETS['ido7.1'].description,
+        (_elf, _t, _section, start, stop) => CALL_RANGES[`${start.toString(16)}-${stop.toString(16)}`],
+      );
+      const relocsOf = (c: string) => (read.bodies[c].kind === 'listing' ? read.bodies[c].relocs : undefined);
+      expect(relocsOf('cj')).toEqual([
+        { section: '.text', offset: 0x80000420, type: 'R_MIPS_26', sym: 'rd1', addend: 0 },
+      ]);
+      expect(relocsOf('cin_a')).toEqual([
+        { section: '.text', offset: 0x80100010, type: 'R_MIPS_26', sym: 'ovl_a', addend: 0 },
+      ]);
+      expect([relocsOf('calias'), relocsOf('cdup'), relocsOf('covl')]).toEqual([undefined, undefined, undefined]);
+    });
+    test.each([
+      // hands its a0 on to a callee declared to read it: the 3 stays
+      ['cj', 'return cj(3);'],
+      // reads none of its a0: the 3 is no argument
+      ['cz', 'return cz();'],
+      ['cin_a', 'return cin_a();'],
+      // a call no one name is certain for leaves the body unliftable, so the guess stands
+      ['calias', 'return calias(3);'],
+      ['cdup', 'return cdup(3);'],
+      ['covl', 'return covl(3);'],
+    ])('%s', async (callee, withElf) => {
+      const more = ['--proto', declaredNone];
+      expect(await call(callee, true, 'calls-mips.elf', CALL_RANGES, more)).toBe(withElf);
+      expect(await call(callee, false, 'calls-mips.elf', CALL_RANGES, more)).toBe(`return ${callee}(3);`);
+    });
+    // a call inside the body that nothing declares is taken at every argument register
+    test('a named call nothing declares keeps every argument', async () => {
+      expect(await call('cz', true, 'calls-mips.elf', CALL_RANGES)).toBe('return cz(3);');
+    });
+  });
+});
+
+// fixtures/elf-bodies/calls-ppc.elf is built from calls-ppc.s and calls-ppc.ld beside it, with the
+// powerpc-eabi binutils the GameCube projects build:
+//   powerpc-eabi-as -mgekko -o calls-ppc.o calls-ppc.s
+//   powerpc-eabi-ld -N -T calls-ppc.ld -e cj -o calls-ppc.elf calls-ppc.o
+// cj hands its r3 on to rd1, cz zeroes r3 first, and cst calls `st`, a static.
+describe('PowerPC: a body read off the ELF names its calls in the listing, as `objdump -r` prints them', () => {
+  const PPC_ELF = readFileSync(fixture('calls-ppc.elf'));
+  const t = TOOLCHAIN_TARGETS.mwcc_242_81.description;
+  const at = (a: number, k: number) => (a + k).toString(16);
+  const framed = (name: string, a: number, body: string[]) =>
+    `\ncalls-ppc.elf:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n${at(a, 0)} <${name}>:\n` +
+    ['mflr    r0', 'stw     r0,4(r1)', 'stwu    r1,-8(r1)', ...body, 'lwz     r0,12(r1)', 'addi    r1,r1,8']
+      .concat(['mtlr    r0', 'blr'])
+      .map((ins, k) => `${at(a, 4 * k)}:\t${ins}\n`)
+      .join('');
+  // what powerpc-eabi-objdump -d -r -M gekko --no-show-raw-insn -j .text prints for each range
+  const RANGES: Record<string, string> = {
+    '80003010-80003030': framed('cj', 0x80003010, ['bl      80003000 <rd1>']),
+    '80003030-80003054': framed('cz', 0x80003030, ['li      r3,0', 'bl      80003000 <rd1>']),
+    '80003058-80003078': framed('cst', 0x80003058, ['bl      80003054 <st>']),
+  };
+  const read = calleeBodiesFromElf('x.elf', PPC_ELF, ['cj', 'cz', 'cst'], t, (_elf, _t, _s, start, stop) => {
+    return RANGES[`${start.toString(16)}-${stop.toString(16)}`];
+  });
+  const own = '\nx.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n   0:\tblr\n';
+  const bound = (bodies: CalleeBodies, callee: string) =>
+    calleeBodyBounds(
+      'f',
+      own,
+      t,
+      { rd1: { params: ['s32'] }, st: { params: [] } },
+      (c, table, entryReadCalls, text) =>
+        liftStamped(c, text, t, table, undefined, undefined, undefined, {
+          calleeBodyBound: () => undefined,
+          entryReadCalls,
+        }),
+      bodies,
+    )(callee);
+  test('each bl gets an R_PPC_REL24 line under it', () => {
+    expect(read.bodies.cz).toEqual({
+      kind: 'listing',
+      text: RANGES['80003030-80003054'].replace(
+        '80003040:\tbl      80003000 <rd1>\n',
+        '80003040:\tbl      80003000 <rd1>\n\t\t\t80003040: R_PPC_REL24\trd1\n',
+      ),
+    });
+    expect(read.bodies.cst.kind === 'listing' && read.bodies.cst.text).toContain('R_PPC_REL24\tst\n');
+  });
+  test('so a body that calls bounds, and the same listing unnamed does not', () => {
+    expect(['cj', 'cz', 'cst'].map((c) => bound(read.bodies, c))).toEqual([1, 0, 0]);
+    const unnamed = Object.fromEntries(
+      Object.entries(RANGES).map(([k, text]) => [
+        { '80003010-80003030': 'cj', '80003030-80003054': 'cz' }[k] ?? 'cst',
+        { kind: 'listing' as const, text },
+      ]),
+    );
+    expect(['cj', 'cz', 'cst'].map((c) => bound(unnamed, c))).toEqual([undefined, undefined, undefined]);
+  });
+  test('a listing that already prints relocations is handed in as it is', () => {
+    const emitted = RANGES['80003030-80003054'].replace(
+      '80003040:\tbl      80003000 <rd1>\n',
+      '80003040:\tbl      80003000 <rd1>\n\t\t\t80003040: R_PPC_REL24\trd1\n',
+    );
+    const again = calleeBodiesFromElf('x.elf', PPC_ELF, ['cz'], t, () => emitted);
+    expect(again.bodies.cz).toEqual({ kind: 'listing', text: emitted });
   });
 });
 

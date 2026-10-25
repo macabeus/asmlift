@@ -1,0 +1,1 @@
+SECTIONS { . = 0x80000400; .text : { *(.text) } OVERLAY 0x80100000 : AT(0x1000) { .ovl_a { *(.ovl_a) } .ovl_b { *(.ovl_b) } } /DISCARD/ : { *(.reginfo) *(.MIPS.abiflags) *(.pdr) *(.gnu.attributes) } }

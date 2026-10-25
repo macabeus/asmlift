@@ -29,14 +29,31 @@
 // which would cut the callee's body there. Every header but the callee's own is dropped: branch
 // targets are read by address, never by a header's name.
 //
+// A RANGE'S CALLS ARE NAMED BY THE IMAGE'S OWN SYMBOLS. The MIPS and PowerPC frontends name a callee
+// only by its relocation, and a linked image carries none, so a listing body making any call would
+// not lift. Each direct call in the range (objfile.ts `callRelocationOf`: MIPS `jal`, PowerPC `bl`)
+// whose target is the value of exactly one FUNC symbol, in the callee's own section where that
+// holds the address and in the one code section that does otherwise (overlays put several at one
+// address), and whose name no other symbol defines, gets the relocation an object would carry for
+// it: as a relocation line under it where the frontend reads them in the listing (PowerPC), and in
+// the body's side table otherwise (MIPS, `CalleeBody.relocs`, against `.text`: the one code section
+// a frontend reads an object's relocations for, and the listing is one). A name is never guessed: a
+// wrong one would lay the call out by another function's declaration, so a target with no such
+// symbol is left unnamed, and the body does not lift. Naming a call only lets the body lift: the
+// core takes every call in it that nothing declares at every argument register (callee-body.ts).
+// A jump is never named (a `j`/`b` to the callee's own entry is a loop's back edge), so a body that
+// tail-calls still proves nothing. An image linked keeping its relocations already prints them
+// (marioparty4's and pikmin's main.elf: every `bl` carries its `R_PPC_REL24`), and is read as it is.
+//
 // KNOWN GAP: a function in a REL module (`--module`) is read from no ELF: the module's own ELF is
 // relocatable, its sections all placed at 0, so its symbol values are no addresses to disassemble.
 import { thumbToArmVeneerTarget } from '@asmlift/core/frontend/arm-body';
+import type { Reloc } from '@asmlift/core/frontend/asmdata';
 import type { CalleeBodies, CalleeBody } from '@asmlift/core/frontend/callee-body';
 import type { TargetDescription } from '@asmlift/core/target';
 
 import { type Elf32, isCode, readElf32 } from './elf-section';
-import { readsObjdumpText } from './objfile';
+import { type CallRelocation, callRelocationOf, readsObjdumpText } from './objfile';
 
 const SHT_SYMTAB = 2;
 const SHN_UNDEF = 0;
@@ -213,10 +230,10 @@ export function calleeBodiesFromElf(
       continue;
     }
     try {
-      bodies[callee] = {
-        kind: 'listing',
-        text: withOnlyHeaderOf(disasm(elfPath, target, range.section, range.start, range.end), callee),
-      };
+      const listing = withOnlyHeaderOf(disasm(elfPath, target, range.section, range.start, range.end), callee);
+      const call = callRelocationOf(target);
+      bodies[callee] =
+        call === undefined ? { kind: 'listing', text: listing } : withNamedCalls(listing, image, range, call);
     } catch (e) {
       warnings.push(
         `asmlift: warning: cannot disassemble ${callee} out of tools.asmlift.elf (${e instanceof Error ? e.message : e}) — its arity stays guessed\n`,
@@ -235,6 +252,55 @@ export function withOnlyHeaderOf(listing: string, callee: string): string {
       return m === null || m[1] === callee;
     })
     .join('\n');
+}
+
+/** `listing` as a body whose calls are named (see the header): each `call.mnemonic` to an address
+ *  `calleeAt` names gets its relocation. A listing that already prints relocations (an image linked
+ *  with `--emit-relocs`) is handed in as it is. */
+export function withNamedCalls(
+  listing: string,
+  image: ElfImage,
+  range: FunctionRange,
+  call: CallRelocation,
+): CalleeBody {
+  if (/^\s+[0-9a-fA-F]+:\s+R_\w+/m.test(listing)) {
+    return { kind: 'listing', text: listing };
+  }
+  const site = new RegExp(`^\\s*([0-9a-fA-F]+):\\s+${call.mnemonic}\\s+([0-9a-fA-F]+)\\b`);
+  const lines: string[] = [];
+  const relocs: Reloc[] = [];
+  for (const line of listing.split('\n')) {
+    lines.push(line);
+    const m = site.exec(line);
+    const name = m === null ? undefined : calleeAt(image, range, parseInt(m[2], 16));
+    if (m === null || name === undefined) {
+      continue;
+    }
+    if (call.inListing) {
+      lines.push(`\t\t\t${m[1]}: ${call.type}\t${name}`);
+    } else {
+      relocs.push({ section: '.text', offset: parseInt(m[1], 16), type: call.type, sym: name, addend: 0 });
+    }
+  }
+  const text = lines.join('\n');
+  return relocs.length === 0 ? { kind: 'listing', text } : { kind: 'listing', text, relocs };
+}
+
+/** The one name a call from `range` to `addr` enters (see the header), or undefined. */
+export function calleeAt(image: ElfImage, range: FunctionRange, addr: number): string | undefined {
+  const holding = image.elf.sections.flatMap((s, i) =>
+    isCode(s) && s.addr <= addr && addr < s.addr + s.size ? [i] : [],
+  );
+  const shndx = holding.includes(range.shndx) ? range.shndx : holding.length === 1 ? holding[0] : undefined;
+  const names = new Set(
+    image.symbols.filter((s) => s.shndx === shndx && s.type === STT_FUNC && s.value === addr).map((s) => s.name),
+  );
+  if (shndx === undefined || names.size !== 1) {
+    return undefined;
+  }
+  const [name] = names;
+  const defined = image.symbols.filter((s) => s.name === name && definedInSection(s));
+  return /^[^\s+.-][^\s+-]*$/.test(name) && defined.length === 1 ? name : undefined;
 }
 
 /** The code section holding `addr`, and the file offset of that address in it. */
