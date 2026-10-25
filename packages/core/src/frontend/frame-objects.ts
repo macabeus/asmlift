@@ -467,7 +467,6 @@ export function auditFrameObjects({
         uses,
         usedSlotOffsets,
         directAccesses,
-        disambiguatesFrameLocals: target.compilerBehaviors.disambiguatesFrameLocals,
       }),
     };
   }
@@ -499,39 +498,37 @@ export function auditFrameObjects({
  *  such a word joins the part beside it.
  *
  *  Only where a split is possible at all: two or more copies with a literal count fill the area.
- *  Anywhere else the words stay the one object's, since a struct member only stored (`s.y = c`)
- *  looks the same as a spill, and a local in its place lets the recompile drop the store.
+ *  Anywhere else the words stay the one object's, since nothing would come of handing them back.
+ *  The copies do NOT tell a spill from a struct member only stored (`struct { u8 a[16], b[16];
+ *  u32 y; }` with `s.y = x` and nothing reading it): that member is handed back too, and its store
+ *  drops. No value changes, since nothing reads the word through the object (an index or an
+ *  escape reaching it keeps it, below); what is lost is one store the target made.
  *
  *  Nothing is handed back where a word might be reached through the object: an escape no literal
- *  count bounds, a bounded one whose bytes cover the word, or a runtime index — unless every
- *  index is based at a copy's destination on a compiler that does not tell frame locals apart
- *  (`disambiguatesFrameLocals`), the premise `provenParts` keeps an index in its part on. */
+ *  count bounds, a bounded one whose bytes cover the word, or any runtime index at all. An index
+ *  reaches every byte of the object it is based in, and `provenParts`' premise for keeping one in
+ *  its part (`disambiguatesFrameLocals`) is about bytes that stay memory: a word handed back is a
+ *  local whose address nothing takes, so the recompile keeps it in a register or drops its store,
+ *  and an index that reached it in the source reads another byte. `*(u32 *)(s + 32) = x; return
+ *  s[16 + i];` on agbcc is spelled exactly as a spill slot beside an index is. */
 function reliftRange({
   declared,
   objects,
   uses,
   usedSlotOffsets,
   directAccesses,
-  disambiguatesFrameLocals,
 }: {
   declared: FrameRange;
   objects: ReadonlyMap<number, readonly Op[]>;
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
   directAccesses: ReadonlySet<Value>;
-  disambiguatesFrameLocals: boolean | undefined;
 }): FrameRange {
   const whole = { from: declared.from, to: declared.to };
   const extents = [...uses.escapeExtents.values()].flat();
   const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
   const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
-  if (bounded.length < extents.length || fills.size < 2) {
-    return whole;
-  }
-  if (
-    uses.indexed.size > 0 &&
-    (disambiguatesFrameLocals !== false || ![...uses.indexed.keys()].every((o) => fills.has(o)))
-  ) {
+  if (bounded.length < extents.length || fills.size < 2 || uses.indexed.size > 0) {
     return whole;
   }
   const handedBack = (w: number, pastScalar: boolean): boolean => {

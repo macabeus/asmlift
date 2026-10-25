@@ -4315,6 +4315,45 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         expect(src).toContain('sink(v4, v5, v6, v7);');
         expect(src).not.toContain('sp32');
       });
+      // `u8 s[36]; memcpy(s, gS1, 16); memcpy(s + 16, gS2, 16); *(u32 *)(s + 32) = x; return
+      // s[16 + i];` at agbcc -O2: the word at [sp,#0x20] is spelled as a spill slot is, but the
+      // index may reach it. Handed back to the slot model it is a local nothing reads, so the
+      // recompile drops the store an index into the frame may read; kept, it stays memory.
+      test('a word a runtime index may reach is not handed back to the slot model', () => {
+        const reached =
+          '\t.align\t2, 0\n' +
+          '\t.thumb_func\n' +
+          'f:\n' +
+          '\tpush\t{r4, r5, lr}\n' +
+          '\tadd\tsp, sp, #-0x24\n' +
+          '\tadd\tr4, r0, #0\n' +
+          '\tadd\tr5, r1, #0\n' +
+          '\tldr\tr1, .L3\n' +
+          '\tmov\tr0, sp\n' +
+          '\tmov\tr2, #0x10\n' +
+          '\tbl\tmemcpy\n' +
+          '\tldr\tr1, .L3+0x4\n' +
+          '\tadd\tr0, sp, #0x10\n' +
+          '\tmov\tr2, #0x10\n' +
+          '\tbl\tmemcpy\n' +
+          '\tstr\tr5, [sp, #0x20]\n' +
+          '\tadd\tr4, r4, #0x10\n' +
+          '\tmov\tr1, sp\n' +
+          '\tadd\tr0, r1, r4\n' +
+          '\tldrb\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #0x24\n' +
+          '\tpop\t{r4, r5}\n' +
+          '\tpop\t{r1}\n' +
+          '\tbx\tr1\n' +
+          '.L4:\n' +
+          '\t.align\t2, 0\n' +
+          '.L3:\n' +
+          '\t.word\tgS1\n' +
+          '\t.word\tgS2\n';
+        const prototypes = { f: { params: 2 } };
+        const src = decompile('f', reached, ARMV4T_AGBCC, { prototypes }).source;
+        expect(src).toMatch(/\)\[\d+\] = a1;/);
+      });
       test('an array a callee nothing bounds is handed keeps the one object', () => {
         const handed = copies('\tadd\tr0, r4, #0\n\tbl\tfill\n');
         const prototypes = { fill: { params: ['u8 *'], returnsVoid: true } };

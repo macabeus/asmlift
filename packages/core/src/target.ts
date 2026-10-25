@@ -566,8 +566,11 @@ export interface TargetDescription {
     // MEASURED on four shapes, each as `u8 a[64]; u8 b[64];` and as one `u8 s[128]`, an index into
     // one between two accesses of the other (`corpus/frame-local-alias.txt`, read by
     // frame-local-alias.test.ts): gcc2.7.2 and gcc2.7.2kmc compile the pair byte-identical; agbcc
-    // makes the same loads and stores (both bases are ADDRESS(sp), alias.c:1389-1394, and equal
-    // bases tell nothing, alias.c:789-790); ido7.1 loads less in all four split and drops a store.
+    // makes the same NUMBER of loads and stores (both bases are ADDRESS(sp), alias.c:1389-1394, and
+    // equal bases tell nothing, alias.c:789-790) but not the same object, since the split pair
+    // allocates registers differently (p1: `push {r4, r5, lr}`, the one object `{r4, lr}`), so
+    // agbcc's half of the claim is the count and the alias.c reading, not byte identity; ido7.1
+    // loads less in all four split and drops a store.
     disambiguatesFrameLocals?: boolean;
     // Does this compiler's C front end take a DESIGNATED array element in an initializer —
     // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
