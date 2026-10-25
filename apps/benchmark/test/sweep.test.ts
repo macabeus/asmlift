@@ -49,6 +49,7 @@ import {
 } from '../src/run/sweep';
 import {
   LEGACY_RANK_OPTIONS_ARITY,
+  PRE_ELF_BODIES_RANK_OPTIONS_ARITY,
   RANK_OPTIONS_ARITY,
   contextArgument,
   fanDigests,
@@ -337,7 +338,12 @@ describe('the record carries its INPUT, not only its output', () => {
     const contextGlobals = { aggregates, volatiles: new Set<string>(), pointeeVolatiles: new Set<string>() };
     expect(contextArgument(LEGACY_RANK_OPTIONS_ARITY, { aggregateGlobals: aggregates })).toBe(aggregates);
     expect(contextArgument(RANK_OPTIONS_ARITY, { contextGlobals, aggregateGlobals: aggregates })).toBe(contextGlobals);
+    // the tree before the callee bodies' ninth parameter carries `contextGlobals` in the eighth too
+    expect(contextArgument(PRE_ELF_BODIES_RANK_OPTIONS_ARITY, { contextGlobals, aggregateGlobals: aggregates })).toBe(
+      contextGlobals,
+    );
     expect(LEGACY_RANK_OPTIONS_ARITY).not.toBe(RANK_OPTIONS_ARITY);
+    expect(PRE_ELF_BODIES_RANK_OPTIONS_ARITY).toBe(RANK_OPTIONS_ARITY - 1);
   });
 
   it('digests the option object without depending on key order, and ignores the compiler closure', () => {

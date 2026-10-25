@@ -10,6 +10,7 @@ import type { ResolvedTarget } from '@asmlift/core/target';
 
 import type { Scorer } from '../eval/asmlift';
 import type { BuiltTarget, Toolchain } from '../toolchains';
+import type { VendoredCalleeBodies } from './callee-bodies';
 
 /** One row as both tiers produce it: its tier, with a real row's unit, and every other field. */
 export type Case = CaseFields & RowTier;
@@ -34,6 +35,11 @@ interface CaseFields {
   /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
   symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes
+  /** real tier: the bodies of its project's callees frozen out of the linked ELF
+   *  (cases/callee-bodies.ts), of which a lift is handed the ones the CLI would read — asmlift-only.
+   *  Undefined for a row in a REL module and for a project with no linked ELF. Read on demand: the
+   *  file is what `bench vendor` writes after reading this row's callees. */
+  calleeBodies?: () => VendoredCalleeBodies | undefined;
   /** what the row's context states about its globals — its aggregates, its volatile objects and
    *  its pointers to volatile (core `globalsFromContext`) — asmlift-only, as `proto` is */
   contextGlobals?: ContextGlobals;

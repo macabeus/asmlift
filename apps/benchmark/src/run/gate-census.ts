@@ -399,12 +399,24 @@ export function gateCensus(o: GateCensusOptions): number {
       // census before it prints anything — the defect that made the documented recipe unrunnable.
       // Counted rather than swallowed: a census over a truncated prefix must not look complete.
       try {
-        const { obj, asm } = c.build();
+        const built = c.build();
+        const asm = scrubObjectHeader(built.asm);
+        const vendored = c.calleeBodies?.();
         enumerateRanked(
           c.sym,
-          scrubObjectHeader(asm),
+          asm,
           c.codegen.target,
-          rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols, c.contextGlobals),
+          rankOptionsFor(
+            c.toolchain,
+            c.codegen,
+            built.obj,
+            c.sym,
+            c.proto,
+            c.compile,
+            c.symbols,
+            c.contextGlobals,
+            vendored && { asm, vendored },
+          ),
         );
       } catch {
         unlifted++;

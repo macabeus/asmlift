@@ -74,6 +74,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctxProto: ctxProto ?? undefined,
         proto: rowPrototypes(f.proto, vendored, language, f.sym, symbols, codegen.target),
         contextGlobals: rowContextGlobals(vendored, language),
+        // the bodies the CLI reads off the project's linked ELF, frozen (cases/callee-bodies.ts)
+        calleeBodies: () => man.calleeBodiesFor(moduleOf(f.addr)),
         // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
         // so the project ELF knows things about it that a user mid-decomp cannot. Score against
         // the map as it would look with this function still `INCLUDE_ASM` (core's

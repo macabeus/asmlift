@@ -1,7 +1,10 @@
 // The bodies of a real row's callees that `bench vendor` freezes out of the project's linked ELF
 // (cases/callee-bodies.ts): one byte-stable file per project, a refusal where a project vendors an
 // ELF's symbol map and no bodies, and the CLI's own selection rule over what is frozen.
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { agbccAvailable } from '@asmlift/toolchains';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -11,8 +14,12 @@ import {
   type VendoredCalleeBodies,
   calleeBodiesBytes,
   readVendoredCalleeBodies,
+  selectCalleeBodies,
   writeVendoredCalleeBodies,
 } from '../src/cases/callee-bodies';
+import { benchCheckoutsDir } from '../src/cases/manifests';
+import { realCases } from '../src/cases/real';
+import { rankOptionsFor } from '../src/eval/asmlift';
 
 const listing = '\nbuild/x.elf:     file format elf32-tradbigmips\n\n80000400 <rd0>:\n80000400:\tjr\tra\n';
 const frozen: VendoredCalleeBodies = {
@@ -25,13 +32,13 @@ const frozen: VendoredCalleeBodies = {
       relocs: [{ section: '.text', offset: 4, type: 'R_MIPS_26', sym: 'g', addend: 0 }],
     },
   },
-  unread: ['memcpy', '__divsi3'],
+  unread: ['memcpy', '__divsi3', 'other'],
 };
 
 describe('the frozen callee bodies of a project', () => {
   test('one value is one byte string, whatever order its keys were built in', () => {
     const reordered: VendoredCalleeBodies = {
-      unread: ['__divsi3', 'memcpy'],
+      unread: ['other', '__divsi3', 'memcpy'],
       bodies: { rd0: frozen.bodies.rd0, thunk_rnd: frozen.bodies.thunk_rnd },
       objdump: frozen.objdump,
     };
@@ -45,7 +52,7 @@ describe('the frozen callee bodies of a project', () => {
     writeVendoredCalleeBodies(dir, frozen);
     const back = readVendoredCalleeBodies('p', dir, true)!;
     expect(back.bodies).toEqual(frozen.bodies);
-    expect(back.unread).toEqual(['__divsi3', 'memcpy']);
+    expect(back.unread).toEqual(['__divsi3', 'memcpy', 'other']);
     expect(back.objdump).toBe(frozen.objdump);
     const first = readFileSync(join(dir, CALLEE_BODIES_FILE));
     writeVendoredCalleeBodies(dir, frozen);
@@ -66,5 +73,61 @@ describe('the frozen callee bodies of a project', () => {
     expect(() => readVendoredCalleeBodies('af', dir, true)).toThrow(
       /af: a linked ELF is vendored \(symbols\.json\.gz\) but no callee bodies from it — run `pnpm bench vendor --project af --callee-bodies-only`/,
     );
+  });
+});
+
+// A lift is handed the bodies the CLI's own rule selects (cli elf-bodies.ts `elfBodyCallees`): the
+// guessed callees, never one a prototype declares, and nothing at all where none is frozen.
+describe('the bodies a lift is handed', () => {
+  const t = TOOLCHAIN_TARGETS.agbcc.description;
+  const asm =
+    '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tbl\tthunk_rnd\n\tbl\tother\n\tbl\trd0\n' +
+    '\tpop\t{r0}\n\tbx\tr0\n';
+  test('every guessed callee with a frozen body, and none a prototype declares', () => {
+    expect(Object.keys(selectCalleeBodies(asm, 'f', t, undefined, undefined, undefined, frozen)!)).toEqual([
+      'thunk_rnd',
+      'rd0',
+    ]);
+    expect(Object.keys(selectCalleeBodies(asm, 'f', t, { rd0: { params: 0 } }, undefined, undefined, frozen)!)).toEqual(
+      ['thunk_rnd'],
+    );
+    const unasked = { ...frozen, bodies: {}, unread: ['other', 'rd0', 'thunk_rnd'] };
+    expect(selectCalleeBodies(asm, 'f', t, undefined, undefined, undefined, unasked)).toBeUndefined();
+  });
+  test('a selected callee the vendoring never read is refused, not handed nothing', () => {
+    const older = { ...frozen, unread: ['__divsi3'] };
+    expect(() => selectCalleeBodies(asm, 'f', t, undefined, undefined, undefined, older)).toThrow(
+      /f: its lift reads the body of other out of the linked ELF, and the vendored callee bodies name no such callee/,
+    );
+  });
+});
+
+// kleod's WorldMapScreenUnlockNewWorld calls thunk_GetRandomValue, a Thumb->ARM interworking veneer
+// nothing declares: the CLI hands its lift the ARM body behind it, and so must the harness.
+describe.skipIf(!agbccAvailable())("the harness hands a real row's lift its ELF callee bodies", () => {
+  const [c] = realCases({ project: 'kleod', only: 'WorldMapScreenUnlockNewWorld' });
+  const built = c.build();
+  const vendored = c.calleeBodies!()!;
+  const opts = rankOptionsFor(
+    c.toolchain,
+    c.codegen,
+    built.obj,
+    c.sym,
+    c.proto,
+    c.compile,
+    c.symbols,
+    c.contextGlobals,
+    { asm: built.asm, vendored },
+  );
+  test('the guessed veneer, and only it', () => {
+    expect(Object.keys(opts.calleeBodies ?? {})).toEqual(['thunk_GetRandomValue']);
+    expect(opts.calleeBodies!.thunk_GetRandomValue.kind).toBe('arm');
+  });
+  const elf = join(benchCheckoutsDir(), 'kleod', 'kleod-syms.elf');
+  test.skipIf(!existsSync(elf))("the body is the one the CLI reads off the checkout's ELF", () => {
+    const live = calleeBodiesFromElf(elf, readFileSync(elf), ['thunk_GetRandomValue'], c.codegen.target, () => {
+      throw new Error('no objdump on the ARM path');
+    });
+    expect(opts.calleeBodies).toEqual(live.bodies);
   });
 });
