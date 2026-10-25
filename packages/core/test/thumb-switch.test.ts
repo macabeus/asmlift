@@ -132,6 +132,58 @@ test('falling into an arm that takes a value from the switch edge DECLINES', () 
   expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: sideB })).toThrow(/takes a value from the switch edge/);
 });
 
+// agbcc -O2 for `for (i = 0; i < n; i++) switch (gId[i]) { case 0: f(i); break; case 1: g(i); break;
+// case 2: case 3: if (gK[i + 1] != 0) break; case 4: case 5: if (gX[i] > 7) h(i); break; case 6: m(i);
+// break; }` (synthetic:sw_fallpre). gcse PRE hoists the loop's `i + 1` into the dispatch (`add r4, r5,
+// #0x1` before the bounds test) and keeps case 2's own sum in the same register (`add r4, r1, #0`), so
+// `case 4:` takes `i + 1` from the switch edge AND from the arm that falls into it.
+const FALLPRE =
+  'sw_fallpre:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tr6, r0, #0\n\tmov\tr5, #0x0\n\tcmp\tr5, r6\n\tbcs\t.L4\t@cond_branch\n' +
+  '.L6:\n\tldr\tr0, .L21\n\tadd\tr0, r5, r0\n\tldrb\tr0, [r0]\n\tadd\tr4, r5, #0x1\n\tcmp\tr0, #0x6\n' +
+  '\tbhi\t.L5\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L21+0x4\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+  '\tmov\tpc, r0\n.L22:\n\t.align\t2, 0\n.L21:\n\t.word\tgId\n\t.word\t.L17\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+  '.L17:\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L11\n\t.word\t.L11\n\t.word\t.L14\n\t.word\t.L14\n\t.word\t.L16\n' +
+  '.L8:\n\tadd\tr0, r5, #0\n\tbl\tf\n\tb\t.L20\n.L9:\n\tadd\tr0, r5, #0\n\tbl\tg\n\tb\t.L20\n' +
+  '.L11:\n\tldr\tr0, .L23\n\tadd\tr1, r5, #0x1\n\tadd\tr0, r1, r0\n\tldrb\tr0, [r0]\n\tadd\tr4, r1, #0\n' +
+  '\tcmp\tr0, #0\n\tbne\t.L5\t@cond_branch\n' +
+  '.L14:\n\tldr\tr0, .L23+0x4\n\tlsl\tr1, r5, #0x2\n\tadd\tr1, r1, r0\n\tldr\tr0, [r1]\n\tcmp\tr0, #0x7\n' +
+  '\tble\t.L5\t@cond_branch\n\tadd\tr0, r5, #0\n\tbl\th\n\tb\t.L5\n.L24:\n\t.align\t2, 0\n.L23:\n\t.word\tgK\n' +
+  '\t.word\tgX\n.L16:\n\tadd\tr0, r5, #0\n\tbl\tm\n.L20:\n\tadd\tr4, r5, #0x1\n' +
+  '.L5:\n\tadd\tr5, r4, #0\n\tcmp\tr5, r6\n\tbcc\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n';
+const FALLPRE_PROTOS = {
+  sw_fallpre: { returnsVoid: true },
+  ...Object.fromEntries(['f', 'g', 'h', 'm'].map((n) => [n, { params: 1, returnsVoid: true }])),
+};
+
+test('a switch-edge value the falling arm computes for itself (gcse PRE) DECLINES today', () => {
+  expect(() => decompile('sw_fallpre', FALLPRE, ARMV4T_AGBCC, { prototypes: FALLPRE_PROTOS })).toThrow(
+    /takes a value from the switch edge/,
+  );
+});
+
+// The dispatch computes `a0 + 1` into r2 for `case 1:`, and `case 0:` falls into it after computing
+// the same sum. Each fixture below breaks one thing a re-run of the switch-edge copy needs.
+const recompute = (dispatch: string, arm0: string) =>
+  `f:\n\tpush\t{lr}\n${dispatch}\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr3, r1, #0x2\n\tldr\tr1, .Lp\n` +
+  '\tadd\tr3, r3, r1\n\tldr\tr3, [r3]\n\tmov\tpc, r3\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+  `.Lc0:\n${arm0}.Lc1:\n\tadd\tr1, r2, #0\n\tbl\tside2\n.Lend:\n\tpop\t{r0}\n\tbx\tr0\n`;
+const SIDE2 = { prototypes: { side2: { params: 2, returns: 'void' }, f: { params: 2, returns: 'void' } } };
+
+test('a switch-edge re-run that would read a name the falling arm overwrote DECLINES', () => {
+  // `case 0:` computes `a0 + 1` and then sets r0 = 9, and r0 at `case 1:` is that arm's parameter,
+  // which takes a0's name — so a re-run `v0 = a0 + 1;` under `case 1:` would read 9 and call
+  // side2(9, 10) where the asm calls side2(9, a0 + 1). Equal SSA values, clobbered name.
+  const asm = recompute('\tadd\tr2, r0, #0x1\n', '\tadd\tr2, r0, #0x1\n\tmov\tr0, #0x9\n');
+  expect(() => decompile('f', asm, ARMV4T_AGBCC, SIDE2)).toThrow(/takes a value from the switch edge/);
+});
+
+test('a switch-edge value read from memory the falling arm then writes DECLINES', () => {
+  // Both edges hand `case 1:` a load of *a0, but `case 0:` stores to *a0 after its own load: a re-run
+  // `v0 = *a0;` would read the 9 the arm just stored.
+  const asm = recompute('\tldr\tr2, [r0]\n', '\tldr\tr2, [r0]\n\tmov\tr3, #0x9\n\tstr\tr3, [r0]\n');
+  expect(() => decompile('f', asm, ARMV4T_AGBCC, SIDE2)).toThrow(/takes a value from the switch edge/);
+});
+
 test('the LAST case may fall into a default that has a body — C emits the default last', () => {
   // `default:` is the arm below the last case, so falling into it is ordinary C, not a goto.
   const withDefault = (arms: string[], def: string) =>
