@@ -1,0 +1,255 @@
+// AN EARLY `return` WHOSE TAIL THE LOOP'S OWN EXIT PATH ALSO RUNS (`earlyReturnArm`, `exitTail`).
+//
+// `for (i = 0; i < gCount; i++) { if (gTab[i] == x) { *out = r; return; } } gMiss = 1; *out = r;`
+// (`synthetic:retpost_tail`). agbcc cross-jumps the `b` to the return label onto the identical
+// `*out = r` before it (jump.c), and gcc2.7.2kmc / gcc2.7.2 put that one store in the `jr ra` delay
+// slot: either way the arm and the post-loop path, after its `gMiss = 1`, end in ONE `store; ret`
+// block. No `break` spells the arm — it would land on `gMiss = 1` — so the arm is an early return
+// that writes the tail once more, and the exit path keeps the copy written after the loop. The paths
+// are exclusive, so each runs the store once.
+//
+// What stays refused, each with a witness here or in `loop-break-exit.test.ts`: a tail the exit
+// reaches running nothing of its own is a `break` to it (`a tail the loop's own exit also runs is
+// written once, after the loop`); an arm leaving by a latch's test, which is the loop's own way out
+// (`an arm another path also enters is not a \`break\` arm, and the loop declines`); a tail entered
+// straight from before the loop, past the exit; and a tail holding a cycle. Owned or not, the tail
+// stays code run after the loop for a `do-while`'s escape check, since the exit path runs it there.
+import { describe, expect, test } from 'vitest';
+
+import { cBackend } from '../src/backend/c';
+import type { AsmData } from '../src/frontend/asmdata';
+import { parse } from '../src/ir/parse';
+import { verify } from '../src/ir/verify';
+import { decompile, readabilityRewrites } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
+import { irAgreement } from './helpers';
+
+const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
+
+const judged = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  return {
+    src: cBackend.emit(sfn),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+/** The row's agbcc listing (`-O2 -mthumb-interwork`): `beq .L9` from the body and the exit `.L4`
+ *  (also the zero-trip guard's `bcs`) both reach `.L9`, the one `str r2,[r3]`. */
+const AGBCC_RETPOST_TAIL = `retpost_tail:
+	push	{r4, r5, r6, lr}
+	add	r3, r1, #0
+	lsl	r0, r0, #0x18
+	lsr	r4, r0, #0x18
+	ldr	r0, .L10
+	ldr	r2, [r0]
+	mov	r1, #0x0
+	ldr	r0, .L10+0x4
+	ldrb	r5, [r0]
+	cmp	r1, r5
+	bcs	.L4	@cond_branch
+	ldr	r6, .L10+0x8
+	add	r5, r0, #0
+.L6:
+	add	r0, r1, r6
+	ldrb	r0, [r0]
+	cmp	r0, r4
+	beq	.L9	@cond_branch
+	add	r0, r1, #0x1
+	lsl	r0, r0, #0x18
+	lsr	r1, r0, #0x18
+	ldrb	r0, [r5]
+	cmp	r1, r0
+	bcc	.L6	@cond_branch
+.L4:
+	ldr	r1, .L10+0xc
+	mov	r0, #0x1
+	strb	r0, [r1]
+.L9:
+	str	r2, [r3]
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.L11:
+	.align	2, 0
+.L10:
+	.word	gInit
+	.word	gCount
+	.word	gTab
+	.word	gMiss
+`;
+
+/** The row's gcc2.7.2kmc listing: the arm's `beq` and the exit's fall-through meet at `jr ra`, whose
+ *  delay slot holds the one `sw a3,0(a1)`. */
+const KMC_RETPOST_TAIL = `00000000 <retpost_tail>:
+   0:	lui	v0,0x0
+   4:	lbu	v0,0(v0)
+   8:	lui	a3,0x0
+   c:	lw	a3,0(a3)
+  10:	beqz	v0,50 <retpost_tail+0x50>
+  14:	move	a2,zero
+  18:	andi	a0,a0,0xff
+  1c:	andi	v0,a2,0xff
+  20:	lui	at,0x0
+  24:	addu	at,at,v0
+  28:	lbu	v0,0(at)
+  2c:	beq	v0,a0,5c <retpost_tail+0x5c>
+  30:	nop
+  34:	lui	v1,0x0
+  38:	lbu	v1,0(v1)
+  3c:	addiu	a2,a2,1
+  40:	andi	v0,a2,0xff
+  44:	sltu	v0,v0,v1
+  48:	bnez	v0,20 <retpost_tail+0x20>
+  4c:	andi	v0,a2,0xff
+  50:	li	v0,1
+  54:	lui	at,0x0
+  58:	sb	v0,0(at)
+  5c:	jr	ra
+  60:	sw	a3,0(a1)
+`;
+const KMC_RELOCS: [number, string, string][] = [
+  [0x00, 'R_MIPS_HI16', 'gCount'],
+  [0x04, 'R_MIPS_LO16', 'gCount'],
+  [0x08, 'R_MIPS_HI16', 'gInit'],
+  [0x0c, 'R_MIPS_LO16', 'gInit'],
+  [0x20, 'R_MIPS_HI16', 'gTab'],
+  [0x28, 'R_MIPS_LO16', 'gTab'],
+  [0x34, 'R_MIPS_HI16', 'gCount'],
+  [0x38, 'R_MIPS_LO16', 'gCount'],
+  [0x54, 'R_MIPS_HI16', 'gMiss'],
+  [0x58, 'R_MIPS_LO16', 'gMiss'],
+];
+const KMC_DATA: AsmData = {
+  sections: new Map(),
+  relocs: KMC_RELOCS.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+  symbols: new Map(),
+  symbolCount: 0,
+  bigEndian: true,
+};
+
+/** The arm writes the store and returns inside the loop; the post-loop code is `gMiss = 1;` and the
+ *  store, written once, after it — never `gMiss = 1` inside the loop (the `while` reading that took
+ *  the arm for the exit, which the zero-trip guard's entry into `gMiss = 1` keeps refused). */
+const expectRetpostTail = (src: string) => {
+  expect(src).toMatch(/\{\n\s+\*a1 = v0;\n\s+return;\n\s+\}/);
+  expect(src.match(/\*a1 = v0;/g)).toHaveLength(2);
+  expect(src.match(/gMiss = 1;/g)).toHaveLength(1);
+  const loopEnd = src.lastIndexOf('break;');
+  expect(loopEnd).toBeGreaterThan(-1);
+  expect(src.indexOf('gMiss = 1;')).toBeGreaterThan(loopEnd);
+  expect(src.slice(src.indexOf('gMiss = 1;'))).toMatch(/^gMiss = 1;\n\s+\*a1 = v0;\n/);
+};
+
+describe('an early return whose tail the loop exit path also runs', () => {
+  test('agbcc: the cross-jumped store is written in the arm and after the loop', () => {
+    const src = decompile('retpost_tail', AGBCC_RETPOST_TAIL, ARMV4T_AGBCC, {
+      prototypes: { retpost_tail: { params: 2, returnsVoid: true } },
+    }).source;
+    expectRetpostTail(src);
+  });
+
+  test('gcc2.7.2kmc: the store in the `jr ra` delay slot is written in the arm and after the loop', () => {
+    const src = decompile('retpost_tail', KMC_RETPOST_TAIL, MIPS_GCC, {
+      asmData: KMC_DATA,
+      prototypes: { retpost_tail: { params: 2, returnsVoid: true } },
+    }).source;
+    expectRetpostTail(src);
+  });
+});
+
+/** The same shape in IR, for the trace oracle: a zero-trip guard into the exit `^bb4` (`miss(i)`), a
+ *  body arm into `^bb5` (`store; ret`), which the exit falls into. The header is a pure test, as the
+ *  rows' `ldrb`/`lbu` is: the `while` reading then takes the arm for its exit and refuses the latch's
+ *  edge, and `while (1)` is the reading left. */
+const RETPOST_TAIL_IR = `fn retpost {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4(%2)
+^bb1(%4: s32):
+  %5: s32 = add %4, %4
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb5(%4), ^bb2()
+^bb2():
+  %7: s32 = const {value=1}
+  %8: s32 = add %4, %7
+  %9: u32 = icmp_slt %8, %1
+  cond_br %9, ^bb1(%8), ^bb4(%8)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="miss"}
+  br ^bb5(%10)
+^bb5(%12: s32):
+  store %0, %12 {off=0, width=4}
+  ret %12
+}`;
+
+describe('the exit-path return tail, against its own IR', () => {
+  test('lifts with the tail in the arm and after the loop, and agrees on every seed', () => {
+    const { src, agreement, shipped } = judged(RETPOST_TAIL_IR);
+    // the store in the arm and once after the `if` the zero-trip guard heads; `miss` on both of its
+    // paths, never inside the loop
+    expect(src.match(/\*\(s32 \*\)a0 = v0;/g)).toHaveLength(2);
+    expect(src).toMatch(/\{\n\s+\*\(s32 \*\)a0 = v0;\n\s+return v0;\n\s+\}/);
+    const loop = src.slice(src.indexOf('while (1) {'), src.indexOf('break;'));
+    expect(loop).not.toContain('miss(');
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail also entered straight from before the loop, past the exit, stays refused', () => {
+    // ^bb0 now enters the tail directly when a1 == 7: a path that ran neither the arm nor the exit
+    const bypass = RETPOST_TAIL_IR.replace(
+      '  cond_br %3, ^bb1(%2), ^bb4(%2)\n',
+      '  cond_br %3, ^bb6(), ^bb4(%2)\n^bb6():\n  %20: s32 = const {value=7}\n  %21: u32 = icmp_eq %1, %20\n' +
+        '  cond_br %21, ^bb5(%2), ^bb1(%2)\n',
+    );
+    expect(() => judged(bypass)).toThrow(/unrecovered back-edge/);
+  });
+
+  test('a tail holding a loop of its own stays refused', () => {
+    const cyclic = RETPOST_TAIL_IR.replace(
+      '^bb5(%12: s32):\n  store %0, %12 {off=0, width=4}\n  ret %12',
+      '^bb5(%12: s32):\n  store %0, %12 {off=0, width=4}\n  %22: s32 = call %12 {target="more"}\n' +
+        '  %23: u32 = icmp_eq %22, %0\n  cond_br %23, ^bb5(%22), ^bb7()\n^bb7():\n  ret %12',
+    );
+    expect(() => judged(cyclic)).toThrow(/cannot structure/);
+  });
+});
+
+/** A `do-while` (the header calls, so no `while` reading) whose shared tail reads `i + i`, a value the
+ *  body computed from the loop variable before the update. The arm's copy reads it ahead of the
+ *  update; the exit path's copy runs after the loop, past it. */
+const DOWHILE_TAIL_READS_BODY = `fn retbody {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = call %3 {target="t"}
+  %5: s32 = add %3, %3
+  %6: u32 = icmp_eq %4, %0
+  cond_br %6, ^bb5(), ^bb2()
+^bb2():
+  %7: s32 = const {value=1}
+  %8: s32 = add %3, %7
+  %9: u32 = icmp_slt %8, %1
+  cond_br %9, ^bb1(%8), ^bb4()
+^bb4():
+  %10: s32 = call %8 {target="miss"}
+  br ^bb5()
+^bb5():
+  store %0, %5 {off=0, width=4}
+  ret %5
+}`;
+
+test('a tail the exit path also runs stays post-loop for the escape check of a `do-while`', () => {
+  // owned by the arm, the tail is still code the exit path runs after the update, where `i + i`
+  // would be re-derived from the updated name (255 of 300 seeds disagreed with the exemption)
+  expect(() => judged(DOWHILE_TAIL_READS_BODY)).toThrow(/post-loop value reads a pre-update loop variable/);
+});

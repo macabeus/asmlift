@@ -104,7 +104,7 @@ const NESTED_CONTINUE = `fn nestcont {
 ^bb6():
   ret %3
 }`;
-/** Two edges out, to two blocks that each call and then meet: neither is a `return` arm. */
+/** Two edges out, to two blocks that each call and then meet in `m(i); return i;`. */
 const TWO_LIVE_EXITS = `fn twoexits {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -337,8 +337,30 @@ test('a continue nested under an `if` jumps, and the rest of the iteration is wr
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
-test('a loop leaving for two live merges has no one exit, and declines LOUD', () => {
-  expect(() => judged(TWO_LIVE_EXITS)).toThrow(/unrecovered back-edge/);
+test('a loop leaving for two blocks that each call and then meet in a `return` tail copies the tail into the arm', () => {
+  // `m(i); return i;` ends the function, and the exit path reaches it after `a(i)`, which the arm
+  // skips: no `break` spells the arm, so it writes the tail as an early return and the exit path
+  // keeps the copy after the loop (`exitTail`, at `earlyReturnArm`)
+  const r = judged(TWO_LIVE_EXITS);
+  expect(r.src).toContain('while (1) {');
+  expect(r.src.match(/m\(v1\);\n\s+return v1;/g)).toHaveLength(2);
+  expect(r.src.match(/a\(/g)).toHaveLength(1);
+  expect(r.src.match(/b\(/g)).toHaveLength(1);
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+test('a loop leaving for two live merges past which the code goes on has no one exit, and declines LOUD', () => {
+  // the tail no longer ends the function: it re-enters a loop of its own, so no arm may copy it
+  expect(() =>
+    judged(
+      TWO_LIVE_EXITS.replace(
+        /\^bb7\(\):\n {2}%14: s32 = call %3 \{target="m"\}\n/,
+        (m) =>
+          `${m}  br ^bb8()\n^bb8():\n  %30: s32 = call %3 {target="w"}\n  %31: u32 = icmp_eq %30, %0\n  cond_br %31, ^bb8(), ^bb9()\n^bb9():\n`,
+      ),
+    ),
+  ).toThrow(/unrecovered back-edge/);
 });
 
 test('a header that computes before it tests is a `while (1)` with its test in mid-body', () => {

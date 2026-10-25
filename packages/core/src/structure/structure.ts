@@ -1139,10 +1139,11 @@ interface LoopInfo {
 // (`earlyReturnArm` decides which). Per-EDGE rather than flattened into per-loop sets: ownership is
 // decided against `from`, so a second edge into the same target is a separate question. Two arms'
 // `owned` sets may OVERLAP: a tail only the loop's exit arms run (`armsOnly`, the cross-jumped
-// `h(i); return;` two arms end in) is owned by every arm that reaches it, and written once in each.
-// `owned` has one reader, `emitDoWhile`, which unions the arms' sets for its pre-update hazard check
-// — an overlap only repeats a block in that union — and a `while` hoists no update, so it has no
-// pre-update reads to exempt.
+// `h(i); return;` two arms end in), or a return tail the exit path also runs after code of its own
+// (`exitTail`), is owned by every arm that reaches it, and written once in each. `owned` has one
+// reader, `emitDoWhile`, which unions the arms' sets for its pre-update hazard check — an overlap
+// only repeats a block in that union — and a `while` hoists no update, so it has no pre-update reads
+// to exempt.
 interface LoopArm {
   from: Block;
   to: Block;
@@ -2424,11 +2425,12 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // The paths are exclusive, so each runs one copy once, the arm's or the one written where the block
 // sits; on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) those copies are the source the one
 // block came from. Whether the block has an effect does not enter into it. A block the loop's own
-// exit path also runs is written once, after the loop: copying it into an arm writes a store or call
-// twice where the asm holds it once on the fall-through path, and drags the rest of the function
-// along. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms bound it and it
+// exit path also runs is, for a `break`, written once, after the loop: the arm's `break` reaches it
+// there. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms bound it and it
 // takes no size limit. This walk applies the same policy to a tail that ends in its own `return`:
-// an effectful block is admitted only on one of the two counts below, and refused otherwise.
+// an effectful block is admitted only on one of the three counts below, and refused otherwise. The
+// third is the one place an arm copies a block the exit path also runs: a `return` tail no `break`
+// can reach without running the exit's own code first.
 //
 // THE EDGE OWNS IT. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
@@ -2444,7 +2446,7 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // arms run on exclusive paths, so each path still runs it once. The `while` reading that takes one
 // such arm for the exit stays refused — the other arm's tail is then reachable from it — so the loop
 // falls to the reading whose exit runs nothing of the tail. A shared epilogue the exit also reaches
-// still has to be pure.
+// still has to be pure, unless the exit path runs code of its own first (`exitTail`, below).
 //
 // A PURE block the count admits is owned as well, though no effect forces it. The arms write it
 // whether or not they own it, so owning it changes no spelling; what it changes is `emitDoWhile`'s
@@ -2455,9 +2457,31 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // the body computed (`synthetic:sretpuretail`); left unowned, it declined the loop as a post-loop
 // read of a pre-update variable.
 //
-// WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop is sound to copy past —
-// the paths are exclusive — but into a tail that returns it is, in the common shape, the loop's own
-// zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) { if (t[i] == 7) {
+// THE EXIT PATH RUNS IT TOO, AFTER CODE OF ITS OWN (`exitTail`). `for (i = 0; i < gCount; i++) { if
+// (gTab[i] == x) { *out = r; return; } } gMiss = 1; *out = r;` (`synthetic:retpost_tail`): agbcc
+// cross-jumps the arm's `b` to the return label onto the identical `*out = r` before it (jump.c), and
+// gcc2.7.2kmc and gcc2.7.2 hold that one store in the `jr ra` delay slot, so the arm and the exit path,
+// past `gMiss = 1`, end in one `store; ret` block. A `break` would land on `gMiss = 1`, so nothing but
+// a copy spells the arm: the arm writes the tail and its `return`, and the exit path keeps the copy
+// written after the loop. Sound for the reason the policy is: a path that took the arm reaches the
+// block only through the arm's copy, which ends in its `return`, and the exit path never ran the arm,
+// so each path runs one copy once. Admitted when every one of these holds, each a refusal with a
+// witness in `loop-exit-return-tail.test.ts` or `loop-break-exit.test.ts`:
+//   - the exit path reaches the block after an effect the arm does not run. Without one, a `break` to
+//     the block spells the arm and the tail stays single, as the asm holds it (`a tail the loop's own
+//     exit also runs is written once, after the loop`);
+//   - every predecessor is an arm's block (`onlyFromBody`) or on the exit's forward path — never an
+//     entry from before the loop that bypasses the exit (the paragraph below says why);
+//   - neither the block nor anything past it holds a cycle, so the region past it only returns, and
+//     each copy is one walk; it is not `exit` itself, which the loop writes after it;
+//   - the arm does not leave by a latch's test, the loop's own way out. agbcc's peeled first test
+//     entering a `hit(i); break;` arm leaves no reading with the latch's target as the exit, and the
+//     one that took the arm for it would copy the post-loop `out()` into the body as an early return
+//     (`an arm another path also enters is not a \`break\` arm, and the loop declines`).
+//
+// WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop that bypasses the exit
+// is sound to copy past — the paths are exclusive — but into a tail that returns it is, in the common
+// shape, the loop's own zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) { if (t[i] == 7) {
 // ping(i); return; } } out(0);`. Admitting it lets the `while` reading take the early-return arm for
 // the exit and copy `out(0); return;` into the body, where the asm holds it once after the loop
 // (ido7.1 and mwcc_242_81 re-spell `while (1)` that way, equivalent but not the source's shape).
@@ -2466,13 +2490,15 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 //
 // Returns the blocks the arm OWNS — the ones the loop emits inside its body for this arm, ahead of
 // the update — or null when this is not an early-`return` arm. Not exclusive to the arm: a block the
-// `armsOnly` count admits is owned by every arm that reaches it, so two arms' sets can share it.
+// `armsOnly` or `exitTail` count admits is owned by every arm that reaches it, so two arms' sets can
+// share it. `fromLatch` says the arm leaves by one of the loop's latches.
 function earlyReturnArm(
   { dom, reachFrom, preds }: EarlyReturnArmDeps,
   from: Block,
   to: Block,
   body: Set<Block>,
   exit: Block,
+  fromLatch: boolean,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -2480,10 +2506,26 @@ function earlyReturnArm(
   // the duplication policy's admission: the loop's own exit path does not run it, and no cycle holds
   // it — and, for a tail that returns, only the loop's exit arms enter it (`armsOnly`, below). Never
   // the arm's own head: an edge straight from the body into a block others enter too is a `break` to
-  // it, which `while (1)` writes once, after the loop.
+  // it, which `while (1)` writes once, after the loop — unless the exit path reaches it after code
+  // of its own, which no `break` can skip (`exitTail`).
   const armOfBody = onlyFromBody(preds, body, exit);
   const armsOnly = (bb: Block) =>
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
+  // a return tail the loop's own exit path also runs, after an effect the arm skips (THE EXIT PATH
+  // RUNS IT TOO, above)
+  let fromExit: Set<Block> | undefined;
+  let fromTo: Set<Block> | undefined;
+  const exitTail = (bb: Block): boolean => {
+    if (fromLatch || bb === exit || offExitPath(bb) || [bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y))) {
+      return false;
+    }
+    if (!(preds.get(bb) ?? []).every((p) => armOfBody(p) || !offExitPath(p))) {
+      return false;
+    }
+    fromExit ??= reachForward(exit, dom);
+    fromTo ??= new Set([to, ...reachFrom(to)]);
+    return [...fromExit].some((y) => y !== bb && !fromTo!.has(y) && reachFrom(y).has(bb) && y.ops.some(effectful));
+  };
   const owned = new Set<Block>();
   const seen = new Set<Block>();
   const stack = [to];
@@ -2496,7 +2538,7 @@ function earlyReturnArm(
     if (body.has(bb)) {
       return null;
     } // re-enters the loop → not an exit
-    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
+    if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb) || (bb.ops.some(effectful) && exitTail(bb))) {
       owned.add(bb);
     } else if (bb.ops.some(effectful)) {
       return null;
@@ -3105,7 +3147,10 @@ export function structure(
   const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
     const region =
       codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
-    const owned = region === null ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit) : null;
+    const owned =
+      region === null
+        ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches.includes(e.from))
+        : null;
     return { region, owned };
   };
   const whileLoops = new Map<Block, WhileLoopInfo>();
@@ -7801,8 +7846,11 @@ export function structure(
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
     // the loop for a hazard that cannot happen. Blocks the arm merely reaches are not `owned`, and stay
-    // post-loop where the other path really does read them after the update.
-    const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
+    // post-loop where the other path really does read them after the update. So does an owned block
+    // the loop's own exit path also runs (`exitTail`, at `earlyReturnArm`): the arm writes its copy
+    // ahead of the update, but the copy written after the loop reads past it.
+    const fromExit = reachForward(dw.exit, dom);
+    const owned = new Set(dw.arms.flatMap((a) => [...a.owned].filter((bb) => !fromExit.has(bb))));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
     // AN EFFECT THE RENDERED TEST MAY SKIP. `movedEffect` below says this about the exit copies; the
     // bottom test is the other place an effect can change how often it runs, and here it is the
