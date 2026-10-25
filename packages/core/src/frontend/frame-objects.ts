@@ -497,18 +497,15 @@ export function auditFrameObjects({
  *  nowhere — and, past such a word, words nothing touches at all. The frontend lifts a word
  *  outside the range with its slot model (Thumb `isFrameObjectAccess`, MIPS `keptInRelift`; PPC
  *  is never handed a narrowed range, `no-split-follows`), so the one object is the bytes its
- *  escapes and accesses reach, and
- *  `provenParts` can split it where they tile: agbcc's reload puts spill slots ABOVE the arrays
- *  (the Thumb frame grows up, thumb.h:569/573, reload1.c:2274), ido7.1 puts them below, and gcc
- *  2.7.2 leaves a pad word between (each array starts at a multiple of 8); kept in the one object,
- *  such a word joins the part beside it.
+ *  escapes and accesses reach, and `provenParts` can split it where they tile: agbcc's reload puts
+ *  spill slots ABOVE the arrays (the Thumb frame grows up, thumb.h:569/573, reload1.c:2274),
+ *  ido7.1 puts them below, and gcc 2.7.2 leaves a pad word between (each array starts at a
+ *  multiple of 8); kept in the one object, such a word joins the part beside it.
  *
- *  A word is handed back only where no rule of `RELIFT_HAND_BACK_GATES` keeps it: those are the
- *  reaches through the object, and where no split could follow. What is NOT tabled is what makes
- *  a word a scalar's (`scalarWord`): which accesses, slots and objects meet it. That is the
- *  question the hand-back exists to answer, not a refusal of it, and a word it gets wrong meets
- *  the second audit's own refusals where an object or an access it names lands outside the kept
- *  bytes (`keepAsOneObject`); its clauses are not each measured for soundness.
+ *  A word is handed back only where no rule of `RELIFT_HAND_BACK_GATES` keeps it: a reach through
+ *  the object, or no split to follow. What makes a word a scalar's (`scalarWord`) is not tabled,
+ *  and its clauses are not each measured for soundness: a word it gets wrong meets the second
+ *  audit's refusals where an object or an access lands outside the kept bytes (`keepAsOneObject`).
  *
  *  The copies do NOT tell a spill from a struct member only stored (`struct { u8 a[16], b[16];
  *  u32 y; }` with `s.y = x` and nothing reading it): that member is handed back too, and its store

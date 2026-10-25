@@ -653,10 +653,9 @@ describe('keepAsOneObject', () => {
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
     // the copies chain: the first one's last two bytes are the second's first two
     expect(objectsOf(withKept(copies([6, 4])))).toEqual([[0, 8]]);
-    // a runtime index into the lower part may reach the upper one — based at the lower copy's own
-    // destination too: declared apart, the C says the index cannot reach `b`, where the target's
-    // one object lets it, and what the recompile then reads is whatever its alias analysis decides
-    // (gcc 2.7.2 keeps a word of `b` in a register across `((s32 *)a)[i] = v`)
+    // a runtime index into the lower part may reach the upper one, even based at the lower copy's
+    // own destination: declared apart, the recompile may keep a word of `b` in a register across
+    // `((s32 *)a)[i] = v` (gcc 2.7.2 does)
     const indexed = copies([4, 4], (a, b, i) => {
       const at = mkOp('add', { operands: [a, i], results: [value()] });
       return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
