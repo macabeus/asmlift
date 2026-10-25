@@ -1388,9 +1388,9 @@ describe('early-return arms of a loop nested in another', () => {
 // A PURE TAIL TWO ARMS SHARE, IN A `do-while` (`synthetic:sretpuretail`). agbcc cross-jumps two of
 // three `return` arms into one pure block — here `v = x + k(i); *out = v; return v;`, `x` computed in
 // the body from the loop variable before the update — which falls into the `store; ret` the third arm
-// enters too. No edge into it dominates it, so no arm owned it, and `emitDoWhile`'s escape check took
-// it for code run after the loop, past the update: "a post-loop value reads a pre-update loop
-// variable". Only the arms enter it, so each writes it ahead of the update, and the arms now own it.
+// enters too. No edge into it dominates it, but only the arms enter it, so each writes it ahead of
+// the update and the arms own it; unowned, `emitDoWhile`'s escape check would take it for code run
+// after the loop, past the update ("a post-loop value reads a pre-update loop variable").
 const PURE_ARMS_TAIL = `fn puretail {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}

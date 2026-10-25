@@ -12,9 +12,9 @@
 // `r = 0; *out = r;` too, a register move falling into the one store (`a pure exit assignment ahead
 // of the tail`). What stays refused is `EXIT_TAIL_GATES` (at `earlyReturnArm`), whose `guardedBy`
 // names the test that fails without each rule — here or in `loop-break-exit.test.ts`; the IR tests
-// here also drop their rule and watch the reading change. The arm writes the tail without owning it, so it stays code run
-// after the loop for a `do-while`'s escape check, since the exit path runs it there. And a copy is the
-// reading of last resort: where another exit lets every edge `break` to the tail, that reading wins
+// here also drop their rule and watch the reading change. The arm writes the tail without owning it,
+// so it stays code run after the loop for a `do-while`'s escape check, since the exit path runs it
+// there. And a copy is the reading of last resort: where another exit lets every edge `break` to the tail, that reading wins
 // (`a rotated loop whose two exits can both \`break\` to the tail copies nothing`), and so does a
 // `while (1)` whose arms keep their own tails (`retarm2_tail`, below).
 import { describe, expect, test } from 'vitest';

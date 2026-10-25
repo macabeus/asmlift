@@ -2409,20 +2409,9 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
   }
   return true;
 }
-// An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
-// every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
-// return site just sets the return register and branches there, so a second body exit that lands on
-// such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
-// merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
-// declining as "multi-exit".
-//
-// The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
-// twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
-// is a FIDELITY rule, not a soundness one.
-//
 /** One block the `exitTail` count (at `earlyReturnArm`) weighs for an arm: a return tail the loop's
- *  own exit path also runs, which the arm would write a copy of. The fields are getters, so the two
- *  walks at the bottom of `EXIT_TAIL_GATES` run only when the rules ahead of them admit. */
+ *  own exit path also runs, which the arm would write a copy of. Every field past the first is a
+ *  getter, so its walk runs only when the rules ahead of it admit. */
 export interface ExitTailCandidate {
   /** the arm's edge leaves from a latch, the loop's own way out */
   readonly armLeavesByLatch: boolean;
@@ -2481,6 +2470,17 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
   },
 ];
 
+// An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
+// every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
+// return site just sets the return register and branches there, so a second body exit that lands on
+// such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
+// merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
+// declining as "multi-exit".
+//
+// The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
+// twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
+// is a FIDELITY rule, not a soundness one.
+//
 // ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
 // effects may be written once per arm when the loop's own exit path does not run it
 // (`offExitPathOf`) and it holds no cycle, whoever else enters it — another arm, or a path from
@@ -2518,7 +2518,7 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
 // block only the arms enter runs ahead of the update on every path, so a read there of a loop
 // variable is the pre-update value the arm's copy renders. agbcc cross-jumps two of three
 // `p.at = …; p.kind = seg->kind; return p;` arms into one such block, reading the element pointer
-// the body computed (`synthetic:sretpuretail`); left unowned, it declined the loop as a post-loop
+// the body computed (`synthetic:sretpuretail`); unowned, it would decline the loop as a post-loop
 // read of a pre-update variable.
 //
 // THE EXIT PATH RUNS IT TOO, AFTER CODE OF ITS OWN (`exitTail`). `for (i = 0; i < gCount; i++) { if
@@ -2543,9 +2543,9 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
 //     from before the loop (the zero-trip guard). An exit only a mid-body branch enters is
 //     indistinguishable from an arm: the `while` reading of `if (t[i] == 7) { Ping(i); Hit(a);
 //     return; } if (t[i] == 8) { Pong(i); Hit(a); return; }` (`synthetic:retarm2_tail:agbcc`) takes
-//     the `Ping` edge for its exit and would copy `Hit(a)` past it. That row no longer reaches the
-//     rule — `while (1)` keeps both arms without a copy and is read first — but a top-tested loop
-//     whose header leaves to a `pre()` ahead of the arms' shared tail does;
+//     the `Ping` edge for its exit and would copy `Hit(a)` past it; `while (1)`, which keeps both
+//     arms without a copy, is read first there, so the rule's live case is a top-tested loop whose
+//     header leaves to a `pre()` ahead of the arms' shared tail;
 //   - `exit-runs-nothing-of-its-own`: the exit path reaches the block after a block of its own:
 //     `exit`, which the arm never reaches. That block need not have an effect: agbcc cross-jumps `{
 //     *out = r; return; }` onto the post-loop `r = 0; *out = r;` as well, a register move falling
@@ -2563,8 +2563,8 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
 //
 // WHY A RETURN TAIL ASKS MORE THAN THE POLICY. An entry from before the loop that bypasses the exit
 // is sound to copy past — the paths are exclusive — but into a tail that returns it is, in the common
-// shape, the loop's own zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) { if (t[i] == 7) {
-// ping(i); return; } } out(0);`. Admitting it lets the `while` reading take the early-return arm for
+// shape, the loop's own zero-trip guard landing on the post-loop epilogue: `for (i = 0; i < n; i++) {
+// if (t[i] == 7) { ping(i); return; } } out(0);`. Admitting it lets the `while` reading take the early-return arm for
 // the exit and copy `out(0); return;` into the body, where the asm holds it once after the loop
 // (ido7.1 and mwcc_242_81 re-spell `while (1)` that way, equivalent but not the source's shape).
 // What it would buy is an `else` before the loop that cross-jumps into the arms' tail (agbcc's
