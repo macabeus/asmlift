@@ -1106,6 +1106,8 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
+  // The exit's own `pre()` runs before the tail, but the exit leaves by the header's test with
+  // nothing entering it from before the loop, so `exitTail` (at `earlyReturnArm`) does not take it.
   test('a shared tail the exit also reaches is refused', () => {
     declines(
       SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
@@ -1370,7 +1372,8 @@ describe('early-return arms of a loop nested in another', () => {
 
   test('a tail the inner exit also reaches forward declines loud', () => {
     // the inner exit now runs into `hit` too when `tick` says so: the arms reach it without `tick`,
-    // so the inner loop leaves for two live merges, and neither arm may copy a tail the exit runs
+    // so the inner loop leaves for two live merges; the inner exit leaves by the header's test, so
+    // neither arm may copy a tail the exit runs (`exitTail`, at `earlyReturnArm`)
     expect(() =>
       judged(
         NESTED_RETURN_TAIL.replace(
@@ -1379,5 +1382,74 @@ describe('early-return arms of a loop nested in another', () => {
         ),
       ),
     ).toThrow(/unrecovered back-edge/);
+  });
+});
+
+// A PURE TAIL TWO ARMS SHARE, IN A `do-while` (`synthetic:sretpuretail`). agbcc cross-jumps two of
+// three `return` arms into one pure block — here `v = x + k(i); *out = v; return v;`, `x` computed in
+// the body from the loop variable before the update — which falls into the `store; ret` the third arm
+// enters too. No edge into it dominates it, but only the arms enter it, so each writes it ahead of
+// the update and the arms own it; unowned, `emitDoWhile`'s escape check would take it for code run
+// after the loop, past the update ("a post-loop value reads a pre-update loop variable").
+const PURE_ARMS_TAIL = `fn puretail {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = call %3 {target="k"}
+  %14: s32 = const {value=3}
+  %15: s32 = add %3, %14
+  %5: s32 = const {value=7}
+  %6: u32 = icmp_eq %4, %5
+  cond_br %6, ^bb8(), ^bb2()
+^bb2():
+  %7: s32 = const {value=8}
+  %8: u32 = icmp_slt %7, %4
+  cond_br %8, ^bb9(), ^bb3()
+^bb3():
+  %10: u32 = icmp_eq %4, %1
+  cond_br %10, ^bb6(%2), ^bb4()
+^bb4():
+  %11: s32 = const {value=1}
+  %12: s32 = add %3, %11
+  %13: u32 = icmp_slt %12, %1
+  cond_br %13, ^bb1(%12), ^bb7()
+^bb5():
+  %18: s32 = add %15, %4
+  br ^bb6(%18)
+^bb6(%16: s32):
+  store %0, %16 {off=0, width=4}
+  ret %16
+^bb8():
+  br ^bb5()
+^bb9():
+  br ^bb5()
+^bb7():
+  %17: s32 = const {value=5}
+  store %0, %17 {off=0, width=4}
+  ret %17
+}`;
+
+describe('a pure tail only the arms of a `do-while` enter', () => {
+  test('each arm writes it ahead of the update, as an early `return`', () => {
+    const { src, agreement, shipped } = judged(PURE_ARMS_TAIL);
+    expect(src).toContain('do {');
+    expect(src.match(/v0 = v2 \+ 3 \+ v1;\n\s+\*\(s32 \*\)a0 = v0;\n\s+return v0;/g)).toHaveLength(2);
+    expect(src).toContain('} while (v2 < a1);\n    *(s32 *)a0 = 5;\n    return 5;\n}');
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test("one the loop's own exit also enters is no arm's: the arms `break` to it", () => {
+    const { src, agreement, shipped } = judged(
+      PURE_ARMS_TAIL.replace(
+        '^bb7():\n  %17: s32 = const {value=5}\n  store %0, %17 {off=0, width=4}\n  ret %17',
+        '^bb7():\n  br ^bb5()',
+      ),
+    );
+    expect(src).toContain('while (1) {');
+    expect(src.match(/return/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });

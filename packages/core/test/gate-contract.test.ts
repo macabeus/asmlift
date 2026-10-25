@@ -60,7 +60,12 @@ import { UNPRE_GATES } from '../src/raise/unpre';
 import { UNTHREAD_GATES } from '../src/raise/unthread';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
-import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
+import {
+  CARRIER_NAME_GATES,
+  ENCLOSING_CARRIER_GATES,
+  EXIT_TAIL_GATES,
+  FRESH_MERGE_GATES,
+} from '../src/structure/structure';
 
 // Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
 // placement heuristics ablated, LIVEBASE_BLOCK_GATES that one plus a selectivity rule —
@@ -138,6 +143,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],
   ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
+  // structure.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
+  EXIT_TAIL_GATES: EXIT_TAIL_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],

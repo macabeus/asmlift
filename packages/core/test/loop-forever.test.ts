@@ -338,6 +338,9 @@ test('a continue nested under an `if` jumps, and the rest of the iteration is wr
 });
 
 test('a loop leaving for two live merges has no one exit, and declines LOUD', () => {
+  // `m(i); return i;` ends the function, but the exit that reaches it after `a(i)` leaves from the
+  // header's mid-body test, not a latch's, and nothing enters it from before the loop: no reading
+  // tells it from an arm, so the arm `b(i)` may not copy the tail (`exitTail`, at `earlyReturnArm`)
   expect(() => judged(TWO_LIVE_EXITS)).toThrow(/unrecovered back-edge/);
 });
 
