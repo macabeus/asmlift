@@ -14,7 +14,7 @@ import {
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { returnedStruct, structLocalType } from './frontend/call-plan';
-import { type CalleeBodyBound, calleeBodyBounds } from './frontend/callee-body';
+import { type CalleeBodies, type CalleeBodyBound, calleeBodyBounds } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
@@ -102,6 +102,11 @@ export interface DecompileOptions {
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
+  /** OPTIONAL bodies of callees the input does not define, found elsewhere by the driver (the CLI
+   *  reads them off `tools.asmlift.elf`): each answers what its callee can read of its arguments
+   *  where the input holds no label of that name (frontend/callee-body.ts). Absent ⇒ only the
+   *  input's own bodies answer. */
+  calleeBodies?: CalleeBodies;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -201,7 +206,7 @@ function runTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    undefined,
+    { calleeBodies: opts.calleeBodies },
     own.ownContextProto,
     ownArityNotes,
   );
@@ -283,7 +288,10 @@ export function ownArityNotesOf(
   name: string,
   asm: string,
   target: TargetDescription,
-  opts: Pick<DecompileOptions, 'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto'>,
+  opts: Pick<
+    DecompileOptions,
+    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
+  >,
 ): string[] {
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
   if (own.ownContextProto === undefined) {
@@ -299,7 +307,7 @@ export function ownArityNotesOf(
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
-      undefined,
+      { calleeBodies: opts.calleeBodies },
       own.ownContextProto,
       notes,
     );
@@ -321,6 +329,10 @@ export function stampBehaviorsFor(
   };
 }
 
+/** What `liftStamped` is handed besides the frontend's own options: the bodies of callees found
+ *  outside the input, which only the callee-body bound reads (`bodyBoundsIn`). */
+export type StampedLiftOptions = LiftOptions & { calleeBodies?: CalleeBodies };
+
 /** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
  *  `symbols` or `contextGlobals` declares volatile stamped `declared` (raise/declared-volatile.ts)
  *  before any pass asks whether it may be deleted. Every entry path lifts through here, each lift
@@ -335,10 +347,11 @@ export function liftStamped(
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
-  liftOptions?: LiftOptions,
+  stampedOptions?: StampedLiftOptions,
   ownContext?: FnProto,
   notes?: string[],
 ): Fn {
+  const { calleeBodies, ...liftOptions } = stampedOptions ?? {};
   // Its callers split the table already; split again here, where every lift passes, so that no
   // frontend is handed a marked context entry to read as a stated, hard bound.
   const split = splitOwnContext(prototypes, name, ownContext);
@@ -351,8 +364,8 @@ export function liftStamped(
   // what each callee whose body is in this input reads of its arguments, lifted from that body as a
   // call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads no bodies
   const calleeBodyBound =
-    liftOptions?.calleeBodyBound ??
-    bodyBoundsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals);
+    liftOptions.calleeBodyBound ??
+    bodyBoundsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals, calleeBodies);
   const options = { ...liftOptions, calleeBodyBound };
   const fn = liftWithinContextBound(
     name,
@@ -400,9 +413,10 @@ const boundsRead = new WeakMap<
 >();
 
 /** Each callee's body bound (frontend/callee-body.ts) as a lift of `name` under `table` reads it: every
- *  callee lifted from the same input, under the same table, map and context, reading no bodies. Kept
- *  across lifts of the same function under the same caller table, map, data and context
- *  (`boundsRead`). */
+ *  callee lifted from the same input, or from its body in `calleeBodies`, under the same table, map
+ *  and context, reading no bodies. A body from outside the input is lifted with none of the input's
+ *  side table, which describes the input's own object. Kept across lifts of the same function under
+ *  the same caller table, map, data, context and bodies (`boundsRead`). */
 function bodyBoundsIn(
   name: string,
   asm: string,
@@ -413,19 +427,26 @@ function bodyBoundsIn(
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
+  calleeBodies: CalleeBodies | undefined,
 ): CalleeBodyBound {
-  const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals];
+  const key = [name, asm, target, ownContext, asmData, symbols, contextGlobals, calleeBodies];
   const read = boundsRead.get(prototypes) ?? [];
   boundsRead.set(prototypes, read);
   const hit = read.find((r) => r.key.every((k, i) => k === key[i]));
   if (hit !== undefined) {
     return hit.bound;
   }
-  const bound = calleeBodyBounds(name, asm, target, table, (callee, calleeTable, entryReadCalls) =>
-    liftStamped(callee, asm, target, calleeTable, asmData, symbols, contextGlobals, {
-      calleeBodyBound: () => undefined,
-      entryReadCalls,
-    }),
+  const bound = calleeBodyBounds(
+    name,
+    asm,
+    target,
+    table,
+    (callee, calleeTable, entryReadCalls, text) =>
+      liftStamped(callee, text, target, calleeTable, text === asm ? asmData : undefined, symbols, contextGlobals, {
+        calleeBodyBound: () => undefined,
+        entryReadCalls,
+      }),
+    calleeBodies,
   );
   // a handful per table: the symbol settings a ranked run tries, never a growing list
   read.unshift({ key, bound });

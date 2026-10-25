@@ -36,6 +36,15 @@
 //     it as an argument-register INDEX. One per word holds only where every parameter is a word in
 //     its own register: o32 passes a leading double in $f12, which shadows a0 and a1, so
 //     `int hdx(double d, int x)` lifts two parameters and reads x from a2, index 2.
+//
+// A BODY OUTSIDE THE INPUT (`CalleeBodies`) answers only where the input defines no label of the
+// callee's name, and is read under every rule above: a listing in the target frontend's own input
+// format is lifted exactly as the same text placed in the input would be, with no side table of
+// the input's (its relocations and jump tables are keyed by the input object's own sections). The
+// driver that hands it in answers for what the input cannot say of it: that the definition is the
+// one the link keeps (cli elf-bodies.ts reads the binding off the linked ELF's symbol table).
+// A disassembly of a linked ELF carries no relocations, and the MIPS and PowerPC frontends name a
+// callee only by its relocation, so such a body that makes any call does not lift and proves nothing.
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
@@ -51,6 +60,17 @@ import {
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
+/** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
+ *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
+ *  callee's label. */
+export type CalleeBody = { kind: 'listing'; text: string };
+
+/** The bodies a driver found outside the input, keyed by callee (`DecompileOptions.calleeBodies`). */
+export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
+
+/** One function of some text lifted under a table, with no bound of its own (`calleeBodyBounds`). */
+export type CalleeLift = (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>, text: string) => Fn;
+
 /** The argument words callee `callee`'s own body can read at most, or `undefined` where its body
  *  proves nothing (frontend/frontend.ts `LiftOptions.calleeBodyBound`). */
 export type CalleeBodyBound = (callee: string) => number | undefined;
@@ -63,22 +83,30 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
 }
 
 /** The bound, read off each callee's body as a call to it is first lowered and kept for the rest.
- *  `lift` lifts one function of the same input under a table, with no bound of its own: one level
- *  of bodies is read, never the callee's callees'. */
+ *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
+ *  bound of its own: one level of bodies is read, never the callee's callees'. */
 export function calleeBodyBounds(
   self: string,
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>) => Fn,
+  lift: CalleeLift,
+  external?: CalleeBodies,
 ): CalleeBodyBound {
   const memo = new Map<string, number | undefined>();
   return (callee) => {
     if (!memo.has(callee)) {
-      memo.set(callee, bodyBound(self, callee, asm, target, prototypes, lift));
+      memo.set(callee, bodyBound(self, callee, asm, target, prototypes, lift, external));
     }
     return memo.get(callee);
   };
+}
+
+/** Whether `text` defines a label named `callee`: a `name:` line, an objdump `<name>:` header or a
+ *  `glabel name`. */
+export function definesLabel(text: string, callee: string): boolean {
+  const name = escaped(callee);
+  return new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm').test(text);
 }
 
 /** Every name a `.weak` directive marks, in each spelling GNU as reads: one name or a comma-separated
@@ -119,18 +147,31 @@ function bodyBound(
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes,
-  lift: (callee: string, table: Prototypes, entryReadCalls: ReadonlySet<string>) => Fn,
+  lift: CalleeLift,
+  external: CalleeBodies | undefined,
 ): number | undefined {
-  const name = escaped(callee);
-  const defined = new RegExp(`^(?:\\s*${name}\\s*:|[0-9a-fA-F]+ <${name}>:|\\s*glabel\\s+${name}\\s*$)`, 'm');
-  if (
-    callee === self ||
-    !defined.test(asm) ||
-    weakNames(asm).has(callee) ||
-    declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-  ) {
+  if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
     return undefined;
   }
+  if (definesLabel(asm, callee)) {
+    return weakNames(asm).has(callee) ? undefined : liftedBound(callee, asm, target, prototypes, lift);
+  }
+  const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
+  if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
+    return undefined;
+  }
+  return liftedBound(callee, body.text, target, prototypes, lift);
+}
+
+/** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
+ *  out is taken at every argument register; undefined where no lift proves it. */
+function liftedBound(
+  callee: string,
+  text: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  lift: CalleeLift,
+): number | undefined {
   const helpers = helperPrototypes(target);
   const table: Prototypes = { ...prototypes, [callee]: returnOnly(prototypes[callee]) };
   const forced = new Set<string>();
@@ -139,7 +180,7 @@ function bodyBound(
   for (;;) {
     let fn: Fn;
     try {
-      fn = lift(callee, table, forced);
+      fn = lift(callee, table, forced, text);
     } catch {
       return undefined;
     }

@@ -30,6 +30,7 @@ import {
   assertResolved,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
+import type { CalleeBodies } from './frontend/callee-body';
 import { hasSetupArgsNarrowing, narrowToSetupArgs, setupArgsDiscardsPassedResult } from './frontend/ssa';
 import { Fn, Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
@@ -170,6 +171,8 @@ export interface EnumerateOptions {
   contextGlobals?: ContextGlobals;
   /** same contract as DecompileOptions.ownContextProto */
   ownContextProto?: FnProto;
+  /** same contract as DecompileOptions.calleeBodies */
+  calleeBodies?: CalleeBodies;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -663,7 +666,7 @@ export function enumerateCandidates(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    undefined,
+    { calleeBodies: opts.calleeBodies },
     ownContext.ownContextProto,
   );
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
@@ -736,7 +739,7 @@ export function enumerateCandidates(
       opts.asmData,
       symbols,
       opts.contextGlobals,
-      undefined,
+      { calleeBodies: opts.calleeBodies },
       ownContext.ownContextProto,
     );
     applyIdiomPatterns(p, target, opts.patterns);
@@ -1999,6 +2002,7 @@ export function enumerateCandidates(
           onTailSlot: () => {
             tailSlot = true;
           },
+          calleeBodies: opts.calleeBodies,
         },
         ownContext.ownContextProto,
       );
@@ -2143,7 +2147,7 @@ export function enumerateCandidates(
                   opts.asmData,
                   symbolSetting.symbols,
                   opts.contextGlobals,
-                  { keepTailSlots: liftSetting.keepTailSlots },
+                  { keepTailSlots: liftSetting.keepTailSlots, calleeBodies: opts.calleeBodies },
                   ownContext.ownContextProto,
                 );
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
