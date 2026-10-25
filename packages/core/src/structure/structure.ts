@@ -68,15 +68,7 @@ import {
   reachForward,
   successorsOf,
 } from '../ir/core';
-import {
-  effectful,
-  orderSensitive,
-  placedAt,
-  qualified,
-  qualifiedBy,
-  reevalUnsafe,
-  spelledWhenDead,
-} from '../ir/discipline';
+import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
@@ -6256,12 +6248,12 @@ export function structure(
       // `readArms` reads that one) or one of three asked here per arm, in emission order, without
       // emitting anything: an arm whose exit is unstructurable, a fall-through into an arm that is
       // not the next one emitted, and a fall-through into an arm that opens with switch-edge
-      // copies the fall path would change. The answer is the arm it refuses at and a `raise` that
-      // throws the refusal, and the emission calls exactly the one `readArms` carries for the
-      // reading it adopted — so the retry's gate and the emission cannot disagree about what
-      // declines, and a reading that declines fails with the message it always did. Each refusal
-      // stays a literal `throw new StructureError(…)` so the decline-message harvest (apps/web
-      // declines.test.ts) still reads it.
+      // copies. The answer is the arm it refuses at and a `raise` that throws the refusal, and the
+      // emission calls exactly the one `readArms` carries for the reading it adopted — so the
+      // retry's gate and the emission cannot disagree about what declines, and a reading that
+      // declines fails with the message it always did. Each refusal stays a literal
+      // `throw new StructureError(…)` so the decline-message harvest (apps/web declines.test.ts)
+      // still reads it.
       //
       // `edgeCopyRecords` stands in for `argAssignsFor` because it mints no swap-cycle temp — a
       // name minted here would change the output of every arm emitted after it — and it answers
@@ -6269,100 +6261,12 @@ export function structure(
       // none. It is not a pure query either: an `undef` copy it drops is recorded in
       // `droppedUndefCopies`, which a postcondition reads. So the records this question leaves are
       // rolled back, as the speculative dispatch hoist does with its own.
-      //
-      // A SWITCH-EDGE COPY THE FALL-THROUGH PATH RE-RUNS TO NO EFFECT. Where the arm fallen into
-      // takes a value from the switch edge that the falling arm also computes — agbcc's gcse PRE
-      // hoists a loop's `i + 1` above the dispatch (gcse.c `pre_insert`, at the end of the block)
-      // and keeps the falling arm's own `gK[i + 1]` sum in the same register (`pre_insert_copy_insn`),
-      // so both edges into `case 4:` hand its parameter `i + 1` — re-running `v = i + 1;` on the fall
-      // path writes the value the arm just wrote. Read per record, all three must hold:
-      //
-      //  1. EVERY edge the falling arms take into `into` hands that parameter a value structurally
-      //     equal to the switch edge's (`sameAtEntry` with an empty entry map: one opcode, one set
-      //     of attributes, equal operands), through no op `reevalUnsafe` names, so neither value
-      //     depends on where it is evaluated;
-      //  2. the switch-edge argument's EXPRESSION, as `expr` renders it at the label, reads no memory
-      //     and nothing that can trap — the same walk, down to the names it stops at;
-      //  3. NO NAME that expression reads is written anywhere on the fall path: an op result or a
-      //     block parameter of a falling arm, or a parameter of `into` itself (the falling edge's
-      //     own copies). SSA equality alone is not enough, because names are shared across SSA
-      //     values by interference (namecoalesce.ts), and the switch-edge value is DEAD inside the
-      //     falling arm, so its name may hold something else there.
-      //
-      // The SSA argument dominates the falling arms by construction — it is an argument of the
-      // dispatch's own terminator, which dominates every arm — so the names it reads were written
-      // before the switch on both paths, and on the fall path nothing rewrote them.
-      const fallPathRecomputes = (
-        records: readonly { arg: Value; param: Value }[],
-        into: Block,
-        fallPath: readonly Block[],
-      ): boolean => {
-        const written = new Set<string>();
-        const write = (v: Value) => {
-          const n = varName.get(v) ?? backArgName.get(v);
-          if (n !== undefined) {
-            written.add(n);
-          }
-        };
-        for (const blk of fallPath) {
-          blk.params.forEach(write);
-          for (const op of blk.ops) {
-            op.results.forEach(write);
-          }
-        }
-        // `into`'s parameters are written by the falling edges' own copies — an identity copy (the
-        // argument already under the parameter's name) writes nothing, as `edgeCopyRecords` drops it.
-        const fallingEdges = fallPath
-          .filter((blk) => blk.ops.length > 0)
-          .flatMap((blk) => blk.ops[blk.ops.length - 1].successors)
-          .filter((s) => s.block === into);
-        into.params.forEach((p, slot) => {
-          const name = varName.get(p);
-          const identity = (a: Value) => varName.get(a) === name && (activeSub?.get(a) ?? name) === name;
-          if (fallingEdges.some((s) => !identity(s.args[slot] as Value))) {
-            write(p);
-          }
-        });
-        const pure = (v: Value) => {
-          const d = defs.get(v);
-          return d === undefined || (!reevalUnsafe(d) && !bitfieldSpelling.has(d));
-        };
-        const readsSafely = (v: Value): boolean => {
-          const seen = new Set<Value>();
-          const walk = (x: Value): boolean => {
-            if (seen.has(x)) {
-              return true;
-            }
-            seen.add(x);
-            const name = activeSub?.get(x) ?? varName.get(x);
-            if (name !== undefined) {
-              return !written.has(name);
-            }
-            const d = defs.get(x);
-            return d !== undefined && pure(x) && d.operands.every(walk);
-          };
-          return walk(v);
-        };
-        return records.every(({ arg, param }) => {
-          const slot = into.params.indexOf(param);
-          const fromArms = fallingEdges.map((s) => s.args[slot] as Value);
-          return (
-            slot >= 0 &&
-            fromArms.length > 0 &&
-            fromArms.every((f) => f !== undefined && sameAtEntry(f, arg, new Map(), false, pure)) &&
-            readsSafely(arg)
-          );
-        });
-      };
       const armRefusal = (exits: Map<Block, ArmExit>, chain: Block[]): { at: number; raise: () => never } | null => {
         const order: { entry: Block; edge: (typeof succ)[number]; values: number[] | null }[] = [
           ...chain.map((e) => armOf.get(e)!),
           { entry: defEdge.block, edge: defEdge, values: null },
         ];
         const auditMark = droppedUndefCopies.length;
-        // The blocks of the arms whose fall-through chain reaches the arm being read: on that path
-        // every one of them runs between the dispatch and the label of the arm it falls into.
-        let fallenFrom: Block[] = [];
         try {
           for (const [i, a] of order.entries()) {
             const exit = exits.get(a.entry)!;
@@ -6376,7 +6280,6 @@ export function structure(
               };
             }
             if (exit.kind !== 'fallthrough') {
-              fallenFrom = [];
               continue;
             }
             const next = order[i + 1];
@@ -6397,14 +6300,13 @@ export function structure(
             // overwrite what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0
             // path calling with 5). They cannot simply be dropped either: entering that arm by its
             // own case value needs them. Hoisting them above the switch is possible but not always
-            // safe (another arm may read the same name first), so this shape declines LOUD, with
-            // two exceptions. A default edge the dispatch never takes (the op's `exhaustive` attr)
-            // needs no copies: nothing enters the default by it, so its copies are not emitted
-            // (`edgeCopies` below) and cannot re-run. And a re-run that writes what the falling arm
-            // already wrote is harmless (`fallPathRecomputes` above).
-            fallenFrom = [...fallenFrom, ...exit.region];
-            const records = deadDefaultEdge && next.edge === defEdge ? [] : edgeCopyRecords(b, next.edge);
-            if (records.length > 0 && !fallPathRecomputes(records, exit.to, fallenFrom)) {
+            // safe (another arm may read the same name first), so this shape declines LOUD. A
+            // parameter every edge hands one pure non-constant expression never reaches here:
+            // raise/unpre.ts recomputes it in the case before structuring (gcse PRE's `i + 1`,
+            // `synthetic:sw_fallpre`), so what is left is a real join or a merged constant. The one edge that needs no copies is a default edge the
+            // dispatch never takes (the op's `exhaustive` attr): nothing enters the default by it,
+            // so its copies are not emitted (`edgeCopies` below) and cannot re-run.
+            if (!(deadDefaultEdge && next.edge === defEdge) && edgeCopyRecords(b, next.edge).length > 0) {
               return {
                 at: i,
                 raise: () => {

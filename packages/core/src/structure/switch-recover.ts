@@ -1318,11 +1318,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // Regime B refuses the same hazard LOUD at its own `switch_br` path, on the weaker predicate
       // that fits it (the copies `argAssignsFor` actually produced): its arms take their edge
       // copies PER ARM, so a fall-through path would re-run them over what the falling arm
-      // computed. It does not hoist (`sw_jtfall`/`sw_jtfalldesc` match without it); it admits
-      // only the re-run that writes what the falling arm already wrote, where every falling edge
-      // hands the parameter the switch edge's own pure value and nothing on the fall path writes a
-      // name that value reads (structure.ts `fallPathRecomputes`, `sw_fallpre`'s gcse PRE shape).
-      // Regime A needs no such admission: the hoist has already removed the re-run.
+      // computed. Hoisting is what removes that hazard, and Regime B does not hoist — booked, not
+      // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
         body: structureArm(blk, to ?? merge, merge, exitOf.get(blk)),
