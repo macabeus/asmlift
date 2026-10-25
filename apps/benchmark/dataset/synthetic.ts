@@ -12571,22 +12571,24 @@ export const SYNTHETIC: SynthSpec[] = [
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
   //      which falls into a `str; b ret` the third arm also enters, apart from the loop's own exit
-  //      store. structure.ts `earlyReturnArm` owns a block only when the arm's entry dominates it or
-  //      when the block is effectful and entered by arms only, so no arm owns the pure tail: it lands
-  //      after the loop, and hazards.ts `loopEscapeHazard` fires ("do-while condition or a post-loop
-  //      value reads a pre-update loop variable"). Instrument-pinned; ablated, the real function lifts
-  //      at 45/117 and the row at 46/114. The row is the real function minus its `continue`: every
+  //      store. structure.ts `earlyReturnArm` owned a block only when the arm's entry dominates it or
+  //      when the block was effectful and entered by arms only, so no arm owned the pure tail: it
+  //      landed after the loop, and hazards.ts `loopEscapeHazard` fired ("do-while condition or a
+  //      post-loop value reads a pre-update loop variable"). The arms now own a pure block only they
+  //      enter, and the row lifts at 46/114 (the real function lifted at 45/117 under the same change,
+  //      ablated). The row is the real function minus its `continue`: every
   //      smaller spelling lets the exit and return stores share a register and lifts as break arms —
   //      sretpuretail_exit is one (control). mwcc_242_81 returns the struct in r3 and lifts both
   //      (controls); ido7.1 (`swl`) and gcc2.7.2kmc/gcc2.7.2 (sret frame as sp data) decline first, off.
   //  17. retpost_tail / retpost_notail (sub_0801D6B0's set-aside below, generalised). A `return` inside
   //      a loop whose effectful tail (`*out = r;`) post-loop code ALSO enters: agbcc cross-jumps the
   //      two `*out = r` into the code before the return label (jump.c:1970), and gcc2.7.2kmc and
-  //      gcc2.7.2 do the same in the `jr ra` delay slot. `earlyReturnArm` refuses an effectful tail a
-  //      non-body path enters, so `foreverShape` finds no exit: "unrecovered back-edge".
-  //      Instrument-pinned on agbcc and gcc2.7.2. The source is goto-free, so writing the tail in each
-  //      arm is a buildable fix. ido7.1 and mwcc_242_81 keep the tails apart and lift (controls);
-  //      retpost_notail, with no post-loop effect before the shared store, lifts on all five.
+  //      gcc2.7.2 do the same in the `jr ra` delay slot. `earlyReturnArm` refused an effectful tail a
+  //      non-body path enters, so `foreverShape` found no exit: "unrecovered back-edge". It now writes
+  //      a return tail in the arm when the loop's exit path reaches it after code of its own
+  //      (`gMiss = 1`, which no `break` can skip): agbcc MATCHes, gcc2.7.2kmc and gcc2.7.2 lift at
+  //      10/25. ido7.1 and mwcc_242_81 keep the tails apart and lift (controls); retpost_notail, with
+  //      no post-loop effect before the shared store, lifts on all five.
   //  18. jt_xjdef / jt_xjcase, with jt_xjdef_ctl / jt_xjcase_ctl (EntityCreate, sub_08042E64; one cause,
   //      instrumented on both). TWO arms enter one sibling arm: arms whose source ends in the same
   //      `X; break;` as another are cross-jumped after reload (toplev.c:3141-3145 `jump_optimize(…,
