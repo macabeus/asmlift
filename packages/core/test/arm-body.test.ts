@@ -66,6 +66,15 @@ describe('the argument words a straight-line ARM body reads', () => {
   ])('%s gives no bound', (_, word) => {
     expect(armArgumentWords([0xe3a00001, word, BX_LR])).toBeUndefined();
   });
+  // r0 is the return register: a `bx lr` nothing wrote r0 for returns the caller's first argument
+  // (`void *id(void *p) { gN++; return p; }`), unless the callee is declared to return nothing
+  test('a return of r0 unwritten reads the first argument word', () => {
+    const id = [0xe59f1008, 0xe5912000, 0xe2822001, 0xe5812000, BX_LR]; // ldr r1, [pc, #8]; ldr r2, [r1]; add; str
+    expect(armArgumentWords([BX_LR])).toBe(1);
+    expect(armArgumentWords(id)).toBe(1);
+    expect(armArgumentWords(id, false)).toBe(0);
+    expect(armArgumentWords(GET_RANDOM_VALUE, false)).toBe(0);
+  });
   test('a body with no bx lr gives no bound', () => {
     expect(armArgumentWords(GET_RANDOM_VALUE.slice(0, -1))).toBeUndefined();
   });

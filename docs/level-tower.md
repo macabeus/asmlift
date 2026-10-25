@@ -867,7 +867,12 @@ lifts `rnd()`. The question is about the WRITE, not the value: `g4(a, b, c, d); 
 copies a..d back from their homes for `un`, values `g4` read first, and those copies stay arguments.
 The bound counts the body's entry parameters, so it is none where that count is not one per argument
 word: a floating-point parameter (o32's `$f12` double covers a0 and a1), or a struct return handed
-back through a hidden pointer. A gap starting there stops the count below it instead of refusing. The jump-table
+back through a hidden pointer. Nor is a lift holding an `opaque` op any bound: which registers an
+unmodelled instruction reads is the decode's guess, and PowerPC `mtmsr r3` and MIPS `mtc0 a0, …`
+read the argument the decode took for written. Where the target returns in its first argument
+register (ARM r0, PowerPC r3), a return no call-free path wrote that register for hands back the
+caller's first argument, so it counts that word as read: `void *id(void *p) { return p; }` is a lone
+`blr`, which no instruction reads. A gap starting there stops the count below it instead of refusing. The jump-table
 dispatch gate (`refuseDispatchUnlockedPassThrough`) excuses a register there. A gap below the bound
 refuses as ever, whatever lies above it: the callee may read that register, and it holds the
 function's own incoming value or nothing. In `gp = 3; gq = rd1(a)` the store's 3 sits in r1 above
@@ -892,8 +897,8 @@ cli elf-bodies.ts):
   they are. They are not lifted: a straight-line scan (frontend/arm-body.ts) counts the argument
   registers r0-r3 the body reads before writing them. It answers nothing on a conditional
   instruction, any branch or call or other pc write but the final `bx lr`, any lr write, any sp
-  use, and any instruction it does not model. It answers only on a target whose `argRegs` are
-  the registers it counts.
+  use, and any instruction it does not model. The final `bx lr` reads r0 where nothing wrote it,
+  as a lifted return does. It answers only on a target whose `argRegs` are the registers it counts.
 
 That is how kleod's `thunk_GetRandomValue`, a veneer to an ARM body that reads none of its
 arguments, drops the leftover values a guess handed it (`thunk_GetRandomValue(30, v7, &gEntityInfo,

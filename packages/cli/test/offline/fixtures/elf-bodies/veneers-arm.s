@@ -22,6 +22,7 @@
 	veneer	thunk_call, call_arm
 	.weak	thunk_wk
 	veneer	thunk_wk, rnd_arm
+	veneer	thunk_id, id_arm
 
 	.align	2, 0
 	.globl	plain
@@ -83,6 +84,16 @@ cond_arm:
 call_arm:
 	mov	r0, #0
 	bl	rnd_arm
+	bx	lr
+
+	.globl	id_arm
+	.type	id_arm, %function
+id_arm:
+	@ void *id(void *p) { gN++; return p; }: r0 is returned as the caller left it
+	ldr	r1, .Lcount
+	ldr	r2, [r1]
+	add	r2, r2, #1
+	str	r2, [r1]
 	bx	lr
 
 	.globl	last

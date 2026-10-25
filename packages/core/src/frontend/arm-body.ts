@@ -16,8 +16,11 @@
 //   - any instruction it does not model (coprocessor, swi, status register moves, swap, long
 //     multiply, the halfword forms ARMv4T leaves undefined), and running out of words before `bx lr`.
 // What it answers is the number of argument words read: one past the highest of r0-r3 that some
-// instruction reads before any instruction writes it. That is an UPPER bound on what the body
-// reads of its arguments, as the callee-body bound is.
+// instruction reads before any instruction writes it, and the final `bx lr` reads r0 where nothing
+// wrote it, since r0 is the return register and holds the caller's first argument there (`void
+// *id(void *p) { return p; }` is a lone `bx lr`), unless the callee is declared to return nothing.
+// That is an UPPER bound on what the body reads of its arguments, as the callee-body bound is.
+// KNOWN GAP: a return in r0:r1 that nothing declares counts r0 only.
 
 /** The registers the scan counts argument words in, in order: the A32 procedure call standard's. */
 export const ARM_ARGUMENT_REGISTERS: readonly string[] = ['r0', 'r1', 'r2', 'r3'];
@@ -33,8 +36,9 @@ export function scansArgumentsOf(target: { readonly argRegs: readonly string[] }
 }
 
 /** The argument words a straight-line ARM body reads at most, or undefined (see the header). `words`
- *  are its instruction words from the entry, in order. */
-export function armArgumentWords(words: readonly number[]): number | undefined {
+ *  are its instruction words from the entry, in order; `returnsValue` is false only where the
+ *  callee is declared to return nothing, so that its `bx lr` reads no r0. */
+export function armArgumentWords(words: readonly number[], returnsValue = true): number | undefined {
   const written = new Set<number>();
   let reads = 0;
   for (const w of words) {
@@ -42,7 +46,7 @@ export function armArgumentWords(words: readonly number[]): number | undefined {
       return undefined;
     }
     if (w >>> 0 === 0xe12fff1e) {
-      return reads; // bx lr
+      return returnsValue && !written.has(0) ? Math.max(reads, 1) : reads; // bx lr, which returns r0
     }
     const effect = decode(w >>> 0);
     if (effect === undefined) {

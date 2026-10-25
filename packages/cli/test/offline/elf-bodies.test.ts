@@ -154,8 +154,9 @@ describe('CLI: a guessed callee absent from the input is bounded by its body in 
 //   arm-none-eabi-ld -T arm.ld -e thunk_rnd -o veneers-arm.elf veneers-arm.o
 // Each thunk_* is kleod's veneer shape, size 0 and ending at the `$a` mapping symbol of its `b`:
 // thunk_rnd enters kleod's GetRandomValue body (reads no argument), thunk_rd1 one reading r0,
-// thunk_br/_cond/_call one that branches, executes conditionally or calls; thunk_wk is weak and
-// `plain` is a Thumb function that is no veneer. No objdump is run on this path.
+// thunk_br/_cond/_call one that branches, executes conditionally or calls, thunk_id one that returns
+// r0 as the caller left it; thunk_wk is weak and `plain` is a Thumb function that is no veneer. No
+// objdump is run on this path.
 describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by the ARM body it enters', () => {
   const ARM_ELF = readFileSync(fixture('veneers-arm.elf'));
   const project = (elf: boolean, asm: string) => {
@@ -175,14 +176,21 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     const read = calleeBodiesFromElf(
       'x.elf',
       ARM_ELF,
-      ['thunk_rnd', 'thunk_rd1', 'thunk_br', 'thunk_cond', 'thunk_call', 'thunk_wk', 'plain', 'last'],
+      ['thunk_rnd', 'thunk_rd1', 'thunk_br', 'thunk_cond', 'thunk_call', 'thunk_id', 'thunk_wk', 'plain', 'last'],
       TOOLCHAIN_TARGETS.agbcc.description,
       () => {
         throw new Error('no objdump on the ARM path');
       },
     );
     // the weak veneer, a Thumb function that is none, and an ARM function called directly give none
-    expect(Object.keys(read.bodies)).toEqual(['thunk_rnd', 'thunk_rd1', 'thunk_br', 'thunk_cond', 'thunk_call']);
+    expect(Object.keys(read.bodies)).toEqual([
+      'thunk_rnd',
+      'thunk_rd1',
+      'thunk_br',
+      'thunk_cond',
+      'thunk_call',
+      'thunk_id',
+    ]);
     expect(read.bodies.thunk_rd1).toEqual({ kind: 'arm', words: [0xe2800001, 0xe12fff1e] });
   });
   // `extern int gp; f() { gp = 3; g(); }`: the store leaves its 3 in r0 and gp's address in r1
@@ -202,6 +210,8 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     ['thunk_br', 'return thunk_br(3, &gp);'],
     ['thunk_cond', 'return thunk_cond(3, &gp);'],
     ['thunk_call', 'return thunk_call(3, &gp);'],
+    // returns r0 unwritten: the store's 3 is the argument it hands back
+    ['thunk_id', 'return thunk_id(3);'],
     ['thunk_wk', 'return thunk_wk(3, &gp);'],
     ['plain', 'return plain(3, &gp);'],
   ])('%s', async (callee, withElf) => {

@@ -228,6 +228,58 @@ describe('the argument words a callee in the same input reads at most', () => {
   );
 });
 
+// A RETURN READS THE RETURN REGISTER: where it is the first argument register (r3, r0), a return
+// that no call-free path wrote it for hands back the caller's first argument, though no instruction
+// reads it (mp4's `void *hwTransAddr(void *p) { return p; }` is a lone `blr`). On MIPS the return is
+// v0, which no argument is in.
+describe('a return the body left the return register untouched for', () => {
+  const ppcRet =
+    '00000000 <idf>:\n   0:\tblr\n' +
+    '00000004 <vd>:\n   4:\tli      r4,7\n   8:\tblr\n' +
+    '0000000c <cnd>:\n   c:\tcmpwi   r4,0\n  10:\tbnelr\n  14:\tli      r3,5\n  18:\tblr\n';
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: counts the first argument word as read', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    expect(read(boundsOf(ppcRet, t), ['idf', 'vd', 'cnd', 'two'])).toEqual({ idf: 1, vd: 1, cnd: 2, two: 'none' });
+    // a call destroys r3 on every path to the return: that return hands back none of the arguments
+    expect(read(boundsOf(ppc, t), ['two'])).toEqual({ two: 0 });
+    // declared void, it returns nothing
+    const declared = { idf: { returnsVoid: true }, vd: { returnsVoid: true } };
+    expect(read(boundsOf(ppcRet, t, undefined, declared), ['idf', 'vd'])).toEqual({ idf: 0, vd: 0 });
+  });
+  test('agbcc: the same, inline and handed in', () => {
+    const t = TOOLCHAIN_TARGETS.agbcc.description;
+    const id =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nid:\n\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tadd\tr2, r2, #1\n' +
+      '\tstr\tr2, [r1]\n\tbx\tlr\n.L3:\n\t.word\tgN\n';
+    const caller = '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tbx\tlr\n';
+    expect(boundsOf(id, t)('id')).toBe(1);
+    expect(boundsOf(caller, t, undefined, {}, { id: { kind: 'listing', text: id } })('id')).toBe(1);
+  });
+});
+
+// AN UNMODELLED INSTRUCTION PROVES NOTHING: its `opaque` op names registers, and which of them it reads
+// is the decode's guess. PowerPC `mtmsr r3` and MIPS `mtc0 a0, …` read the argument; the decode took
+// it for written, and the lift counted no parameter (mp4 PPCMtmsr, mp3 __osSetSR). A linked image's
+// objdump names the CP0 register (`c0_sr`) where an object's prints `$12`: neither answers.
+describe('a callee whose lift holds an opaque op', () => {
+  test.each(['mwcc_242_81', 'mwcc_247_107'] as const)('%s: mtmsr gives no bound', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    const text = '00000000 <mtm>:\n   0:\tmtmsr   r3\n   4:\tblr\n';
+    expect(boundsOf(text, t)('mtm')).toBeUndefined();
+    expect(boundsOf('00000000 <f>:\n   0:\tblr\n', t, undefined, {}, { mtm: { kind: 'listing', text } })('mtm')).toBe(
+      undefined,
+    );
+  });
+  test.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s: mtc0 gives no bound, in either spelling', (id) => {
+    const t = TOOLCHAIN_TARGETS[id].description;
+    const head = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    for (const cp0 of ['$12', 'c0_sr']) {
+      const text = `${head}00000000 <setsr>:\n   0:\tmtc0\ta0,${cp0}\n   4:\tnop\n   8:\tjr\tra\n   c:\tnop\n`;
+      expect(boundsOf(text, t)('setsr')).toBeUndefined();
+    }
+  });
+});
+
 // A BODY THE INPUT DOES NOT HOLD (`CalleeBodies`), handed in by a driver that found it elsewhere: read
 // exactly as the same text placed in the input, and only where the input defines no label of the name
 describe('the argument words a callee body handed in from outside the input reads at most', () => {

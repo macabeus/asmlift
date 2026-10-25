@@ -21,6 +21,14 @@
 // the callee's arguments, and a read of it would only make the lift refuse (`push {lr}; mov r0-r3,
 // #0; bl g; bl h` would lose its bound so, though it reads none).
 //
+// A RETURN READS THE RETURN REGISTER. Where the target returns in its first argument register (ARM
+// r0, PowerPC r3), a return that no path wrote that register for hands back the caller's first
+// argument: `void *id(void *p) { return p; }` is a lone `blr` and `bx lr`, which no instruction reads,
+// and its lift returns nothing and counts no parameter. So a return the lift left bare, on a path
+// from the entry that makes no call (a call destroys the register), counts the first argument word
+// as read, unless the callee's entry declares a void return. KNOWN GAP: a return in a register PAIR
+// (r0:r1, r3:r4) that nothing declares is counted for its first register only.
+//
 // It answers nothing where:
 //   - the callee is the function being lifted (its own declaration is a different question);
 //   - the input defines no label of that name: a `name:` line, an objdump `<name>:` header or a
@@ -28,6 +36,10 @@
 //     lift alone does not say the callee is here);
 //   - the input marks the callee `.weak`, which another definition may replace at link time;
 //   - the callee does not lift, inside or outside the input (a lift that fails proves nothing);
+//   - the callee's lift holds an `opaque` op: an instruction no frontend models is decoded only for
+//     which registers it names, and which of them it reads is a guess (PowerPC `mtmsr r3` and MIPS
+//     `mtc0 a0, c0_sr` each read the argument the decode takes for written), so a lift holding one
+//     proves no more than one that fails;
 //   - the callee makes a call through a register, whose arity nothing here can force;
 //   - the callee's entry declares a struct or union return: one handed back through memory takes a
 //     hidden pointer the lift reads as no entry parameter, so its count is one argument word short
@@ -52,7 +64,7 @@
 // KNOWN GAP: an objdump listing (MIPS, PowerPC) shows no symbol binding, so a weak definition there
 // is read as the one the link keeps. A weak copy of one inline definition is that definition; a weak
 // default some other object overrides is not, and no row here has one.
-import type { Fn } from '../ir/core';
+import { type Block, type Fn, successorsOf } from '../ir/core';
 import {
   type FnProto,
   type Prototypes,
@@ -60,6 +72,7 @@ import {
   declaredCallArgs,
   declaresAggregateReturn,
   declaresParams,
+  declaresVoidReturn,
 } from '../proto';
 import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
@@ -165,7 +178,12 @@ function bodyBound(
   }
   const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
   if (body?.kind === 'arm') {
-    return scansArgumentsOf(target) ? armArgumentWords(body.words) : undefined;
+    return scansArgumentsOf(target)
+      ? armArgumentWords(
+          body.words,
+          !declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined),
+        )
+      : undefined;
   }
   if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
     return undefined;
@@ -197,6 +215,9 @@ function liftedBound(
     const guessed = new Set<string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
+        if (op.opcode === 'opaque') {
+          return undefined;
+        }
         if (op.opcode !== 'call') {
           continue;
         }
@@ -211,7 +232,12 @@ function liftedBound(
     }
     if (guessed.size === 0) {
       const { params } = fn.blocks[0];
-      return params.some((p) => p.type.kind === 'float') ? undefined : params.length;
+      if (params.some((p) => p.type.kind === 'float')) {
+        return undefined;
+      }
+      const passesFirst =
+        target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
+      return Math.max(params.length, passesFirst ? 1 : 0);
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
     // too, so the call is taken at the incoming values rather than at what the guess counted
@@ -220,4 +246,20 @@ function liftedBound(
       table[g] = returnOnly(Object.hasOwn(table, g) ? table[g] : undefined);
     }
   }
+}
+
+/** Whether some return of `fn` hands back nothing the lift names (a bare `ret`) on a path from the
+ *  entry that makes no call: there the return register still holds what the caller left in it. */
+function returnsUntouched(fn: Fn): boolean {
+  const callFree = new Set<Block>();
+  const work = fn.blocks.length === 0 ? [] : [fn.blocks[0]];
+  while (work.length > 0) {
+    const b = work.pop()!;
+    if (callFree.has(b) || b.ops.some((o) => o.opcode === 'call')) {
+      continue;
+    }
+    callFree.add(b);
+    work.push(...successorsOf(b));
+  }
+  return [...callFree].some((b) => b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0));
 }
