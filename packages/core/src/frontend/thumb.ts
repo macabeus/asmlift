@@ -2844,9 +2844,7 @@ interface LrState {
  *
  *  Blocks no path from the entry reaches are not asked: they never run. */
 function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
-  const { asmBlocks, preds, entryReachable } = cfg;
-  const succs: number[][] = asmBlocks.map(() => []);
-  preds.forEach((ps, b) => ps.forEach((p) => succs[p].push(b)));
+  const { asmBlocks, succs, entryReachable } = cfg;
   const LR = 'r14';
   const join = (a: LrState, b: LrState): LrState => {
     const depth = a.depth !== null && a.depth === b.depth ? a.depth : null;
@@ -3234,6 +3232,8 @@ interface ThumbCfg {
   readonly labelIndex: ReadonlyMap<string, number>;
   /** Each block's predecessors, one entry per edge. */
   readonly preds: number[][];
+  /** Each block's successors, `preds` turned around. */
+  readonly succs: readonly (readonly number[])[];
   readonly entryReachable: ReadonlySet<number>;
 }
 
@@ -3276,7 +3276,9 @@ function thumbCfg(name: string, blocks: readonly AsmBlock[], tables: ReadonlyMap
     }
     return live;
   })();
-  return { asmBlocks, labelIndex, preds, entryReachable };
+  const succs: number[][] = asmBlocks.map(() => []);
+  preds.forEach((ps, at) => ps.forEach((p) => succs[p].push(at)));
+  return { asmBlocks, labelIndex, preds, succs, entryReachable };
 }
 
 // --- CFG (successors per block) as label lists; fallthrough + branch targets (via classifyXfer) ---
@@ -3415,7 +3417,7 @@ function calleeRegister(ins: Instr, target: TargetDescription): string | null | 
 function measureThumbFrame({
   name,
   target,
-  cfg: { asmBlocks, preds, entryReachable },
+  cfg: { asmBlocks, preds, succs, entryReachable },
   calls,
   oneObject,
   own,
@@ -3792,8 +3794,6 @@ function measureThumbFrame({
   // it calls through (`calleeRegister`). Any other register it clobbers is dead past it, and a
   // callee-saved one still holds the copy. Read as `readsBeforeWrite` reads a call for the save
   // analysis (every register but r12), kleod sub_08016EEC keeps two copies live, in r3 and in r6.
-  const narrowSuccs: number[][] = asmBlocks.map(() => []);
-  preds.forEach((ps, at) => ps.forEach((p) => narrowSuccs[p].push(at)));
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
@@ -3804,7 +3804,7 @@ function measureThumbFrame({
     localArea,
     target.capabilities.endianness === 'little',
     (b, from, r) =>
-      readsBeforeWrite(asmBlocks, narrowSuccs, b, from, r, { reads: narrowCallReads, clobbers: calls.callClobbers }) ===
+      readsBeforeWrite(asmBlocks, succs, b, from, r, { reads: narrowCallReads, clobbers: calls.callClobbers }) ===
       false,
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
@@ -4712,6 +4712,7 @@ const ALL_REGS = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
+  succs: readonly (readonly number[])[],
 ): {
   saved: ReadonlySet<string>;
   misSaved: ReadonlySet<string>;
@@ -4793,8 +4794,6 @@ function bodySavedRegs(
   const leaked = new Map<string, Instr>();
   const copied = new Map<string, Instr>();
   const returned = new Map<string, Instr>();
-  const succs: number[][] = blocks.map(() => []);
-  preds.forEach((ps, at) => ps.forEach((p) => succs[p].push(at)));
   const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
@@ -5591,7 +5590,7 @@ function thumbFillOf(
   // a two-parameter one.
   // A prologue save that some path uses past its restore, or carries to a return unrestored, is
   // `misSaved` and no save: the prologue's reading of it sees only the `push`.
-  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);
+  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds, cfg.succs);
   const liveIns = registerLiveIns(
     target,
     new Set([...frame.savedRegs, ...body.saved].filter((r) => !body.misSaved.has(r))),
