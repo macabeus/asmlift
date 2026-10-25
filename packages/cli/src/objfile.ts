@@ -149,3 +149,24 @@ export function asmDataForObject(
   const dump = overObject(obj, sym, (path) => run(choice, ['-s', '-r', '-t'], path, 'asmdata'));
   return parseAsmData(dump, dump, dump, true);
 }
+
+/** `objdump -d` text for `[start, stop)` of a LINKED image (`tools.asmlift.elf`), in the target
+ *  family's disassembler and flags: the text the frontend reads, as for an object. A linked image
+ *  carries no relocations, so nothing in the text a relocation would name is named (cli
+ *  elf-bodies.ts). */
+export function disasmRange(
+  elf: string,
+  target: TargetDescription,
+  start: number,
+  stop: number,
+  objdumpBin?: string,
+): string {
+  const choice = objdumpFor(target, objdumpBin);
+  const hex = (n: number) => `0x${n.toString(16)}`;
+  return run(
+    choice,
+    [...choice.disasmFlags, `--start-address=${hex(start)}`, `--stop-address=${hex(stop)}`],
+    elf,
+    'disassemble a callee',
+  );
+}

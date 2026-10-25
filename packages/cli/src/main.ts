@@ -16,6 +16,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
+import { type CalleeBodies, definesLabel } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
@@ -35,12 +36,13 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { guessedArityNote } from './callees';
+import { guessedArityCallees, guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
+import { type RangeDisasm, calleeBodiesFromElf } from './elf-bodies';
 import { type FlagsInput, resolveFlags } from './flags';
 import { moduleElfPath } from './module-elf';
 import {
@@ -48,6 +50,7 @@ import {
   SymbolRequiredError,
   asmDataForObject,
   disasmObject,
+  disasmRange,
   isElfObject,
 } from './objfile';
 import { PhaseClock } from './phase';
@@ -182,6 +185,9 @@ Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
 export interface ObjInput {
   disasm: (obj: string, target: TargetDescription, sym?: string) => string;
   asmData: (obj: string, target: TargetDescription, sym?: string) => AsmData | undefined;
+  /** a range of `tools.asmlift.elf`, for a guessed callee's body (elf-bodies.ts); absent ⇒ the
+   *  target's objdump */
+  disasmRange?: RangeDisasm;
 }
 
 export interface CliResult {
@@ -765,6 +771,26 @@ export async function runCli(
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
   const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
+  // …and the bodies of those the input does not define, read off the linked ELF (elf-bodies.ts),
+  // which bound what each can read of its arguments as an inline body would
+  let calleeBodies: CalleeBodies | undefined;
+  if (toolCfg?.elf && moduleFlag === undefined) {
+    const elfPath = resolve(configDir!, toolCfg.elf);
+    const outside = guessedArityCallees(asm, name, unitTarget, prototypes, symbols, asmData?.relocs).filter(
+      (c) => !definesLabel(asm, c),
+    );
+    if (outside.length > 0) {
+      const read = calleeBodiesFromElf(
+        elfPath,
+        readFileSync(elfPath),
+        outside,
+        unitTarget,
+        objInput?.disasmRange ?? ((elf, t, start, stop) => disasmRange(elf, t, start, stop, toolCfg?.objdump)),
+      );
+      warn += read.warnings.join('');
+      calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
+    }
+  }
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>
     notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');
@@ -855,6 +881,7 @@ export async function runCli(
         symbols,
         contextGlobals,
         ...(ownContextProto ? { ownContextProto } : {}),
+        ...(calleeBodies ? { calleeBodies } : {}),
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -887,7 +914,14 @@ export async function runCli(
           protoNote:
             protoNote +
             ownArityNote(
-              ownArityNotesOf(name, asm, unitTarget, { prototypes, asmData, symbols, contextGlobals, ownContextProto }),
+              ownArityNotesOf(name, asm, unitTarget, {
+                prototypes,
+                asmData,
+                symbols,
+                contextGlobals,
+                ownContextProto,
+                calleeBodies,
+              }),
             ),
         }),
       };
@@ -906,6 +940,7 @@ export async function runCli(
       symbols,
       contextGlobals,
       ...(ownContextProto ? { ownContextProto } : {}),
+      ...(calleeBodies ? { calleeBodies } : {}),
     });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's
