@@ -16,6 +16,8 @@
 // the loop declines`); a tail entered
 // straight from before the loop, past the exit; and a tail holding a cycle. Owned or not, the tail
 // stays code run after the loop for a `do-while`'s escape check, since the exit path runs it there.
+// And a copy is the reading of last resort: where another exit lets every edge `break` to the tail,
+// that reading wins (`a rotated loop whose two exits can both \`break\` to the tail copies nothing`).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -280,6 +282,43 @@ describe('the exit-path return tail, against its own IR', () => {
     );
     expect(() => judged(cyclic)).toThrow(/cannot structure/);
   });
+});
+
+/** agbcc's rotated `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail();`: the `break`
+ *  arm's `bit` test is the latch, and the count test sits mid-body (`synthetic` shape of sa3's
+ *  CreateEntity_Suction and pokeemerald's Cmd_jumpifarrayequal). Taking the `x = i` arm for the exit,
+ *  the count test's edge could copy `tail` past it; the reading with `tail` for the exit spells both
+ *  edges as `break` and needs no copy, and a copy is the reading of last resort. */
+const ROTATED_BREAK_IR = `fn rotbreak {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: s32 = const {value=7}
+  %7: u32 = icmp_slt %6, %5
+  cond_br %7, ^bb5(%1), ^bb2()
+^bb2():
+  %8: s32 = call %5 {target="bit"}
+  %9: s32 = const {value=0}
+  %10: u32 = icmp_eq %8, %9
+  cond_br %10, ^bb1(%5), ^bb4()
+^bb4():
+  store %0, %5 {off=0, width=4}
+  br ^bb5(%5)
+^bb5(%11: s32):
+  %12: s32 = call %11 {target="tail"}
+  ret %12
+}`;
+
+test('a rotated loop whose two exits can both `break` to the tail copies nothing', () => {
+  const { src, agreement, shipped } = judged(ROTATED_BREAK_IR);
+  expect(src.match(/break;/g)).toHaveLength(2);
+  expect(src.match(/tail\(/g)).toHaveLength(1);
+  expect(src).toMatch(/\}\n\s+return tail\(a1\);\n\}/);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** A `do-while` (the header calls, so no `while` reading) whose shared tail reads `i + i`, a value the

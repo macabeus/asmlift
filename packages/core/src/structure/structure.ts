@@ -2465,8 +2465,12 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 // a copy spells the arm: the arm writes the tail and its `return`, and the exit path keeps the copy
 // written after the loop. Sound for the reason the policy is: a path that took the arm reaches the
 // block only through the arm's copy, which ends in its `return`, and the exit path never ran the arm,
-// so each path runs one copy once. Admitted when every one of these holds, each a refusal with a
-// witness in `loop-exit-return-tail.test.ts` or `loop-break-exit.test.ts`:
+// so each path runs one copy once. A copy is the reading of last resort: the caller asks for it
+// (`copyExitTail`) only once every reading of the loop has failed without it, since another exit can
+// let the arm `break` to the tail (agbcc's rotated `if (bit(i)) { x = i; break; }`, where taking the
+// `x = i` arm for the exit would copy the tail into the count test's edge). Admitted when every one
+// of these holds, each a refusal with a witness in `loop-exit-return-tail.test.ts` or
+// `loop-break-exit.test.ts`:
 //   - the exit path reaches the block after an effect the arm does not run. Without one, a `break` to
 //     the block spells the arm and the tail stays single, as the asm holds it (`a tail the loop's own
 //     exit also runs is written once, after the loop`);
@@ -2504,6 +2508,7 @@ function earlyReturnArm(
   body: Set<Block>,
   exit: Block,
   latches: readonly Block[],
+  copyExitTail: boolean,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -2521,7 +2526,7 @@ function earlyReturnArm(
   let fromExit: Set<Block> | undefined;
   let fromTo: Set<Block> | undefined;
   const exitIsTestOut =
-    !latches.includes(from) && (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
+    copyExitTail && !latches.includes(from) && (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
   const exitTail = (bb: Block): boolean => {
     if (!exitIsTestOut || bb === exit || offExitPath(bb) || [bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y))) {
       return false;
@@ -3151,15 +3156,26 @@ export function structure(
   // return 3;` twice, not a `break` each and one `return 3`). The break arm copies nothing past
   // `exit` — the duplication policy written at `earlyReturnArm`.
   // `codeArms` is the classifier's own admission of a code-running break; never out of an inner body.
-  const exitArmOf = (nl: NaturalLoop, e: { from: Block; to: Block }, exit: Block, codeArms: boolean) => {
+  // `copyExitTail` lets the arm copy a tail the exit path also runs (`exitTail`, at `earlyReturnArm`):
+  // a copy is the reading of last resort, asked for only once every reading without it has failed.
+  const exitArmOf = (
+    nl: NaturalLoop,
+    e: { from: Block; to: Block },
+    exit: Block,
+    codeArms: boolean,
+    copyExitTail: boolean,
+  ) => {
     const region =
       codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
     const owned =
-      region === null ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches) : null;
+      region === null
+        ? earlyReturnArm({ dom, reachFrom, preds }, e.from, e.to, nl.body, exit, nl.latches, copyExitTail)
+        : null;
     return { region, owned };
   };
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
+  const copyingReadings = new Map<Block, () => void>();
   const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
@@ -3252,55 +3268,68 @@ export function structure(
     // object. Where that exit ends in a return, the edge is also an arm or a ret target, and emission
     // copies the tail where the break spelling refuses. The arms and breaks are kept: emission needs
     // to know which edges out of the body end an iteration rather than continue it.
-    const arms: LoopArm[] = [];
-    const breaks = new Set<Block>();
-    const breakArms: BreakArm[] = [];
-    let singleExit = true;
-    for (const e of nl.exitEdges) {
-      if (e.from === exitFrom && e.to === exit) {
-        continue;
+    // An arm that copies a tail the exit path also runs (`exitTail`) is asked for only when the reading
+    // fails without one, and a reading that needs it waits (`copyingReadings`) until `while (1)` has
+    // tried every exit without it (below).
+    const readArms = (copyExitTail: boolean) => {
+      const arms: LoopArm[] = [];
+      const breaks = new Set<Block>();
+      const breakArms: BreakArm[] = [];
+      for (const e of nl.exitEdges) {
+        if (e.from === exitFrom && e.to === exit) {
+          continue;
+        }
+        // a `while` takes a code-running break only into an exit that takes no copies: the header's exit
+        // copies are what `breakRule` shares with a break, and an arm's edge into the exit is not one
+        const { region, owned } = exitArmOf(nl, e, exit, kind === 'while' && exit.params.length === 0, copyExitTail);
+        if (owned) {
+          arms.push({ from: e.from, to: e.to, owned });
+        }
+        if (kind === 'while' && e.to === exit && !innerBodyHas(nl, e.from)) {
+          breaks.add(e.from);
+        } else if (region !== null) {
+          breaks.add(e.from);
+          breakArms.push({ from: e.from, to: e.to, region });
+        } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
+          return null;
+        }
       }
-      // a `while` takes a code-running break only into an exit that takes no copies: the header's exit
-      // copies are what `breakRule` shares with a break, and an arm's edge into the exit is not one
-      const { region, owned } = exitArmOf(nl, e, exit, kind === 'while' && exit.params.length === 0);
-      if (owned) {
-        arms.push({ from: e.from, to: e.to, owned });
-      }
-      if (kind === 'while' && e.to === exit && !innerBodyHas(nl, e.from)) {
-        breaks.add(e.from);
-      } else if (region !== null) {
-        breaks.add(e.from);
-        breakArms.push({ from: e.from, to: e.to, region });
-      } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
-        singleExit = false;
-        break;
-      }
-    }
-    if (!singleExit) {
+      return { arms, breaks, breakArms };
+    };
+    const plain = readArms(false);
+    const read = plain ?? readArms(true);
+    if (read === null) {
       continue;
     }
+    const { arms, breaks, breakArms } = read;
 
-    if (kind === 'while') {
-      whileLoops.set(h, {
-        header: h,
-        bodyEntry: bodyEntry!,
-        exit,
-        latch,
-        forwardPreds: nl.forwardPreds,
-        body: nl.body,
-        arms,
-        breaks,
-        breakArms,
-      });
+    const commit =
+      kind === 'while'
+        ? () =>
+            whileLoops.set(h, {
+              header: h,
+              bodyEntry: bodyEntry!,
+              exit,
+              latch,
+              forwardPreds: nl.forwardPreds,
+              body: nl.body,
+              arms,
+              breaks,
+              breakArms,
+            })
+        : () =>
+            (guarded ? keptGuardDoWhiles : doWhileLoops).set(h, {
+              header: h,
+              latch,
+              exit,
+              forwardPreds: nl.forwardPreds,
+              body: nl.body,
+              arms,
+            });
+    if (plain === null && !guarded) {
+      copyingReadings.set(h, commit);
     } else {
-      (guarded ? keptGuardDoWhiles : doWhileLoops).set(h, {
-        header: h,
-        latch,
-        exit,
-        forwardPreds: nl.forwardPreds,
-        body: nl.body,
-        arms,
-      });
+      commit();
     }
   }
 
@@ -3315,7 +3344,7 @@ export function structure(
   // after a loop there and an early `return` inside the loop's span, so block order alone would take
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
-  const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
+  const foreverShape = (nl: NaturalLoop, copyExitTail: boolean): ForeverLoopInfo | null => {
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -3343,7 +3372,7 @@ export function structure(
           breaks.add(e.from);
           return !innerBodyHas(nl, e.from);
         }
-        const { region, owned } = exitArmOf(nl, e, exit, true);
+        const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
@@ -3371,12 +3400,24 @@ export function structure(
     }
     return null;
   };
+  // A copy of an exit-path tail (`exitTail`) is the reading of last resort: `while (1)` first tries
+  // every exit without one, then the `while` or `do-while` reading that needed one, then every exit
+  // with one. agbcc rotates `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail;` so the
+  // `break` arm leaves by the latch and the count test mid-body: taking the arm for the exit, the
+  // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
+  // the source's two `break`s and one `tail`.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
-    const shape =
-      !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl) ? foreverShape(nl) : null;
-    if (shape !== null) {
-      foreverLoops.set(h, shape);
+    const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
+    const shape = open ? foreverShape(nl, false) : null;
+    const copying = copyingReadings.get(h);
+    if (open && shape === null && copying !== undefined) {
+      copying();
+    } else {
+      const copied = shape ?? (open ? foreverShape(nl, true) : null);
+      if (copied !== null) {
+        foreverLoops.set(h, copied);
+      }
     }
   }
 
