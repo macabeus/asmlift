@@ -18,7 +18,7 @@ import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import { type CalleeBodies, definesLabel } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { type OnGap, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type OnGap, calleeBodyBoundsOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
@@ -769,10 +769,8 @@ export async function runCli(
 
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
-  // run did not use.
-  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs);
-  // …and the bodies of those the input does not define, read off the linked ELF (elf-bodies.ts),
-  // which bound what each can read of its arguments as an inline body would
+  // run did not use. The bodies of those the input does not define are read off the linked ELF
+  // (elf-bodies.ts), and bound what each can read of its arguments as an inline body would.
   let calleeBodies: CalleeBodies | undefined;
   if (toolCfg?.elf && moduleFlag === undefined) {
     const elfPath = resolve(configDir!, toolCfg.elf);
@@ -791,6 +789,25 @@ export async function runCli(
       calleeBodies = Object.keys(read.bodies).length === 0 ? undefined : read.bodies;
     }
   }
+  // what each of those bodies bounds, as the lift reads it, for the note
+  const bodyBound =
+    calleeBodies === undefined
+      ? undefined
+      : calleeBodyBoundsOf(name, asm, unitTarget, {
+          prototypes,
+          asmData,
+          symbols,
+          contextGlobals,
+          ownContextProto,
+          calleeBodies,
+        });
+  const bounded = new Map(
+    Object.keys(calleeBodies ?? {}).flatMap((c) => {
+      const words = bodyBound?.(c);
+      return words === undefined ? [] : [[c, words] as const];
+    }),
+  );
+  const protoNote = guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, bounded);
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>
     notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');

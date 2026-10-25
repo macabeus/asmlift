@@ -281,6 +281,34 @@ function runTower(
   };
 }
 
+/** What each callee's own body reads of its arguments at most (frontend/callee-body.ts), as a lift of
+ *  `name` under `opts` reads it: the same bound, from the same table, for a driver that reports it. */
+export function calleeBodyBoundsOf(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  opts: Pick<
+    DecompileOptions,
+    'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
+  >,
+): CalleeBodyBound {
+  const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
+  const prototypes = prototypesFromSymbols(opts.symbols, own.prototypes ?? {});
+  const table = splitOwnContext(prototypes, name, own.ownContextProto).prototypes ?? {};
+  return bodyBoundsIn(
+    name,
+    asm,
+    target,
+    prototypes,
+    own.ownContextProto,
+    table,
+    opts.asmData,
+    opts.symbols,
+    opts.contextGlobals,
+    opts.calleeBodies,
+  );
+}
+
 /** The `[own-arity]` notes (`DecompileResult.ownArityNotes`) of one lift under `opts`, for a caller
  *  whose result carries none — the ranked path, whose every candidate lifts as this one does. Empty
  *  where the lift fails: the run reports that failure itself. */

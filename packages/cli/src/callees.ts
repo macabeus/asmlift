@@ -173,7 +173,9 @@ export function guessedArityCallees(
   });
 }
 
-/** The one stderr line, or '' when every callee's arity was declared. */
+/** The stderr lines, or '' when every callee's arity was declared. A callee in `bounded` (what its
+ *  body outside the input reads at most, in argument words: main.ts reads it off the linked ELF) is
+ *  named on a line of its own: its arity is still guessed, but only within that bound. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -181,10 +183,22 @@ export function guessedArityNote(
   prototypes?: Prototypes,
   symbols?: SymbolMap,
   relocs?: readonly Reloc[],
+  bounded?: ReadonlyMap<string, number>,
 ): string {
-  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
-  return guessed.length === 0
-    ? ''
-    : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
-        `${guessed.join(', ')} — pass --proto '{"${guessed[0]}":{"params":N}}' if a guess is wrong\n`;
+  const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
+  const guessed = all.filter((n) => !bounded?.has(n));
+  const within = all.filter((n) => bounded?.has(n));
+  const remedy = (n: string) => `pass --proto '{"${n}":{"params":N}}' if a guess is wrong\n`;
+  return (
+    (guessed.length === 0
+      ? ''
+      : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
+        `${guessed.join(', ')} — ${remedy(guessed[0])}`) +
+    (within.length === 0
+      ? ''
+      : `asmlift: [proto] ${within.length} callee(s) have no declared arity, guessed from the argument registers ` +
+        'within what their bodies in tools.asmlift.elf read: ' +
+        `${within.map((n) => `${n} (at most ${bounded!.get(n)} argument word${bounded!.get(n) === 1 ? '' : 's'})`).join(', ')} — ` +
+        remedy(within[0]))
+  );
 }

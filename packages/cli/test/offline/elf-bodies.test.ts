@@ -193,6 +193,16 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     expect(await call(callee, true)).toBe(withElf);
     expect(await call(callee, false)).toBe(`return ${callee}(3, &gp);`);
   });
+  test('the [proto] note names a callee its ARM body bounds, and leaves the rest guessed', async () => {
+    const r = await runCli([project(true, stored('thunk_rnd') + stored('thunk_br').replace(/f:/, 'g:'))]);
+    expect(r.stderr).toContain(
+      'guessed from the argument registers within what their bodies in tools.asmlift.elf read: thunk_rnd (at most 0 argument words)',
+    );
+    const bare = await runCli([project(false, stored('thunk_rnd'))]);
+    expect(bare.stderr).toContain('guessed from the argument registers: thunk_rnd —');
+    const br = await runCli([project(true, stored('thunk_br'))]);
+    expect(br.stderr).toContain('guessed from the argument registers: thunk_br —');
+  });
   // `u8 thunk_rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = thunk_rnd(); … } }`
   // (synthetic:jt_rndst:agbcc with the callee behind a veneer, as kleod's thunk_GetRandomValue is):
   // case 0 leaves its store's 5 in r0 at the call, which the dispatch gate refuses to guess at
