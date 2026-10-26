@@ -134,7 +134,8 @@ export interface SsaBuilder {
    *  write (or after a call destroyed it), and that read's value is one `accept` takes. The question is
    *  about the write, not its value: a copy (`add r4, r0, #0`) reads `r0` and lowers to no op, so no
    *  op-level question sees that read, and it counts here. Only the frontend's own reads count
-   *  ({@link readVar}); a lookup this construction makes, or a call's argument read, is none. A path
+   *  ({@link readVar}); a lookup this construction makes, or a call's argument read
+   *  ({@link readGuessedArg}, which the call planner's own probes use too), is none. A path
    *  stops at a block that wrote `reg` or had a call destroy it, unread since: that write was not
    *  read. A path reaching the entry with nothing read, or a block not filled yet, answers no
    *  (frontend/call-plan.ts `leftover`). */

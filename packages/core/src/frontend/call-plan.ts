@@ -792,7 +792,8 @@ export function callDeclarations(
     if (target.compilerBehaviors.keepsUnusedReads === true || !ssa.writtenSinceCall(set, bi)) {
       return undefined;
     }
-    const v = ssa.readVar(set, bi);
+    // a lookup, not the frontend's read: `leftover` asks what instructions read (`readSinceWriteOnSomePath`)
+    const v = ssa.readGuessedArg(set, bi);
     const def = ssa.irBlocks[bi].ops.find((op) => op.results.includes(v));
     const sig = def === undefined ? undefined : (OPCODES[def.opcode as keyof typeof OPCODES] as OpSig | undefined);
     const readsRefuse = target.compilerBehaviors.discardedReadMayFillArgRegister !== false;
