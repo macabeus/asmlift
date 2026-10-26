@@ -86,7 +86,7 @@ interface ElfSymbol {
  *
  *  ONE RULE, TWO READERS: the CLI reads these bodies off `tools.asmlift.elf` (main.ts), and the
  *  benchmark harness hands the same subset of the bodies `bench vendor` froze (apps/benchmark
- *  cases/manifests.ts `vendoredCalleeBodies`). Spelled twice, a change to the guess would move what
+ *  cases/callee-bodies.ts `selectCalleeBodies`). Spelled twice, a change to the guess would move what
  *  `bench repro` prints and leave the published row where it was. */
 export function elfBodyCallees(
   asm: string,

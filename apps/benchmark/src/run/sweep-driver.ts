@@ -288,7 +288,7 @@ export const TREE_MODULES = [
 ] as const;
 
 /** How many parameters `rankOptionsFor` declares, in a tree this driver can sweep: this tree's own
- *  count, the one before it (`ELF_BODIES_RANK_OPTIONS_ARITY` less one: no ninth parameter, which
+ *  count, the one before it (`PRE_ELF_BODIES_RANK_OPTIONS_ARITY`: no ninth parameter, which
  *  ignores what it is handed), or the one before that (`LEGACY_RANK_OPTIONS_ARITY`).
  *
  *  THE ONE SIGNATURE CHECK, and a compensating control `sweep.ts`'s floor note asks for:
