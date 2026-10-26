@@ -515,6 +515,24 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
       /holds a value and r0 holds none/,
     );
   });
+  // `void f(int *a) { St *s = gets(); int i; for (i = 0; i < s->n; i++) if (s->list[i * 3] >= 61) {
+  // a[0] = 5; a[1] = 7; rd1(cb); return; } }`, compiled: agbcc copies gets' result to r1 (`add r1, r0,
+  // #0`) and the loop's loads read it there. The copy is a write this function made, read after,
+  // whatever value it copies, so past rd1's bound r1 is what the loop left: `rd1(&cb)`, as the source
+  test("a copy of an earlier call's result into another register is a write a read after makes a leftover", () => {
+    const f =
+      '\t.thumb_func\nf:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tbl\tgets\n\tadd\tr1, r0, #0\n\tmov\tr2, #0x0\n' +
+      '\tadd\tr0, r0, #0x5f\n\tldrb\tr0, [r0]\n\tcmp\tr2, r0\n\tbge\t.L6\n\tmov\tr3, #0x0\n.L10:\n' +
+      '\tldr\tr0, [r1, #0x10]\n\tadd\tr0, r3, r0\n\tldr\tr0, [r0]\n\tcmp\tr0, #0x3c\n\tble\t.L9\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [r4]\n\tmov\tr0, #0x7\n\tstr\tr0, [r4, #0x4]\n\tldr\tr0, .L13\n\tbl\trd1\n' +
+      '\tb\t.L6\n\t.align\t2, 0\n.L13:\n\t.word\tcb\n.L9:\n\tadd\tr3, r3, #0xc\n\tadd\tr2, r2, #0x1\n' +
+      '\tadd\tr0, r1, #0\n\tadd\tr0, r0, #0x5f\n\tldrb\tr0, [r0]\n\tcmp\tr2, r0\n\tblt\t.L10\n.L6:\n' +
+      '\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const rd1 = '\t.thumb_func\nrd1:\n\tldr\tr0, [r0]\n\tbx\tlr\n';
+    const protos: Prototypes = { gets: { params: [], returns: 's32' }, f: { params: 1, returnsVoid: true } };
+    const src = decompile('f', `${rd1}${f}`, ARMV4T_AGBCC, { prototypes: protos }).source;
+    expect(src).toMatch(/rd1\([^,)]+\);/);
+  });
   // synthetic:jt_rndjoin:agbcc, `u8 rnd(); void jt_rndjoin(u8 i) { u8 j = i + 0xde; switch
   // (gE[i].kind) { … case 4: switch (j) { case 0: gE[i].x = 0x44; break; … } gE[i].y = rnd() * 10;
   // break; } }`: agbcc's case CSE moves each inner case's `i << 3` from r0 to r5 at the cases' join

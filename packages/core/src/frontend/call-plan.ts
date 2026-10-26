@@ -989,9 +989,15 @@ export function callDeclarations(
         return true;
       }
       return ssa.readAfterEveryReachingWrite(r, bi, {
-        // an earlier call's result is no write this function made, for this call or another
+        // an earlier call's result where that call left it is no write this function made, for this
+        // call or another; a copy of it into another register is one (`bl gets; add r1, r0, #0` and
+        // `jal gets; move a1, v0`, read by the loop's loads after)
         passes: (v) =>
-          mayPass(v, r) && !ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v))),
+          mayPass(v, r) &&
+          !(
+            r === target.returnReg &&
+            ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v)))
+          ),
         accept: (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)),
         // a path into a block not lowered yet: what its value answers, as the base question did
         unlowered: (v) => readSoFar(v),
