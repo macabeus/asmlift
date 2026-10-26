@@ -12664,7 +12664,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      because the sret temps escape. Delta-reduced from the real C (516 → 93 asm lines) and
   //      instrument-pinned on both. Next link (the home rule ablated): the parameter is spelled
   //      `s32 a1, s32 a2` (68/108); bvhomereg, which keeps p in registers, pins that link today
-  //      (32/66). agbcc only: the MIPS lanes decline on sp as data, and mwcc does not compile it.
+  //      (32/66). agbcc only: the MIPS lanes decline on sp as data, and mwcc_242_81 passes the
+  //      struct by reference (`lbz r4, 4(r28)`), so there is no home to read.
+  //      LIFTED by the audit releasing a held home where the one-object answer is withheld
+  //      (frame-objects.ts `auditFrameObjects`, `FrameObjectRelift.homesReleased`): bvhome at 68/108,
+  //      value-correct, and sub_0803D4AC lifts. The next link, on both rows, is an own by-value
+  //      aggregate parameter spelled from the own declaration (`struct P p`): hand spellings at
+  //      canonical flags score that 0, a by-value union parameter 0, `long long p` 56, and a local
+  //      union over the home 50 (agbcc keeps an 8-byte aggregate in registers).
   //  23. imgidx / imgspill / cpyidx / cpyspill (sub_0804D0B0: why item 2's split does not fire on the
   //      real function). frame-objects.ts `provenParts` returns the whole range for two reasons: (a) a
   //      runtime index into a part (`sp0[(u8)(...)*2]`, imgidx/cpyidx), and (b) once (a) is ablated,
