@@ -777,9 +777,11 @@ has not yet written is taken as a by-value parameter's home and keeps the object
 own declaration overrules where it proves that register holds one integer word (proto.ts
 `ownLeadingWordRegisters`), since no struct passed by value is one. The home is held for the
 one-object answer alone: where that answer is withheld (an address escapes to a writer it cannot
-hold, such as a struct-return temp beside the home) and the audit declines with the home held, it
-asks for a second lift with the homes released (`FrameObjectRelift.homesReleased`), which reads
-their narrow reloads as the slot narrowed. In either model a store
+hold, such as a struct-return temp beside the home) and the per-object model refuses an object over
+a held home — over its slot, or read at two widths — the audit asks for a second lift with the homes
+released (`FrameObjectRelift.homesReleased`), which reads their narrow reloads as the slot narrowed;
+any other refusal declines as it stands, and a second lift that declines reports the first's
+refusal. In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a

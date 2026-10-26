@@ -5821,6 +5821,49 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(decompile('f', afterCall, ARMV4T_AGBCC, { prototypes: GET }).source).toContain('return (u8)v0 + ');
   });
 
+  // A RELEASED HOME IS STILL JUDGED WHOLE. A narrow store into the home through another sp copy is
+  // a write the slot model would never see: read as the slot narrowed, the reload would return the
+  // entry's value and miss the 5. The second audit refuses the object over the released slot, and
+  // the decline reports the first audit's refusal of the held home (frame-objects.ts
+  // `liftWithRelift`), as with no release at all.
+  test('a home released to the slot model that is written through another copy declines', () => {
+    const home = (store: string) =>
+      fr(`\tmov\tr3, sp\n\tmov\tr2, #0x5\n\t${store}\tr2, [r3, #0x4]\n\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x4]\n`).replace(
+        '\tadd\tr0, r0, #0x1\n',
+        '',
+      );
+    expect(lift(fr('\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x4]\n').replace('\tadd\tr0, r0, #0x1\n', ''))).toContain(
+      'return (u8)a0 + *(s32 *)&sp0;',
+    );
+    expect(() => lift(home('strb'))).toThrow(
+      'the object at [sp,#4) overlaps the SSA slot at [sp,#4] — one byte, two models',
+    );
+    expect(() => lift(home('strh'))).toThrow('the accesses through the captured address disagree on width (2 vs 1)');
+  });
+
+  // …and only the home's own refusal releases it: a refusal of another object declines as it stands
+  // (here an 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes)
+  test('a refusal that is not the held home declines with its own reason', () => {
+    const R8: Prototypes = {
+      ...P,
+      mk: {
+        params: [],
+        returns: 'struct R8',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u32' },
+            { name: 'b', type: 'u32' },
+          ],
+        },
+      },
+    };
+    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    expect(() => decompile('f', home, ARMV4T_AGBCC, { prototypes: R8 })).toThrow(
+      'the object at [sp,#0) is where `mk` returns struct R8, and this function also writes it',
+    );
+  });
+
   // …unless the function's own declaration proves the register holds one integer word, which no
   // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
   // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it

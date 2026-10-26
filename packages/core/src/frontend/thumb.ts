@@ -3805,8 +3805,9 @@ function measureThumbFrame({
   // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
   // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
   // capture. A home is held for the one-object answer alone, so the audit may hand it back: where
-  // that answer is withheld (a struct-return temp escapes beside the home) and the held home
-  // declines, the second lift reads it as any other slot (`releasableHomes`, `homesReleased`).
+  // that answer is withheld (a struct-return temp escapes beside the home) and the per-object model
+  // refuses an object over the held home, the second lift reads it as any other slot
+  // (`releasableHomes`, `homesReleased`).
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
