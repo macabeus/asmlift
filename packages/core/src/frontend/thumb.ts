@@ -3811,11 +3811,9 @@ function measureThumbFrame({
   // is reloaded: the stack-argument analysis takes a held home's narrow reload as that word's
   // reload (`heldHomeReloadOf`) in both lifts. Read as no reload, a home BELOW an escaping temp
   // would decline there as a possible outgoing argument before any audit could release it, and
-  // agbcc compiles that shape: reload spills a DImode struct's registers above the locals
-  // (bvhome's home at 8 and 12, over temps at 0 and 4), but `assign_parms` stores a BLKmode one
-  // (over 8 bytes) at the frame's bottom, below the temp (`struct P { u8 m0, …, m8; }` beside
-  // `struct R r0 = mk0(1)`: `str r0, [sp] / … / add r0, sp, #0xc / bl mk0 / … / mov r0, sp /
-  // ldrb r0, [r0]`).
+  // agbcc compiles that shape: reload spills a DImode struct's registers above the locals, but
+  // `assign_parms` stores a BLKmode one (over 8 bytes) at the frame's bottom, below the temp
+  // (`str r0, [sp] / … / add r0, sp, #0xc / bl mk0 / … / mov r0, sp / ldrb r0, [r0]`).
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the

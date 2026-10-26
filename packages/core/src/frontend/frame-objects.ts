@@ -150,8 +150,8 @@ export interface FrameObjectRelift {
  *  bytes to keep as one object routed through an `laddr`, or argument homes released to the slot
  *  model. The second audit judges the frame as asked and refuses rather than asking again, so a
  *  second request is an internal error, not a third lift. A second lift with homes released that
- *  declines reports the first audit's refusal (`homesReleased.refusal`) and then its own. A frontend that hands the
- *  audit no `releasableHomes` is never asked to release one, and may ignore `homesReleased`. */
+ *  declines reports the first audit's refusal (`homesReleased.refusal`), then its own where that
+ *  differs. A frontend that hands the audit no `releasableHomes` is never asked to release one. */
 export function liftWithRelift<F>(
   name: string,
   liftOnce: (oneObject: FrameRange | undefined, homesReleased: boolean) => F | FrameObjectRelift,
@@ -419,15 +419,12 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
 export function auditFrameObjects(audit: FrameObjectAudit): FrameObjectVerdict {
   // AN ARGUMENT HOME HELD FOR AN ANSWER THAT DID NOT COME. The frontend keeps a by-value struct
   // parameter's home out of the slot model (`releasableHomes`) so the one-object answer can take it
-  // whole. Where this audit declines instead — that answer withheld, because an address escapes to
-  // a writer it cannot hold (a struct-return temp's) — the decline becomes a relift with the homes
-  // released. The hold exists for byte-exactness (the one object recompiles as the frame does), not
-  // for soundness: a home's narrow reload read as the word narrowed is the value the entry stored
-  // there, and the second audit judges the frame whole either way, so the release is value-sound
-  // whichever refusal fired. A second lift that declines reports this refusal first, the frame as
-  // the first lift read it, and then its own where that differs (`liftWithRelift`), the obstacle
-  // left once the home is released, which may be a different one. Asked of the first lift
-  // alone: a relift that keeps one object has already had the answer the homes were held for.
+  // whole. Where this audit declines instead, that answer withheld (an address escapes to a writer
+  // it cannot hold, such as a struct-return temp), the decline becomes a relift with the homes
+  // released. The hold is for byte-exactness, not soundness: a home's narrow reload read as the
+  // word narrowed is the value the entry stored, and the second audit judges the frame whole, so
+  // the release is value-sound whichever refusal fired. Asked of the first lift alone: a relift
+  // that keeps one object has already had the answer the homes were held for.
   const { oneObject, releasableHomes } = audit;
   if (oneObject !== undefined || releasableHomes === undefined || releasableHomes.size === 0) {
     return auditFrame(audit);

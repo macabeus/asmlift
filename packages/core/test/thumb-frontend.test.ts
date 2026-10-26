@@ -5824,7 +5824,7 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // A RELEASED HOME IS STILL JUDGED WHOLE. A narrow store into the home through another sp copy is
   // a write the slot model would never see: read as the slot narrowed, the reload would return the
   // entry's value and miss the 5. The second audit refuses the object over the released slot, and
-  // the decline reports the first audit's refusal of the held home (frame-objects.ts
+  // the decline leads with the first audit's refusal of the held home (frame-objects.ts
   // `liftWithRelift`), as with no release at all.
   test('a home released to the slot model that is written through another copy declines', () => {
     const home = (store: string) =>
@@ -5841,8 +5841,8 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => lift(home('strh'))).toThrow('the accesses through the captured address disagree on width (2 vs 1)');
   });
 
-  // …and a released relift that declines reports the first lift's refusal, not its own: here an
-  // 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes
+  // …and the decline leads with the first lift's refusal where that is not the held home's: here
+  // an 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes
   test('a refusal that is not the held home declines with its own reason', () => {
     const R8: Prototypes = {
       ...P,
