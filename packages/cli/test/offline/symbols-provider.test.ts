@@ -8,7 +8,9 @@
 //  3. the CAPABILITY GATE — what counts as a witness that the installed package reports the
 //     facts the spelling rules read, and when an unwitnessed package is refused;
 //  4. the PLACEHOLDER shape — `sub_08xxxxxx`-style names are real symbols that no header
-//     declares, so emitting one produces output that cannot compile.
+//     declares, so emitting one produces output that cannot compile;
+//  5. the NAME-JOIN LIMIT — which data names the symtab places at more than one address, and so
+//     take no DWARF declaration fact (the sidecar answers a name with one CU's declaration).
 import type { SymbolInfo } from '@asmlift/core/symbols';
 import { describe, expect, test } from 'vitest';
 
@@ -18,6 +20,7 @@ import {
   assertPointeeCapabilityWitnessed,
   canonicalOrder,
   layoutOf,
+  multiAddressDataNames,
 } from '../../src/symbols-provider';
 
 const sym = (name: string, declared?: true): SymbolInfo => ({
@@ -202,5 +205,36 @@ describe('assertArrayDimsPresent — the array-RANK capability gate', () => {
     expect(() =>
       assertArrayDimsPresent({ kind: 'scalar', size: 4, signed: true, volatile: false, const: false }, '/tmp/x.elf'),
     ).not.toThrow();
+  });
+});
+
+describe('multiAddressDataNames — the names a by-name DWARF join cannot attribute', () => {
+  const FUNC = 2;
+  const OBJECT = 1;
+  const at = (name: string, address: number, type = OBJECT) => ({ name, address, type });
+
+  test('a file static two units define at different addresses is ambiguous; a unique name is not', () => {
+    // pokeemerald: `static u8 sUnknown` in EWRAM (random.c) and `static const u32 sUnknown[2]` in
+    // ROM (berry_powder.c). The sidecar's one shape for the name fits only one of them.
+    const names = multiAddressDataNames(
+      [at('sUnknown', 0x020249bc), at('sUnknown', 0x082f445c), at('sRandCount', 0x020249c0)],
+      FUNC,
+    );
+    expect([...names]).toEqual(['sUnknown']);
+  });
+
+  test('the same name repeated at ONE address is not ambiguous — every entry is the same object', () => {
+    expect(multiAddressDataNames([at('gFoo', 0x03000000), at('gFoo', 0x03000000)], FUNC).size).toBe(0);
+  });
+
+  test('code symbols never count — a function is not a variable DIE the join could have picked', () => {
+    expect(multiAddressDataNames([at('Init', 0x08000100, FUNC), at('Init', 0x02000000)], FUNC).size).toBe(0);
+    expect(multiAddressDataNames([at('sub', 0x08000100, FUNC), at('sub', 0x08000200, FUNC)], FUNC).size).toBe(0);
+  });
+
+  test('mapping symbols and local labels are not project names and never count', () => {
+    expect(
+      multiAddressDataNames([at('$d', 0x08000000), at('$d', 0x08000010), at('.L1', 4), at('.L1', 8)], FUNC).size,
+    ).toBe(0);
   });
 });
