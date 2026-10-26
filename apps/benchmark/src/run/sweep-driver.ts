@@ -74,8 +74,9 @@ const firstLine = (e: unknown): string =>
 
 /** Serialization of ONE `Map`/`Set`/typed array, cached on the container's identity.
  *
- *  WHY: a project's vendored symbol map is ONE object shared by all 42 of that project's rows —
- *  1,784 entries for kleod, 41,016 for pokeemerald — and the sweep digests it once per row per map mode.
+ *  WHY: a project's vendored symbol map is ONE object shared by every one of that project's rows
+ *  (51 for kleod) — 1,844 entries for kleod, 54,883 for pokeemerald — and the sweep digests it once
+ *  per row per map mode.
  *  A/B'd on the real tier's 504 records, two runs each: a plain `JSON.stringify` digest is
  *  31.7 / 31.9 s, serializing the containers every time is 43.7 / 43.6 s (+37%), and caching on
  *  identity is 35.2 / 35.0 s (+10%) and catches the same perturbations, because the expensive
