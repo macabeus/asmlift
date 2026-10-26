@@ -4,6 +4,7 @@
 // over what is frozen, and the drift check that holds what is frozen to what the ELF gives today.
 import { asmliftBlock } from '@asmlift/cli/config';
 import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
+import type { RankOptions } from '@asmlift/cli/rank';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { agbccAvailable } from '@asmlift/toolchains';
 import { searchDecompYaml } from '@match-kit/decomp-yaml/files';
@@ -11,7 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test } from 'vitest';
 
 import {
   CALLEE_BODIES_FILE,
@@ -135,19 +136,15 @@ describe('the bodies a lift is handed', () => {
 // nothing declares: the CLI hands its lift the ARM body behind it, and so must the harness.
 describe.skipIf(!agbccAvailable())("the harness hands a real row's lift its ELF callee bodies", () => {
   const [c] = realCases({ project: 'kleod', only: 'WorldMapScreenUnlockNewWorld' });
-  const built = c.build();
-  const vendored = c.calleeBodies!()!;
-  const opts = rankOptionsFor(
-    c.toolchain,
-    c.codegen,
-    built.obj,
-    c.sym,
-    c.proto,
-    c.compile,
-    c.symbols,
-    c.contextGlobals,
-    { asm: built.asm, vendored },
-  );
+  // built in beforeAll: a skipped describe's body still runs at collection, where agbcc may be absent
+  let opts: RankOptions;
+  beforeAll(() => {
+    const built = c.build();
+    opts = rankOptionsFor(c.toolchain, c.codegen, built.obj, c.sym, c.proto, c.compile, c.symbols, c.contextGlobals, {
+      asm: built.asm,
+      vendored: c.calleeBodies!()!,
+    });
+  });
   test('the guessed veneer, and only it', () => {
     expect(Object.keys(opts.calleeBodies ?? {})).toEqual(['thunk_GetRandomValue']);
     expect(opts.calleeBodies!.thunk_GetRandomValue.kind).toBe('arm');
