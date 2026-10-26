@@ -212,7 +212,7 @@ function substitutePlaceholders(cmd: string, id: ToolchainId): string {
 interface BenchDoc {
   name: string;
   platform: string;
-  tools: { asmlift: { target: string; compiler?: string; elf?: string; symbols?: string } };
+  tools: { asmlift: { target: string; compiler?: string; elf?: string; objdump?: string; symbols?: string } };
 }
 
 /** The committed config for one toolchain, with placeholders materialized. Its command takes the
@@ -301,6 +301,10 @@ export function benchScorer(
  *  or its authored map, the materialized scoring context, and the row's language. */
 export interface ScoreConfigParts {
   elf?: string; // absolute path — symbol-fed rows
+  // absolute path of the objdump the row's callee bodies were read off `elf` with
+  // (cases/callee-bodies-elf.ts `projectObjdump`) — a GameCube project's own; absent ⇒ the CLI's
+  // choice (env, then PATH), which is what `bench vendor` read with too
+  objdump?: string;
   ctxFile?: string; // basename of the materialized scoring context (materializeScoringContext)
   symbolsFile?: string; // basename of an authored symbol map, where no ELF backs it
   // The dialect the CANDIDATE is compiled in — not the one the target was built in. `c++` is
@@ -319,7 +323,8 @@ export interface ScoreConfigParts {
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
  *  the benchmark's own toolchain. The command spells the row's `cflags`, which the CLI reads off
  *  it. `elf` (absolute path — symbol-fed rows) lands as tools.asmlift.elf so the CLI loads the
- *  project's symbol map exactly as the benchmark did.
+ *  project's symbol map exactly as the benchmark did, and `objdump` as tools.asmlift.objdump so it
+ *  reads the callee bodies off that ELF as the benchmark did.
  *
  *  A reproduction compiles every candidate: the CLI keys no command a `decomp.yaml` hands it (the
  *  candidate store keys only the benchmark's own, @asmlift/cli/candcache-bench). A cache changes
@@ -328,7 +333,7 @@ export function writeScoreConfig(
   id: ToolchainId,
   cflags: readonly string[],
   dir: string,
-  { elf, ctxFile, symbolsFile, language, unitLanguage }: ScoreConfigParts = {},
+  { elf, objdump, ctxFile, symbolsFile, language, unitLanguage }: ScoreConfigParts = {},
 ): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   // `-lang=c++` without a context file is a config that cannot work: the linkage block lives in the
@@ -347,6 +352,13 @@ export function writeScoreConfig(
   }).command;
   if (elf) {
     doc.tools.asmlift.elf = elf;
+    // The CLI reads a guessed callee's body off that ELF with this objdump, the one the harness's
+    // frozen bodies were read with: without it a PowerPC repro reads none where no PowerPC objdump
+    // is on PATH. The config key and not ASMLIFT_PPC_OBJDUMP, which the docker-run compiler wrapper
+    // also reads, inside its container.
+    if (objdump) {
+      doc.tools.asmlift.objdump = objdump;
+    }
   }
   // A row whose map has no ELF behind it — the synthetic tier's hand-written maps. `bench
   // target` writes the map itself next to target.o and names it here, so the reproduction feeds

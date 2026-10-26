@@ -104,6 +104,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileS
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { projectObjdump } from './cases/callee-bodies-elf';
 import { loadCompleteManifests, loadManifests, resolveProjectRoot } from './cases/manifests';
 import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
@@ -555,6 +556,7 @@ switch (command) {
     const { obj } = c.build();
     copyFileSync(obj, join(out, 'target.o'));
     let elf: string | undefined;
+    let objdump: string | undefined;
     let symbolsFile: string | undefined;
     if (c.symbols && c.tier === 'synthetic') {
       // A SYNTHETIC row's map is AUTHORED in the dataset, not derived from any ELF, so there is
@@ -581,6 +583,9 @@ switch (command) {
         const res = resolveProjectElf(c.project, root);
         if (res.elf !== null) {
           elf = res.elf;
+          // the objdump `bench vendor` read the row's callee bodies off that ELF with, so the CLI
+          // reads the bodies the harness handed the row (cases/callee-bodies-elf.ts)
+          objdump = projectObjdump(root, c.codegen.target);
         } else {
           mapless(`symbol map unavailable (${res.reason})`);
         }
@@ -642,6 +647,7 @@ switch (command) {
     }
     writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, {
       elf,
+      objdump,
       ctxFile,
       symbolsFile,
       language: ctxLanguage,

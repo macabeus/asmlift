@@ -120,7 +120,7 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
 
 describe('writeScoreConfig (the repro decomp.yaml)', () => {
   interface Doc {
-    tools: { asmlift: { target: string; compiler?: string; elf?: string } };
+    tools: { asmlift: { target: string; compiler?: string; elf?: string; objdump?: string } };
   }
   const written = (elf?: string, cflags: readonly string[] = canonical('agbcc')): Doc => {
     const dir = mkdtempSync(join(tmpdir(), 'score-config-'));
@@ -141,6 +141,19 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
 
   test('map-free rows: no elf key at all', () => {
     expect('elf' in written().tools.asmlift).toBe(false);
+  });
+
+  test("a GameCube row's callee bodies are read with the objdump the vendoring read them with", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'score-config-'));
+    try {
+      const objdump = '/checkouts/pikmin/build/binutils/powerpc-eabi-objdump';
+      writeScoreConfig('mwcc_233_163n', [], dir, { elf: '/checkouts/pikmin/build/G98E01/main.elf', objdump });
+      const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
+      expect(doc.tools.asmlift.objdump).toBe(objdump);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect('objdump' in written('/checkouts/pokeemerald/pokeemerald-syms.elf').tools.asmlift).toBe(false);
   });
 
   test("the command spells the row's flags", () => {
