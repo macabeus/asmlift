@@ -783,9 +783,10 @@ their narrow reloads as the slot narrowed. The hold buys byte-exactness, not sou
 release is value-sound whichever refusal fired; a second lift that declines reports the first's
 refusal, followed by its own where that names another obstacle. The hold changes how the lift reads
 a home's reloads, never whether the word is reloaded: the stack-argument analysis counts a held
-home's narrow reload as its word's reload, so a home below an escaping temp (agbcc's BLKmode
-by-value struct over 8 bytes, stored at the frame's bottom on entry) reaches the audit rather than
-declining as a possible outgoing argument (thumb.ts `measureThumbFrame`). In either model a store
+home's narrow reload as its word's reload, and so a narrow reload inside the bytes a first audit
+kept as one object, so agbcc's BLKmode by-value struct over 8 bytes, stored at the frame's bottom on
+entry, does not decline as a possible outgoing argument, below an escaping temp or across a call
+with no temp beside it (thumb.ts `measureThumbFrame`). In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a

@@ -3809,11 +3809,14 @@ function measureThumbFrame({
   // with the home held, the second lift reads it as any other slot (`releasableHomes`,
   // `homesReleased`). The hold decides how the LIFT reads a home's reloads, not whether the word
   // is reloaded: the stack-argument analysis takes a held home's narrow reload as that word's
-  // reload (`heldHomeReloadOf`) in both lifts. Read as no reload, a home BELOW an escaping temp
-  // would decline there as a possible outgoing argument before any audit could release it, and
-  // agbcc compiles that shape: reload spills a DImode struct's registers above the locals, but
-  // `assign_parms` stores a BLKmode one (over 8 bytes) at the frame's bottom, below the temp
-  // (`str r0, [sp] / … / add r0, sp, #0xc / bl mk0 / … / mov r0, sp / ldrb r0, [r0]`).
+  // reload (`capturedReloadOf`) in every lift, as it takes a narrow reload inside the bytes a
+  // first audit asked to keep as one object, which that relift keeps as a capture too. Read as no
+  // reload, a home at the frame's bottom would decline as a possible outgoing argument, and agbcc
+  // compiles that shape: reload spills a DImode struct's registers above the locals, but
+  // `assign_parms` stores a BLKmode one (over 8 bytes) at the frame's bottom, below any temp
+  // (`str r0, [sp] / … / add r0, sp, #0xc / bl mk0 / … / mov r0, sp / ldrb r0, [r0]`). Below an
+  // escaping temp the first lift would decline before any audit could release the home; with a
+  // call and no temp (`g(); return p.m0 + p.m8;`) the one-object relift would.
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
@@ -3902,19 +3905,17 @@ function measureThumbFrame({
   }
   const narrowReloadOf = new Map<Instr, number>();
   const releasableHomes = new Set<number>();
-  // a held home's narrow reloads, which stay captures for the lift but are still reloads of that
-  // word for the outgoing-argument analysis below
-  const heldHomeReloadOf = new Map<Instr, number>();
+  // the narrow reloads the lift keeps as captures (a held home's, and every one inside the bytes
+  // a first audit asked to keep as one object), which are still reloads of that word for the
+  // outgoing-argument analysis below
+  const capturedReloadOf = new Map<Instr, number>();
   for (const [load, { slot }] of narrowCandidates) {
-    if (
-      wordStoredSlots.has(slot) &&
-      !otherCaptureOffsets.has(slot) &&
-      !inByValueBlock(slot, 4) &&
-      !(oneObject !== undefined && slot < oneObject.to && slot + 4 > oneObject.from)
-    ) {
+    if (oneObject !== undefined && slot < oneObject.to && slot + 4 > oneObject.from) {
+      capturedReloadOf.set(load, slot);
+    } else if (wordStoredSlots.has(slot) && !otherCaptureOffsets.has(slot) && !inByValueBlock(slot, 4)) {
       if (argumentHomes.has(slot) && !homesReleased) {
         releasableHomes.add(slot);
-        heldHomeReloadOf.set(load, slot);
+        capturedReloadOf.set(load, slot);
       } else {
         narrowReloadOf.set(load, slot);
       }
@@ -3964,9 +3965,10 @@ function measureThumbFrame({
         return escaped;
       }
       // …and a narrow reload of a word slot is that slot's reload, as its word reload would be,
-      // a held argument home's included: the hold decides how the lift reads the load, not
-      // whether the word is loaded, and a word this function loads is no outgoing argument
-      const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? heldHomeReloadOf.get(ins) ?? null;
+      // one the lift keeps as a capture included (a held argument home's, or one inside the
+      // one-object bytes): that decides how the lift reads the load, not whether the word is
+      // loaded, and a word this function loads is no outgoing argument
+      const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? capturedReloadOf.get(ins) ?? null;
       if (off !== null && !constantCaptureOffsets.has(off) && !inByValueBlock(off, 4)) {
         return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
       }

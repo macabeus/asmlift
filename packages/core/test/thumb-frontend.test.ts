@@ -5911,6 +5911,22 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => decompile('f', g5, ARMV4T_AGBCC, { prototypes: G5 })).toThrow('but this function also LOADS it');
   });
 
+  // …AND SO IS A NARROW RELOAD INSIDE THE BYTES A FIRST AUDIT KEPT AS ONE OBJECT, which the
+  // one-object relift keeps as a capture. The BLKmode home with a call and no struct-return temp
+  // beside it: `s32 m2(struct P p) { g(); return p.m0 + p.m8; }` asks for [0,12) as one object,
+  // and read as no reload there, [sp,#0] would decline as a possible outgoing argument.
+  test('a home kept as one object across a call lifts', () => {
+    const m2 =
+      'm2:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+      '\tbl\tg\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n\tbx\tr1\n';
+    const source = decompile('m2', m2, ARMV4T_AGBCC, {
+      prototypes: { m2: { params: 3, returns: 's32' }, g: { params: [], returns: 'void' } },
+    }).source;
+    expect(source).toContain('u8 sp0[12];');
+    expect(source).toContain('g();\n    return *p1 + p1[8];');
+  });
+
   // …unless the function's own declaration proves the register holds one integer word, which no
   // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
   // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it
