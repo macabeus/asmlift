@@ -765,7 +765,12 @@ inhabitant on Thumb, and the frontend tells them apart before the audit: agbcc p
 made for that one load (`mov r2, sp / ldrh r2, [r2, #4]`), because Thumb has no sp-relative
 `ldrb`/`ldrh`. Those bytes are the stored word's low-order part (the slot's own address on a
 little-endian target), so the load is the slot's value narrowed, a `zext` of the slot, and the copy
-captures nothing (frontend/thumb.ts `narrowSlotReloads`). It is read that way only where live code
+captures nothing (frontend/thumb.ts `narrowSlotReloads`). Where reload hands the load another
+register (`add r3, sp, #0x28 / ldrb r1, [r3]`, a `?:` join's operand) the copy outlives it, and is
+dropped only where no path from the load reads it before writing it — a call reading what it is
+handed, a return what it may hand back (nothing under a stated `void`, the one the pipeline drops
+the return operand for, r0 alone under a proven one-word return); the copy leaves a marker whose
+read declines (`refuseStaleIdiomReads`). It is read that way only where live code
 stores a word to the slot with `str` and nothing else claims it: no other capture, no by-value
 block, not the one object. A word the entry block stores straight from an argument register it
 has not yet written is taken as a by-value parameter's home and keeps the object model, which the

@@ -22,7 +22,14 @@ import { ownArgumentWordsOn } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, ownLeadingWordRegisters, wordsOf } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  declaresVoidReturn,
+  ownLeadingWordRegisters,
+  ownReturnWidth,
+  wordsOf,
+} from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
@@ -2635,6 +2642,7 @@ function liftOnce(
       throw new FrontendUnsupportedError(m);
     },
     fill.calls,
+    declaresVoidReturn(prototypes[name]),
   );
   // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
   // refusal order: the proof reads only the text and the CFG, and changes nothing.
@@ -2844,9 +2852,7 @@ interface LrState {
  *
  *  Blocks no path from the entry reaches are not asked: they never run. */
 function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
-  const { asmBlocks, preds, entryReachable } = cfg;
-  const succs: number[][] = asmBlocks.map(() => []);
-  preds.forEach((ps, b) => ps.forEach((p) => succs[p].push(b)));
+  const { asmBlocks, succs, entryReachable } = cfg;
   const LR = 'r14';
   const join = (a: LrState, b: LrState): LrState => {
     const depth = a.depth !== null && a.depth === b.depth ? a.depth : null;
@@ -3234,6 +3240,8 @@ interface ThumbCfg {
   readonly labelIndex: ReadonlyMap<string, number>;
   /** Each block's predecessors, one entry per edge. */
   readonly preds: number[][];
+  /** Each block's successors, `preds` turned around. */
+  readonly succs: readonly (readonly number[])[];
   readonly entryReachable: ReadonlySet<number>;
 }
 
@@ -3276,7 +3284,9 @@ function thumbCfg(name: string, blocks: readonly AsmBlock[], tables: ReadonlyMap
     }
     return live;
   })();
-  return { asmBlocks, labelIndex, preds, entryReachable };
+  const succs: number[][] = asmBlocks.map(() => []);
+  preds.forEach((ps, at) => ps.forEach((p) => succs[p].push(at)));
+  return { asmBlocks, labelIndex, preds, succs, entryReachable };
 }
 
 // --- CFG (successors per block) as label lists; fallthrough + branch targets (via classifyXfer) ---
@@ -3415,10 +3425,11 @@ function calleeRegister(ins: Instr, target: TargetDescription): string | null | 
 function measureThumbFrame({
   name,
   target,
-  cfg: { asmBlocks, preds, entryReachable },
+  cfg: { asmBlocks, preds, succs, entryReachable },
   calls,
   oneObject,
   own,
+  dropsVoidReturn,
 }: {
   name: string;
   target: TargetDescription;
@@ -3427,6 +3438,10 @@ function measureThumbFrame({
   oneObject: FrameRange | undefined;
   /** the function's own declaration (`ownDeclarationOf`), read only where it `proves` */
   own: OwnDeclaration | undefined;
+  /** whether the lift's `ret` reads nothing: a STATED void entry (`prototypes[name]`), the one
+   *  pipeline.ts `raiseRecovered` drops ret operands for. The context's own entry, proving or not,
+   *  leaves the operand in place. */
+  dropsVoidReturn: boolean;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -3782,11 +3797,54 @@ function measureThumbFrame({
   // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
   // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
   // capture.
+  //
+  // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
+  // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
+  // address after it. The copy is not lifted, so rD must be DEAD there: no path from the load reads
+  // it before writing it (`readsBeforeWrite`), a return that may hand it back counting as a read.
+  // The lift holds to that proof: the dropped copy leaves a marker in rD (`writeNarrowCopyMarker`),
+  // and a read of it declines. A CALL READS WHAT IT IS HANDED, the one receiver rule
+  // (`frameAddressReceivers`: a declared callee's argument words, every argument register where
+  // nothing declares it), plus the register it calls through (`calleeRegister`). Any other register
+  // it clobbers, r0 among them, is dead past it, and a callee-saved one still holds the copy. Read
+  // as `readsBeforeWrite` reads a call for the save analysis (every register but r12), kleod
+  // sub_08016EEC keeps two copies live, in r3 and in r6.
+  //
+  // A RETURN HANDS BACK WHAT THE OWN DECLARATION RETURNS. Where a STATED entry declares a void
+  // return, a return reads neither r0 nor r1 (pipeline.ts `dropVoidReturnOperands`, the exemption
+  // `refuseStaleIdiomReads` makes for the marker), and where the own declaration proves a return no
+  // wider than a word, it reads r0 alone: `add r1, sp, #4 / ldrb r0, [r1] / … / pop {r0} / bx r0` in
+  // a `void f(u32)` leaves no read of r1. Undeclared, a return may hand back the pair r0:r1. The void
+  // reading of r0 is the stated entry's alone because the drop is: under the context's `void f(u32)`
+  // the lifted `ret` still reads r0, and an r0 copy dropped there would print as `return uninit_r0`.
+  // The reading of r1 needs no such care, under a void or a one-word declaration from either source,
+  // as the lifted `ret` reads r1 only through a pair the asm builds (`wideReturn`), where the marker
+  // declines.
+  const narrowCallReads = (call: Instr): readonly string[] => {
+    const through = calleeRegister(call, target);
+    return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
+  };
+  // `callClobbers` leaves out r0, which the lift writes with what the call returns
+  const narrowCallClobbers = [...calls.callClobbers, target.returnReg];
+  const ownProven = own?.proves === true ? own.proto : undefined;
+  const returnMayHand = (r: string): boolean =>
+    !dropsVoidReturn &&
+    !(
+      r !== target.returnReg &&
+      (declaresVoidReturn(ownProven) || (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32)
+    );
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,
     localArea,
     target.capabilities.endianness === 'little',
+    (b, from, r) => {
+      const use = readsBeforeWrite(asmBlocks, succs, b, from, r, {
+        reads: narrowCallReads,
+        clobbers: narrowCallClobbers,
+      });
+      return use === false || (use === 'returned' && !returnMayHand(r));
+    },
   );
   const candidateCopies = new Set([...narrowCandidates.values()].map((n) => n.copy));
   const otherCaptureOffsets = new Set(
@@ -4187,10 +4245,11 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
 //
 // What this finds is a shape and not yet a licence; the copy is a capture everywhere it fails:
 //   * the copy is `mov rD, sp` or `add rD, sp, #c`, entry-reachable, and in ONE block it is read
-//     by exactly one instruction, a zero-extending `ldrb`/`ldrh` at an immediate offset from rD
-//     that writes rD itself, so the address dies at that load. Anything else that mentions rD
-//     before it (a second load, a store through it, an escape), a call, a control transfer or a
-//     write of sp ends the search, and the copy stays a capture.
+//     by exactly one instruction, a zero-extending `ldrb`/`ldrh` at an immediate offset from rD,
+//     after which the address is dead: the load writes rD itself, or it writes another register
+//     and the caller's `diesAfter` proves no path from it reads rD before writing it. Anything else
+//     that mentions rD before the load (a second load, a store through it, an escape), a call, a
+//     control transfer or a write of sp ends the search, and the copy stays a capture.
 //   * the load's bytes are the low-order part of a whole aligned word of the reserved local area.
 //     A load at any other byte of the word is not that word's value narrowed, whatever it reads.
 //   * `ldrsb`/`ldrsh` exist only register-offset in Thumb-1, and agbcc's signed use reloads a word
@@ -4206,6 +4265,7 @@ function narrowSlotReloads(
   entryReachable: ReadonlySet<number>,
   localArea: number,
   littleEndian: boolean,
+  diesAfter: (b: number, from: number, r: string) => boolean,
 ): Map<Instr, { copy: Instr; slot: number }> {
   const found = new Map<Instr, { copy: Instr; slot: number }>();
   for (const b of entryReachable) {
@@ -4221,7 +4281,8 @@ function narrowSlotReloads(
         return;
       }
       const rD = reg(d);
-      for (const ins of instrs.slice(at + 1)) {
+      for (let li = at + 1; li < instrs.length; li++) {
+        const ins = instrs[li];
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx' || classifyXfer(ins) !== null || modifiesSp(ins)) {
           return;
         }
@@ -4230,7 +4291,10 @@ function narrowSlotReloads(
         }
         const width = ins.mnemonic === 'ldrb' ? 1 : ins.mnemonic === 'ldrh' ? 2 : 0;
         const addr = ins.ops[1] === undefined ? null : parseAddr(ins.ops[1]);
-        if (width === 0 || reg(ins.ops[0] ?? '') !== rD || addr === null || reg(addr.base) !== rD || addr.regOff) {
+        if (width === 0 || addr === null || reg(addr.base) !== rD || addr.regOff) {
+          return;
+        }
+        if (reg(ins.ops[0] ?? '') !== rD && !diesAfter(b, li + 1, rD)) {
           return;
         }
         const slot = from + addr.off - (littleEndian ? 0 : 4 - width);
@@ -4687,6 +4751,7 @@ const ALL_REGS = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r
 function bodySavedRegs(
   blocks: readonly AsmBlock[],
   preds: readonly (readonly number[])[],
+  succs: readonly (readonly number[])[],
 ): {
   saved: ReadonlySet<string>;
   misSaved: ReadonlySet<string>;
@@ -4768,8 +4833,6 @@ function bodySavedRegs(
   const leaked = new Map<string, Instr>();
   const copied = new Map<string, Instr>();
   const returned = new Map<string, Instr>();
-  const succs: number[][] = blocks.map(() => []);
-  preds.forEach((ps, at) => ps.forEach((p) => succs[p].push(at)));
   const word = (r: string) => canonReg(r) ?? r;
   const walk = (b: number, record: boolean): State => {
     const cur = new Set(stateIn[b]!.cur);
@@ -4948,13 +5011,19 @@ function bodySavedRegs(
  *  or r1), which is a use only in a function not declared to return nothing. A `bx` through it is
  *  the return idiom `pop {r1}; bx r1` (agbcc's `pop {r3}; add sp, #0x10; bx r3` after a variadic
  *  save), which uses the word as where to go; a write that reads no `reg` ends the path. Any
- *  spelling of the register counts (`ip` is r12). */
+ *  spelling of the register counts (`ip` is r12).
+ *
+ *  `calls`, where a caller passes it, reads a `bl`/`blx` by what it is handed instead: a call that
+ *  names `reg` or whose `reads` include it reads it, one that clobbers it (`clobbers`) ends the
+ *  path, and past one that does neither the callee preserved it and the walk goes on. A `swi` is
+ *  read as without it. */
 function readsBeforeWrite(
   blocks: readonly AsmBlock[],
   succs: readonly (readonly number[])[],
   b: number,
   from: number,
   reg: string,
+  calls?: { readonly reads: (call: Instr) => readonly string[]; readonly clobbers: readonly string[] },
 ): 'read' | 'returned' | false {
   const names = (x: Instr): boolean =>
     expandRegList(
@@ -4975,14 +5044,27 @@ function readsBeforeWrite(
         returned ||= !(mn === 'bx' && canonReg(x.ops[0] ?? '') === reg) && (reg === 'r0' || reg === 'r1');
         return false;
       }
+      if (calls !== undefined && (mn === 'bl' || mn === 'blx')) {
+        if (names(x) || calls.reads(x).some((r) => canonReg(r) === reg)) {
+          return true;
+        }
+        if (calls.clobbers.some((r) => canonReg(r) === reg)) {
+          return false;
+        }
+        continue;
+      }
       if (/^(bl|blx|swi)$/.test(mn)) {
         return reg !== 'r12';
       }
       if (names(x)) {
         const dest = canonReg(x.ops[0] ?? '');
+        // Thumb's three-operand forms (`add rD, rN, #i`, `add rD, sp, #k`, `lsl rD, rM, #s`, `sub rD,
+        // rN, rM`) read only their sources; the two-operand ones (`add rD, #i`, `mul rD, rM`) read rD.
         const writesOnly =
           mn === 'pop' ||
-          ((DEST_ONLY.test(mn) || SINGLE_LOAD.test(mn)) && dest === reg && !names({ ...x, ops: x.ops.slice(1) }));
+          ((DEST_ONLY.test(mn) || SINGLE_LOAD.test(mn) || (WRITES_OPERAND_0.test(mn) && x.ops.length === 3)) &&
+            dest === reg &&
+            !names({ ...x, ops: x.ops.slice(1) }));
         return !writesOnly;
       }
     }
@@ -5531,6 +5613,7 @@ function thumbFillOf(
     calls,
     oneObject,
     own: ownDeclarationOf(name, prototypes, contextOwnProto),
+    dropsVoidReturn: declaresVoidReturn(prototypes[name]),
   });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
@@ -5547,7 +5630,7 @@ function thumbFillOf(
   // a two-parameter one.
   // A prologue save that some path uses past its restore, or carries to a return unrestored, is
   // `misSaved` and no save: the prologue's reading of it sees only the `push`.
-  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds);
+  const body = bodySavedRegs(cfg.asmBlocks, cfg.preds, cfg.succs);
   const liveIns = registerLiveIns(
     target,
     new Set([...frame.savedRegs, ...body.saved].filter((r) => !body.misSaved.has(r))),
@@ -6132,6 +6215,7 @@ function lowerMov(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     if (frame.slotsOk && frame.localArea > 0) {
       // a copy only a narrow slot reload reads names no object; the reload reads the slot
       if (frame.narrowReloadCopies.has(ins)) {
+        writeNarrowCopyMarker(fill, cur, reg(a));
         return;
       }
       const res = mkValue(T.unk(32));
@@ -6143,6 +6227,18 @@ function lowerMov(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   }
   const v = b?.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
   writeData(reg(a), bi, v);
+}
+
+/** What a narrow reload's unlifted copy of sp leaves in `r`: an address no C spells.
+ *  `measureThumbFrame` accepts the copy only where `r` is dead past its load, and the marker holds
+ *  the lift to that: a read of it declines (`refuseStaleIdiomReads`) rather than reading what `r`
+ *  held before the copy. */
+function writeNarrowCopyMarker(fill: ThumbFill, cur: BlockCursor, r: string): void {
+  fill.operands.writeData(
+    r,
+    cur.bi,
+    staleMarker(cur.irb.ops, r, { reg: r, form: 'narrow', parks: false }, fill.staleIdiomValues),
+  );
 }
 
 /** `add`: a frame adjustment, a 64-bit pair with the `adc` after it, a frame capture,
@@ -6169,7 +6265,8 @@ function lowerAdd(fill: ThumbFill, cur: BlockCursor, ins: Instr, ii: number): vo
   if (isSpReg(b ?? '') && !isSpReg(a ?? '') && c !== undefined && IMM_LITERAL.test(c)) {
     if (frame.slotsOk && frame.localArea > 0) {
       if (frame.narrowReloadCopies.has(ins)) {
-        return; // see lowerMov
+        writeNarrowCopyMarker(fill, cur, reg(a)); // see lowerMov
+        return;
       }
       const res = mkValue(T.unk(32));
       irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));

@@ -3,6 +3,8 @@
 // Thumb degrades it to a loud `opaque`. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
+import { type StaleIdiomRead, refuseStaleIdiomReads, staleMarker } from '../src/frontend/jump-table';
+import { type Op, type Value, mkOp } from '../src/ir/core';
 import { decompile, liftStamped } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import type { SymbolMap } from '../src/symbols';
@@ -5828,10 +5830,123 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     );
   });
 
-  test('a copy anything else reads, or that outlives the load, stays a capture', () => {
+  // reload hands the load another register where the value is a `?:` join's operand (`add r3, sp,
+  // #0x28 / ldrb r1, [r3]`): the copy outlives its load, and is no capture only where it is dead
+  test('a copy that outlives its load and dies is no capture', () => {
+    expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toContain('return (u8)(a0 + 1) + *(s32 *)&sp0;');
+    // …and a halfword through `mov rD, sp` (sa3 EraseSaveSector's `mov r1, sp / ldrh r2, [r1]`)
+    expect(lift(fr('\tmov\tr1, sp\n\tldrh\tr0, [r1, #0x4]\n'))).toContain('return (u16)(a0 + 1) + *(s32 *)&sp0;');
+    // …written again on one arm of a branch before anything reads it, and never read on the other
+    expect(
+      lift(
+        fr(
+          '\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n\tcmp\tr0, #0x3\n\tbcs\t.La\n\tmov\tr3, #0x2\n\tadd\tr0, r0, r3\n.La:\n',
+        ),
+      ),
+    ).toContain('(u8)(a0 + 1)');
+    // …or by a three-operand write that reads only its sources
+    expect(lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n\tadd\tr3, r0, #0x2\n\tadd\tr0, r0, r3\n'))).toContain(
+      '(u8)(a0 + 1)',
+    );
+  });
+
+  // The copy is not lifted: r3 holds a marker past it (thumb.ts `writeNarrowCopyMarker`), so with
+  // the deadness check ablated each of these still declines, on the marker's read, where the 9
+  // below would otherwise stand for the address (`((u8 *)9)[1]`, `*(u8 *)9 = 0`, `gP = 9`, `+ 9`).
+  test('a copy read after its load, on any path, stays a capture', () => {
+    for (const after of [
+      // read again by a second load, a store through it, a store of it, and an add
+      '\tldrb\tr2, [r3, #0x1]\n\tadd\tr0, r0, r2\n',
+      '\tmov\tr2, #0x0\n\tstrb\tr2, [r3]\n',
+      '\tldr\tr2, .L9\n\tstr\tr3, [r2]\n',
+      '\tadd\tr0, r0, r3\n',
+      // …on one arm of a branch only
+      '\tcmp\tr0, #0x3\n\tbcs\t.La\n\tmov\tr3, #0x2\n\tb\t.Lb\n.La:\n\tldrb\tr3, [r3, #0x1]\n.Lb:\n\tadd\tr0, r0, r3\n',
+    ]) {
+      const asm = fr(`\tmov\tr3, #0x9\n\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n${after}`, '.L9:\n\t.word\tgP\n');
+      expect(() => lift(asm), after).toThrow(/address-taken stack local/);
+    }
+    // a copy in r0 a return may hand back, in a function that returns a value
+    const ret =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+      '\tadd\tr0, sp, #0x4\n\tldrb\tr1, [r0]\n\tldr\tr2, .L9\n\tstrb\tr1, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n.L9:\n\t.word\tgP\n';
+    expect(() => lift(ret)).toThrow('the captured address flows into `ret`');
+  });
+
+  // A return reads what the own declaration returns (thumb.ts `returnMayHand`): nothing where it
+  // proves void, r0 alone where it proves one word. Undeclared, or wider, it may hand back r0:r1.
+  test('a copy a return cannot hand back dies there', () => {
+    const r1 = (tail: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n' +
+      `\tbl\tmk\n\tadd\tr1, sp, #0x4\n\tldrb\tr0, [r1]\n\tldr\tr2, .L9\n\tstrb\tr0, [r2]\n${tail}` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, pc}\n.L9:\n\t.word\tgP\n';
+    const ownLift = (asm: string, f: Prototypes[string]) =>
+      decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...P, f } }).source;
+    expect(ownLift(r1(''), { params: ['u32'], returnsVoid: true })).toContain('gP = (u8)(a0 + 1);');
+    expect(ownLift(r1('\tmov\tr0, #0x5\n'), { params: ['u32'], returns: 'u32' })).toContain('return 5;');
+    // …and a copy in r0 at a void return
+    const r0 = r1('')
+      .replace('add\tr1, sp, #0x4\n\tldrb\tr0, [r1]', 'add\tr0, sp, #0x4\n\tldrb\tr3, [r0]')
+      .replace('strb\tr0, [r2]', 'strb\tr3, [r2]');
+    expect(ownLift(r0, { params: ['u32'], returnsVoid: true })).toContain('gP = (u8)(a0 + 1);');
+    // a declaration that proves no return as narrow as a word keeps the r1 copy a capture
+    for (const f of [{ params: ['u32'], returns: 'u64' }, { params: ['u32'] }]) {
+      expect(() => ownLift(r1(''), f), JSON.stringify(f)).toThrow('disagree on width (4 vs 1)');
+    }
+    // The context's own `void f(u32)` proves no dropped return: pipeline.ts drops a ret operand
+    // only for a stated entry, so the lifted `ret` still reads r0, and the r0 copy there stays a
+    // capture. Dropped, it would print `s32 f(s32 a0)` returning `uninit_r0`.
+    const contextLift = (asm: string) =>
+      decompile('f', asm, ARMV4T_AGBCC, {
+        prototypes: { mk: P.mk },
+        ownContextProto: { params: ['u32'], returnsVoid: true },
+      }).source;
+    expect(() => contextLift(r0)).toThrow('the captured address flows into `ret`');
+    // …while the r1 copy dies there all the same: the lifted `ret` reads r1 only through a pair the
+    // asm builds, so a context void drops it as a context one-word return does
+    expect(contextLift(r1(''))).toContain('gP = (u8)(a0 + 1);');
+  });
+
+  // A call reads only what it is handed (thumb.ts `frameAddressReceivers`): a declared callee its
+  // argument words, an undeclared one every argument register. Past it a clobbered register is
+  // dead and a callee-saved one still holds the copy.
+  test('a call past the load reads the copy only where it is handed it', () => {
+    const PC: Prototypes = { ...P, g0: { params: [], returns: 'u32' }, g1: { params: ['u32'], returns: 'u32' } };
+    const saved = (mid: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n\tmov\tr0, sp\n' +
+      `\tbl\tmk\n${mid}\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const callLift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: PC }).source;
+    // a declared one-word callee is handed r0, so a copy in r2 dies at the call
+    expect(callLift(fr('\tadd\tr2, sp, #0x4\n\tldrb\tr0, [r2]\n\tbl\tg1\n'))).toContain('g1((u8)(a0 + 1))');
+    // …and a copy in r4 the callee preserves dies where the next copy of sp is written over it
+    expect(
+      callLift(
+        saved(
+          '\tadd\tr4, sp, #0x4\n\tldrb\tr0, [r4]\n\tbl\tg1\n\tadd\tr4, sp, #0x4\n\tldrb\tr4, [r4]\n\tadd\tr0, r0, r4\n',
+        ),
+      ),
+    ).toContain('g1((u8)(a0 + 1))');
+    // …and a copy in r0 a callee is not handed dies there too: what it returns is written over it
+    expect(callLift(saved('\tadd\tr0, sp, #0x4\n\tldrb\tr4, [r0]\n\tbl\tg0\n\tadd\tr0, r0, r4\n'))).toContain(
+      'g0() + (u8)(a0 + 1)',
+    );
+    for (const declines of [
+      // an undeclared callee may be handed every argument register
+      fr('\tadd\tr2, sp, #0x4\n\tldrb\tr0, [r2]\n\tmov\tr1, #0x1\n\tbl\tg9\n'),
+      // the copy in the register the declared callee is handed
+      fr('\tadd\tr0, sp, #0x4\n\tldrb\tr1, [r0]\n\tbl\tg1\n'),
+      // a callee-saved copy read after the call
+      saved(
+        '\tmov\tr4, #0x9\n\tadd\tr4, sp, #0x4\n\tldrb\tr0, [r4]\n\tbl\tg1\n\tldrb\tr1, [r4, #0x1]\n\tadd\tr0, r0, r1\n',
+      ),
+    ]) {
+      expect(() => callLift(declines), declines).toThrow(/address-taken stack local/);
+    }
+  });
+
+  test('a copy anything else reads stays a capture', () => {
     const WIDTHS = 'the accesses through the captured address disagree on width (4 vs 1)';
-    // the loaded value lands in another register, so the copy outlives the load
-    expect(() => lift(fr('\tadd\tr3, sp, #0x4\n\tldrb\tr0, [r3]\n'))).toThrow(WIDTHS);
     // a second load through the copy
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tldrb\tr2, [r0]\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
       WIDTHS,
@@ -5845,6 +5960,36 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => lift(fr('\tadd\tr0, sp, #0x4\n\tbl\tmk2\n\tldrb\tr0, [r0]\n'))).toThrow(
       'the captured address at [sp,#0) is where `mk` returns its struct',
     );
+  });
+
+  // The deadness proof picks the copies left unlifted; the marker each leaves in its register holds
+  // the lift to that proof, so a read the proof missed declines instead of reading the register's
+  // value from before the copy.
+  test("a read of a dropped copy's register declines", () => {
+    const ops: Op[] = [];
+    const stale = new Map<Value, StaleIdiomRead>();
+    ops.push(mkOp('ret', { operands: [staleMarker(ops, 'r3', { reg: 'r3', form: 'narrow', parks: false }, stale)] }));
+    const refuse = (own?: Prototypes[string], dropsVoidReturn?: boolean) => () =>
+      refuseStaleIdiomReads(
+        'f',
+        [{ params: [], ops }],
+        stale,
+        { everyReachingDef: () => false },
+        own,
+        (m) => {
+          throw new Error(m);
+        },
+        { refuseDispatchUnlockedPassThrough: () => {} },
+        dropsVoidReturn,
+      );
+    const READ =
+      "cannot lift 'f': address-taken stack local — r3 is read past the narrow slot reload that read through it";
+    expect(refuse()).toThrow(READ);
+    // a void own exempts the `ret` only where the pipeline drops its operand: a stated entry, not the
+    // context's own alone
+    const VOID = { params: [], returnsVoid: true };
+    expect(refuse(VOID, false)).toThrow(READ);
+    expect(refuse(VOID, true)).not.toThrow();
   });
 
   test('a register-offset or signed narrow load is no reload of the slot', () => {
