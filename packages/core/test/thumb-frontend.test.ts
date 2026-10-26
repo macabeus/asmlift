@@ -5864,6 +5864,19 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     );
   });
 
+  // …and where the released lift stops at another obstacle, the decline names it after the first:
+  // here g's escape at [sp,#8], which the first refusal (the width disagreement over the held home)
+  // stopped short of
+  test('a released relift that declines elsewhere reports both refusals', () => {
+    const asm =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr0, [sp, #0xc]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+      '\tadd\tr0, sp, #0x8\n\tbl\tg\n\tadd\tr0, sp, #0xc\n\tldrb\tr0, [r0]\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0x10\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => lift(asm)).toThrow(
+      /disagree on width \(4 vs 1\).*; with the argument home released: address-taken stack local — the captured address is never dereferenced/,
+    );
+  });
+
   // A HELD HOME'S NARROW RELOAD IS STILL ITS WORD'S RELOAD for the stack-argument analysis. agbcc
   // stores a by-value struct over 8 bytes (BLKmode) at the frame's bottom, below a struct-return
   // temp: `struct P { u8 m0, …, m8; }; s32 k1(struct P p) { struct R r0 = mk0(1); return p.m0 +

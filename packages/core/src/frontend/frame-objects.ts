@@ -76,7 +76,7 @@ export interface FrameObjectAudit {
    *  parameter's home recompiles as that one object (Thumb `argumentHomes`). Where that answer is
    *  withheld and the audit refuses, it asks for a relift with them released
    *  (`FrameObjectRelift.homesReleased`) rather than refusing, and a relift that declines reports
-   *  this refusal. Absent or empty where none was kept. */
+   *  this refusal first. Absent or empty where none was kept. */
   releasableHomes?: ReadonlySet<number>;
   /** the bytes a first audit asked to have kept as ONE object in memory (`FrameObjectRelift`):
    *  the frontend routes every access inside them through an `laddr`, and the audit declares
@@ -139,8 +139,9 @@ export function keptInRelift(kept: FrameRange, at: number, width: number, what: 
  *  unset and `homesReleased`, so the frontend reads those homes as the slots they are. */
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange | undefined;
-  /** with `homesReleased`, the first audit's refusal, which a relift that declines again reports:
-   *  the frame as the first lift read it, not the second lift's next refusal */
+  /** with `homesReleased`, the first audit's refusal, which a relift that declines again reports
+   *  first: the frame as the first lift read it, followed by the second lift's own refusal where it
+   *  differs (`bothRefusals`) */
   readonly homesReleased?: { readonly refusal: FrontendUnsupportedError };
 }
 
@@ -149,7 +150,7 @@ export interface FrameObjectRelift {
  *  bytes to keep as one object routed through an `laddr`, or argument homes released to the slot
  *  model. The second audit judges the frame as asked and refuses rather than asking again, so a
  *  second request is an internal error, not a third lift. A second lift with homes released that
- *  declines reports the first audit's refusal (`homesReleased.refusal`). A frontend that hands the
+ *  declines reports the first audit's refusal (`homesReleased.refusal`) and then its own. A frontend that hands the
  *  audit no `releasableHomes` is never asked to release one, and may ignore `homesReleased`. */
 export function liftWithRelift<F>(
   name: string,
@@ -165,7 +166,7 @@ export function liftWithRelift<F>(
     again = liftOnce(first.oneObject, released !== undefined);
   } catch (e) {
     if (released !== undefined && e instanceof FrontendUnsupportedError) {
-      throw released.refusal;
+      throw bothRefusals(name, released.refusal, e);
     }
     throw e;
   }
@@ -173,6 +174,23 @@ export function liftWithRelift<F>(
     throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
   }
   return again;
+}
+
+/** A released relift's decline, worded as both lifts read the frame: the first audit's refusal of
+ *  the frame with the homes held, then the second's with them released, which may name another
+ *  obstacle (an escape the first refusal stopped short of). The first leads, so a message that
+ *  only the first lift's refusal explains reads as it would with no release; the second is
+ *  appended only where it says something else. */
+function bothRefusals(
+  name: string,
+  first: FrontendUnsupportedError,
+  second: FrontendUnsupportedError,
+): FrontendUnsupportedError {
+  const lead = `cannot lift '${name}': `;
+  const reason = second.message.startsWith(lead) ? second.message.slice(lead.length) : second.message;
+  return first.message.endsWith(reason)
+    ? first
+    : new FrontendUnsupportedError(`${first.message}; with the argument home released: ${reason}`);
 }
 
 const isRelift = <F>(x: F | FrameObjectRelift): x is FrameObjectRelift =>
@@ -406,8 +424,9 @@ export function auditFrameObjects(audit: FrameObjectAudit): FrameObjectVerdict {
   // released. The hold exists for byte-exactness (the one object recompiles as the frame does), not
   // for soundness: a home's narrow reload read as the word narrowed is the value the entry stored
   // there, and the second audit judges the frame whole either way, so the release is value-sound
-  // whichever refusal fired. A second lift that declines reports this refusal (`liftWithRelift`),
-  // the frame as the first lift read it, not the second's next refusal. Asked of the first lift
+  // whichever refusal fired. A second lift that declines reports this refusal first, the frame as
+  // the first lift read it, and then its own where that differs (`liftWithRelift`), the obstacle
+  // left once the home is released, which may be a different one. Asked of the first lift
   // alone: a relift that keeps one object has already had the answer the homes were held for.
   const { oneObject, releasableHomes } = audit;
   if (oneObject !== undefined || releasableHomes === undefined || releasableHomes.size === 0) {

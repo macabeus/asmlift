@@ -781,7 +781,7 @@ hold, such as a struct-return temp beside the home) and the audit declines with 
 asks for a second lift with the homes released (`FrameObjectRelift.homesReleased`), which reads
 their narrow reloads as the slot narrowed. The hold buys byte-exactness, not soundness, so the
 release is value-sound whichever refusal fired; a second lift that declines reports the first's
-refusal. The hold changes how the lift reads
+refusal, followed by its own where that names another obstacle. The hold changes how the lift reads
 a home's reloads, never whether the word is reloaded: the stack-argument analysis counts a held
 home's narrow reload as its word's reload, so a home below an escaping temp (agbcc's BLKmode
 by-value struct over 8 bytes, stored at the frame's bottom on entry) reaches the audit rather than
