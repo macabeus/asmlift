@@ -560,3 +560,63 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     ).toThrow(/a case of the elided jump table reads r0/);
   });
 });
+
+// A WRITE ANOTHER BLOCK MADE, ASKED ON O32: whether an instruction read it is asked on every path out
+// of it, and the call's own block is not asked (frontend/call-plan.ts `leftover`)
+describe('on O32, a write another block made is a leftover where an instruction read it', () => {
+  const listing = (body: string) =>
+    '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n' +
+    '00000000 <rnd>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlw\tv0,0(v0)\n\n' +
+    body;
+  const data = (relocs: Array<[number, string, string]>): AsmData => ({
+    sections: new Map(),
+    relocs: relocs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+    symbols: new Map(),
+    symbolCount: 0,
+    bigEndian: true,
+  });
+  // `int f(int c, int d) { int t; if (c) t = d + 3; else t = d - 9; rnd(t); return t; }` at ido7.1
+  // -O2: each arm computes t into a0, and IDO saves the argument it hands rnd in the jal's delay slot
+  // (`sw a0, 28(sp)`). Handed nothing, IDO computes t into v1 instead, so a0 is rnd's argument
+  test("ido7.1: a delay-slot save in the call's own block does not make an arm's write a leftover", () => {
+    const f =
+      '00000018 <f>:\n  18:\taddiu\tsp,sp,-32\n  1c:\tbeqz\ta0,2c <f+0x14>\n  20:\tsw\tra,20(sp)\n' +
+      '  24:\tb\t30 <f+0x18>\n  28:\taddiu\ta0,a1,3\n  2c:\taddiu\ta0,a1,-9\n  30:\tjal\t0 <rnd>\n' +
+      '  34:\tsw\ta0,28(sp)\n  38:\tlw\tra,20(sp)\n  3c:\tlw\tv0,28(sp)\n  40:\taddiu\tsp,sp,32\n' +
+      '  44:\tjr\tra\n  48:\tnop\n';
+    const asmData = data([
+      [0, 'R_MIPS_HI16', 'gq'],
+      [8, 'R_MIPS_LO16', 'gq'],
+      [0x30, 'R_MIPS_26', 'rnd'],
+    ]);
+    const src = decompile('f', listing(f), MIPS_IDO, { asmData, prototypes: own(['s32', 's32']) }).source;
+    expect(src).toMatch(/rnd\(\w+\);/);
+  });
+  // `void f(void) { if (gr == 0) { cr(0, 20); gr = 1; } else if (rnd() == 0) gq = 1; }` at gcc2.7.2
+  // -O2: the branch's delay slot sets a0 for cr (`bnez v0, L; move a0, zero`), so on the path to rnd
+  // the 0 reaches it unread, while the other path's call read it
+  test("gcc2.7.2: a write a sibling path's call read is a leftover", () => {
+    const f =
+      '00000018 <f>:\n  18:\taddiu\tsp,sp,-24\n  1c:\tsw\tra,16(sp)\n  20:\tlui\tv0,0x0\n' +
+      '  24:\tlw\tv0,0(v0)\n  28:\tbnez\tv0,48 <f+0x30>\n  2c:\tmove\ta0,zero\n  30:\tjal\t0 <rnd>\n' +
+      '  34:\tli\ta1,20\n  38:\tli\tv0,1\n  3c:\tlui\tat,0x0\n  40:\tj\t60 <f+0x48>\n  44:\tsw\tv0,0(at)\n' +
+      '  48:\tjal\t0 <rnd>\n  4c:\tnop\n  50:\tbnez\tv0,60 <f+0x48>\n  54:\tli\tv0,1\n  58:\tlui\tat,0x0\n' +
+      '  5c:\tsw\tv0,0(at)\n  60:\tlw\tra,16(sp)\n  64:\tjr\tra\n  68:\taddiu\tsp,sp,24\n';
+    const asmData = data([
+      [0, 'R_MIPS_HI16', 'gq'],
+      [8, 'R_MIPS_LO16', 'gq'],
+      [0x20, 'R_MIPS_HI16', 'gr'],
+      [0x24, 'R_MIPS_LO16', 'gr'],
+      [0x30, 'R_MIPS_26', 'cr'],
+      [0x3c, 'R_MIPS_HI16', 'gr'],
+      [0x44, 'R_MIPS_LO16', 'gr'],
+      [0x48, 'R_MIPS_26', 'rnd'],
+      [0x58, 'R_MIPS_HI16', 'gq'],
+      [0x5c, 'R_MIPS_LO16', 'gq'],
+    ]);
+    const prototypes: Prototypes = { f: { params: [], returnsVoid: true } };
+    const src = decompile('f', listing(f), MIPS_GCC, { asmData, prototypes }).source;
+    expect(src).toContain('cr(0, 20)');
+    expect(src).toContain('rnd()');
+  });
+});

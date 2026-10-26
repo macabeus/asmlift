@@ -958,28 +958,44 @@ export function callDeclarations(
     // into a callee-saved register, a store to a frame home — is how a value is SAVED across the
     // call, and a saved value may be handed to the call as well:
     //   - the call's own block wrote it, or nothing in this function did (the incoming value): only a
-    //     lowered op's read since. IDO computes a value it hands to a call and keeps after it in the
-    //     argument register and saves it in the delay slot (`t = i << 3; rnd(t); return g(t);` is
-    //     `sll a0, a0, 3; jal rnd; sw a0, 24(sp)`, where `rnd(); return g(i << 3);` computes after
-    //     the call). An incoming value used after the call is saved whatever the call is handed:
-    //     `un(a); return g2(a);` and `un(); return g2(a);` compile to the same caller bytes on
-    //     agbcc, IDO, gcc 2.7.2, KMC and mwcc (agbcc `add r4, r0, #0; bl un`). An op that reads
-    //     either (`i << 3` from the incoming i) used it for something else.
-    //   - another block wrote it: any read since on some path into the call, the save's included
-    //     (`SsaBuilder.readSinceWriteOnSomePath`). agbcc's case CSE computes a switch's cases'
-    //     `i << 3` in r0 and moves it to r4 at the join (`add r4, r0, #0; bl rnd`), where a value
-    //     handed to the call is copied back for it in the call's block (`t = b ? i << 3 : i + 5;
-    //     rnd(t); return g(t);` is `lsl r4, r0, #3` in a case and `add r0, r4, #0; bl rnd` at the
-    //     join, measured): a write the call's block makes, read by nothing since. IDO's join is the
-    //     same bytes whether the call is handed it or not (`sll a0, a0, 3` in a case, `sw a0` in the
-    //     delay slot), so either answer is the bytes there.
+    //     lowered op's read since. An incoming value used after the call is saved whatever the call
+    //     is handed: `un(a); return g2(a);` and `un(); return g2(a);` compile to the same caller
+    //     bytes on agbcc, IDO, gcc 2.7.2, KMC and mwcc (agbcc `add r4, r0, #0; bl un`). An op that
+    //     reads either (`i << 3` from the incoming i) used it for something else.
+    //   - another block wrote it: a lowered op's read in the call's block, or any read after EACH
+    //     write that reaches the call, the save's included, on any path out of that write but the
+    //     ones into the call (`SsaBuilder.readAfterEveryReachingWrite`). agbcc's case CSE computes a
+    //     switch's cases' `i << 3` in r0 and moves it to r4 at the cases' join (`add r4, r0, #0`)
+    //     before the join the call is in, where a value handed to the call is copied back for it in
+    //     the call's block (`t = b ? i << 3 : i + 5; rnd(t); return g(t);` is `lsl r4, r0, #3` in a
+    //     case and `add r0, r4, #0; bl rnd` at the join, measured). EACH write, because one no read
+    //     follows was made for the call: `if (c) { t = d + 3; gX = t; } else t = d - 9; rnd(t);` at
+    //     IDO stores one arm's a0; an earlier call's result is no such write (sa3 Task_274_8056314:
+    //     `strb r0` of one arm's value, `bl sub_8056408` in the other, then `bl Task_274_8054E38`,
+    //     whose source takes nothing). ANY path out of it, because gcc 2.7.2 and KMC fill a branch's
+    //     delay slot with the argument of the call one way (`bnez v0, L; move a0, zero; jal cr`), and
+    //     the 0 reaches `L: jal stat` unread on the path between. NOT the call's own block's saves:
+    //     IDO saves the argument it hands a call and keeps after it in the jal's delay slot (`t = d +
+    //     3` in an arm, `jal rnd; sw a0, 28(sp)`, measured), and computes t into v1 where rnd is
+    //     handed nothing, so that save is evidence FOR the argument there, as agbcc's copy in an
+    //     earlier block is evidence against.
     const leftover = (r: string): boolean => {
       const at = ssa.lastWriteOp(r, bi);
       if (at !== undefined) {
         const since = ssa.irBlocks[bi].ops.slice(at);
         return ssa.holdsValue(r, bi, (v) => mayPass(v, r) && since.some((o) => reads(o, v)));
       }
-      return ssa.readSinceWriteOnSomePath(r, bi, (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)));
+      if (ssa.holdsValue(r, bi, (v) => mayPass(v, r) && ssa.irBlocks[bi].ops.some((o) => reads(o, v)))) {
+        return true;
+      }
+      return ssa.readAfterEveryReachingWrite(r, bi, {
+        // an earlier call's result is no write this function made, for this call or another
+        passes: (v) =>
+          mayPass(v, r) && !ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v))),
+        accept: (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)),
+        // a path into a block not lowered yet: what its value answers, as the base question did
+        unlowered: (v) => readSoFar(v),
+      });
     };
     const unreadByBody = (r: string): boolean => {
       const words = bodyWords();
@@ -1138,6 +1154,7 @@ export function callDeclarations(
     const guessed = (k: number): Value => {
       const r = target.argRegs[k];
       const v = ssa.readGuessedArg(r, bi);
+      ssa.noteGuessedArgRead(r, bi, v);
       return placeholders ? placeholders.guardRead(name, r, v) : v;
     };
     const args: Value[] = [];
