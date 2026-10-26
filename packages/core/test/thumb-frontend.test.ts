@@ -5797,10 +5797,21 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   });
 
   // …and a word the entry stores straight from an argument register is that argument's home, the
-  // by-value struct parameter's shape, whose members are an object's (thumb.ts `argumentHomes`)
+  // by-value struct parameter's shape, whose members are an object's (thumb.ts `argumentHomes`) —
+  // while the one-object answer can take it: with no address escaping, the frame is that one object
   test('an incoming argument stored on entry keeps the object model', () => {
+    const own =
+      'f:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tstr\tr1, [sp]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tbx\tlr\n';
+    const one = decompile('f', own, ARMV4T_AGBCC, { prototypes: { f: { params: 2, returns: 's32' } } }).source;
+    expect(one).toContain('u8 sp0[8];');
+    expect(one).toContain('return ((u8 *)sp0)[4];');
+    // A struct-return temp beside it escapes to `mk`, a writer the one object cannot hold, so that
+    // answer is withheld and the held home only declined ("disagree on width (4 vs 1)"): the audit
+    // asks for a relift with the home released (frame-objects.ts `auditFrameObjects`), and its
+    // reload is the word narrowed, as a spilled local's is.
     const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
-    expect(() => lift(home)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+    expect(lift(home)).toContain('return (u8)a0 + *(s32 *)&sp0;');
     // …which a call before the store ends: r0 is then the callee's return, not the argument
     const afterCall = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace(
       '\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n',
@@ -5810,18 +5821,127 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(decompile('f', afterCall, ARMV4T_AGBCC, { prototypes: GET }).source).toContain('return (u8)v0 + ');
   });
 
+  // A RELEASED HOME IS STILL JUDGED WHOLE. A narrow store into the home through another sp copy is
+  // a write the slot model would never see: read as the slot narrowed, the reload would return the
+  // entry's value and miss the 5. The second audit refuses the object over the released slot, and
+  // the decline leads with the first audit's refusal of the held home (frame-objects.ts
+  // `liftWithRelift`), as with no release at all.
+  test('a home released to the slot model that is written through another copy declines', () => {
+    const home = (store: string) =>
+      fr(`\tmov\tr3, sp\n\tmov\tr2, #0x5\n\t${store}\tr2, [r3, #0x4]\n\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x4]\n`).replace(
+        '\tadd\tr0, r0, #0x1\n',
+        '',
+      );
+    expect(lift(fr('\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x4]\n').replace('\tadd\tr0, r0, #0x1\n', ''))).toContain(
+      'return (u8)a0 + *(s32 *)&sp0;',
+    );
+    expect(() => lift(home('strb'))).toThrow(
+      'the object at [sp,#4) overlaps the SSA slot at [sp,#4] — one byte, two models',
+    );
+    expect(() => lift(home('strh'))).toThrow('the accesses through the captured address disagree on width (2 vs 1)');
+  });
+
+  // …and the decline leads with the first lift's refusal where that is not the held home's: here
+  // an 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes
+  test('a refusal that is not the held home declines with its own reason', () => {
+    const R8: Prototypes = {
+      ...P,
+      mk: {
+        params: [],
+        returns: 'struct R8',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u32' },
+            { name: 'b', type: 'u32' },
+          ],
+        },
+      },
+    };
+    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    expect(() => decompile('f', home, ARMV4T_AGBCC, { prototypes: R8 })).toThrow(
+      'the object at [sp,#0) is where `mk` returns struct R8, and this function also writes it',
+    );
+  });
+
+  // …and where the released lift stops at another obstacle, the decline names it after the first:
+  // here g's escape at [sp,#8], which the first refusal (the width disagreement over the held home)
+  // stopped short of
+  test('a released relift that declines elsewhere reports both refusals', () => {
+    const asm =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr0, [sp, #0xc]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+      '\tadd\tr0, sp, #0x8\n\tbl\tg\n\tadd\tr0, sp, #0xc\n\tldrb\tr0, [r0]\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0x10\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => lift(asm)).toThrow(
+      /disagree on width \(4 vs 1\).*; with the argument home released: address-taken stack local — the captured address is never dereferenced/,
+    );
+  });
+
+  // A HELD HOME'S NARROW RELOAD IS STILL ITS WORD'S RELOAD for the stack-argument analysis. agbcc
+  // stores a by-value struct over 8 bytes (BLKmode) at the frame's bottom, below a struct-return
+  // temp: `struct P { u8 m0, …, m8; }; s32 k1(struct P p) { struct R r0 = mk0(1); return p.m0 +
+  // p.m4 + r0.a; }`. Read as no reload, [sp,#0] would decline as a possible outgoing argument.
+  test('a home below an escaping struct-return temp reaches the audit', () => {
+    const k1 =
+      'k1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+      '\tadd\tr0, sp, #0xc\n\tmov\tr1, #0x1\n\tbl\tmk0\n\tldr\tr2, [sp, #0xc]\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n' +
+      '\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n' +
+      '\tadd\tr0, r0, r2\n\tadd\tsp, sp, #0x10\n\tpop\t{r1}\n\tbx\tr1\n';
+    const mk0: Prototypes[string] = {
+      params: ['s32'],
+      returns: 'struct R',
+      returnLayout: {
+        kind: 'struct',
+        members: [
+          { name: 'a', type: 'u16' },
+          { name: 'b', type: 'u8' },
+          { name: 'c', type: 'u8' },
+        ],
+      },
+    };
+    expect(
+      decompile('k1', k1, ARMV4T_AGBCC, { prototypes: { k1: { params: 3, returns: 's32' }, mk0 } }).source,
+    ).toContain('return (u8)a0 + (u8)a1 + sp12.a;');
+    // …and the word a declared callee takes as its fifth argument is still refused where this
+    // function loads it back
+    const g5 =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n' +
+      '\tmov\tr3, #0x4\n\tbl\tg5\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    const G5: Prototypes = { ...P, g5: { params: ['s32', 's32', 's32', 's32', 's32'], returns: 'void' } };
+    expect(() => decompile('f', g5, ARMV4T_AGBCC, { prototypes: G5 })).toThrow('but this function also LOADS it');
+  });
+
+  // …AND SO IS A NARROW RELOAD INSIDE THE BYTES A FIRST AUDIT KEPT AS ONE OBJECT, which the
+  // one-object relift keeps as a capture. The BLKmode home with a call and no struct-return temp
+  // beside it: `s32 m2(struct P p) { g(); return p.m0 + p.m8; }` asks for [0,12) as one object,
+  // and read as no reload there, [sp,#0] would decline as a possible outgoing argument.
+  test('a home kept as one object across a call lifts', () => {
+    const m2 =
+      'm2:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+      '\tbl\tg\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n\tbx\tr1\n';
+    const source = decompile('m2', m2, ARMV4T_AGBCC, {
+      prototypes: { m2: { params: 3, returns: 's32' }, g: { params: [], returns: 'void' } },
+    }).source;
+    expect(source).toContain('u8 sp0[12];');
+    expect(source).toContain('g();\n    return *p1 + p1[8];');
+  });
+
   // …unless the function's own declaration proves the register holds one integer word, which no
   // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
   // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it
   // guards.
   test("the own declaration's word parameter is no by-value home", () => {
-    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    // no address escapes, so a home would be the one object (the test above)
+    const home =
+      'f:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tstr\tr1, [sp]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tbx\tlr\n';
     const own = (params: Prototypes[string]['params']): string =>
-      decompile('f', home, ARMV4T_AGBCC, { prototypes: { ...P, f: { params, returns: 's32' } } }).source;
-    expect(own(['u32'])).toContain('return (u8)a0 + *(s32 *)&sp0;');
-    expect(own(['u8 *'])).toContain('return (u8)a0 + ');
-    expect(() => own(['struct Q'])).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
-    expect(() => own(1)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+      decompile('f', home, ARMV4T_AGBCC, { prototypes: { f: { params, returns: 's32' } } }).source;
+    expect(own(['u32', 'u32'])).toContain('return (u8)a0;');
+    expect(own(['u8 *', 'u32'])).toContain('return (u8)a0;');
+    expect(own(['struct Q', 'u32'])).toContain('return ((u8 *)sp0)[4];');
+    expect(own(2)).toContain('return ((u8 *)sp0)[4];');
   });
 
   test('a byte that is not the low-order part of the word is no reload of it', () => {

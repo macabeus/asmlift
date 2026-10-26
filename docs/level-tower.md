@@ -775,7 +775,18 @@ stores a word to the slot with `str` and nothing else claims it: no other captur
 block, not the one object. A word the entry block stores straight from an argument register it
 has not yet written is taken as a by-value parameter's home and keeps the object model, which the
 own declaration overrules where it proves that register holds one integer word (proto.ts
-`ownLeadingWordRegisters`), since no struct passed by value is one. In either model a store
+`ownLeadingWordRegisters`), since no struct passed by value is one. The home is held for the
+one-object answer alone: where that answer is withheld (an address escapes to a writer it cannot
+hold, such as a struct-return temp beside the home) and the audit declines with the home held, it
+asks for a second lift with the homes released (`FrameObjectRelift.homesReleased`), which reads
+their narrow reloads as the slot narrowed. The hold buys byte-exactness, not soundness, so the
+release is value-sound whichever refusal fired; a second lift that declines reports the first's
+refusal, followed by its own where that names another obstacle. The hold changes how the lift reads
+a home's reloads, never whether the word is reloaded: the stack-argument analysis counts a held
+home's narrow reload as its word's reload, and so a narrow reload inside the bytes a first audit
+kept as one object, so agbcc's BLKmode by-value struct over 8 bytes, stored at the frame's bottom on
+entry, does not decline as a possible outgoing argument, below an escaping temp or across a call
+with no temp beside it (thumb.ts `measureThumbFrame`). In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a
