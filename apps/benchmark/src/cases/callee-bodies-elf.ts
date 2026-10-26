@@ -2,8 +2,8 @@
 // `bench vendor` freezes them (cases/vendor.ts), `bench fidelity` re-derives them and holds the
 // frozen file equal (run/symbol-drift.ts `checkCalleeBodiesDrift`), and `bench target` names the
 // same objdump in the decomp.yaml a row's repro script runs the CLI with (decomp-config.ts).
-// Spelled per reader, the objdump a PowerPC listing is read with was the vendor's alone, and a PPC
-// repro read no body where the harness handed it one.
+// Spelled per reader, a PowerPC repro could read its listings with another objdump than the
+// vendor's, or with none, and read no body where the harness hands it one.
 import { moduleOf } from '@asmlift/bench-schema';
 import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
 import { disasmRange, objdumpBinaryFor, readsObjdumpText } from '@asmlift/cli/objfile';
