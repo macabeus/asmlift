@@ -563,16 +563,21 @@ export function pointeeFields(pointee: SymbolPointee | undefined): DeclaredField
 /** Kind-aware two-probe lookup for a pool-loaded 32-bit value. Exact match first (any kind);
  *  on miss, `value & ~1` — accepted ONLY when the hit is code, because ELF function addresses
  *  are stored with the Thumb bit cleared while a Thumb code pointer in a pool is odd. An exact
- *  odd-DATA hit therefore wins over a masked code hit (odd data addresses are real). */
+ *  odd-DATA hit therefore wins over a masked code hit (odd data addresses are real).
+ *
+ *  The masked probe asks for the CODE alias at that address, not for the canonical `[0]`: a
+ *  table-end or segment marker can share its address with the function that follows it, and the
+ *  provider may rank the marker first (pokeemerald's `gMysteryEventScriptCmdTableEnd` over
+ *  `GameCubeMultiBoot_Hash`). An odd pool word there is still the function's Thumb pointer. */
 export function lookupSymbol(map: SymbolMap, value: number): SymbolInfo | null {
   const exact = map.get(value)?.[0];
   if (exact) {
     return exact;
   }
   if ((value & 1) === 1) {
-    const masked = map.get(value & ~1)?.[0];
-    if (masked?.kind === 'code') {
-      return masked;
+    const code = map.get(value & ~1)?.find((info) => info.kind === 'code');
+    if (code) {
+      return code;
     }
   }
   return null;

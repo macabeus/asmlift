@@ -66,6 +66,24 @@ describe('the numeric-pool promotion (P1 names)', () => {
     expect(src).not.toContain('&DoThing');
   });
 
+  test('the masked probe finds the code alias behind a data marker ranked first at its address', () => {
+    // pokeemerald 0x082ded70: gMysteryEventScriptCmdTableEnd (data, declared) is [0], the FUNC
+    // GameCubeMultiBoot_Hash is the alias. An odd pool word there is the function's Thumb pointer.
+    const map: SymbolMap = new Map([
+      [
+        0x08012344,
+        [
+          { name: 'gTableEnd', kind: 'data', declared: true },
+          { name: 'DoThing', kind: 'code' },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x08012345)?.name).toBe('DoThing');
+    expect(lookupSymbol(map, 0x08012344)?.name).toBe('gTableEnd');
+    const src = run('f', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08012345\n', map);
+    expect(src).toContain('(u32)DoThing');
+  });
+
   test('an exact odd DATA hit wins over a masked code hit', () => {
     const body = '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x03000001\n';
     const map: SymbolMap = new Map([
