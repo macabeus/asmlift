@@ -54,8 +54,12 @@ const build = (
     ssa.markFilled(i);
   }
   run(n - 1);
-  return (passes: () => boolean = () => true, accept: () => boolean = () => true, unlowered = () => false) =>
-    ssa.readAfterEveryReachingWrite('r0', n - 1, { passes, accept, unlowered });
+  return (
+    passes: () => boolean = () => true,
+    accept: () => boolean = () => true,
+    unlowered = () => false,
+    answersIfRead = () => false,
+  ) => ssa.readAfterEveryReachingWrite('r0', n - 1, { passes, accept, unlowered, answersIfRead });
 };
 
 // bb0 → bb1 | bb2 → bb3 → bb4, the call's block
@@ -78,7 +82,8 @@ test('a write nothing read since answers no: a copy made for the call in a prede
   // a read before the write is a read of an older write
   expect(build(join, { 0: ['read'], 1: ['def'], 2: ['def'] })()).toBe(false);
   expect(build(join, { 1: ['read', 'def'], 2: ['def'] })()).toBe(false);
-  expect(build(join, {})()).toBe(false);
+  // nothing written here and no entry value read: no answer, the caller asks the value
+  expect(build(join, {})()).toBe(undefined);
 });
 
 test("the call's own block is not asked: a save there says something different per compiler", () => {
@@ -99,8 +104,8 @@ test('a call destroying r0 neither counts nor answers; a write the caller does n
   // what the call left there, read since, says nothing: bb2's own write decides
   expect(build(join, { 1: ['call', 'read'], 2: ['def', 'read'] })()).toBe(true);
   expect(build(join, { 1: ['call'], 2: ['def'] })()).toBe(false);
-  // …and the entry's value, unread on bb2's path, was handed on
-  expect(build(join, { 1: ['call'] })()).toBe(false);
+  // …and with the entry's value, unread on bb2's path, nothing is left to judge
+  expect(build(join, { 1: ['call'] })()).toBe(undefined);
   // bb2's write is one the caller never passes (a dispatch's marker): bb1's read decides
   let k = 0;
   expect(build(join, { 1: ['def', 'read'], 2: ['def'] })(() => k++ === 0)).toBe(true);
@@ -116,9 +121,18 @@ test('a call destroying r0 on every path in leaves what a callee left: no argume
 test("the entry's value read answers by its value, as a path into a block not lowered yet does", () => {
   // a lookup minted the entry's parameter; whether a lowered op read it is `unlowered`'s to say
   expect(build(join, { 0: ['look'] })(undefined, undefined, () => true)).toBe(true);
-  expect(build(join, { 0: ['look'] })()).toBe(false);
+  expect(build(join, { 0: ['look'] })()).toBe(undefined);
   // and a write on another path still has to be read after
   expect(build(join, { 0: ['look'], 1: ['def'] })(undefined, undefined, () => false)).toBe(false);
+});
+
+test("an earlier call's result answers only where read after", () => {
+  // bb1 copied a result the loop then read; bb2's copy of one went unread, and says nothing
+  expect(build(join, { 1: ['def', 'read'], 2: ['def'] })(undefined, undefined, undefined, () => true)).toBe(true);
+  expect(build(join, { 1: ['def'], 2: ['def'] })(undefined, undefined, undefined, () => true)).toBe(undefined);
+  // a write of another value, unread, still answers no
+  let k = 0;
+  expect(build(join, { 1: ['def'], 2: ['def'] })(undefined, undefined, undefined, () => k++ === 0)).toBe(false);
 });
 
 test("a loop's back edge reads its own write at the body's top", () => {

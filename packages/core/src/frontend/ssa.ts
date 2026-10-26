@@ -156,7 +156,10 @@ export interface SsaBuilder {
    *  filled yet is passed through looking for the write, as {@link holdsValue} does; a path out of
    *  a write that reaches one has reads nobody has seen yet, and the write's value answers for it
    *  as `unlowered` takes it (IDO reloads `lw a0, 24(sp)` in a branch's delay slot for the arm laid
-   *  out after the call). */
+   *  out after the call). A write of a value `answersIfRead` takes (an earlier call's result, copied
+   *  or reloaded) answers yes where it was read after, and is otherwise none: such a value is the
+   *  callee's, saved across a call as often as handed to one. `undefined` where no write of this
+   *  function's is left to judge and no entry value read: the question has no answer here. */
   readAfterEveryReachingWrite(
     reg: string,
     b: number,
@@ -164,8 +167,9 @@ export interface SsaBuilder {
       passes: (v: Value) => boolean;
       accept: (v: Value) => boolean;
       unlowered: (v: Value) => boolean;
+      answersIfRead: (v: Value) => boolean;
     },
-  ): boolean;
+  ): boolean | undefined;
   /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
    *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
    *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
@@ -1725,7 +1729,7 @@ export function makeSsaBuilder(
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     lastWriteOp: (reg: string, b: number) => lastWriteOp[b].get(reg),
-    readAfterEveryReachingWrite: (reg, b, { passes, accept, unlowered }) => {
+    readAfterEveryReachingWrite: (reg, b, { passes, accept, unlowered, answersIfRead }) => {
       const writes = (at: number) => lastWriteOp[at].has(reg) || clobberedLocal[at].has(reg);
       // the blocks whose last write of `reg` reaches `b`, and whether a path from the entry wrote none.
       // `b` is judged up to here: met again round a loop, its end is no write that reaches here yet
@@ -1766,12 +1770,16 @@ export function makeSsaBuilder(
           }
           return !writes(s) && ahead(s, seen, written);
         });
-      // a call's destroying it is no write of this function's: it neither counts nor answers
-      const own = writers.filter((w) => !clobberedLocal[w].has(reg) && passes(defs[w].get(reg)!));
       const readAfter = (w: number): boolean => {
         const read = readSinceWrite[w].get(reg);
         return read !== undefined ? accept(read) : ahead(w, new Set(), defs[w].get(reg));
       };
+      // a call's destroying it is no write of this function's: it neither counts nor answers; and a
+      // write of a value `answersIfRead` takes answers only where it was read after
+      const own = writers.filter((w) => {
+        const v = defs[w].get(reg)!;
+        return !clobberedLocal[w].has(reg) && passes(v) && (!answersIfRead(v) || readAfter(w));
+      });
       // nor does the entry's value unread: nothing wrote it for the call. Read, it answers by its
       // value too (`unlowered`): no write of this function's made it, so no path out of one places
       // the read, and a path from the entry into a block not lowered yet holds reads nobody has seen
@@ -1787,7 +1795,11 @@ export function makeSsaBuilder(
       if (!fromEntry && writers.length > 0 && writers.every((w) => clobberedLocal[w].has(reg))) {
         return true;
       }
-      return (own.length > 0 || entryRead) && own.every(readAfter);
+      // no write of this function's left to judge, and no entry value read: nothing to answer
+      if (own.length === 0 && !entryRead) {
+        return undefined;
+      }
+      return own.every(readAfter);
     },
     writtenOnEveryPath: (reg, b, stop, visit) => {
       // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,

@@ -12577,8 +12577,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //      that reaches the call, on any path out of that write but the ones into the call. The call's
   //      own block's saves are not asked (IDO saves the argument it hands in the jal's delay slot); an
   //      earlier call's result where the call left it and a call destroying it neither count nor
-  //      answer; the entry's value counts where a lowered op read it; and a register calls destroyed
-  //      on every path in holds what a callee left, a leftover. jt_rndjoin lifts `rnd()` on agbcc,
+  //      answer, and a copy or reload of one answers only where read after; the entry's value counts
+  //      where a lowered op read it; a register calls destroyed on every path in holds what a callee
+  //      left, a leftover; and where no write is left to judge, what reaches answers by its value as
+  //      the base question did, a join's phi by the values it merges. jt_rndjoin lifts `rnd()` on agbcc,
   //      as `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one.
   //      jt_rndjoinst has no body and must STAY declined on agbcc, the soundness control.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc

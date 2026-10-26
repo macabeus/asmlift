@@ -637,4 +637,51 @@ describe('on O32, a write another block made is a leftover where an instruction 
     expect(src).toContain('cr(0, 20)');
     expect(src).toContain('rnd()');
   });
+  // af mCPk_PakPrivateLoad at ido7.1, the real function: `move a3, v0` keeps ld's result r, saved
+  // across chk's call and reloaded (`lw a3, 28(sp)`) on the path to mem_copy, which reads three words.
+  // The result was the callee's, not written for mem_copy, and the function read it (`bne v0, v1`):
+  // past the bound a3 is no argument, `mem_copy(d, s, 3024)` as the source
+  test('ido7.1: a result kept across a call and reloaded is no argument past the bound', () => {
+    const bodies =
+      '00000010 <mem_copy>:\n  10:\tlbu\tt0,0(a1)\n  14:\tsb\tt0,0(a0)\n  18:\taddiu\ta2,a2,-1\n' +
+      '  1c:\tjr\tra\n  20:\tnop\n\n00000024 <mPr_CheckPrivate>:\n  24:\tlw\tv0,0(a0)\n  28:\tjr\tra\n' +
+      '  2c:\tnop\n\n';
+    const f =
+      '00000040 <f>:\n  40:\taddiu\tsp,sp,-32\n  44:\tsw\tra,20(sp)\n  48:\tsw\ta0,32(sp)\n' +
+      '  4c:\tsw\ta1,36(sp)\n  50:\tsw\ta2,40(sp)\n  54:\tlw\ta0,40(sp)\n  58:\tjal\t0 <rnd>\n' +
+      '  5c:\tmove\ta1,zero\n  60:\tlui\ta1,0x0\n  64:\taddiu\ta1,a1,0\n  68:\tjal\t0 <rnd>\n' +
+      '  6c:\tlw\ta0,40(sp)\n  70:\tli\tv1,1\n  74:\tbne\tv0,v1,84 <f+0x44>\n' +
+      '  78:\tmove\ta3,v0\n  7c:\tlui\tat,0x0\n  80:\tsw\tv1,4612(at)\n' +
+      '  84:\tbne\tv0,v1,e0 <f+0xa0>\n  88:\tlui\ta0,0x0\n  8c:\taddiu\ta0,a0,8\n' +
+      '  90:\tjal\t0 <rnd>\n  94:\tsw\ta3,28(sp)\n  98:\tli\tv1,1\n' +
+      '  9c:\tbne\tv0,v1,d8 <f+0x98>\n  a0:\tlw\ta3,28(sp)\n  a4:\tlui\ta1,0x0\n' +
+      '  a8:\taddiu\ta1,a1,8\n  ac:\tlw\ta0,32(sp)\n  b0:\tli\ta2,3024\n  b4:\tjal\t0 <rnd>\n' +
+      '  b8:\tsw\ta3,28(sp)\n  bc:\tlui\ta1,0x0\n  c0:\taddiu\ta1,a1,3032\n' +
+      '  c4:\tlw\ta0,36(sp)\n  c8:\tjal\t0 <rnd>\n  cc:\tli\ta2,1320\n  d0:\tb\te4 <f+0xa4>\n' +
+      '  d4:\tlw\ta3,28(sp)\n  d8:\tb\te4 <f+0xa4>\n  dc:\tmove\ta3,zero\n' +
+      '  e0:\tmove\ta3,zero\n  e4:\tmove\tv0,a3\n  e8:\tlw\tra,20(sp)\n  ec:\taddiu\tsp,sp,32\n' +
+      '  f0:\tjr\tra\n  f4:\tnop\n';
+    const asmData = data([
+      [0x58, 'R_MIPS_26', 'mCPk_SetForestPakState'],
+      [0x60, 'R_MIPS_HI16', 'l_pak_ctrl'],
+      [0x64, 'R_MIPS_LO16', 'l_pak_ctrl'],
+      [0x68, 'R_MIPS_26', 'func_800792FC_jp'],
+      [0x7c, 'R_MIPS_HI16', 'l_pak_ctrl'],
+      [0x80, 'R_MIPS_LO16', 'l_pak_ctrl'],
+      [0x88, 'R_MIPS_HI16', 'l_pak_ctrl'],
+      [0x8c, 'R_MIPS_LO16', 'l_pak_ctrl'],
+      [0x90, 'R_MIPS_26', 'mPr_CheckPrivate'],
+      [0xa4, 'R_MIPS_HI16', 'l_pak_ctrl'],
+      [0xa8, 'R_MIPS_LO16', 'l_pak_ctrl'],
+      [0xb4, 'R_MIPS_26', 'mem_copy'],
+      [0xbc, 'R_MIPS_HI16', 'l_pak_ctrl'],
+      [0xc0, 'R_MIPS_LO16', 'l_pak_ctrl'],
+      [0xc8, 'R_MIPS_26', 'mem_copy'],
+    ]);
+    const src = decompile('f', listing(`${bodies}${f}`), MIPS_IDO, {
+      asmData,
+      prototypes: own(['s32', 's32', 's32']),
+    }).source;
+    expect(src).toMatch(/mem_copy\([^,]+, [^,]+, 3024\);/);
+  });
 });

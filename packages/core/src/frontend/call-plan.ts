@@ -988,20 +988,55 @@ export function callDeclarations(
       if (ssa.holdsValue(r, bi, (v) => mayPass(v, r) && ssa.irBlocks[bi].ops.some((o) => reads(o, v)))) {
         return true;
       }
-      return ssa.readAfterEveryReachingWrite(r, bi, {
-        // an earlier call's result where that call left it is no write this function made, for this
-        // call or another; a copy of it into another register is one (`bl gets; add r1, r0, #0` and
-        // `jal gets; move a1, v0`, read by the loop's loads after)
-        passes: (v) =>
-          mayPass(v, r) &&
-          !(
-            r === target.returnReg &&
-            ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v)))
-          ),
-        accept: (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)),
-        // a path into a block not lowered yet: what its value answers, as the base question did
-        unlowered: (v) => readSoFar(v),
-      });
+      const callResult = (v: Value): boolean =>
+        ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v)));
+      // the values a join's phi of `v` merges, through phis of phis, or `undefined` where an edge
+      // into one is not lowered yet
+      const merged = (v: Value, seen = new Set<Value>()): Value[] | undefined => {
+        const at = ssa.irBlocks.find((b) => b.params.includes(v));
+        if (at === undefined) {
+          return [v];
+        }
+        if (seen.has(v)) {
+          return [];
+        }
+        seen.add(v);
+        const k = at.params.indexOf(v);
+        const edges = ssa.irBlocks.flatMap((b) => b.ops.flatMap((o) => o.successors.filter((e) => e.block === at)));
+        const out: Value[] = [];
+        for (const e of edges) {
+          const sub = e.args[k] === undefined ? undefined : merged(e.args[k], seen);
+          if (sub === undefined) {
+            return undefined;
+          }
+          out.push(...sub);
+        }
+        return edges.length > 0 ? out : undefined;
+      };
+      // an earlier call's result on every path in: a join's phi of copies of one (IDO's `move a3,
+      // v0` in a branch's delay slot meets the path that skips the store between)
+      const resultOnEveryPath = (v: Value): boolean => {
+        const vs = merged(v);
+        return vs !== undefined && vs.length > 0 && vs.every(callResult);
+      };
+      return (
+        ssa.readAfterEveryReachingWrite(r, bi, {
+          // an earlier call's result where that call left it is no write this function made, for this
+          // call or another
+          passes: (v) => mayPass(v, r) && !(r === target.returnReg && callResult(v)),
+          accept: (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)),
+          // a path into a block not lowered yet: what its value answers, as the base question did
+          unlowered: (v) => readSoFar(v),
+          // a copy of an earlier call's result into another register, or a reload of one, answers
+          // only where read after: `bl gets; add r1, r0, #0` and `jal gets; move a1, v0` were, by the
+          // loop's loads, while IDO's `lw a3, 28(sp)` of a result saved across a call (af
+          // mCPk_PakPrivateLoad) was not, and says nothing
+          answersIfRead: (v) => resultOnEveryPath(v),
+        }) ??
+        // nothing written here left to judge: what reaches answers by its value, the base question,
+        // a join's phi by the values it merges (af mCPk_PakPrivateLoad compares the result it keeps)
+        ssa.holdsValue(r, bi, (v) => mayPass(v, r) && (readSoFar(v) || (merged(v) ?? []).some(readSoFar)))
+      );
     };
     const unreadByBody = (r: string): boolean => {
       const words = bodyWords();
