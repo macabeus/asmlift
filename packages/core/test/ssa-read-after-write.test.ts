@@ -99,13 +99,28 @@ test('a call destroying r0 neither counts nor answers; a write the caller does n
   // what the call left there, read since, says nothing: bb2's own write decides
   expect(build(join, { 1: ['call', 'read'], 2: ['def', 'read'] })()).toBe(true);
   expect(build(join, { 1: ['call'], 2: ['def'] })()).toBe(false);
-  expect(build(join, { 1: ['call'], 2: ['call'] })()).toBe(false);
+  // …and the entry's value, unread on bb2's path, was handed on
+  expect(build(join, { 1: ['call'] })()).toBe(false);
   // bb2's write is one the caller never passes (a dispatch's marker): bb1's read decides
   let k = 0;
   expect(build(join, { 1: ['def', 'read'], 2: ['def'] })(() => k++ === 0)).toBe(true);
 });
 
 // bb0 → bb1 (a loop body that branches back to itself) → bb2, the call's block
+test('a call destroying r0 on every path in leaves what a callee left: no argument', () => {
+  expect(build(join, { 1: ['call'], 2: ['call'] })()).toBe(true);
+  expect(build(join, { 0: ['def'], 1: ['call'], 2: ['call'] })()).toBe(true);
+  expect(build(join, { 3: ['call'] })()).toBe(true);
+});
+
+test("the entry's value read answers by its value, as a path into a block not lowered yet does", () => {
+  // a lookup minted the entry's parameter; whether a lowered op read it is `unlowered`'s to say
+  expect(build(join, { 0: ['look'] })(undefined, undefined, () => true)).toBe(true);
+  expect(build(join, { 0: ['look'] })()).toBe(false);
+  // and a write on another path still has to be read after
+  expect(build(join, { 0: ['look'], 1: ['def'] })(undefined, undefined, () => false)).toBe(false);
+});
+
 test("a loop's back edge reads its own write at the body's top", () => {
   // `sh v0, 168(a1); …; bnez v0, top; addiu a1, a1, 16`: the bump is read round the loop
   expect(build([[], [0, 1], [1]], { 1: ['read', 'def'] })()).toBe(true);

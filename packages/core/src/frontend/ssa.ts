@@ -140,7 +140,9 @@ export interface SsaBuilder {
    *  one whose value `accept` takes, and after one at least. A write no read follows on any path was
    *  made for `b`'s use, so one is enough to answer no. A call destroying `reg` is no write of this
    *  function's, and neither is the entry's value where a path from the entry writes neither, so they
-   *  do not answer no; the entry's value read after (as `accept` takes it) counts as a write read.
+   *  do not answer no; the entry's value read after (as `accept` takes it), or read by a lowered op
+   *  at all (as `unlowered` takes it: no write placed that read), counts as a write read. Where a
+   *  call destroyed `reg` on EVERY path in, it holds what a callee left there and the answer is yes.
    *  The question is about the write, not its value: a copy (`add r4, r0, #0`) reads `r0` and lowers
    *  to no op, so no op-level question sees that read, and it counts here; a copy made in an earlier
    *  block names the value it copies, read before that write too, and is no read of it. Any path out
@@ -1769,10 +1771,21 @@ export function makeSsaBuilder(
         const read = readSinceWrite[w].get(reg);
         return read !== undefined ? accept(read) : ahead(w, new Set(), defs[w].get(reg));
       };
-      // nor does the entry's value unread: nothing wrote it for the call
+      // nor does the entry's value unread: nothing wrote it for the call. Read, it answers by its
+      // value too (`unlowered`): no write of this function's made it, so no path out of one places
+      // the read, and a path from the entry into a block not lowered yet holds reads nobody has seen
+      const param = irBlocks[0].params.find((v) => paramReg.get(v) === reg);
       const entryRead =
         fromEntry &&
-        (readBeforeWrite[0].has(reg) ? accept(readBeforeWrite[0].get(reg)!) : ahead(0, new Set(), undefined));
+        ((param !== undefined && unlowered(param)) ||
+          (readBeforeWrite[0].has(reg) ? accept(readBeforeWrite[0].get(reg)!) : ahead(0, new Set(), undefined)));
+      // where a call destroyed it on every path in, it holds what a callee left there and nothing
+      // this function named: no argument, whatever an earlier lookup's phi of the bytes before
+      // those calls says (sbk func_800B6E5C_A6D0C: counted, a1 and a2 are read through the calls to
+      // the entry, and the trim cuts them from the call but leaves them in the signature)
+      if (!fromEntry && writers.length > 0 && writers.every((w) => clobberedLocal[w].has(reg))) {
+        return true;
+      }
       return (own.length > 0 || entryRead) && own.every(readAfter);
     },
     writtenOnEveryPath: (reg, b, stop, visit) => {
