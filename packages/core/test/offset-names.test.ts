@@ -16,10 +16,17 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
 import { decompile, stampBehaviorsFor } from '../src/pipeline';
-import { OFFSET_NAME_GATES, OFFSET_NAME_PASS, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
+import { RaiseUnsupportedError } from '../src/raise/errors';
+import {
+  OFFSET_NAME_GATES,
+  OFFSET_NAME_PASS,
+  cellSpelledTwice,
+  nameOffsetAddresses,
+  offsetNameRefusals,
+} from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -91,10 +98,6 @@ const lift = (name: string, asm: string, symbols?: SymbolMap) =>
   frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, symbols);
 
 const src = (name: string, asm: string, symbols: SymbolMap) => decompile(name, asm, ARMV4T_AGBCC, { symbols }).source;
-
-/** The map's entry at the walk's base (0x040000ba) and nothing else — what the frontend is lifted
- *  against where the whole map lays the base over its neighbours. */
-const baseOnly = (symbols: SymbolMap): SymbolMap => new Map([[0x040000ba, symbols.get(0x040000ba)!]]);
 
 /** WHICH RULE decided, per `<base>+<offset>` site — the attribution `firstRejection` exists for. */
 const refusals = (name: string, asm: string, symbols: SymbolMap) => [
@@ -204,11 +207,7 @@ describe('what refuses', () => {
       [0x040000c6, [reg('REG_DMA1CNT_H')]],
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
-    // The Thumb frontend now DECLINES a pool word naming an object the map lays over another
-    // (symbols.ts overlappingObject), so this map cannot reach the pass through a Thumb lift; the
-    // gate still guards every frontend that walks without that check (MIPS/PPC maps overlap by
-    // st_size). Lift against the base alone, judge against the whole map.
-    expect([...offsetNameRefusals(lift('walk', WALK, baseOnly(big)), big)]).toEqual([
+    expect(judged(big)).toEqual([
       ['gTable+12', 'interior-offset'],
       ['gTable+24', 'interior-offset'],
     ]);
@@ -429,8 +428,8 @@ describe('what refuses', () => {
 describe('the gates are load-bearing', () => {
   /** The pass with ONE named rule removed — the real predicate, on real input, no test-only
    *  branch in the shipped path. */
-  const namedWithout = (id: string, symbols: SymbolMap, asm = WALK, liftWith = symbols): string[] => {
-    const fn = lift('walk', asm, liftWith);
+  const namedWithout = (id: string, symbols: SymbolMap, asm = WALK): string[] => {
+    const fn = lift('walk', asm, symbols);
     nameOffsetAddresses(fn, symbols, stampBehaviorsFor(ARMV4T_AGBCC, undefined), without(OFFSET_NAME_GATES, id));
     return fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'gaddr').map((op) => op.attrs.sym as string));
   };
@@ -441,8 +440,7 @@ describe('the gates are load-bearing', () => {
       [0x040000c6, [reg('REG_DMA1CNT_H')]],
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
-    // lifted against the base alone: the Thumb frontend declines the overlapping map outright
-    expect(namedWithout('interior-offset', big, WALK, baseOnly(big))).toContain('REG_DMA1CNT_H');
+    expect(namedWithout('interior-offset', big)).toContain('REG_DMA1CNT_H');
   });
 
   // `base-unsized` is a COST gate, so this one records the spelling it costs rather than a guard.
@@ -527,5 +525,134 @@ describe('the gates are load-bearing', () => {
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
     expect(namedWithout('const-target-store', rom)).toContain('gRomWord');
+  });
+});
+
+// ONE SPELLING PER CELL (`cellSpelledTwice`). Every probe stores 5 to a word, stores 7 to one of
+// its bytes, and reads the word back, so the asm returns the 7 through memory. Spelled through two
+// names — or a name and a numeric address — the C is two objects to the compiler, and agbcc
+// (`-O2 -mthumb-interwork`) and gcc 2.7.2 compile the read to the forwarded `5`. Checked by
+// compiling each shape quoted below.
+describe('one spelling per cell', () => {
+  const probe = (word: string, byte: string, byteStore = 'strb\tr0, [r2]'): string =>
+    `f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tmovs\tr0, #7\n\t${byteStore}\n` +
+    `\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t${word}\n.L2:\n\t.word\t${byte}\n`;
+  const lifted = (asm: string, symbols: SymbolMap): string => decompile('f', asm, ARMV4T_AGBCC, { symbols }).source;
+  const sRandCount: SymbolInfo = {
+    name: 'sRandCount',
+    kind: 'data',
+    size: 4,
+    declared: true,
+    shape: 'scalar',
+    signed: false,
+  };
+  // pokeemerald EWRAM as vendored now: `sUnknown` is random.c's `static u8` at its own st_size
+  const perAddress: SymbolMap = new Map([
+    [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 1 }]],
+    [0x020249c0, [sRandCount]],
+  ]);
+
+  test('a byte the map places inside one name is spelled through that name alone', () => {
+    // agbcc: `strb r0, [r1, #0x1]; ldr r0, [r1]` — the read goes back to memory
+    const out = lifted(probe('0x020249c0', '0x020249c1'), perAddress);
+    expect(out).toContain('sRandCount');
+    expect(out).not.toContain('sUnknown');
+    expect(out).not.toMatch(/33704385|0x20249c1/i);
+  });
+
+  test('a map that lays one object over another declines the byte both cover', () => {
+    // the map this repository vendored until the provider stopped joining a multi-address name's
+    // DWARF shape: EWRAM `sUnknown` took berry_powder.c's 8-byte ROM `sUnknown[2]`, and the byte
+    // was `((u8 *)&sUnknown)[5]` beside `sRandCount`
+    const overlapping: SymbolMap = new Map([
+      [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 8, shape: 'array', elemSize: 4, dims: [2] }]],
+      [0x020249c0, [sRandCount]],
+    ]);
+    expect(() => lifted(probe('0x020249c0', '0x020249c1'), overlapping)).toThrow(RaiseUnsupportedError);
+    expect(() => lifted(probe('0x020249c0', '0x020249c1'), overlapping)).toThrow(
+      /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+    );
+    // …but the overlap in the MAP is not the defect: a function reaching the cell one way lifts
+    const single = 'f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x020249c0\n';
+    expect(lifted(single, overlapping)).toContain('return sRandCount;');
+  });
+
+  test('a displacement walked past the base object into its neighbour declines', () => {
+    // `strb r0, [r1, #4]` off `sUnknown` (1 byte) lands on `sRandCount`; the walk gates refuse the
+    // byte-wide name, and the arithmetic they leave spelled `((u8 *)&sUnknown)[4]` beside it
+    for (const k of [4, 5]) {
+      expect(() => lifted(probe('0x020249c0', '0x020249bc', `strb\tr0, [r2, #${k}]`), perAddress)).toThrow(
+        new RegExp(`byte 0x${(0x020249c0 + k - 4).toString(16)} is reached as 'sRandCount' and as 'sUnknown'`),
+      );
+    }
+  });
+
+  test('a numeric address beside a name for the same byte declines', () => {
+    // kleod's pointer-shaped `gUnk_030007C8` carries no size, so the byte stays a raw constant:
+    // `gUnk_030007C8 = 5; *(u8 *)50333641 = 7; return gUnk_030007C8;`
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    expect(() => lifted(probe('0x030007c8', '0x030007c9'), unsized)).toThrow(
+      /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
+    );
+  });
+
+  test('two spellings that only READ the byte lift: there is no store to forward', () => {
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    const reads =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tldr\tr0, [r1]\n\tldrb\tr3, [r2]\n\tadds\tr0, r0, r3\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x030007c8\n.L2:\n\t.word\t0x030007c9\n';
+    expect(lifted(reads, unsized)).toContain('gUnk_030007C8');
+  });
+
+  // gcc 2.7.2 -O2 compiles `D_80100004 = 5; ((u8 *)0x80100000)[5] = 7; return D_80100004;` to
+  // `sb v0, 5(at); jr ra; li v0, 5`; the literal is the negative constant the frontend builds.
+  const mips = (walk: string, word: string, byteOff: number): string => `glabel f
+    /* 0 80000200 3C010000 */  lui        $at, %hi(D_80100000)
+    /* 4 80000204 24210000 */  addiu      $at, $at, %lo(D_80100000)
+${walk}    /* C 8000020C 24080005 */  addiu      $t0, $zero, 5
+    /* 10 80000210 AC280000 */  sw         $t0, ${word}($at)
+    /* 14 80000214 3C098010 */  lui        $t1, 0x8010
+    /* 18 80000218 240A0007 */  addiu      $t2, $zero, 7
+    /* 1C 8000021C A12A0005 */  sb         $t2, ${byteOff}($t1)
+    /* 20 80000220 8C220000 */  lw         $v0, ${word}($at)
+    /* 24 80000224 03E00008 */  jr         $ra
+    /* 28 80000228 00000000 */   nop
+endlabel f
+`;
+  const twoWords: SymbolMap = new Map([
+    [0x80100000, [{ name: 'D_80100000', kind: 'data', size: 4, shape: 'scalar' }]],
+    [0x80100004, [{ name: 'D_80100004', kind: 'data', size: 4, shape: 'scalar', signed: true }]],
+  ]);
+
+  test('on MIPS, a walk the map names beside a numeric address for one byte declines', () => {
+    // `addiu $at, $at, 4` off `D_80100000` is named `D_80100004` by this pass — asmlift's spelling
+    const walked = mips('    /* 8 80000208 24210004 */  addiu      $at, $at, 4\n', '0', 5);
+    expect(() => decompile('f', walked, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100005 is reached as 'D_80100004' and as a numeric address/,
+    );
+  });
+
+  test('a byte the ASM spells two ways — a relocation and a literal — lifts as the asm spells it', () => {
+    // nothing here was read off the map: the source wrote both spellings and its compiler made this
+    // asm out of them (IDO 7.1 -O2 reloads the word: `sb t7, 1(t8); jr ra; lw v0, 0(v1)`)
+    const own = mips('', '0', 1);
+    const out = decompile('f', own, MIPS_GCC, { symbols: twoWords }).source;
+    expect(out).toContain('D_80100000 = 5;');
+    expect(out).toContain('[1] = 7;');
+  });
+
+  test('an address-cast macro is a numeric spelling, so it shares a byte with a raw constant', () => {
+    // `REG_W` expands to the literal it names: to the compiler both stores are numeric addresses
+    const macro: SymbolMap = new Map([
+      [0x040000b8, [{ name: 'REG_W', kind: 'data', size: 4, macroBody: '(*(vu32 *)0x40000b8)' }]],
+    ]);
+    const fn = lift('f', probe('0x040000b8', '0x040000b9'), macro);
+    expect(fn.blocks.flatMap((b) => b.ops).some((op) => op.opcode === 'gaddr' && op.attrs.sym === 'REG_W')).toBe(true);
+    expect(cellSpelledTwice(fn, macro)).toBeNull();
+    // the same entry as an ordinary (unsized, so the byte stays raw) name is a second spelling
+    const named: SymbolMap = new Map([[0x040000b8, [{ name: 'gW', kind: 'data' }]]]);
+    expect(cellSpelledTwice(lift('f', probe('0x040000b8', '0x040000b9'), named), named)).toMatch(
+      /'gW' and as a numeric address/,
+    );
   });
 });
