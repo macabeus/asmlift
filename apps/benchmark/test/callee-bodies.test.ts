@@ -15,6 +15,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   CALLEE_BODIES_FILE,
+  StaleCalleeBodies,
   type VendoredCalleeBodies,
   calleeBodiesBytes,
   calleeBodiesJson,
@@ -120,6 +121,12 @@ describe('the bodies a lift is handed', () => {
     const older = { ...frozen, unread: ['__divsi3'] };
     expect(() => selectCalleeBodies(asm, 'f', t, undefined, undefined, undefined, older)).toThrow(
       /f: its lift reads the body of other out of the linked ELF, and the vendored callee bodies name no such callee/,
+    );
+    // its own class: `bench gates` rethrows it rather than counting a harness refusal as a row the
+    // decompiler did not lift (run/gate-census.ts)
+    expect(() => selectCalleeBodies(asm, 'f', t, undefined, undefined, undefined, older)).toThrow(StaleCalleeBodies);
+    expect(() => readVendoredCalleeBodies('af', mkdtempSync(join(tmpdir(), 'callee-bodies-')), true)).toThrow(
+      StaleCalleeBodies,
     );
   });
 });

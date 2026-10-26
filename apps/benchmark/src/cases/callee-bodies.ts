@@ -43,6 +43,12 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 
 export const CALLEE_BODIES_FILE = 'callee-bodies.json.gz';
 
+/** A vendoring the harness cannot hand a lift what the CLI hands it from: older than the selection
+ *  rule, or missing beside a vendored map. A HARNESS refusal, not a decompiler gap, and its own class
+ *  so a driver that counts a row it cannot lift as a decompiler gap (run/gate-census.ts) can tell it
+ *  apart and stay loud on it, as fan, sweep and the runner do. */
+export class StaleCalleeBodies extends Error {}
+
 /** A project's frozen callee bodies (see the header). */
 export interface VendoredCalleeBodies {
   /** the `--version` line of the objdump that disassembled the listing bodies; null where none did */
@@ -114,7 +120,7 @@ export function readVendoredCalleeBodies(
   if (!hasSymbolMap) {
     return undefined;
   }
-  throw new Error(
+  throw new StaleCalleeBodies(
     `${project}: a linked ELF is vendored (symbols.json.gz) but no callee bodies from it — ` +
       `run \`pnpm bench vendor --project ${project} --callee-bodies-only\``,
   );
@@ -139,7 +145,7 @@ export function selectCalleeBodies(
     if (body !== undefined) {
       out[callee] = body;
     } else if (!unread.has(callee)) {
-      throw new Error(
+      throw new StaleCalleeBodies(
         `${sym}: its lift reads the body of ${callee} out of the linked ELF, and the vendored callee bodies ` +
           'name no such callee — re-run `pnpm bench vendor --callee-bodies-only` for its project',
       );
