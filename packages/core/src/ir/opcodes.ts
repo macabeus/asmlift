@@ -206,10 +206,10 @@ export const OPCODES = {
   //   - any other use (e.g. `&gSym` passed to a call) → the `{k:'addr'}` L3 node, printed `&gSym`.
   // Optional `fromMap: true` marks a name asmlift READ OFF THE SYMBOL MAP (a promoted numeric pool
   // word, an interior attribution, a named walk) rather than one the asm spells by relocation —
-  // raise/offsetnames.ts `cellSpelledTwice` declines only a two-spelled byte one of whose names it is.
   // With it, `mapAddr` is the map address the name was read at: a name the map places at several
   // addresses (a file static per unit) then denotes that one, and two such reads at different
-  // addresses are two objects under one spelling, which the same check declines.
+  // addresses, one of them read off the map, are two objects under one spelling, which
+  // raise/offsetnames.ts `cellSpelledTwice` declines. Two relocations of one name are the asm's own.
   gaddr: { operands: 0, results: 1, requiredAttrs: ['sym'] },
   // The address of a FRAME-LOCAL object — gaddr's local twin, for the address-taken stack local
   // (`mov rD, sp` feeding a DMA register or a callee). `off` is the byte offset inside the frame's
