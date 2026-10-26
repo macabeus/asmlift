@@ -210,14 +210,13 @@ export const vendoredMapFile = (dir: string, module: string | undefined): string
  *
  *  WHY A STAMP. A map is a function of the ELF, of this package, AND of the in-repo provider that
  *  drives it ({@link SYMBOLS_PROVIDER_SOURCES}: which symbols it keeps, how it places a REL module,
- *  and `canonicalOrder`, which picks `[0]` at an address with aliases). A change to either code
- *  input alone touches no measured path that re-derives the maps: provenance forces a regen, and
- *  the regen reads the stale vendored maps, so `bench baseline` reads the artifact as CURRENT. The
- *  only other gate is `bench fidelity`'s drift pre-step, which needs the checkouts, so CI never runs
- *  it. `test/real-manifests.test.ts` holds each project's stamp equal to
- *  {@link symbolsProviderStamp}, so a bump or a provider edit fails the offline tests until the
- *  maps are re-vendored (`pnpm bench vendor --symbols-only`). An edit that changes no map (a
- *  comment) fails it too; re-vendoring then rewrites the stamp and leaves every map byte-identical.
+ *  and `canonicalOrder`, which picks `[0]` at an address with aliases). Neither code input
+ *  re-derives a map: a package bump touches no measured path, so provenance and `bench baseline`
+ *  read the artifact as CURRENT, and a provider edit forces a regen that reads the stale vendored
+ *  maps. `bench fidelity`'s drift pre-step needs the checkouts, so CI never runs it.
+ *  `test/real-manifests.test.ts` holds each project's stamp equal to {@link symbolsProviderStamp},
+ *  so either change fails the offline tests until `pnpm bench vendor --symbols-only` re-vendors.
+ *  An edit that changes no map (a comment) fails it too; the re-vendor then rewrites only the stamp.
  *
  *  KNOWN GAP: two core functions feed the map and are NOT digested, because each is shared with
  *  code that has nothing to do with vendoring and a digest would demand a re-vendor on every edit

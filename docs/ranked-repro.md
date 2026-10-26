@@ -139,9 +139,10 @@ wherever the checkout's ELF is built.
 
 The map is derived by `@gba-kit/debug-info`, the CLI's symbol provider, and by the in-repo code
 that drives it (`packages/cli/src/symbols-provider.ts` and `module-elf.ts`), as much as it is
-derived from the ELF. A bump of that package or an edit of that code re-derives no map: the
-provenance check forces a regen, and the regen reads the stale vendored maps. A stale map would
-otherwise surface only in `bench fidelity`, which needs the checkouts. `bench vendor` stamps the
+derived from the ELF. Neither change re-derives a map: a bump of that package touches no measured
+path, so the provenance check and `bench baseline` still call the artifact current, and an edit of
+that code forces a regen that reads the stale vendored maps. A stale map would otherwise surface
+only in `bench fidelity`, which needs the checkouts. `bench vendor` stamps the
 package version and a digest of each of those two files into `tu/<p>/symbols.provider.json`, and
 `test/real-manifests.test.ts` fails, offline, until that stamp equals the tree's. After a bump or
 a provider edit, run `pnpm bench vendor --symbols-only` and regenerate the benchmark. Two core

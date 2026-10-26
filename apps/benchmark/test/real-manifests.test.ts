@@ -241,9 +241,9 @@ describe('committed real-tier manifests', () => {
     });
 
     // A map is derived by the CLI's provider (the package and its in-repo driver) as much as from the
-    // ELF, and neither a bump nor a provider edit touches a measured path that re-derives the maps, so
-    // neither provenance nor `bench baseline` sees them go stale. This does, without a checkout: the
-    // inputs that wrote the maps must be the ones in this tree.
+    // ELF, and neither a bump nor a provider edit re-derives one, so neither provenance nor
+    // `bench baseline` sees a map go stale. This does, without a checkout: the inputs that wrote the
+    // maps must be the ones in this tree.
     test(`${f} vendored its symbol maps with the installed ${SYMBOLS_PROVIDER} and this tree's provider`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const dir = join(REAL_DIR, 'tu', man.project);
