@@ -126,9 +126,8 @@ reads the symbol map off it, and also the body of every guessed callee the input
 the bodies out of `callee-bodies.json.gz`, which `bench vendor` writes beside it. Of those bodies
 it hands the lift the ones the CLI's own rule selects (`elfBodyCallees`).
 
-Until the bodies were vendored, the two read different inputs. The harness published
-`kleod:WorldMapScreenUnlockNewWorld:agbcc` with a guessed argument list on `thunk_GetRandomValue`,
-and the script printed `thunk_GetRandomValue()`.
+So both bound a guessed callee by the same body. On `kleod:WorldMapScreenUnlockNewWorld:agbcc`,
+both spell `thunk_GetRandomValue()`: the ARM veneer's body reads no argument register.
 
 A project whose ELF changes, or a change to the CLI's body reader or callee naming, needs
 `pnpm bench vendor --project <p> --callee-bodies-only`. Two checks say so. The NAMES: the runner

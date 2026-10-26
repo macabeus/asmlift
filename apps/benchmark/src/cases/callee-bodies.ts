@@ -4,9 +4,9 @@
 // WHY THE HARNESS NEEDS THEM. The CLI reads a guessed callee's body off `tools.asmlift.elf` and the
 // core bounds the callee's arity by it (cli elf-bodies.ts). A row's published repro script runs the
 // CLI in the project checkout, so it reads those bodies; the harness runs from the vendored dataset
-// with no checkout, and read none. On a row whose lift asks such a body the two then publish
-// different source for one input: kleod's WorldMapScreenUnlockNewWorld spelled a guessed argument
-// for thunk_GetRandomValue (an ARM veneer whose body reads none) that `bench repro` did not.
+// with no checkout, so it reads them from this file. Without them, a row whose lift asks such a body
+// would publish different source from its repro for one input: kleod's WorldMapScreenUnlockNewWorld
+// would spell a guessed argument for thunk_GetRandomValue, an ARM veneer whose body reads none.
 //
 // WHAT IS FROZEN: for every row outside a REL module, every direct callee its target does not
 // define (cli `elfBodyCandidates`), and of each, the body the ELF gives (`calleeBodiesFromElf`) or
