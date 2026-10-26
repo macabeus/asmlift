@@ -288,7 +288,8 @@ export const TREE_MODULES = [
 ] as const;
 
 /** How many parameters `rankOptionsFor` declares, in a tree this driver can sweep: this tree's own
- *  count, or the one before it (`LEGACY_RANK_OPTIONS_ARITY`).
+ *  count, the one before it (`PRE_ELF_BODIES_RANK_OPTIONS_ARITY`: no ninth parameter, which
+ *  ignores what it is handed), or the one before that (`LEGACY_RANK_OPTIONS_ARITY`).
  *
  *  THE ONE SIGNATURE CHECK, and a compensating control `sweep.ts`'s floor note asks for:
  *  `TREE_MODULES` proves a module EXISTS, and a module that exists with a CHANGED SIGNATURE is
@@ -298,7 +299,12 @@ export const TREE_MODULES = [
  *
  *  WHAT IT CANNOT SEE, said out loud: a signature whose parameter COUNT is unchanged and whose
  *  meaning is not. That one is still the `opts` digest's to report. */
-export const RANK_OPTIONS_ARITY = 8;
+export const RANK_OPTIONS_ARITY = 9;
+
+/** The count of the signature before this one: the same eight parameters, and no ninth — the
+ *  vendored callee bodies and the asm a lift selects from them (eval/asmlift.ts `elfBodies`). A
+ *  tree of that count reads no bodies, and ignores the ninth argument it is handed. */
+export const PRE_ELF_BODIES_RANK_OPTIONS_ARITY = 8;
 
 /** The count of the signature before this one: the same parameters, the eighth (behind a default,
  *  so not counted) being the bare set of context aggregates a case carried as `aggregateGlobals`,
@@ -320,10 +326,10 @@ async function treeModules(root: string) {
     TREE_MODULES.map((p) => import(`${root}/${p}`)),
   );
   const arity = (evalAsmlift.rankOptionsFor as (...args: unknown[]) => unknown).length;
-  if (arity !== RANK_OPTIONS_ARITY && arity !== LEGACY_RANK_OPTIONS_ARITY) {
+  if (![RANK_OPTIONS_ARITY, PRE_ELF_BODIES_RANK_OPTIONS_ARITY, LEGACY_RANK_OPTIONS_ARITY].includes(arity)) {
     throw new Error(
       `tree ${root}: its \`rankOptionsFor\` declares ${arity} parameters and this driver calls it with ` +
-        `${RANK_OPTIONS_ARITY} (or ${LEGACY_RANK_OPTIONS_ARITY}) — it is on the other side of a signature change, so every row it lifted would be ` +
+        `${RANK_OPTIONS_ARITY} (or ${PRE_ELF_BODIES_RANK_OPTIONS_ARITY}, or ${LEGACY_RANK_OPTIONS_ARITY}) — it is on the other side of a signature change, so every row it lifted would be ` +
         'lifted under options this command chose by accident. Compare against a newer revision, or use ' +
         '`bench diff` against the published artifact.',
     );
@@ -471,6 +477,9 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
       continue;
     }
     const asm = m.scrub.scrubObjectHeader(built.asm);
+    // the callee bodies the row's own tree froze out of the linked ELF: read with the map, as the
+    // CLI reads both off one ELF, and never in the map-less mode, where the CLI has no ELF to read
+    const vendored = (c.calleeBodies as (() => unknown) | undefined)?.();
     const runs = mapModesFor(sel.mapModes, c.symbols !== undefined, (withMap) =>
       m.evalAsmlift.rankOptionsFor(
         c.toolchain,
@@ -481,6 +490,7 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         c.compile,
         withMap ? c.symbols : undefined,
         contextArgument(m.arity, c),
+        withMap && vendored !== undefined ? { asm, vendored } : undefined,
       ),
     );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;

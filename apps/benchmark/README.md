@@ -99,7 +99,10 @@ extents, volatility, const-ness, address-cast macro bodies, and, where the vendo
 callee signatures and struct tags with full field tables. So m2c is given the matching thing —
 that row's own vendored preprocessed context, verbatim, via `--context` — on every real row.
 How much of that map a project actually carries is a property of ITS vendoring, and on three of the
-nine it is name, kind and size alone: residual 6 measures it.
+nine it is name, kind and size alone: residual 6 measures it. Out of the same ELF, asmlift is also
+handed the bodies of the callees whose arity it guesses, frozen in `tu/<project>/callee-bodies.json.gz`
+(`cases/callee-bodies.ts`). These are the bodies the CLI reads off `tools.asmlift.elf`, so a row
+reads the callee bodies its repro script reads, while `bench fidelity` re-reads them the same. m2c reads a callee's arity from the declarations in its context.
 
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures

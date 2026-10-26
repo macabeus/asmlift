@@ -920,8 +920,15 @@ cli elf-bodies.ts):
 That is how kleod's `thunk_GetRandomValue`, a veneer to an ARM body that reads none of its
 arguments, drops the leftover values a guess handed it (`thunk_GetRandomValue(30, v7, &gEntityInfo,
 a0)` becomes `thunk_GetRandomValue()`), and how a jump-table case calling it passes the dispatch gate.
-The harness passes no `calleeBodies`, so no benchmark row measures this: offline ELF fixtures pin it
-(cli test/offline/elf-bodies.test.ts).
+Offline ELF fixtures pin it (cli test/offline/elf-bodies.test.ts). The benchmark measures it too.
+`bench vendor` freezes each project's callee bodies out of its linked ELF
+(apps/benchmark cases/callee-bodies.ts), and the harness hands a row's lift the ones the CLI's own
+rule selects (cli elf-bodies.ts `elfBodyCallees`), so a row's lift is handed the callee bodies its
+repro script's CLI reads: kleod:WorldMapScreenUnlockNewWorld:agbcc spells `thunk_GetRandomValue()`
+in both. The repro's decomp.yaml names the objdump the bodies were frozen with, and `bench fidelity`
+re-reads them off the checkout's ELF and refuses a drifted file (apps/benchmark run/symbol-drift.ts).
+The bodies are one input of a row and not all of them: a row reads its vendored symbol map too, and
+a drifted map is a different input again, which the same gate refuses.
 
 ## A float, across the tower
 

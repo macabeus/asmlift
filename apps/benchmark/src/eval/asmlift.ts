@@ -16,6 +16,7 @@ import type { ResolvedTarget } from '@asmlift/core/target';
 import { tallyFanVariations } from '@asmlift/core/variation-tokens';
 
 import { cachedExtractAsmData, sha } from '../cache';
+import { type VendoredCalleeBodies, selectCalleeBodies } from '../cases/callee-bodies';
 import { benchCompilerFor } from '../decomp-config';
 import { scrub } from '../report/committed';
 import type { Toolchain } from '../toolchains';
@@ -60,12 +61,17 @@ export function rankOptionsFor(
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
-  // Optional but with NO default, so `Function.length` counts it and is 8 — which is how `bench
-  // sweep --base` tells this signature from the one before it, whose eighth place held the bare set
-  // of context aggregates behind a default (length 7). A driver that passed one tree's argument to
+  // Optional but with NO default, so `Function.length` counts it — which is how `bench sweep --base`
+  // tells this signature from the one whose eighth place held the bare set of context aggregates
+  // behind a default (length 7). A driver that passed one tree's argument to
   // the other would lift a side without the context its own rows read, and a moved `src` would
   // read as a decompiler change (run/sweep-driver.ts `contextArgument`).
   contextGlobals?: ContextGlobals,
+  // THE BODIES THE CLI READS OFF THE LINKED ELF, frozen by `bench vendor` (cases/callee-bodies.ts),
+  // with the asm the lift reads: the lift is handed the ones the CLI's own rule selects at these
+  // prototypes, this map and this object's relocations (`selectCalleeBodies`), so a row publishes
+  // what its repro script prints. Optional with no default, so `Function.length` counts it (9).
+  elfBodies?: { asm: string; vendored: VendoredCalleeBodies },
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover, reading the section that defines `sym` — a CodeWarrior object
@@ -79,6 +85,9 @@ export function rankOptionsFor(
     asmData = undefined;
   }
   const compile = rowCompiler(tc, codegen, contextCompile);
+  const calleeBodies =
+    elfBodies &&
+    selectCalleeBodies(elfBodies.asm, sym, codegen.target, prototypes, symbols, asmData?.relocs, elfBodies.vendored);
   return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
@@ -87,6 +96,7 @@ export function rankOptionsFor(
     // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
     ...(contextGlobals ? { contextGlobals } : {}),
+    ...(calleeBodies ? { calleeBodies } : {}),
   };
 }
 
@@ -252,8 +262,19 @@ export async function runAsmlift(
   symbols?: SymbolMap,
   onProgress?: RankOptions['onProgress'],
   contextGlobals?: ContextGlobals,
+  calleeBodies?: VendoredCalleeBodies,
 ): Promise<DecompilerResult> {
-  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols, contextGlobals);
+  const opts = rankOptionsFor(
+    tc,
+    codegen,
+    obj,
+    sym,
+    prototypes,
+    contextCompile,
+    symbols,
+    contextGlobals,
+    calleeBodies && { asm, vendored: calleeBodies },
+  );
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).

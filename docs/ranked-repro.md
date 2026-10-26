@@ -119,6 +119,34 @@ nor `--progress` and takes `--proto` from a `proto.json` it writes, and still re
 exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench fidelity` in
 `benchmark.yml`, which re-runs both repro scripts for every function.
 
+**The script reads the project's linked ELF, and the harness reads a frozen copy of what the CLI
+reads from it.** The script's `decomp.yaml` names the checkout's `tools.asmlift.elf`, so the CLI
+reads the symbol map off it, and also the body of every guessed callee the input does not define
+(cli `elf-bodies.ts`). The harness has no checkout. It reads the map out of `symbols.json.gz`, and
+the bodies out of `callee-bodies.json.gz`, which `bench vendor` writes beside it. Of those bodies
+it hands the lift the ones the CLI's own rule selects (`elfBodyCallees`).
+
+So both bound a guessed callee by the same body. On `kleod:WorldMapScreenUnlockNewWorld:agbcc`,
+both spell `thunk_GetRandomValue()`: the ARM veneer's body reads no argument register.
+
+A project whose ELF changes, or a change to the CLI's body reader or callee naming, needs
+`pnpm bench vendor --project <p> --callee-bodies-only`. Two checks say so. The NAMES: the runner
+refuses a row whose lift selects a callee the file does not name, and
+`test/callee-bodies-complete.test.ts` names it. The BODIES: `bench fidelity` re-reads every callee
+the file names off the checkout's ELF and refuses a file whose content differs
+(`run/symbol-drift.ts` `checkCalleeBodiesDrift`), and `test/callee-bodies.test.ts` does the same
+wherever the checkout's ELF is built.
+
+A GameCube project's listing bodies are read with its dtk build's own `build/binutils` objdump
+unless `--objdump` names one, since no PowerPC objdump is on a usual PATH. `bench target` writes
+that same binary into the repro's `decomp.yaml` as `tools.asmlift.objdump`, so the script's CLI
+reads the bodies the harness was handed (`cases/callee-bodies-elf.ts`). The file records the
+binutils release that read the listings, without the distribution's package label.
+
+What holds across machines is the file's CONTENT (canonical JSON), not its gzip bytes, which
+depend on the zlib build, as `symbols.json.gz`'s do. `bench vendor` leaves a file whose content is
+unchanged alone, so re-vendoring on another host rewrites only what changed.
+
 **Run it in a gitignored directory, which is what the default gives you.** The script's step 1 is
 `bench target … --out "$PWD"`, so running it in the repo root leaves `decomp.yaml`, `ctx.i`,
 `in.asm`, `proto.json` and the script itself untracked there — and `bench run`'s dirty-tree

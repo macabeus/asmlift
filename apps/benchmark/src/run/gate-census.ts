@@ -103,6 +103,7 @@ import { type ThreadedExit, UNTHREAD_GATES, unthreadLoopExits } from '@asmlift/c
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
+import { StaleCalleeBodies } from '../cases/callee-bodies';
 import { realCases } from '../cases/real';
 import { syntheticCases } from '../cases/synthetic';
 import type { Case } from '../cases/types';
@@ -398,15 +399,33 @@ export function gateCensus(o: GateCensusOptions): number {
       // corpus rows publish `declined` on exactly such a gap. Unguarded, the FIRST of them ends the
       // census before it prints anything — the defect that made the documented recipe unrunnable.
       // Counted rather than swallowed: a census over a truncated prefix must not look complete.
+      // A STALE VENDORING is not such a gap and is rethrown: `selectCalleeBodies` refuses a row whose
+      // lift asks a callee body the vendored file never froze, and counting that as "did not lift"
+      // would report a harness input older than its rule as a decompiler lift gap.
       try {
-        const { obj, asm } = c.build();
+        const built = c.build();
+        const asm = scrubObjectHeader(built.asm);
+        const vendored = c.calleeBodies?.();
         enumerateRanked(
           c.sym,
-          scrubObjectHeader(asm),
+          asm,
           c.codegen.target,
-          rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols, c.contextGlobals),
+          rankOptionsFor(
+            c.toolchain,
+            c.codegen,
+            built.obj,
+            c.sym,
+            c.proto,
+            c.compile,
+            c.symbols,
+            c.contextGlobals,
+            vendored && { asm, vendored },
+          ),
         );
-      } catch {
+      } catch (e) {
+        if (e instanceof StaleCalleeBodies) {
+          throw e;
+        }
         unlifted++;
       }
     }

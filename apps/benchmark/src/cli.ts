@@ -73,9 +73,11 @@
 //                                        #   exit 2 = nothing compared (no run behind it)
 //   pnpm bench smoke                     # one trivial fn through every available toolchain
 //   pnpm bench verify <manifest.json>    # compile-check loop for authoring real manifests
-//   pnpm bench vendor [--project p] [--symbols-only]   # freeze the real tier's preprocessed TUs
-//                                        # (needs checkouts); --symbols-only rewrites just the
-//                                        # ELF-derived symbol maps
+//   pnpm bench vendor [--project p] [--symbols-only | --callee-bodies-only] [--objdump bin]
+//                                        # freeze the real tier's preprocessed TUs (needs
+//                                        # checkouts); --symbols-only rewrites just the ELF-derived
+//                                        # symbol maps, --callee-bodies-only just the callee bodies
+//                                        # read off the ELF (--objdump: the binary that reads them)
 //   pnpm bench flags [--project p] [--only s] [--write] [--toolchain id]
 //                                        # every real unit's flags derived from its project's build
 //                                        # (needs checkouts): stored-flags status, unclassified words,
@@ -102,6 +104,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileS
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { projectObjdump } from './cases/callee-bodies-elf';
 import { loadCompleteManifests, loadManifests, resolveProjectRoot } from './cases/manifests';
 import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
@@ -154,6 +157,10 @@ const { values: opts, positionals } = parseArgs({
     // vendor only: rewrite just the derived symbol maps, leaving the preprocessed TUs, index.json
     // and PROVENANCE.json exactly as committed (see cases/vendor.ts).
     'symbols-only': { type: 'boolean', default: false },
+    // vendor only: rewrite just the callee bodies read off the linked ELF (cases/callee-bodies.ts),
+    // and the objdump that disassembles a listing body
+    'callee-bodies-only': { type: 'boolean', default: false },
+    objdump: { type: 'string' },
     // repro only: which of the row's two scripts, and whether to execute it here.
     tool: { type: 'string' },
     run: { type: 'boolean', default: false },
@@ -549,6 +556,7 @@ switch (command) {
     const { obj } = c.build();
     copyFileSync(obj, join(out, 'target.o'));
     let elf: string | undefined;
+    let objdump: string | undefined;
     let symbolsFile: string | undefined;
     if (c.symbols && c.tier === 'synthetic') {
       // A SYNTHETIC row's map is AUTHORED in the dataset, not derived from any ELF, so there is
@@ -575,6 +583,9 @@ switch (command) {
         const res = resolveProjectElf(c.project, root);
         if (res.elf !== null) {
           elf = res.elf;
+          // the objdump `bench vendor` read the row's callee bodies off that ELF with, so the CLI
+          // reads the bodies the harness handed the row (cases/callee-bodies-elf.ts)
+          objdump = projectObjdump(root, c.codegen.target);
         } else {
           mapless(`symbol map unavailable (${res.reason})`);
         }
@@ -636,6 +647,7 @@ switch (command) {
     }
     writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, {
       elf,
+      objdump,
       ctxFile,
       symbolsFile,
       language: ctxLanguage,
@@ -884,7 +896,11 @@ switch (command) {
     break;
   case 'vendor': {
     const { vendor } = await import('./cases/vendor');
-    await vendor(opts.project, { symbolsOnly: opts['symbols-only'] });
+    await vendor(opts.project, {
+      symbolsOnly: opts['symbols-only'],
+      calleeBodiesOnly: opts['callee-bodies-only'],
+      objdump: opts.objdump,
+    });
     break;
   }
   case 'flags': {

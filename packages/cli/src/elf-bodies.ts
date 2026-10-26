@@ -48,9 +48,12 @@
 // relocatable, its sections all placed at 0, so its symbol values are no addresses to disassemble.
 import { thumbToArmVeneerTarget } from '@asmlift/core/frontend/arm-body';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
-import type { CalleeBodies, CalleeBody } from '@asmlift/core/frontend/callee-body';
+import { type CalleeBodies, type CalleeBody, definesLabel } from '@asmlift/core/frontend/callee-body';
+import type { Prototypes } from '@asmlift/core/proto';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 
+import { calleeNames, guessedArityCallees } from './callees';
 import { type Elf32, isCode, readElf32 } from './elf-section';
 import { type CallRelocation, callRelocationOf, readsObjdumpText } from './objfile';
 
@@ -74,6 +77,38 @@ interface ElfSymbol {
   bind: number;
   type: number;
   shndx: number;
+}
+
+/** THE CALLEES WHOSE BODIES A LIFT OF `self` IS HANDED OUT OF THE LINKED ELF: those whose arity it
+ *  guesses (`guessedArityCallees`, read at the prototypes and the map the lift reads) that the input
+ *  does not define (`definesLabel`: a body in the input answers for itself), and none at all for a
+ *  function in a REL module (`module`, the header's KNOWN GAP).
+ *
+ *  ONE RULE, TWO READERS: the CLI reads these bodies off `tools.asmlift.elf` (main.ts), and the
+ *  benchmark harness hands the same subset of the bodies `bench vendor` froze (apps/benchmark
+ *  cases/callee-bodies.ts `selectCalleeBodies`). Spelled twice, a change to the guess would move what
+ *  `bench repro` prints and leave the published row where it was. */
+export function elfBodyCallees(
+  asm: string,
+  self: string,
+  target: TargetDescription,
+  prototypes: Prototypes | undefined,
+  symbols: SymbolMap | undefined,
+  relocs: readonly Reloc[] | undefined,
+  module: string | undefined,
+): string[] {
+  if (module !== undefined) {
+    return [];
+  }
+  return guessedArityCallees(asm, self, target, prototypes, symbols, relocs).filter((c) => !definesLabel(asm, c));
+}
+
+/** Every direct callee of `self` the input does not define: the callees {@link elfBodyCallees} can
+ *  ever select, whatever the prototypes and the map say. What a reader that freezes the ELF's bodies
+ *  ahead of the lift reads (apps/benchmark `bench vendor`), so the frozen set does not depend on
+ *  which callees today's declarations leave guessed. */
+export function elfBodyCandidates(asm: string, self: string, relocs: readonly Reloc[] | undefined): string[] {
+  return calleeNames(asm, self, relocs).filter((c) => !definesLabel(asm, c));
 }
 
 /** Every symbol of every symbol table, in the file's order. */

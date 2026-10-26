@@ -13,6 +13,7 @@ import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
+import type { VendoredCalleeBodies } from '../cases/callee-bodies';
 import { m2cDeclarations, referencedPrototypes } from '../cases/context-proto';
 import { rowFeatures } from '../cases/features';
 import { benchScorer } from '../decomp-config';
@@ -43,6 +44,8 @@ interface EvalSpecFields {
   contextGlobals?: ContextGlobals;
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
+  /** the callee bodies frozen out of the project's linked ELF (cases/types.ts) — asmlift-only */
+  calleeBodies?: VendoredCalleeBodies;
   /** the flags this row's target and candidates compile at, and asmlift's description from them */
   codegen: ResolvedTarget;
   note?: string;
@@ -285,6 +288,7 @@ export async function evaluate(
     spec.symbols,
     onRankProgress,
     spec.contextGlobals,
+    spec.calleeBodies,
   );
   // A real row m2c is not given its project's context for gets the callee declarations asmlift's lift
   // read, as C its parser reads — the same facts through each tool's own channel.

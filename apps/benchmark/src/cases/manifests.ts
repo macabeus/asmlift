@@ -23,6 +23,7 @@ import { gunzipSync } from 'node:zlib';
 import type { TuModel } from '../compile/types';
 import { WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
+import { type VendoredCalleeBodies, readVendoredCalleeBodies } from './callee-bodies';
 
 export interface RealFunction {
   /** The upstream project's name for the function, as-is — presentation, and the row id's middle. */
@@ -188,6 +189,11 @@ export interface VendoredManifest extends RealManifest {
    *  exposes no ELF; THROWS for a module the vendoring did not write, because reading a module's
    *  row with the project's map alone would publish different source silently. */
   symbolsFor: (module: string | undefined) => SymbolMap | undefined;
+  /** The callee bodies frozen out of the project's linked ELF (cases/callee-bodies.ts) a row of
+   *  `module` selects from: undefined in a REL module — the CLI reads a module's row no bodies
+   *  (cli elf-bodies.ts `elfBodyCallees`) — and for a project with no linked ELF; THROWS for a
+   *  project that vendors its ELF's map and no bodies. */
+  calleeBodiesFor: (module: string | undefined) => VendoredCalleeBodies | undefined;
 }
 
 /** Where `bench vendor` writes one map per REL module that has rows, under `tu/<project>/`. */
@@ -580,8 +586,16 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
     return entry;
   };
   const maps = new Map<string | undefined, SymbolMap | undefined>();
+  let bodies: { read: VendoredCalleeBodies | undefined } | undefined;
   return {
     ...man,
+    calleeBodiesFor: (module) => {
+      if (module !== undefined) {
+        return undefined;
+      }
+      bodies ??= { read: readVendoredCalleeBodies(man.project, dir, existsSync(vendoredMapFile(dir, undefined))) };
+      return bodies.read;
+    },
     symbolsFor: (module) => {
       if (!maps.has(module)) {
         maps.set(module, vendoredSymbols(man.project, dir, module));

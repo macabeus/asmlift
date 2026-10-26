@@ -222,6 +222,7 @@ export async function runCases(
       proto: c.proto,
       contextGlobals: c.contextGlobals,
       symbols: c.symbols,
+      calleeBodies: c.calleeBodies?.(),
       codegen: c.codegen,
       note: c.note,
       scoringContext: c.scoringContext,
