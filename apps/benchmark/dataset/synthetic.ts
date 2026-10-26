@@ -12567,6 +12567,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //      there, as on ido7.1. mwcc_242_81 inlines `rnd`. kleod also needs the body read from the
   //      project ELF and through the ARM veneer, which a synthetic row cannot carry. Item 21's
   //      sret2knr turns on the same K&R arity at a different gate, and carries no body.
+  //      jt_rndjoin / jt_rndjoinst (sub_08021AD4) put the call at the join after a switch nested in
+  //      the outer table's case. agbcc's case CSE moves the inner cases' `i << 3` out of r0 by a copy
+  //      in their join (`add r5, r0, #0`), and the inner default edge brings the outer dispatch's
+  //      marker in r0 to `bl rnd`. call-plan.ts `leftover` asked a register written in another block
+  //      of its VALUE, which no lowered op read (a copy lowers to none), so r0 was counted and the
+  //      marker refused. It now asks each path whether an instruction, a copy included, read the
+  //      register since its last write (`SsaBuilder.readSinceWriteOnSomePath`), and jt_rndjoin lifts
+  //      `rnd()` on agbcc, as `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one.
+  //      jt_rndjoinst has no body and must STAY declined on agbcc, the soundness control.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,
@@ -13460,6 +13469,35 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
     ctx: 'extern u8 gR;\nu8 rnd();\nextern u8 gA, gB, gC; extern u16 gH;\nvoid jt_rndread(s32 i);',
     proto: { jt_rndread: { returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndjoin',
+    src:
+      'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nextern u8 gR;\nu8 rnd() { return gR; }\nvoid jt_rndjoin(u8 i)\n{\n' +
+      '    u8 j = i + 0xde;\n    switch (gE[i].kind) {\n    case 0: gE[i].kind = 2; break;\n' +
+      '    case 1: gE[i].kind = 7; break;\n    case 2: gE[i].kind = 9; break;\n    case 3: gE[i].x = 7; break;\n' +
+      '    case 4:\n        switch (j) {\n        case 0: gE[i].x = 0x44; break;\n        case 1: gE[i].x = 0x110; break;\n' +
+      '        case 2: gE[i].x = 0xcc; break;\n        case 3: gE[i].x = 0x154; break;\n' +
+      '        case 4: gE[i].x = 0x88; break;\n        }\n        gE[i].y = rnd() * 10;\n        break;\n    }\n}',
+    // no `dense`: the tag's floor reads the first definition in `src`, which is `rnd`'s
+    features: [],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nextern u8 gR;\nu8 rnd();\nvoid jt_rndjoin(u8 i);',
+    proto: { jt_rndjoin: { params: ['u8'], returnsVoid: true }, rnd: { returns: 'u8' } },
+  },
+  {
+    sym: 'jt_rndjoinst',
+    src:
+      'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nextern u8 rnd();\nvoid jt_rndjoinst(u8 i)\n{\n' +
+      '    u8 j = i + 0xde;\n    switch (gE[i].kind) {\n    case 0: gE[i].kind = 2; break;\n' +
+      '    case 1: gE[i].kind = 7; break;\n    case 2: gE[i].kind = 9; break;\n    case 3: gE[i].x = 7; break;\n' +
+      '    case 4:\n        switch (j) {\n        case 0: gE[i].x = 0x44; break;\n        case 1: gE[i].x = 0x110; break;\n' +
+      '        case 2: gE[i].x = 0xcc; break;\n        case 3: gE[i].x = 0x154; break;\n' +
+      '        case 4: gE[i].x = 0x88; break;\n        }\n        gE[i].y = rnd() * 10;\n        break;\n    }\n}',
+    features: ['dense'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx: 'struct E { u16 x, y; u8 pad[11]; u8 kind; u8 pad3[12]; };\nextern struct E gE[];\nu8 rnd();\nvoid jt_rndjoinst(u8 i);',
+    proto: { jt_rndjoinst: { params: ['u8'], returnsVoid: true }, rnd: { returns: 'u8' } },
   },
   {
     sym: 'sretpuretail',
