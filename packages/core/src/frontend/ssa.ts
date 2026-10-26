@@ -130,6 +130,15 @@ export interface SsaBuilder {
    *  no new value, so this is how a question about one WRITE of a register is asked, where its value
    *  was read before the write too (frontend/call-plan.ts `leftover`). */
   lastWriteOp(reg: string, b: number): number | undefined;
+  /** Whether, on SOME path into this point of block `b`, an instruction READ `reg` after its last
+   *  write (or after a call destroyed it), and that read's value is one `accept` takes. The question is
+   *  about the write, not its value: a copy (`add r4, r0, #0`) reads `r0` and lowers to no op, so no
+   *  op-level question sees that read, and it counts here. Only the frontend's own reads count
+   *  ({@link readVar}); a lookup this construction makes, or a call's argument read, is none. A path
+   *  stops at a block that wrote `reg` or had a call destroy it, unread since: that write was not
+   *  read. A path reaching the entry with nothing read, or a block not filled yet, answers no
+   *  (frontend/call-plan.ts `leftover`). */
+  readSinceWriteOnSomePath(reg: string, b: number, accept: (v: Value) => boolean): boolean;
   /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
    *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
    *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
@@ -751,6 +760,9 @@ export function makeSsaBuilder(
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
   // the ops block `b` held at each register's last write in it (`lastWriteOp`)
   const lastWriteOp: Array<Map<string, number>> = irBlocks.map(() => new Map());
+  // the value the frontend last read of each register block `b` read since its last write or the
+  // last call destroying it there (since the block's start where neither): `readSinceWriteOnSomePath`
+  const readSinceWrite: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
   fn.writeOrder = writeOrder;
 
@@ -943,6 +955,7 @@ export function makeSsaBuilder(
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
     lastWriteOp[b].set(reg, irBlocks[b].ops.length);
+    readSinceWrite[b].delete(reg);
   };
   const readVar = (reg: string, b: number): Value => {
     if (globalRegs.has(reg)) {
@@ -956,6 +969,7 @@ export function makeSsaBuilder(
     }
     const v = readAny(reg, b);
     noteStaleCandidate(reg, b, v);
+    readSinceWrite[b].set(reg, v);
     return v;
   };
   /** The lookup, with no claim attached. The FRONTEND's read is what asserts "this register holds
@@ -1664,6 +1678,28 @@ export function makeSsaBuilder(
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     lastWriteOp: (reg: string, b: number) => lastWriteOp[b].get(reg),
+    readSinceWriteOnSomePath: (reg, b, accept) => {
+      // `b` is judged up to here on the first visit; met again round a loop, its end is a path the
+      // first visit already judged
+      const seen = new Set<number>([b]);
+      const walk = (at: number): boolean => {
+        const read = readSinceWrite[at].get(reg);
+        if (read !== undefined) {
+          return accept(read);
+        }
+        if (lastWriteOp[at].has(reg) || clobberedLocal[at].has(reg)) {
+          return false;
+        }
+        return distinctPreds(at).some((p) => {
+          if (seen.has(p) || !filled[p]) {
+            return false;
+          }
+          seen.add(p);
+          return walk(p);
+        });
+      };
+      return walk(b);
+    },
     writtenOnEveryPath: (reg, b, stop, visit) => {
       // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
       // which a back edge brings, and a cycle adds no path the first visit did not judge
@@ -1711,6 +1747,7 @@ export function makeSsaBuilder(
       for (const r of clobbers) {
         clobberedLocal[b].add(r);
         decidedLocal[b].add(r);
+        readSinceWrite[b].delete(r);
       }
       imageLocal[b] = new Set();
     },
