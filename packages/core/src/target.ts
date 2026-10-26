@@ -1170,6 +1170,18 @@ export interface TargetDescription {
     // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
     // pinned, and a read of a declared object placed, whatever its extension.
     volatileReadsExtendInRegister?: boolean;
+    // Does this compiler RELOAD a cell stored through one spelling and read back through another —
+    // two names, or a name and a numeric address, for the same byte? MEASURED at -O2, each probe
+    // storing 5 to a word, 7 to one of its bytes, and reading the word back: IDO 7.1 reloads
+    // (`D_80100000 = 5; ((u8 *)0x80100000)[1] = 7; return D_80100000;` is `sb; jr ra; lw v0`);
+    // agbcc (`sRandCount = 5; ((u8 *)&sUnknown)[4] = 7; return sRandCount;` is `strb; mov r0,
+    // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. So where it holds, a
+    // pair of spellings the asm itself carries (relocations, literals) is faithful lifted as-is;
+    // where it does not, an asm that went back to memory proves the source did not spell the byte
+    // two ways, and raise/offsetnames.ts `cellSpelledTwice` declines the pair.
+    //
+    // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
+    reloadsAcrossSpellings?: boolean;
     // Does this compiler, AT THESE FLAGS, keep a plain read whose value nothing uses? A FLAG fact,
     // never written in a description: `targetFor` sets it from the optimisation level
     // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
@@ -1540,6 +1552,8 @@ export const MIPS_IDO: TargetDescription = {
     switchAllowsNeqCase: false,
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
+    // MEASURED: the probe at the field (`lw v0` after the byte store).
+    reloadsAcrossSpellings: true,
     // MEASURED: the probe at the field.
     narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 1,

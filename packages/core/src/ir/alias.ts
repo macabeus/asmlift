@@ -12,15 +12,19 @@
 //   • two DIFFERENT named globals are different objects, so a store through one can never change
 //     what a read of the other sees. That is a C guarantee about distinct declared objects, not a
 //     heuristic about what the compiler happened to do.
-//   • name comparison suffices where a cell has ONE spelling per function, and that is enforced
-//     for every access a symbol map can place: raise/offsetnames.ts `cellSpelledTwice` declines a
-//     lift that reaches one byte under two names, or under a name and a numeric address, with a
-//     store among them. The pool promotion's one canonical name per address does not give it
-//     alone — an interior attribution into an object sized over its neighbour, a walk the
-//     offset-name gates leave as `base + K` past the base's end, and a raw constant beside an
-//     unsized name each reached a named cell a second way. What the check cannot place it cannot
-//     enforce: with no map (or a name the map does not hold) two spellings of one cell are the
-//     asm's own, read from its relocations and literals.
+//   • name comparison suffices where a cell has ONE spelling per function and a name ONE cell, and
+//     that is enforced for every access whose address a symbol map places, through defs and
+//     joins alike: raise/offsetnames.ts `cellSpelledTwice` declines a lift that reaches one byte
+//     under two names, or under a name and a numeric address, with a store among them, and one
+//     that reads a name the map places at several addresses at two of them. The pool promotion's
+//     one canonical name per address does not give it alone — an interior attribution into an
+//     object sized over its neighbour, a walk the offset-name gates leave as `base + K` past the
+//     base's end, a raw constant beside an unsized name, and any of them carried across a join
+//     each reached a named cell a second way. Two spellings the asm itself carries are exempt
+//     only on a compiler that reloads across them (`reloadsAcrossSpellings`, IDO 7.1); agbcc and
+//     gcc 2.7.2 forward. KNOWN GAP: with no map (or a name the map does not hold) nothing is
+//     placed, so a relocation and a literal for one cell lift unchecked — faithful on IDO, and
+//     the forwarding compilers' C on agbcc and gcc 2.7.2 where the asm reloaded.
 //   • anything that does not resolve to a name — a materialized base, a variable index, a pointer
 //     parameter — is unknown, and unknown BARS. A call or an `opaque` bars unconditionally: it may
 //     write anything.

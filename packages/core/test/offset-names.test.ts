@@ -26,7 +26,7 @@ import {
 } from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC, MIPS_GCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -632,13 +632,63 @@ endlabel f
     );
   });
 
-  test('a byte the ASM spells two ways — a relocation and a literal — lifts as the asm spells it', () => {
-    // nothing here was read off the map: the source wrote both spellings and its compiler made this
-    // asm out of them (IDO 7.1 -O2 reloads the word: `sb t7, 1(t8); jr ra; lw v0, 0(v1)`)
+  test('a byte the ASM spells two ways lifts where the compiler reloads, and declines where it forwards', () => {
+    // nothing here was read off the map. IDO 7.1 -O2 reloads the word (`sb t7, 1(t8); jr ra; lw
+    // v0, 0(v1)`), so the source's own two spellings made this asm; gcc 2.7.2 compiles the same C
+    // to `sb v0, -2146435071; jr ra; li v0, 5`, so an asm that reloads was not those two spellings
     const own = mips('', '0', 1);
-    const out = decompile('f', own, MIPS_GCC, { symbols: twoWords }).source;
-    expect(out).toContain('D_80100000 = 5;');
-    expect(out).toContain('[1] = 7;');
+    const ido = decompile('f', own, MIPS_IDO, { symbols: twoWords }).source;
+    expect(ido).toContain('D_80100000 = 5;');
+    expect(ido).toContain('[1] = 7;');
+    expect(() => decompile('f', own, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
+    );
+  });
+
+  // The address reaches the byte store through a JOIN, which the raising tower merges into the name
+  // (or into a pointer local whose only base is it), and agbcc tracks the base across the join:
+  // `sRandCount = 5; ((u8 *)&sUnknown)[5] = 7; return sRandCount;` and the `v0 = (u8 *)&sUnknown`
+  // form both compile to `mov r0, #0x5`.
+  const joined = (word: string, byte: string, arm: string, byteStore: string): string =>
+    `f:\n\tldr\tr1, .L1\n\tmovs\tr3, #5\n\tstr\tr3, [r1]\n${arm}` +
+    `.Lb:\n\tmovs\tr3, #7\n\t${byteStore}\n\tldr\tr0, [r1]\n\tbx\tlr\n` +
+    `.L1:\n\t.word\t${word}\n.L2:\n\t.word\t${byte}\n`;
+  const twoLoads = '\tcmp\tr0, #0\n\tbeq\t.La\n\tldr\tr2, .L2\n\tb\t.Lb\n.La:\n\tldr\tr2, .L2\n';
+  const loadAndCopy = '\tldr\tr2, .L2\n\tcmp\tr0, #0\n\tbeq\t.Lb\n\tadds\tr2, #0\n';
+
+  test('an address that reaches the access through a join is placed as the join spells it', () => {
+    for (const arm of [twoLoads, loadAndCopy]) {
+      expect(() => lifted(joined('0x020249c0', '0x020249bc', arm, 'strb\tr3, [r2, #5]'), perAddress)).toThrow(
+        /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+      );
+    }
+    // a name and a raw constant through the same join: `v0 = (u8 *)50333641; *v0 = 7;`
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    expect(() => lifted(joined('0x030007c8', '0x030007c9', twoLoads, 'strb\tr3, [r2]'), unsized)).toThrow(
+      /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
+    );
+    // …and a join that reaches nothing the word is spelled through lifts
+    expect(lifted(joined('0x020249c0', '0x020249bc', twoLoads, 'strb\tr3, [r2]'), perAddress)).toContain(
+      'sUnknown = 7;',
+    );
+  });
+
+  test('one name read off the map at two of its addresses declines', () => {
+    // two EWRAM file statics both called `sFiller`: `sFiller = 5; return sFiller;` would read back
+    // the stored cell, where the asm reads the other one
+    const filler: SymbolInfo = { name: 'sFiller', kind: 'data', size: 4, shape: 'scalar' };
+    const twoStatics: SymbolMap = new Map([
+      [0x02037344, [filler]],
+      [0x02037fe0, [filler]],
+    ]);
+    const asm = (a: string, b: string): string =>
+      `f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tldr\tr0, [r2]\n\tbx\tlr\n` +
+      `.L1:\n\t.word\t${a}\n.L2:\n\t.word\t${b}\n`;
+    expect(() => lifted(asm('0x02037344', '0x02037fe0'), twoStatics)).toThrow(
+      /'sFiller' names two of the cells the map places it at/,
+    );
+    // the same one of the two, reached twice, is one object
+    expect(lifted(asm('0x02037344', '0x02037344'), twoStatics)).toContain('return sFiller;');
   });
 
   test('an address-cast macro is a numeric spelling, so it shares a byte with a raw constant', () => {

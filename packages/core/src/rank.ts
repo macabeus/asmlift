@@ -63,7 +63,7 @@ import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
-import { applyIdiomPatterns, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked } from './pipeline';
+import { applyIdiomPatterns, liftStamped, offsetNameBehaviorsFor, raiseRecovered, structureChecked } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
@@ -2185,9 +2185,10 @@ export function enumerateCandidates(
           // …and the NAMES the map holds for the addresses this lift built by arithmetic off a
           // named one (raise/offsetnames.ts). Per lift setting, off that setting's own map: the
           // `/raw-globals` sibling has no map and so no name to reach. AFTER the two readings, and
-          // the staleness that leaves them is priced in pipeline.ts's copy of this note.
+          // the staleness that leaves them is priced in pipeline.ts's copy of this note, which also
+          // states the one-spelling-per-cell decline the pass throws from here.
           if (symbolSetting.symbols) {
-            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols, stampBehaviorsFor(target, opts.contextGlobals));
+            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols, offsetNameBehaviorsFor(target, opts.contextGlobals));
           }
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {
