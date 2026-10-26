@@ -585,11 +585,17 @@ export function lookupSymbol(map: SymbolMap, value: number): SymbolInfo | null {
 
 /** Interior attribution: the data symbol whose `[address, address+size)` range contains
  *  `value` strictly inside (offset > 0 — exact bases go through `lookupSymbol`). Only
- *  complete-typed globals carry a size, so unsized arrays never attribute. */
+ *  complete-typed globals carry a size, so unsized arrays never attribute.
+ *
+ *  Like {@link lookupSymbol}'s masked probe, this asks for the SIZED DATA alias at an address, not
+ *  for the canonical `[0]`: an unsized label can share its address with the object that follows
+ *  it, and the provider may rank the label first (sa3's `gUnknown_08358528` over
+ *  `Map_zone_1_act_hub_fg0`). Only when `[0]` is itself data: behind a CODE `[0]` a sized data
+ *  alias is a label over the function's bytes (MIPS `func_X.NON_MATCHING`), not an object. */
 export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInfo; offset: number } | null {
   for (const [addr, infos] of map) {
-    const info = infos[0];
-    if (info.kind !== 'data' || info.size === undefined) {
+    const info = infos[0].kind === 'data' ? infos.find((i) => i.kind === 'data' && i.size !== undefined) : undefined;
+    if (info?.size === undefined) {
       continue;
     }
     if (value > addr && value < addr + info.size) {

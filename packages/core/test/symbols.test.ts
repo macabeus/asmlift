@@ -370,6 +370,39 @@ describe('declaration shapes (P2)', () => {
     expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002008)).toBeNull();
     expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002000)).toBeNull();
   });
+
+  test('interior attribution looks past an unsized data marker ranked first at the base', () => {
+    // sa3 0x08358528: the unsized label gUnknown_08358528 (data/empty_unknown_data.s) is [0], the
+    // sized object Map_zone_1_act_hub_fg0 (540 bytes) its alias. A word inside is still the object's.
+    const map: SymbolMap = new Map([
+      [
+        0x08058528,
+        [
+          { name: 'gMarker', kind: 'data' },
+          { name: 'gMap', kind: 'data', size: 540 },
+        ],
+      ],
+    ]);
+    expect(lookupInterior(map, 0x08058530)).toEqual({ info: { name: 'gMap', kind: 'data', size: 540 }, offset: 8 });
+    const src = run('f', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08058530\n', map);
+    expect(src).toContain('gMap');
+    expect(src).not.toMatch(/0x8058530/i);
+  });
+
+  test('interior attribution never reads a sized data alias behind CODE ranked first', () => {
+    // marioparty3/snowboardkids2: `func_X.NON_MATCHING` is a sized data label over the function's
+    // code. An address inside a function is not an object's interior.
+    const map: SymbolMap = new Map([
+      [
+        0x80001000,
+        [
+          { name: 'func_80001000', kind: 'code' },
+          { name: 'func_80001000.NON_MATCHING', kind: 'data', size: 64 },
+        ],
+      ],
+    ]);
+    expect(lookupInterior(map, 0x80001008)).toBeNull();
+  });
 });
 
 describe('value-context escapes intify — a named address never declines what raw C compiled', () => {
