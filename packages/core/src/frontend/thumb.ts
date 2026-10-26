@@ -3807,12 +3807,15 @@ function measureThumbFrame({
   // capture. A home is held for the one-object answer alone, so the audit may hand it back: where
   // that answer is withheld (a struct-return temp escapes beside the home) and the audit declines
   // with the home held, the second lift reads it as any other slot (`releasableHomes`,
-  // `homesReleased`). KNOWN GAP, in the safe direction: the hold has one reader before the audit.
-  // The stack-argument analysis sees a held home's narrow reload as no reload, so a home BELOW an
-  // escaping temp (`str r0, [sp]` beside `add r0, sp, #4 / bl mk`, read back `mov r0, sp / ldrb r0,
-  // [r0]`) declines there as a possible outgoing argument and no audit runs to release it. agbcc's
-  // reload puts a spilled argument's home above the locals (bvhome's at 8 and 12, over temps at 0
-  // and 4), so no compiled shape is known to reach it.
+  // `homesReleased`). The hold decides how the LIFT reads a home's reloads, not whether the word
+  // is reloaded: the stack-argument analysis takes a held home's narrow reload as that word's
+  // reload (`heldHomeReloadOf`) in both lifts. Read as no reload, a home BELOW an escaping temp
+  // would decline there as a possible outgoing argument before any audit could release it, and
+  // agbcc compiles that shape: reload spills a DImode struct's registers above the locals
+  // (bvhome's home at 8 and 12, over temps at 0 and 4), but `assign_parms` stores a BLKmode one
+  // (over 8 bytes) at the frame's bottom, below the temp (`struct P { u8 m0, …, m8; }` beside
+  // `struct R r0 = mk0(1)`: `str r0, [sp] / … / add r0, sp, #0xc / bl mk0 / … / mov r0, sp /
+  // ldrb r0, [r0]`).
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
@@ -3901,6 +3904,9 @@ function measureThumbFrame({
   }
   const narrowReloadOf = new Map<Instr, number>();
   const releasableHomes = new Set<number>();
+  // a held home's narrow reloads, which stay captures for the lift but are still reloads of that
+  // word for the outgoing-argument analysis below
+  const heldHomeReloadOf = new Map<Instr, number>();
   for (const [load, { slot }] of narrowCandidates) {
     if (
       wordStoredSlots.has(slot) &&
@@ -3910,6 +3916,7 @@ function measureThumbFrame({
     ) {
       if (argumentHomes.has(slot) && !homesReleased) {
         releasableHomes.add(slot);
+        heldHomeReloadOf.set(load, slot);
       } else {
         narrowReloadOf.set(load, slot);
       }
@@ -3958,8 +3965,10 @@ function measureThumbFrame({
       if (escaped.length > 0 && ins.mnemonic === 'str') {
         return escaped;
       }
-      // …and a narrow reload of a word slot is that slot's reload, as its word reload would be
-      const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? null;
+      // …and a narrow reload of a word slot is that slot's reload, as its word reload would be,
+      // a held argument home's included: the hold decides how the lift reads the load, not
+      // whether the word is loaded, and a word this function loads is no outgoing argument
+      const off = slotAcc(ins) ?? narrowReloadOf.get(ins) ?? heldHomeReloadOf.get(ins) ?? null;
       if (off !== null && !constantCaptureOffsets.has(off) && !inByValueBlock(off, 4)) {
         return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
       }

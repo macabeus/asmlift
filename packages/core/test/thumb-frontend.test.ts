@@ -5864,6 +5864,40 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     );
   });
 
+  // A HELD HOME'S NARROW RELOAD IS STILL ITS WORD'S RELOAD for the stack-argument analysis. agbcc
+  // stores a by-value struct over 8 bytes (BLKmode) at the frame's bottom, below a struct-return
+  // temp: `struct P { u8 m0, …, m8; }; s32 k1(struct P p) { struct R r0 = mk0(1); return p.m0 +
+  // p.m4 + r0.a; }`. Read as no reload, [sp,#0] would decline as a possible outgoing argument.
+  test('a home below an escaping struct-return temp reaches the audit', () => {
+    const k1 =
+      'k1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+      '\tadd\tr0, sp, #0xc\n\tmov\tr1, #0x1\n\tbl\tmk0\n\tldr\tr2, [sp, #0xc]\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n' +
+      '\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n' +
+      '\tadd\tr0, r0, r2\n\tadd\tsp, sp, #0x10\n\tpop\t{r1}\n\tbx\tr1\n';
+    const mk0: Prototypes[string] = {
+      params: ['s32'],
+      returns: 'struct R',
+      returnLayout: {
+        kind: 'struct',
+        members: [
+          { name: 'a', type: 'u16' },
+          { name: 'b', type: 'u8' },
+          { name: 'c', type: 'u8' },
+        ],
+      },
+    };
+    expect(
+      decompile('k1', k1, ARMV4T_AGBCC, { prototypes: { k1: { params: 3, returns: 's32' }, mk0 } }).source,
+    ).toContain('return (u8)a0 + (u8)a1 + sp12.a;');
+    // …and the word a declared callee takes as its fifth argument is still refused where this
+    // function loads it back
+    const g5 =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n' +
+      '\tmov\tr3, #0x4\n\tbl\tg5\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    const G5: Prototypes = { ...P, g5: { params: ['s32', 's32', 's32', 's32', 's32'], returns: 'void' } };
+    expect(() => decompile('f', g5, ARMV4T_AGBCC, { prototypes: G5 })).toThrow('but this function also LOADS it');
+  });
+
   // …unless the function's own declaration proves the register holds one integer word, which no
   // struct passed by value is (proto.ts `ownLeadingWordRegisters`): `u32 f(u32 k)` spilling k on
   // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it

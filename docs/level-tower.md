@@ -781,9 +781,11 @@ hold, such as a struct-return temp beside the home) and the audit declines with 
 asks for a second lift with the homes released (`FrameObjectRelift.homesReleased`), which reads
 their narrow reloads as the slot narrowed. The hold buys byte-exactness, not soundness, so the
 release is value-sound whichever refusal fired; a second lift that declines reports the first's
-refusal. The release reaches only refusals the audit makes: a home below an escaping temp declines
-earlier, in the stack-argument analysis, which reads the held reload as none (a known gap no
-compiled shape is known to reach, thumb.ts `measureThumbFrame`). In either model a store
+refusal. The hold changes how the lift reads
+a home's reloads, never whether the word is reloaded: the stack-argument analysis counts a held
+home's narrow reload as its word's reload, so a home below an escaping temp (agbcc's BLKmode
+by-value struct over 8 bytes, stored at the frame's bottom on entry) reaches the audit rather than
+declining as a possible outgoing argument (thumb.ts `measureThumbFrame`). In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
 stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a
