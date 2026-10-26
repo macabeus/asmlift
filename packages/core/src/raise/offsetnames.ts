@@ -231,8 +231,10 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
   // The mirror of `base-address-ambiguous`, and it is not the same question asked twice: that one
   // is one NAME the map places at two addresses, this one is one ADDRESS the map gives several
   // names — aliases, or typed views of one RAM region, which `SymbolMap`'s `SymbolInfo[]` exists
-  // to carry. `lookupSymbol` answers with the first of them, so the width the two access rules
-  // check and the `const` the store rule checks would otherwise be read off an arbitrary pick.
+  // to carry. `lookupSymbol` answers with ONE of them — `objectAt`'s per-address pick, usually the
+  // first, the sized object behind an unsized data marker otherwise — so the width the two access
+  // rules check and the `const` the store rule checks would otherwise be read off whichever alias
+  // that pick lands on. Passing this gate means every alias agrees with the first on all of them.
   {
     id: 'target-address-ambiguous',
     why: 'the map gives the walked-to address several names that do not agree, so which one this spells is arbitrary',

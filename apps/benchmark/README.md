@@ -129,7 +129,7 @@ moves no asmlift row.
 _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
-   bulk (2179 of 41016 entries; af 26 of 61860, sa3 9, kleod 7 of 894, marioparty3 7, snowboardkids2 5).
+   bulk (2180 of 54883 entries; af 26 of 85030, sa3 13, kleod 25 of 1844, marioparty3 7, snowboardkids2 5).
    The three dtk projects carry none, having no DWARF to vendor it from (residuals 6 and 10).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and

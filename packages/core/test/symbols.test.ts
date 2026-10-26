@@ -66,6 +66,24 @@ describe('the numeric-pool promotion (P1 names)', () => {
     expect(src).not.toContain('&DoThing');
   });
 
+  test('the masked probe finds the code alias behind a data marker ranked first at its address', () => {
+    // pokeemerald 0x082ded70: gMysteryEventScriptCmdTableEnd (data, declared) is [0], the FUNC
+    // GameCubeMultiBoot_Hash is the alias. An odd pool word there is the function's Thumb pointer.
+    const map: SymbolMap = new Map([
+      [
+        0x08012344,
+        [
+          { name: 'gTableEnd', kind: 'data', declared: true },
+          { name: 'DoThing', kind: 'code' },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x08012345)?.name).toBe('DoThing');
+    expect(lookupSymbol(map, 0x08012344)?.name).toBe('gTableEnd');
+    const src = run('f', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08012345\n', map);
+    expect(src).toContain('(u32)DoThing');
+  });
+
   test('an exact odd DATA hit wins over a masked code hit', () => {
     const body = '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x03000001\n';
     const map: SymbolMap = new Map([
@@ -351,6 +369,88 @@ describe('declaration shapes (P2)', () => {
     // strictly inside only: the end is exclusive, the base is not interior
     expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002008)).toBeNull();
     expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002000)).toBeNull();
+  });
+
+  test('interior attribution looks past an unsized data marker ranked first at the base', () => {
+    // sa3 0x08358528: the unsized label gUnknown_08358528 (data/empty_unknown_data.s) is [0], the
+    // sized object Map_zone_1_act_hub_fg0 (540 bytes) its alias. A word inside is still the object's.
+    const map: SymbolMap = new Map([
+      [
+        0x08058528,
+        [
+          { name: 'gMarker', kind: 'data' },
+          { name: 'gMap', kind: 'data', size: 540 },
+        ],
+      ],
+    ]);
+    expect(lookupInterior(map, 0x08058530)).toEqual({ info: { name: 'gMap', kind: 'data', size: 540 }, offset: 8 });
+    const src = run('f', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08058530\n', map);
+    expect(src).toContain('gMap');
+    expect(src).not.toMatch(/0x8058530/i);
+  });
+
+  test('interior attribution never reads a sized data alias behind CODE ranked first', () => {
+    // marioparty3/snowboardkids2: `func_X.NON_MATCHING` is a sized data label over the function's
+    // code. An address inside a function is not an object's interior.
+    const map: SymbolMap = new Map([
+      [
+        0x80001000,
+        [
+          { name: 'func_80001000', kind: 'code' },
+          { name: 'func_80001000.NON_MATCHING', kind: 'data', size: 64 },
+        ],
+      ],
+    ]);
+    expect(lookupInterior(map, 0x80001008)).toBeNull();
+  });
+
+  test('an exact hit and an interior hit name the same object at one address', () => {
+    // sa3 0x08358528 again. Two names for one object in one function let agbcc forward the first
+    // store past the second (distinct symbols do not alias): this body returns 7, and the two-name
+    // C compiles to `mov r0, #5`.
+    const map: SymbolMap = new Map([
+      [
+        0x08058528,
+        [
+          { name: 'gMarker', kind: 'data' },
+          { name: 'gMap', kind: 'data', size: 540 },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x08058528)?.name).toBe('gMap');
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r2]\n\tmovs\tr0, #7\n\tstr\tr0, [r1, #8]\n' +
+      '\tldr\tr0, [r2]\n\tbx\tlr\n.L1:\n\t.word\t0x08058528\n.L2:\n\t.word\t0x08058530\n';
+    const src = run('f', body, map);
+    expect(src).toContain('gMap');
+    expect(src).not.toContain('gMarker');
+  });
+
+  test('an unsized data marker over CODE keeps its rank, and nothing inside the function attributes', () => {
+    // marioparty3/af/snowboardkids2: splat ranks the unsized `gcc2_compiled.` label first at a
+    // function's address, ahead of the function and its sized `func_X.NON_MATCHING` label.
+    const map: SymbolMap = new Map([
+      [
+        0x80001000,
+        [
+          { name: 'gcc2_compiled.', kind: 'data' },
+          { name: 'func_80001000', kind: 'code' },
+          { name: 'func_80001000.NON_MATCHING', kind: 'data', size: 64 },
+        ],
+      ],
+      [
+        0x80002000,
+        [
+          { name: 'D_80002000', kind: 'data' },
+          { name: 'D_80002000.NON_MATCHING', kind: 'data', size: 16 },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x80001000)?.name).toBe('gcc2_compiled.');
+    expect(lookupInterior(map, 0x80001008)).toBeNull();
+    // a sized label C cannot spell is not the object either
+    expect(lookupSymbol(map, 0x80002000)?.name).toBe('D_80002000');
+    expect(lookupInterior(map, 0x80002004)).toBeNull();
   });
 });
 
