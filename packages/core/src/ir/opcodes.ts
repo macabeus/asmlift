@@ -204,6 +204,9 @@ export const OPCODES = {
   //   - a load/store through an off-0 SCALAR gaddr → a bare global `gSym` / `gSym = v`;
   //   - an indexed or non-zero-offset AGGREGATE access → the address-cast `((T *)&gSym)[i]`;
   //   - any other use (e.g. `&gSym` passed to a call) → the `{k:'addr'}` L3 node, printed `&gSym`.
+  // Optional `fromMap: true` marks a name asmlift READ OFF THE SYMBOL MAP (a promoted numeric pool
+  // word, an interior attribution, a named walk) rather than one the asm spells by relocation —
+  // raise/offsetnames.ts `cellSpelledTwice` declines only a two-spelled byte one of whose names it is.
   gaddr: { operands: 0, results: 1, requiredAttrs: ['sym'] },
   // The address of a FRAME-LOCAL object — gaddr's local twin, for the address-taken stack local
   // (`mov rD, sp` feeding a DMA register or a callee). `off` is the byte offset inside the frame's

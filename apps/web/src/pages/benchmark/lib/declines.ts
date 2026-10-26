@@ -35,7 +35,7 @@
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       32  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, alignment fill that depends on the function's base
 //                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
@@ -45,9 +45,7 @@
 //                               through `sp` or `lr`, a return that does not jump through the
 //                               caller's lr, a `pop` that loads a callee-saved register with a word
 //                               not its own save and returns so, a `pop` that copies another word
-//                               into a scratch register read as a value, a pool word naming an object
-//                               the symbol map lays over another (one cell, two names), and the
-//                               reaching-compare throw
+//                               into a scratch register read as a value, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
@@ -106,8 +104,10 @@
 //   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
 //                               callee handed back in it, where the callee's leftover bits are no value
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
+//   raise/offsetnames.ts     1  one byte reached under two spellings in one function (two names, or a
+//                               name and a numeric address) with a store among them
 //
-// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fourteen of them, and the file
+// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fifteen of them, and the file
 // names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
 // harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
 // then reads THIS FILE back and requires each one to be spelled here. Move a family out of the

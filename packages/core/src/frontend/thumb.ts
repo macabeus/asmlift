@@ -31,7 +31,7 @@ import {
   wordsOf,
 } from '../proto';
 import type { ContextGlobals } from '../proto-context';
-import { type SymbolMap, lookupInterior, lookupSymbol, overlappingObject } from '../symbols';
+import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
@@ -6544,27 +6544,19 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       // word stays the raw constant the target says it is.
       const found = symbols ? lookupSymbol(symbols, pr.value) : null;
       const si = found && (!text.poolNamesSymbols || found.macroBody !== undefined) ? found : null;
-      // ONE NAME PER CELL (symbols.ts overlappingObject): a data object the map lays over another
-      // has no spelling safe without every other access in the function — another name, an
-      // interior offset and the raw constant all let agbcc forward a store past one of them.
-      const declineOverlap = (base: number, sym: string): void => {
-        const other = symbols ? overlappingObject(symbols, base) : null;
-        if (other !== null) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': pool word 0x${pr.value.toString(16)} names '${sym}', whose bytes the ` +
-              `symbol map also gives to '${other}' — one cell under two names is two objects to the compiler`,
-          );
-        }
-      };
-      if (si && si.kind === 'data') {
-        declineOverlap(pr.value, si.name);
-      }
       if (si) {
         const res = mkValue(T.unk(32));
         irb.ops.push(
           mkOp('gaddr', {
             results: [res],
-            attrs: { sym: si.name, ...(si.kind === 'code' ? { code: true } : {}) },
+            // `fromMap`: the NAME is asmlift's reading of a numeric word, not the asm's own
+            // spelling (raise/offsetnames.ts `cellSpelledTwice` asks which). A macro expands to
+            // the numeric literal the asm holds, so it is not marked.
+            attrs: {
+              sym: si.name,
+              ...(si.kind === 'code' ? { code: true } : {}),
+              ...(si.macroBody === undefined ? { fromMap: true } : {}),
+            },
           }),
         );
         writeData(reg(a), bi, res);
@@ -6578,11 +6570,10 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       // relocated — so the veto applies to it without the macro exemption above.
       const interior = symbols && !text.poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
       if (interior) {
-        declineOverlap(pr.value - interior.offset, interior.info.name);
         const g = mkValue(T.unk(32));
         const k = mkValue(T.unk(32));
         const res = mkValue(T.unk(32));
-        irb.ops.push(mkOp('gaddr', { results: [g], attrs: { sym: interior.info.name } }));
+        irb.ops.push(mkOp('gaddr', { results: [g], attrs: { sym: interior.info.name, fromMap: true } }));
         irb.ops.push(mkOp('const', { results: [k], attrs: { value: interior.offset } }));
         irb.ops.push(mkOp('add', { operands: [g, k], results: [res] }));
         writeData(reg(a), bi, res);

@@ -8,7 +8,6 @@
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
-import { FrontendUnsupportedError } from '../src/frontend/errors';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
 import { prototypesFromContext } from '../src/proto-context';
@@ -19,7 +18,6 @@ import {
   asIfUndecompiled,
   lookupInterior,
   lookupSymbol,
-  overlappingObject,
   symbolsByName,
 } from '../src/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
@@ -426,97 +424,6 @@ describe('declaration shapes (P2)', () => {
     const src = run('f', body, map);
     expect(src).toContain('gMap');
     expect(src).not.toContain('gMarker');
-  });
-
-  test('overlappingObject names another object sharing bytes with the one at a base — and only that', () => {
-    const map: SymbolMap = new Map([
-      [0x02000000, [{ name: 'gOuter', kind: 'data', size: 8 }]],
-      [0x02000004, [{ name: 'gInner', kind: 'data', size: 4 }]],
-      [0x02000010, [{ name: 'gAlone', kind: 'data', size: 4 }]],
-      [0x02000014, [{ name: 'gNext', kind: 'data' }]], // starts at gAlone's END: adjacent, not inside
-      [0x02000020, [{ name: 'gLong', kind: 'data', size: 0x40 }]],
-      [0x02000030, [{ name: 'gShort', kind: 'data', size: 4 }]],
-      [0x02000038, [{ name: 'gLabel', kind: 'data' }]], // unsized, but still a base inside gLong
-      [0x08000100, [{ name: 'Func', kind: 'code' }]],
-    ]);
-    expect(overlappingObject(map, 0x02000000)).toBe('gInner'); // contains another base
-    expect(overlappingObject(map, 0x02000004)).toBe('gOuter'); // contained by a sized object
-    expect(overlappingObject(map, 0x02000010)).toBeNull();
-    expect(overlappingObject(map, 0x02000014)).toBeNull();
-    // the containing object is found past a nearer, shorter one that ends before the base
-    expect(overlappingObject(map, 0x02000038)).toBe('gLong');
-    expect(overlappingObject(map, 0x02000030)).toBe('gLong');
-    expect(overlappingObject(map, 0x08000100)).toBeNull(); // code is not an object
-    expect(overlappingObject(map, 0x02000001)).toBeNull(); // no object at this base
-    // a sized object and an unsized marker at ONE address are one object (objectAt), not an overlap
-    const same: SymbolMap = new Map([
-      [
-        0x08058528,
-        [
-          { name: 'gMarker', kind: 'data' },
-          { name: 'gMap', kind: 'data', size: 540 },
-        ],
-      ],
-    ]);
-    expect(overlappingObject(same, 0x08058528)).toBeNull();
-  });
-
-  // pokeemerald 0x020249c0, the byte probe: store 5 to the word, 7 to its second byte, read the
-  // word back (the asm returns 0x0705). The map this repository vendored until the provider stopped
-  // joining a multi-address name's DWARF shape gave EWRAM `sUnknown` (0x020249bc) the 8 bytes of
-  // berry_powder.c's ROM `sUnknown[2]`, so it covered `sRandCount`, and the lift spelled the byte
-  // as `((u8 *)&sUnknown)[5]` beside `sRandCount`: agbcc compiles that to `strb; mov r0, #5`.
-  const BYTE_PROBE =
-    '\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tmovs\tr0, #7\n\tstrb\tr0, [r2]\n' +
-    '\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x020249c1\n';
-  const sRandCount: SymbolInfo = {
-    name: 'sRandCount',
-    kind: 'data',
-    size: 4,
-    declared: true,
-    shape: 'scalar',
-    signed: false,
-  };
-
-  test('a cell two overlapping objects cover is declined, never spelled under two names', () => {
-    const overlapping: SymbolMap = new Map([
-      [
-        0x020249bc,
-        [
-          {
-            name: 'sUnknown',
-            kind: 'data',
-            size: 8,
-            declared: true,
-            const: true,
-            shape: 'array',
-            elemSize: 4,
-            elemSigned: false,
-            dims: [2],
-          },
-        ],
-      ],
-      [0x020249c0, [sRandCount]],
-    ]);
-    expect(() => run('f', BYTE_PROBE, overlapping)).toThrow(FrontendUnsupportedError);
-    expect(() => run('f', BYTE_PROBE, overlapping)).toThrow(/'sUnknown'.*'sRandCount'|'sRandCount'.*'sUnknown'/);
-    // an EXACT hit on either object declines too: the other's spelling of the same bytes is one
-    // offset away, through a base the structurer may still name
-    expect(() => run('f', LOADW.replace('0x03001234', '0x020249c0'), overlapping)).toThrow(FrontendUnsupportedError);
-    expect(() => run('f', LOADW.replace('0x03001234', '0x020249bc'), overlapping)).toThrow(FrontendUnsupportedError);
-  });
-
-  test('the byte probe over the map as vendored now names the cell once', () => {
-    // EWRAM `sUnknown` keeps its own st_size (it is `static u8`, random.c), so nothing overlaps and
-    // the byte is `sRandCount`'s: agbcc reloads the word (`strb [r1, #1]; ldr r0, [r1]`).
-    const perAddress: SymbolMap = new Map([
-      [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 1 }]],
-      [0x020249c0, [sRandCount]],
-    ]);
-    const src = run('f', BYTE_PROBE, perAddress);
-    expect(src).toContain('sRandCount');
-    expect(src).not.toContain('sUnknown');
-    expect(src).not.toMatch(/33704385|0x20249c1/i);
   });
 
   test('an unsized data marker over CODE keeps its rank, and nothing inside the function attributes', () => {

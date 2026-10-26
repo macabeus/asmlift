@@ -12,12 +12,15 @@
 //   • two DIFFERENT named globals are different objects, so a store through one can never change
 //     what a read of the other sees. That is a C guarantee about distinct declared objects, not a
 //     heuristic about what the compiler happened to do.
-//   • name comparison suffices because the pool promotion picks ONE canonical name per address,
-//     and DECLINES a word that names an object the map lays over another one (one object's base
-//     strictly inside the other's extent — symbols.ts `overlappingObject`), so a single cell
-//     cannot appear under two names within one function (frontend/thumb.ts). The per-address
-//     pick alone did not give that: an object sized past a neighbour's base gave the neighbour's
-//     cells a second, interior name.
+//   • name comparison suffices where a cell has ONE spelling per function, and that is enforced
+//     for every access a symbol map can place: raise/offsetnames.ts `cellSpelledTwice` declines a
+//     lift that reaches one byte under two names, or under a name and a numeric address, with a
+//     store among them. The pool promotion's one canonical name per address does not give it
+//     alone — an interior attribution into an object sized over its neighbour, a walk the
+//     offset-name gates leave as `base + K` past the base's end, and a raw constant beside an
+//     unsized name each reached a named cell a second way. What the check cannot place it cannot
+//     enforce: with no map (or a name the map does not hold) two spellings of one cell are the
+//     asm's own, read from its relocations and literals.
 //   • anything that does not resolve to a name — a materialized base, a variable index, a pointer
 //     parameter — is unknown, and unknown BARS. A call or an `opaque` bars unconditionally: it may
 //     write anything.
