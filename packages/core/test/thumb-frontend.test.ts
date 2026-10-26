@@ -5841,8 +5841,8 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
     expect(() => lift(home('strh'))).toThrow('the accesses through the captured address disagree on width (2 vs 1)');
   });
 
-  // …and only the home's own refusal releases it: a refusal of another object declines as it stands
-  // (here an 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes)
+  // …and a released relift that declines reports the first lift's refusal, not its own: here an
+  // 8-byte struct-return temp at [sp,#0) that covers the home, which the function writes
   test('a refusal that is not the held home declines with its own reason', () => {
     const R8: Prototypes = {
       ...P,

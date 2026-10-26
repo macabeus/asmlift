@@ -74,10 +74,9 @@ export interface FrameObjectAudit {
    *  words an incoming argument register is stored to on entry, whose narrow reloads the frontend
    *  left as captures rather than reading them as the word narrowed, because a by-value struct
    *  parameter's home recompiles as that one object (Thumb `argumentHomes`). Where that answer is
-   *  withheld and the per-object model refuses an object over one of them — over its slot, or read
-   *  at two widths — the audit asks for a relift with them released
-   *  (`FrameObjectRelift.homesReleased`) rather than refusing; any other refusal stands. Absent or
-   *  empty where none was kept. */
+   *  withheld and the audit refuses, it asks for a relift with them released
+   *  (`FrameObjectRelift.homesReleased`) rather than refusing, and a relift that declines reports
+   *  this refusal. Absent or empty where none was kept. */
   releasableHomes?: ReadonlySet<number>;
   /** the bytes a first audit asked to have kept as ONE object in memory (`FrameObjectRelift`):
    *  the frontend routes every access inside them through an `laddr`, and the audit declares
@@ -135,13 +134,13 @@ export function keptInRelift(kept: FrameRange, at: number, width: number, what: 
 
 /** What an audit answers instead of a refusal. Where a device may read the frame, or a callee write
  *  it, without bound: lift again with `oneObject` set to these bytes. Where the one-object answer is
- *  withheld and the per-object model refuses an object over an argument home the frontend kept out
- *  of the slot model for that answer alone (`FrameObjectAudit.releasableHomes`): lift again with
- *  `oneObject` unset and `homesReleased`, so the frontend reads those homes as the slots they are. */
+ *  withheld and the audit refuses a frame with an argument home the frontend kept out of the slot
+ *  model for that answer alone (`FrameObjectAudit.releasableHomes`): lift again with `oneObject`
+ *  unset and `homesReleased`, so the frontend reads those homes as the slots they are. */
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange | undefined;
-  /** with `homesReleased`, the first audit's refusal of the held home, which a relift that declines
-   *  again reports: the frame as the first lift read it, not the second lift's next refusal */
+  /** with `homesReleased`, the first audit's refusal, which a relift that declines again reports:
+   *  the frame as the first lift read it, not the second lift's next refusal */
   readonly homesReleased?: { readonly refusal: FrontendUnsupportedError };
 }
 
@@ -402,29 +401,25 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
 export function auditFrameObjects(audit: FrameObjectAudit): FrameObjectVerdict {
   // AN ARGUMENT HOME HELD FOR AN ANSWER THAT DID NOT COME. The frontend keeps a by-value struct
   // parameter's home out of the slot model (`releasableHomes`) so the one-object answer can take it
-  // whole. Where that answer is withheld — an address escapes to a writer it cannot hold, a
-  // struct-return temp's — and the per-object model refuses the home itself (`HeldHomeRefusal`: an
-  // object over its slot, or two widths through its capture), the hold bought nothing but that
-  // refusal, since a home's narrow reload read as the word narrowed is the value the entry stored
-  // there. So that refusal, and no other, becomes a relift with the homes released, which a second
-  // audit judges whole; one that declines again reports this refusal (`liftWithRelift`). Every
-  // other refusal declines with its own reason, as it would with no home held.
+  // whole. Where this audit declines instead — that answer withheld, because an address escapes to
+  // a writer it cannot hold (a struct-return temp's) — the decline becomes a relift with the homes
+  // released. The hold exists for byte-exactness (the one object recompiles as the frame does), not
+  // for soundness: a home's narrow reload read as the word narrowed is the value the entry stored
+  // there, and the second audit judges the frame whole either way, so the release is value-sound
+  // whichever refusal fired. A second lift that declines reports this refusal (`liftWithRelift`),
+  // the frame as the first lift read it, not the second's next refusal. Asked of the first lift
+  // alone: a relift that keeps one object has already had the answer the homes were held for.
+  const { oneObject, releasableHomes } = audit;
+  if (oneObject !== undefined || releasableHomes === undefined || releasableHomes.size === 0) {
+    return auditFrame(audit);
+  }
   try {
     return auditFrame(audit);
   } catch (e) {
-    if (e instanceof HeldHomeRefusal) {
-      return { oneObject: undefined, homesReleased: { refusal: e.refusal } };
+    if (e instanceof FrontendUnsupportedError) {
+      return { oneObject: undefined, homesReleased: { refusal: e } };
     }
     throw e;
-  }
-}
-
-/** A per-object refusal of an argument home the frontend held for the one-object answer alone
- *  (`FrameObjectAudit.releasableHomes`), carrying the decline it would have been, which
- *  `auditFrameObjects` answers with a relift */
-class HeldHomeRefusal extends Error {
-  constructor(readonly refusal: FrontendUnsupportedError) {
-    super(refusal.message);
   }
 }
 
@@ -444,7 +439,6 @@ function auditFrame({
   target,
   gates = FRAME_ESCAPE_GATES,
   reliftGates = RELIFT_HAND_BACK_GATES,
-  releasableHomes = new Set(),
   oneObject,
 }: FrameObjectAudit): FrameObjectVerdict {
   const { laddrs: captures, foldedHere } = foldMovedCaptures(irBlocks, movedCaptures);
@@ -454,18 +448,6 @@ function auditFrame({
     return undefined;
   }
   const fail = frameRefusal(name);
-  // …asked of the first lift alone: a relift that keeps one object has had the answer the homes
-  // were held for
-  const failHome: Refuse =
-    oneObject === undefined && releasableHomes.size > 0
-      ? (why) => {
-          try {
-            return fail(why);
-          } catch (e) {
-            throw new HeldHomeRefusal(e as FrontendUnsupportedError);
-          }
-        }
-      : fail;
   if (captures.length === 0 && escapesReliedOn.size > 0) {
     recheckEscapesReliedOn(escapesReliedOn, undefined, fail);
   }
@@ -484,15 +466,7 @@ function auditFrame({
     fail,
   });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel({
-    oneObject,
-    uses,
-    windows,
-    returnsWithoutHiddenPointer,
-    releasableHomes,
-    fail,
-    failHome,
-  });
+  const model = chooseFrameModel({ oneObject, uses, windows, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -553,16 +527,8 @@ function auditFrame({
     };
   }
   const failWithheld: Refuse = (why) => fail(model.withheld(why));
-  const failHomeWithheld: Refuse = (why) => failHome(model.withheld(why));
   for (const [off, width] of shapes.overSlot) {
-    failIfSlotKeysIt(off, width, {
-      usedSlotOffsets,
-      objects,
-      foldedHere,
-      fail: failWithheld,
-      homes: releasableHomes,
-      failHome: failHomeWithheld,
-    });
+    failIfSlotKeysIt(off, width, { usedSlotOffsets, objects, foldedHere, fail: failWithheld });
   }
   // RULE-MAJOR, not escape-major: every escape is asked a rule before any is asked the next, so
   // the refusal a function reports does not turn on the order its escapes were found in.
@@ -1920,10 +1886,8 @@ interface ModelChoice {
    *  one fact both the offer and the relift test (`answered`) read, so the miss proof moves neither */
   readonly unboundedAt: ReadonlySet<number>;
   refused: boolean;
-  /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead;
-   *  `at`, the refused object's offset and width, where it overlaps an argument home held for that
-   *  answer (`releasableHomes`), refuses as that home's (`HeldHomeRefusal`) */
-  shapeRefused(why: string, at?: readonly [number, number]): void;
+  /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead */
+  shapeRefused(why: string): void;
   /** `why`, naming the writer that withheld the one-object answer where one did — for a refusal
    *  that answer would otherwise have taken */
   withheld(why: string): string;
@@ -1979,18 +1943,13 @@ function chooseFrameModel({
   uses,
   windows,
   returnsWithoutHiddenPointer,
-  releasableHomes = new Set(),
   fail,
-  failHome = fail,
 }: {
   oneObject: FrameRange | undefined;
   uses: FrameUses;
   windows: ReadonlyMap<number, ReadWindow>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
-  releasableHomes?: ReadonlySet<number>;
   fail: Refuse;
-  /** the refusal of an object over a held argument home (`HeldHomeRefusal`); `fail` when none is held */
-  failHome?: Refuse;
 }): ModelChoice {
   const unboundedAt = new Set(
     [...windows]
@@ -2007,10 +1966,9 @@ function chooseFrameModel({
     onOffer,
     unboundedAt,
     refused: false,
-    shapeRefused: (why, at) => {
+    shapeRefused: (why) => {
       if (!onOffer) {
-        const home = at !== undefined && [...releasableHomes].some((h) => overlaps(at[0], at[1], h, 4));
-        (home ? failHome : fail)(model.withheld(why));
+        fail(model.withheld(why));
       }
       model.refused = true;
     },
@@ -2415,21 +2373,16 @@ function failIfSlotKeysIt(
     objects,
     foldedHere,
     fail,
-    homes,
-    failHome,
   }: {
     usedSlotOffsets: ReadonlySet<number>;
     objects: ReadonlyMap<number, readonly Op[]>;
     foldedHere: ReadonlySet<Op>;
     fail: Refuse;
-    /** argument homes held for the one-object answer, whose slot refuses through `failHome` */
-    homes: ReadonlySet<number>;
-    failHome: Refuse;
   },
 ): void {
   for (const slot of usedSlotOffsets) {
     if (overlaps(off, width, slot, 4)) {
-      (homes.has(slot) ? failHome : fail)(
+      fail(
         objects.get(off)?.some((op) => foldedHere.has(op))
           ? `the capture moved by a constant to [sp,#${off}) is a move the pre-lift walk does not follow, ` +
               `so the slot model keys [sp,#${slot}] too — one byte, two models`
@@ -2983,10 +2936,7 @@ function objectShapes({
     }
     const widths = new Set(acc.map((a) => a.width));
     if (widths.size > 1) {
-      model.shapeRefused(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`, [
-        off,
-        Math.max(...widths),
-      ]);
+      model.shapeRefused(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
     }
     // …and on SIGNEDNESS, over the loads, for the same reason: one declared type extends one
     // way, so an object read by both `ldrsb` and `ldrb` has no faithful declaration —

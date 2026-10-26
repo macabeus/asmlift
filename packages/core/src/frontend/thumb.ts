@@ -3805,9 +3805,14 @@ function measureThumbFrame({
   // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
   // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
   // capture. A home is held for the one-object answer alone, so the audit may hand it back: where
-  // that answer is withheld (a struct-return temp escapes beside the home) and the per-object model
-  // refuses an object over the held home, the second lift reads it as any other slot
-  // (`releasableHomes`, `homesReleased`).
+  // that answer is withheld (a struct-return temp escapes beside the home) and the audit declines
+  // with the home held, the second lift reads it as any other slot (`releasableHomes`,
+  // `homesReleased`). KNOWN GAP, in the safe direction: the hold has one reader before the audit.
+  // The stack-argument analysis sees a held home's narrow reload as no reload, so a home BELOW an
+  // escaping temp (`str r0, [sp]` beside `add r0, sp, #4 / bl mk`, read back `mov r0, sp / ldrb r0,
+  // [r0]`) declines there as a possible outgoing argument and no audit runs to release it. agbcc's
+  // reload puts a spilled argument's home above the locals (bvhome's at 8 and 12, over temps at 0
+  // and 4), so no compiled shape is known to reach it.
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
