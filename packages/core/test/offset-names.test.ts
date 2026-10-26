@@ -606,13 +606,13 @@ describe('one spelling per cell', () => {
 
   // gcc 2.7.2 -O2 compiles `D_80100004 = 5; ((u8 *)0x80100000)[5] = 7; return D_80100004;` to
   // `sb v0, 5(at); jr ra; li v0, 5`; the literal is the negative constant the frontend builds.
-  const mips = (walk: string, word: string, byteOff: number): string => `glabel f
+  const mips = (walk: string, word: string, byteOff: number, moveByte = ''): string => `glabel f
     /* 0 80000200 3C010000 */  lui        $at, %hi(D_80100000)
     /* 4 80000204 24210000 */  addiu      $at, $at, %lo(D_80100000)
 ${walk}    /* C 8000020C 24080005 */  addiu      $t0, $zero, 5
     /* 10 80000210 AC280000 */  sw         $t0, ${word}($at)
     /* 14 80000214 3C098010 */  lui        $t1, 0x8010
-    /* 18 80000218 240A0007 */  addiu      $t2, $zero, 7
+${moveByte}    /* 18 80000218 240A0007 */  addiu      $t2, $zero, 7
     /* 1C 8000021C A12A0005 */  sb         $t2, ${byteOff}($t1)
     /* 20 80000220 8C220000 */  lw         $v0, ${word}($at)
     /* 24 80000224 03E00008 */  jr         $ra
@@ -670,6 +670,42 @@ endlabel f
     // …and a join that reaches nothing the word is spelled through lifts
     expect(lifted(joined('0x020249c0', '0x020249bc', twoLoads, 'strb\tr3, [r2]'), perAddress)).toContain(
       'sUnknown = 7;',
+    );
+  });
+
+  test('a constant built in several steps is placed as the C compiler folds it', () => {
+    // the index or displacement reaches the access as `add(add(c, c), …)`, `shl(c, #0)` or two
+    // pool words summed, not as one `const`. The emitted C folds each (`((u8 *)&sUnknown)[5]`,
+    // `*(u8 *)33704385`), and agbcc forwards the 5 past it (`strb r0, [r1]; mov r0, #0x5`)
+    const head = '\tldr\tr3, .L1\n\tmovs\tr0, #5\n\tstr\tr0, [r3]\n';
+    const tail = '\tldr\tr0, [r3]\n\tbx\tlr\n.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x020249bc\n';
+    const steps = '\tldr\tr1, .L2\n\tmovs\tr2, #2\n\tadds\tr2, #3\n\tmovs\tr0, #7\n';
+    for (const [body, name] of [
+      [`${steps}\tstrb\tr0, [r1, r2]\n`, 'an index of two adds'],
+      [`${steps}\tadds\tr1, r1, r2\n\tstrb\tr0, [r1]\n`, 'a displacement of two adds'],
+      ['\tldr\tr1, .L2\n\tmovs\tr2, #5\n\tlsls\tr2, r2, #0\n\tmovs\tr0, #7\n\tstrb\tr0, [r1, r2]\n', 'a shifted index'],
+    ]) {
+      expect(() => lifted(`f:\n${head}${body}${tail}`, perAddress), name).toThrow(
+        /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+      );
+    }
+    const rawSum =
+      `f:\n${head}\tldr\tr1, .L2\n\tldr\tr2, .L3\n\tadds\tr1, r1, r2\n\tadds\tr1, #1\n\tmovs\tr0, #7\n` +
+      '\tstrb\tr0, [r1]\n\tldr\tr0, [r3]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x01000000\n.L3:\n\t.word\t0x010249c0\n';
+    expect(() => lifted(rawSum, perAddress)).toThrow(
+      /byte 0x20249c1 is reached as 'sRandCount' and as a numeric address/,
+    );
+    // gcc 2.7.2: a literal moved up and back down still names the byte the plain pin declines on
+    const movedBack = mips(
+      '',
+      '0',
+      1,
+      '    /* 16 80000216 25290010 */  addiu      $t1, $t1, 0x10\n' +
+        '    /* 17 80000217 2529FFF0 */  addiu      $t1, $t1, -0x10\n',
+    );
+    expect(() => decompile('f', movedBack, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
     );
   });
 

@@ -14,9 +14,11 @@
 //     heuristic about what the compiler happened to do.
 //   • name comparison suffices where a cell has ONE spelling per function and a name ONE cell, and
 //     that is enforced for every access whose address a symbol map places, through defs and
-//     joins alike: raise/offsetnames.ts `cellSpelledTwice` declines a lift that reaches one byte
-//     under two names, or under a name and a numeric address, with a store among them, and one
-//     that reads a name the map places at several addresses at two of them. The pool promotion's
+//     joins alike and with constant arithmetic folded as the C compiler will fold it (an index or
+//     displacement built in several steps): raise/offsetnames.ts `cellSpelledTwice` declines a
+//     lift that reaches one byte under two names, or under a name and a numeric address, with a
+//     store among them, and one that reads a name the map places at several addresses at two of
+//     them. The pool promotion's
 //     one canonical name per address does not give it alone — an interior attribution into an
 //     object sized over its neighbour, a walk the offset-name gates leave as `base + K` past the
 //     base's end, a raw constant beside an unsized name, and any of them carried across a join
@@ -158,15 +160,20 @@ export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): 
  * {@link constAddressOf}'s question). The one reading of address arithmetic that raise/structs.ts
  * (which accesses share a base) and raise/offsetnames.ts (which named global an address stands on)
  * both ask, so the two cannot disagree about where a chain ends.
+ *
+ * `constOf` is what counts as a constant operand: a `const` def by default, which is where those
+ * two readers want a chain to end. raise/offsetnames.ts `cellSpelledTwice`, which must place an
+ * address the way the C compiler will once it folds the emitted arithmetic, passes a reader that
+ * folds constant subtrees too.
  */
 export function constDisplacementOf(
   defs: Map<Value, Op>,
   addr: Value,
-): { root: Value; k: number; chain: Value[] } | null {
-  const constOf = (x: Value): number | null => {
+  constOf: (x: Value) => number | null = (x) => {
     const d = defs.get(x);
     return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : null;
-  };
+  },
+): { root: Value; k: number; chain: Value[] } | null {
   let k = 0;
   const chain: Value[] = [];
   let cur = addr;

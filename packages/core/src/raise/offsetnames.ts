@@ -106,7 +106,7 @@
 // objects on — and declines the function when one is. A refusal above is one way to get there (a
 // walk left as `base + K` past the base's end spells its neighbour's byte through the base's
 // name), not the only one, which is why the question is asked of the accesses and not of the gates.
-import { constAddressOf, constDisplacementOf } from '../ir/alias';
+import { constDisplacementOf } from '../ir/alias';
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -487,6 +487,99 @@ interface PlacedAccess extends Spelled {
   readonly writes: boolean;
 }
 
+/** The 32-bit integer `v` denotes when every leaf under it is a constant, or null. Integer
+ *  arithmetic over constants, and a join whose every in-edge brings one value, fold, because the C
+ *  compiler folds them in the emitted C whatever this pipeline's own constant pass does: an index
+ *  built in two steps (`movs r2, #2; adds r2, #3`), or `lsls r2, #0`, is `[5]` to agbcc. Reading
+ *  only `const` defs left such an address unplaced, so the pair it formed was never asked.
+ *  Memoised per call of {@link cellSpelledTwice}; a value met again on its own walk (a loop-carried
+ *  join) does not fold. */
+function constantFolder(defOf: Map<Value, Op>, incoming: Map<Value, Value[]>): (v: Value) => number | null {
+  const memo = new Map<Value, number | null>();
+  const onWalk = new Set<Value>();
+  const fold = (v: Value): number | null => {
+    const known = memo.get(v);
+    if (known !== undefined || memo.has(v)) {
+      return known ?? null;
+    }
+    if (onWalk.has(v)) {
+      return null;
+    }
+    onWalk.add(v);
+    const out = foldOnce(v);
+    onWalk.delete(v);
+    memo.set(v, out);
+    return out;
+  };
+  const foldOnce = (v: Value): number | null => {
+    const d = defOf.get(v);
+    if (d === undefined) {
+      const ins = [...new Set(incoming.get(v) ?? [])].filter((a) => a !== v);
+      const each = ins.map(fold);
+      return each.length > 0 && each.every((x) => x !== null && x === each[0]) ? each[0] : null;
+    }
+    if (d.opcode === 'const') {
+      return typeof d.attrs.value === 'number' ? d.attrs.value >> 0 : null;
+    }
+    const a = d.operands.length > 0 ? fold(d.operands[0]) : null;
+    if (a === null) {
+      return null;
+    }
+    if (d.operands.length === 1) {
+      const imm = d.attrs.imm;
+      const w = d.attrs.width;
+      switch (d.opcode) {
+        case 'not':
+          return ~a;
+        case 'neg':
+          return -a >> 0;
+        case 'zext':
+          return typeof w === 'number' && w < 32 ? (a & ((1 << w) - 1)) >>> 0 : a;
+        case 'sext':
+          return typeof w === 'number' && w < 32 ? (a << (32 - w)) >> (32 - w) : a;
+      }
+      if (typeof imm !== 'number') {
+        return null;
+      }
+      return shift(d.opcode, a, imm);
+    }
+    const b = d.operands.length === 2 ? fold(d.operands[1]) : null;
+    if (b === null) {
+      return null;
+    }
+    switch (d.opcode) {
+      case 'add':
+        return (a + b) >> 0;
+      case 'sub':
+        return (a - b) >> 0;
+      case 'mul':
+        return Math.imul(a, b);
+      case 'and':
+        return a & b;
+      case 'or':
+        return a | b;
+      case 'xor':
+        return a ^ b;
+    }
+    return shift(d.opcode, a, b);
+  };
+  const shift = (opcode: string, a: number, n: number): number | null => {
+    if (n < 0 || n > 31) {
+      return null;
+    }
+    switch (opcode) {
+      case 'shl':
+        return a << n;
+      case 'shr_u':
+        return (a >>> n) >> 0;
+      case 'shr_s':
+        return a >> n;
+    }
+    return null;
+  };
+  return fold;
+}
+
 /** The spellings an address stands for, through defs and joins: a literal (or a literal plus
  *  constants) is a numeric address, a `gaddr` plus constants its name — at the one map address
  *  the name was read at (`mapAddr`), or at every address the map places it at — and a block
@@ -494,12 +587,14 @@ interface PlacedAccess extends Spelled {
  *  pool loads of one word, a load and its `adds #0` copy) is placed as the merge spells it. An
  *  in-edge that passes the parameter back unchanged adds nothing; one that passes it MOVED (a
  *  pointer stepped round a loop) reaches bytes no constant names. Null where any reaching value
- *  is not placed: a parameter, a frame slot, a runtime index, a name the map does not hold. */
+ *  is not placed: a parameter, a frame slot, a runtime index, a name the map does not hold. Every
+ *  constant here is read through `fold` ({@link constantFolder}), as the C compiler will read it. */
 function spellingsOf(
   v: Value,
   defOf: Map<Value, Op>,
   incoming: Map<Value, Value[]>,
   places: Map<string, Places>,
+  fold: (v: Value) => number | null,
 ): Spelled[] | null {
   // A parameter's answer is memoised per displacement once it is known not to lean on a parameter
   // still being walked (`open`), so a chain of joins is walked once, not once per path through it.
@@ -507,17 +602,15 @@ function spellingsOf(
   const onWalk = new Map<Value, number>();
   let open = false;
   const walk = (x: Value, k: number): Spelled[] | null => {
-    const literal = constAddressOf(defOf, x, k);
+    // a literal however it was built, a join of one literal included
+    const literal = fold(x);
     if (literal !== null) {
-      return [{ spelling: null, objects: [literal >>> 0], k: 0, fromMap: false }];
+      return [{ spelling: null, objects: [(literal + k) >>> 0], k: 0, fromMap: false }];
     }
-    const disp = constDisplacementOf(defOf, x);
+    const disp = constDisplacementOf(defOf, x, fold);
     const root = disp?.root ?? x;
     const kk = k + (disp?.k ?? 0);
     const d = defOf.get(root);
-    if (d?.opcode === 'const' && typeof d.attrs.value === 'number') {
-      return [{ spelling: null, objects: [(d.attrs.value + kk) >>> 0], k: 0, fromMap: false }];
-    }
     if (d?.opcode === 'gaddr') {
       const sym = d.attrs.sym as string;
       const at = places.get(sym);
@@ -570,6 +663,7 @@ function placeAccess(
   defOf: Map<Value, Op>,
   incoming: Map<Value, Value[]>,
   places: Map<string, Places>,
+  fold: (v: Value) => number | null,
 ): PlacedAccess[] {
   let off: number;
   let width: number;
@@ -577,19 +671,19 @@ function placeAccess(
     off = op.attrs.off as number;
     width = op.attrs.width as number;
   } else if (op.opcode === 'aload' || op.opcode === 'astore') {
-    const index = defOf.get(op.operands[1]);
-    if (index?.opcode !== 'const' || typeof index.attrs.value !== 'number') {
+    const index = fold(op.operands[1]);
+    if (index === null) {
       return [];
     }
     width = op.attrs.elemSize as number;
-    off = index.attrs.value * width;
+    off = index * width;
   } else {
     return [];
   }
   const writes = op.opcode === 'store' || op.opcode === 'astore';
   // A literal is compared as the UNSIGNED address the map keys by: MIPS and PPC materialize
   // `0x80100000` as a negative 32-bit constant (`spellingsOf` takes `>>> 0`).
-  return (spellingsOf(op.operands[0], defOf, incoming, places) ?? []).map((sp) => ({
+  return (spellingsOf(op.operands[0], defOf, incoming, places, fold) ?? []).map((sp) => ({
     ...sp,
     op,
     writes,
@@ -644,10 +738,11 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
   const defOf = defOpMap(fn);
   const incoming = joinIncoming(fn);
   const places = placesByName(symbols);
+  const fold = constantFolder(defOf, incoming);
   const placed: PlacedAccess[] = [];
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      placed.push(...placeAccess(op, defOf, incoming, places));
+      placed.push(...placeAccess(op, defOf, incoming, places, fold));
     }
   }
   const spell = (s: string | null): string => (s === null ? 'a numeric address' : `'${s}'`);
