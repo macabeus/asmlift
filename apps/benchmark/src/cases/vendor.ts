@@ -29,16 +29,14 @@
 // where it says it is — its module ELF defines that symbol at that section and offset — so a wrong
 // location is refused by name rather than as a byte difference.
 import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
-import { calleeBodiesFromElf, elfBodyCandidates } from '@asmlift/cli/elf-bodies';
+import { elfBodyCandidates } from '@asmlift/cli/elf-bodies';
 import { moduleFunctionLocations } from '@asmlift/cli/module-elf';
-import { disasmRange, objdumpBinaryFor, readsObjdumpText } from '@asmlift/cli/objfile';
 import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
-import type { TargetDescription } from '@asmlift/core/target';
-import { execSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -48,6 +46,7 @@ import { buildRealTarget, m2cContext, makeTU, realCompilerFor } from '../compile
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { type VendoredCalleeBodies, writeVendoredCalleeBodies } from './callee-bodies';
+import { calleeBodiesTarget, projectObjdump, readCalleeBodies } from './callee-bodies-elf';
 import { enforceCheckoutPin, git } from './checkout';
 import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
 import {
@@ -149,15 +148,6 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   }
 }
 
-/** The objdump a dtk project's own build fetches (`build/binutils`, configure.py), which a GameCube
- *  project's listing bodies are read with where the vendor names none: no PowerPC objdump is on a
- *  usual PATH, and the CLI's environment variable cannot be pointed at it without also reaching the
- *  docker-run compiler wrapper, which reads the same variable inside its container. */
-function projectObjdump(root: string, target: TargetDescription): string | undefined {
-  const dtk = join(root, 'build', 'binutils', 'powerpc-eabi-objdump');
-  return target.compiler === 'mwcc' && existsSync(dtk) ? dtk : undefined;
-}
-
 /** Freeze the bodies of the project's rows' callees out of its linked ELF (cases/callee-bodies.ts):
  *  every direct callee of every row outside a REL module that its target does not define, read off
  *  the ELF as the CLI reads one (`calleeBodiesFromElf`). Each row's target is built from the
@@ -179,8 +169,8 @@ async function vendorCalleeBodies(man: RealManifest, root: string, outDir: strin
     );
     return;
   }
+  const target = calleeBodiesTarget(project);
   const asked = new Set<string>();
-  const families = new Map<string, TargetDescription>();
   for (const c of realCases({ project }).filter((x) => moduleOf(x.addr) === undefined)) {
     if (!c.toolchain.available()) {
       throw new Error(`${c.id}: its toolchain is not installed here, so its callees cannot be read — nothing written`);
@@ -195,33 +185,12 @@ async function vendorCalleeBodies(man: RealManifest, root: string, outDir: strin
     for (const callee of elfBodyCandidates(scrubObjectHeader(built.asm), c.sym, relocs)) {
       asked.add(callee);
     }
-    const t = c.codegen.target;
-    families.set(JSON.stringify([t.compiler === 'mwcc', readsObjdumpText(t)]), t);
   }
-  if (families.size > 1) {
-    throw new Error(`${project}: its rows read callee bodies as ${families.size} different targets — nothing written`);
-  }
-  const target = [...families.values()][0];
   const callees = [...asked].sort();
-  let vendored: VendoredCalleeBodies = { objdump: null, bodies: {}, unread: callees };
-  if (target !== undefined) {
-    const bin = readsObjdumpText(target) ? (objdump ?? projectObjdump(root, target)) : undefined;
-    const elfPath = res.elf;
-    const read = calleeBodiesFromElf(elfPath, readFileSync(elfPath), callees, target, (elf, t, section, start, stop) =>
-      disasmRange(elf, t, section, start, stop, bin).split(elfPath).join(res.elfRel),
-    );
-    if (read.warnings.length > 0) {
-      throw new Error(`${project}: refused, nothing written:\n  ${read.warnings.map((w) => w.trim()).join('\n  ')}`);
-    }
-    const version = readsObjdumpText(target)
-      ? spawnSync(objdumpBinaryFor(target, bin), ['--version'], { encoding: 'utf8' }).stdout.split('\n')[0]
-      : null;
-    vendored = {
-      objdump: version,
-      bodies: read.bodies,
-      unread: callees.filter((c) => !Object.hasOwn(read.bodies, c)),
-    };
-  }
+  const vendored: VendoredCalleeBodies =
+    target === undefined
+      ? { objdump: null, bodies: {}, unread: callees }
+      : readCalleeBodies(project, res, callees, target, objdump ?? projectObjdump(root, target));
   const leak = JSON.stringify(vendored);
   if (MACHINE_PATH.test(leak) || leak.includes(root)) {
     throw new Error(`${project}: a machine path leaked into the vendored callee bodies — nothing written`);

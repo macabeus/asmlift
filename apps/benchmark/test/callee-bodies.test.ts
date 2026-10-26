@@ -1,18 +1,21 @@
 // The bodies of a real row's callees that `bench vendor` freezes out of the project's linked ELF
-// (cases/callee-bodies.ts): one byte-stable file per project, a refusal where a project vendors an
-// ELF's symbol map and no bodies, and the CLI's own selection rule over what is frozen.
+// (cases/callee-bodies.ts): one canonical file per project, left alone while its content holds, a
+// refusal where a project vendors an ELF's symbol map and no bodies, and the CLI's own selection
+// rule over what is frozen.
 import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { agbccAvailable } from '@asmlift/toolchains';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
 import {
   CALLEE_BODIES_FILE,
   type VendoredCalleeBodies,
   calleeBodiesBytes,
+  calleeBodiesJson,
   readVendoredCalleeBodies,
   selectCalleeBodies,
   writeVendoredCalleeBodies,
@@ -57,6 +60,20 @@ describe('the frozen callee bodies of a project', () => {
     const first = readFileSync(join(dir, CALLEE_BODIES_FILE));
     writeVendoredCalleeBodies(dir, frozen);
     expect(readFileSync(join(dir, CALLEE_BODIES_FILE)).equals(first)).toBe(true);
+  });
+
+  test('a file already holding the bodies is left alone, whatever zlib wrote it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'callee-bodies-'));
+    // the same content through another deflate (level 1, not the writer's 9): other bytes
+    const other = gzipSync(Buffer.from(calleeBodiesJson(frozen)), { level: 1 });
+    expect(other.equals(calleeBodiesBytes(frozen))).toBe(false);
+    writeFileSync(join(dir, CALLEE_BODIES_FILE), other);
+    writeVendoredCalleeBodies(dir, frozen);
+    expect(readFileSync(join(dir, CALLEE_BODIES_FILE)).equals(other)).toBe(true);
+    writeVendoredCalleeBodies(dir, { ...frozen, unread: ['memcpy'] });
+    expect(
+      readFileSync(join(dir, CALLEE_BODIES_FILE)).equals(calleeBodiesBytes({ ...frozen, unread: ['memcpy'] })),
+    ).toBe(true);
   });
 
   test('a project with no linked ELF keeps no file, and a stale one is removed', () => {

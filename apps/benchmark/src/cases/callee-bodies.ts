@@ -18,12 +18,17 @@
 // divergence this file exists to remove.
 //
 // ONE FILE PER PROJECT (`callee-bodies.json.gz` beside `symbols.json.gz`), a callee's body being the
-// ELF's and not the row's. Canonical JSON (keys sorted at every depth, `unread` sorted), gzipped at
-// level 9 with the header's OS byte fixed, so the same bodies are the same bytes on every machine.
-// A listing body is objdump text, and objdump's version decides it: `objdump` records the
-// `--version` line of the one that read the listings (null where none did: an agbcc project's
-// bodies are ARM words out of the image), and the ELF's path in the listing's header line is
-// written as decomp.yaml names it, never as this machine's.
+// ELF's and not the row's. WHAT IS STABLE ACROSS MACHINES IS THE CONTENT, not the gzip bytes: the
+// JSON is canonical (keys sorted at every depth, `unread` sorted), so the same bodies are the same
+// text everywhere; the deflate stream is whatever the zlib build writes (Node's and a system zlib
+// 1.3 differ at the same level), as for symbols.json.gz. So the writer leaves a file whose content
+// is unchanged alone (`writeVendoredCalleeBodies`), and the drift check compares content
+// (run/symbol-drift.ts `checkCalleeBodiesDrift`): a re-vendor on another host rewrites only what
+// changed. A listing body is objdump text, and objdump's release decides it: `objdump` records the
+// `--version` line of the one that read the listings without its package label
+// (callee-bodies-elf.ts `objdumpVersion`: the distribution's, not the release's), null where none
+// did (an agbcc project's bodies are ARM words out of the image), and the ELF's path in the
+// listing's header line is written as decomp.yaml names it, never as this machine's.
 //
 // A REL module's row is handed none, as the CLI hands it none (`elfBodyCallees`).
 import { elfBodyCallees } from '@asmlift/cli/elf-bodies';
@@ -65,18 +70,27 @@ function canonical(v: unknown): unknown {
 /** The file's bytes for `v`: canonical JSON, gzipped with the header's OS byte (RFC 1952 §2.3, byte
  *  9) fixed at 3 (Unix), which zlib otherwise sets to the platform it was built for. */
 export function calleeBodiesBytes(v: VendoredCalleeBodies): Buffer {
-  const json = `${JSON.stringify(canonical({ ...v, unread: [...v.unread].sort() }))}\n`;
-  const gz = gzipSync(Buffer.from(json), { level: 9 });
+  const gz = gzipSync(Buffer.from(calleeBodiesJson(v)), { level: 9 });
   gz[9] = 3;
   return gz;
 }
 
+/** The canonical JSON text of `v`: the file's content, which is what holds across machines (see
+ *  the header). */
+export function calleeBodiesJson(v: VendoredCalleeBodies): string {
+  return `${JSON.stringify(canonical({ objdump: v.objdump, bodies: v.bodies, unread: [...v.unread].sort() }))}\n`;
+}
+
 /** Write the project's frozen bodies into its vendored dir, or remove the file where the project
- *  has none to freeze (`undefined`: no linked ELF), so no file outlives what wrote it. */
+ *  has none to freeze (`undefined`: no linked ELF), so no file outlives what wrote it. A file that
+ *  already holds `v` is left as it is, whatever zlib wrote it (see the header). */
 export function writeVendoredCalleeBodies(dir: string, v: VendoredCalleeBodies | undefined): void {
   const path = join(dir, CALLEE_BODIES_FILE);
   if (v === undefined) {
     rmSync(path, { force: true });
+    return;
+  }
+  if (existsSync(path) && gunzipSync(readFileSync(path)).toString('utf8') === calleeBodiesJson(v)) {
     return;
   }
   writeFileSync(path, calleeBodiesBytes(v));
