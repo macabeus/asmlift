@@ -624,12 +624,18 @@ endlabel f
     [0x80100004, [{ name: 'D_80100004', kind: 'data', size: 4, shape: 'scalar', signed: true }]],
   ]);
 
-  test('on MIPS, a walk the map names beside a numeric address for one byte declines', () => {
+  test('on MIPS, a walk the map names beside a numeric address declines where the compiler forwards', () => {
     // `addiu $at, $at, 4` off `D_80100000` is named `D_80100004` by this pass — asmlift's spelling
     const walked = mips('    /* 8 80000208 24210004 */  addiu      $at, $at, 4\n', '0', 5);
     expect(() => decompile('f', walked, MIPS_GCC, { symbols: twoWords })).toThrow(
       /byte 0x80100005 is reached as 'D_80100004' and as a numeric address/,
     );
+    // …and lifts where it reloads: IDO 7.1 -O2 compiles the same C to `sw t6, 0(v1); sb t7,
+    // 5(t8); jr ra; lw v0, 0(v1)`, whoever chose the name
+    const ido = decompile('f', walked, MIPS_IDO, { symbols: twoWords }).source;
+    expect(ido).toContain('D_80100004 = 5;');
+    expect(ido).toContain('[5] = 7;');
+    expect(ido).toContain('return D_80100004;');
   });
 
   test('a byte the ASM spells two ways lifts where the compiler reloads, and declines where it forwards', () => {

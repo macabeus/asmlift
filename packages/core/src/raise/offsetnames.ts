@@ -474,7 +474,8 @@ interface Spelled {
   readonly spelling: string | null;
   readonly objects: readonly number[];
   readonly k: number;
-  /** the name is asmlift's reading of the map (`gaddr`'s `fromMap`), not the asm's own spelling */
+  /** the name is asmlift's reading of the map (`gaddr`'s `fromMap`), not the asm's own spelling —
+   *  read by ONE CELL PER SPELLING only; whether two spellings forward is the compiler's fact */
   readonly fromMap: boolean;
 }
 
@@ -715,12 +716,12 @@ export type OffsetNameBehaviors = StampBehaviors & {
  *  (two LOADS leave no value to forward) and the compiler forwards across two spellings.
  *
  *  Which compilers forward is a compiler fact, not a property of who chose the spelling. agbcc and
- *  gcc 2.7.2 forward; IDO 7.1 reloads (`reloadsAcrossSpellings`). On a reloading compiler a pair
- *  the ASM ITSELF spells two ways — two relocations, or a relocation and a literal — is the
- *  source's own two objects, compiled the way they were, so it lifts; only a spelling asmlift
- *  CHOSE off the map (a promoted pool word, an interior attribution, a named walk: `gaddr`'s
- *  `fromMap`) declines there. On a forwarding compiler an asm that went back to memory proves the
- *  source was NOT those two spellings, whoever chose them, so every such pair declines.
+ *  gcc 2.7.2 forward, so an asm that went back to memory proves the source was NOT those two
+ *  spellings, and every such pair declines. IDO 7.1 reloads (`reloadsAcrossSpellings`) across a
+ *  name and a literal, two externs, two statics and an array element alike, so the C reads the
+ *  cell back as the asm does and the pair lifts — whether the asm spelled both (two relocations, a
+ *  relocation and a literal) or asmlift chose one off the map (a promoted pool word, an interior
+ *  attribution, a named walk: `gaddr`'s `fromMap`).
  *
  *  ONE CELL PER SPELLING. A name the map places at several addresses (one file static per unit)
  *  read off the map at two different ones is two objects the C would spell as one, which the
@@ -762,7 +763,7 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
       if (x.spelling === y.spelling || !(x.writes || y.writes)) {
         continue;
       }
-      if (reloadsAcrossSpellings && !(x.fromMap || y.fromMap)) {
+      if (reloadsAcrossSpellings) {
         continue;
       }
       for (const [xl, xh] of x.ranges) {

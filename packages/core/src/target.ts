@@ -1175,10 +1175,12 @@ export interface TargetDescription {
     // storing 5 to a word, 7 to one of its bytes, and reading the word back: IDO 7.1 reloads
     // (`D_80100000 = 5; ((u8 *)0x80100000)[1] = 7; return D_80100000;` is `sb; jr ra; lw v0`);
     // agbcc (`sRandCount = 5; ((u8 *)&sUnknown)[4] = 7; return sRandCount;` is `strb; mov r0,
-    // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. So where it holds, a
-    // pair of spellings the asm itself carries (relocations, literals) is faithful lifted as-is;
-    // where it does not, an asm that went back to memory proves the source did not spell the byte
-    // two ways, and raise/offsetnames.ts `cellSpelledTwice` declines the pair.
+    // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. IDO also reloads across
+    // two externs, two statics, an array element beside a scalar, and a word-wide literal beside
+    // a name. So where it holds, a pair of spellings is faithful lifted as-is, whether the asm
+    // carries both or the map chose one; where it does not, an asm that went back to memory
+    // proves the source did not spell the byte two ways, and raise/offsetnames.ts
+    // `cellSpelledTwice` declines the pair.
     //
     // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
     reloadsAcrossSpellings?: boolean;
