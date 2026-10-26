@@ -76,7 +76,8 @@
 //   pnpm bench vendor [--project p] [--symbols-only | --callee-bodies-only] [--objdump bin]
 //                                        # freeze the real tier's preprocessed TUs (needs
 //                                        # checkouts); --symbols-only rewrites just the ELF-derived
-//                                        # symbol maps, --callee-bodies-only just the callee bodies
+//                                        # symbol maps and the provider version they were derived
+//                                        # with, --callee-bodies-only just the callee bodies
 //                                        # read off the ELF (--objdump: the binary that reads them)
 //   pnpm bench flags [--project p] [--only s] [--write] [--toolchain id]
 //                                        # every real unit's flags derived from its project's build

@@ -137,6 +137,13 @@ the file names off the checkout's ELF and refuses a file whose content differs
 (`run/symbol-drift.ts` `checkCalleeBodiesDrift`), and `test/callee-bodies.test.ts` does the same
 wherever the checkout's ELF is built.
 
+The map is derived by `@gba-kit/debug-info`, the CLI's symbol provider, as much as it is derived
+from the ELF. A bump of that package changes no path the provenance check measures, so a stale map
+would otherwise surface only in `bench fidelity`, which needs the checkouts. `bench vendor` stamps
+the version that derived a project's maps into `tu/<p>/symbols.provider.json`, and
+`test/real-manifests.test.ts` fails, offline, until that stamp equals the installed version. After
+a bump, run `pnpm bench vendor --symbols-only` and regenerate the benchmark.
+
 A GameCube project's listing bodies are read with its dtk build's own `build/binutils` objdump
 unless `--objdump` names one, since no PowerPC objdump is on a usual PATH. `bench target` writes
 that same binary into the repro's `decomp.yaml` as `tools.asmlift.objdump`, so the script's CLI

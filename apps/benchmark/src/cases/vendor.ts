@@ -12,8 +12,9 @@
 //                      (compile/real.ts `m2cContext`), which is the same file unless CodeWarrior
 //                      preprocessed it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version), and
-// out of the project's linked ELF, symbols.json.gz (the symbol map) and callee-bodies.json.gz (the
-// bodies of the rows' callees the TUs do not hold: cases/callee-bodies.ts).
+// out of the project's linked ELF, symbols.json.gz (the symbol map, with symbols.provider.json naming
+// the provider version that derived it) and callee-bodies.json.gz (the bodies of the rows' callees
+// the TUs do not hold: cases/callee-bodies.ts).
 //
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU the
 // manifest assembles must declare every function it calls — enforced here, and by
@@ -54,7 +55,10 @@ import {
   REAL_DIR,
   type RealFunction,
   type RealManifest,
+  SYMBOLS_PROVIDER,
+  SYMBOLS_PROVIDER_FILE,
   type VendoredEntry,
+  installedSymbolsProviderVersion,
   loadManifestsForVendor,
   resolveProjectRoot,
   rewriteManifest,
@@ -121,6 +125,12 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   const map = await loadSymbolMap(res.elf);
   write(vendoredMapFile(outDir, undefined), map);
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);
+  // One stamp for all of the project's maps, written once every one of them is.
+  const stamp = (): void =>
+    writeFileSync(
+      join(outDir, SYMBOLS_PROVIDER_FILE),
+      JSON.stringify({ [SYMBOLS_PROVIDER]: installedSymbolsProviderVersion() }, null, 2) + '\n',
+    );
 
   // ONE MAP PER REL MODULE THAT HAS ROWS. A module's code refers to the module's own symbols, so a
   // REL row is read with the module's map — its symbols, placed, over the base ELF's globals
@@ -134,6 +144,7 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   rmSync(moduleDir, { recursive: true, force: true });
   const modules = [...new Set(man.functions.map((f) => moduleOf(f.addr)))].filter((m) => m !== undefined).sort();
   if (modules.length === 0) {
+    stamp();
     return;
   }
   mkdirSync(moduleDir, { recursive: true });
@@ -146,6 +157,7 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
     write(vendoredMapFile(outDir, module), moduleMap);
     console.log(`${project}: vendored ${module}'s symbol map (${moduleMap.size} addresses, over ${res.elfRel})`);
   }
+  stamp();
 }
 
 /** Freeze the bodies of the project's rows' callees out of its linked ELF (cases/callee-bodies.ts):
@@ -279,7 +291,7 @@ export function writeVendoredBlobs(
   return { index, contexts: ctxSeen.size };
 }
 
-/** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
+/** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map (and its provider stamp), leaving the preprocessed TUs,
  *  index.json and PROVENANCE.json byte-for-byte as committed. The two halves of the vendored
  *  dataset have DIFFERENT sources — the TUs come from cpp over the checkout's headers, the map
  *  from the checkout's ELF through this repo's own provider — so a change to the PROVIDER

@@ -11,7 +11,10 @@ import { describe, expect, test } from 'vitest';
 import {
   REAL_DIR,
   type RealManifest,
+  SYMBOLS_PROVIDER,
+  SYMBOLS_PROVIDER_FILE,
   type VendoredEntry,
+  installedSymbolsProviderVersion,
   resolveProjectRoot,
   validateManifest,
   vendoredMapFile,
@@ -235,6 +238,26 @@ describe('committed real-tier manifests', () => {
         [...named].filter((b) => !onDisk.has(b)),
         `${man.project}: blobs the index names`,
       ).toEqual([]);
+    });
+
+    // A map is derived by the CLI's provider as much as from the ELF, and a provider bump touches no
+    // measured path, so neither provenance nor `bench baseline` sees the maps go stale. This does,
+    // without a checkout: the version that wrote the maps must be the one installed.
+    test(`${f} vendored its symbol maps with the installed ${SYMBOLS_PROVIDER}`, () => {
+      const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
+      const dir = join(REAL_DIR, 'tu', man.project);
+      if (!existsSync(vendoredMapFile(dir, undefined))) {
+        return; // the project vendors no map
+      }
+      const stampPath = join(dir, SYMBOLS_PROVIDER_FILE);
+      const stamped = existsSync(stampPath)
+        ? (JSON.parse(readFileSync(stampPath, 'utf8')) as Record<string, string>)[SYMBOLS_PROVIDER]
+        : undefined;
+      expect(
+        stamped,
+        `${man.project}: maps vendored with ${SYMBOLS_PROVIDER} ${stamped ?? '(unstamped)'} — ` +
+          `run \`pnpm bench vendor --project ${man.project} --symbols-only\``,
+      ).toBe(installedSymbolsProviderVersion());
     });
 
     // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that

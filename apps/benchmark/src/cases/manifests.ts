@@ -17,11 +17,12 @@ import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import type { TuModel } from '../compile/types';
-import { WORKSPACE } from '../config';
+import { REPO_ROOT, WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 import { type VendoredCalleeBodies, readVendoredCalleeBodies } from './callee-bodies';
 
@@ -202,6 +203,31 @@ export const MODULE_MAP_DIR = 'symbols';
 /** The vendored map blob a row of `module` is read from, inside the project's vendored dir. */
 export const vendoredMapFile = (dir: string, module: string | undefined): string =>
   module === undefined ? join(dir, 'symbols.json.gz') : join(dir, MODULE_MAP_DIR, `${module}.json.gz`);
+
+/** The package that derives every vendored symbol map from a project's ELF (the CLI's
+ *  `symbols-provider`), and the file `bench vendor` stamps its version into, beside the maps.
+ *
+ *  WHY A STAMP. A map is a function of the ELF AND of this package, and a bump of the package alone
+ *  touches no measured path: provenance and `bench baseline` both read the artifact as CURRENT
+ *  while every map is stale. The only other gate is `bench fidelity`'s drift pre-step, which needs
+ *  the checkouts, so CI never runs it. `test/real-manifests.test.ts` holds each project's stamp
+ *  equal to the installed version, so a bump fails the offline tests until the maps are
+ *  re-vendored (`pnpm bench vendor --symbols-only`). */
+export const SYMBOLS_PROVIDER = '@gba-kit/debug-info';
+export const SYMBOLS_PROVIDER_FILE = 'symbols.provider.json';
+
+/** The version of {@link SYMBOLS_PROVIDER} the CLI resolves: found the way Node resolves it from
+ *  packages/cli, since the package's `exports` map does not expose its package.json. */
+export function installedSymbolsProviderVersion(): string {
+  const require = createRequire(join(REPO_ROOT, 'packages', 'cli', 'package.json'));
+  for (const dir of require.resolve.paths(SYMBOLS_PROVIDER) ?? []) {
+    const pkg = join(dir, SYMBOLS_PROVIDER, 'package.json');
+    if (existsSync(pkg)) {
+      return (JSON.parse(readFileSync(pkg, 'utf8')) as { version: string }).version;
+    }
+  }
+  throw new Error(`${SYMBOLS_PROVIDER} is not installed for packages/cli — run \`pnpm install\``);
+}
 
 /** The vendored symbol map (name/shape metadata derived from the project's ELFs at vendor time) a
  *  row of `module` is read with, out of the project's vendored dir `dir`.
