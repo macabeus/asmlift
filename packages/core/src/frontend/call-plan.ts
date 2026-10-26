@@ -944,24 +944,42 @@ export function callDeclarations(
       unstated ? (bodyMemo ??= { words: calleeBodyBound?.(callee!) }).words : undefined;
     // whether an op lowered so far reads `v`: the call being lowered is not one yet
     const reads = (o: Op, v: Value): boolean => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v));
+    const readSoFar = (v: Value): boolean => ssa.irBlocks.some((b) => b.ops.some((o) => reads(o, v)));
+    // the function's own incoming value of argument register `r`
+    const incoming = (v: Value, r: string): boolean => ssa.paramReg.get(v) === r && ssa.irBlocks[0].params.includes(v);
     // WHETHER WHAT ARGUMENT REGISTER `r` HOLDS WAS LEFT THERE BY A WRITE MADE FOR SOMETHING ELSE: a
-    // question about the register's last WRITE, not about its value. Where the call's own block wrote
-    // it, only a read since that write counts — `mov r0, #5; strh r0, [r1]; bl rnd` left the store's
-    // 5 in r0, while `add r1, r5, #0; bl un` is a copy made for this call, whose value an earlier call
-    // read (`g4(a, b, c, d); un(a, b, c, d)` forwards the same arguments twice, and agbcc and mwcc
-    // copy them back from callee-saved homes). A copy names no new value, so the value-level question
-    // cannot tell those two apart. Where another block wrote it, each path is asked the same of the
-    // write it brings (`SsaBuilder.readSinceWriteOnSomePath`), a copy's read included: agbcc's case
-    // CSE moves a switch's cases' `i << 3` from r0 to r4 at the join (`add r4, r0, #0`), and the r0
-    // `bl rnd` finds there was read by that copy, which lowers to no op. A copy made for the call in a
-    // predecessor was read by nothing since, so it stays an argument.
+    // question about the register's last WRITE, not about its value. `mov r0, #5; strh r0, [r1];
+    // bl rnd` left the store's 5 in r0. A copy made for the call is none, whatever read its value
+    // before: `add r1, r5, #0; bl un` was read by nothing since (`g4(a, b, c, d); un(a, b, c, d)`
+    // forwards the same arguments twice, and agbcc and mwcc copy them back from callee-saved homes).
+    // A copy names no new value, so no value-level question tells that apart from a leftover.
+    //
+    // WHAT READ COUNTS DEPENDS ON WHERE THE WRITE WAS, because a read that lowers to nothing — a copy
+    // into a callee-saved register, a store to a frame home — is how a value is SAVED across the
+    // call, and a saved value may be handed to the call as well:
+    //   - the call's own block wrote it, or nothing in this function did (the incoming value): only a
+    //     lowered op's read since. IDO computes a value it hands to a call and keeps after it in the
+    //     argument register and saves it in the delay slot (`t = i << 3; rnd(t); return g(t);` is
+    //     `sll a0, a0, 3; jal rnd; sw a0, 24(sp)`, where `rnd(); return g(i << 3);` computes after
+    //     the call). An incoming value used after the call is saved whatever the call is handed:
+    //     `un(a); return g2(a);` and `un(); return g2(a);` compile to the same caller bytes on
+    //     agbcc, IDO, gcc 2.7.2, KMC and mwcc (agbcc `add r4, r0, #0; bl un`). An op that reads
+    //     either (`i << 3` from the incoming i) used it for something else.
+    //   - another block wrote it: any read since on some path into the call, the save's included
+    //     (`SsaBuilder.readSinceWriteOnSomePath`). agbcc's case CSE computes a switch's cases'
+    //     `i << 3` in r0 and moves it to r4 at the join (`add r4, r0, #0; bl rnd`), where a value
+    //     handed to the call is copied back for it in the call's block (`t = b ? i << 3 : i + 5;
+    //     rnd(t); return g(t);` is `lsl r4, r0, #3` in a case and `add r0, r4, #0; bl rnd` at the
+    //     join, measured): a write the call's block makes, read by nothing since. IDO's join is the
+    //     same bytes whether the call is handed it or not (`sll a0, a0, 3` in a case, `sw a0` in the
+    //     delay slot), so either answer is the bytes there.
     const leftover = (r: string): boolean => {
       const at = ssa.lastWriteOp(r, bi);
-      if (at === undefined) {
-        return ssa.readSinceWriteOnSomePath(r, bi, (v) => mayPass(v, r));
+      if (at !== undefined) {
+        const since = ssa.irBlocks[bi].ops.slice(at);
+        return ssa.holdsValue(r, bi, (v) => mayPass(v, r) && since.some((o) => reads(o, v)));
       }
-      const since = ssa.irBlocks[bi].ops.slice(at);
-      return ssa.holdsValue(r, bi, (v) => mayPass(v, r) && since.some((o) => reads(o, v)));
+      return ssa.readSinceWriteOnSomePath(r, bi, (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)));
     };
     const unreadByBody = (r: string): boolean => {
       const words = bodyWords();

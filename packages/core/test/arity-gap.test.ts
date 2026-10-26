@@ -491,6 +491,20 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
       expect(decompile('f', asm, ARMV4T_AGBCC, { prototypes: g2 }).source).toMatch(/rd0\(\w+, \w+\)/);
     }
   });
+  // `int f(int a) { rd0(a); return g2(a); }`: agbcc saves the incoming a to r4 for g2 (`add r4, r0,
+  // #0`), the same caller bytes as `rd0(); return g2(a);`. The save copy says nothing of the call,
+  // so the incoming value stays an argument past the bound; an op reading it first (`a << 3`, kept
+  // for g2) used it for something else
+  test('an incoming value only a save copy read stays an argument past the bound', () => {
+    const save = (between: string) =>
+      `\t.thumb_func\nf:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n${between}\tbl\trd0\n\tadd\tr0, r4, #0\n` +
+      '\tbl\tg2\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const g2: Prototypes = { g2: { params: 1, returns: 's32' }, f: { params: 1, returns: 's32' } };
+    expect(decompile('f', `${rd0}${save('')}`, ARMV4T_AGBCC, { prototypes: g2 }).source).toContain('rd0(a0);');
+    expect(decompile('f', `${rd0}${save('\tlsl\tr4, r4, #0x3\n')}`, ARMV4T_AGBCC, { prototypes: g2 }).source).toContain(
+      'rd0();',
+    );
+  });
   // `gp = 3; gq = rd1(a);` leaves the store's 3 in r1 above r0's a, which rd1 reads: dropping r0
   // would drop the a, so the gap refuses as it does with no body
   test('a gap below the bound refuses whatever lies above it', () => {
