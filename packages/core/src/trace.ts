@@ -13,7 +13,14 @@ import { print } from './ir/print';
 import { verify } from './ir/verify';
 import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type OnGap, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked, stubResult } from './pipeline';
+import {
+  type OnGap,
+  liftStamped,
+  offsetNameBehaviorsFor,
+  raiseRecovered,
+  structureChecked,
+  stubResult,
+} from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -236,9 +243,9 @@ function traceTower(
 
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
-  // runTower.
+  // runTower — and its one-spelling-per-cell decline, which throws from here (pipeline.ts's 1.6).
   const named = opts.symbols
-    ? OFFSET_NAME_PASS.run(fn, opts.symbols, stampBehaviorsFor(target, opts.contextGlobals))
+    ? OFFSET_NAME_PASS.run(fn, opts.symbols, offsetNameBehaviorsFor(target, opts.contextGlobals))
     : [];
   trace.push({
     id: 'stage:offsetnames',

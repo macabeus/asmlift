@@ -6550,12 +6550,14 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
           mkOp('gaddr', {
             results: [res],
             // `fromMap`: the NAME is asmlift's reading of a numeric word, not the asm's own
-            // spelling (raise/offsetnames.ts `cellSpelledTwice` asks which). A macro expands to
-            // the numeric literal the asm holds, so it is not marked.
+            // spelling (raise/offsetnames.ts `cellSpelledTwice` asks which), and `mapAddr` the
+            // word itself — the one address of a name the map places at several that this
+            // spelling denotes. A macro expands to the numeric literal the asm holds, so it is
+            // not marked.
             attrs: {
               sym: si.name,
               ...(si.kind === 'code' ? { code: true } : {}),
-              ...(si.macroBody === undefined ? { fromMap: true } : {}),
+              ...(si.macroBody === undefined ? { fromMap: true, mapAddr: pr.value >>> 0 } : {}),
             },
           }),
         );
@@ -6573,7 +6575,12 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         const g = mkValue(T.unk(32));
         const k = mkValue(T.unk(32));
         const res = mkValue(T.unk(32));
-        irb.ops.push(mkOp('gaddr', { results: [g], attrs: { sym: interior.info.name, fromMap: true } }));
+        irb.ops.push(
+          mkOp('gaddr', {
+            results: [g],
+            attrs: { sym: interior.info.name, fromMap: true, mapAddr: (pr.value - interior.offset) >>> 0 },
+          }),
+        );
         irb.ops.push(mkOp('const', { results: [k], attrs: { value: interior.offset } }));
         irb.ops.push(mkOp('add', { operands: [g, k], results: [res] }));
         writeData(reg(a), bi, res);
