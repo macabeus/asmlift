@@ -624,6 +624,98 @@ export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInf
   return null;
 }
 
+/** The data objects of a map in address order, with the running maximum of their ends — what
+ *  {@link overlappingObject} answers from in two binary searches. Cached per map (and rebuilt when
+ *  its entry count moves), because the pool promotion asks once per pool word of every lift. */
+interface ObjectIndex {
+  entries: number;
+  bases: number[];
+  ends: number[];
+  names: string[];
+  /** maxEnd[i] = the largest end among bases[0..i], and maxAt[i] the index that reached it */
+  maxEnd: number[];
+  maxAt: number[];
+}
+const objectIndexes = new WeakMap<SymbolMap, ObjectIndex>();
+
+function objectIndex(map: SymbolMap): ObjectIndex {
+  const cached = objectIndexes.get(map);
+  if (cached && cached.entries === map.size) {
+    return cached;
+  }
+  const objs: { base: number; end: number; name: string }[] = [];
+  for (const [addr, infos] of map) {
+    if (infos.length === 0) {
+      continue;
+    }
+    const info = objectAt(infos);
+    if (info.kind === 'data') {
+      objs.push({ base: addr, end: addr + (info.size ?? 0), name: info.name });
+    }
+  }
+  objs.sort((a, b) => a.base - b.base);
+  const index: ObjectIndex = { entries: map.size, bases: [], ends: [], names: [], maxEnd: [], maxAt: [] };
+  for (const [i, o] of objs.entries()) {
+    index.bases.push(o.base);
+    index.ends.push(o.end);
+    index.names.push(o.name);
+    const prev = i > 0 && index.maxEnd[i - 1] >= o.end;
+    index.maxEnd.push(prev ? index.maxEnd[i - 1] : o.end);
+    index.maxAt.push(prev ? index.maxAt[i - 1] : i);
+  }
+  objectIndexes.set(map, index);
+  return index;
+}
+
+/** The first index whose base is > `value` (bases sorted ascending). */
+function firstAbove(bases: readonly number[], value: number): number {
+  let lo = 0;
+  let hi = bases.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bases[mid] <= value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+/** ANOTHER OBJECT SHARING CELLS with the data object {@link objectAt} names at `base`: the name of a
+ *  data object whose base lies strictly inside this one's extent, or of a sized one whose extent
+ *  strictly contains this base — null when the object is alone in its bytes (or is not data).
+ *
+ *  This is the map side of the premise `ir/alias.ts` rests on, that one cell never appears under
+ *  two names within one function. Two named objects are disjoint to every C compiler, so where a
+ *  map lays one object over another (pokeemerald's EWRAM `sUnknown`, once sized from a different
+ *  unit's declaration of the same name, covered its neighbour `sRandCount`), naming a cell through
+ *  either lets agbcc forward a store made through one name past a store made through the other:
+ *  the C computes a different value than the asm. Falling back to the RAW constant is no repair
+ *  either — agbcc forwards across a named access and a numeric address of the same cell just the
+ *  same. So a promotion that lands here has no spelling that is safe without knowing every other
+ *  access in the function, and the frontend declines it. */
+export function overlappingObject(map: SymbolMap, base: number): string | null {
+  const infos = map.get(base);
+  if (infos === undefined || infos.length === 0 || objectAt(infos).kind !== 'data') {
+    return null;
+  }
+  const index = objectIndex(map);
+  const at = firstAbove(index.bases, base) - 1; // this object's own slot (bases are unique)
+  if (at < 0 || index.bases[at] !== base) {
+    return null;
+  }
+  // a later base strictly inside this object's extent
+  if (at + 1 < index.bases.length && index.bases[at + 1] < index.ends[at]) {
+    return index.names[at + 1];
+  }
+  // an earlier sized object whose extent strictly contains this base
+  if (at > 0 && index.maxEnd[at - 1] > base) {
+    return index.names[index.maxAt[at - 1]];
+  }
+  return null;
+}
+
 /** The `SymbolInfo` keys a project's DWARF can only carry because the symbol's DEFINITION was
  *  compiled from C. Everything else in the map survives a function that is still `INCLUDE_ASM`:
  *  its `.symtab` entry exists (the asm defines the label), and most globals it reads are typed by
