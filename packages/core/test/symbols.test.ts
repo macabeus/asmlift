@@ -403,6 +403,55 @@ describe('declaration shapes (P2)', () => {
     ]);
     expect(lookupInterior(map, 0x80001008)).toBeNull();
   });
+
+  test('an exact hit and an interior hit name the same object at one address', () => {
+    // sa3 0x08358528 again. Two names for one object in one function let agbcc forward the first
+    // store past the second (distinct symbols do not alias): this body returns 7, and the two-name
+    // C compiles to `mov r0, #5`.
+    const map: SymbolMap = new Map([
+      [
+        0x08058528,
+        [
+          { name: 'gMarker', kind: 'data' },
+          { name: 'gMap', kind: 'data', size: 540 },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x08058528)?.name).toBe('gMap');
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r2]\n\tmovs\tr0, #7\n\tstr\tr0, [r1, #8]\n' +
+      '\tldr\tr0, [r2]\n\tbx\tlr\n.L1:\n\t.word\t0x08058528\n.L2:\n\t.word\t0x08058530\n';
+    const src = run('f', body, map);
+    expect(src).toContain('gMap');
+    expect(src).not.toContain('gMarker');
+  });
+
+  test('an unsized data marker over CODE keeps its rank, and nothing inside the function attributes', () => {
+    // marioparty3/af/snowboardkids2: splat ranks the unsized `gcc2_compiled.` label first at a
+    // function's address, ahead of the function and its sized `func_X.NON_MATCHING` label.
+    const map: SymbolMap = new Map([
+      [
+        0x80001000,
+        [
+          { name: 'gcc2_compiled.', kind: 'data' },
+          { name: 'func_80001000', kind: 'code' },
+          { name: 'func_80001000.NON_MATCHING', kind: 'data', size: 64 },
+        ],
+      ],
+      [
+        0x80002000,
+        [
+          { name: 'D_80002000', kind: 'data' },
+          { name: 'D_80002000.NON_MATCHING', kind: 'data', size: 16 },
+        ],
+      ],
+    ]);
+    expect(lookupSymbol(map, 0x80001000)?.name).toBe('gcc2_compiled.');
+    expect(lookupInterior(map, 0x80001008)).toBeNull();
+    // a sized label C cannot spell is not the object either
+    expect(lookupSymbol(map, 0x80002000)?.name).toBe('D_80002000');
+    expect(lookupInterior(map, 0x80002004)).toBeNull();
+  });
 });
 
 describe('value-context escapes intify — a named address never declines what raw C compiled', () => {

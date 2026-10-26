@@ -560,19 +560,43 @@ export function pointeeFields(pointee: SymbolPointee | undefined): DeclaredField
   return declaredFields(pointee.layout);
 }
 
-/** Kind-aware two-probe lookup for a pool-loaded 32-bit value. Exact match first (any kind);
- *  on miss, `value & ~1` — accepted ONLY when the hit is code, because ELF function addresses
- *  are stored with the Thumb bit cleared while a Thumb code pointer in a pool is odd. An exact
- *  odd-DATA hit therefore wins over a masked code hit (odd data addresses are real).
+/** A name C can spell. Splat's `func_X.NON_MATCHING` labels are sized data aliases that are not. */
+const C_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** THE one object an address names, decided once per address so every lookup that lands there
+ *  spells the same name. Two names for one object inside one function are not a style problem:
+ *  the compiler treats distinct symbols as non-aliasing and forwards a store made through one past
+ *  a store made through the other.
+ *
+ *  Usually the canonical `[0]`. The exception is an unsized data label ranked first over the sized
+ *  object that starts at the same address (sa3's `gUnknown_08358528` over the 540-byte
+ *  `Map_zone_1_act_hub_fg0`, pokeemerald's `gMultiBootProgram_BerryGlitchFix_End` over
+ *  `gMultiBootProgram_PokemonColosseum_Start`): the object is the sized one, because only it has
+ *  an extent, so both an exact hit and an interior hit name it. Never where any alias is code: a
+ *  sized data alias there is a label over the function's bytes (MIPS `func_X.NON_MATCHING`, which
+ *  splat maps rank behind an unsized `gcc2_compiled.` marker), not an object. */
+function objectAt(infos: readonly SymbolInfo[]): SymbolInfo {
+  const head = infos[0];
+  if (head.kind !== 'data' || head.size !== undefined || infos.some((i) => i.kind === 'code')) {
+    return head;
+  }
+  return infos.find((i) => i.kind === 'data' && i.size !== undefined && C_IDENTIFIER.test(i.name)) ?? head;
+}
+
+/** Kind-aware two-probe lookup for a pool-loaded 32-bit value. Exact match first (any kind), which
+ *  names {@link objectAt}'s object; on miss, `value & ~1` — accepted ONLY when the hit is code,
+ *  because ELF function addresses are stored with the Thumb bit cleared while a Thumb code pointer
+ *  in a pool is odd. An exact odd-DATA hit therefore wins over a masked code hit (odd data
+ *  addresses are real).
  *
  *  The masked probe asks for the CODE alias at that address, not for the canonical `[0]`: a
  *  table-end or segment marker can share its address with the function that follows it, and the
  *  provider may rank the marker first (pokeemerald's `gMysteryEventScriptCmdTableEnd` over
  *  `GameCubeMultiBoot_Hash`). An odd pool word there is still the function's Thumb pointer. */
 export function lookupSymbol(map: SymbolMap, value: number): SymbolInfo | null {
-  const exact = map.get(value)?.[0];
-  if (exact) {
-    return exact;
+  const exact = map.get(value);
+  if (exact !== undefined && exact.length > 0) {
+    return objectAt(exact);
   }
   if ((value & 1) === 1) {
     const code = map.get(value & ~1)?.find((info) => info.kind === 'code');
@@ -585,17 +609,12 @@ export function lookupSymbol(map: SymbolMap, value: number): SymbolInfo | null {
 
 /** Interior attribution: the data symbol whose `[address, address+size)` range contains
  *  `value` strictly inside (offset > 0 — exact bases go through `lookupSymbol`). Only
- *  complete-typed globals carry a size, so unsized arrays never attribute.
- *
- *  Like {@link lookupSymbol}'s masked probe, this asks for the SIZED DATA alias at an address, not
- *  for the canonical `[0]`: an unsized label can share its address with the object that follows
- *  it, and the provider may rank the label first (sa3's `gUnknown_08358528` over
- *  `Map_zone_1_act_hub_fg0`). Only when `[0]` is itself data: behind a CODE `[0]` a sized data
- *  alias is a label over the function's bytes (MIPS `func_X.NON_MATCHING`), not an object. */
+ *  complete-typed globals carry a size, so unsized arrays never attribute. The symbol at each
+ *  base is {@link objectAt}'s, the same one an exact hit on that base names. */
 export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInfo; offset: number } | null {
   for (const [addr, infos] of map) {
-    const info = infos[0].kind === 'data' ? infos.find((i) => i.kind === 'data' && i.size !== undefined) : undefined;
-    if (info?.size === undefined) {
+    const info = objectAt(infos);
+    if (info.kind !== 'data' || info.size === undefined) {
       continue;
     }
     if (value > addr && value < addr + info.size) {
