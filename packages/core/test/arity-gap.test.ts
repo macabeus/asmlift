@@ -479,6 +479,18 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
       );
     }
   });
+  // `g2(a, b); if (r) rd0(a, b); else rd0(1, 2);` with the copies for the call in each arm: a write
+  // made for the call in a predecessor, whose value an earlier call read, is still an argument
+  test('a copy made for the call in a predecessor block stays an argument past the bound', () => {
+    const arms =
+      '\t.thumb_func\nf:\n\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tg2\n\tcmp\tr0, #0\n' +
+      '\tbeq\t.L2\n\tadd\tr0, r4, #0\n\tadd\tr1, r5, #0\n\tb\t.L3\n.L2:\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n.L3:\n' +
+      '\tbl\trd0\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const g2: Prototypes = { g2: { params: 2, returns: 's32' }, f: { params: 2, returnsVoid: true } };
+    for (const asm of [arms, `${rd0}${arms}`]) {
+      expect(decompile('f', asm, ARMV4T_AGBCC, { prototypes: g2 }).source).toMatch(/rd0\(\w+, \w+\)/);
+    }
+  });
   // `gp = 3; gq = rd1(a);` leaves the store's 3 in r1 above r0's a, which rd1 reads: dropping r0
   // would drop the a, so the gap refuses as it does with no body
   test('a gap below the bound refuses whatever lies above it', () => {
@@ -488,5 +500,49 @@ describe('on Thumb (agbcc), a callee body in the same input bounds the arity gue
     expect(() => decompile('f', `${rd2}${stored('r3', 'rd2')}`, ARMV4T_AGBCC)).toThrow(
       /holds a value and r0 holds none/,
     );
+  });
+  // synthetic:jt_rndjoin:agbcc, `u8 rnd(); void jt_rndjoin(u8 i) { u8 j = i + 0xde; switch
+  // (gE[i].kind) { … case 4: switch (j) { case 0: gE[i].x = 0x44; break; … } gE[i].y = rnd() * 10;
+  // break; } }`: agbcc's case CSE moves each inner case's `i << 3` from r0 to r5 at the cases' join
+  // (`add r5, r0, #0`), and the inner switch's default edge brings the outer dispatch's marker in r0
+  // to `bl rnd`. The copy read the r0 the cases wrote, so past rnd's bound it is no argument
+  test('a write a copy read before the call is a leftover, though the copy lowers to no op', () => {
+    const join =
+      'jt_rndjoin:\n\tpush\t{r4, r5, lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr4, r0, #0x18\n\tmov\tr1, #0xde\n' +
+      '\tlsl\tr1, r1, #0x18\n\tadd\tr0, r0, r1\n\tlsr\tr3, r0, #0x18\n\tldr\tr1, .L23\n' +
+      '\tlsl\tr0, r4, #0x3\n\tsub\tr0, r0, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n' +
+      '\tldrb\tr0, [r0, #0xf]\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L6\t@cond_branch\n' +
+      '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L23+0x4\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '\t.align\t2, 0\n.L23:\n\t.word\tgE\n\t.word\t.L20\n\t.align\t2, 0\n\t.align\t2, 0\n.L20:\n' +
+      '\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n\t.word\t.L10\n\t.word\t.L11\n.L7:\n\tlsl\tr0, r4, #0x3\n' +
+      '\tsub\tr0, r0, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tmov\tr1, #0x2\n\tstrb\tr1, [r0, #0xf]\n' +
+      '\tb\t.L6\n.L8:\n\tlsl\tr0, r4, #0x3\n\tsub\tr0, r0, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n' +
+      '\tmov\tr1, #0x7\n\tstrb\tr1, [r0, #0xf]\n\tb\t.L6\n.L9:\n\tlsl\tr0, r4, #0x3\n\tsub\tr0, r0, r4\n' +
+      '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tmov\tr1, #0x9\n\tstrb\tr1, [r0, #0xf]\n\tb\t.L6\n.L10:\n' +
+      '\tlsl\tr0, r4, #0x3\n\tsub\tr0, r0, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r2\n\tmov\tr1, #0x7\n' +
+      '\tstrh\tr1, [r0]\n\tb\t.L6\n.L11:\n\tlsl\tr5, r4, #0x3\n\tcmp\tr3, #0x4\n\tbhi\t.L12\t@cond_branch\n' +
+      '\tlsl\tr0, r3, #0x2\n\tldr\tr1, .L25\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '\t.align\t2, 0\n.L25:\n\t.word\t.L18\n\t.align\t2, 0\n\t.align\t2, 0\n.L18:\n\t.word\t.L13\n' +
+      '\t.word\t.L14\n\t.word\t.L15\n\t.word\t.L16\n\t.word\t.L17\n.L13:\n\tlsl\tr0, r4, #0x3\n' +
+      '\tsub\tr1, r0, r4\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tmov\tr2, #0x44\n\tb\t.L22\n.L14:\n' +
+      '\tlsl\tr0, r4, #0x3\n\tsub\tr1, r0, r4\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tmov\tr2, #0x88\n' +
+      '\tlsl\tr2, r2, #0x1\n\tb\t.L22\n.L15:\n\tlsl\tr0, r4, #0x3\n\tsub\tr1, r0, r4\n\tlsl\tr1, r1, #0x2\n' +
+      '\tadd\tr1, r1, r2\n\tmov\tr2, #0xcc\n\tb\t.L22\n.L16:\n\tlsl\tr0, r4, #0x3\n\tsub\tr1, r0, r4\n' +
+      '\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tmov\tr2, #0xaa\n\tlsl\tr2, r2, #0x1\n\tb\t.L22\n.L17:\n' +
+      '\tlsl\tr0, r4, #0x3\n\tsub\tr1, r0, r4\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tmov\tr2, #0x88\n' +
+      '.L22:\n\tstrh\tr2, [r1]\n\tadd\tr5, r0, #0\n.L12:\n\tbl\trnd\n\tldr\tr1, .L27\n\tsub\tr2, r5, r4\n' +
+      '\tlsl\tr2, r2, #0x2\n\tadd\tr2, r2, r1\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n' +
+      '\tlsl\tr1, r0, #0x2\n\tadd\tr1, r1, r0\n\tlsl\tr1, r1, #0x1\n\tstrh\tr1, [r2, #0x2]\n.L6:\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n\t.align\t2, 0\n.L27:\n\t.word\tgE\n';
+    const protos: Prototypes = { jt_rndjoin: { params: ['u8'], returnsVoid: true }, rnd: { returns: 'u8' } };
+    const src = decompile('jt_rndjoin', `\t.code\t16\n\t.text\n${rnd}\t.thumb_func\n${join}`, ARMV4T_AGBCC, {
+      prototypes: protos,
+    }).source;
+    expect(src).toContain('rnd()');
+    expect(src).not.toMatch(/rnd\([^)]/);
+    // synthetic:jt_rndjoinst:agbcc: with no body, r0 is counted, and the marker it may hold refuses
+    expect(() =>
+      decompile('jt_rndjoin', `\t.code\t16\n\t.text\n\t.thumb_func\n${join}`, ARMV4T_AGBCC, { prototypes: protos }),
+    ).toThrow(/a case of the elided jump table reads r0/);
   });
 });
