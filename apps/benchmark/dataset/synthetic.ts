@@ -12572,9 +12572,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      in their join (`add r5, r0, #0`), and the inner default edge brings the outer dispatch's
   //      marker in r0 to `bl rnd`. call-plan.ts `leftover` asked a register written in another block
   //      of its VALUE, which no lowered op read (a copy lowers to none), so r0 was counted and the
-  //      marker refused. It now asks each path whether an instruction, a copy included, read the
-  //      register since its last write (`SsaBuilder.readSinceWriteOnSomePath`), and jt_rndjoin lifts
-  //      `rnd()` on agbcc, as `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one.
+  //      marker refused. It now asks of the WRITES (`SsaBuilder.readAfterEveryReachingWrite`): the
+  //      register is a leftover where an instruction, a copy included, read it after each write of it
+  //      that reaches the call, on any path out of that write but the ones into the call. The call's
+  //      own block's saves are not asked (IDO saves the argument it hands in the jal's delay slot); an
+  //      earlier call's result where the call left it and a call destroying it neither count nor
+  //      answer; the entry's value counts where a lowered op read it; and a register calls destroyed
+  //      on every path in holds what a callee left, a leftover. jt_rndjoin lifts `rnd()` on agbcc,
+  //      as `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one.
   //      jt_rndjoinst has no body and must STAY declined on agbcc, the soundness control.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into

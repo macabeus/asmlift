@@ -150,8 +150,9 @@ export interface SsaBuilder {
    *  branch that picks it (`bnez v0, L; move a0, zero`), so the write reaches the other call unread
    *  on the path between. `b`'s own reads are not asked: what a read there that lowers to no op says
    *  differs by compiler (frontend/call-plan.ts `leftover`). Only the frontend's own reads count
-   *  ({@link readVar}); a lookup this construction makes, or a call's argument read
-   *  ({@link readGuessedArg}, which the call planner's own probes use too), is none. A block not
+   *  ({@link readVar}), and a guessed call's argument read the planner records for it
+   *  ({@link noteGuessedArgRead}: a sibling path's call reads the write); a lookup this construction
+   *  makes, or the planner's own probe ({@link readGuessedArg} alone), is none. A block not
    *  filled yet is passed through looking for the write, as {@link holdsValue} does; a path out of
    *  a write that reaches one has reads nobody has seen yet, and the write's value answers for it
    *  as `unlowered` takes it (IDO reloads `lw a0, 24(sp)` in a branch's delay slot for the arm laid
