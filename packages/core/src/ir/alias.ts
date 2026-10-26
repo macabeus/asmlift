@@ -13,7 +13,11 @@
 //     what a read of the other sees. That is a C guarantee about distinct declared objects, not a
 //     heuristic about what the compiler happened to do.
 //   • name comparison suffices because the pool promotion picks ONE canonical name per address,
-//     so a single cell cannot appear under two names within one function (frontend/thumb.ts).
+//     and DECLINES a word that names an object the map lays over another one (one object's base
+//     strictly inside the other's extent — symbols.ts `overlappingObject`), so a single cell
+//     cannot appear under two names within one function (frontend/thumb.ts). The per-address
+//     pick alone did not give that: an object sized past a neighbour's base gave the neighbour's
+//     cells a second, interior name.
 //   • anything that does not resolve to a name — a materialized base, a variable index, a pointer
 //     parameter — is unknown, and unknown BARS. A call or an `opaque` bars unconditionally: it may
 //     write anything.

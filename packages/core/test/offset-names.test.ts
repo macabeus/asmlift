@@ -92,6 +92,10 @@ const lift = (name: string, asm: string, symbols?: SymbolMap) =>
 
 const src = (name: string, asm: string, symbols: SymbolMap) => decompile(name, asm, ARMV4T_AGBCC, { symbols }).source;
 
+/** The map's entry at the walk's base (0x040000ba) and nothing else — what the frontend is lifted
+ *  against where the whole map lays the base over its neighbours. */
+const baseOnly = (symbols: SymbolMap): SymbolMap => new Map([[0x040000ba, symbols.get(0x040000ba)!]]);
+
 /** WHICH RULE decided, per `<base>+<offset>` site — the attribution `firstRejection` exists for. */
 const refusals = (name: string, asm: string, symbols: SymbolMap) => [
   ...offsetNameRefusals(lift(name, asm, symbols), symbols),
@@ -200,7 +204,11 @@ describe('what refuses', () => {
       [0x040000c6, [reg('REG_DMA1CNT_H')]],
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
-    expect(judged(big)).toEqual([
+    // The Thumb frontend now DECLINES a pool word naming an object the map lays over another
+    // (symbols.ts overlappingObject), so this map cannot reach the pass through a Thumb lift; the
+    // gate still guards every frontend that walks without that check (MIPS/PPC maps overlap by
+    // st_size). Lift against the base alone, judge against the whole map.
+    expect([...offsetNameRefusals(lift('walk', WALK, baseOnly(big)), big)]).toEqual([
       ['gTable+12', 'interior-offset'],
       ['gTable+24', 'interior-offset'],
     ]);
@@ -421,8 +429,8 @@ describe('what refuses', () => {
 describe('the gates are load-bearing', () => {
   /** The pass with ONE named rule removed — the real predicate, on real input, no test-only
    *  branch in the shipped path. */
-  const namedWithout = (id: string, symbols: SymbolMap, asm = WALK): string[] => {
-    const fn = lift('walk', asm, symbols);
+  const namedWithout = (id: string, symbols: SymbolMap, asm = WALK, liftWith = symbols): string[] => {
+    const fn = lift('walk', asm, liftWith);
     nameOffsetAddresses(fn, symbols, stampBehaviorsFor(ARMV4T_AGBCC, undefined), without(OFFSET_NAME_GATES, id));
     return fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'gaddr').map((op) => op.attrs.sym as string));
   };
@@ -433,7 +441,8 @@ describe('the gates are load-bearing', () => {
       [0x040000c6, [reg('REG_DMA1CNT_H')]],
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
-    expect(namedWithout('interior-offset', big)).toContain('REG_DMA1CNT_H');
+    // lifted against the base alone: the Thumb frontend declines the overlapping map outright
+    expect(namedWithout('interior-offset', big, WALK, baseOnly(big))).toContain('REG_DMA1CNT_H');
   });
 
   // `base-unsized` is a COST gate, so this one records the spelling it costs rather than a guard.
