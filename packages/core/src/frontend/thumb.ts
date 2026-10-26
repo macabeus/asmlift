@@ -3815,10 +3815,11 @@ function measureThumbFrame({
   // `refuseStaleIdiomReads` makes for the marker), and where the own declaration proves a return no
   // wider than a word, it reads r0 alone: `add r1, sp, #4 / ldrb r0, [r1] / … / pop {r0} / bx r0` in
   // a `void f(u32)` leaves no read of r1. Undeclared, a return may hand back the pair r0:r1. The void
-  // reading is the stated entry's alone because the drop is: under the context's `void f(u32)` the
-  // lifted `ret` still reads r0, and an r0 copy dropped there would print as `return uninit_r0`. The
-  // word reading needs no such care, as the lifted `ret` reads r1 only through a pair the asm builds
-  // (`wideReturn`), where the marker declines.
+  // reading of r0 is the stated entry's alone because the drop is: under the context's `void f(u32)`
+  // the lifted `ret` still reads r0, and an r0 copy dropped there would print as `return uninit_r0`.
+  // The reading of r1 needs no such care, under a void or a one-word declaration from either source,
+  // as the lifted `ret` reads r1 only through a pair the asm builds (`wideReturn`), where the marker
+  // declines.
   const narrowCallReads = (call: Instr): readonly string[] => {
     const through = calleeRegister(call, target);
     return typeof through === 'string' ? [...handedOutRegs(call), through] : handedOutRegs(call);
@@ -3827,7 +3828,11 @@ function measureThumbFrame({
   const narrowCallClobbers = [...calls.callClobbers, target.returnReg];
   const ownProven = own?.proves === true ? own.proto : undefined;
   const returnMayHand = (r: string): boolean =>
-    !dropsVoidReturn && !(r !== target.returnReg && (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32);
+    !dropsVoidReturn &&
+    !(
+      r !== target.returnReg &&
+      (declaresVoidReturn(ownProven) || (ownReturnWidth(ownProven) ?? Number.POSITIVE_INFINITY) <= 32)
+    );
   const narrowCandidates = narrowSlotReloads(
     asmBlocks,
     entryReachable,

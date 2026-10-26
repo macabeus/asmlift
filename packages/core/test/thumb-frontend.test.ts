@@ -5903,6 +5903,9 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
         ownContextProto: { params: ['u32'], returnsVoid: true },
       }).source;
     expect(() => contextLift(r0)).toThrow('the captured address flows into `ret`');
+    // …while the r1 copy dies there all the same: the lifted `ret` reads r1 only through a pair the
+    // asm builds, so a context void drops it as a context one-word return does
+    expect(contextLift(r1(''))).toContain('gP = (u8)(a0 + 1);');
   });
 
   // A call reads only what it is handed (thumb.ts `frameAddressReceivers`): a declared callee its
