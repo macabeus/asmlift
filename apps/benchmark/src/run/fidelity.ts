@@ -24,7 +24,7 @@ import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftProvenance, sameMeasuredCode } from '../provenance';
 import { checkTierProvenance } from '../report/merge';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
-import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
+import { checkCalleeBodiesDrift, checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
 
 interface Verdict {
   id: string;
@@ -259,12 +259,14 @@ export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promi
   for (const man of loadCompleteManifests().filter((m) => realProjects.has(m.project))) {
     const st = enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
     // Map-drift: symbol-fed rows are only trustworthy if the vendored map still IS what the
-    // checkout's ELF derives. Requires the checkout; without one the pin warning above already
-    // fired — restate that the map specifically went unverified.
+    // checkout's ELF derives, and the callee bodies frozen out of it are the ones `bench repro`'s
+    // CLI reads only while they still re-read the same. Requires the checkout; without one the pin
+    // warning above already fired — restate that the ELF's two products went unverified.
     if (st.present && st.head) {
       await checkSymbolMapDrift(man);
+      checkCalleeBodiesDrift(man);
     } else if (vendoredMapPath(man.project)) {
-      console.warn(`WARN fidelity: ${man.project}: no checkout — vendored symbol map NOT verified`);
+      console.warn(`WARN fidelity: ${man.project}: no checkout — vendored symbol map and callee bodies NOT verified`);
     }
   }
   const work = rows.flatMap((r) => [() => checkM2c(r), () => checkAsmlift(r)]);

@@ -1,13 +1,15 @@
 // The bodies of a real row's callees that `bench vendor` freezes out of the project's linked ELF
 // (cases/callee-bodies.ts): one canonical file per project, left alone while its content holds, a
-// refusal where a project vendors an ELF's symbol map and no bodies, and the CLI's own selection
-// rule over what is frozen.
+// refusal where a project vendors an ELF's symbol map and no bodies, the CLI's own selection rule
+// over what is frozen, and the drift check that holds what is frozen to what the ELF gives today.
+import { asmliftBlock } from '@asmlift/cli/config';
 import { calleeBodiesFromElf } from '@asmlift/cli/elf-bodies';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { agbccAvailable } from '@asmlift/toolchains';
+import { searchDecompYaml } from '@match-kit/decomp-yaml/files';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
@@ -20,9 +22,12 @@ import {
   selectCalleeBodies,
   writeVendoredCalleeBodies,
 } from '../src/cases/callee-bodies';
-import { benchCheckoutsDir } from '../src/cases/manifests';
+import { calleeBodiesTarget, projectObjdump, readCalleeBodies } from '../src/cases/callee-bodies-elf';
+import { allowDirtyCheckout } from '../src/cases/checkout';
+import { REAL_DIR, benchCheckoutsDir, loadCompleteManifests, resolveProjectRoot } from '../src/cases/manifests';
 import { realCases } from '../src/cases/real';
 import { rankOptionsFor } from '../src/eval/asmlift';
+import { calleeBodiesDrift } from '../src/run/symbol-drift';
 
 const listing = '\nbuild/x.elf:     file format elf32-tradbigmips\n\n80000400 <rd0>:\n80000400:\tjr\tra\n';
 const frozen: VendoredCalleeBodies = {
@@ -148,3 +153,57 @@ describe.skipIf(!agbccAvailable())("the harness hands a real row's lift its ELF 
     expect(opts.calleeBodies).toEqual(live.bodies);
   });
 });
+
+// The fidelity gate's half for the bodies (run/symbol-drift.ts `checkCalleeBodiesDrift`): content,
+// never gzip bytes, and the callees whose body moved, by name.
+describe('callee-body drift', () => {
+  test('the same content is no drift, whichever objdump release read it', () => {
+    expect(calleeBodiesDrift(frozen, { ...frozen, objdump: 'GNU objdump 2.43' })).toBeNull();
+  });
+  test('a body that moved, and a callee that gained one, are named', () => {
+    const relinked: VendoredCalleeBodies = {
+      ...frozen,
+      bodies: { ...frozen.bodies, thunk_rnd: { kind: 'arm', words: [0xe12fff1e] }, other: { kind: 'arm', words: [] } },
+      unread: ['memcpy', '__divsi3'],
+    };
+    expect(calleeBodiesDrift(frozen, relinked)).toBe('2 callee bodies differ: other, thunk_rnd');
+  });
+});
+
+// What `bench fidelity` holds, run wherever a project's linked ELF is built: every frozen file is
+// what the CLI's reader reads off that ELF today, for every callee it names. A relinked ELF or a
+// change to cli elf-bodies.ts that moves a body the harness hands fails here by project and callee;
+// the completeness test above it holds only the names. ASMLIFT_ALLOW_DIRTY_CHECKOUT=1 (a WIP
+// checkout, which bench vendor and bench fidelity accept with a warning) skips it.
+describe.skipIf(allowDirtyCheckout())(
+  "the frozen callee bodies are the ones the CLI reads off each checkout's ELF",
+  () => {
+    const projects = loadCompleteManifests().filter((m) =>
+      existsSync(join(REAL_DIR, 'tu', m.project, CALLEE_BODIES_FILE)),
+    );
+    test.each(projects.map((m) => [m.project, m] as const))(
+      '%s',
+      (project, man) => {
+        const root = resolveProjectRoot(man);
+        const loaded = searchDecompYaml(root);
+        const elfRel = asmliftBlock(loaded)?.elf;
+        const elf = loaded === null || elfRel === undefined ? undefined : resolve(loaded.dir, elfRel);
+        if (elf === undefined || !existsSync(elf)) {
+          return; // no checkout, or its ELF is not built: bench fidelity says so by name
+        }
+        const vendored = readVendoredCalleeBodies(project, join(REAL_DIR, 'tu', project), true)!;
+        const target = calleeBodiesTarget(project)!;
+        const names = [...Object.keys(vendored.bodies), ...vendored.unread];
+        const derived = readCalleeBodies(
+          project,
+          { elf, elfRel: elfRel! },
+          names,
+          target,
+          projectObjdump(root, target),
+        );
+        expect(calleeBodiesDrift(vendored, derived)).toBeNull();
+      },
+      120_000,
+    ); // a project's cases and one objdump spawn per listing body: seconds, a minute under load
+  },
+);
