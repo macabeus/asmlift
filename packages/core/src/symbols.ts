@@ -601,9 +601,16 @@ export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInf
 
 /** The `SymbolInfo` keys a project's DWARF can only carry because the symbol's DEFINITION was
  *  compiled from C. Everything else in the map survives a function that is still `INCLUDE_ASM`:
- *  its `.symtab` entry exists (the asm defines the label), and its globals are typed by the OTHER
- *  translation units that declare them. Listed here, once, so {@link asIfUndecompiled} and any
- *  later definition-derived fact (a signature, a local's type, a register location) stay in sync. */
+ *  its `.symtab` entry exists (the asm defines the label), and most globals it reads are typed by
+ *  other code that references them. Listed here, once, so {@link asIfUndecompiled} and any later
+ *  definition-derived fact (a signature, a local's type, a register location) stay in sync.
+ *
+ *  KNOWN GAP: "other code" is not guaranteed. agbcc writes a DWARF entry for an extern global only
+ *  in a compilation unit that references it, so a global defined in asm (a NOTYPE symbol) that only
+ *  the row's own body references takes its type from the row's decompiled C. Nothing here strips
+ *  that type, because the map does not record which compilation unit typed a symbol. kleod has 10
+ *  such globals across 6 rows, among them PauseMenuScreenHandler's `gUnk_081166F8[4][4]`. The
+ *  CLI's repro reads the same ELF and sees the same types. */
 const DEFINITION_DERIVED_KEYS = ['declared', 'signature'] as const satisfies readonly (keyof SymbolInfo)[];
 
 /** The map a user actually has while decompiling `fn` — i.e. with `fn` still an `INCLUDE_ASM`
