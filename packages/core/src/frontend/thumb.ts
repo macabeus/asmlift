@@ -2595,8 +2595,8 @@ export function lift(
   context?: ContextGlobals,
   options: LiftOptions = {},
 ): Fn {
-  return liftWithRelift(name, (oneObject) =>
-    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, options),
+  return liftWithRelift(name, (oneObject, homesReleased) =>
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject, homesReleased, options),
   );
 }
 
@@ -2618,12 +2618,13 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
+  homesReleased: boolean,
   options: Pick<
     LiftOptions,
     'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
   >,
 ): Fn | FrameObjectRelift {
-  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options);
+  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options, homesReleased);
   const { cfg, frame, ssa, pairs, statics } = fill;
   const { fn, irBlocks, paramReg } = ssa;
 
@@ -2704,6 +2705,7 @@ function liftOnce(
     symbols,
     target,
     oneObject,
+    releasableHomes: frame.releasableHomes,
   });
   if (verdict !== undefined && 'oneObject' in verdict) {
     return verdict;
@@ -3380,6 +3382,9 @@ interface ThumbFrame {
    *  (`narrowSlotReloads`), and the copies those reloads consume, which name no object */
   readonly narrowReloadOf: ReadonlyMap<Instr, number>;
   readonly narrowReloadCopies: ReadonlySet<Instr>;
+  /** the argument homes whose narrow reloads were kept as captures for the one-object answer alone
+   *  (`argumentHomes`), which the audit may ask to release (`FrameObjectAudit.releasableHomes`) */
+  readonly releasableHomes: ReadonlySet<number>;
 }
 
 /** The frame offset of each word of a declared call's outgoing block, or null where it stages none.
@@ -3428,6 +3433,7 @@ function measureThumbFrame({
   cfg: { asmBlocks, preds, succs, entryReachable },
   calls,
   oneObject,
+  homesReleased = false,
   own,
   dropsVoidReturn,
 }: {
@@ -3436,6 +3442,8 @@ function measureThumbFrame({
   cfg: ThumbCfg;
   calls: CallDeclarations;
   oneObject: FrameRange | undefined;
+  /** whether a first audit released the argument homes to the slot model (`releasableHomes`) */
+  homesReleased?: boolean;
   /** the function's own declaration (`ownDeclarationOf`), read only where it `proves` */
   own: OwnDeclaration | undefined;
   /** whether the lift's `ret` reads nothing: a STATED void entry (`prototypes[name]`), the one
@@ -3796,7 +3804,9 @@ function measureThumbFrame({
   // `ownLeadingWordRegisters`): a `u32 k` spilled on entry and read back as `(u8)k` is no struct's
   // home, and lifts as the slot narrowed. A copy kept here is no capture, so its offset leaves
   // `constantCaptureOffsets` and the slot's own `str`/`ldr` stay slot accesses; one dropped stays a
-  // capture.
+  // capture. A home is held for the one-object answer alone, so the audit may hand it back: where
+  // that answer is withheld (a struct-return temp escapes beside the home) and the held home
+  // declines, the second lift reads it as any other slot (`releasableHomes`, `homesReleased`).
   //
   // A COPY THAT OUTLIVES ITS LOAD. Where reload hands the load another register (`add r3, sp, #0x28
   // / ldrb r1, [r3]`, the left operand of a `?:` join whose hard register is r1), rD still holds the
@@ -3884,15 +3894,19 @@ function measureThumbFrame({
     }
   }
   const narrowReloadOf = new Map<Instr, number>();
+  const releasableHomes = new Set<number>();
   for (const [load, { slot }] of narrowCandidates) {
     if (
       wordStoredSlots.has(slot) &&
-      !argumentHomes.has(slot) &&
       !otherCaptureOffsets.has(slot) &&
       !inByValueBlock(slot, 4) &&
       !(oneObject !== undefined && slot < oneObject.to && slot + 4 > oneObject.from)
     ) {
-      narrowReloadOf.set(load, slot);
+      if (argumentHomes.has(slot) && !homesReleased) {
+        releasableHomes.add(slot);
+      } else {
+        narrowReloadOf.set(load, slot);
+      }
     }
   }
   const narrowReloadCopies: ReadonlySet<Instr> = new Set(
@@ -4128,6 +4142,7 @@ function measureThumbFrame({
     isOwnFrameWordSlot,
     narrowReloadOf,
     narrowReloadCopies,
+    releasableHomes,
   };
 }
 
@@ -5590,6 +5605,7 @@ function thumbFillOf(
     LiftOptions,
     'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
   > = {},
+  homesReleased = false,
 ): ThumbFill {
   const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
@@ -5612,6 +5628,7 @@ function thumbFillOf(
     cfg,
     calls,
     oneObject,
+    homesReleased,
     own: ownDeclarationOf(name, prototypes, contextOwnProto),
     dropsVoidReturn: declaresVoidReturn(prototypes[name]),
   });

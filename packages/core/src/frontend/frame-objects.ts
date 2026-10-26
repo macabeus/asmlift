@@ -70,6 +70,13 @@ export interface FrameObjectAudit {
   /** the rules that keep a frame's end word in the one object (`reliftRange`);
    *  `RELIFT_HAND_BACK_GATES` when absent, and a census or an ablation hands in its own */
   reliftGates?: readonly Gate<HandBack>[];
+  /** THE ARGUMENT HOMES THE FRONTEND KEPT FROM THE SLOT MODEL FOR THE ONE-OBJECT ANSWER ALONE: frame
+   *  words an incoming argument register is stored to on entry, whose narrow reloads the frontend
+   *  left as captures rather than reading them as the word narrowed, because a by-value struct
+   *  parameter's home recompiles as that one object (Thumb `argumentHomes`). Where that answer is
+   *  withheld and an object sits over one of them, the audit asks for a relift with them released
+   *  (`FrameObjectRelift.homesReleased`) rather than refusing. Absent or empty where none was kept. */
+  releasableHomes?: ReadonlySet<number>;
   /** the bytes a first audit asked to have kept as ONE object in memory (`FrameObjectRelift`):
    *  the frontend routes every access inside them through an `laddr`, and the audit declares
    *  them one object rather than judging each offset on its own */
@@ -124,25 +131,31 @@ export function keptInRelift(kept: FrameRange, at: number, width: number, what: 
   );
 }
 
-/** What an audit answers instead of a refusal when a device may read the frame, or a callee write
- *  it, without bound: lift again with `oneObject` set to these bytes. */
+/** What an audit answers instead of a refusal. Where a device may read the frame, or a callee write
+ *  it, without bound: lift again with `oneObject` set to these bytes. Where the one-object answer is
+ *  withheld and an object sits over an argument home the frontend kept out of the slot model for
+ *  that answer alone (`FrameObjectAudit.releasableHomes`): lift again with `oneObject` unset and
+ *  `homesReleased`, so the frontend reads those homes as the slots they are. */
 export interface FrameObjectRelift {
-  readonly oneObject: FrameRange;
+  readonly oneObject: FrameRange | undefined;
+  readonly homesReleased?: true;
 }
 
 /** THE RELIFT PROTOCOL, AT MOST TWICE, the one copy every frontend that runs the audit calls: lift,
- *  and where the audit answers with bytes to keep as one object (`FrameObjectRelift`), lift once
- *  more with them routed through an `laddr`. The second audit judges them as one object and refuses
- *  rather than asking again, so a second request is an internal error, not a third lift. */
+ *  and where the audit answers with a relift (`FrameObjectRelift`), lift once more as it asks —
+ *  bytes to keep as one object routed through an `laddr`, or argument homes released to the slot
+ *  model. The second audit judges the frame as asked and refuses rather than asking again, so a
+ *  second request is an internal error, not a third lift. A frontend that hands the audit no
+ *  `releasableHomes` is never asked to release one, and may ignore `homesReleased`. */
 export function liftWithRelift<F>(
   name: string,
-  liftOnce: (oneObject: FrameRange | undefined) => F | FrameObjectRelift,
+  liftOnce: (oneObject: FrameRange | undefined, homesReleased: boolean) => F | FrameObjectRelift,
 ): F {
-  const first = liftOnce(undefined);
+  const first = liftOnce(undefined, false);
   if (!isRelift(first)) {
     return first;
   }
-  const again = liftOnce(first.oneObject);
+  const again = liftOnce(first.oneObject, first.homesReleased === true);
   if (isRelift(again)) {
     throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
   }
@@ -372,7 +385,30 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  the fold, the split, the one-object answer and the stamp; `foldedHere`, which the split adds to
  *  and the slot-overlap refusal reads; and `ModelChoice.refused`, which the model choice and the
  *  shape stage set and the relift test reads. */
-export function auditFrameObjects({
+export function auditFrameObjects(audit: FrameObjectAudit): FrameObjectVerdict {
+  // AN ARGUMENT HOME HELD FOR AN ANSWER THAT DID NOT COME. The frontend keeps a by-value struct
+  // parameter's home out of the slot model (`releasableHomes`) so the one-object answer can take it
+  // whole. Where this audit declines instead — that answer withheld, because an address escapes to
+  // a writer it cannot hold (a struct-return temp's) — the homes bought nothing but the refusal,
+  // since a home's narrow reload read as the word narrowed is the value the entry stored there. So
+  // the decline becomes a relift with the homes released, which a second audit judges whole; one
+  // that declines again declines. Asked of the first lift alone: a relift that keeps one object has
+  // already had the answer the homes were held for.
+  const { oneObject, releasableHomes } = audit;
+  if (oneObject !== undefined || releasableHomes === undefined || releasableHomes.size === 0) {
+    return auditFrame(audit);
+  }
+  try {
+    return auditFrame(audit);
+  } catch (e) {
+    if (e instanceof FrontendUnsupportedError) {
+      return { oneObject: undefined, homesReleased: true };
+    }
+    throw e;
+  }
+}
+
+function auditFrame({
   name,
   irBlocks,
   ownedLocals: owned,

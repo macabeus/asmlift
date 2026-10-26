@@ -5797,10 +5797,21 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   });
 
   // …and a word the entry stores straight from an argument register is that argument's home, the
-  // by-value struct parameter's shape, whose members are an object's (thumb.ts `argumentHomes`)
+  // by-value struct parameter's shape, whose members are an object's (thumb.ts `argumentHomes`) —
+  // while the one-object answer can take it: with no address escaping, the frame is that one object
   test('an incoming argument stored on entry keeps the object model', () => {
+    const own =
+      'f:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tstr\tr1, [sp]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tbx\tlr\n';
+    const one = decompile('f', own, ARMV4T_AGBCC, { prototypes: { f: { params: 2, returns: 's32' } } }).source;
+    expect(one).toContain('u8 sp0[8];');
+    expect(one).toContain('return ((u8 *)sp0)[4];');
+    // A struct-return temp beside it escapes to `mk`, a writer the one object cannot hold, so that
+    // answer is withheld and the held home only declined ("disagree on width (4 vs 1)"): the audit
+    // asks for a relift with the home released (frame-objects.ts `auditFrameObjects`), and its
+    // reload is the word narrowed, as a spilled local's is.
     const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
-    expect(() => lift(home)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+    expect(lift(home)).toContain('return (u8)a0 + *(s32 *)&sp0;');
     // …which a call before the store ends: r0 is then the callee's return, not the argument
     const afterCall = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace(
       '\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n',
@@ -5815,13 +5826,16 @@ describe('a narrow reload of a word slot is the slot narrowed', () => {
   // entry and reading `(u8)k` back. A count states no type, and a by-value parameter is the home it
   // guards.
   test("the own declaration's word parameter is no by-value home", () => {
-    const home = fr('\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n').replace('\tadd\tr0, r0, #0x1\n', '');
+    // no address escapes, so a home would be the one object (the test above)
+    const home =
+      'f:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tstr\tr1, [sp]\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tbx\tlr\n';
     const own = (params: Prototypes[string]['params']): string =>
-      decompile('f', home, ARMV4T_AGBCC, { prototypes: { ...P, f: { params, returns: 's32' } } }).source;
-    expect(own(['u32'])).toContain('return (u8)a0 + *(s32 *)&sp0;');
-    expect(own(['u8 *'])).toContain('return (u8)a0 + ');
-    expect(() => own(['struct Q'])).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
-    expect(() => own(1)).toThrow('the accesses through the captured address disagree on width (4 vs 1)');
+      decompile('f', home, ARMV4T_AGBCC, { prototypes: { f: { params, returns: 's32' } } }).source;
+    expect(own(['u32', 'u32'])).toContain('return (u8)a0;');
+    expect(own(['u8 *', 'u32'])).toContain('return (u8)a0;');
+    expect(own(['struct Q', 'u32'])).toContain('return ((u8 *)sp0)[4];');
+    expect(own(2)).toContain('return ((u8 *)sp0)[4];');
   });
 
   test('a byte that is not the low-order part of the word is no reload of it', () => {
