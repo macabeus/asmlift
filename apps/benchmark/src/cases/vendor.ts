@@ -13,8 +13,8 @@
 //                      preprocessed it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version), and
 // out of the project's linked ELF, symbols.json.gz (the symbol map, with symbols.provider.json naming
-// the provider version that derived it) and callee-bodies.json.gz (the bodies of the rows' callees
-// the TUs do not hold: cases/callee-bodies.ts).
+// the provider version and the digests of the in-repo provider source that derived it) and
+// callee-bodies.json.gz (the bodies of the rows' callees the TUs do not hold: cases/callee-bodies.ts).
 //
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU the
 // manifest assembles must declare every function it calls — enforced here, and by
@@ -55,13 +55,12 @@ import {
   REAL_DIR,
   type RealFunction,
   type RealManifest,
-  SYMBOLS_PROVIDER,
   SYMBOLS_PROVIDER_FILE,
   type VendoredEntry,
-  installedSymbolsProviderVersion,
   loadManifestsForVendor,
   resolveProjectRoot,
   rewriteManifest,
+  symbolsProviderStamp,
   vendoredMapFile,
 } from './manifests';
 import { placedModuleElves, resolveProjectElf } from './project-elf';
@@ -127,10 +126,7 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);
   // One stamp for all of the project's maps, written once every one of them is.
   const stamp = (): void =>
-    writeFileSync(
-      join(outDir, SYMBOLS_PROVIDER_FILE),
-      JSON.stringify({ [SYMBOLS_PROVIDER]: installedSymbolsProviderVersion() }, null, 2) + '\n',
-    );
+    writeFileSync(join(outDir, SYMBOLS_PROVIDER_FILE), JSON.stringify(symbolsProviderStamp(), null, 2) + '\n');
 
   // ONE MAP PER REL MODULE THAT HAS ROWS. A module's code refers to the module's own symbols, so a
   // REL row is read with the module's map — its symbols, placed, over the base ELF's globals

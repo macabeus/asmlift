@@ -14,8 +14,8 @@ import {
   SYMBOLS_PROVIDER,
   SYMBOLS_PROVIDER_FILE,
   type VendoredEntry,
-  installedSymbolsProviderVersion,
   resolveProjectRoot,
+  symbolsProviderStamp,
   validateManifest,
   vendoredMapFile,
 } from '../src/cases/manifests';
@@ -240,10 +240,11 @@ describe('committed real-tier manifests', () => {
       ).toEqual([]);
     });
 
-    // A map is derived by the CLI's provider as much as from the ELF, and a provider bump touches no
-    // measured path, so neither provenance nor `bench baseline` sees the maps go stale. This does,
-    // without a checkout: the version that wrote the maps must be the one installed.
-    test(`${f} vendored its symbol maps with the installed ${SYMBOLS_PROVIDER}`, () => {
+    // A map is derived by the CLI's provider (the package and its in-repo driver) as much as from the
+    // ELF, and neither a bump nor a provider edit touches a measured path that re-derives the maps, so
+    // neither provenance nor `bench baseline` sees them go stale. This does, without a checkout: the
+    // inputs that wrote the maps must be the ones in this tree.
+    test(`${f} vendored its symbol maps with the installed ${SYMBOLS_PROVIDER} and this tree's provider`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const dir = join(REAL_DIR, 'tu', man.project);
       if (!existsSync(vendoredMapFile(dir, undefined))) {
@@ -251,13 +252,13 @@ describe('committed real-tier manifests', () => {
       }
       const stampPath = join(dir, SYMBOLS_PROVIDER_FILE);
       const stamped = existsSync(stampPath)
-        ? (JSON.parse(readFileSync(stampPath, 'utf8')) as Record<string, string>)[SYMBOLS_PROVIDER]
-        : undefined;
+        ? (JSON.parse(readFileSync(stampPath, 'utf8')) as Record<string, string>)
+        : {};
       expect(
         stamped,
-        `${man.project}: maps vendored with ${SYMBOLS_PROVIDER} ${stamped ?? '(unstamped)'} — ` +
+        `${man.project}: maps vendored with other provider inputs — ` +
           `run \`pnpm bench vendor --project ${man.project} --symbols-only\``,
-      ).toBe(installedSymbolsProviderVersion());
+      ).toEqual(symbolsProviderStamp());
     });
 
     // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that

@@ -16,6 +16,7 @@ import { parseFlags, storedFlags, tokenizeFlags, unitLanguage } from '@asmlift/c
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -205,16 +206,42 @@ export const vendoredMapFile = (dir: string, module: string | undefined): string
   module === undefined ? join(dir, 'symbols.json.gz') : join(dir, MODULE_MAP_DIR, `${module}.json.gz`);
 
 /** The package that derives every vendored symbol map from a project's ELF (the CLI's
- *  `symbols-provider`), and the file `bench vendor` stamps its version into, beside the maps.
+ *  `symbols-provider`), and the file `bench vendor` stamps the map's inputs into, beside the maps.
  *
- *  WHY A STAMP. A map is a function of the ELF AND of this package, and a bump of the package alone
- *  touches no measured path: provenance and `bench baseline` both read the artifact as CURRENT
- *  while every map is stale. The only other gate is `bench fidelity`'s drift pre-step, which needs
- *  the checkouts, so CI never runs it. `test/real-manifests.test.ts` holds each project's stamp
- *  equal to the installed version, so a bump fails the offline tests until the maps are
- *  re-vendored (`pnpm bench vendor --symbols-only`). */
+ *  WHY A STAMP. A map is a function of the ELF, of this package, AND of the in-repo provider that
+ *  drives it ({@link SYMBOLS_PROVIDER_SOURCES}: which symbols it keeps, how it places a REL module,
+ *  and `canonicalOrder`, which picks `[0]` at an address with aliases). A change to either code
+ *  input alone touches no measured path that re-derives the maps: provenance forces a regen, and
+ *  the regen reads the stale vendored maps, so `bench baseline` reads the artifact as CURRENT. The
+ *  only other gate is `bench fidelity`'s drift pre-step, which needs the checkouts, so CI never runs
+ *  it. `test/real-manifests.test.ts` holds each project's stamp equal to
+ *  {@link symbolsProviderStamp}, so a bump or a provider edit fails the offline tests until the
+ *  maps are re-vendored (`pnpm bench vendor --symbols-only`). An edit that changes no map (a
+ *  comment) fails it too; re-vendoring then rewrites the stamp and leaves every map byte-identical.
+ *
+ *  KNOWN GAP: two core functions feed the map and are NOT digested, because each is shared with
+ *  code that has nothing to do with vendoring and a digest would demand a re-vendor on every edit
+ *  there: `addressCastMacrosFrom` (core macros.ts, which names a map's macro cells) and
+ *  `symbolMapToJson` (the serialization). A change to either is caught only by `bench fidelity`. */
 export const SYMBOLS_PROVIDER = '@gba-kit/debug-info';
 export const SYMBOLS_PROVIDER_FILE = 'symbols.provider.json';
+
+/** The in-repo source of the provider, repo-relative: the files whose digests the stamp records. */
+export const SYMBOLS_PROVIDER_SOURCES = ['packages/cli/src/symbols-provider.ts', 'packages/cli/src/module-elf.ts'];
+
+/** What `bench vendor` writes to {@link SYMBOLS_PROVIDER_FILE}: the version of
+ *  {@link SYMBOLS_PROVIDER} installed for packages/cli, and a sha256 (first 16 hex digits) of each
+ *  of {@link SYMBOLS_PROVIDER_SOURCES} as it is in this tree. */
+export function symbolsProviderStamp(): Record<string, string> {
+  const stamp: Record<string, string> = { [SYMBOLS_PROVIDER]: installedSymbolsProviderVersion() };
+  for (const rel of SYMBOLS_PROVIDER_SOURCES) {
+    stamp[rel] = createHash('sha256')
+      .update(readFileSync(join(REPO_ROOT, rel)))
+      .digest('hex')
+      .slice(0, 16);
+  }
+  return stamp;
+}
 
 /** The version of {@link SYMBOLS_PROVIDER} the CLI resolves: found the way Node resolves it from
  *  packages/cli, since the package's `exports` map does not expose its package.json. */
