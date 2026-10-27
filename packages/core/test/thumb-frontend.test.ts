@@ -3857,9 +3857,19 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const bounded = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: inIwram }).source;
       expect(bounded).toContain('volatile u32 sp4;');
       expect(bounded).toContain('((s32 *)&gNamed)[1] = a1;');
-      // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
+      // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word. That
+      // byte is then also the literal `REG_DMA3CNT` store's, two spellings of one cell agbcc does
+      // not reload across, so on agbcc the lift declines (raise/offsetnames.ts `cellSpelledTwice`);
+      // the window's exactness is read under a target that reloads across them
       const onControl = new Map([[0x040000d8, [{ name: 'gNamed', kind: 'data' as const }]]]);
-      const kept = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl }).source;
+      expect(() => decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl })).toThrow(
+        /byte 0x40000dc is reached as a numeric address and as 'gNamed'/,
+      );
+      const reloading = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, reloadsAcrossSpellings: true },
+      };
+      const kept = decompile('n1', n1, reloading, { ...five, symbols: onControl }).source;
       expect(kept).toContain('    u8 sp4[8];');
       expect(kept).toContain('p0[1] = a1;');
       const n3 = armed(

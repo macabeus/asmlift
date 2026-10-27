@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 296 distinct decline messages (the texts reached by
+// `packages/core/src` throws 297 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 110 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -104,8 +104,10 @@
 //   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
 //                               callee handed back in it, where the callee's leftover bits are no value
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
+//   raise/offsetnames.ts     1  one byte reached under two spellings in one function (two names, or a
+//                               name and a numeric address) with a store among them
 //
-// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fourteen of them, and the file
+// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fifteen of them, and the file
 // names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
 // harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
 // then reads THIS FILE back and requires each one to be spelled here. Move a family out of the

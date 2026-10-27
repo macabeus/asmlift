@@ -12,8 +12,23 @@
 //   • two DIFFERENT named globals are different objects, so a store through one can never change
 //     what a read of the other sees. That is a C guarantee about distinct declared objects, not a
 //     heuristic about what the compiler happened to do.
-//   • name comparison suffices because the pool promotion picks ONE canonical name per address,
-//     so a single cell cannot appear under two names within one function (frontend/thumb.ts).
+//   • name comparison suffices where a cell has ONE spelling per function and a name ONE cell, and
+//     that is enforced for every access whose address a symbol map places, through defs and
+//     joins alike and with constant arithmetic folded as the C compiler will fold it (an index or
+//     displacement built in several steps): raise/offsetnames.ts `cellSpelledTwice` declines a
+//     lift that reaches one byte under two names, or under a name and a numeric address, with a
+//     store among them, and one that reads a name the map places at several addresses at two of
+//     them. The pool promotion's one canonical name per address does not give it alone: an
+//     interior attribution into an object sized over its neighbour, a walk the offset-name gates
+//     leave as `base + K` past the base's end, a raw constant beside an unsized name, and any of
+//     them carried across a join each reach a named cell a second way. On a compiler that reloads
+//     across two spellings (`reloadsAcrossSpellings`, IDO 7.1) a pair in one block outside any
+//     loop with the store first is exempt, whoever chose them, because the C reads the cell back
+//     after the store as the asm did; IDO sinks a read placed before the store past it, so that
+//     order declines there too. agbcc and gcc 2.7.2 forward.
+//     KNOWN GAP: with no map (or a name the map does not hold) nothing is placed, so a relocation
+//     and a literal for one cell lift unchecked — faithful on IDO, wrong C on agbcc and gcc 2.7.2
+//     where the asm reloaded.
 //   • anything that does not resolve to a name — a materialized base, a variable index, a pointer
 //     parameter — is unknown, and unknown BARS. A call or an `opaque` bars unconditionally: it may
 //     write anything.
@@ -147,15 +162,20 @@ export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): 
  * {@link constAddressOf}'s question). The one reading of address arithmetic that raise/structs.ts
  * (which accesses share a base) and raise/offsetnames.ts (which named global an address stands on)
  * both ask, so the two cannot disagree about where a chain ends.
+ *
+ * `constOf` is what counts as a constant operand: a `const` def by default, which is where those
+ * two readers want a chain to end. raise/offsetnames.ts `cellSpelledTwice`, which must place an
+ * address the way the C compiler will once it folds the emitted arithmetic, passes a reader that
+ * folds constant subtrees too.
  */
 export function constDisplacementOf(
   defs: Map<Value, Op>,
   addr: Value,
-): { root: Value; k: number; chain: Value[] } | null {
-  const constOf = (x: Value): number | null => {
+  constOf: (x: Value) => number | null = (x) => {
     const d = defs.get(x);
     return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : null;
-  };
+  },
+): { root: Value; k: number; chain: Value[] } | null {
   let k = 0;
   const chain: Value[] = [];
   let cur = addr;

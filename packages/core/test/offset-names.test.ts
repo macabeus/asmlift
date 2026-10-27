@@ -16,10 +16,17 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
 import { decompile, stampBehaviorsFor } from '../src/pipeline';
-import { OFFSET_NAME_GATES, OFFSET_NAME_PASS, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
+import { RaiseUnsupportedError } from '../src/raise/errors';
+import {
+  OFFSET_NAME_GATES,
+  OFFSET_NAME_PASS,
+  cellSpelledTwice,
+  nameOffsetAddresses,
+  offsetNameRefusals,
+} from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -518,5 +525,269 @@ describe('the gates are load-bearing', () => {
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
     expect(namedWithout('const-target-store', rom)).toContain('gRomWord');
+  });
+});
+
+// ONE SPELLING PER CELL (`cellSpelledTwice`). Every probe stores 5 to a word, stores 7 to one of
+// its bytes, and reads the word back, so the asm returns the 7 through memory. Spelled through two
+// names — or a name and a numeric address — the C is two objects to the compiler, and agbcc
+// (`-O2 -mthumb-interwork`) and gcc 2.7.2 compile the read to the forwarded `5`. Checked by
+// compiling each shape quoted below.
+describe('one spelling per cell', () => {
+  const probe = (word: string, byte: string, byteStore = 'strb\tr0, [r2]'): string =>
+    `f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tmovs\tr0, #7\n\t${byteStore}\n` +
+    `\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t${word}\n.L2:\n\t.word\t${byte}\n`;
+  const lifted = (asm: string, symbols: SymbolMap): string => decompile('f', asm, ARMV4T_AGBCC, { symbols }).source;
+  const sRandCount: SymbolInfo = {
+    name: 'sRandCount',
+    kind: 'data',
+    size: 4,
+    declared: true,
+    shape: 'scalar',
+    signed: false,
+  };
+  // pokeemerald EWRAM as vendored now: `sUnknown` is random.c's `static u8` at its own st_size
+  const perAddress: SymbolMap = new Map([
+    [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 1 }]],
+    [0x020249c0, [sRandCount]],
+  ]);
+
+  test('a byte the map places inside one name is spelled through that name alone', () => {
+    // agbcc: `strb r0, [r1, #0x1]; ldr r0, [r1]` — the read goes back to memory
+    const out = lifted(probe('0x020249c0', '0x020249c1'), perAddress);
+    expect(out).toContain('sRandCount');
+    expect(out).not.toContain('sUnknown');
+    expect(out).not.toMatch(/33704385|0x20249c1/i);
+  });
+
+  test('a map that lays one object over another declines the byte both cover', () => {
+    // a map that joins a multi-address name's DWARF shape by name: EWRAM `sUnknown` takes
+    // berry_powder.c's 8-byte ROM `sUnknown[2]`, and the byte is `((u8 *)&sUnknown)[5]` beside
+    // `sRandCount`
+    const overlapping: SymbolMap = new Map([
+      [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 8, shape: 'array', elemSize: 4, dims: [2] }]],
+      [0x020249c0, [sRandCount]],
+    ]);
+    expect(() => lifted(probe('0x020249c0', '0x020249c1'), overlapping)).toThrow(RaiseUnsupportedError);
+    expect(() => lifted(probe('0x020249c0', '0x020249c1'), overlapping)).toThrow(
+      /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+    );
+    // …but the overlap in the MAP is not the defect: a function reaching the cell one way lifts
+    const single = 'f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x020249c0\n';
+    expect(lifted(single, overlapping)).toContain('return sRandCount;');
+  });
+
+  test('a displacement walked past the base object into its neighbour declines', () => {
+    // `strb r0, [r1, #4]` off `sUnknown` (1 byte) lands on `sRandCount`; the walk gates refuse the
+    // byte-wide name, and the arithmetic they leave spelled `((u8 *)&sUnknown)[4]` beside it
+    for (const k of [4, 5]) {
+      expect(() => lifted(probe('0x020249c0', '0x020249bc', `strb\tr0, [r2, #${k}]`), perAddress)).toThrow(
+        new RegExp(`byte 0x${(0x020249c0 + k - 4).toString(16)} is reached as 'sRandCount' and as 'sUnknown'`),
+      );
+    }
+  });
+
+  test('a numeric address beside a name for the same byte declines', () => {
+    // kleod's pointer-shaped `gUnk_030007C8` carries no size, so the byte stays a raw constant:
+    // `gUnk_030007C8 = 5; *(u8 *)50333641 = 7; return gUnk_030007C8;`
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    expect(() => lifted(probe('0x030007c8', '0x030007c9'), unsized)).toThrow(
+      /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
+    );
+  });
+
+  test('two spellings that only READ the byte lift: there is no store to forward', () => {
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    const reads =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tldr\tr0, [r1]\n\tldrb\tr3, [r2]\n\tadds\tr0, r0, r3\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x030007c8\n.L2:\n\t.word\t0x030007c9\n';
+    expect(lifted(reads, unsized)).toContain('gUnk_030007C8');
+  });
+
+  // gcc 2.7.2 -O2 compiles `D_80100004 = 5; ((u8 *)0x80100000)[5] = 7; return D_80100004;` to
+  // `sb v0, 5(at); jr ra; li v0, 5`; the literal is the negative constant the frontend builds.
+  const mips = (walk: string, word: string, byteOff: number, moveByte = ''): string => `glabel f
+    /* 0 80000200 3C010000 */  lui        $at, %hi(D_80100000)
+    /* 4 80000204 24210000 */  addiu      $at, $at, %lo(D_80100000)
+${walk}    /* C 8000020C 24080005 */  addiu      $t0, $zero, 5
+    /* 10 80000210 AC280000 */  sw         $t0, ${word}($at)
+    /* 14 80000214 3C098010 */  lui        $t1, 0x8010
+${moveByte}    /* 18 80000218 240A0007 */  addiu      $t2, $zero, 7
+    /* 1C 8000021C A12A0005 */  sb         $t2, ${byteOff}($t1)
+    /* 20 80000220 8C220000 */  lw         $v0, ${word}($at)
+    /* 24 80000224 03E00008 */  jr         $ra
+    /* 28 80000228 00000000 */   nop
+endlabel f
+`;
+  const twoWords: SymbolMap = new Map([
+    [0x80100000, [{ name: 'D_80100000', kind: 'data', size: 4, shape: 'scalar' }]],
+    [0x80100004, [{ name: 'D_80100004', kind: 'data', size: 4, shape: 'scalar', signed: true }]],
+  ]);
+
+  test('on MIPS, a walk the map names beside a numeric address declines where the compiler forwards', () => {
+    // `addiu $at, $at, 4` off `D_80100000` is named `D_80100004` by this pass — asmlift's spelling
+    const walked = mips('    /* 8 80000208 24210004 */  addiu      $at, $at, 4\n', '0', 5);
+    expect(() => decompile('f', walked, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100005 is reached as 'D_80100004' and as a numeric address/,
+    );
+    // …and lifts where it reloads: IDO 7.1 -O2 compiles the same C to `sw t6, 0(v1); sb t7,
+    // 5(t8); jr ra; lw v0, 0(v1)`, whoever chose the name
+    const ido = decompile('f', walked, MIPS_IDO, { symbols: twoWords }).source;
+    expect(ido).toContain('D_80100004 = 5;');
+    expect(ido).toContain('[5] = 7;');
+    expect(ido).toContain('return D_80100004;');
+  });
+
+  test('a byte the ASM spells two ways lifts where the compiler reloads, and declines where it forwards', () => {
+    // nothing here was read off the map. IDO 7.1 -O2 reloads the word (`sb t7, 1(t8); jr ra; lw
+    // v0, 0(v1)`), so the source's own two spellings made this asm; gcc 2.7.2 compiles the same C
+    // to `sb v0, -2146435071; jr ra; li v0, 5`, so an asm that reloads was not those two spellings
+    const own = mips('', '0', 1);
+    const ido = decompile('f', own, MIPS_IDO, { symbols: twoWords }).source;
+    expect(ido).toContain('D_80100000 = 5;');
+    expect(ido).toContain('[1] = 7;');
+    expect(() => decompile('f', own, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
+    );
+  });
+
+  test('on IDO, a read placed BEFORE a store through another spelling declines: IDO sinks it past the store', () => {
+    // IDO 7.1 -O2 compiles `v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7; return v0;` (and the
+    // `D_80100005 = 7;` form) to `sb t6, 5(at); jr ra; lw v0, 0(v1)`: the C returns the word with
+    // byte 5 already 7, where this asm returns the word as it was before the store
+    const loadFirst = (byteStore: string, head = ''): string => `glabel f
+${head}    /* 0 80000200 3C010000 */  lui        $at, %hi(D_80100000)
+    /* 4 80000204 24210000 */  addiu      $at, $at, %lo(D_80100000)
+    /* 8 80000208 242B0004 */  addiu      $t3, $at, 4
+    /* C 8000020C 8D620000 */  lw         $v0, 0($t3)
+    /* 10 80000210 240A0007 */  addiu      $t2, $zero, 7
+${byteStore}    /* 1C 8000021C 03E00008 */  jr         $ra
+    /* 20 80000220 00000000 */   nop
+endlabel f
+`;
+    const withByte: SymbolMap = new Map([
+      ...twoWords,
+      [0x80100005, [{ name: 'D_80100005', kind: 'data', size: 1, shape: 'scalar' }]],
+    ]);
+    const displaced = '    /* 14 80000214 A02A0005 */  sb         $t2, 5($at)\n';
+    const named =
+      '    /* 14 80000214 24290005 */  addiu      $t1, $at, 5\n    /* 18 80000218 A12A0000 */  sb         $t2, 0($t1)\n';
+    for (const [store, spelled] of [
+      [displaced, /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100000'/],
+      [named, /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100005'/],
+    ] as const) {
+      expect(() => decompile('f', loadFirst(store), MIPS_IDO, { symbols: withByte })).toThrow(spelled);
+      expect(() => decompile('f', loadFirst(store), MIPS_GCC, { symbols: withByte })).toThrow(RaiseUnsupportedError);
+    }
+    // the asm's own two relocations in that order are the same pair
+    const ownLoadFirst = `glabel f
+    /* 0 80000200 3C030000 */  lui        $v1, %hi(D_80100004)
+    /* 4 80000204 8C620000 */  lw         $v0, %lo(D_80100004)($v1)
+    /* 8 80000208 3C010000 */  lui        $at, %hi(D_80100005)
+    /* C 8000020C 240A0007 */  addiu      $t2, $zero, 7
+    /* 10 80000210 03E00008 */  jr         $ra
+    /* 14 80000214 A02A0000 */   sb        $t2, %lo(D_80100005)($at)
+endlabel f
+`;
+    expect(() => decompile('f', ownLoadFirst, MIPS_IDO, { symbols: withByte })).toThrow(
+      /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100005'/,
+    );
+  });
+
+  // The address reaches the byte store through a JOIN, which the raising tower merges into the name
+  // (or into a pointer local whose only base is it), and agbcc tracks the base across the join:
+  // `sRandCount = 5; ((u8 *)&sUnknown)[5] = 7; return sRandCount;` and the `v0 = (u8 *)&sUnknown`
+  // form both compile to `mov r0, #0x5`.
+  const joined = (word: string, byte: string, arm: string, byteStore: string): string =>
+    `f:\n\tldr\tr1, .L1\n\tmovs\tr3, #5\n\tstr\tr3, [r1]\n${arm}` +
+    `.Lb:\n\tmovs\tr3, #7\n\t${byteStore}\n\tldr\tr0, [r1]\n\tbx\tlr\n` +
+    `.L1:\n\t.word\t${word}\n.L2:\n\t.word\t${byte}\n`;
+  const twoLoads = '\tcmp\tr0, #0\n\tbeq\t.La\n\tldr\tr2, .L2\n\tb\t.Lb\n.La:\n\tldr\tr2, .L2\n';
+  const loadAndCopy = '\tldr\tr2, .L2\n\tcmp\tr0, #0\n\tbeq\t.Lb\n\tadds\tr2, #0\n';
+
+  test('an address that reaches the access through a join is placed as the join spells it', () => {
+    for (const arm of [twoLoads, loadAndCopy]) {
+      expect(() => lifted(joined('0x020249c0', '0x020249bc', arm, 'strb\tr3, [r2, #5]'), perAddress)).toThrow(
+        /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+      );
+    }
+    // a name and a raw constant through the same join: `v0 = (u8 *)50333641; *v0 = 7;`
+    const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+    expect(() => lifted(joined('0x030007c8', '0x030007c9', twoLoads, 'strb\tr3, [r2]'), unsized)).toThrow(
+      /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
+    );
+    // …and a join that reaches nothing the word is spelled through lifts
+    expect(lifted(joined('0x020249c0', '0x020249bc', twoLoads, 'strb\tr3, [r2]'), perAddress)).toContain(
+      'sUnknown = 7;',
+    );
+  });
+
+  test('a constant built in several steps is placed as the C compiler folds it', () => {
+    // the index or displacement reaches the access as `add(add(c, c), …)`, `shl(c, #0)` or two
+    // pool words summed, not as one `const`. The emitted C folds each (`((u8 *)&sUnknown)[5]`,
+    // `*(u8 *)33704385`), and agbcc forwards the 5 past it (`strb r0, [r1]; mov r0, #0x5`)
+    const head = '\tldr\tr3, .L1\n\tmovs\tr0, #5\n\tstr\tr0, [r3]\n';
+    const tail = '\tldr\tr0, [r3]\n\tbx\tlr\n.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x020249bc\n';
+    const steps = '\tldr\tr1, .L2\n\tmovs\tr2, #2\n\tadds\tr2, #3\n\tmovs\tr0, #7\n';
+    for (const [body, name] of [
+      [`${steps}\tstrb\tr0, [r1, r2]\n`, 'an index of two adds'],
+      [`${steps}\tadds\tr1, r1, r2\n\tstrb\tr0, [r1]\n`, 'a displacement of two adds'],
+      ['\tldr\tr1, .L2\n\tmovs\tr2, #5\n\tlsls\tr2, r2, #0\n\tmovs\tr0, #7\n\tstrb\tr0, [r1, r2]\n', 'a shifted index'],
+    ]) {
+      expect(() => lifted(`f:\n${head}${body}${tail}`, perAddress), name).toThrow(
+        /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
+      );
+    }
+    const rawSum =
+      `f:\n${head}\tldr\tr1, .L2\n\tldr\tr2, .L3\n\tadds\tr1, r1, r2\n\tadds\tr1, #1\n\tmovs\tr0, #7\n` +
+      '\tstrb\tr0, [r1]\n\tldr\tr0, [r3]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x01000000\n.L3:\n\t.word\t0x010249c0\n';
+    expect(() => lifted(rawSum, perAddress)).toThrow(
+      /byte 0x20249c1 is reached as 'sRandCount' and as a numeric address/,
+    );
+    // gcc 2.7.2: a literal moved up and back down still names the byte the plain pin declines on
+    const movedBack = mips(
+      '',
+      '0',
+      1,
+      '    /* 16 80000216 25290010 */  addiu      $t1, $t1, 0x10\n' +
+        '    /* 17 80000217 2529FFF0 */  addiu      $t1, $t1, -0x10\n',
+    );
+    expect(() => decompile('f', movedBack, MIPS_GCC, { symbols: twoWords })).toThrow(
+      /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
+    );
+  });
+
+  test('one name read off the map at two of its addresses declines', () => {
+    // two EWRAM file statics both called `sFiller`: `sFiller = 5; return sFiller;` would read back
+    // the stored cell, where the asm reads the other one
+    const filler: SymbolInfo = { name: 'sFiller', kind: 'data', size: 4, shape: 'scalar' };
+    const twoStatics: SymbolMap = new Map([
+      [0x02037344, [filler]],
+      [0x02037fe0, [filler]],
+    ]);
+    const asm = (a: string, b: string): string =>
+      `f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tldr\tr0, [r2]\n\tbx\tlr\n` +
+      `.L1:\n\t.word\t${a}\n.L2:\n\t.word\t${b}\n`;
+    expect(() => lifted(asm('0x02037344', '0x02037fe0'), twoStatics)).toThrow(
+      /'sFiller' names two of the cells the map places it at/,
+    );
+    // the same one of the two, reached twice, is one object
+    expect(lifted(asm('0x02037344', '0x02037344'), twoStatics)).toContain('return sFiller;');
+  });
+
+  test('an address-cast macro is a numeric spelling, so it shares a byte with a raw constant', () => {
+    // `REG_W` expands to the literal it names: to the compiler both stores are numeric addresses
+    const macro: SymbolMap = new Map([
+      [0x040000b8, [{ name: 'REG_W', kind: 'data', size: 4, macroBody: '(*(vu32 *)0x40000b8)' }]],
+    ]);
+    const fn = lift('f', probe('0x040000b8', '0x040000b9'), macro);
+    expect(fn.blocks.flatMap((b) => b.ops).some((op) => op.opcode === 'gaddr' && op.attrs.sym === 'REG_W')).toBe(true);
+    expect(cellSpelledTwice(fn, macro)).toBeNull();
+    // the same entry as an ordinary (unsized, so the byte stays raw) name is a second spelling
+    const named: SymbolMap = new Map([[0x040000b8, [{ name: 'gW', kind: 'data' }]]]);
+    expect(cellSpelledTwice(lift('f', probe('0x040000b8', '0x040000b9'), named), named)).toMatch(
+      /'gW' and as a numeric address/,
+    );
   });
 });

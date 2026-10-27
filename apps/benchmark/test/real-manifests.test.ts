@@ -261,6 +261,40 @@ describe('committed real-tier manifests', () => {
       ).toEqual(symbolsProviderStamp());
     });
 
+    // The provider joins a DWARF declaration to a symbol BY NAME, and the sidecar answers a name with
+    // one compilation unit's declaration — so a file static two units define (pokeemerald's EWRAM
+    // `static u8 sUnknown` and ROM `static const u32 sUnknown[2]`) would take that one shape at both
+    // addresses. The borrowed 8-byte size makes EWRAM `sUnknown` contain its neighbour `sRandCount`,
+    // so one cell gets two names in one function, and agbcc forwards a store across them. A vendored
+    // map must carry no name-joined fact on such a name (symbols-provider.ts multiAddressDataNames).
+    test(`${f} attributes no name-joined declaration to a data name at more than one address`, () => {
+      const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
+      const dir = join(REAL_DIR, 'tu', man.project);
+      const maps = [vendoredMapFile(dir, undefined)];
+      if (existsSync(join(dir, 'symbols'))) {
+        maps.push(...readdirSync(join(dir, 'symbols')).map((m) => join(dir, 'symbols', m)));
+      }
+      for (const path of maps.filter((p) => existsSync(p))) {
+        const map = JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')) as Record<
+          string,
+          { name: string; kind: string; declared?: boolean; shape?: string; macroBody?: string }[]
+        >;
+        const addresses = new Map<string, Set<string>>();
+        for (const [addr, infos] of Object.entries(map)) {
+          for (const i of infos) {
+            if (i.kind === 'data' && i.macroBody === undefined) {
+              addresses.set(i.name, (addresses.get(i.name) ?? new Set()).add(addr));
+            }
+          }
+        }
+        const joined = Object.values(map)
+          .flat()
+          .filter((i) => (addresses.get(i.name)?.size ?? 0) > 1 && (i.declared || i.shape !== undefined))
+          .map((i) => i.name);
+        expect([...new Set(joined)], `${man.project}: ${path}`).toEqual([]);
+      }
+    });
+
     // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that
     // re-vendors without re-deriving (or the reverse) leaves the two commits apart, and fails here.
     test(`${f} derives every unit's flags at the commit its TUs were vendored from`, () => {

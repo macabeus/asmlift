@@ -84,7 +84,7 @@ function addressThroughJoins(fn: Fn): (v: Value) => Value {
 }
 
 /** Every block parameter's incoming values, one per in-edge (the entry block's excepted). */
-function joinIncoming(fn: Fn): Map<Value, Value[]> {
+export function joinIncoming(fn: Fn): Map<Value, Value[]> {
   const incoming = new Map<Value, Value[]>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {

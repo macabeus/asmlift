@@ -5,7 +5,8 @@
 //   names+addresses+kind from `.symtab` (always), declaration shapes from the DWARF
 //   types-sidecar the project links in (when present — `hasTypeInfo` is the detector; absent
 //   ⇒ names-only, gracefully). The join is by NAME: the sidecar's variable DIEs carry
-//   name→type (declarations, no addresses), the symtab carries name→address.
+//   name→type (declarations, no addresses), the symtab carries name→address — so a name the
+//   symtab places at MORE THAN ONE address takes no DWARF fact at all (multiAddressDataNames).
 //
 // Alias policy (addresses are NOT unique in real projects): every symbol at an address is
 // kept, ordered so `[0]` is the canonical pick — header-declared (DIE-joined) names first,
@@ -292,6 +293,44 @@ export async function loadModuleSymbolMap(moduleElfPath: string, baseElfPath: st
   return map;
 }
 
+/** The data names the symtab places at more than one address — file statics two compilation units
+ *  each define (pokeemerald's `sUnknown` is a `static u8` in EWRAM and a `static const u32[2]` in
+ *  ROM). The sidecar answers `variableShape(name)` with ONE declaration for such a name (the first
+ *  definition it read), and nothing in a name join says which address that declaration belongs to,
+ *  so pasting it onto every address with the name sizes and types the others from a stranger's
+ *  declaration. That is not a cosmetic slip: a borrowed size can make one object CONTAIN another
+ *  (EWRAM `sUnknown` given 8 bytes covers its neighbour `sRandCount`), so one cell is spelled under
+ *  two names in one function, and agbcc — which treats two named objects as distinct — forwards a
+ *  stored value across the other name's store: plausible C that computes the wrong value.
+ *
+ *  Such a name therefore keeps only what the symtab says about that ADDRESS — its name, its kind and
+ *  its own st_size — and no name-joined declaration fact (shape, size, signedness, cv-qualifiers,
+ *  dims, layout, pointee, and `declared`, which only the join earns). KNOWN GAP: giving each
+ *  address its own declaration would need the DIE's location, which a name join does not read.
+ *
+ *  Counted over the ELF's whole symtab, before the module `keep` and unbacked filters: the
+ *  sidecar's ambiguity is a property of the ELF, not of which of its symbols reach the map. Only
+ *  data symbols count — a code symbol is never a variable DIE, so it cannot be the definition the
+ *  join picked. */
+export function multiAddressDataNames(
+  symbols: Iterable<{ name: string; address: number; type: number }>,
+  codeType: number,
+): Set<string> {
+  const addresses = new Map<string, Set<number>>();
+  for (const s of symbols) {
+    if (!s.name || s.name.startsWith('$') || s.name.startsWith('.') || s.type === codeType) {
+      continue;
+    }
+    const at = addresses.get(s.name);
+    if (at) {
+      at.add(s.address);
+    } else {
+      addresses.set(s.name, new Set([s.address]));
+    }
+  }
+  return new Set([...addresses].filter(([, at]) => at.size > 1).map(([name]) => name));
+}
+
 /** `keep` selects which of the ELF's own symbols reach the map, by name and mapped address (the
  *  module union's binding filter). Macro names are not symbols and are never filtered by it. */
 async function symbolMapFromElf(
@@ -319,6 +358,7 @@ async function symbolMapFromElf(
   // the whole ELF because no single variable can be relied on to exercise it.
   let pointeeWitnessed = false;
   let layoutsSeen = 0;
+  const ambiguous = multiAddressDataNames(di.symbols.symbols, STT_FUNC);
 
   const map: SymbolMap = new Map();
   for (const s of di.symbols.symbols) {
@@ -350,7 +390,9 @@ async function symbolMapFromElf(
       if (s.size > 0) {
         info.size = s.size;
       }
-      const sh = shapeOf(s.name);
+      // A name at more than one address keeps its own st_size and nothing name-joined
+      // (multiAddressDataNames).
+      const sh = ambiguous.has(s.name) ? null : shapeOf(s.name);
       if (sh) {
         assertShapeFactsPresent(sh, elfPath);
         assertArrayDimsPresent(sh, elfPath);

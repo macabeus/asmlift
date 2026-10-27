@@ -100,13 +100,20 @@
 // the map spells two ways at either end, a width the map does not state, a width that disagrees
 // with the access, a store onto a `const` name — refuse NOTHING here and are pinned by
 // `offset-names.test.ts` alone.
+//
+// AND IT IS WHERE A LIFT'S NAMES BECOME FINAL, so it is also where `cellSpelledTwice` asks whether
+// any byte is now reached under two spellings — the premise `ir/alias.ts` reads two names as two
+// objects on — and declines the function when one is. A refusal above is one way to get there (a
+// walk left as `base + K` past the base's end spells its neighbour's byte through the base's
+// name), not the only one, which is why the question is asked of the accesses and not of the gates.
 import { constDisplacementOf } from '../ir/alias';
-import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, successorsOf } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
 import { type SymbolInfo, type SymbolMap, accessSignedness, lookupSymbol } from '../symbols';
-import { type StampBehaviors, stampDeclaredVolatileUnder } from './declared-volatile';
+import { type StampBehaviors, joinIncoming, stampDeclaredVolatileUnder } from './declared-volatile';
+import { RaiseUnsupportedError } from './errors';
 
 /** One `add`/`sub` whose address the gates judge. Built only for an op that already resolves to a
  *  named base plus a NON-ZERO constant — a zero offset names the base itself, which the pool path
@@ -335,7 +342,7 @@ function namedBase(v: Value, defOf: Map<Value, Op>): { sym: string; code: boolea
 /** Every `add`/`sub` in `fn` that resolves to a named base plus a non-zero constant, with the
  *  context the gates judge. Shared by the rewrite and by `offsetNameRefusals` so the two cannot
  *  disagree about which sites exist. */
-function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: OffsetAddress }[] {
+function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: OffsetAddress; at: number }[] {
   const defOf = defOpMap(fn);
   const byName = addressesByName(symbols);
   const written = new Set<Value>();
@@ -390,7 +397,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
       }
     }
   }
-  const out: { op: Op; sym: string; addr: OffsetAddress }[] = [];
+  const out: { op: Op; sym: string; addr: OffsetAddress; at: number }[] = [];
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode !== 'add' && op.opcode !== 'sub') {
@@ -412,6 +419,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
       out.push({
         op,
         sym: base.sym,
+        at: at.addr + base.offset,
         addr: {
           base: at.info,
           ambiguous: at.twice,
@@ -430,15 +438,400 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
   return out;
 }
 
+/** Every address the map carries a name at, and whether the name is a MACRO — an address-cast
+ *  macro expands to the numeric literal, so to the compiler it is the same spelling as a raw
+ *  constant address, not an object of its own. Cached per map (rebuilt when its entry count moves),
+ *  because the pass runs once per lift setting of every row. */
+interface Places {
+  readonly addrs: number[];
+  macro: boolean;
+}
+const placesCache = new WeakMap<SymbolMap, { entries: number; places: Map<string, Places> }>();
+
+function placesByName(symbols: SymbolMap): Map<string, Places> {
+  const cached = placesCache.get(symbols);
+  if (cached && cached.entries === symbols.size) {
+    return cached.places;
+  }
+  const places = new Map<string, Places>();
+  for (const [addr, infos] of symbols) {
+    for (const info of infos) {
+      const p = places.get(info.name) ?? places.set(info.name, { addrs: [], macro: false }).get(info.name)!;
+      if (!p.addrs.includes(addr)) {
+        p.addrs.push(addr);
+      }
+      p.macro ||= info.macroBody !== undefined;
+    }
+  }
+  placesCache.set(symbols, { entries: symbols.size, places });
+  return places;
+}
+
+/** What one access's address may stand for: the SPELLING the emitted C reaches it through (a
+ *  global's name, or `null` for a numeric address — a raw constant or a macro), the OBJECT
+ *  addresses that spelling may denote, and the constant displacement off them. */
+interface Spelled {
+  readonly spelling: string | null;
+  readonly objects: readonly number[];
+  readonly k: number;
+  /** the name is asmlift's reading of the map (`gaddr`'s `fromMap`), not the asm's own spelling —
+   *  read by ONE CELL PER SPELLING only; whether two spellings forward is the compiler's fact */
+  readonly fromMap: boolean;
+}
+
+/** One access whose bytes the map lets this pass place, under ONE of the spellings its address may
+ *  stand for (an address that arrives through a join may stand for several, one entry each). */
+interface PlacedAccess extends Spelled {
+  /** the access, so a pair is never one op against itself */
+  readonly op: Op;
+  readonly ranges: readonly (readonly [lo: number, hi: number])[];
+  readonly writes: boolean;
+}
+
+/** The 32-bit integer `v` denotes when every leaf under it is a constant, or null. Integer
+ *  arithmetic over constants, and a join whose every in-edge brings one value, fold, because the C
+ *  compiler folds them in the emitted C whatever this pipeline's own constant pass does: an index
+ *  built in two steps (`movs r2, #2; adds r2, #3`), or `lsls r2, #0`, is `[5]` to agbcc.
+ *  Memoised per call of {@link cellSpelledTwice}; a value met again on its own walk (a loop-carried
+ *  join) does not fold. */
+function constantFolder(defOf: Map<Value, Op>, incoming: Map<Value, Value[]>): (v: Value) => number | null {
+  const memo = new Map<Value, number | null>();
+  const onWalk = new Set<Value>();
+  const fold = (v: Value): number | null => {
+    const known = memo.get(v);
+    if (known !== undefined || memo.has(v)) {
+      return known ?? null;
+    }
+    if (onWalk.has(v)) {
+      return null;
+    }
+    onWalk.add(v);
+    const out = foldOnce(v);
+    onWalk.delete(v);
+    memo.set(v, out);
+    return out;
+  };
+  const foldOnce = (v: Value): number | null => {
+    const d = defOf.get(v);
+    if (d === undefined) {
+      const ins = [...new Set(incoming.get(v) ?? [])].filter((a) => a !== v);
+      const each = ins.map(fold);
+      return each.length > 0 && each.every((x) => x !== null && x === each[0]) ? each[0] : null;
+    }
+    if (d.opcode === 'const') {
+      return typeof d.attrs.value === 'number' ? d.attrs.value >> 0 : null;
+    }
+    const a = d.operands.length > 0 ? fold(d.operands[0]) : null;
+    if (a === null) {
+      return null;
+    }
+    if (d.operands.length === 1) {
+      const imm = d.attrs.imm;
+      const w = d.attrs.width;
+      switch (d.opcode) {
+        case 'not':
+          return ~a;
+        case 'neg':
+          return -a >> 0;
+        case 'zext':
+          return typeof w === 'number' && w < 32 ? (a & ((1 << w) - 1)) >>> 0 : a;
+        case 'sext':
+          return typeof w === 'number' && w < 32 ? (a << (32 - w)) >> (32 - w) : a;
+      }
+      if (typeof imm !== 'number') {
+        return null;
+      }
+      return shift(d.opcode, a, imm);
+    }
+    const b = d.operands.length === 2 ? fold(d.operands[1]) : null;
+    if (b === null) {
+      return null;
+    }
+    switch (d.opcode) {
+      case 'add':
+        return (a + b) >> 0;
+      case 'sub':
+        return (a - b) >> 0;
+      case 'mul':
+        return Math.imul(a, b);
+      case 'and':
+        return a & b;
+      case 'or':
+        return a | b;
+      case 'xor':
+        return a ^ b;
+    }
+    return shift(d.opcode, a, b);
+  };
+  const shift = (opcode: string, a: number, n: number): number | null => {
+    if (n < 0 || n > 31) {
+      return null;
+    }
+    switch (opcode) {
+      case 'shl':
+        return a << n;
+      case 'shr_u':
+        return (a >>> n) >> 0;
+      case 'shr_s':
+        return a >> n;
+    }
+    return null;
+  };
+  return fold;
+}
+
+/** The spellings an address stands for, through defs and joins: a literal (or a literal plus
+ *  constants) is a numeric address, a `gaddr` plus constants its name — at the one map address
+ *  the name was read at (`mapAddr`), or at every address the map places it at — and a block
+ *  parameter every in-edge's value, so an address the raising tower will merge across a join (two
+ *  pool loads of one word, a load and its `adds #0` copy) is placed as the merge spells it. An
+ *  in-edge that passes the parameter back unchanged adds nothing; one that passes it MOVED (a
+ *  pointer stepped round a loop) reaches bytes no constant names. Null where any reaching value
+ *  is not placed: a parameter, a frame slot, a runtime index, a name the map does not hold. Every
+ *  constant here is read through `fold` ({@link constantFolder}), as the C compiler will read it. */
+function spellingsOf(
+  v: Value,
+  defOf: Map<Value, Op>,
+  incoming: Map<Value, Value[]>,
+  places: Map<string, Places>,
+  fold: (v: Value) => number | null,
+): Spelled[] | null {
+  // A parameter's answer is memoised per displacement once it is known not to lean on a parameter
+  // still being walked (`open`), so a chain of joins is walked once, not once per path through it.
+  const memo = new Map<Value, Map<number, Spelled[] | null>>();
+  const onWalk = new Map<Value, number>();
+  let open = false;
+  const walk = (x: Value, k: number): Spelled[] | null => {
+    // a literal however it was built, a join of one literal included
+    const literal = fold(x);
+    if (literal !== null) {
+      return [{ spelling: null, objects: [(literal + k) >>> 0], k: 0, fromMap: false }];
+    }
+    const disp = constDisplacementOf(defOf, x, fold);
+    const root = disp?.root ?? x;
+    const kk = k + (disp?.k ?? 0);
+    const d = defOf.get(root);
+    if (d?.opcode === 'gaddr') {
+      const sym = d.attrs.sym as string;
+      const at = places.get(sym);
+      if (at === undefined) {
+        return null;
+      }
+      const objects = typeof d.attrs.mapAddr === 'number' ? [d.attrs.mapAddr] : at.addrs;
+      return [{ spelling: at.macro ? null : sym, objects, k: kk, fromMap: d.attrs.fromMap === true }];
+    }
+    const ins = d === undefined ? incoming.get(root) : undefined;
+    if (ins === undefined) {
+      return null;
+    }
+    const known = memo.get(root)?.get(kk);
+    if (known !== undefined) {
+      return known;
+    }
+    const seenAt = onWalk.get(root);
+    if (seenAt !== undefined) {
+      open = true;
+      return seenAt === kk ? [] : null;
+    }
+    const outerOpen = open;
+    open = false;
+    onWalk.set(root, kk);
+    let out: Spelled[] | null = [];
+    for (const a of new Set(ins)) {
+      const each = walk(a, kk);
+      if (each === null) {
+        out = null;
+        break;
+      }
+      out.push(...each);
+    }
+    onWalk.delete(root);
+    if (!open) {
+      (memo.get(root) ?? memo.set(root, new Map()).get(root)!).set(kk, out);
+    }
+    open ||= outerOpen;
+    return out;
+  };
+  const all = walk(v, 0);
+  return all === null || all.length === 0 ? null : all;
+}
+
+/** Every spelling one memory access may be placed under, with the byte range at each base that
+ *  spelling may denote; empty where its address is not placed ({@link spellingsOf}). */
+function placeAccess(
+  op: Op,
+  defOf: Map<Value, Op>,
+  incoming: Map<Value, Value[]>,
+  places: Map<string, Places>,
+  fold: (v: Value) => number | null,
+): PlacedAccess[] {
+  let off: number;
+  let width: number;
+  if (op.opcode === 'load' || op.opcode === 'store') {
+    off = op.attrs.off as number;
+    width = op.attrs.width as number;
+  } else if (op.opcode === 'aload' || op.opcode === 'astore') {
+    const index = fold(op.operands[1]);
+    if (index === null) {
+      return [];
+    }
+    width = op.attrs.elemSize as number;
+    off = index * width;
+  } else {
+    return [];
+  }
+  const writes = op.opcode === 'store' || op.opcode === 'astore';
+  // A literal is compared as the UNSIGNED address the map keys by: MIPS and PPC materialize
+  // `0x80100000` as a negative 32-bit constant (`spellingsOf` takes `>>> 0`).
+  return (spellingsOf(op.operands[0], defOf, incoming, places, fold) ?? []).map((sp) => ({
+    ...sp,
+    op,
+    writes,
+    ranges: sp.objects.map((a) => [a + sp.k + off, a + sp.k + off + width] as const),
+  }));
+}
+
+/** The behaviours the pass reads: the declared-volatile stamp's, and whether this compiler RELOADS
+ *  a cell stored through one spelling and read through another (`compilerBehaviors`
+ *  `reloadsAcrossSpellings`; absent ⇒ it forwards). */
+export type OffsetNameBehaviors = StampBehaviors & {
+  readonly reloadsAcrossSpellings?: boolean;
+};
+
+/** ONE SPELLING PER CELL, AND ONE CELL PER SPELLING — the premise `ir/alias.ts` reads names on:
+ *  the first pair of this function's accesses that breaks it, or null when none does.
+ *
+ *  ONE SPELLING PER CELL. Two different names are two objects to every C compiler, and so are a
+ *  name and a numeric address: agbcc forwards a value stored through one past a store made
+ *  through the other, where the machine code reads memory back (`sRandCount = 5; ((u8
+ *  *)&sUnknown)[4] = 7; return sRandCount;` compiles to `mov r0, #5`). Several places decide a
+ *  spelling — the pool promotion's per-address pick and its interior attribution, this pass's
+ *  walk and the refusals that leave a walk as `base + K`, the raw constant where the map holds
+ *  nothing — and none of them sees the others' accesses. So the question is asked once, after the
+ *  last of them, over the BYTES each access touches rather than over the map's extents: a map that
+ *  lays one object over another is harmless until two accesses spell one byte two ways, and an
+ *  access walked past an object's declared end, or a raw constant beside an unsized name, reaches
+ *  a byte twice with no overlap in the map at all. A pair declines when one of the two is a store
+ *  (two LOADS leave no value to forward) and the compiler forwards across two spellings.
+ *
+ *  Which compilers forward is a compiler fact, not a property of who chose the spelling. agbcc and
+ *  gcc 2.7.2 forward, so an asm that went back to memory proves the source was NOT those two
+ *  spellings, and every such pair declines. IDO 7.1 reloads (`reloadsAcrossSpellings`) across a
+ *  name and a literal, two externs, two statics and an array element alike — but only a read that
+ *  FOLLOWS the store: it treats two names as two objects, so a read of one placed BEFORE a byte
+ *  store through the other is sunk past it (`v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7; return
+ *  v0;` is `sb t6, 5(at); jr ra; lw v0, 0(v1)`, the word read with byte 5 already 7). So the pair
+ *  lifts there only in an order the compiler is measured to keep ({@link keptInOrder}): both in
+ *  one block outside any loop, the store first — whether the asm spelled both (two relocations, a
+ *  relocation and a literal) or asmlift chose one off the map (a promoted pool word, an interior
+ *  attribution, a named walk: `gaddr`'s `fromMap`). Any other order declines.
+ *
+ *  ONE CELL PER SPELLING. A name the map places at several addresses (one file static per unit)
+ *  read off the map at two different ones is two objects the C would spell as one, which the
+ *  compiler forwards across or reads once (`sFiller = 5; return sFiller;` where the asm reads
+ *  another static's cell). It declines whenever one of the two is a map read — two relocations of
+ *  one name are the asm's own one object — with or without a store.
+ *
+ *  An address is placed through defs and joins ({@link spellingsOf}); one that reaches an access
+ *  under several spellings (`c ? &a : &b`) is placed under each, so a pair is asked of every one.
+ *  What this cannot place it cannot enforce: a lift with no map, or a name the map does not hold,
+ *  has no address to compare, and an address the compiler cannot place either — a pointer
+ *  parameter, a frame slot, a runtime index — is one it assumes may alias (agbcc reloads
+ *  `sRandCount` after `((u8 *)&sUnknown)[a0] = 7`). */
+export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpellings = false): string | null {
+  const keptInOrder = reloadsAcrossSpellings ? keptInOrderOn(fn) : (): boolean => false;
+  const defOf = defOpMap(fn);
+  const incoming = joinIncoming(fn);
+  const places = placesByName(symbols);
+  const fold = constantFolder(defOf, incoming);
+  const placed: PlacedAccess[] = [];
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      placed.push(...placeAccess(op, defOf, incoming, places, fold));
+    }
+  }
+  const spell = (s: string | null): string => (s === null ? 'a numeric address' : `'${s}'`);
+  for (const [i, x] of placed.entries()) {
+    for (const y of placed.slice(i + 1)) {
+      if (x.op === y.op) {
+        continue;
+      }
+      if (x.spelling !== null && x.spelling === y.spelling) {
+        const oneObject = x.objects.length === 1 && y.objects.length === 1 && x.objects[0] === y.objects[0];
+        const several = (places.get(x.spelling)?.addrs.length ?? 0) > 1;
+        if (several && (x.fromMap || y.fromMap) && !oneObject) {
+          return `'${x.spelling}' names two of the cells the map places it at`;
+        }
+        continue;
+      }
+      if (x.spelling === y.spelling || !(x.writes || y.writes)) {
+        continue;
+      }
+      if (keptInOrder(x.op, y.op)) {
+        continue;
+      }
+      for (const [xl, xh] of x.ranges) {
+        for (const [yl, yh] of y.ranges) {
+          if (xl < yh && yl < xh) {
+            return `byte 0x${Math.max(xl, yl).toString(16)} is reached as ${spell(x.spelling)} and as ${spell(y.spelling)}`;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Whether a compiler that reloads across two spellings (`reloadsAcrossSpellings`) keeps the pair
+ *  `a`, `b` (at least one a store) in the order the asm has, so the C reads back what the asm read.
+ *  MEASURED on IDO 7.1 -O2: a store then a read through another name reloads, and two stores keep
+ *  their order; a read then a store through another name does NOT — the read is sunk past the
+ *  store. So the pair holds only when both sit in ONE block, the store first (or both stores), and
+ *  that block is on no cycle: across blocks, or in a loop whose next iteration reads before this
+ *  one's store, nothing measured says the read stays where the asm put it. */
+function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
+  const at = new Map<Op, { block: Block; index: number }>();
+  for (const block of fn.blocks) {
+    block.ops.forEach((op, index) => at.set(op, { block, index }));
+  }
+  const onCycle = (start: Block): boolean => {
+    const seen = new Set<Block>();
+    const work = successorsOf(start);
+    for (let b = work.pop(); b !== undefined; b = work.pop()) {
+      if (b === start) {
+        return true;
+      }
+      if (!seen.has(b)) {
+        seen.add(b);
+        work.push(...successorsOf(b));
+      }
+    }
+    return false;
+  };
+  const isStore = (op: Op): boolean => op.opcode === 'store' || op.opcode === 'astore';
+  return (a, b) => {
+    const pa = at.get(a);
+    const pb = at.get(b);
+    if (pa === undefined || pb === undefined || pa.block !== pb.block || onCycle(pa.block)) {
+      return false;
+    }
+    // one of the two is a store, so the pair is in order exactly when the first one is
+    return isStore(pa.index < pb.index ? a : b);
+  };
+}
+
 /** Rewrite every admitted site into the `gaddr` the map names, in place. Returns THE NAMES it
  *  spelled, in block order — what a caller has to be told, because a name this pass produced does
  *  not rest on the map alone the way a pool-loaded one does: it rests on `addr(base) + K` landing
  *  on the map entry it names. `DecompileResult.walkedNames` and the trace's `stage:offsetnames`
- *  carry it out; nothing else can tell from a result that a walk was named. */
+ *  carry it out; nothing else can tell from a result that a walk was named.
+ *
+ *  It is also where the lift's names become FINAL, so it declines a function whose accesses reach
+ *  one byte under two spellings ({@link cellSpelledTwice}), whichever pass named them. */
 export function nameOffsetAddresses(
   fn: Fn,
   symbols: SymbolMap,
-  behaviors: StampBehaviors,
+  behaviors: OffsetNameBehaviors,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
 ): string[] {
   // Every site is judged against the PRE-REWRITE defs, so a chain's later links resolve through
@@ -447,7 +840,7 @@ export function nameOffsetAddresses(
   for (const s of admitted) {
     s.op.opcode = 'gaddr';
     s.op.operands = [];
-    s.op.attrs = { sym: s.addr.target!.name };
+    s.op.attrs = { sym: s.addr.target!.name, fromMap: true, mapAddr: s.at >>> 0 };
   }
   if (admitted.length > 0) {
     // An access now names another object, so whether it reads one the map declares volatile is
@@ -455,6 +848,13 @@ export function nameOffsetAddresses(
     stampDeclaredVolatileUnder(fn, symbols, behaviors);
     dce(fn); // the constants and the walked-off base the rewrite just orphaned
     verify(fn);
+  }
+  const twice = cellSpelledTwice(fn, symbols, behaviors.reloadsAcrossSpellings === true);
+  if (twice !== null) {
+    throw new RaiseUnsupportedError(
+      `cannot lift '${fn.name}': ${twice} in one function — C the compiler would read as ` +
+        `${twice.startsWith('byte') ? 'two objects, forwarding a store through one past the other' : 'one object'}`,
+    );
   }
   return admitted.map((s) => s.addr.target!.name);
 }
@@ -490,7 +890,7 @@ export function offsetNameRefusals(
  *  pass up, which three hand-written calls do not — so `offset-names.test.ts` supplies it by
  *  wrapping this record and asserting all three reach it. */
 export const OFFSET_NAME_PASS: {
-  run: (fn: Fn, symbols: SymbolMap, behaviors: StampBehaviors) => string[];
+  run: (fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors) => string[];
 } = {
   run: (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors),
 };
