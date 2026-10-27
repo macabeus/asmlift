@@ -35,10 +35,12 @@
 // mid-tested header), PROPERLY-nested loops, in-body `break`/early-`return`, comparison-tree and
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
-// others (`switchFrames`). Still DECLINED (loud StructureError, never wrong code):
-// irreducible/overlapping loops, exits to more than one live merge, a `break` out of a nested loop's
-// body, a `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
-// entered by a plain br).
+// others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
+// (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
+// StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
+// merge that no flag spells (a third target, or a second one outside the enclosing loop), a `break`
+// out of a nested loop's body, a `break` whose exit copies would clobber, and mixed-entry self-loops
+// (a guarded header also entered by a plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
@@ -1172,6 +1174,18 @@ interface ForeverLoopInfo {
   arms: LoopArm[];
   breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`, or whose edge enters a `breakArms` arm
   breakArms: BreakArm[];
+  twoLevel?: TwoLevelExit;
+}
+
+// A SECOND EXIT PAST THE CODE AFTER THE LOOP: `for (j…) { if (hit) goto next; } k(i); next: …`, the
+// `goto` a search loop takes out of its own exit region. The loop leaves to `exit` and, from the
+// blocks in `from`, to `to`, a block every path from `exit` reaches unless it leaves first
+// (`twoLevelTarget`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
+// break;` on the edge to `to`, and the code from `exit` up to `to` under `if (f == 0)` after it
+// (`emitForever`). Only a `while (1)` takes one, and only where no other reading fits.
+interface TwoLevelExit {
+  to: Block;
+  from: Set<Block>;
 }
 
 // A test-at-top multi-block `while`. The header is a pure test whose cond_br enters `bodyEntry`
@@ -2435,7 +2449,7 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
     id: 'arm-leaves-by-latch',
     why: 'an arm leaving by a latch is the way the loop itself leaves, and a copy past it moves post-loop code into the body',
     sound: false,
-    guardedBy: 'loop-break-exit.test.ts: an arm another path also enters is not a `break` arm, and the loop declines',
+    guardedBy: 'loop-break-exit.test.ts: an arm another path also enters is not a `break` arm',
     rejects: (c) => c.armLeavesByLatch,
   },
   {
@@ -3226,6 +3240,42 @@ export function structure(
   // loop's body (`innerBodyHas`), which would be a two-level exit.
   const innerBodyHas = (nl: NaturalLoop, b: Block): boolean =>
     [...forest.byHeader.values()].some((l2) => l2.header !== nl.header && nl.body.has(l2.header) && l2.body.has(b));
+  // THE CODE A TWO-LEVEL EXIT SKIPS (`TwoLevelExit`): every block a forward path from `exit` runs
+  // before it meets `to`, or null when none meets it. Forward only: an edge into a block that
+  // dominates its source is the back edge of a loop around both, the next iteration, not the code
+  // after this loop. A path that leaves without meeting `to` (a `return`, a `break` or `continue` of
+  // the enclosing loop) stays in the region, which renders it where it sits, inside the `if`.
+  const twoLevelSkip = (exit: Block, to: Block): Set<Block> | null => {
+    const region = new Set<Block>();
+    let meets = false;
+    for (const work = [exit]; work.length > 0;) {
+      const x = work.pop()!;
+      if (x === to) {
+        meets = true;
+      } else if (!region.has(x)) {
+        region.add(x);
+        work.push(...successorsOf(x).filter((s) => !dom.get(x)!.has(s)));
+      }
+    }
+    return meets ? region : null;
+  };
+  // May the edge from `nl`'s body to `to` be a two-level exit past `exit`? `to` lies outside the
+  // loop and is not `exit`; inside a loop around this one, both lie in that loop's body and `to` is
+  // not its header (that edge is the enclosing loop's `continue`, a different spelling); and the
+  // code from `exit` to `to` meets `to` and never re-enters this loop. Asked only of an edge no other
+  // reading takes (`foreverShape`), so a loop that lifted without it reads as it did.
+  const twoLevelTarget = (nl: NaturalLoop, exit: Block, to: Block): boolean => {
+    if (to === exit || nl.body.has(to)) {
+      return false;
+    }
+    const outer = forest.parent.get(nl.header);
+    const outerBody = outer ? forest.byHeader.get(outer)!.body : null;
+    if (outerBody !== null && (!outerBody.has(to) || !outerBody.has(exit) || to === outer)) {
+      return false;
+    }
+    const skip = twoLevelSkip(exit, to);
+    return skip !== null && ![...skip].some((x) => nl.body.has(x));
+  };
   const admissible = (nl: NaturalLoop): boolean =>
     [...forest.byHeader.values()].every(
       (l2) => l2.header === nl.header || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
@@ -3438,7 +3488,7 @@ export function structure(
   // after a loop there and an early `return` inside the loop's span, so block order alone would take
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
-  const foreverShape = (nl: NaturalLoop, copyExitTail: boolean): ForeverLoopInfo | null => {
+  const foreverShape = (nl: NaturalLoop, copyExitTail: boolean, twoLevel = false): ForeverLoopInfo | null => {
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -3461,6 +3511,7 @@ export function structure(
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
+      let second: TwoLevelExit | undefined;
       const fits = nl.exitEdges.every((e) => {
         if (e.to === exit) {
           breaks.add(e.from);
@@ -3477,7 +3528,22 @@ export function structure(
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
-        return owned !== null || (isRet(e.to) && !e.to.ops.some(effectful));
+        if (owned !== null || (isRet(e.to) && !e.to.ops.some(effectful))) {
+          return true;
+        }
+        // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body
+        if (
+          !twoLevel ||
+          innerBodyHas(nl, e.from) ||
+          (second !== undefined && second.to !== e.to) ||
+          (second === undefined && !twoLevelTarget(nl, exit, e.to))
+        ) {
+          return false;
+        }
+        second ??= { to: e.to, from: new Set() };
+        second.from.add(e.from);
+        breaks.add(e.from);
+        return true;
       });
       if (fits) {
         return {
@@ -3489,6 +3555,7 @@ export function structure(
           arms,
           breaks,
           breakArms,
+          ...(second !== undefined ? { twoLevel: second } : {}),
         };
       }
     }
@@ -3499,7 +3566,9 @@ export function structure(
   // with one. agbcc rotates `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail;` so the
   // `break` arm leaves by the latch and the count test mid-body: taking the arm for the exit, the
   // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
-  // the source's two `break`s and one `tail`.
+  // the source's two `break`s and one `tail`. Past all of them comes the two-level exit
+  // (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop that
+  // every other reading declines, so no loop that lifted before reads differently.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
@@ -3508,7 +3577,7 @@ export function structure(
     if (open && shape === null && copying !== undefined) {
       copying();
     } else {
-      const copied = shape ?? (open ? foreverShape(nl, true) : null);
+      const copied = shape ?? (open ? (foreverShape(nl, true) ?? foreverShape(nl, false, true)) : null);
       if (copied !== null) {
         foreverLoops.set(h, copied);
       }
@@ -6016,6 +6085,7 @@ export function structure(
     arms: LoopArm[];
     breaks: ReadonlySet<Block>;
     breakArms?: readonly BreakArm[];
+    twoLevel?: TwoLevelExit;
   };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
@@ -6137,10 +6207,21 @@ export function structure(
   // over every argument the header hands the exit, at the value level, and not only over the copies
   // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
-  const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
-    const exit = frame.exit;
+  //
+  // A TWO-LEVEL EXIT (`TwoLevelExit`) is judged as a `while (1)`'s break to its own target `to`:
+  // the region it lands in is the code from `to` on, which reads what the break left in the names.
+  const breakRule = (
+    frame: LoopFrame,
+    from: Block,
+    writes: Set<string>,
+    to: Block | null = frame.exit,
+  ): { refusal: string } | { bare: boolean } => {
+    const exit = to;
     if (exit === null) {
       return { refusal: 'leaves a loop that has no exit' }; // DEFENSIVE: no edge leaves such a loop
+    }
+    if (exit !== frame.exit && !foreverLoops.has(frame.header)) {
+      return { refusal: 'leaves for a second target a loop with a test of its own cannot spell' }; // DEFENSIVE
     }
     // A `while (1)` has no copies of its own after the loop, so a break carries its own, computed
     // where it leaves; what is left is the exit region's re-derivations. An inner loop's value the
@@ -7223,6 +7304,19 @@ export function structure(
     // (or that an early-return arm owns) needs no `break`: if-recovery below copies the tail into the
     // arm, as it does outside a switch when the break rule refuses. Any other exit is refused here,
     // loud, rather than handed to the printer as a `break` it would rebind.
+    // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
+    // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
+    // code from the second target inside the loop.
+    const twoLevel =
+      loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
+        ? loopCtx.twoLevel
+        : undefined;
+    if (twoLevel !== undefined && armCapturesBreak) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a two-level exit out of block #${fn.blocks.indexOf(b)} sits in a case ` +
+          `body, where \`break\` would leave only the switch`,
+      );
+    }
     if (loopCtx && loopCtx.breaks.has(b) && armCapturesBreak) {
       const exit = loopCtx.exit;
       const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
@@ -7237,13 +7331,13 @@ export function structure(
       // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
       // the `break`, and its last block's copies into the exit are the break's.
       const arm = frame.breakArms?.find((a) => a.from === b && (a.to === takenB || a.to === fallB));
-      const breakIsTaken = takenB === (arm?.to ?? frame.exit);
+      const breakIsTaken = takenB === (twoLevel?.to ?? arm?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
       const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
       const rule = continueRefused
         ? { refusal: 'would continue the loop from a region that ends past the loop bottom' }
         : frame.body.has(stayB)
-          ? breakRule(frame, b, writtenAhead(frame, b))
+          ? breakRule(frame, b, writtenAhead(frame, b), twoLevel?.to ?? frame.exit)
           : { refusal: 'has no edge beside it that stays in the loop' };
       if ('bare' in rule) {
         let leaveCond = expr(term.operands[0]);
@@ -7256,7 +7350,10 @@ export function structure(
             leaveCond,
             [
               ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
-              ...(arm !== undefined ? structureRegion(arm.to, frame.exit) : []),
+              ...(arm !== undefined && twoLevel === undefined ? structureRegion(arm.to, frame.exit) : []),
+              ...(twoLevel !== undefined
+                ? [{ k: 'assign', name: twoLevelFlag(frame.header), value: { k: 'const', value: 1 } } as Stmt]
+                : []),
               { k: 'break' },
             ],
             [],
@@ -7265,7 +7362,12 @@ export function structure(
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
-      if (continueRefused || frame.exit === null || (!isArm(frame.exit) && !isRet(frame.exit))) {
+      if (
+        twoLevel !== undefined ||
+        continueRefused ||
+        frame.exit === null ||
+        (!isArm(frame.exit) && !isRet(frame.exit))
+      ) {
         throw new StructureError(
           `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${rule.refusal}`,
         );
@@ -7812,6 +7914,13 @@ export function structure(
   // its last value in its variable's name, and the region reads it there (`latchInnerSub`, with the
   // breaks as its readers). Read raw it would re-derive that value from the name that holds it. Where
   // neither reading is the value, decline LOUD, as the do-while latch does.
+  //
+  // A TWO-LEVEL EXIT (`TwoLevelExit`) adds its flag: cleared ahead of the loop, so every entry
+  // starts it clear, and read once after it, where the code from `exit` up to the second target
+  // runs only if the loop left by its own exit. The second target and what follows render after
+  // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
+  // before the second target (`stop` among the skipped code): the code after the `if` would run
+  // past the end of the region, and the region's owner renders it again.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const frame = {
@@ -7821,6 +7930,7 @@ export function structure(
       arms: fl.arms,
       breaks: fl.breaks,
       breakArms: fl.breakArms,
+      ...(fl.twoLevel !== undefined ? { twoLevel: fl.twoLevel } : {}),
     };
     const body = withLoop(frame, () => structureBlock(fl.header, fl.header));
     dwActive.delete(fl.header);
@@ -7837,10 +7947,42 @@ export function structure(
           `rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote`,
       );
     }
+    const after = (run: () => Stmt[]): Stmt[] => (innerSub.size > 0 ? withSub(innerSub, run) : run());
+    const second = fl.twoLevel;
+    if (second === undefined) {
+      return [loop, ...after(() => structureRegion(exit, stop))];
+    }
+    const skipped = twoLevelSkip(exit, second.to);
+    if (skipped === null || (stop !== null && skipped.has(stop))) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a two-level exit out of the loop at block #${fn.blocks.indexOf(fl.header)} ` +
+          `skips the end of the region the loop sits in`,
+      );
+    }
+    const flag = twoLevelFlag(fl.header);
     return [
+      { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
       loop,
-      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(exit, stop)) : structureRegion(exit, stop)),
+      mkIf(
+        { k: 'bin', op: '==', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
+        after(() => structureRegion(exit, second.to)),
+        [],
+      ),
+      ...after(() => structureRegion(second.to, stop)),
     ];
+  };
+  // The flag of the two-level exit out of the loop at `header`: one `s32` local per loop, named on
+  // first use, after the naming walk. Declared only where the body still mentions it
+  // (`localNames`), so a reading structured and then dropped declares nothing.
+  const twoLevelFlags = new Map<Block, string>();
+  const twoLevelFlag = (header: Block): string => {
+    let name = twoLevelFlags.get(header);
+    if (name === undefined) {
+      name = `v${fresh++}`;
+      varType.set(name, T.s(32));
+      twoLevelFlags.set(header, name);
+    }
+    return name;
   };
 
   // The latch back-edge substitution (do-while) — subFor over the latch's back-edge args.
@@ -8315,10 +8457,16 @@ export function structure(
     throw new StructureError(`${strictGaps.length} unresolvable value(s) in '${fn.name}' — ${reasons}`);
   }
   // v* = coalesced/materialized locals; t* = sequentialize's swap-cycle temps (varType-only —
-  // they have no Value, so they are collected from varType, not varName).
-  const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
-    (n) => /^[vt]\d+$/.test(n) && !globalNames.has(n),
-  );
+  // they have no Value, so they are collected from varType, not varName); and the two-level exit
+  // flags (`twoLevelFlag`), varType-only too. A name the body no longer mentions is pruned by
+  // l3/dce.ts.
+  const localNames = [
+    ...new Set([
+      ...varName.values(),
+      ...[...varType.keys()].filter((n) => /^t\d+$/.test(n)),
+      ...twoLevelFlags.values(),
+    ]),
+  ].filter((n) => /^[vt]\d+$/.test(n) && !globalNames.has(n));
   // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
   // builder). The naming walk is what makes it a per-DECLARATION fact: several spilled values can
   // land under one name, and the local the source declared is the name, not the value. Where a

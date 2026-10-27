@@ -1,0 +1,368 @@
+// A SECOND EXIT PAST THE CODE AFTER THE LOOP, spelled with a flag.
+//
+// `for (i…) { for (j…) { if (hit(j)) goto next; } k(i); next:; }` leaves the inner loop two ways:
+// by its own exit, into `k(i)`, and from the search straight to the end of the outer body. L3 has
+// no `goto`, so structure spells the second way out `f = 1; break;`, with `f = 0;` ahead of the loop
+// and the code it skips under `if (f == 0)` after it (structure.ts `TwoLevelExit`). Every fixture is
+// judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as
+// it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
+// on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
+// shapes the reading must not take: a third exit target, and a target outside the enclosing loop.
+import { expect, test } from 'vitest';
+
+import { cBackend } from '../src/backend/c';
+import { parse } from '../src/ir/parse';
+import { verify } from '../src/ir/verify';
+import { readabilityRewrites } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { structure } from '../src/structure/structure';
+import { irAgreement, irTraceOf } from './helpers';
+
+const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
+
+const judged = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  return {
+    src: cBackend.emit(sfn),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+/** What the seeds exercise, read off the IR's own traces: per outer iteration (each `mark`), how
+ *  many `probe` calls ran and whether `k` followed. A hit is an iteration that probed and skipped
+ *  `k`; a first-element hit probed once. */
+const covers = (ir: string) => {
+  const fn = parse(ir);
+  const seen = { zeroTrips: 0, firstHit: 0, laterHit: 0, noHit: 0 };
+  for (const seed of SEEDS) {
+    let trace;
+    try {
+      trace = irTraceOf(fn, seed);
+    } catch {
+      continue;
+    }
+    const iterations: { probes: number; k: boolean }[] = [];
+    for (const ev of trace) {
+      if (ev.fn === 'mark') {
+        iterations.push({ probes: 0, k: false });
+      } else if (ev.fn === 'probe' && iterations.length > 0) {
+        iterations[iterations.length - 1].probes++;
+      } else if (ev.fn === 'k' && iterations.length > 0) {
+        iterations[iterations.length - 1].k = true;
+      }
+    }
+    for (const it of iterations) {
+      if (it.probes === 0) {
+        seen.zeroTrips++;
+      } else if (it.k) {
+        seen.noHit++;
+      } else if (it.probes === 1) {
+        seen.firstHit++;
+      } else {
+        seen.laterHit++;
+      }
+    }
+  }
+  return seen;
+};
+
+const expectCovered = (ir: string) => {
+  const seen = covers(ir);
+  expect(seen.zeroTrips).toBeGreaterThan(0);
+  expect(seen.firstHit).toBeGreaterThan(0);
+  expect(seen.laterHit).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
+};
+
+/** `synthetic:brk2lvl:agbcc`'s shape with its loads as calls: the outer loop a guarded do-while, the
+ *  inner one guarded (`m < 0` skips it into `k(i)`) and rotated, its header testing for the hit and
+ *  leaving to the outer latch, its latch testing the count and leaving to `k(i)`. */
+const GOTO_NEXT = `fn gotonext {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %8: s32 = add %5, %7
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb2()
+^bb2():
+  br ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb6():
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+test('a `goto` past the code after an inner loop lifts as a flag', () => {
+  const { src, agreement, shipped } = judged(GOTO_NEXT);
+  expect(src).toBe(
+    'void gotonext(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n' +
+      '    v0 = 0;\n    if (v0 < a0) {\n        v2 = v0;\n        do {\n            mark(v2);\n            v1 = 1;\n' +
+      '            if (a1 >= v0) {\n                v3 = v0;\n                v4 = 0;\n                while (1) {\n' +
+      '                    if (probe(v3, v2) == a2) {\n                        v4 = 1;\n                        break;\n' +
+      '                    }\n                    v3 = v3 + v1;\n                    if (a1 < v3) break;\n                }\n' +
+      '                if (v4 == 0) k(v2);\n            } else {\n                k(v2);\n            }\n' +
+      '            v2 = v2 + v1;\n        } while (v2 < a0);\n    }\n    return;\n}\n',
+  );
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(GOTO_NEXT);
+});
+
+/** ido7.1's spelling of the same loop: the hit test leaves first, the count test is the latch, and
+ *  the skipped code reads the inner loop's own counter (`k(j)`), which only its exit hands it. */
+const SKIPPED_CODE_READS_THE_COUNTER = `fn readscounter {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(%3), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(%13), ^bb3(%13)
+^bb5(%17: s32):
+  %15: s32 = call %17, %5 {target="k"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+test('the skipped code reads the value the inner loop hands its own exit', () => {
+  const { agreement, shipped } = judged(SKIPPED_CODE_READS_THE_COUNTER);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(SKIPPED_CODE_READS_THE_COUNTER);
+});
+
+/** The second target takes a parameter: the hit hands it the matching element (`probe`'s result),
+ *  the exit path hands it `-1`, and the code after reads it. The flag's `break` carries its own copy,
+ *  and the skipped code writes the other one on its way to the target. */
+const TARGET_TAKES_A_VALUE = `fn targetvalue {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(%11), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  %18: s32 = sub %3, %7
+  br ^bb6(%18)
+^bb6(%19: s32):
+  %20: s32 = call %19 {target="use"}
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+test('a second target with a parameter takes each way out its own value', () => {
+  const { agreement, shipped } = judged(TARGET_TAKES_A_VALUE);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(TARGET_TAKES_A_VALUE);
+});
+
+/** No loop around it: `for (j…) { if (hit) goto out; } k(); out: for (…) after(c);`. The code past
+ *  the target holds a loop, so no early `return` can copy it into the hit's arm, and the flag is
+ *  the reading left. */
+const NO_ENCLOSING_LOOP = `fn nolooparound {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %5: s32 = call %0 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %0 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %0 {target="k"}
+  br ^bb6()
+^bb6():
+  br ^bb8(%3)
+^bb8(%21: s32):
+  %20: s32 = call %21 {target="after"}
+  %22: s32 = add %21, %7
+  %23: u32 = icmp_slt %22, %0
+  cond_br %23, ^bb8(%22), ^bb9()
+^bb9():
+  ret
+}`;
+
+test('a two-level exit needs no loop around it', () => {
+  const { agreement, shipped } = judged(NO_ENCLOSING_LOOP);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(NO_ENCLOSING_LOOP);
+});
+
+/** The skipped code may itself leave the enclosing loop: `if (k(i) == a2) break;` sits between the
+ *  inner loop's exit and the target, so it renders inside the `if`, as the enclosing loop's break. */
+const SKIPPED_CODE_LEAVES = `fn skippedleaves {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  %18: u32 = icmp_eq %15, %2
+  cond_br %18, ^bb7(), ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  %20: s32 = call %0 {target="after"}
+  ret
+}`;
+
+test('the skipped code may leave the enclosing loop from inside the `if`', () => {
+  const { agreement, shipped } = judged(SKIPPED_CODE_LEAVES);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+// ── declines ──────────────────────────────────────────────────────────────────────────────────
+
+/** Two second targets: one hit goes to the end of the outer body, another to `h(i)` ahead of it.
+ *  One flag cannot say which, so the loop stays unrecovered. */
+const THREE_EXIT_TARGETS = `fn threetargets {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb2()
+^bb2():
+  %17: u32 = icmp_slt %11, %2
+  cond_br %17, ^bb8(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb8()
+^bb8():
+  %18: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+/** The hit leaves BOTH loops (`goto done` past the outer one, a merge that also takes the outer
+ *  loop's own exit): the target lies outside the enclosing loop, which a flag read after the inner
+ *  loop cannot reach without a second `break`. */
+const TARGET_PAST_THE_ENCLOSING_LOOP = `fn pastouter {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7(%3)
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb7(%11), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7(%8)
+^bb7(%21: s32):
+  %20: s32 = call %21 {target="after"}
+  ret
+}`;
+
+test.each([
+  ['a third exit target', THREE_EXIT_TARGETS],
+  ['a target outside the enclosing loop', TARGET_PAST_THE_ENCLOSING_LOOP],
+])('%s stays declined', (_, ir) => {
+  expect(() => judged(ir)).toThrow(/cannot structure/);
+});

@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 297 distinct decline messages (the texts reached by
+// `packages/core/src` throws 299 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -490,7 +490,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     key: 'loop-shapes',
     label: 'Loop shapes declined (irreducible / multi-exit / hazards)',
-    pattern: /unrecovered back-edge|loop-recovery declined|pre-update loop variable|a break out of block/,
+    pattern:
+      /unrecovered back-edge|loop-recovery declined|pre-update loop variable|a break out of block|a two-level exit out of/,
   },
   {
     // The loop IS recovered here and the values crossing its exit are what refuse: a post-loop read
