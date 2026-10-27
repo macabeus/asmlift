@@ -1177,10 +1177,13 @@ export interface TargetDescription {
     // agbcc (`sRandCount = 5; ((u8 *)&sUnknown)[4] = 7; return sRandCount;` is `strb; mov r0,
     // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. IDO also reloads across
     // two externs, two statics, an array element beside a scalar, and a word-wide literal beside
-    // a name. So where it holds, a pair of spellings is faithful lifted as-is, whether the asm
-    // carries both or the map chose one; where it does not, an asm that went back to memory
-    // proves the source did not spell the byte two ways, and raise/offsetnames.ts
-    // `cellSpelledTwice` declines the pair.
+    // a name. It reloads only a read that FOLLOWS the store: a read placed before a byte store
+    // through another name is sunk past it (`v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7;
+    // return v0;` is `sb; jr ra; lw v0`). So where it holds, a pair of spellings in one block
+    // outside any loop, the store first, is faithful lifted as-is, whether the asm carries both or
+    // the map chose one; any other order, and every pair where it does not hold (an asm that went
+    // back to memory proves the source did not spell the byte two ways), raise/offsetnames.ts
+    // `cellSpelledTwice` declines.
     //
     // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
     reloadsAcrossSpellings?: boolean;

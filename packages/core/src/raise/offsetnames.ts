@@ -107,7 +107,7 @@
 // walk left as `base + K` past the base's end spells its neighbour's byte through the base's
 // name), not the only one, which is why the question is asked of the accesses and not of the gates.
 import { constDisplacementOf } from '../ir/alias';
-import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, successorsOf } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
@@ -717,10 +717,14 @@ export type OffsetNameBehaviors = StampBehaviors & {
  *  Which compilers forward is a compiler fact, not a property of who chose the spelling. agbcc and
  *  gcc 2.7.2 forward, so an asm that went back to memory proves the source was NOT those two
  *  spellings, and every such pair declines. IDO 7.1 reloads (`reloadsAcrossSpellings`) across a
- *  name and a literal, two externs, two statics and an array element alike, so the C reads the
- *  cell back as the asm does and the pair lifts — whether the asm spelled both (two relocations, a
+ *  name and a literal, two externs, two statics and an array element alike — but only a read that
+ *  FOLLOWS the store: it treats two names as two objects, so a read of one placed BEFORE a byte
+ *  store through the other is sunk past it (`v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7; return
+ *  v0;` is `sb t6, 5(at); jr ra; lw v0, 0(v1)`, the word read with byte 5 already 7). So the pair
+ *  lifts there only in an order the compiler is measured to keep ({@link keptInOrder}): both in
+ *  one block outside any loop, the store first — whether the asm spelled both (two relocations, a
  *  relocation and a literal) or asmlift chose one off the map (a promoted pool word, an interior
- *  attribution, a named walk: `gaddr`'s `fromMap`).
+ *  attribution, a named walk: `gaddr`'s `fromMap`). Any other order declines.
  *
  *  ONE CELL PER SPELLING. A name the map places at several addresses (one file static per unit)
  *  read off the map at two different ones is two objects the C would spell as one, which the
@@ -735,6 +739,7 @@ export type OffsetNameBehaviors = StampBehaviors & {
  *  parameter, a frame slot, a runtime index — is one it assumes may alias (agbcc reloads
  *  `sRandCount` after `((u8 *)&sUnknown)[a0] = 7`). */
 export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpellings = false): string | null {
+  const keptInOrder = reloadsAcrossSpellings ? keptInOrderOn(fn) : (): boolean => false;
   const defOf = defOpMap(fn);
   const incoming = joinIncoming(fn);
   const places = placesByName(symbols);
@@ -762,7 +767,7 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
       if (x.spelling === y.spelling || !(x.writes || y.writes)) {
         continue;
       }
-      if (reloadsAcrossSpellings) {
+      if (keptInOrder(x.op, y.op)) {
         continue;
       }
       for (const [xl, xh] of x.ranges) {
@@ -775,6 +780,44 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
     }
   }
   return null;
+}
+
+/** Whether a compiler that reloads across two spellings (`reloadsAcrossSpellings`) keeps the pair
+ *  `a`, `b` (at least one a store) in the order the asm has, so the C reads back what the asm read.
+ *  MEASURED on IDO 7.1 -O2: a store then a read through another name reloads, and two stores keep
+ *  their order; a read then a store through another name does NOT — the read is sunk past the
+ *  store. So the pair holds only when both sit in ONE block, the store first (or both stores), and
+ *  that block is on no cycle: across blocks, or in a loop whose next iteration reads before this
+ *  one's store, nothing measured says the read stays where the asm put it. */
+function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
+  const at = new Map<Op, { block: Block; index: number }>();
+  for (const block of fn.blocks) {
+    block.ops.forEach((op, index) => at.set(op, { block, index }));
+  }
+  const onCycle = (start: Block): boolean => {
+    const seen = new Set<Block>();
+    const work = successorsOf(start);
+    for (let b = work.pop(); b !== undefined; b = work.pop()) {
+      if (b === start) {
+        return true;
+      }
+      if (!seen.has(b)) {
+        seen.add(b);
+        work.push(...successorsOf(b));
+      }
+    }
+    return false;
+  };
+  const isStore = (op: Op): boolean => op.opcode === 'store' || op.opcode === 'astore';
+  return (a, b) => {
+    const pa = at.get(a);
+    const pb = at.get(b);
+    if (pa === undefined || pb === undefined || pa.block !== pb.block || onCycle(pa.block)) {
+      return false;
+    }
+    // one of the two is a store, so the pair is in order exactly when the first one is
+    return isStore(pa.index < pb.index ? a : b);
+  };
 }
 
 /** Rewrite every admitted site into the `gaddr` the map names, in place. Returns THE NAMES it

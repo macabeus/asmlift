@@ -651,6 +651,49 @@ endlabel f
     );
   });
 
+  test('on IDO, a read placed BEFORE a store through another spelling declines: IDO sinks it past the store', () => {
+    // IDO 7.1 -O2 compiles `v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7; return v0;` (and the
+    // `D_80100005 = 7;` form) to `sb t6, 5(at); jr ra; lw v0, 0(v1)`: the C returns the word with
+    // byte 5 already 7, where this asm returns the word as it was before the store
+    const loadFirst = (byteStore: string, head = ''): string => `glabel f
+${head}    /* 0 80000200 3C010000 */  lui        $at, %hi(D_80100000)
+    /* 4 80000204 24210000 */  addiu      $at, $at, %lo(D_80100000)
+    /* 8 80000208 242B0004 */  addiu      $t3, $at, 4
+    /* C 8000020C 8D620000 */  lw         $v0, 0($t3)
+    /* 10 80000210 240A0007 */  addiu      $t2, $zero, 7
+${byteStore}    /* 1C 8000021C 03E00008 */  jr         $ra
+    /* 20 80000220 00000000 */   nop
+endlabel f
+`;
+    const withByte: SymbolMap = new Map([
+      ...twoWords,
+      [0x80100005, [{ name: 'D_80100005', kind: 'data', size: 1, shape: 'scalar' }]],
+    ]);
+    const displaced = '    /* 14 80000214 A02A0005 */  sb         $t2, 5($at)\n';
+    const named =
+      '    /* 14 80000214 24290005 */  addiu      $t1, $at, 5\n    /* 18 80000218 A12A0000 */  sb         $t2, 0($t1)\n';
+    for (const [store, spelled] of [
+      [displaced, /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100000'/],
+      [named, /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100005'/],
+    ] as const) {
+      expect(() => decompile('f', loadFirst(store), MIPS_IDO, { symbols: withByte })).toThrow(spelled);
+      expect(() => decompile('f', loadFirst(store), MIPS_GCC, { symbols: withByte })).toThrow(RaiseUnsupportedError);
+    }
+    // the asm's own two relocations in that order are the same pair
+    const ownLoadFirst = `glabel f
+    /* 0 80000200 3C030000 */  lui        $v1, %hi(D_80100004)
+    /* 4 80000204 8C620000 */  lw         $v0, %lo(D_80100004)($v1)
+    /* 8 80000208 3C010000 */  lui        $at, %hi(D_80100005)
+    /* C 8000020C 240A0007 */  addiu      $t2, $zero, 7
+    /* 10 80000210 03E00008 */  jr         $ra
+    /* 14 80000214 A02A0000 */   sb        $t2, %lo(D_80100005)($at)
+endlabel f
+`;
+    expect(() => decompile('f', ownLoadFirst, MIPS_IDO, { symbols: withByte })).toThrow(
+      /byte 0x80100005 is reached as 'D_80100004' and as 'D_80100005'/,
+    );
+  });
+
   // The address reaches the byte store through a JOIN, which the raising tower merges into the name
   // (or into a pointer local whose only base is it), and agbcc tracks the base across the join:
   // `sRandCount = 5; ((u8 *)&sUnknown)[5] = 7; return sRandCount;` and the `v0 = (u8 *)&sUnknown`
