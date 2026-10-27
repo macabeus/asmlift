@@ -220,3 +220,62 @@ test('ido7.1: a switch nested in an arm of an in-loop switch stays loud where it
     /structuring emitted 1 statement\(s\) no path reaches/,
   );
 });
+
+// An arm whose early `return` goes into the epilogue past the loop ESCAPES the switch's region at
+// the body's join (the switch does not dominate that epilogue). An escape that only returns ends
+// its path where it sits, as a `ret` in the arm does, so it does not stop the arm falling into a
+// sibling, or taking a cross-jumped sibling back as copies.
+test.each([
+  { name: 'agbcc', tc: 'agbcc', asm: 'agbcc-swloopcont.s', dump: undefined },
+  { name: 'mwcc_242_81', tc: 'mwcc_242_81', asm: 'mwcc242-swloopcont.asm', dump: 'mwcc242-swloopcont.txt' },
+] as const)('$name: a returning arm beside a `continue` arm and code after the switch', (c) => {
+  //   for (i = 0; i <= n; i++) {
+  //       switch (gId[i]) {
+  //       case 0: if (gV[i] == a) { k(a); return; } gOut = 1; break;
+  //       case 1: gOut = 2; break;
+  //       case 3: k(i); break;
+  //       case 4: gOut = 4; break;
+  //       case 5: k(5); break;
+  //       case 6: k(6); continue;
+  //       }
+  //       gV[i] += 1;
+  //   }
+  //   if (gOut == a) { k(7); return; }
+  //   gOut = 9;
+  const out = lift('d1', c.tc, c.asm, c.dump);
+  const sw = switchOf(out);
+  expect(armOf(sw, 'case 0')).toMatch(/k\(a0\);\s*return;/);
+  expect(armOf(sw, 'case 0')).toMatch(/gOut = 1;/);
+  expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
+  // the `continue` arm skips the `gV[i] += 1` every other path runs
+  expect(armOf(sw, 'case 6')).toMatch(/k\(6\);/);
+  expect(armOf(sw, 'case 6')).not.toMatch(/\+ 1;/);
+  for (const label of ['case 0', 'case 3', 'case 4', 'case 5']) {
+    expect(armOf(sw, label)).toMatch(/\+ 1;/);
+  }
+  expect(sw).not.toContain('k(7)');
+  expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
+});
+
+test('agbcc: a returning arm falls through into the next case', () => {
+  //   for (i = 0; i <= n; i++) {
+  //       switch (gId[i]) {
+  //       case 0: if (gV[i] == a) { k(a); return; } gOut = 1;
+  //       case 1: gOut += 2; break;
+  //       case 2: k(2);
+  //       case 3: k(i); break;
+  //       case 4: gOut = 4; break;
+  //       case 5: k(5); break;
+  //       }
+  //   }
+  //   if (gOut == a) { k(7); return; }
+  //   gOut = 9;
+  const out = lift('ft3', 'agbcc', 'agbcc-swloopfall.s');
+  const sw = switchOf(out);
+  expect(armOf(sw, 'case 0')).toMatch(/k\(a0\);\s*return;/);
+  expect(sw).toMatch(/gOut = 1;\s*case 1:\s*gOut = gOut \+ 2;\s*break;/);
+  expect(sw).toMatch(/k\(2\);\s*case 3:\s*k\(v\d+\);\s*break;/);
+  expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
+  expect(sw).not.toContain('default:');
+  expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
+});

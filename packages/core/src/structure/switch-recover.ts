@@ -705,6 +705,36 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return true;
   };
 
+  // A SIDEWAYS PATH THAT ONLY RETURNS. Where the switch sits in a loop body and an arm `return`s
+  // into the one epilogue past the loop (agbcc and IDO when the code after the loop returns early
+  // too, mwcc always), the switch ends at the body's own join (structure.ts, THE LOOP CLAMP) and
+  // that epilogue is a block the switch does not dominate: the arm escapes. It escapes to nothing
+  // but the end of the function, though. Every path from `s` runs forward to a `ret`, never back
+  // into the switch, its merge, a sibling or a cycle, so the arm spells the escaping path in place
+  // as its `return;` (`case 0: if (c) { k(a); return; } gOut = 1;` falling into `case 1:`). Outside
+  // a loop the epilogue is the merge itself and no such path escapes at all. A falling arm's join
+  // already reads that path as a jump (`regionJoins`, "a `return k` through a shared epilogue").
+  const onlyReturns = (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>): boolean => {
+    const seen = new Set<Block>([s]);
+    for (const q = [s]; q.length;) {
+      const x = q.pop()!;
+      const succ = successorsOf(x);
+      if (succ.length === 0 && x.ops[x.ops.length - 1]?.opcode !== 'ret') {
+        return false;
+      }
+      for (const y of succ) {
+        if (y === b || y === merge || siblings.has(y) || dom.get(x)!.has(y)) {
+          return false; // back into the switch, or a cycle (an edge to a block dominating its source)
+        }
+        if (!seen.has(y)) {
+          seen.add(y);
+          q.push(y);
+        }
+      }
+    }
+    return true;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -746,8 +776,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
     }
     const into = new Set<Block>(); // sibling entries this arm flows into
+    const escapedTo = new Set<Block>(); // the blocks outside the switch's region it steps into
     let toMerge = false,
-      escapes = false,
       leavesLoop = false;
     const seen = new Set<Block>([entry]);
     const q = [entry];
@@ -761,7 +791,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           into.add(s);
         } else if (s !== entry && !seen.has(s)) {
           if (!dom.get(s)!.has(b)) {
-            escapes = true;
+            escapedTo.add(s);
             continue;
           }
           seen.add(s);
@@ -770,7 +800,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     if (into.size === 0) {
-      return escapes ? { kind: 'break' } : { kind: 'break', region: seen };
+      return escapedTo.size > 0 ? { kind: 'break' } : { kind: 'break', region: seen };
     }
     // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
     // spells only where nothing breakable sits between that edge and the arm, which the structurer
@@ -781,7 +811,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         why: `a case body falls into sibling case ${[...into].map((x) => `#${layoutIndex(x)}`).join(', ')}, reaches the end of the switch, and leaves the loop the switch sits in`,
       };
     }
-    if (into.size === 1 && !escapes) {
+    // A sideways path that only RETURNS does not stop the fall-through (`onlyReturns`): it is a
+    // jump that ends where it sits, as a `ret` inside the arm is.
+    if (into.size === 1 && [...escapedTo].every((s) => onlyReturns(s, b, merge, siblings))) {
       return { kind: 'fallthrough', to: [...into][0], breaks: toMerge, region: seen };
     }
     // Name what is actually missing. These are two different facts: the first is a shape C's
