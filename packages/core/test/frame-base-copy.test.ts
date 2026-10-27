@@ -369,10 +369,17 @@ describe('the audit judges each frame object on its own bytes', () => {
     // after the `bl` is a value the callee destroyed (frontend/ssa.ts), which would refuse this
     // function ahead of the audit and hide what it is here to show.
     const keyed = frame('\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r4\n');
-    // handed at argument 0 to a `g` nothing says the return of, the one object cannot hold it
+    // handed at argument 0 to a `g` nothing says the return of, the one object cannot hold it —
+    // and with `g` undeclared it may also take [sp,#0] as a stack word, so the word stays a slot
     const atArg0 = keyed.replace('\tmov\tr1, sp\n', '\tmov\tr0, sp\n');
-    expect(() => lift(atArg0)).toThrow(
+    expect(() => liftUndeclared(atArg0)).toThrow(
       /overlaps the SSA slot at \[sp,#0\] — one byte, two models — and the one object cannot hold every writer/,
+    );
+    // …while a `g` declared to take one register argument takes no stack word, so the escaping
+    // frame base is a local's address and its word is that local's: no slot, and the refusal is
+    // the per-object model's own, still loud
+    expect(() => lift(atArg0)).toThrow(
+      /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys[\s\S]*the one object cannot hold every writer/,
     );
     // …and with a callee it holds the only writer, the slot is a word of the one object in memory
     expect(lift(keyed).source).toContain('*(s32 *)sp0 = a0;');
@@ -903,7 +910,13 @@ describe('a frame nothing escapes from is one object where the slot model and an
     // object cannot hold, so the overlap is refused where it stands
     const handed = BYTES.replace('\tadd\tr0, r0, r1\n', '\tadd\tr0, r0, r1\n\tmov\tr0, sp\n\tbl\tg\n');
     expect(handed).not.toBe(BYTES);
-    expect(() => lift(handed)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+    // `g` undeclared may take [sp,#0] as a stack word, so the word there stays a slot…
+    expect(() => liftUndeclared(handed)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+    // …and declared, it takes none: the word is the escaping object's, which overlaps the byte read
+    // at [sp,#1]
+    expect(() => lift(handed)).toThrow(
+      /the objects at \[sp,#0\) and \[sp,#1\) overlap — one byte, two models — and the one object cannot hold every writer/,
+    );
   });
 
   test('word spills read back as halfwords are the views of one union', () => {
@@ -1050,5 +1063,82 @@ describe('a frame nothing escapes from is one object where the slot model and an
       '\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr4, [r0]\n' +
       `\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n${TH}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n`;
     expect(() => lift(afterF0)).toThrow(STORED_NEVER_READ);
+  });
+});
+
+// THE FRAME BASE AS A CAPTURE WHERE NO CALL TAKES A STACK WORD. A function none of whose calls
+// takes a stack word has no outgoing area, so [sp,#0] is nobody's argument: a constant capture of
+// it names a local, as one at [sp,#4] does, and a direct `str rX, [sp]` beside it is a store to
+// that local, not an SSA slot under it. Verbatim agbcc 2.9-arm-000512 at the corpus's flags, the
+// GBA `DmaSet` macro expanded twice (benchmark row `dmafill_wh`, from kleod's `sub_0804C60C`):
+//   `{ vu32 tmp = 0x1234; DmaSet(&tmp, 0x06000040, 0x85000008); }
+//    { vu16 tmp = 0xF002; DmaSet(&tmp, 0x06008000, 0x81000400); }`
+// The DMA source registers are a device that reads a bounded window from the address it is handed
+// (`readOnlyAddressSinks`), so neither object reaches the other and the one-object answer is not
+// on offer: each local stands on its own bytes.
+describe('the frame base is a capture where no call takes a stack word', () => {
+  const DMA_FILL_WH =
+    'f:\n\tadd\tsp, sp, #-0x8\n\tldr\tr0, .L3\n\tstr\tr0, [sp]\n\tldr\tr1, .L3+0x4\n\tmov\tr0, sp\n\tstr\tr0, [r1]\n' +
+    '\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1, #0x4]\n\tldr\tr0, .L3+0xc\n\tstr\tr0, [r1, #0x8]\n\tldr\tr0, [r1, #0x8]\n' +
+    '\tadd\tr2, sp, #0x4\n\tldr\tr3, .L3+0x10\n\tadd\tr0, r3, #0\n\tstrh\tr0, [r2]\n\tstr\tr2, [r1]\n' +
+    '\tldr\tr0, .L3+0x14\n\tstr\tr0, [r1, #0x4]\n\tldr\tr0, .L3+0x18\n\tstr\tr0, [r1, #0x8]\n\tldr\tr0, [r1, #0x8]\n' +
+    '\tadd\tsp, sp, #0x8\n\tbx\tlr\n' +
+    '.L3:\n\t.word\t0x1234\n\t.word\t0x40000d4\n\t.word\t0x6000040\n\t.word\t-0x7afffff8\n' +
+    '\t.word\t0xf002\n\t.word\t0x6008000\n\t.word\t-0x7efffc00\n';
+  const liftVoid = (asm: string, prototypes = {}) =>
+    decompile('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true }, ...prototypes } });
+
+  test('a direct store to the published frame base is the local`s, stored before the device reads it', () => {
+    const src = liftVoid(DMA_FILL_WH).source;
+    // two locals, each volatile (the device reads them), neither keyed as a slot
+    expect(src).toMatch(/volatile u32 sp0;/);
+    expect(src).toMatch(/volatile u16 sp4;/);
+    // the fill value lands before its address is handed to the device, and the second fill after
+    // the first transfer's control word is written and read back
+    expect(src).toMatch(/sp0 = 4660;\n.*= &sp0;\n[\s\S]*\[2\] = -2063597560;\n.*\[2\];\n    sp4 = 61442;\n.*= &sp4;/);
+  });
+
+  test('a call nothing sizes may take [sp,#0] as a stack word, and keeps it a slot', () => {
+    expect(() => liftVoid(DMA_FILL_WH)).not.toThrow();
+    // the same function opening with a call to `h`, which nothing declares
+    const called = DMA_FILL_WH.replace(
+      '\tadd\tsp, sp, #-0x8\n',
+      '\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tbl\th\n',
+    ).replace('\tadd\tsp, sp, #0x8\n\tbx\tlr\n', '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n');
+    expect(called).not.toContain('\tbx\tlr\n');
+    expect(() => liftVoid(called)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+    // …and declared with no argument it takes no stack word: the frame base is a capture again
+    expect(liftVoid(called, { h: { params: 0, returnsVoid: true } }).source).toMatch(
+      /h\(\);\n    sp0 = 4660;\n.*= &sp0;/,
+    );
+  });
+
+  test('a call declared past the registers takes a stack word whatever the target says of staging', () => {
+    // a word stored at [sp,#0] beside the published frame base, then a call declared with five
+    // arguments: [sp,#0] may be its fifth, so the store keeps the refusal that names that call —
+    // also on a target that never claimed agbcc's staging premise
+    const five =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr1, .L3\n\tmov\tr2, sp\n\tstr\tr2, [r1]\n\tstr\tr0, [sp]\n' +
+      '\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n\tmov\tr3, #4\n\tbl\tfive\n\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L3:\n\t.word\t0x40000d4\n';
+    const unstaged = { ...ARMV4T_AGBCC.compilerBehaviors };
+    delete unstaged.stagesOutgoingArgsInFrame;
+    const target = { ...ARMV4T_AGBCC, compilerBehaviors: unstaged };
+    const prototypes = { f: { params: 1, returnsVoid: true }, five: { params: 5, returnsVoid: true } };
+    expect(() => decompile('f', five, target, { prototypes })).toThrow(
+      /the store to \[sp,#0\] reaches `bl five` unread with its lower slots supplied — it may be that call's outgoing stack argument/,
+    );
+  });
+
+  test('a frame base published without bound still declines, as the escape', () => {
+    expect(() => liftVoid(DMA_FILL_WH)).not.toThrow();
+    // the first source register replaced by a plain global: whatever reads it reads the whole frame
+    const toGlobal =
+      DMA_FILL_WH.replace('\tmov\tr0, sp\n\tstr\tr0, [r1]\n', '\tmov\tr0, sp\n\tldr\tr3, .Lpub\n\tstr\tr0, [r3]\n') +
+      '.Lpub:\n\t.word\tgPtr\n';
+    expect(toGlobal).toContain('gPtr');
+    expect(() => liftVoid(toGlobal)).toThrow(
+      /the captured address escapes, so something outside this function reaches the whole frame — including another object/,
+    );
   });
 });

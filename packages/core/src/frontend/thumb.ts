@@ -3530,7 +3530,7 @@ function measureThumbFrame({
   // wider frame the publish escape admits exactly the shape the callee escape's table warns
   // about; at one word it cannot occur. A wider frame's publish is read by the outgoing-argument
   // `escape` event instead (below), per program point, which is the reading that survives a block
-  // copy: see "ONE DECISION, TWO LICENCES" above `capturedObjectIsTheWholeFrame`.
+  // copy: see "ONE DECISION, FOUR LICENCES" above `capturedObjectIsTheWholeFrame`.
   //
   // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
   // question is the same one and only the consuming event differs. Here that event is a WORD store
@@ -3667,7 +3667,7 @@ function measureThumbFrame({
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   //
-  // ONE DECISION, THREE LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // ONE DECISION, FOUR LICENCES. This gate and the outgoing-argument `escape` event (fed below,
   // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
   // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
   // one escape anywhere and no frame word is any call's argument — which is sound only where no
@@ -3678,7 +3678,14 @@ function measureThumbFrame({
   //
   // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
   // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
-  // struct through memory, which a block copy's base never is (why: the field's comment).
+  // struct through memory, which a block copy's base never is (why: the field's comment). It
+  // matters only where some call may take a stack word: the hidden pointer is r0, which
+  // `frameAddressReceivers` hands over, so such a base always escapes and the fourth licence
+  // admits it everywhere else.
+  //
+  // The FOURTH is the [sp,#0] capture where no call takes a stack word (`noCallTakesAStackWord &&
+  // frameBaseEscapes`, below): flow-insensitive at any frame size too, and sound for a block copy's
+  // base as well, because with no outgoing area no frame word is any call's argument at all.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3726,23 +3733,35 @@ function measureThumbFrame({
   // offsets either: a store there reaching a call unread is the object being filled for the
   // callee that is handed it.
   //
-  // THE FRAME BASE, ONLY AS A DECLARED CALL'S RETURN STORAGE AND ONLY WHERE NO CALL TAKES A STACK
-  // WORD. A bare `mov rD, sp` is also the base of a by-value argument's block copy into the
-  // outgoing area, and [sp,#0] is then a call's fifth argument word (the producer table above
-  // `capturedObjectIsTheWholeFrame`, which keeps its own licence for a one-word frame). Where every
-  // call is to a callee whose declaration places all of its arguments in registers there is no
-  // outgoing area, and where the base is handed as the hidden pointer of a callee declared to
-  // return a struct through memory it is that struct's storage: two struct-return temps,
-  // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
-  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out —
-  // unless `compilerBehaviors.escapedFrameAddressNamesALocal` holds (its second reader).
+  // THE FRAME BASE, ONLY WHERE ITS ADDRESS ESCAPES AND NO CALL TAKES A STACK WORD, OR AS A
+  // DECLARED CALL'S RETURN STORAGE. A bare `mov rD, sp` is also the base of a by-value argument's
+  // block copy into the outgoing area, and [sp,#0] is then a call's fifth argument word (the
+  // producer table above `capturedObjectIsTheWholeFrame`, which keeps its own licence for a
+  // one-word frame). Where every call's declaration places all of its arguments in registers — no
+  // call at all included — there is no outgoing area on any compiler, so a frame base handed out
+  // (`escapedOffsetOf`: to a call, or stored as a word to memory) is a local's address whoever
+  // receives it: a struct-return temp (`mov r0, sp / bl mk`), or a DMA fill's source published to
+  // the device's registers (`dmafill_wh`). A direct `str rX, [sp]` is then that local's store, as
+  // one at [sp,#4] beside `add rD, sp, #4` is. A frame base only ADDRESSED THROUGH (`mov r3, sp /
+  // strh r1, [r3, #4]`, Thumb's sole spelling of a sub-word frame access) hands nothing out and
+  // leaves [sp,#0] a slot. A call nothing declares, a call through a register, or a declaration
+  // nothing sizes may take a stack word, and keeps offset 0 out — unless the base is a
+  // struct-return callee's hidden pointer and `compilerBehaviors.escapedFrameAddressNamesALocal`
+  // holds (its second reader).
+  //
+  // THUMB ONLY: the MIPS and PPC frontends (`inLocalArea`) route every local-area access through
+  // memory once any frame address is taken, so a direct store at the frame base is already the
+  // object's there.
+  const frameBaseEscapes = [...escapedOffsetOf.values()].includes(0);
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
       if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
         return true;
       }
       const declared = calleeRegister(ins, target) === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-      return declared !== null && outgoingBlock(declared.widths, target) === null;
+      // the declaration alone, not `outgoingBlock`: a call whose arguments run past the registers
+      // takes a stack word whether or not the target claims agbcc's staging premise
+      return declared !== null && wordsOf(declared.widths, target) <= target.argRegs.length;
     }),
   );
 
@@ -3932,8 +3951,8 @@ function measureThumbFrame({
         (o) =>
           o > 0 ||
           (o === 0 &&
-            frameBaseIsReturnStorage &&
-            (noCallTakesAStackWord || target.compilerBehaviors.escapedFrameAddressNamesALocal === true)),
+            ((noCallTakesAStackWord && frameBaseEscapes) ||
+              (frameBaseIsReturnStorage && target.compilerBehaviors.escapedFrameAddressNamesALocal === true))),
       ),
   );
 
