@@ -125,11 +125,98 @@ test.each(cells)('$name: an in-loop switch whose CFG merge is the epilogue ends 
   }
 });
 
-test('gcc 2.7.2 stays declined: its latch increment sits in the arms delay slots, a different shape', () => {
+test('gcc 2.7.2: the latch increment reorg spread into the arms lifts at the loop body join', () => {
   // reorg fills two arms' delay slots with the latch's `i++`, so they jump to the test block while
-  // the rest go to a separate `i++` block (the default); the loop-body join is the test block, and
-  // reading the arms there still has two of them falling into one. Loud, never wrong C.
-  expect(() => lift('sw_loopret', 'gcc2.7.2', 'gcc272-swloopret.asm', 'gcc272-swloopret.txt')).toThrow(
-    /the jump table's case arms do not linearize/,
+  // the rest go to a separate `i++` block (the default and both holes): two `ret`s and no CFG
+  // merge, so the switch takes the body's own join (the test block) and the arms that reach it
+  // through the `i++` block take that block back as a copy. Each arm ends `i + 1` and breaks.
+  const out = lift('sw_loopret', 'gcc2.7.2', 'gcc272-swloopret.asm', 'gcc272-swloopret.txt');
+  const sw = switchOf(out);
+  expect(armOf(sw, 'case 0')).toMatch(/k\(a0\);\s*return;/);
+  expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
+  for (const label of ['case 1', 'case 3', 'case 4', 'case 6', 'case 7']) {
+    expect(armOf(sw, label)).toMatch(/v\d+ = v\d+ \+ 1;\s*break;\s*$/);
+  }
+  expect(sw).toMatch(/case 2:\s*case 5:\s*v\d+ = v\d+ \+ 1;\s*break;/);
+  expect(out).not.toContain('continue');
+  expect(sw).not.toContain('k(7)');
+  expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
+});
+
+test('agbcc: the loop body join is offered to the copies, for arm tails a cross-jump merged', () => {
+  // The same loop, with arm tails agbcc cross-jumped (`case 1: g(1); h(a);` and `case 2: g(3);
+  // h(a);` share `g(r0)` and run on into `case 3: h(a);`), and the post-loop early return that
+  // makes the epilogue the switch's CFG merge:
+  //
+  //   for (i = 0; i <= n; i++)
+  //       switch (gId[i]) {
+  //       case 0: if (a == i) { k(a); return; } gOut = 1; break;
+  //       case 1: g(1); h(a); gOut = 7; break;
+  //       case 2: g(3); h(a); gOut = 7; break;
+  //       case 3: h(a); gOut = 7; break;
+  //       case 4: gOut = 4; break;
+  //       case 5: k(i); break;
+  //       }
+  //   if (gOut == a) { k(7); return; }
+  //   gOut = 9;
+  //
+  // Read as written, two arms fall into `case 3:` at the body's join too; only the copies spell it.
+  const out = decompile('b1', corpus('agbcc-swloopcopies.s'), TOOLCHAIN_TARGETS.agbcc.description, {
+    prototypes: {
+      b1: { returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      g: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+    },
+  }).source;
+  const sw = switchOf(out);
+  expect(armOf(sw, 'case 0')).toMatch(/k\(a0\);\s*return;/);
+  // one entrant takes the shared tail back as a copy and breaks; the other falls into `case 3:`
+  expect(armOf(sw, 'case 1')).toMatch(/g\(v\d+\);\s*h\(a0\);\s*gOut = 7;\s*break;\s*$/);
+  expect(armOf(sw, 'case 2')).toMatch(/g\(v\d+\);\s*$/);
+  expect(armOf(sw, 'case 3')).toMatch(/h\(a0\);\s*gOut = 7;\s*break;/);
+  for (const label of ['case 4', 'case 5']) {
+    expect(armOf(sw, label).trimEnd()).toMatch(/break;$/);
+  }
+  expect(sw).not.toContain('default:');
+  expect(out).not.toContain('continue');
+  expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
+  expect(sw).not.toContain('k(7)');
+});
+
+test('ido7.1: a switch nested in an arm of an in-loop switch stays loud where its merge only returns reach', () => {
+  // The inner switch's own `case 4:` returns, so its CFG merge is the epilogue past the loop too,
+  // which only `return`s reach. Its arms SPELL there (tail copies and `continue`), so the loop
+  // clamp is never asked, and it writes the epilogue's `return;` after itself where no path
+  // reaches it: the reachability contract declines the function. No static test tells that from
+  // the published reading whose arm spells an early `return` as `break;` to the same `return;`,
+  // so it stays loud, never wrong C.
+  //
+  //   i = -1;
+  //   while (1) {
+  //       i++;
+  //       if (i > n) break;
+  //       if (gV[i] != 1) {
+  //           switch (gId[i]) {
+  //           case 0: gOut = 20;
+  //           case 1: k(i); break;
+  //           case 4: switch (gV[i] & 7) {
+  //                   case 0: if (gV[i] < a) gOut = 20; break;
+  //                   case 4: if (gV[i] == 24) return; break;
+  //                   case 6: if (gV[i] < a) gOut = 26; break;
+  //                   case 7: gOut = 27;
+  //                   default: gOut -= 1; break;
+  //                   }
+  //                   k(55); break;
+  //           case 5: if (gV[i] == 25) return; break;
+  //           case 7: while (gV[i] > 27) { gV[i]--; k(27); } break;
+  //           }
+  //           gOut += 2;
+  //       }
+  //   }
+  //   if (gOut == a) { k(7); return; }
+  //   gOut = 9;
+  expect(() => lift('q242', 'ido7.1', 'ido71-swloopnested.asm', 'ido71-swloopnested.txt')).toThrow(
+    /structuring emitted 1 statement\(s\) no path reaches/,
   );
 });
