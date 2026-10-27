@@ -1,0 +1,135 @@
+// A jump table in a loop body, one of whose arms `return`s — where the function's single epilogue
+// (every `return` merged into one, as agbcc and IDO do when the code after the loop returns early
+// too, and mwcc always does) is the only block every path from the dispatch reaches. Post-dominance
+// then puts the switch's end PAST the loop, the loop's own latch is left a sibling, and every
+// `break` read as a fall-through into it. The switch's end inside a loop body is the body's own join
+// (`loopJoin`), as it is for an `if` there.
+//
+// The fixtures are the benchmark's own `synthetic:sw_loopret` objects (and mwcc's
+// `sw_loopret_ctl`, which has no post-loop return but still one epilogue), as `pnpm bench repro`
+// fed them to asmlift: the `.s`/objdump text and, off agbcc, its `objdump -s -r -t` dump.
+//
+//   for (i = 0; i <= n; i++) {
+//       switch (gE[i].id) {
+//       case 5: if (gE[i].x == a) { k(a); return; } gOut = 1; break;
+//       case 6: if (gE[i].x > a) gOut = 2; break;
+//       case 8: if (gE[i].x < a) gOut = 3; break;
+//       case 9: gOut = 4; break;
+//       case 11: if (gE[i].x != a) gOut = 5; break;
+//       case 12: k(i); break;
+//       }
+//   }
+//   if (gOut == a) { k(7); return; }      // absent from sw_loopret_ctl
+//   gOut = 9;
+import { readFileSync } from 'node:fs';
+import { expect, test } from 'vitest';
+
+import { parseAsmData } from '../src/frontend/asmdata';
+import { decompile } from '../src/pipeline';
+import { TOOLCHAIN_TARGETS } from '../src/target';
+
+const corpus = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+const protos = (sym: string) => ({ [sym]: { returnsVoid: true }, k: { params: 1, returnsVoid: true } });
+const lift = (sym: string, tc: keyof typeof TOOLCHAIN_TARGETS, asm: string, dump?: string) =>
+  decompile(sym, corpus(asm), TOOLCHAIN_TARGETS[tc].description, {
+    prototypes: protos(sym),
+    ...(dump !== undefined ? { asmData: parseAsmData(corpus(dump), corpus(dump), corpus(dump), true) } : {}),
+  }).source;
+
+/** The text of the one `switch` statement, from its keyword to its closing brace. */
+const switchOf = (out: string): string => {
+  const at = out.indexOf('switch (');
+  expect(at).toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  for (let i = out.indexOf('{', at); i < out.length; i++) {
+    depth += out[i] === '{' ? 1 : out[i] === '}' ? -1 : 0;
+    if (depth === 0) {
+      return out.slice(at, i + 1);
+    }
+  }
+  throw new Error('unbalanced switch');
+};
+
+/** Everything a case label opens, up to the next label or the switch's end. */
+const armOf = (sw: string, label: string): string => {
+  const at = sw.indexOf(`${label}:`);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const rest = sw.slice(at + label.length + 1);
+  const next = rest.search(/\n\s*(case -?\d+|default):/);
+  return next < 0 ? rest.replace(/\s*\}$/, '') : rest.slice(0, next);
+};
+
+const cells = [
+  { name: 'agbcc', sym: 'sw_loopret', tc: 'agbcc', asm: 'agbcc-swloopret.s', postLoopReturn: true },
+  {
+    name: 'ido7.1',
+    sym: 'sw_loopret',
+    tc: 'ido7.1',
+    asm: 'ido71-swloopret.asm',
+    dump: 'ido71-swloopret.txt',
+    postLoopReturn: true,
+  },
+  {
+    name: 'mwcc_242_81',
+    sym: 'sw_loopret',
+    tc: 'mwcc_242_81',
+    asm: 'mwcc242-swloopret.asm',
+    dump: 'mwcc242-swloopret.txt',
+    postLoopReturn: true,
+  },
+  {
+    name: 'mwcc_242_81 (no post-loop return)',
+    sym: 'sw_loopret_ctl',
+    tc: 'mwcc_242_81',
+    asm: 'mwcc242-swloopretctl.asm',
+    dump: 'mwcc242-swloopretctl.txt',
+    postLoopReturn: false,
+  },
+] as const;
+
+test.each(cells)('$name: an in-loop switch whose CFG merge is the epilogue ends at the loop body', (c) => {
+  const out = lift(c.sym, c.tc, c.asm, 'dump' in c ? c.dump : undefined);
+  const sw = switchOf(out);
+  // inside the loop: the loop opens before the switch, and the switch closes before the loop does
+  const loopAt = out.search(/\b(do|for \(.*\)|while \(.*\)) \{/);
+  expect(loopAt).toBeGreaterThanOrEqual(0);
+  expect(loopAt).toBeLessThan(out.indexOf(sw));
+  // `case 5:` (the scrutinee is rebased by 5, so label 0) keeps its own `k(a); return;`, and is
+  // the ONLY `return` in the function: none was merged into a `break`, and none was invented.
+  const ret = armOf(sw, 'case 0');
+  expect(ret).toMatch(/k\(a0\);\s*return;/);
+  expect(ret).toMatch(/gOut = 1;/);
+  expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
+  // every other arm, and both holes (7 and 10, labels 2 and 5), is a `break` — nothing falls, no
+  // `default:` (the source wrote none: holes and out-of-range values go round the loop), and no
+  // `continue` path was dropped or spelled.
+  for (const label of ['case 1', 'case 3', 'case 4', 'case 6', 'case 7', 'case 5']) {
+    expect(armOf(sw, label).trimEnd()).toMatch(/break;$/);
+  }
+  expect(sw).toMatch(/case 2:\s*case 5:\s*break;/);
+  expect(armOf(sw, 'case 0').trimEnd()).toMatch(/break;$/);
+  expect(sw).not.toContain('default:');
+  expect(out).not.toContain('continue');
+  expect(armOf(sw, 'case 7')).toMatch(/k\(v\d+\);/);
+  // the code after the loop stays after it, outside the switch
+  expect(sw).not.toContain('gOut = 9');
+  expect(out.indexOf('gOut = 9')).toBeGreaterThan(out.indexOf(sw) + sw.length);
+  if (c.postLoopReturn) {
+    expect(sw).not.toContain('k(7)');
+    expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
+    // `if (gOut == a) { k(7); return; } gOut = 9;` — the `return` is the end of the function, so
+    // the two exclusive paths are the same program as `if (…) k(7); else gOut = 9;`
+    expect(out).toMatch(/if \((gOut == a0|a0 == gOut)\) \{\s*k\(7\);\s*\} else \{\s*gOut = 9;\s*\}/);
+  } else {
+    expect(out).not.toContain('k(7)');
+  }
+});
+
+test('gcc 2.7.2 stays declined: its latch increment sits in the arms delay slots, a different shape', () => {
+  // reorg fills two arms' delay slots with the latch's `i++`, so they jump to the test block while
+  // the rest go to a separate `i++` block (the default); the loop-body join is the test block, and
+  // reading the arms there still has two of them falling into one. Loud, never wrong C.
+  expect(() => lift('sw_loopret', 'gcc2.7.2', 'gcc272-swloopret.asm', 'gcc272-swloopret.txt')).toThrow(
+    /the jump table's case arms do not linearize/,
+  );
+});

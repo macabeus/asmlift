@@ -14087,15 +14087,19 @@ export const SYNTHETIC: SynthSpec[] = [
   //      carry too.
   //  25. sw_loopret / sw_loopret_ctl (sub_08016EEC). A jump table with no `default` as a `for` body,
   //      so its holes and bounds test go to the loop's latch, with one arm that `return`s, and an
-  //      early `return` after the loop. The arms then share no join, so the merge is read past the
-  //      loop (`followOverReturns`; on the real function, which has seven returns, the switch's stop).
-  //      The latch becomes the default sibling, every `break` reads as a fall-through into it, and
-  //      `chainArms` refuses. The default-anchored retry finds no end either: the latch reaches every
-  //      return after the loop. The fix this gates ends a switch inside a loop at the loop's latch.
-  //      sw_loopret_ctl drops the post-loop return and lifts on agbcc and ido7.1. On gcc2.7.2 and
-  //      mwcc_242_81 it declines on the same reading of the latch, so there it is a second instance
-  //      and not a control. Off gcc2.7.2kmc: its table dispatch fails earlier ("indirect jump
-  //      'jr v0'").
+  //      early `return` after the loop. agbcc and IDO then merge every `return` into one epilogue,
+  //      and mwcc always does, so post-dominance puts the switch's end at that epilogue, PAST the
+  //      loop. The latch becomes the default sibling, every `break` reads as a fall-through into it,
+  //      and `chainArms` refuses. The fix ends a switch in a loop body at the body's own join
+  //      (structure.ts THE LOOP CLAMP, `loopJoin`), where the epilogue reading declines.
+  //      sw_loopret_ctl drops the post-loop return: agbcc and ido7.1 keep two `ret`s, so it lifted
+  //      already there (controls); mwcc_242_81 keeps one epilogue, so it is a second instance.
+  //      gcc2.7.2 declines both rows on a different shape: reorg fills two arms' delay slots with the
+  //      latch's `i++`, so those arms jump to the test while the rest go to a separate `i++` block,
+  //      and the body's join still leaves two arms falling into one. Off gcc2.7.2kmc: its table
+  //      dispatch fails earlier ("indirect jump 'jr v0'"). On sub_08016EEC itself the loop around
+  //      the switch is not classified at all (its exits run into a cross-jumped `call; return` tail
+  //      that code outside the loop also enters), so no loop clamp reaches it.
   //  26. dmafill_wh / dmafill_ww / dmafill_hw (sub_0804C60C). Two `DMA_FILL`s, a 32-bit one and then
   //      a 16-bit one. The `vu32 tmp` at [sp,#0] is stored with a direct `str r0, [sp]`, which the
   //      slot model keys as an SSA slot unless the [sp,#0] capture licence (thumb.ts, beside
