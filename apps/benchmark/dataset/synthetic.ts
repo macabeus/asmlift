@@ -14063,6 +14063,397 @@ export const SYNTHETIC: SynthSpec[] = [
       memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
     },
   },
+  // ── kleod decline census, measured on 7a8c9c1d: the five functions still declining ──────────────
+  // Five kleod functions still decline on main 7a8c9c1d (the CLI over build/kleod/src/<unit>.s with
+  // the unit's .i context and kleod's symbol map). Each was run
+  // through its refusing site again, instrumented, and each row below is the smallest shape that
+  // reproduces the real function's words at the same site. One of the five is covered already:
+  //   - sub_0804D0B0 is imgidx's: frame-objects.ts `provenParts` keeps the whole range because a
+  //     runtime index reaches both arrays (offsets 0 and 16 on imgidx and on the real function). Its
+  //     `u8[36]` against imgidx's `u8[32]` is the arg0 spill word imgspill pinned, which MATCHes.
+  //  24. jt_xjdefpre / jt_xjdefpre_body / jt_xjdefpre_one (EntityCreate). Item 18's two arms
+  //      cross-jumped into the default, on item 8's dispatch. gcse's PRE insertion before the
+  //      tablejump keeps the dispatch block apart from its bounds test, which also branches to the
+  //      default, so the switch does not dominate the default's successors. switch-recover.ts
+  //      `analyzeArmExit` then reads the default as a `break` with no region (it escapes), and
+  //      `copySharedFallTargets` writes copies only into a sibling with a region. Neither arm gets
+  //      the default's code back, and `chainArms` refuses two fall-throughs into one arm ("case arms
+  //      do not linearize"). In EntityCreate the default's tail is also where other arms cross-jump
+  //      and where the next switch's index is recomputed; the row does not need either. Controls:
+  //      jt_xjdefpre_body gives `case 4` a body, so the insertion moves to the join (MATCH), and
+  //      jt_xjdefpre_one cross-jumps one arm (lifts; its residue is jt_pre_midg's). jt_xjdef itself
+  //      MATCHes. GCC 2.7.2 has no gcse, so gcc2.7.2kmc and gcc2.7.2 MATCH the row (controls).
+  //      ido7.1 and mwcc_242_81 keep each tail and lift the row with the residue their controls
+  //      carry too.
+  //  25. sw_loopret / sw_loopret_ctl (sub_08016EEC). A jump table with no `default` as a `for` body,
+  //      so its holes and bounds test go to the loop's latch, with one arm that `return`s, and an
+  //      early `return` after the loop. The arms then share no join, so the merge is read past the
+  //      loop (`followOverReturns`; on the real function, which has seven returns, the switch's stop).
+  //      The latch becomes the default sibling, every `break` reads as a fall-through into it, and
+  //      `chainArms` refuses. The default-anchored retry finds no end either: the latch reaches every
+  //      return after the loop. The fix this gates ends a switch inside a loop at the loop's latch.
+  //      sw_loopret_ctl drops the post-loop return and lifts on agbcc and ido7.1. On gcc2.7.2 and
+  //      mwcc_242_81 it declines on the same reading of the latch, so there it is a second instance
+  //      and not a control. Off gcc2.7.2kmc: its table dispatch fails earlier ("indirect jump
+  //      'jr v0'").
+  //  26. dmafill_wh / dmafill_ww / dmafill_hw (sub_0804C60C). Two `DMA_FILL`s, a 32-bit one and then
+  //      a 16-bit one. The `vu32 tmp` at [sp,#0] is stored with a direct `str r0, [sp]`, which the
+  //      slot model keys as an SSA slot, while its published address makes it an object, and the
+  //      `vu16 tmp` at [sp,#4] (stored through `add r0, sp, #4`) is a second object, so the one-object
+  //      answer is withheld. frame-objects.ts `failIfSlotKeysIt` then refuses the object over the
+  //      slot ("one byte, two models"). Both fills 32-bit (dmafill_ww) or the 16-bit one first
+  //      (dmafill_hw) MATCH. The real function needs its symbol map to reach this: with
+  //      gUnk_03004D84 unplaced its reads are of an unknown address, and it lifts; spelled as a
+  //      literal address it declines without any map. agbcc only: the DMA source registers are a GBA
+  //      device (`readOnlyAddressSinks`), and the other lanes decline all three rows on the frame
+  //      address itself (sp as data on gcc2.7.2kmc and gcc2.7.2, an escape to the whole frame on
+  //      ido7.1 and mwcc_242_81).
+  //  27. brk2lvl / brk2lvl_flag (sub_0800D188). A `goto` from an inner search loop to the end of
+  //      the outer loop's body, skipping the code after the inner loop: kleod spells this with
+  //      `goto exit_loop`. The inner loop then exits to two places, its own exit and the outer
+  //      latch, and no loop recognizer takes it ("unrecovered back-edge"). The goto-free spelling
+  //      (`break` and `if (j > m)`, brk2lvl_flag) compiles to a different object and lifts, so under
+  //      the no-goto rule the function is set aside and the row pins the guard: brk2lvl should stay
+  //      declined until asmlift spells such an exit. Same exits and same decline on all five lanes.
+  {
+    sym: 'jt_xjdefpre',
+    src:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre(s32 x, s32 *p, s32 c, s32 v)\n' +
+      '{\n' +
+      '    if (c) {\n' +
+      '        gOut = x - 37;\n' +
+      '    } else {\n' +
+      '        switch (x) {\n' +
+      '        case 1: f(1); break;\n' +
+      '        case 2: h(v); gOut = v; gOut2 = 5; break;\n' +
+      '        case 3: m(v); gOut = v; gOut2 = 5; break;\n' +
+      '        case 4: break;\n' +
+      '        case 5: q(v); break;\n' +
+      '        case 6: f(7); break;\n' +
+      '        default: gOut = v; gOut2 = 5; break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    switch (x) {\n' +
+      '    case 37: p[9] = 1; break;\n' +
+      '    case 38: p[10] = 2; break;\n' +
+      '    case 39: p[11] = 3; break;\n' +
+      '    case 40: p[12] = 4; break;\n' +
+      '    case 41: p[13] = 5; break;\n' +
+      '    case 42: p[14] = 6; break;\n' +
+      '    case 43: p[15] = 7; break;\n' +
+      '    case 44: p[16] = 8; break;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'branch'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre(s32 x, s32 *p, s32 c, s32 v);',
+    proto: {
+      jt_xjdefpre: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_xjdefpre_body',
+    src:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre_body(s32 x, s32 *p, s32 c, s32 v)\n' +
+      '{\n' +
+      '    if (c) {\n' +
+      '        gOut = x - 37;\n' +
+      '    } else {\n' +
+      '        switch (x) {\n' +
+      '        case 1: f(1); break;\n' +
+      '        case 2: h(v); gOut = v; gOut2 = 5; break;\n' +
+      '        case 3: m(v); gOut = v; gOut2 = 5; break;\n' +
+      '        case 4: f(3); break;\n' +
+      '        case 5: q(v); break;\n' +
+      '        case 6: f(7); break;\n' +
+      '        default: gOut = v; gOut2 = 5; break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    switch (x) {\n' +
+      '    case 37: p[9] = 1; break;\n' +
+      '    case 38: p[10] = 2; break;\n' +
+      '    case 39: p[11] = 3; break;\n' +
+      '    case 40: p[12] = 4; break;\n' +
+      '    case 41: p[13] = 5; break;\n' +
+      '    case 42: p[14] = 6; break;\n' +
+      '    case 43: p[15] = 7; break;\n' +
+      '    case 44: p[16] = 8; break;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'branch'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre_body(s32 x, s32 *p, s32 c, s32 v);',
+    proto: {
+      jt_xjdefpre_body: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'jt_xjdefpre_one',
+    src:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre_one(s32 x, s32 *p, s32 c, s32 v)\n' +
+      '{\n' +
+      '    if (c) {\n' +
+      '        gOut = x - 37;\n' +
+      '    } else {\n' +
+      '        switch (x) {\n' +
+      '        case 1: f(1); break;\n' +
+      '        case 2: h(v); gOut = v; gOut2 = 5; break;\n' +
+      '        case 3: m(v); break;\n' +
+      '        case 4: break;\n' +
+      '        case 5: q(v); break;\n' +
+      '        case 6: f(7); break;\n' +
+      '        default: gOut = v; gOut2 = 5; break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    switch (x) {\n' +
+      '    case 37: p[9] = 1; break;\n' +
+      '    case 38: p[10] = 2; break;\n' +
+      '    case 39: p[11] = 3; break;\n' +
+      '    case 40: p[12] = 4; break;\n' +
+      '    case 41: p[13] = 5; break;\n' +
+      '    case 42: p[14] = 6; break;\n' +
+      '    case 43: p[15] = 7; break;\n' +
+      '    case 44: p[16] = 8; break;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'branch'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'extern s32 gOut;\n' +
+      'extern s32 gOut2;\n' +
+      'void f(s32 x);\n' +
+      'void h(s32 x);\n' +
+      'void m(s32 x);\n' +
+      'void q(s32 x);\n' +
+      'void jt_xjdefpre_one(s32 x, s32 *p, s32 c, s32 v);',
+    proto: {
+      jt_xjdefpre_one: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sw_loopret',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_loopret(s32 a, s32 n)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = 0; i <= n; i++) {\n' +
+      '        switch (gE[i].id) {\n' +
+      '        case 5: if (gE[i].x == a) { k(a); return; } gOut = 1; break;\n' +
+      '        case 6: if (gE[i].x > a) gOut = 2; break;\n' +
+      '        case 8: if (gE[i].x < a) gOut = 3; break;\n' +
+      '        case 9: gOut = 4; break;\n' +
+      '        case 11: if (gE[i].x != a) gOut = 5; break;\n' +
+      '        case 12: k(i); break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    if (gOut == a) {\n' +
+      '        k(7);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gOut = 9;\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_loopret(s32 a, s32 n);',
+    proto: { sw_loopret: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_loopret_ctl',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_loopret_ctl(s32 a, s32 n)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = 0; i <= n; i++) {\n' +
+      '        switch (gE[i].id) {\n' +
+      '        case 5: if (gE[i].x == a) { k(a); return; } gOut = 1; break;\n' +
+      '        case 6: if (gE[i].x > a) gOut = 2; break;\n' +
+      '        case 8: if (gE[i].x < a) gOut = 3; break;\n' +
+      '        case 9: gOut = 4; break;\n' +
+      '        case 11: if (gE[i].x != a) gOut = 5; break;\n' +
+      '        case 12: k(i); break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    gOut = 9;\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2', 'mwcc_242_81'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_loopret_ctl(s32 a, s32 n);',
+    proto: { sw_loopret_ctl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'dmafill_wh',
+    src:
+      'typedef volatile unsigned short vu16;\n' +
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4; dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); dmaRegs[2]; }\n' +
+      'void dmafill_wh(void)\n' +
+      '{\n' +
+      '    { vu32 tmp = 0x1234; DmaSet(&tmp, 0x06000040, 0x85000008); }\n' +
+      '    { vu16 tmp = 0xF002; DmaSet(&tmp, 0x06008000, 0x81000400); }\n' +
+      '}',
+    features: ['stack-addr', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmafill_wh(void);',
+    proto: { dmafill_wh: { returnsVoid: true } },
+  },
+  {
+    sym: 'dmafill_ww',
+    src:
+      'typedef volatile unsigned short vu16;\n' +
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4; dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); dmaRegs[2]; }\n' +
+      'void dmafill_ww(void)\n' +
+      '{\n' +
+      '    { vu32 tmp = 0x1234; DmaSet(&tmp, 0x06000040, 0x85000008); }\n' +
+      '    { vu32 tmp = 0xF002; DmaSet(&tmp, 0x06008000, 0x85000200); }\n' +
+      '}',
+    features: ['stack-addr', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmafill_ww(void);',
+    proto: { dmafill_ww: { returnsVoid: true } },
+  },
+  {
+    sym: 'dmafill_hw',
+    src:
+      'typedef volatile unsigned short vu16;\n' +
+      'typedef volatile unsigned int vu32;\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4; dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); dmaRegs[2]; }\n' +
+      'void dmafill_hw(void)\n' +
+      '{\n' +
+      '    { vu16 tmp = 0x1234; DmaSet(&tmp, 0x06000040, 0x81000010); }\n' +
+      '    { vu32 tmp = 0xF002; DmaSet(&tmp, 0x06008000, 0x85000200); }\n' +
+      '}',
+    features: ['stack-addr', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmafill_hw(void);',
+    proto: { dmafill_hw: { returnsVoid: true } },
+  },
+  {
+    sym: 'brk2lvl',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'void k(s32 x);\n' +
+      'void brk2lvl(s32 n, s32 m)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        gA[i] = 1;\n' +
+      '        for (j = 0; j <= m; j++) {\n' +
+      '            if (gE[j].f <= 24) {\n' +
+      '                if (gE[j].x == i)\n' +
+      '                    goto next;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        k(i);\n' +
+      '    next:;\n' +
+      '    }\n' +
+      '}',
+    features: ['branch'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'void k(s32 x);\n' +
+      'void brk2lvl(s32 n, s32 m);',
+    proto: { brk2lvl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'brk2lvl_flag',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'void k(s32 x);\n' +
+      'void brk2lvl_flag(s32 n, s32 m)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        gA[i] = 1;\n' +
+      '        for (j = 0; j <= m; j++) {\n' +
+      '            if (gE[j].f <= 24) {\n' +
+      '                if (gE[j].x == i)\n' +
+      '                    break;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        if (j > m)\n' +
+      '            k(i);\n' +
+      '    }\n' +
+      '}',
+    features: ['break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'void k(s32 x);\n' +
+      'void brk2lvl_flag(s32 n, s32 m);',
+    proto: { brk2lvl_flag: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
   // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
   // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a
