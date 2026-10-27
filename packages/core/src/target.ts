@@ -729,6 +729,9 @@ export interface TargetDescription {
     // frame base is handed as the hidden pointer of a callee DECLARED to return a struct through
     // memory, it is a local's address, so no word of the frame is any call's outgoing argument and
     // the area is empty — whatever the other calls are (sret2knr: `u8 rnd();` beside two temps).
+    // This premise is read only where some call may take a stack word: where none does there is
+    // no outgoing area to confuse, and an escaping frame base is a local's address on any target,
+    // whoever receives it (a DMA source published to the device's registers, `dmafill_wh`).
     // The residue cannot reach it: a block copy's base goes to `memcpy`, no struct-returning
     // callee. That reading is agbcc's layout, and is measured beyond `f0`: thumb.h:573
     // STARTING_FRAME_OFFSET 0 and :620-621 add `current_function_outgoing_args_size` to every

@@ -1763,13 +1763,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       }).source;
       expect(src).toContain('    u8 sp0[12];');
       expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;');
-      // …and where the read is bounded, the overlap is still refused, by the refusal it always had
+      // …and where the read is bounded, the one object is not on offer and the frame is still
+      // refused: no call takes a stack word, so [sp,#0] is the published object's own word, and the
+      // words at [sp,#4] and [sp,#8] the device may read are slots this lift keeps in registers
       const bounded = atBase.replace(
         '\tldr\tr0, .L9+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L9+0x14\n\tstr\tr0, [r1]\n',
         '',
       );
       expect(() => decompile('u1', bounded, ARMV4T_AGBCC)).toThrow(
-        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+        /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the slot at \[sp,#4\]/,
       );
     });
 
@@ -2832,9 +2834,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     } = ARMV4T_AGBCC.compilerBehaviors;
     const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: unprobedBehaviors };
 
+    //
+    // The table is needed only where a call MAY take a stack word: with `use` undeclared, a
+    // compiler that has not run it gets no proof. With `use` declared to take its one word in a
+    // register no call takes a stack word, so there is no outgoing area to overlay on any compiler,
+    // and the escaping frame base is a local's address without either premise (thumb.ts, beside
+    // `noCallTakesAStackWord`).
     test('an armv4t compiler that has not declared the layout does not get the proof', () => {
-      expect(() => decompile('f', addrTaken, undeclared, { prototypes: { use: { params: 1 } } })).toThrow(
-        /never reloaded/,
+      expect(() => decompile('f', addrTaken, undeclared)).toThrow(/never reloaded/);
+      expect(decompile('f', addrTaken, ARMV4T_AGBCC).source).toContain('use(&sp0, ');
+      expect(decompile('f', addrTaken, undeclared, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0);',
       );
     });
 
@@ -3230,14 +3240,25 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // function arms, with a fixed source that reads two bytes: a read nothing bounds is kept as
       // one object in memory instead, which needs no layout proof — it declares every byte of the
       // reserved area and keeps every store to it.
+      //
+      // The layout is asked for only where a call MAY take a stack word, here a `bl h` nothing
+      // declares: with no such call there is no outgoing area on any compiler, and the published
+      // frame base is a local's address without the premise (thumb.ts, beside
+      // `noCallTakesAStackWord`).
       test('an armv4t compiler that has not declared the layout does not get the publish proof', () => {
         const armed = PUBLISH.replace(
           '\tstr\tr1, [r2]\n',
           '\tstr\tr1, [r2]\n\tldr\tr3, .L4+0x4\n\tstr\tr3, [r2, #0x8]\n',
         ).concat('\t.word\t0x81000001\n');
         expect(armed).not.toBe(PUBLISH);
-        expect(() => decompile('f', armed, undeclared)).toThrow(TWO_MODELS);
-        expect(decompile('f', PUBLISH, undeclared).source).toContain('    u8 sp0[4];');
+        const called = armed.replace('\tadd\tsp, sp, #0x4\n', '\tbl\th\n\tadd\tsp, sp, #0x4\n');
+        expect(called).not.toBe(armed);
+        expect(() => decompile('f', called, undeclared)).toThrow(/it may be an outgoing stack argument/);
+        expect(decompile('f', called, ARMV4T_AGBCC).source).toContain('    volatile u32 sp0;');
+        // …and with `h` declared to take no word, or with no call at all, nothing asks for it
+        const noWord = { prototypes: { h: { params: 0 } } };
+        expect(decompile('f', called, undeclared, noWord).source).toContain('    volatile u32 sp0;');
+        expect(decompile('f', armed, undeclared).source).toContain('    volatile u32 sp0;');
       });
 
       // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
@@ -3989,10 +4010,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // [sp]` and published through `mov r2, sp`, DmaClear16 of a `vu16` at sp+4 (its read-back
     // dropped, which structuring otherwise refuses on both sides), and `gMain.state++` through a
     // phi of two loads of one literal. The phi's every address misses DMA3's control halfword, so
-    // each read is bounded — and the per-object model then refuses the sp-direct store under the
-    // capture. Without the proof the read reaches the frame and the one object holds it; the proof
-    // must not take that lift away, so the frame stays one object.
-    test('a window the miss proof bounds keeps the one-object answer the unbounded read had', () => {
+    // each read is bounded. Without the proof the read reaches the frame and the one object holds
+    // it; the proof must not take that lift away. It once kept it by keeping the frame one object,
+    // because the per-object model refused the sp-direct store under the capture as an SSA slot;
+    // with `foo` declared to take no word, no call takes a stack word, so that store is the
+    // published `vu32`'s own (thumb.ts, beside `noCallTakesAStackWord`) and each object stands on
+    // its own bytes, filled before its address reaches the device.
+    test('a window the miss proof bounds keeps the lift the unbounded read had', () => {
       const shared =
         'tc:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr3, .L9\n\tcmp\tr0, #1\n\tbhi\t.L7\n' +
         '\tcmp\tr0, #0\n\tbne\t.L2\n\tmov\tr1, #0xe0\n\tlsl\tr1, r1, #0x13\n\tmov\tr0, #0x0\n' +
@@ -4009,9 +4033,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const src = decompile('tc', shared, ARMV4T_AGBCC, {
         prototypes: { tc: { params: ['s32'], returnsVoid: true }, foo: { params: [], returnsVoid: true } },
       }).source;
-      expect(src).toContain('    u8 sp0[8];');
-      expect(src).toContain('*(volatile s32 *)67109076 = sp0;');
-      expect(src).toContain('*(volatile s32 *)67109076 = (u32)sp0 + 4;');
+      expect(src).toContain('    volatile u32 sp0;\n    volatile u16 sp4;');
+      expect(src).toContain('            sp0 = 0;\n            *(s32 *)67109076 = &sp0;');
+      expect(src).toContain('            sp4 = 0;\n            *(s32 *)67109076 = &sp4;');
     });
 
     // …AND THE SAME WINDOW IS ASKED AS UNBOUNDED WHERE AN ESCAPE GATE REJECTS IT, not only where a
@@ -5054,11 +5078,16 @@ describe('a frame address that escapes explains the stores it hands over', () =>
     );
   });
 
+  // The premise is read only where a call MAY take a stack word, here `g` undeclared. With `g`
+  // declared no call takes one, so there is no outgoing area on any compiler and the escaping
+  // frame base is a local's address without the premise (thumb.ts, beside `noCallTakesAStackWord`).
   test('an armv4t compiler that has not declared the premise does not get it', () => {
     const { escapedFrameAddressNamesALocal: _unprobed, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
     const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: behaviors };
-    expect(() => decompile('f0', f0, undeclared, { prototypes: G })).toThrow(
-      /the store to \[sp,#0\] is never reloaded/,
+    expect(() => decompile('f0', f0, undeclared)).toThrow(/the store to \[sp,#0\] is never reloaded/);
+    expect(() => decompile('f0', f0, ARMV4T_AGBCC)).not.toThrow(/never reloaded/);
+    expect(decompile('f0', f0, undeclared, { prototypes: G }).source).toBe(
+      decompile('f0', f0, ARMV4T_AGBCC, { prototypes: G }).source,
     );
   });
 
@@ -5096,8 +5125,11 @@ describe('a frame address that escapes explains the stores it hands over', () =>
       's3:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tldr\tr2, .L5\n\tmov\tr3, sp\n\tstr\tr3, [r2]\n' +
       '\tstr\tr1, [sp, #0x4]\n\tmov\tr1, #0x2\n\tstr\tr1, [sp, #0x8]\n\tbl\thy\n\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n' +
       '\tbx\tr1\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\tgp\n';
+    // `hy` takes its one word in a register, so no call takes a stack word and the published frame
+    // base is a local's address: the frame model refuses the words stored after the publish as
+    // slots a reader of that address may write, before the event is read. Still loud.
     expect(() => decompile('s3', s3, ARMV4T_AGBCC, { prototypes: T })).toThrow(
-      /the store to \[sp,#4\] reaches `bl hy` unread/,
+      /the captured address at \[sp,#0\) is stored to memory, which may write the slot at \[sp,#4\]/,
     );
   });
 
