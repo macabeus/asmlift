@@ -792,7 +792,8 @@ export function callDeclarations(
     if (target.compilerBehaviors.keepsUnusedReads === true || !ssa.writtenSinceCall(set, bi)) {
       return undefined;
     }
-    const v = ssa.readVar(set, bi);
+    // a lookup, not the frontend's read: `leftover` asks what instructions read (`readAfterEveryReachingWrite`)
+    const v = ssa.readGuessedArg(set, bi);
     const def = ssa.irBlocks[bi].ops.find((op) => op.results.includes(v));
     const sig = def === undefined ? undefined : (OPCODES[def.opcode as keyof typeof OPCODES] as OpSig | undefined);
     const readsRefuse = target.compilerBehaviors.discardedReadMayFillArgRegister !== false;
@@ -944,21 +945,90 @@ export function callDeclarations(
     // whether an op lowered so far reads `v`: the call being lowered is not one yet
     const reads = (o: Op, v: Value): boolean => o.operands.includes(v) || o.successors.some((e) => e.args.includes(v));
     const readSoFar = (v: Value): boolean => ssa.irBlocks.some((b) => b.ops.some((o) => reads(o, v)));
+    // the function's own incoming value of argument register `r`
+    const incoming = (v: Value, r: string): boolean => ssa.paramReg.get(v) === r && ssa.irBlocks[0].params.includes(v);
     // WHETHER WHAT ARGUMENT REGISTER `r` HOLDS WAS LEFT THERE BY A WRITE MADE FOR SOMETHING ELSE: a
-    // question about the register's last WRITE, not about its value. Where the call's own block wrote
-    // it, only a read since that write counts — `mov r0, #5; strh r0, [r1]; bl rnd` left the store's
-    // 5 in r0, while `add r1, r5, #0; bl un` is a copy made for this call, whose value an earlier call
-    // read (`g4(a, b, c, d); un(a, b, c, d)` forwards the same arguments twice, and agbcc and mwcc
-    // copy them back from callee-saved homes). A copy names no new value, so the value-level question
-    // cannot tell those two apart. KNOWN GAP: a register last written in another block is still asked
-    // of its value, which cuts such a copy made in a predecessor.
+    // question about the register's last WRITE, not about its value. `mov r0, #5; strh r0, [r1];
+    // bl rnd` left the store's 5 in r0; `add r1, r5, #0; bl un` is a copy made for the call, though
+    // an earlier call read its value (`g4(a, b, c, d); un(a, b, c, d)`: agbcc and mwcc copy them back
+    // from callee-saved homes). A copy names no new value, so no value-level question tells them apart.
+    //
+    // WHAT READ COUNTS DEPENDS ON WHERE THE WRITE WAS, because a read that lowers to nothing — a copy
+    // into a callee-saved register, a store to a frame home — SAVES a value across the call, and a
+    // saved value may be handed to the call as well:
+    //   - the call's own block wrote it, or nothing in this function did (the incoming value): only a
+    //     lowered op's read since. `un(a); return g2(a);` and `un(); return g2(a);` compile to the
+    //     same caller bytes on agbcc, IDO, gcc 2.7.2, KMC and mwcc (agbcc `add r4, r0, #0; bl un`).
+    //   - another block wrote it: a lowered op's read in the call's block, or a read after EACH write
+    //     that reaches the call, a save included, on ANY path out of it but the ones into the call
+    //     (`SsaBuilder.readAfterEveryReachingWrite`). agbcc's case CSE moves the cases' `i << 3` from
+    //     r0 to r4 at their join (`add r4, r0, #0`) before the call's join, while a value handed to
+    //     the call is copied back for it in the call's block (`add r0, r4, #0; bl rnd`, measured).
+    //     EACH write, because one no read follows was made for the call (`if (c) { t = d + 3; gX = t;
+    //     } else t = d - 9; rnd(t);` at IDO stores one arm's a0). ANY path, because gcc 2.7.2 and KMC
+    //     fill a branch's delay slot with one call's argument (`bnez v0, L; move a0, zero; jal cr`),
+    //     and the 0 reaches `L: jal stat` unread. NOT the call's own block's saves: IDO saves the
+    //     argument it hands a call in the jal's delay slot (`jal rnd; sw a0, 28(sp)`, measured) and
+    //     computes t into v1 where rnd is handed nothing, so that save is evidence FOR the argument.
+    //     An earlier call's result is no such write (sa3 Task_274_8056314: `strb r0` of one arm's
+    //     value, `bl sub_8056408` in the other, then `bl Task_274_8054E38`, whose source takes nothing).
     const leftover = (r: string): boolean => {
       const at = ssa.lastWriteOp(r, bi);
-      const since = at === undefined ? undefined : ssa.irBlocks[bi].ops.slice(at);
-      return ssa.holdsValue(
-        r,
-        bi,
-        (v) => mayPass(v, r) && (since === undefined ? readSoFar(v) : since.some((o) => reads(o, v))),
+      if (at !== undefined) {
+        const since = ssa.irBlocks[bi].ops.slice(at);
+        return ssa.holdsValue(r, bi, (v) => mayPass(v, r) && since.some((o) => reads(o, v)));
+      }
+      if (ssa.holdsValue(r, bi, (v) => mayPass(v, r) && ssa.irBlocks[bi].ops.some((o) => reads(o, v)))) {
+        return true;
+      }
+      const callResult = (v: Value): boolean =>
+        ssa.irBlocks.some((b) => b.ops.some((o) => o.opcode === 'call' && o.results.includes(v)));
+      // the values a join's phi of `v` merges, through phis of phis, or `undefined` where an edge
+      // into one is not lowered yet
+      const merged = (v: Value, seen = new Set<Value>()): Value[] | undefined => {
+        const at = ssa.irBlocks.find((b) => b.params.includes(v));
+        if (at === undefined) {
+          return [v];
+        }
+        if (seen.has(v)) {
+          return [];
+        }
+        seen.add(v);
+        const k = at.params.indexOf(v);
+        const edges = ssa.irBlocks.flatMap((b) => b.ops.flatMap((o) => o.successors.filter((e) => e.block === at)));
+        const out: Value[] = [];
+        for (const e of edges) {
+          const sub = e.args[k] === undefined ? undefined : merged(e.args[k], seen);
+          if (sub === undefined) {
+            return undefined;
+          }
+          out.push(...sub);
+        }
+        return edges.length > 0 ? out : undefined;
+      };
+      // an earlier call's result on every path in: a join's phi of copies of one (IDO's `move a3,
+      // v0` in a branch's delay slot meets the path that skips the store between)
+      const resultOnEveryPath = (v: Value): boolean => {
+        const vs = merged(v);
+        return vs !== undefined && vs.length > 0 && vs.every(callResult);
+      };
+      return (
+        ssa.readAfterEveryReachingWrite(r, bi, {
+          // an earlier call's result where that call left it is no write this function made, for this
+          // call or another
+          passes: (v) => mayPass(v, r) && !(r === target.returnReg && callResult(v)),
+          accept: (v) => mayPass(v, r) && (!incoming(v, r) || readSoFar(v)),
+          // a path into a block not lowered yet: what its value answers, as the base question did
+          unlowered: (v) => readSoFar(v),
+          // a copy of an earlier call's result into another register, or a reload of one, answers
+          // only where read after: `bl gets; add r1, r0, #0` and `jal gets; move a1, v0` were, by the
+          // loop's loads, while IDO's `lw a3, 28(sp)` of a result saved across a call (af
+          // mCPk_PakPrivateLoad) was not, and says nothing
+          answersIfRead: (v) => resultOnEveryPath(v),
+        }) ??
+        // nothing written here left to judge: what reaches answers by its value, the base question,
+        // a join's phi by the values it merges (af mCPk_PakPrivateLoad compares the result it keeps)
+        ssa.holdsValue(r, bi, (v) => mayPass(v, r) && (readSoFar(v) || (merged(v) ?? []).some(readSoFar)))
       );
     };
     const unreadByBody = (r: string): boolean => {
@@ -1118,6 +1188,7 @@ export function callDeclarations(
     const guessed = (k: number): Value => {
       const r = target.argRegs[k];
       const v = ssa.readGuessedArg(r, bi);
+      ssa.noteGuessedArgRead(r, bi, v);
       return placeholders ? placeholders.guardRead(name, r, v) : v;
     };
     const args: Value[] = [];

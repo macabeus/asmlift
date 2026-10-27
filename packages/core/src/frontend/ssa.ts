@@ -65,6 +65,11 @@ export interface SsaBuilder {
    *
    *  One of the three call verbs `CallDeclarations.lower` owns ({@link noteCall}). */
   readGuessedArg(reg: string, b: number): Value;
+  /** Record that the call being lowered in block `b` reads `v` from argument register `reg` it
+   *  guessed it takes, for {@link readAfterEveryReachingWrite} alone: the call is an instruction
+   *  reading what the register's last write left there, as a sibling path's call may be, while
+   *  {@link readGuessedArg} makes the read carry no claim for `finish` to judge. */
+  noteGuessedArgRead(reg: string, b: number, v: Value): void;
   /** The value `reg` holds at the END of block `b` once `b` is filled, as the edges out of it carry
    *  it; `null` before. A lookup, not a read: it records no read for `finish` to judge. */
   readAtEnd(reg: string, b: number): Value | null;
@@ -130,6 +135,41 @@ export interface SsaBuilder {
    *  no new value, so this is how a question about one WRITE of a register is asked, where its value
    *  was read before the write too (frontend/call-plan.ts `leftover`). */
   lastWriteOp(reg: string, b: number): number | undefined;
+  /** Whether an instruction READ `reg` after EACH write of it that reaches block `b` and whose value
+   *  `passes`, on ANY path out of that write but the ones into `b`, the first read on that path being
+   *  one whose value `accept` takes. A write no read follows on any path was
+   *  made for `b`'s use, so one is enough to answer no. A call destroying `reg` is no write of this
+   *  function's, and neither is the entry's value where a path from the entry writes neither, so they
+   *  do not answer no; the entry's value read after (as `accept` takes it), or read by a lowered op
+   *  at all (as `unlowered` takes it: no write placed that read), counts as a write read. Where a
+   *  call destroyed `reg` on EVERY path in, it holds what a callee left there and the answer is yes.
+   *  The question is about the write, not its value: a copy (`add r4, r0, #0`) reads `r0` and lowers
+   *  to no op, so no op-level question sees that read, and it counts here; a copy made in an earlier
+   *  block names the value it copies, read before that write too, and is no read of it. Any path out
+   *  of the write, because a MIPS compiler hoists one call's argument into the delay slot of the
+   *  branch that picks it (`bnez v0, L; move a0, zero`), so the write reaches the other call unread
+   *  on the path between. `b`'s own reads are not asked: what a read there that lowers to no op says
+   *  differs by compiler (frontend/call-plan.ts `leftover`). Only the frontend's own reads count
+   *  ({@link readVar}), and a guessed call's argument read the planner records for it
+   *  ({@link noteGuessedArgRead}: a sibling path's call reads the write); a lookup this construction
+   *  makes, or the planner's own probe ({@link readGuessedArg} alone), is none. A block not
+   *  filled yet is passed through looking for the write, as {@link holdsValue} does; a path out of
+   *  a write that reaches one has reads nobody has seen yet, and the write's value answers for it
+   *  as `unlowered` takes it (IDO reloads `lw a0, 24(sp)` in a branch's delay slot for the arm laid
+   *  out after the call). A write of a value `answersIfRead` takes (an earlier call's result, copied
+   *  or reloaded) answers yes where it was read after, and is otherwise none: such a value is the
+   *  callee's, saved across a call as often as handed to one. `undefined` where no write of this
+   *  function's is left to judge and no entry value read: the question has no answer here. */
+  readAfterEveryReachingWrite(
+    reg: string,
+    b: number,
+    ask: {
+      passes: (v: Value) => boolean;
+      accept: (v: Value) => boolean;
+      unlowered: (v: Value) => boolean;
+      answersIfRead: (v: Value) => boolean;
+    },
+  ): boolean | undefined;
   /** Whether EVERY path into this point of block `b` wrote `reg` (or had a call destroy it) after
    *  leaving the last block `stop` names: {@link writtenSinceCall} asked of `b` so far and, where `b`
    *  did not write it, of each predecessor in turn. A path reaching a `stop` block, the entry, or a
@@ -701,6 +741,16 @@ export function makeSsaBuilder(
 
   // `preds` lists an entry per CFG EDGE; these are the distinct predecessor BLOCKS.
   const distinctPreds = (b: number): number[] => [...new Set(preds[b])];
+  // the distinct successor blocks of each, built on first ask (`readAfterEveryReachingWrite`)
+  let successorsMemo: number[][] | undefined;
+  const successors = (): number[][] => {
+    if (successorsMemo === undefined) {
+      const succ: number[][] = irBlocks.map(() => []);
+      irBlocks.forEach((_, s) => distinctPreds(s).forEach((p) => succ[p].push(s)));
+      successorsMemo = succ;
+    }
+    return successorsMemo;
+  };
 
   // CALLER-SAVED CLOBBER, for guessed call arities (see trimClobberedCallArgs). Tracked HERE
   // because every register write in every frontend already goes through `writeVar`: a frontend
@@ -751,6 +801,11 @@ export function makeSsaBuilder(
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
   // the ops block `b` held at each register's last write in it (`lastWriteOp`)
   const lastWriteOp: Array<Map<string, number>> = irBlocks.map(() => new Map());
+  // the value an instruction last read of each register block `b` read since its last write or the
+  // last call destroying it there (since the block's start where neither), and the value it first
+  // read of each before writing it or a call destroying it: `readAfterEveryReachingWrite`
+  const readSinceWrite: Array<Map<string, Value>> = irBlocks.map(() => new Map());
+  const readBeforeWrite: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
   fn.writeOrder = writeOrder;
 
@@ -943,6 +998,7 @@ export function makeSsaBuilder(
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
     lastWriteOp[b].set(reg, irBlocks[b].ops.length);
+    readSinceWrite[b].delete(reg);
   };
   const readVar = (reg: string, b: number): Value => {
     if (globalRegs.has(reg)) {
@@ -956,7 +1012,15 @@ export function makeSsaBuilder(
     }
     const v = readAny(reg, b);
     noteStaleCandidate(reg, b, v);
+    noteRead(reg, b, v);
     return v;
+  };
+  // an instruction's read, for `readAfterEveryReachingWrite`
+  const noteRead = (reg: string, b: number, v: Value): void => {
+    readSinceWrite[b].set(reg, v);
+    if (!lastWriteOp[b].has(reg) && !clobberedLocal[b].has(reg) && !readBeforeWrite[b].has(reg)) {
+      readBeforeWrite[b].set(reg, v);
+    }
   };
   /** The lookup, with no claim attached. The FRONTEND's read is what asserts "this register holds
    *  this value here"; the lookups this construction makes on its own — a single predecessor's
@@ -1652,6 +1716,7 @@ export function makeSsaBuilder(
     irBlocks,
     readVar,
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
+    noteGuessedArgRead: noteRead,
     readAtEnd: (reg: string, b: number) => (filled[b] ? readAny(reg, b) : null),
     writeVar,
     frameWrites,
@@ -1664,6 +1729,78 @@ export function makeSsaBuilder(
     holdsEntryValue,
     writtenSinceCall: (reg: string, b: number) => writtenSinceCall[b].has(reg),
     lastWriteOp: (reg: string, b: number) => lastWriteOp[b].get(reg),
+    readAfterEveryReachingWrite: (reg, b, { passes, accept, unlowered, answersIfRead }) => {
+      const writes = (at: number) => lastWriteOp[at].has(reg) || clobberedLocal[at].has(reg);
+      // the blocks whose last write of `reg` reaches `b`, and whether a path from the entry wrote none.
+      // `b` is judged up to here: met again round a loop, its end is no write that reaches here yet
+      const writers: number[] = [];
+      let fromEntry = false;
+      const back = new Set<number>([b]);
+      const walkBack = (at: number): void => {
+        for (const p of distinctPreds(at)) {
+          if (back.has(p)) {
+            continue;
+          }
+          back.add(p);
+          if (filled[p] && writes(p)) {
+            writers.push(p);
+          } else if (preds[p].length === 0) {
+            fromEntry = true;
+          } else {
+            walkBack(p);
+          }
+        }
+      };
+      walkBack(b);
+      const succs = (at: number): number[] => successors()[at].filter((s) => s !== b);
+      // forward from a write of `written` (none for the entry's): the first read on each path, until
+      // another write ends it
+      const ahead = (from: number, seen: Set<number>, written: Value | undefined): boolean =>
+        succs(from).some((s) => {
+          if (seen.has(s)) {
+            return false;
+          }
+          seen.add(s);
+          if (!filled[s]) {
+            return written !== undefined && unlowered(written);
+          }
+          const read = readBeforeWrite[s].get(reg);
+          if (read !== undefined) {
+            return accept(read);
+          }
+          return !writes(s) && ahead(s, seen, written);
+        });
+      const readAfter = (w: number): boolean => {
+        const read = readSinceWrite[w].get(reg);
+        return read !== undefined ? accept(read) : ahead(w, new Set(), defs[w].get(reg));
+      };
+      // a call's destroying it is no write of this function's: it neither counts nor answers; and a
+      // write of a value `answersIfRead` takes answers only where it was read after
+      const own = writers.filter((w) => {
+        const v = defs[w].get(reg)!;
+        return !clobberedLocal[w].has(reg) && passes(v) && (!answersIfRead(v) || readAfter(w));
+      });
+      // nor does the entry's value unread: nothing wrote it for the call. Read, it answers by its
+      // value too (`unlowered`): no write of this function's made it, so no path out of one places
+      // the read, and a path from the entry into a block not lowered yet holds reads nobody has seen
+      const param = irBlocks[0].params.find((v) => paramReg.get(v) === reg);
+      const entryRead =
+        fromEntry &&
+        ((param !== undefined && unlowered(param)) ||
+          (readBeforeWrite[0].has(reg) ? accept(readBeforeWrite[0].get(reg)!) : ahead(0, new Set(), undefined)));
+      // where a call destroyed it on every path in, it holds what a callee left there and nothing
+      // this function named: no argument, whatever an earlier lookup's phi of the bytes before
+      // those calls says (counted, sbk func_800B6E5C_A6D0C's a1 and a2 would be minted as entry
+      // parameters the trim cuts from the call but leaves in the signature)
+      if (!fromEntry && writers.length > 0 && writers.every((w) => clobberedLocal[w].has(reg))) {
+        return true;
+      }
+      // no write of this function's left to judge, and no entry value read: nothing to answer
+      if (own.length === 0 && !entryRead) {
+        return undefined;
+      }
+      return own.every(readAfter);
+    },
     writtenOnEveryPath: (reg, b, stop, visit) => {
       // `b` is judged up to here on the first visit; met again round a loop, it is the end of `b`,
       // which a back edge brings, and a cycle adds no path the first visit did not judge
@@ -1711,6 +1848,7 @@ export function makeSsaBuilder(
       for (const r of clobbers) {
         clobberedLocal[b].add(r);
         decidedLocal[b].add(r);
+        readSinceWrite[b].delete(r);
       }
       imageLocal[b] = new Set();
     },

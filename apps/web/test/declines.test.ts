@@ -976,6 +976,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `loop-exit-values` has no rows: a kept guard (one that is not the loop's own test) that meets
   // one of its refusals is an ordinary `if` around a do-while (structure.ts `keptGuardDoWhiles`).
   // The refusals fire only on a FUSED guard, and no benchmark row reaches one.
+  //
+  // `switch-shapes` holds `jt_rndjoinst:agbcc`, the no-body control of the
+  // cross-block leftover rows: its K&R call at a nested switch's join counts r0, which the inner
+  // default edge brings in as the outer dispatch's marker ("a case of the elided jump table reads").
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -989,10 +993,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'non-compare-flags',
     'pool-word-shape',
     'structs',
-    // The last row this class held was `sw_fallpre` (a fall-through re-running a switch-edge copy),
-    // which lifts since raise/unpre.ts recomputes the parameter both edges hand it; the class's other
-    // messages are still reachable by hand-written jump tables (thumb-switch.test.ts).
-    'switch-shapes',
     'tu-scoped-name',
     'unread-data-directive',
     'unstored-slot',
