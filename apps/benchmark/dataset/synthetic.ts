@@ -12570,19 +12570,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      jt_rndjoin / jt_rndjoinst (sub_08021AD4) put the call at the join after a switch nested in
   //      the outer table's case. agbcc's case CSE moves the inner cases' `i << 3` out of r0 by a copy
   //      in their join (`add r5, r0, #0`), and the inner default edge brings the outer dispatch's
-  //      marker in r0 to `bl rnd`. call-plan.ts `leftover` asked a register written in another block
-  //      of its VALUE, which no lowered op read (a copy lowers to none), so r0 was counted and the
-  //      marker refused. It now asks of the WRITES (`SsaBuilder.readAfterEveryReachingWrite`): the
-  //      register is a leftover where an instruction, a copy included, read it after each write of it
-  //      that reaches the call, on any path out of that write but the ones into the call. The call's
-  //      own block's saves are not asked (IDO saves the argument it hands in the jal's delay slot); an
-  //      earlier call's result where the call left it and a call destroying it neither count nor
-  //      answer, and a copy or reload of one answers only where read after; the entry's value counts
-  //      where a lowered op read it; a register calls destroyed on every path in holds what a callee
-  //      left, a leftover; and where no write is left to judge, what reaches answers by its value as
-  //      the base question did, a join's phi by the values it merges. jt_rndjoin lifts `rnd()` on agbcc,
-  //      as `--proto '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one.
-  //      jt_rndjoinst has no body and must STAY declined on agbcc, the soundness control.
+  //      marker in r0 to `bl rnd`. No lowered op reads the cases' r0 (a copy lowers to none), so a
+  //      question about its VALUE counts it; call-plan.ts `leftover` asks of each WRITE that reaches
+  //      the call whether an instruction, the copy included, read it after
+  //      (`SsaBuilder.readAfterEveryReachingWrite`). jt_rndjoin lifts `rnd()` on agbcc, as `--proto
+  //      '{"thunk_GetRandomValue":{"params":0}}'` lifts the real one. jt_rndjoinst has no body and
+  //      must STAY declined on agbcc, the soundness control.
   //  16. sretpuretail / sretpuretail_exit (sub_08014230). Three return arms in one loop. agbcc
   //      cross-jumps two of them after reload (toplev.c:3164; jump.c:1961-1991 `find_cross_jump`) into
   //      one PURE block, the `p.kind = seg->kind` insert reading the strength-reduced element pointer,

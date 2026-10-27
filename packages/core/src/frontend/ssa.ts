@@ -137,7 +137,7 @@ export interface SsaBuilder {
   lastWriteOp(reg: string, b: number): number | undefined;
   /** Whether an instruction READ `reg` after EACH write of it that reaches block `b` and whose value
    *  `passes`, on ANY path out of that write but the ones into `b`, the first read on that path being
-   *  one whose value `accept` takes, and after one at least. A write no read follows on any path was
+   *  one whose value `accept` takes. A write no read follows on any path was
    *  made for `b`'s use, so one is enough to answer no. A call destroying `reg` is no write of this
    *  function's, and neither is the entry's value where a path from the entry writes neither, so they
    *  do not answer no; the entry's value read after (as `accept` takes it), or read by a lowered op
@@ -801,7 +801,7 @@ export function makeSsaBuilder(
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
   // the ops block `b` held at each register's last write in it (`lastWriteOp`)
   const lastWriteOp: Array<Map<string, number>> = irBlocks.map(() => new Map());
-  // the value the frontend last read of each register block `b` read since its last write or the
+  // the value an instruction last read of each register block `b` read since its last write or the
   // last call destroying it there (since the block's start where neither), and the value it first
   // read of each before writing it or a call destroying it: `readAfterEveryReachingWrite`
   const readSinceWrite: Array<Map<string, Value>> = irBlocks.map(() => new Map());
@@ -1790,8 +1790,8 @@ export function makeSsaBuilder(
           (readBeforeWrite[0].has(reg) ? accept(readBeforeWrite[0].get(reg)!) : ahead(0, new Set(), undefined)));
       // where a call destroyed it on every path in, it holds what a callee left there and nothing
       // this function named: no argument, whatever an earlier lookup's phi of the bytes before
-      // those calls says (sbk func_800B6E5C_A6D0C: counted, a1 and a2 are read through the calls to
-      // the entry, and the trim cuts them from the call but leaves them in the signature)
+      // those calls says (counted, sbk func_800B6E5C_A6D0C's a1 and a2 would be minted as entry
+      // parameters the trim cuts from the call but leaves in the signature)
       if (!fromEntry && writers.length > 0 && writers.every((w) => clobberedLocal[w].has(reg))) {
         return true;
       }
