@@ -1,5 +1,5 @@
 {
   "@gba-kit/debug-info": "0.9.0",
-  "packages/cli/src/symbols-provider.ts": "9a8c6897e855ebc0",
+  "packages/cli/src/symbols-provider.ts": "e5ef90e45eb240ee",
   "packages/cli/src/module-elf.ts": "34e87047fb255abd"
 }

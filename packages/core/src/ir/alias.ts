@@ -18,15 +18,15 @@
 //     displacement built in several steps): raise/offsetnames.ts `cellSpelledTwice` declines a
 //     lift that reaches one byte under two names, or under a name and a numeric address, with a
 //     store among them, and one that reads a name the map places at several addresses at two of
-//     them. The pool promotion's
-//     one canonical name per address does not give it alone — an interior attribution into an
-//     object sized over its neighbour, a walk the offset-name gates leave as `base + K` past the
-//     base's end, a raw constant beside an unsized name, and any of them carried across a join
-//     each reached a named cell a second way. On a compiler that reloads across two spellings
-//     (`reloadsAcrossSpellings`, IDO 7.1) the pair is exempt, whoever chose them, because the C
-//     reads the cell back as the asm did; agbcc and gcc 2.7.2 forward. KNOWN GAP: with no map (or a name the map does not hold) nothing is
-//     placed, so a relocation and a literal for one cell lift unchecked — faithful on IDO, and
-//     the forwarding compilers' C on agbcc and gcc 2.7.2 where the asm reloaded.
+//     them. The pool promotion's one canonical name per address does not give it alone: an
+//     interior attribution into an object sized over its neighbour, a walk the offset-name gates
+//     leave as `base + K` past the base's end, a raw constant beside an unsized name, and any of
+//     them carried across a join each reach a named cell a second way. On a compiler that reloads
+//     across two spellings (`reloadsAcrossSpellings`, IDO 7.1) the pair is exempt, whoever chose
+//     them, because the C reads the cell back as the asm did; agbcc and gcc 2.7.2 forward.
+//     KNOWN GAP: with no map (or a name the map does not hold) nothing is placed, so a relocation
+//     and a literal for one cell lift unchecked — faithful on IDO, wrong C on agbcc and gcc 2.7.2
+//     where the asm reloaded.
 //   • anything that does not resolve to a name — a materialized base, a variable index, a pointer
 //     parameter — is unknown, and unknown BARS. A call or an `opaque` bars unconditionally: it may
 //     write anything.

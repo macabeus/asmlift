@@ -561,9 +561,9 @@ describe('one spelling per cell', () => {
   });
 
   test('a map that lays one object over another declines the byte both cover', () => {
-    // the map this repository vendored until the provider stopped joining a multi-address name's
-    // DWARF shape: EWRAM `sUnknown` took berry_powder.c's 8-byte ROM `sUnknown[2]`, and the byte
-    // was `((u8 *)&sUnknown)[5]` beside `sRandCount`
+    // a map that joins a multi-address name's DWARF shape by name: EWRAM `sUnknown` takes
+    // berry_powder.c's 8-byte ROM `sUnknown[2]`, and the byte is `((u8 *)&sUnknown)[5]` beside
+    // `sRandCount`
     const overlapping: SymbolMap = new Map([
       [0x020249bc, [{ name: 'sUnknown', kind: 'data', size: 8, shape: 'array', elemSize: 4, dims: [2] }]],
       [0x020249c0, [sRandCount]],

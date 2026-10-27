@@ -263,9 +263,9 @@ describe('committed real-tier manifests', () => {
 
     // The provider joins a DWARF declaration to a symbol BY NAME, and the sidecar answers a name with
     // one compilation unit's declaration — so a file static two units define (pokeemerald's EWRAM
-    // `static u8 sUnknown` and ROM `static const u32 sUnknown[2]`) used to take that one shape at both
-    // addresses. The borrowed 8-byte size made EWRAM `sUnknown` contain its neighbour `sRandCount`,
-    // one cell got two names in one function, and agbcc forwarded a store across them. A vendored
+    // `static u8 sUnknown` and ROM `static const u32 sUnknown[2]`) would take that one shape at both
+    // addresses. The borrowed 8-byte size makes EWRAM `sUnknown` contain its neighbour `sRandCount`,
+    // so one cell gets two names in one function, and agbcc forwards a store across them. A vendored
     // map must carry no name-joined fact on such a name (symbols-provider.ts multiAddressDataNames).
     test(`${f} attributes no name-joined declaration to a data name at more than one address`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
