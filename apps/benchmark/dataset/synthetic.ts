@@ -14116,10 +14116,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //  27. brk2lvl / brk2lvl_flag (sub_0800D188). A `goto` from an inner search loop to the end of
   //      the outer loop's body, skipping the code after the inner loop: kleod spells this with
   //      `goto exit_loop`. The inner loop then exits to two places, its own exit and the outer
-  //      latch, and no loop recognizer takes it ("unrecovered back-edge"). The goto-free spelling
-  //      (`break` and `if (j > m)`, brk2lvl_flag) compiles to a different object and lifts, so under
-  //      the no-goto rule the function is set aside and the row pins the guard: brk2lvl should stay
-  //      declined until asmlift spells such an exit. Same exits and same decline on all five lanes.
+  //      latch. L3 has no `goto`, so structure spells the second exit with a flag (`f = 1; break;`,
+  //      the skipped code under `if (f == 0)`: structure.ts `TwoLevelExit`), and brk2lvl lifts
+  //      correct but short of a match: every goto-free spelling of it written inside one function
+  //      compiles to another object on all five lanes, the flag one and brk2lvl_flag (`break` and
+  //      `if (j > m)`, which lifts on its own) among them. Same exits on all five lanes.
   {
     sym: 'jt_xjdefpre',
     src:
