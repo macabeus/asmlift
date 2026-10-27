@@ -1113,6 +1113,23 @@ describe('the frame base is a capture where no call takes a stack word', () => {
     );
   });
 
+  test('a call declared past the registers takes a stack word whatever the target says of staging', () => {
+    // a word stored at [sp,#0] beside the published frame base, then a call declared with five
+    // arguments: [sp,#0] may be its fifth, so the store keeps the refusal that names that call —
+    // also on a target that never claimed agbcc's staging premise
+    const five =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr1, .L3\n\tmov\tr2, sp\n\tstr\tr2, [r1]\n\tstr\tr0, [sp]\n' +
+      '\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n\tmov\tr3, #4\n\tbl\tfive\n\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L3:\n\t.word\t0x40000d4\n';
+    const unstaged = { ...ARMV4T_AGBCC.compilerBehaviors };
+    delete unstaged.stagesOutgoingArgsInFrame;
+    const target = { ...ARMV4T_AGBCC, compilerBehaviors: unstaged };
+    const prototypes = { f: { params: 1, returnsVoid: true }, five: { params: 5, returnsVoid: true } };
+    expect(() => decompile('f', five, target, { prototypes })).toThrow(
+      /the store to \[sp,#0\] reaches `bl five` unread with its lower slots supplied — it may be that call's outgoing stack argument/,
+    );
+  });
+
   test('a frame base published without bound still declines, as the escape', () => {
     expect(() => liftVoid(DMA_FILL_WH)).not.toThrow();
     // the first source register replaced by a plain global: whatever reads it reads the whole frame

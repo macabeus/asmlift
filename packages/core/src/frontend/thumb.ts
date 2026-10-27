@@ -3530,7 +3530,7 @@ function measureThumbFrame({
   // wider frame the publish escape admits exactly the shape the callee escape's table warns
   // about; at one word it cannot occur. A wider frame's publish is read by the outgoing-argument
   // `escape` event instead (below), per program point, which is the reading that survives a block
-  // copy: see "ONE DECISION, TWO LICENCES" above `capturedObjectIsTheWholeFrame`.
+  // copy: see "ONE DECISION, FOUR LICENCES" above `capturedObjectIsTheWholeFrame`.
   //
   // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
   // question is the same one and only the consuming event differs. Here that event is a WORD store
@@ -3667,7 +3667,7 @@ function measureThumbFrame({
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   //
-  // ONE DECISION, THREE LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // ONE DECISION, FOUR LICENCES. This gate and the outgoing-argument `escape` event (fed below,
   // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
   // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
   // one escape anywhere and no frame word is any call's argument — which is sound only where no
@@ -3679,6 +3679,10 @@ function measureThumbFrame({
   // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
   // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
   // struct through memory, which a block copy's base never is (why: the field's comment).
+  //
+  // The FOURTH is the [sp,#0] capture where no call takes a stack word (`noCallTakesAStackWord &&
+  // frameBaseEscapes`, below): flow-insensitive at any frame size too, and sound for a block copy's
+  // base as well, because with no outgoing area no frame word is any call's argument at all.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3758,7 +3762,9 @@ function measureThumbFrame({
         return true;
       }
       const declared = calleeRegister(ins, target) === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-      return declared !== null && outgoingBlock(declared.widths, target) === null;
+      // the declaration alone, not `outgoingBlock`: a target that never claimed agbcc's staging
+      // premise still has a call past the registers take a stack word
+      return declared !== null && wordsOf(declared.widths, target) <= target.argRegs.length;
     }),
   );
 
