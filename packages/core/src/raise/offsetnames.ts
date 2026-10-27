@@ -491,8 +491,7 @@ interface PlacedAccess extends Spelled {
 /** The 32-bit integer `v` denotes when every leaf under it is a constant, or null. Integer
  *  arithmetic over constants, and a join whose every in-edge brings one value, fold, because the C
  *  compiler folds them in the emitted C whatever this pipeline's own constant pass does: an index
- *  built in two steps (`movs r2, #2; adds r2, #3`), or `lsls r2, #0`, is `[5]` to agbcc. Reading
- *  only `const` defs left such an address unplaced, so the pair it formed was never asked.
+ *  built in two steps (`movs r2, #2; adds r2, #3`), or `lsls r2, #0`, is `[5]` to agbcc.
  *  Memoised per call of {@link cellSpelledTwice}; a value met again on its own walk (a loop-carried
  *  join) does not fold. */
 function constantFolder(defOf: Map<Value, Op>, incoming: Map<Value, Value[]>): (v: Value) => number | null {

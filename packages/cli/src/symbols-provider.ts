@@ -305,9 +305,8 @@ export async function loadModuleSymbolMap(moduleElfPath: string, baseElfPath: st
  *
  *  Such a name therefore keeps only what the symtab says about that ADDRESS — its name, its kind and
  *  its own st_size — and no name-joined declaration fact (shape, size, signedness, cv-qualifiers,
- *  dims, layout, pointee, and `declared`, which only the join earns). Attributing a declaration per
- *  address would need the DIE's own location, which no current row reads a multi-address name
- *  through.
+ *  dims, layout, pointee, and `declared`, which only the join earns). KNOWN GAP: giving each
+ *  address its own declaration would need the DIE's location, which a name join does not read.
  *
  *  Counted over the ELF's whole symtab, before the module `keep` and unbacked filters: the
  *  sidecar's ambiguity is a property of the ELF, not of which of its symbols reach the map. Only
