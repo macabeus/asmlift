@@ -3678,7 +3678,10 @@ function measureThumbFrame({
   //
   // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
   // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
-  // struct through memory, which a block copy's base never is (why: the field's comment).
+  // struct through memory, which a block copy's base never is (why: the field's comment). It is
+  // read only where some call may take a stack word: the hidden pointer is the declaration's first
+  // width, so `frameAddressReceivers` hands r0 there and such a base always ESCAPES — where no
+  // call takes a stack word, the fourth licence already admits it.
   //
   // The FOURTH is the [sp,#0] capture where no call takes a stack word (`noCallTakesAStackWord &&
   // frameBaseEscapes`, below): flow-insensitive at any frame size too, and sound for a block copy's
@@ -3955,8 +3958,7 @@ function measureThumbFrame({
           o > 0 ||
           (o === 0 &&
             ((noCallTakesAStackWord && frameBaseEscapes) ||
-              (frameBaseIsReturnStorage &&
-                (noCallTakesAStackWord || target.compilerBehaviors.escapedFrameAddressNamesALocal === true)))),
+              (frameBaseIsReturnStorage && target.compilerBehaviors.escapedFrameAddressNamesALocal === true))),
       ),
   );
 
