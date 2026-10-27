@@ -14098,20 +14098,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //      'jr v0'").
   //  26. dmafill_wh / dmafill_ww / dmafill_hw (sub_0804C60C). Two `DMA_FILL`s, a 32-bit one and then
   //      a 16-bit one. The `vu32 tmp` at [sp,#0] is stored with a direct `str r0, [sp]`, which the
-  //      slot model keyed as an SSA slot, while its published address makes it an object. The
-  //      one-object answer was never on offer: both fixed-source DMA windows are bounded, so each
-  //      object stands on its own bytes, and the `vu16 tmp` at [sp,#4] (stored through `add r0, sp,
-  //      #4`) plays no part. frame-objects.ts `failIfSlotKeysIt` then refused the object over the
-  //      slot ("one byte, two models"). The gap was the [sp,#0] capture licence alone (thumb.ts,
-  //      beside `noCallTakesAStackWord`), which admitted the frame base only as a struct-return
-  //      temp; a direct store at [sp,#4] beside `add rD, sp, #4` was already the object's. Both
-  //      fills 32-bit (dmafill_ww, the one-word licence) or the 16-bit one first (dmafill_hw)
-  //      MATCH. The real function needs its symbol map to reach this: with
-  //      gUnk_03004D84 unplaced its reads are of an unknown address, and it lifts; spelled as a
-  //      literal address it declines without any map. agbcc only: the DMA source registers are a GBA
-  //      device (`readOnlyAddressSinks`), and the other lanes decline all three rows on the frame
-  //      address itself (sp as data on gcc2.7.2kmc and gcc2.7.2, an escape to the whole frame on
-  //      ido7.1 and mwcc_242_81).
+  //      slot model keys as an SSA slot unless the [sp,#0] capture licence (thumb.ts, beside
+  //      `noCallTakesAStackWord`) makes the frame base a capture, while its published address
+  //      makes it an object; frame-objects.ts `failIfSlotKeysIt` refuses the object over the slot
+  //      ("one byte, two models"). The one-object answer is not on offer: both fixed-source DMA
+  //      windows are bounded, so each object stands on its own bytes, and the `vu16 tmp` at [sp,#4]
+  //      (stored through `add r0, sp, #4`, already the object's) plays no part. The fix this gates
+  //      admits the escaping frame base wherever no call takes a stack word. Both fills 32-bit
+  //      (dmafill_ww, the one-word licence) or the 16-bit one first (dmafill_hw) are the controls.
+  //      agbcc only: the DMA source registers are a GBA device (`readOnlyAddressSinks`), and the
+  //      other lanes decline all three rows on the frame address itself (sp as data on gcc2.7.2kmc
+  //      and gcc2.7.2, an escape to the whole frame on ido7.1 and mwcc_242_81).
   //  27. brk2lvl / brk2lvl_flag (sub_0800D188). A `goto` from an inner search loop to the end of
   //      the outer loop's body, skipping the code after the inner loop: kleod spells this with
   //      `goto exit_loop`. The inner loop then exits to two places, its own exit and the outer

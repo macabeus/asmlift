@@ -2834,7 +2834,6 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     } = ARMV4T_AGBCC.compilerBehaviors;
     const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: unprobedBehaviors };
 
-    //
     // The table is needed only where a call MAY take a stack word: with `use` undeclared, a
     // compiler that has not run it gets no proof. With `use` declared to take its one word in a
     // register no call takes a stack word, so there is no outgoing area to overlay on any compiler,
@@ -4011,11 +4010,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // dropped, which structuring otherwise refuses on both sides), and `gMain.state++` through a
     // phi of two loads of one literal. The phi's every address misses DMA3's control halfword, so
     // each read is bounded. Without the proof the read reaches the frame and the one object holds
-    // it; the proof must not take that lift away. It once kept it by keeping the frame one object,
-    // because the per-object model refused the sp-direct store under the capture as an SSA slot;
-    // with `foo` declared to take no word, no call takes a stack word, so that store is the
-    // published `vu32`'s own (thumb.ts, beside `noCallTakesAStackWord`) and each object stands on
-    // its own bytes, filled before its address reaches the device.
+    // it; the proof must not take that lift away. With `foo` declared to take no word, no call
+    // takes a stack word, so the sp-direct store is the published `vu32`'s own (thumb.ts, beside
+    // `noCallTakesAStackWord`) and each object stands on its own bytes, filled before its address
+    // reaches the device.
     test('a window the miss proof bounds keeps the lift the unbounded read had', () => {
       const shared =
         'tc:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr3, .L9\n\tcmp\tr0, #1\n\tbhi\t.L7\n' +

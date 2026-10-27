@@ -3678,10 +3678,10 @@ function measureThumbFrame({
   //
   // The THIRD is the [sp,#0] struct-return capture (`frameBaseIsReturnStorage`, below): flow-
   // insensitive at any frame size, but only for the hidden pointer of a callee declared to return a
-  // struct through memory, which a block copy's base never is (why: the field's comment). It is
-  // read only where some call may take a stack word: the hidden pointer is the declaration's first
-  // width, so `frameAddressReceivers` hands r0 there and such a base always ESCAPES — where no
-  // call takes a stack word, the fourth licence already admits it.
+  // struct through memory, which a block copy's base never is (why: the field's comment). It
+  // matters only where some call may take a stack word: the hidden pointer is r0, which
+  // `frameAddressReceivers` hands over, so such a base always escapes and the fourth licence
+  // admits it everywhere else.
   //
   // The FOURTH is the [sp,#0] capture where no call takes a stack word (`noCallTakesAStackWord &&
   // frameBaseEscapes`, below): flow-insensitive at any frame size too, and sound for a block copy's
@@ -3733,31 +3733,25 @@ function measureThumbFrame({
   // offsets either: a store there reaching a call unread is the object being filled for the
   // callee that is handed it.
   //
-  // THE FRAME BASE, ONLY WHERE ITS ADDRESS ESCAPES, AND ONLY WHERE NO CALL TAKES A STACK WORD OR AS
-  // A DECLARED CALL'S RETURN STORAGE. A bare `mov rD, sp` is also the base of a by-value
-  // argument's block copy into the outgoing area, and [sp,#0] is then a call's fifth argument word
-  // (the producer table above `capturedObjectIsTheWholeFrame`, which keeps its own licence for a
-  // one-word frame). Where every call is to a callee whose declaration places all of its arguments
-  // in registers — no call at all included — there is no outgoing area, so [sp,#0] is nobody's
-  // argument, and a frame base handed out (`escapedOffsetOf`: to a call that reads it, or stored as
-  // a word to memory) is a local's address, whoever receives it: a struct-return temp (`mov r0, sp
-  // / bl mk` beside `add r0, sp, #4 / bl mk`), or the source of a DMA fill published to the
-  // device's registers (`str r0, [sp] / mov r0, sp / str r0, [r1]`, r1 = 0x040000D4, then a
-  // second fill through `add r2, sp, #4` — the `dmafill_wh` row). A direct `str rX, [sp]` there is
-  // then that local's store, as one at [sp,#4] beside `add rD, sp, #4` already is, and not an SSA
-  // slot under its own object. That needs no layout premise of any one compiler — an outgoing
-  // word exists only for a call that takes one — and a block copy's base fits it too: with
-  // `memcpy` declared to take its three words in registers, the bytes it fills at [sp,#0] are a
-  // local's. A frame base only ADDRESSED THROUGH (`mov r3, sp / strh r1, [r3, #4]`, Thumb's sole
-  // spelling of a sub-word frame access) hands nothing out, and leaves a word at [sp,#0] the slot
-  // it was. A call nothing declares, a call through a register, or a declaration nothing sizes may
-  // take a stack word, and keeps offset 0 out — unless the base is a struct-return callee's hidden
-  // pointer and `compilerBehaviors.escapedFrameAddressNamesALocal` holds (its second reader).
+  // THE FRAME BASE, ONLY WHERE ITS ADDRESS ESCAPES AND NO CALL TAKES A STACK WORD, OR AS A
+  // DECLARED CALL'S RETURN STORAGE. A bare `mov rD, sp` is also the base of a by-value argument's
+  // block copy into the outgoing area, and [sp,#0] is then a call's fifth argument word (the
+  // producer table above `capturedObjectIsTheWholeFrame`, which keeps its own licence for a
+  // one-word frame). Where every call's declaration places all of its arguments in registers — no
+  // call at all included — there is no outgoing area on any compiler, so a frame base handed out
+  // (`escapedOffsetOf`: to a call, or stored as a word to memory) is a local's address whoever
+  // receives it: a struct-return temp (`mov r0, sp / bl mk`), or a DMA fill's source published to
+  // the device's registers (`dmafill_wh`). A direct `str rX, [sp]` is then that local's store, as
+  // one at [sp,#4] beside `add rD, sp, #4` is. A frame base only ADDRESSED THROUGH (`mov r3, sp /
+  // strh r1, [r3, #4]`, Thumb's sole spelling of a sub-word frame access) hands nothing out and
+  // leaves [sp,#0] a slot. A call nothing declares, a call through a register, or a declaration
+  // nothing sizes may take a stack word, and keeps offset 0 out — unless the base is a
+  // struct-return callee's hidden pointer and `compilerBehaviors.escapedFrameAddressNamesALocal`
+  // holds (its second reader).
   //
-  // THUMB ONLY, because only this frontend keys a frame word as an SSA slot at one offset and an
-  // object at the next. The MIPS and PPC frontends (`inLocalArea`) route every access to the local
-  // area through memory once any frame address is taken, so a direct store at the frame base
-  // beside a capture of it is already the object's there.
+  // THUMB ONLY: the MIPS and PPC frontends (`inLocalArea`) route every local-area access through
+  // memory once any frame address is taken, so a direct store at the frame base is already the
+  // object's there.
   const frameBaseEscapes = [...escapedOffsetOf.values()].includes(0);
   const noCallTakesAStackWord = [...entryReachable].every((b) =>
     asmBlocks[b].instrs.every((ins) => {
@@ -3765,8 +3759,8 @@ function measureThumbFrame({
         return true;
       }
       const declared = calleeRegister(ins, target) === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-      // the declaration alone, not `outgoingBlock`: a target that never claimed agbcc's staging
-      // premise still has a call past the registers take a stack word
+      // the declaration alone, not `outgoingBlock`: a call whose arguments run past the registers
+      // takes a stack word whether or not the target claims agbcc's staging premise
       return declared !== null && wordsOf(declared.widths, target) <= target.argRegs.length;
     }),
   );
