@@ -6296,10 +6296,17 @@ export function structure(
     fallsTo: Block | null;
   };
   const switchFrames: SwitchFrame[] = [];
+  // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
+  // does where `b` is the merge of the innermost arm with a region and no loop was entered since
+  // that arm began. `switchBreakAt` spells it, and `emitForever` asks it for a flag's `break`.
+  const switchBreaks = (b: Block): boolean => {
+    const f = switchFrames[switchFrames.length - 1];
+    return f !== undefined && f.region !== null && f.merge === b && f.loop === loopCtx;
+  };
   // Is `b` the merge of an arm with a region, reached before that arm's end, and may `break;` say so
-  // from here? Undefined when no such arm ends at `b`. (At an arm's own end, `stop` is the merge and
-  // `structureRegion` returns before asking.) Throws when one does but a nested loop or switch would
-  // capture the statement.
+  // from here (`switchBreaks`)? Undefined when no such arm ends at `b`. (At an arm's own end, `stop`
+  // is the merge and `structureRegion` returns before asking.) Throws when one does but a nested
+  // loop or switch would capture the statement.
   const switchBreakAt = (b: Block): Stmt[] | undefined => {
     let i = switchFrames.length - 1;
     while (i >= 0 && (switchFrames[i].region === null || switchFrames[i].merge !== b)) {
@@ -6308,19 +6315,13 @@ export function structure(
     if (i < 0) {
       return undefined;
     }
-    if (i !== switchFrames.length - 1 || switchFrames[i].loop !== loopCtx) {
+    if (!switchBreaks(b)) {
       throw new StructureError(
         `cannot structure '${fn.name}': a case body leaves its switch from inside a nested ` +
           `${i !== switchFrames.length - 1 ? 'switch' : 'loop'}, where \`break\` would leave that instead`,
       );
     }
     return [{ k: 'break', ofSwitch: true }];
-  };
-  // Does a `break;` written here reach `b`: `b` is the merge of the innermost arm with a region, and
-  // no loop was entered since that arm began? `switchBreakAt`'s yes, asked without its refusal.
-  const switchBreaks = (b: Block): boolean => {
-    const f = switchFrames[switchFrames.length - 1];
-    return f !== undefined && f.region !== null && f.merge === b && f.loop === loopCtx;
   };
   // THE JOIN OF A BRANCH INSIDE AN ARM. The CFG's join for `if (c) break;` lies past the switch —
   // in a falling arm the fall-through path reaches the merge too, through the next arm, and in a
