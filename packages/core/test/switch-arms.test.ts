@@ -880,9 +880,8 @@ test('ido7.1, no PRE: a shared tail that runs on into code outside the switch is
 //   }
 //   out: p[3] = x;
 //
-// The tail's `if` puts one block between the switch's region and the loop's exit. A refusal of
-// any step to the loop's exit declined this "do not linearize", while the same tail without the
-// `if` (its first sideways block the exit itself) lifted; both lift now, host differential SAME.
+// The tail's `if` puts one block between the switch's region and the loop's exit, so the exit is a
+// later sideways block on the path, not the first one. Host differential SAME.
 test('agbcc: a shared tail that leaves the enclosing loop is copied into its entrants, with the code past the loop', () => {
   const out = decompile('x_wh2', readFileSync(new URL('corpus/agbcc-xwh2.s', import.meta.url), 'utf8'), ARMV4T_AGBCC, {
     prototypes: {

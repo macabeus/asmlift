@@ -335,8 +335,8 @@ function singleton(r: Ranges): number | null {
  *  OR A SIBLING THAT LEAVES SIDEWAYS ONLY FORWARD. A closed sibling with no region stepped into
  *  blocks the switch does not dominate (`escapedTo`). Its body is still the switch's end on every
  *  path where each of those blocks runs only on to the merge or a `ret` — never back into the
- *  dispatch, a sibling (the entrants among them), round a cycle or out of the enclosing loop —
- *  which `sidewaysEnds` answers per block (switch-recover's `forwardToMerge`, the caller's to hand
+ *  dispatch, a sibling (the entrants among them) or round a cycle; a path out through the
+ *  enclosing loop's exit is one more path to a `ret` — which `sidewaysEnds` answers per block (switch-recover's `forwardToMerge`, the caller's to hand
  *  in; absent, no such sibling is copied). Nothing in it is particular to one compiler: it is
  *  asked of every jump table whose shared tail lost its region because a block on the tail's way
  *  to the merge is also reached from outside the switch. Measured shapes, each host-differential
