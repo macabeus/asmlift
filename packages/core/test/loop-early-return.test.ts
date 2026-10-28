@@ -275,9 +275,9 @@ test('two in-body sides meeting below the loop bottom join where they meet, writ
   );
 });
 
-// REFUSAL — the arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2`
-// dominates `^bb5`, so ownership by dominance alone would claim it; but the loop's own exit reaches
-// it too, and emitting it on both paths writes `gOut` twice. The arm owns nothing, and the do-while
+// The arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2` dominates
+// `^bb5`, so ownership by dominance alone would claim it; but the loop's own exit reaches it too,
+// and emitting it on both paths writes `gOut` twice. The arm owns nothing, and the do-while
 // reading that copies `^bb5` in as an early `return` finds no join in the body; the structuring
 // that asks `while (1)` first (`RetCopyRanking`) breaks to `^bb5` from both edges, and `gOut` is
 // written once, after the loop.

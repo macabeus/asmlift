@@ -3,10 +3,11 @@
 // `for (i…) { for (j…) { if (hit(j)) goto next; } k(i); next:; }` leaves the inner loop two ways:
 // by its own exit, into `k(i)`, and from the search straight to the end of the outer body. L3 has
 // no `goto`, so structure spells the second way out `f = 1; break;`, with `f = 0;` ahead of the loop
-// and the code it skips under `if (f == 0)` after it (structure.ts `TwoLevelExit`). Every fixture is
-// judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as
-// it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
-// on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
+// and the code it skips under `if (f == 0)` after it (structure.ts `TwoLevelExit`); where the target
+// is the end of the switch arm the loop sits in, the flag reads `if (f != 0) break;`. Every fixture
+// is judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and
+// as it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop
+// (where it has one), a hit on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
 // shapes the reading does not take: a third exit target, a target outside the enclosing loop, the
 // enclosing loop's header, a second exit out of a case body, and one into the switch arm its own
 // arm falls into.
@@ -666,10 +667,10 @@ test('a `goto` to the end of a switch arm whose merge returns lifts as a flag, n
 });
 
 /** `for (j = 0; j < 8; j++) { if (skip(i) < x && probe(j, i) == x) goto out; } k(i); out: t(i);`
- *  as gcc2.7.2kmc lays it out (`synthetic`-style probe `cret`): no zero-trip guard, so the loop's
- *  header dominates `t(i); return`, and the do-while reading copies it into the hit. Emission
- *  finds that hit's branch no join in the body ("unrecovered back-edge"), and the structuring run
- *  again with the copy last (`RetCopyRanking`) spells the loop `while (1)` with two `break`s. */
+ *  as gcc2.7.2kmc lays it out: no zero-trip guard, so the loop's header dominates `t(i); return`,
+ *  and the do-while reading copies it into the hit. Emission finds that hit's branch no join in the
+ *  body ("unrecovered back-edge"), and the structuring run again with the copy last
+ *  (`RetCopyRanking`) spells the loop `while (1)`. */
 const CONST_TRIP_RET = `fn consttripret {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -834,8 +835,9 @@ test('each decline is refused by the two-level rule its shape names', () => {
   expect(refusalsOf(TARGET_IS_THE_ENCLOSING_HEADER)).toEqual(['skip-reenters-loop', 'target-is-enclosing-header']);
   expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
   expect(refusalsOf(GOTO_INTO_NEXT_ARM)).toEqual(['skips-region-end']);
-  // the inner loop's do-while would copy `after(…); return;` into the hit, a tail the outer
-  // loop's exit also runs: that reading waits behind the two-level one, which refuses the target
+  // the inner loop's do-while copies `after(…); return;` into the hit, a tail the outer loop's exit
+  // also runs; emission refuses that copy, and the structuring run again with it last
+  // (`RetCopyRanking`) asks the two-level reading first, which refuses the target
   expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([
     'exit-past-enclosing-loop',
     'target-past-enclosing-loop',

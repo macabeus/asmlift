@@ -8220,14 +8220,15 @@ function structureRanked(
   // loop reaches it (`switchBreaks`): the flag reads `if (f != 0) break;`, and the skipped code
   // renders after it up to `stop`, where the region's owner renders the rest. That `stop` is a
   // zero-trip guard's join at the loop's exit (`case 1: for (j…) { if (hit) goto out; } k(i); out:
-  // break;`, which `armJoin` reads as running to `k(i)`), or the sibling a falling arm runs into
-  // (agbcc cross-jumps a post-loop `k(i)` into `case 3: k(i); break;`). Refused, loud, where no
-  // `break;` reaches the target (`TWO_LEVEL_REGION_GATES`): the code from the second target on
-  // would render past the end of the region, and the region's owner renders it again. That copy is
-  // not a proven wrong (where it ends in a `return`, `break` or `continue` it lifts correct); the
-  // refusal stays until a reading proves it never falls through into the owner's. Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to:
-  // …; Z:`) are not refused: they render inside the `if` and again after it, each copy ending in a
-  // jump.
+  // break;`, where `armJoin` takes the hit's edge to the merge for a `break;` and the guard joins at
+  // `k(i)`), or the sibling a falling arm runs into (agbcc cross-jumps a post-loop `k(i)` into
+  // `case 3: k(i); break;`). Refused, loud, where no `break;` reaches the target
+  // (`TWO_LEVEL_REGION_GATES`): the code from the second target on would render past the end of the
+  // region, and the region's owner renders it again. That copy is not a proven wrong (where it ends
+  // in a `return`, `break` or `continue` it lifts correct); the refusal stays until a reading proves
+  // it never falls through into the owner's. Paths from `exit` that pass `to` without meeting it
+  // (`if (q) goto Z; … to: …; Z:`) are not refused: they render inside the `if` and again after it,
+  // each copy ending in a jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const frame = {
