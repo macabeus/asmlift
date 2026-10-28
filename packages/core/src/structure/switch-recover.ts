@@ -705,6 +705,52 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return true;
   };
 
+  // A SIDEWAYS PATH THAT ONLY RETURNS. An arm can step into a block the switch does not dominate
+  // and still go nowhere but the end of the function: every path from `s` runs forward to a `ret`,
+  // never back into the switch, its merge or a sibling, and never round a cycle. Such an arm spells
+  // the escaping path in place as its `return;` (`case 0: if (c) { k(a); return; } gOut = 1;`
+  // falling into `case 1:`), and a falling arm's join already reads that path as a jump
+  // (`regionJoins`, "a `return k` through a shared epilogue"). It is a property of the ARM, not of
+  // any loop, so it is asked of every jump-table switch (Regime B; `analyzeArmExit` says why not of
+  // Regime A's comparison trees). Where it shows:
+  // - in a loop body, where an arm `return`s into the one epilogue past the loop (agbcc and IDO
+  //   when the code after the loop returns early too, mwcc always) and the switch ends at the
+  //   body's own join (structure.ts, THE LOOP CLAMP);
+  // - outside any loop, where an arm `goto`s a returning tail it shares with code the switch does
+  //   not dominate: a guard above the switch cross-jumped into the same `k(7); return;`, a shared
+  //   `out:` label, the other branch of an `if` around the switch, or a switch with no merge.
+  // The cycle test is a walk of the paths themselves: a block met again while it is still on the
+  // path being walked is a cycle, reducible or not (an IDO `goto mid;` into a `while` body makes an
+  // irreducible one, which a dominance test does not see). An edge to a block that dominates its
+  // source is refused too, since that block may lie above `s` where the walk never put it.
+  const onlyReturns = (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>): boolean => {
+    const done = new Set<Block>();
+    const onPath = new Set<Block>([s]);
+    const stack: { x: Block; next: number }[] = [{ x: s, next: 0 }];
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      const succ = successorsOf(top.x);
+      if (top.next === 0 && succ.length === 0 && top.x.ops[top.x.ops.length - 1]?.opcode !== 'ret') {
+        return false;
+      }
+      if (top.next === succ.length) {
+        stack.pop();
+        onPath.delete(top.x);
+        done.add(top.x);
+        continue;
+      }
+      const y = succ[top.next++];
+      if (y === b || y === merge || siblings.has(y) || onPath.has(y) || dom.get(top.x)!.has(y)) {
+        return false; // back into the switch, or a cycle
+      }
+      if (!done.has(y)) {
+        onPath.add(y);
+        stack.push({ x: y, next: 0 });
+      }
+    }
+    return true;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -746,8 +792,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
     }
     const into = new Set<Block>(); // sibling entries this arm flows into
+    const escapedTo = new Set<Block>(); // the blocks outside the switch's region it steps into
     let toMerge = false,
-      escapes = false,
       leavesLoop = false;
     const seen = new Set<Block>([entry]);
     const q = [entry];
@@ -761,7 +807,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           into.add(s);
         } else if (s !== entry && !seen.has(s)) {
           if (!dom.get(s)!.has(b)) {
-            escapes = true;
+            escapedTo.add(s);
             continue;
           }
           seen.add(s);
@@ -770,7 +816,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     if (into.size === 0) {
-      return escapes ? { kind: 'break' } : { kind: 'break', region: seen };
+      return escapedTo.size > 0 ? { kind: 'break' } : { kind: 'break', region: seen };
     }
     // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
     // spells only where nothing breakable sits between that edge and the arm, which the structurer
@@ -781,7 +827,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         why: `a case body falls into sibling case ${[...into].map((x) => `#${layoutIndex(x)}`).join(', ')}, reaches the end of the switch, and leaves the loop the switch sits in`,
       };
     }
-    if (into.size === 1 && !escapes) {
+    // A sideways path that only RETURNS does not stop the fall-through (`onlyReturns`): it is a
+    // jump that ends where it sits, as a `ret` inside the arm is. Regime B only. Regime A
+    // (`stopAtLoop`) commits to its `switch` on gates that read an arm's `breaks` alone, and has
+    // if-recovery to fall back on, so a falling arm beside an escape stays `unstructurable` there:
+    // admitted, it commits Regime A to switches whose emission then refuses the whole function (an
+    // escape to a `goto out` past a loop exit, or out of a nested switch) where if-recovery spells
+    // them.
+    if (
+      into.size === 1 &&
+      (escapedTo.size === 0 || (!stopAtLoop && [...escapedTo].every((s) => onlyReturns(s, b, merge, siblings))))
+    ) {
       return { kind: 'fallthrough', to: [...into][0], breaks: toMerge, region: seen };
     }
     // Name what is actually missing. These are two different facts: the first is a shape C's

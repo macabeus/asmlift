@@ -2894,16 +2894,17 @@ export function structure(
   //
   // THE TWO CALLERS DIFFER ON LOOPS AND ONLY ONE OF THEM GUARDS IT. The `if` caller asks outside a
   // loop body only (`followEarlyReturns && loopCtx === null`, with `clampToLoop` as its second
-  // net), for the reason written there. The `switch_br` caller does not consult `loopCtx` at all,
-  // and no input has been found that reaches this from inside a loop body: every `ret` the arms of
-  // an in-loop branch reach is reachable from the latch too, so the intersection keeps the whole
-  // graph, `pd` is `ipdom` itself — and the caller only asks when `ipdom.get(b)` is already null,
-  // so the answer comes back null and the `?? stop` fallback stands. That is an observation about
-  // the shape rather than a check, which is why it is written down here. The anchored RETRY that
-  // caller adds is no exception in practice: inside a loop the latch carries every arm to every
-  // `ret`, so the arm that returns shares one with the default edge and is kept, and nothing is
-  // left out (measured on five in-loop switches with one returning arm, compiled with agbcc and
-  // IDO: every one declines). That is a reach this does not have, not a guard.
+  // net), for the reason written there. The `switch_br` caller asks it without consulting
+  // `loopCtx`, and no input has been found that reaches this from inside a loop body: every `ret`
+  // the arms of an in-loop branch reach is reachable from the latch too, so the intersection keeps
+  // the whole graph, `pd` is `ipdom` itself — and the caller only asks when `ipdom.get(b)` is
+  // already null, so the answer comes back null and the `?? stop` fallback stands. That is an
+  // observation about the shape rather than a check, which is why it is written down here. The
+  // anchored RETRY that caller adds is no exception in practice: inside a loop the latch carries
+  // every arm to every `ret`, so the arm that returns shares one with the default edge and is
+  // kept, and nothing is left out. Where an in-loop switch's arms DO reach one join past the loop
+  // — every `ret` merged into one epilogue, which `ipdom` then names (`synthetic:sw_loopret`) —
+  // it is that caller's LOOP CLAMP, not this, that reads the loop body's own join (`loopJoin`).
   const followsByShared = new Map<string, Map<Block, Block | null>>();
   const followOverReturns = (b: Block, stop: Block | null, anchor: Block | null = null): Block | null => {
     const shared = sharedRetsOf(b, reachFrom, anchor);
@@ -6343,6 +6344,8 @@ export function structure(
       // variation would have to offer back — a candidate nothing mints today, and the one thing
       // this line costs. `?? stop` keeps the shape where no `ret` is reachable from every
       // successor — and where that reading declines, the default-anchored RETRY below gets one try.
+      // Neither reading knows about loops: inside a loop body, where post-dominance names a join
+      // PAST the loop and every reading declines there, THE LOOP CLAMP below reads the body's own.
       const joined = ipdom.get(b) ?? followOverReturns(b, stop);
       let merge = joined ?? stop;
       const succ = term.successors;
@@ -6400,7 +6403,8 @@ export function structure(
       const preChain = arms.map((a) => a.entry);
       // Everything below that depends on WHERE THE SWITCH ENDS, read for one candidate merge: the
       // arms' exits, their linearization, and whether the emission below would decline them. Read
-      // twice at most — see the retry after it.
+      // five times at most — the CFG's merge (or `stop`), the retry's (no CFG merge), the copies once
+      // at either, and the loop clamp's own merge twice, as written and with the copies.
       // A default edge the dispatch never takes: a frontend whose dispatch is entered only past a
       // bounds test that already sent every other value elsewhere says so with `exhaustive`.
       const deadDefaultEdge = term.attrs.exhaustive === true;
@@ -6605,11 +6609,12 @@ export function structure(
       //
       // NEVER ON THE `stop` READING. There the default block is a sibling, every plain `break`
       // reads as falling into it, and copying it would write the code after the switch into every
-      // arm. So it is read at a merge the switch HAS — post-dominance's, or the retry's. That narrows
-      // the shape and does not rule it out: where the other arms `return` into the epilogue the
-      // default block also reaches, post-dominance's merge IS that epilogue, and arms that `break`
-      // to the code after the switch get it as copies (`copySharedFallTargets`, a `default:`
-      // sibling). The same program, where the reading before it failed loud.
+      // arm. So it is read at a merge the switch HAS — post-dominance's, or the retry's; THE LOOP CLAMP
+      // below asks it at a third, the loop body's own join. That narrows the shape and does not rule
+      // it out: where the other arms `return` into the epilogue the default block also reaches,
+      // post-dominance's merge IS that epilogue, and arms that `break` to the code after the switch
+      // get it as copies (`copySharedFallTargets`, a `default:` sibling). The same program, where
+      // the reading before it failed loud.
       const copyAt = joined !== null ? merge : over;
       if (read.declines && copyAt !== null) {
         const copied = readArms(copyAt, true);
@@ -6619,6 +6624,54 @@ export function structure(
           }
           merge = copyAt;
           read = copied;
+        }
+      }
+      // THE LOOP CLAMP: A SWITCH IN A LOOP BODY WHOSE CFG MERGE LIES PAST THE LOOP. Post-dominance
+      // reads the whole function, and where an arm `return`s and every `return` shares one epilogue
+      // (agbcc and IDO whenever the code after the loop returns early too, mwcc always), that
+      // epilogue is the only block every path from the dispatch reaches — so `joined` is outside
+      // the loop, the loop's own latch (or the block a hole and the bounds test go to) is left a
+      // sibling, and every `break` reads as falling into it (`synthetic:sw_loopret`). The `if`
+      // has the same problem and the same answer: a join outside the body is not this statement's
+      // join, and the real one is where the paths that STAY in the body meet — `inLoopJoin`, the
+      // one rule both statements read (null ⇒ they meet only at the bottom of the body, and the
+      // region's `stop` is the end). NO CFG MERGE AT ALL reads the same way inside a loop body: an
+      // arm that `return`s keeps a `ret` of its own beside the one past the loop, and the stop
+      // reading then puts the default block among the siblings (gcc 2.7.2, whose reorg moves the
+      // latch's `i++` into some arms' delay slots and leaves the rest a separate `i++` block).
+      //
+      // A MERGE CANDIDATE OF ITS OWN, READ AS THE OTHERS ARE: as written, then — where that
+      // declines — with the arms a cross-jump sent into one sibling's body given that body back
+      // (THE COPIES above, which read only at a merge the switch HAS: the body's join is one, even
+      // where it is the very block the stop reading ended at, and the region's `stop` standing in
+      // where the body has none is not). An in-loop switch whose arm tails were cross-jumped needs
+      // both at once.
+      //
+      // ASKED LAST, NOT FIRST, and only where every reading above declines, as the retry and the
+      // copies are: where any of them spells, it is published already, and this one turns a
+      // decline into a lift and never one lift into another. Asked first it would re-read the
+      // switch whose CFG merge is the loop's exit and whose arms `break` there (switch-arms.test
+      // `exitloop`, which then declines at the body's join).
+      //
+      // KNOWN GAP, loud: where an earlier reading SPELLS at a merge past the body that only
+      // `return`s reach (a switch nested in an arm of an in-loop switch, one of whose own arms
+      // returns), this is never asked, and the epilogue's `return;` after the switch is one no path
+      // reaches — the reachability contract declines the function. No static test over the CFG
+      // tells that reading from the published one whose arm spells an early `return` as `break;`
+      // to that same `return;` (a `return` arm entered from the dispatch, or one Regime A walks
+      // through rather than rendering in place).
+      if (loopCtx !== null) {
+        const at = read.declines ? inLoopJoin(b, joined, true) : undefined;
+        const clampAt = at === undefined ? undefined : (at ?? stop);
+        if (clampAt !== undefined && clampAt !== null) {
+          for (const copies of (clampAt !== merge ? [false] : []).concat(at !== null ? [true] : [])) {
+            const clamped = readArms(clampAt, copies);
+            if (!clamped.declines) {
+              merge = clampAt;
+              read = clamped;
+              break;
+            }
+          }
         }
       }
       const exitOf = read.exits;
@@ -7254,31 +7307,20 @@ export function structure(
       !loopCtx.body.has(ipd) &&
       term.successors.some((sc) => isArm(sc.block) || sc.block === stop) &&
       term.successors.every((sc) => loopCtx!.body.has(sc.block) || isArm(sc.block));
-    // In a `while (1)` body the join is the body's own, which the CFG's post-dominance cannot see
-    // (`loopJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
-    // the other arm leaves the loop from.
-    const inForever = loopCtx === null ? undefined : foreverLoops.get(loopCtx.header);
-    // A break arm's own blocks join as any code outside the loop does: they are not the body's.
-    const inArm = loopCtx?.breakArms?.some((a) => a.region.has(b)) === true;
-    const bodyJoin = inForever === undefined || inArm ? undefined : loopJoin(inForever, b, true);
-    // THE SAME QUESTION IN A TESTED LOOP. A branch whose one way leads out of the body by a `break` —
-    // the `else break;` of an if/else-if chain — has the loop's exit as its CFG join, and its in-body
-    // arm walked from there through the latch back into the header (`onStack`). Its join is where its
-    // paths that stay in the body meet: the post-dominator over the body with the back edges and the
-    // exits deleted (`loopJoin`). Asked only where the CFG join leaves the body, no clamp applies,
-    // one successor stays in the body, and every way out of the body from here is one the loop
-    // renders in place (`leavesByOwnedEdges`).
-    const tested =
+    // THE BODY'S OWN JOIN (`inLoopJoin`, the one rule the `switch` reads too). In a `while (1)` body
+    // it is asked always: a branch whose one arm continues is post-dominated, in the CFG, by
+    // wherever the other arm leaves the loop from. In a tested loop it is the same question for a
+    // branch whose one way leads out of the body by a `break` — the `else break;` of an
+    // if/else-if chain — whose CFG join is the loop's exit, its in-body arm walked from there
+    // through the latch back into the header (`onStack`); asked there only where no clamp applies
+    // and one successor stays in the body, and `inLoopJoin` adds that the CFG join leaves the body
+    // and every way out from here is one the loop renders in place.
+    const inForever = loopCtx !== null && foreverLoops.has(loopCtx.header);
+    const bodyJoin =
       loopCtx !== null &&
-      inForever === undefined &&
-      !inArm &&
-      ipd !== null &&
-      !loopCtx.body.has(ipd) &&
-      !clampToLoop &&
-      loopCtx.body.has(b) &&
-      term.successors.some((sc) => loopCtx!.body.has(sc.block) && sc.block !== loopCtx!.header) &&
-      leavesByOwnedEdges(loopCtx, b)
-        ? loopJoin(loopCtx, b, false)
+      (inForever ||
+        (!clampToLoop && term.successors.some((sc) => loopCtx!.body.has(sc.block) && sc.block !== loopCtx!.header)))
+        ? inLoopJoin(b, ipd)
         : undefined;
     // Inside a switch arm, the arm's own join wins over every reading above: each of them reads the
     // CFG, where the arm's paths meet past the switch.
@@ -7288,11 +7330,9 @@ export function structure(
         ? (inArmJoin ?? stop)
         : bodyJoin !== undefined
           ? (bodyJoin ?? stop)
-          : tested !== undefined
-            ? (tested ?? stop)
-            : clampToLoop
-              ? stop
-              : (ipd ?? stop);
+          : clampToLoop
+            ? stop
+            : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];
@@ -7602,6 +7642,38 @@ export function structure(
       }
     }
     return true;
+  };
+  // THE JOIN OF A BRANCH IN A LOOP BODY, ONE RULE FOR BOTH BRANCHING STATEMENTS — the `if`
+  // (`bodyJoin` at the cond_br site) and the `switch` (THE LOOP CLAMP at the switch_br
+  // site). `undefined` ⇒ no loop reading applies and the statement keeps its CFG merge; otherwise
+  // `loopJoin`'s answer, null meaning the paths meet only at the bottom of the body.
+  //  - Outside a loop, or inside one of the innermost loop's break arms: undefined. A break arm's
+  //    blocks join as any code outside the loop does.
+  //  - In a `while (1)` frame: the body's own join, always (`loopJoin` under the `while (1)` rule).
+  //    The CFG cannot see it there: a branch whose one arm continues is post-dominated, in the CFG,
+  //    by wherever the other arm leaves the loop from.
+  //  - In a tested loop: only where the CFG join `cfgJoin` leaves the body, `b` is a body block,
+  //    and every way out of the body from `b` is one the loop renders in place
+  //    (`leavesByOwnedEdges`). A CFG join inside the body is the statement's own. No CFG join at
+  //    all counts as leaving the body only where the caller says so (`noJoinLeaves`): the `switch`,
+  //    whose arms that `return` each keep a `ret` of their own; the `if` reads none as divergent
+  //    arms, which need no join.
+  // What each statement adds on top is its own: the `if` defers to `clampToLoop` and asks only
+  // where one successor stays in the body; the `switch` asks only where its own readings fail.
+  const inLoopJoin = (b: Block, cfgJoin: Block | null, noJoinLeaves = false): Block | null | undefined => {
+    const frame = loopCtx;
+    if (frame === null || frame.breakArms?.some((a) => a.region.has(b)) === true) {
+      return undefined;
+    }
+    const forever = foreverLoops.get(frame.header);
+    if (forever !== undefined) {
+      return loopJoin(forever, b, true);
+    }
+    return (cfgJoin !== null ? !frame.body.has(cfgJoin) : noJoinLeaves) &&
+      frame.body.has(b) &&
+      leavesByOwnedEdges(frame, b)
+      ? loopJoin(frame, b, false)
+      : undefined;
   };
   // THE JOIN OF A BRANCH IN A LOOP BODY, over the body with its back edges and exits deleted: where
   // the paths from `b` that stay in the body meet, its nearest post-dominator over the rest. Null
