@@ -5797,6 +5797,13 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     // A halfword shifted back up to the sign bit is INT_MIN at 0x8000: the bound is the reload's,
     // and nothing past it carries one.
     expect(() => dc('f', store('\tldrh\tr2, [r2]\n\tlsl\tr2, r2, #16\n'))).toThrow(gap);
+    // Merged by a param (agbcc's `m = c ? gA : gD`, a halfword in one arm, a byte in the other), the
+    // bound is the union of the arms'; one whole-word arm leaves the refusal.
+    const merged = (left: string, right: string) =>
+      `\tldr\tr2, .Lg\n\tstrh\tr1, [r3]\n\tcmp\tr4, #0\n\tbeq\t.Lb\n${left}\tb\t.Lj\n.Lb:\n${right}.Lj:\n` +
+      `\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}.Lg: .word gMag\n`;
+    expect(dc('f', merged('\tldrh\tr2, [r2]\n', '\tldrb\tr2, [r2, #4]\n')).source).toContain('<= -');
+    expect(() => dc('f', merged('\tldrh\tr2, [r2]\n', '\tldr\tr2, [r2, #4]\n'))).toThrow(gap);
     // A carry branch refuses for its own reason, bound or no bound.
     expect(() => dc('f', store('\tldrh\tr2, [r2]\n', 'bcs'))).toThrow(
       "conditional branch 'bcs' tests the carry of a 'cmn', and the carry out of a + b is not a >=u -b",

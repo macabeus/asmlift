@@ -570,6 +570,33 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
     expect(mayAlwaysHold({ defs }, def(defs, 'and', { imm: 0x7fffffff }, [k]), INT_MIN)).toBe(false);
   });
 
+  test('a param whose every in-edge passes an overwritten narrow reload is never INT_MIN', () => {
+    // agbcc's `m = c ? gA : gD` (u16, u8) after a store that may land on either: the word evaluator
+    // meets two constants it cannot compute, but the range their widths leave is [0, 0xffff].
+    const defs = new Map<Value, Op>();
+    const a = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const d = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const s8 = def(defs, 'load', { off: 0, width: 1, signed: true }, [v()]);
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const m = v();
+    const at = (args: Value[], entry: Set<Value> | null = new Set()): WordCtx => ({
+      defs,
+      overwritten: new Set([a, d, s8, word].map((x) => defs.get(x)!)),
+      incoming: new Map([[m, args]]),
+      ...(entry === null ? {} : { entry }),
+    });
+    expect(mayAlwaysHold(at([a, d]), m, INT_MIN)).toBe(false);
+    // a signed arm straddles zero, and still holds no INT_MIN
+    expect(mayAlwaysHold(at([a, s8]), m, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(at([a, s8]), m, -1)).toBe(true);
+    // one whole-word arm may be what the store left: it refuses
+    expect(mayAlwaysHold(at([a, word]), m, INT_MIN)).toBe(true);
+    // a function parameter arrives from a caller whatever its back edges pass
+    expect(mayAlwaysHold(at([a, d], new Set([m])), m, INT_MIN)).toBe(true);
+    // a caller that names no entry params gets no param bound at all
+    expect(mayAlwaysHold(at([a, d], null), m, INT_MIN)).toBe(true);
+  });
+
   test("a struct-array aload's elemSize is its stride, which bounds nothing", () => {
     const defs = new Map<Value, Op>();
     const flat = def(defs, 'aload', { elemSize: 2, signed: false }, [v(), v()]);
