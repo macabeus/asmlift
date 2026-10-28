@@ -5281,7 +5281,9 @@ export function structure(
       // `sub`/`orr`/`eor` of constants, a param both arms of a diamond set, a reload of a store
       // nothing can have overwritten, a reload of memory this function wrote on every path through
       // an address it cannot match — so the question goes to the shared word evaluator, and fails
-      // closed: a constant it cannot compute refuses too.
+      // closed: a constant it cannot compute refuses too — unless the operand's own op cannot make
+      // 0x80000000 at all (a halfword or byte reload of that memory, a narrowing cast), whatever
+      // the evaluator could not say about its inputs.
       // An operand that is INT_MIN on some paths only still lifts; that is the "might hold" case.
       // Only hand-written asm reaches the refusal — agbcc folds the negation of a constant.
       const x = e(d.operands[0]);
