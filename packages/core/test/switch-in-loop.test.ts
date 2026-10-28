@@ -5,9 +5,10 @@
 // `break` read as a fall-through into it. The switch's end inside a loop body is the body's own join
 // (`loopJoin`), as it is for an `if` there.
 //
-// The fixtures are the benchmark's own `synthetic:sw_loopret` objects (and mwcc's
+// The `*-swloopret*` fixtures are the benchmark's own `synthetic:sw_loopret` objects (and mwcc's
 // `sw_loopret_ctl`, which has no post-loop return but still one epilogue), as `pnpm bench repro`
-// fed them to asmlift: the `.s`/objdump text and, off agbcc, its `objdump -s -r -t` dump.
+// fed them to asmlift: the `.s`/objdump text and, off agbcc, its `objdump -s -r -t` dump. The
+// other fixtures are compiled from the source written above each test.
 //
 //   for (i = 0; i <= n; i++) {
 //       switch (gE[i].id) {
@@ -330,8 +331,8 @@ test('agbcc: a comparison-tree arm falling through beside a `goto` past the loop
 
 test('ido7.1: an escape that runs round an irreducible cycle does not count as only returning', () => {
   // `case 0`'s `goto out` reaches a `while` entered in its middle (`goto mid`), a cycle whose
-  // back edge targets no dominator. The path never reaches a `ret` without going round it, so the
-  // arm cannot fall through beside that escape: the arms still do not linearize, loud.
+  // back edge targets no dominator. One of the escape's paths runs round it, so the escape does
+  // not only return and the arm cannot fall through beside it: the arms do not linearize, loud.
   //
   //   for (i = 0; i <= n; i++) {
   //       switch (gId[i]) {

@@ -6653,13 +6653,13 @@ export function structure(
       // switch whose CFG merge is the loop's exit and whose arms `break` there (switch-arms.test
       // `exitloop`, which then declines at the body's join).
       //
-      // NOT ASKED where an earlier reading SPELLS at a merge past the body that only `return`s
-      // reach, and the code after the switch is then the epilogue's `return;` no path reaches (a
-      // switch nested in an arm of an in-loop switch, one of whose own arms returns): the
-      // reachability contract declines that function, loud. No static test over the CFG tells that
-      // reading from the one whose arm reads an early `return` as its `break;` to that same
-      // `return;`, which publishes — a `return` arm entered from the dispatch, or one Regime A
-      // walks through rather than rendering in place — so this reading stays behind the decline.
+      // KNOWN GAP, loud: where an earlier reading SPELLS at a merge past the body that only
+      // `return`s reach (a switch nested in an arm of an in-loop switch, one of whose own arms
+      // returns), this is never asked, and the epilogue's `return;` after the switch is one no path
+      // reaches — the reachability contract declines the function. No static test over the CFG
+      // tells that reading from the published one whose arm spells an early `return` as `break;`
+      // to that same `return;` (a `return` arm entered from the dispatch, or one Regime A walks
+      // through rather than rendering in place).
       if (loopCtx !== null) {
         const at = read.declines ? inLoopJoin(b, joined, true) : undefined;
         const clampAt = at === undefined ? undefined : (at ?? stop);
@@ -7644,7 +7644,7 @@ export function structure(
     return true;
   };
   // THE JOIN OF A BRANCH IN A LOOP BODY, ONE RULE FOR BOTH BRANCHING STATEMENTS — the `if`
-  // (`bodyJoin`/`tested` at the cond_br site) and the `switch` (THE LOOP CLAMP at the switch_br
+  // (`bodyJoin` at the cond_br site) and the `switch` (THE LOOP CLAMP at the switch_br
   // site). `undefined` ⇒ no loop reading applies and the statement keeps its CFG merge; otherwise
   // `loopJoin`'s answer, null meaning the paths meet only at the bottom of the body.
   //  - Outside a loop, or inside one of the innermost loop's break arms: undefined. A break arm's

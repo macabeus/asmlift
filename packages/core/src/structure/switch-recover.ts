@@ -831,9 +831,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // jump that ends where it sits, as a `ret` inside the arm is. Regime B only. Regime A
     // (`stopAtLoop`) commits to its `switch` on gates that read an arm's `breaks` alone, and has
     // if-recovery to fall back on, so a falling arm beside an escape stays `unstructurable` there:
-    // admitting it let Regime A commit to switches whose emission then refused the whole function
-    // (an escape to a `goto out` past a loop exit, or out of a nested switch) where if-recovery
-    // spelled them.
+    // admitted, it commits Regime A to switches whose emission then refuses the whole function (an
+    // escape to a `goto out` past a loop exit, or out of a nested switch) where if-recovery spells
+    // them.
     if (
       into.size === 1 &&
       (escapedTo.size === 0 || (!stopAtLoop && [...escapedTo].every((s) => onlyReturns(s, b, merge, siblings))))

@@ -14094,12 +14094,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      (structure.ts THE LOOP CLAMP, `loopJoin`), where the epilogue reading declines.
   //      sw_loopret_ctl drops the post-loop return: agbcc and ido7.1 keep two `ret`s, so it lifted
   //      already there (controls); mwcc_242_81 keeps one epilogue, so it is a second instance.
-  //      gcc2.7.2 declines both rows on a different shape: reorg fills two arms' delay slots with the
+  //      gcc2.7.2 has no CFG merge at all on both rows: reorg fills two arms' delay slots with the
   //      latch's `i++`, so those arms jump to the test while the rest go to a separate `i++` block,
-  //      and the body's join still leaves two arms falling into one. Off gcc2.7.2kmc: its table
-  //      dispatch fails earlier ("indirect jump 'jr v0'"). On sub_08016EEC itself the loop around
-  //      the switch is not classified at all (its exits run into a cross-jumped `call; return` tail
-  //      that code outside the loop also enters), so no loop clamp reaches it.
+  //      and the body's join lifts only with that block given back as copies. Off gcc2.7.2kmc: its
+  //      table dispatch fails earlier ("indirect jump 'jr v0'"). On sub_08016EEC itself the loop
+  //      around the switch is not classified at all (its exits run into a cross-jumped `call;
+  //      return` tail that code outside the loop also enters), so no loop clamp reaches it.
   //  26. dmafill_wh / dmafill_ww / dmafill_hw (sub_0804C60C). Two `DMA_FILL`s, a 32-bit one and then
   //      a 16-bit one. The `vu32 tmp` at [sp,#0] is stored with a direct `str r0, [sp]`, which the
   //      slot model keys as an SSA slot unless the [sp,#0] capture licence (thumb.ts, beside
