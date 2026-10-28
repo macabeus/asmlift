@@ -64,6 +64,10 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       // the two-level loop exit (a nested search loop, lifted with a flag) and its goto-free control
       'synthetic:brk2lvl_flag:mwcc_242_81  unsigned/unreduce',
       'synthetic:brk2lvl:mwcc_242_81  unsigned/unreduce',
+      // the same search loop inside a switch arm (whose goto lands on the arm's break) and its
+      // if/else-arm control
+      'synthetic:brk2sw_ctl:mwcc_242_81  unsigned/unreduce',
+      'synthetic:brk2sw:mwcc_242_81  unsigned/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
       'synthetic:sw_h4:mwcc_242_81  signed/unreduce',

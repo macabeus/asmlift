@@ -246,6 +246,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /tests the carry of a 'cmn'/,
   },
   {
+    // A `cmn`'s negation whose operand MAY ALWAYS be INT_MIN (`structure/structure.ts`, the `neg_s`
+    // rule over ir/bits.ts `mayAlwaysHold`), fail-closed: `-(s32)0x80000000` has no C spelling
+    // that is the machine's +2^31. Its one row, `cmn_store`, refuses past need: a zero-extended
+    // halfword reloaded after a store through another pointer reads as a constant the evaluator
+    // cannot compute, though no halfword is 0x80000000.
+    key: 'cmn-int-min',
+    label: 'Thumb cmn whose negated operand may always be INT_MIN (a reload after a store)',
+    pattern: /the mathematical negation of the constant 0x80000000 has no int spelling/,
+  },
+  {
     // THE LEFTOVERS OF A CAPABILITY THAT LANDED, not a missing one — the reading `branch-likely`
     // below asks for. Both Thumb and PowerPC carry a compare across a run of edges into blocks with
     // one predecessor each (`frontend/flags-edge.ts`, one rule for both), so what still refuses is
