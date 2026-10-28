@@ -20,7 +20,12 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
-import { makeSwitchRecovery, __testing as switchRangesForTest } from '../src/structure/switch-recover';
+import {
+  type ArmExit,
+  copySharedFallTargets,
+  makeSwitchRecovery,
+  __testing as switchRangesForTest,
+} from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
@@ -716,6 +721,89 @@ test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LO
   // and Regime B, which has no second recovery, refuses it as `chainArms` does.
   const fallsOn = twoIntoOne.replace('.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L7\n');
   expect(() => of(fallsOn)).toThrow(/do not linearize/);
+});
+
+// ── a sibling that LEAVES SIDEWAYS, copied all the same (switch-recover.ts `copySharedFallTargets`) ──
+// gcse's PRE puts the NEXT switch's index (`x - 37`) in the dispatch block, so the dispatch no
+// longer dominates the `default:` the bounds test also branches to. The default then leaves the
+// switch's region into the tail other arms were cross-jumped into, and reads as a `break` with no
+// region — while cases 2 and 3, whose `gOut = v; gOut2 = 5;` agbcc cross-jumped into the default,
+// both fall into it. The copy is safe because of where that tail GOES: only on to the merge.
+
+/** synthetic:jt_xjdefpre:agbcc, the benchmark's own object text. */
+const xjdefpre = readFileSync(new URL('corpus/agbcc-jtxjdefpre.s', import.meta.url), 'utf8');
+const ofXjdefpre = (asm: string) =>
+  decompile('jt_xjdefpre', asm, ARMV4T_AGBCC, {
+    prototypes: {
+      jt_xjdefpre: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+  }).source;
+
+test('two arms cross-jumped into a default the PRE dispatch does not dominate each get its tail back', () => {
+  const out = ofXjdefpre(xjdefpre);
+  const tail = /gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;/g;
+  // once in each of cases 2 and 3 (`a0 - 1` = 1, 2), once on the out-of-range path, nowhere else
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+break;/);
+  expect(out).toMatch(/case 2:\s+m\(a3\);\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+break;/);
+  expect(out).toMatch(/\} else \{\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+\}/);
+  expect([...out.matchAll(tail)]).toHaveLength(3);
+  expect(count(out, 'gOut2 = 5;')).toBe(3);
+  expect(out).not.toContain('default:');
+});
+
+test('…but not where the tail runs into a sibling arm, or round a cycle: those still fail LOUD', () => {
+  // The tail re-enters case 6's body, which now leaves for the merge on its own.
+  const sibling = xjdefpre
+    .replace('\tsub\tr1, r1, #0x25\n.L4:', '\tsub\tr1, r1, #0x25\n\tcmp\tr5, #0x9\n\tbeq\t.L11\t@cond_branch\n.L4:')
+    .replace(
+      '.L11:\n\tmov\tr0, #0x7\n\tbl\tf\n\tb\t.L25\n',
+      '.L11:\n\tmov\tr0, #0x7\n\tbl\tf\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n\tb\t.L4\n',
+    );
+  // The tail loops on itself before reaching the merge.
+  const cycle = xjdefpre.replace(
+    '.L25:\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n',
+    '.L25:\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n\tsub\tr5, r5, #0x1\n\tcmp\tr5, #0x9\n\tbne\t.L25\t@cond_branch\n',
+  );
+  expect(sibling).not.toBe(xjdefpre);
+  expect(cycle).not.toBe(xjdefpre);
+  expect(() => ofXjdefpre(sibling)).toThrow(/do not linearize/);
+  expect(() => ofXjdefpre(cycle)).toThrow(/do not linearize/);
+});
+
+test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnds` clears every escape', () => {
+  const blk = (): Block => ({ params: [], ops: [mkOp('br')] });
+  const [e1, x, e2, d, s] = [blk(), blk(), blk(), blk(), blk()];
+  const exits = new Map<Block, ArmExit>([
+    [e1, { kind: 'fallthrough', to: d, breaks: false, region: new Set([e1]) }],
+    [x, { kind: 'break', region: new Set([x]) }],
+    [e2, { kind: 'fallthrough', to: d, breaks: false, region: new Set([e2]) }],
+    [d, { kind: 'break', escapedTo: new Set([s]) }],
+  ]);
+  const order = [e1, x, e2];
+  // no predicate, or one that refuses the escape: two-into-one stays for `chainArms` to refuse
+  expect(copySharedFallTargets(order, d, exits, false)).toEqual(exits);
+  expect(copySharedFallTargets(order, d, exits, false, undefined, () => false)).toEqual(exits);
+  // cleared: every entrant becomes a closed `break` with no region, naming the sibling's escapes
+  const all = copySharedFallTargets(order, d, exits, false, undefined, (b) => b === s);
+  expect(all.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  expect(all.get(e2)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  // …and the faller policy is unchanged: the arm above the `default:` (order's last) keeps falling
+  let kept = 0;
+  const one = copySharedFallTargets(
+    order,
+    d,
+    exits,
+    true,
+    () => kept++,
+    () => true,
+  );
+  expect(one.get(e2)).toBe(exits.get(e2));
+  expect(one.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  expect(kept).toBe(1);
 });
 
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────

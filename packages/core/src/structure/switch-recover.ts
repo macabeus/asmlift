@@ -106,6 +106,8 @@ export interface SwitchRecovery {
    *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
    *  Regime B, which has no fallback, fails loud. */
   analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>, stopAtLoop?: boolean) => ArmExit;
+  /** may the copies write out a sibling that leaves sideways into `s`? (`copySharedFallTargets`) */
+  forwardToMerge: (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>) => boolean;
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
@@ -321,10 +323,22 @@ function singleton(r: Ranges): number | null {
  *  ONLY OVER A CLOSED SIBLING. The copy is the sibling's region walked again inside the entrant's
  *  arm, so it is spelled only where that region ends the switch: the sibling's own exit a `break`
  *  WITH a region — it reaches no sibling of its own and leaves through no block the switch does
- *  not dominate. A sibling that falls on, or leaves sideways, stays two-into-one for `chainArms`
- *  to refuse. PURE: the closed exit is exactly what `analyzeArmExit` reads for the
- *  entrant once the sibling is no longer a sibling — its walk reaches the sibling's blocks, and
- *  they reach the merge and nothing else — so it is assembled here rather than walked again.
+ *  not dominate. A sibling that falls on stays two-into-one for `chainArms` to refuse. PURE: the
+ *  closed exit is exactly what `analyzeArmExit` reads for the entrant once the sibling is no
+ *  longer a sibling — its walk reaches the sibling's blocks, and they reach the merge and nothing
+ *  else — so it is assembled here rather than walked again.
+ *
+ *  OR A SIBLING THAT LEAVES SIDEWAYS ONLY FORWARD. A closed sibling with no region stepped into
+ *  blocks the switch does not dominate (`escapedTo`). Its body is still the switch's end on every
+ *  path where each of those blocks runs only on to the merge or a `ret` — never back into the
+ *  dispatch, a sibling (the entrants among them), round a cycle or out of the enclosing loop —
+ *  which `sidewaysEnds` answers per block (switch-recover's `forwardToMerge`, the caller's to hand
+ *  in; absent, no such sibling is copied). It shows where the default is ALSO entered from outside
+ *  the dispatch: gcse's PRE puts code in the dispatch block, which then no longer dominates the
+ *  default that the bounds test reaches too, and the default's tail runs on through blocks other
+ *  arms cross-jumped into (`synthetic:jt_xjdefpre`, kleod EntityCreate). Each copying entrant
+ *  then has no region either: like every arm that leaves sideways, it structures to the CFG's
+ *  joins, which walks the sibling's blocks once inside it and stops at the merge.
  *
  *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
  *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
@@ -335,6 +349,7 @@ export function copySharedFallTargets(
   exitOf: ReadonlyMap<Block, ArmExit>,
   faller: boolean,
   onFallerKept?: () => void,
+  sidewaysEnds?: (s: Block) => boolean,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   const entrants = new Map<Block, Block[]>();
@@ -346,7 +361,14 @@ export function copySharedFallTargets(
   }
   for (const [to, from] of entrants) {
     const own = exitOf.get(to);
-    if (from.length < 2 || own?.kind !== 'break' || own.region === undefined) {
+    if (from.length < 2 || own?.kind !== 'break') {
+      continue;
+    }
+    const { region, escapedTo } = own;
+    if (
+      region === undefined &&
+      (escapedTo === undefined || sidewaysEnds === undefined || ![...escapedTo].every(sidewaysEnds))
+    ) {
       continue;
     }
     const at = to === dflt ? order.length : order.indexOf(to);
@@ -357,7 +379,12 @@ export function copySharedFallTargets(
     for (const e of from) {
       const x = exitOf.get(e)!;
       if (e !== above && x.kind === 'fallthrough') {
-        out.set(e, { kind: 'break', region: new Set([...x.region, ...own.region]) });
+        out.set(
+          e,
+          region === undefined
+            ? { kind: 'break', escapedTo: escapedTo! }
+            : { kind: 'break', region: new Set([...x.region, ...region]) },
+        );
       }
     }
   }
@@ -725,7 +752,19 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // path being walked is a cycle, reducible or not (an IDO `goto mid;` into a `while` body makes an
   // irreducible one, which a dominance test does not see). An edge to a block that dominates its
   // source is refused too, since that block may lie above `s` where the walk never put it.
-  const onlyReturns = (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>): boolean => {
+  //
+  // WITH `mergeEnds` it is the copies' question instead (`forwardToMerge`): a path may also END at
+  // the merge, and may not leave the enclosing loop (a step to its header or its exit), since the
+  // copy writes the path out inside a case arm, where neither spells. Everything else it refuses
+  // here it refuses there too.
+  const onlyReturns = (
+    s: Block,
+    b: Block,
+    merge: Block | null,
+    siblings: ReadonlySet<Block>,
+    mergeEnds = false,
+  ): boolean => {
+    const loop = mergeEnds ? enclosingLoop() : null;
     const done = new Set<Block>();
     const onPath = new Set<Block>([s]);
     const stack: { x: Block; next: number }[] = [{ x: s, next: 0 }];
@@ -742,6 +781,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         continue;
       }
       const y = succ[top.next++];
+      if (mergeEnds && y === merge && merge !== null) {
+        continue; // a path that reaches the switch's end
+      }
+      if (loop !== null && (y === loop.header || y === loop.exit)) {
+        return false; // out of the loop the switch sits in, or round it
+      }
       if (y === b || y === merge || siblings.has(y) || onPath.has(y) || dom.get(top.x)!.has(y)) {
         return false; // back into the switch, or a cycle
       }
@@ -1430,7 +1475,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms };
+  /** `copySharedFallTargets`' `sidewaysEnds`: does every path from `s`, a block outside the
+   *  switch's region, run only forward to `merge` or a `ret` (`onlyReturns` with the merge as an
+   *  end)? */
+  const forwardToMerge = (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>): boolean =>
+    merge !== null && onlyReturns(s, b, merge, siblings, true);
+  return { recognizeSwitch, analyzeArmExit, forwardToMerge, layoutIndex, defaultLayoutPos, chainArms };
 }
 
 /** Internal surface for this module's own tests, and for nothing else: PRE3 reads each test
