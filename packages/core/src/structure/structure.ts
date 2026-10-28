@@ -6509,27 +6509,28 @@ export function structure(
       switchFrames.pop();
     }
   };
-  const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms } = makeSwitchRecovery({
-    fn,
-    defs,
-    dom,
-    ipdom,
-    opBlock,
-    isNamed: (v) => varName.has(v),
-    isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
-    switchAllowsNeqCase,
-    switchBoundCase: switchBoundCase ?? null,
-    switchArmsFollowLayout,
-    switchRequiresFrontLoadedTests,
-    spellSwitchFallthrough,
-    emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
-    blockOf,
-    enclosingLoop: () => loopCtx,
-    hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
-    expr: (v) => expr(v),
-    structureRegion: (b, stop) => structureRegion(b, stop),
-    structureArm,
-  });
+  const { recognizeSwitch, analyzeArmExit, forwardToMerge, layoutIndex, defaultLayoutPos, chainArms } =
+    makeSwitchRecovery({
+      fn,
+      defs,
+      dom,
+      ipdom,
+      opBlock,
+      isNamed: (v) => varName.has(v),
+      isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
+      switchAllowsNeqCase,
+      switchBoundCase: switchBoundCase ?? null,
+      switchArmsFollowLayout,
+      switchRequiresFrontLoadedTests,
+      spellSwitchFallthrough,
+      emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
+      blockOf,
+      enclosingLoop: () => loopCtx,
+      hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
+      expr: (v) => expr(v),
+      structureRegion: (b, stop) => structureRegion(b, stop),
+      structureArm,
+    });
 
   const structureBlock = (b: Block, stop: Block | null): Stmt[] => {
     // Bottom-test `do-while`: this block is a do-while header (the body-first loop entry). Emit the
@@ -6685,7 +6686,9 @@ export function structure(
         // all but the one the arm-order policy puts above it, or under `/tail-copies` all of them
         // (`copySharedFallTargets`, and THE COPIES below for when it is asked).
         const exits = copies
-          ? copySharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, hooks.onTailFallerKept)
+          ? copySharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, hooks.onTailFallerKept, (s) =>
+              forwardToMerge(s, b, at, siblings),
+            )
           : walked;
         const falls = [...exits.values()].some((e) => e.kind === 'fallthrough');
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);

@@ -9,6 +9,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
 import { pascalBackend } from '../src/backend/pascal';
+import { parseAsmData } from '../src/frontend/asmdata';
 import { frontendFor } from '../src/frontend/registry';
 import { mkOp } from '../src/ir/core';
 import type { Block } from '../src/ir/core';
@@ -20,7 +21,12 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
-import { makeSwitchRecovery, __testing as switchRangesForTest } from '../src/structure/switch-recover';
+import {
+  type ArmExit,
+  copySharedFallTargets,
+  makeSwitchRecovery,
+  __testing as switchRangesForTest,
+} from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
@@ -716,6 +722,183 @@ test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LO
   // and Regime B, which has no second recovery, refuses it as `chainArms` does.
   const fallsOn = twoIntoOne.replace('.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L7\n');
   expect(() => of(fallsOn)).toThrow(/do not linearize/);
+});
+
+// ── a sibling that LEAVES SIDEWAYS, copied all the same (switch-recover.ts `copySharedFallTargets`) ──
+// gcse's PRE puts the NEXT switch's index (`x - 37`) in the dispatch block, so the dispatch no
+// longer dominates the `default:` the bounds test also branches to. The default then leaves the
+// switch's region into the tail other arms were cross-jumped into, and reads as a `break` with no
+// region — while cases 2 and 3, whose `gOut = v; gOut2 = 5;` agbcc cross-jumped into the default,
+// both fall into it. The copy is safe because of where that tail GOES: only on to the merge.
+// Nothing here is agbcc's: the ido7.1 `jl_cont` test below pins the same copies with no PRE.
+
+/** synthetic:jt_xjdefpre:agbcc, the benchmark's own object text. */
+const xjdefpre = readFileSync(new URL('corpus/agbcc-jtxjdefpre.s', import.meta.url), 'utf8');
+const ofXjdefpre = (asm: string) =>
+  decompile('jt_xjdefpre', asm, ARMV4T_AGBCC, {
+    prototypes: {
+      jt_xjdefpre: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+  }).source;
+
+test('two arms cross-jumped into a default the PRE dispatch does not dominate each get its tail back', () => {
+  const out = ofXjdefpre(xjdefpre);
+  const tail = /gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;/g;
+  // once in each of cases 2 and 3 (`a0 - 1` = 1, 2), once on the out-of-range path, nowhere else
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+break;/);
+  expect(out).toMatch(/case 2:\s+m\(a3\);\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+break;/);
+  expect(out).toMatch(/\} else \{\s+gOut = a3;\s+gOut2 = 5;\s+v0 = a0 - 37;\s+\}/);
+  expect([...out.matchAll(tail)]).toHaveLength(3);
+  expect(count(out, 'gOut2 = 5;')).toBe(3);
+  expect(out).not.toContain('default:');
+});
+
+// CONSERVATIVE, not needed for soundness: with `forwardToMerge` forced true both shapes below lift,
+// and read as the same program written out longer (case 6's `f(7)` in every entrant; the loop in
+// every entrant). The refusals spare that duplication (switch-recover.ts `onlyReturns`).
+test('…but not where the tail runs into a sibling arm, or round a cycle: those decline LOUD, conservatively', () => {
+  // The tail re-enters case 6's body, which now leaves for the merge on its own.
+  const sibling = xjdefpre
+    .replace('\tsub\tr1, r1, #0x25\n.L4:', '\tsub\tr1, r1, #0x25\n\tcmp\tr5, #0x9\n\tbeq\t.L11\t@cond_branch\n.L4:')
+    .replace(
+      '.L11:\n\tmov\tr0, #0x7\n\tbl\tf\n\tb\t.L25\n',
+      '.L11:\n\tmov\tr0, #0x7\n\tbl\tf\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n\tb\t.L4\n',
+    );
+  // The tail loops on itself before reaching the merge.
+  const cycle = xjdefpre.replace(
+    '.L25:\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n',
+    '.L25:\n\tadd\tr1, r4, #0\n\tsub\tr1, r1, #0x25\n\tsub\tr5, r5, #0x1\n\tcmp\tr5, #0x9\n\tbne\t.L25\t@cond_branch\n',
+  );
+  expect(sibling).not.toBe(xjdefpre);
+  expect(cycle).not.toBe(xjdefpre);
+  expect(() => ofXjdefpre(sibling)).toThrow(/do not linearize/);
+  expect(() => ofXjdefpre(cycle)).toThrow(/do not linearize/);
+});
+
+test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnds` clears every escape', () => {
+  const blk = (): Block => ({ params: [], ops: [mkOp('br')] });
+  const [e1, x, e2, d, s] = [blk(), blk(), blk(), blk(), blk()];
+  const exits = new Map<Block, ArmExit>([
+    [e1, { kind: 'fallthrough', to: d, breaks: false, region: new Set([e1]) }],
+    [x, { kind: 'break', region: new Set([x]) }],
+    [e2, { kind: 'fallthrough', to: d, breaks: false, region: new Set([e2]) }],
+    [d, { kind: 'break', escapedTo: new Set([s]) }],
+  ]);
+  const order = [e1, x, e2];
+  // no predicate, or one that refuses the escape: two-into-one stays for `chainArms` to refuse
+  expect(copySharedFallTargets(order, d, exits, false)).toEqual(exits);
+  expect(copySharedFallTargets(order, d, exits, false, undefined, () => false)).toEqual(exits);
+  // cleared: every entrant becomes a closed `break` with no region, naming the sibling's escapes
+  const all = copySharedFallTargets(order, d, exits, false, undefined, (b) => b === s);
+  expect(all.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  expect(all.get(e2)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  // …and the faller policy is unchanged: the arm above the `default:` (order's last) keeps falling
+  let kept = 0;
+  const one = copySharedFallTargets(
+    order,
+    d,
+    exits,
+    true,
+    () => kept++,
+    () => true,
+  );
+  expect(one.get(e2)).toBe(exits.get(e2));
+  expect(one.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
+  expect(kept).toBe(1);
+});
+
+// The same copies with NO PRE: IDO 7.1 has no gcse, and the tail cases 2, 3 and the default share
+// still leaves the switch's region, because it runs on into the second jump table, which the
+// `if (c)` branch around the switch reaches too. `corpus/ido71-jlcont.{asm,txt}` are ido7.1's
+// object for, at its canonical flags (the `.txt` its `objdump -s -r -t`):
+//
+//   for (i = 0; i < 3; i++) {
+//       if (c) { gOut = x - 37; } else {
+//           switch (x) {
+//           case 1: f(1); break;
+//           case 2: h(v); gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           case 3: m(v); gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           case 4: break;
+//           case 5: q(v); break;
+//           case 6: f(7); break;
+//           default: gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           }
+//       }
+//       switch (x) { case 37: p[9] += 1; break; … case 44: p[16] += 8; break; }
+//       v++;
+//   }
+//
+// Without the region-less copies it declines "do not linearize"; with them it lifts, and the host
+// differential against that source is SAME.
+test('ido7.1, no PRE: a shared tail that runs on into code outside the switch is copied into its entrants', () => {
+  const fixture = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+  const dump = fixture('ido71-jlcont.txt');
+  const out = decompile('jl_cont', fixture('ido71-jlcont.asm'), MIPS_IDO, {
+    prototypes: {
+      jl_cont: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+    asmData: parseAsmData(dump, dump, dump, true),
+  }).source;
+  // The tail once per arm that runs it (labels are `x - 1`): two arms print it whole, source case 2
+  // (`case 1:`) and the default; source case 3 keeps the original, and falls on into case 4's
+  // empty body, which IS the code after the switch. The `continue` is the skipped `f(i)`, second
+  // switch and `v++`, so no `continue` is spelled.
+  const tail = /gOut = a3;\s+gOut2 = v\d+;\s+if \(a3 != v\d+\) \{\s+f\(v\d+\);\s+switch \(a0 \+ -37\)/g;
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;/);
+  expect(out).toMatch(/default:\s+gOut = a3;/);
+  expect([...out.matchAll(tail)]).toHaveLength(2);
+  expect(count(out, 'gOut = a3;')).toBe(3);
+  expect(out).not.toContain('continue');
+});
+
+// A shared tail that LEAVES THE ENCLOSING LOOP on its way to the end is copied too: the copy
+// writes the code past the loop and its `return;` inside each entrant. `corpus/agbcc-xwh2.s` is
+// agbcc's object for, at its canonical flags:
+//
+//   s32 i = 0;
+//   while (1) {
+//       if (++i > c) break;
+//       if (i == 3) goto L;
+//       switch (x) {
+//       case 1: f(1); break;
+//       case 2: h(v); gOut = v; if (v & 1) f(v); goto out;
+//       case 3: m(v); gOut = v; if (v & 1) f(v); goto out;
+//       case 4: break;
+//       case 6: f(7); break;
+//       default: L: gOut = v; if (v & 1) f(v); goto out;
+//       }
+//       k(i);
+//   }
+//   out: p[3] = x;
+//
+// The tail's `if` puts one block between the switch's region and the loop's exit, so the exit is a
+// later sideways block on the path, not the first one. Host differential SAME.
+test('agbcc: a shared tail that leaves the enclosing loop is copied into its entrants, with the code past the loop', () => {
+  const out = decompile('x_wh2', readFileSync(new URL('corpus/agbcc-xwh2.s', import.meta.url), 'utf8'), ARMV4T_AGBCC, {
+    prototypes: {
+      x_wh2: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+    },
+  }).source;
+  const exit = /gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/g;
+  // labels are `x - 1`: cases 2 and 3 (`case 1:`, `case 2:`), x == 5 and the default each spell it
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect(out).toMatch(/case 2:\s+m\(a3\);\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect(out).toMatch(/default:\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect([...out.matchAll(exit)]).toHaveLength(4);
+  // and the `goto L` path, which breaks out of the loop into the one store past it
+  expect(count(out, 'a1[3] = a0;')).toBe(5);
 });
 
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
