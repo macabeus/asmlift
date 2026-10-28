@@ -3260,10 +3260,18 @@ export function structure(
     return meets ? region : null;
   };
   // May the edge from `nl`'s body to `to` be a two-level exit past `exit`? `to` lies outside the
-  // loop and is not `exit`; inside a loop around this one, both lie in that loop's body and `to` is
-  // not its header (that edge is the enclosing loop's `continue`, a different spelling); and the
-  // code from `exit` to `to` meets `to` and never re-enters this loop. Asked only of an edge no other
-  // reading takes (`foreverShape`), so a loop that lifted without it reads as it did.
+  // loop and is not `exit`; inside a loop around this one, `to` lies in that loop's body (a target
+  // past it is a `break` out of both loops, which one flag read after this loop cannot spell); and
+  // the code from `exit` meets `to` (`twoLevelSkip`). That walk is what refuses the enclosing
+  // loop's header (a two-level `continue`): it reaches the header only by a back edge, which it
+  // never follows. Both refusals are loud capability gaps, not wrong code. Asked only of an edge no
+  // other reading takes (`foreverShape`), so a loop that lifted without it reads as it did.
+  //
+  // The other three tests are DEFENSIVE, never seen to fire, and no fixture fails without them: on
+  // a reducible CFG, once back edges are dropped no path leads from a loop's body out and back into
+  // it, so `exit` lies in the enclosing body whenever the walk from it meets `to` there, the skipped
+  // code never re-enters `nl`, and `to` is never the enclosing header. They hold the reading to that
+  // promise on a CFG that breaks it.
   const twoLevelTarget = (nl: NaturalLoop, exit: Block, to: Block): boolean => {
     if (to === exit || nl.body.has(to)) {
       return false;
@@ -3271,10 +3279,10 @@ export function structure(
     const outer = forest.parent.get(nl.header);
     const outerBody = outer ? forest.byHeader.get(outer)!.body : null;
     if (outerBody !== null && (!outerBody.has(to) || !outerBody.has(exit) || to === outer)) {
-      return false;
+      return false; // `!outerBody.has(to)` refuses; the other two are DEFENSIVE (above)
     }
     const skip = twoLevelSkip(exit, to);
-    return skip !== null && ![...skip].some((x) => nl.body.has(x));
+    return skip !== null && ![...skip].some((x) => nl.body.has(x)); // the second test is DEFENSIVE
   };
   const admissible = (nl: NaturalLoop): boolean =>
     [...forest.byHeader.values()].every(
@@ -3531,7 +3539,10 @@ export function structure(
         if (owned !== null || (isRet(e.to) && !e.to.ops.some(effectful))) {
           return true;
         }
-        // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body
+        // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body.
+        // The inner-body test is DEFENSIVE: an inner loop's edge out of `nl` must first be taken by
+        // that loop's own reading, and none takes a non-`ret` target past its enclosing body, so the
+        // inner loop declines before this one is asked; no fixture fails without it.
         if (
           !twoLevel ||
           innerBodyHas(nl, e.from) ||
@@ -7306,7 +7317,10 @@ export function structure(
     // loud, rather than handed to the printer as a `break` it would rebind.
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
-    // code from the second target inside the loop.
+    // code from the second target inside the loop. In a case body opened in this loop it is refused
+    // outright, since `break` there leaves only the switch. No probe or fixture has reached that
+    // refusal yet (the switch-in-loop shapes tried were taken by the tail-copying readings or
+    // declined in switch recovery), so it rests on that reading of C, not on a failing fixture.
     const twoLevel =
       loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
         ? loopCtx.twoLevel
@@ -7919,8 +7933,14 @@ export function structure(
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
   // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
-  // before the second target (`stop` among the skipped code): the code after the `if` would run
-  // past the end of the region, and the region's owner renders it again.
+  // before the second target (`stop` among the skipped code): the code from the second target on
+  // would render past the end of the region, and the region's owner renders it again after. That
+  // is a copy, not yet a proven wrong: with the refusal removed, the probes it refuses (an inner
+  // loop under a guard whose join it skips; ido7.1's loop in a case arm with the target past the
+  // switch) lifted correct, the copy ending in a `return`, `break` or `continue`. No fixture fails
+  // without it; it stays until a reading proves the copy can never fall through into the owner's.
+  // Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to: …; Z:`) are not
+  // refused: they render inside the `if` and again after it, a copy that always ends in a jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const frame = {

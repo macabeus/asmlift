@@ -7,7 +7,8 @@
 // judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as
 // it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
 // on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
-// shapes the reading must not take: a third exit target, and a target outside the enclosing loop.
+// shapes the reading does not take: a third exit target, a target outside the enclosing loop, and
+// the enclosing loop's header.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -360,9 +361,40 @@ const TARGET_PAST_THE_ENCLOSING_LOOP = `fn pastouter {
   ret
 }`;
 
+/** The hit goes straight to the enclosing loop's header (a two-level `continue`, `goto next` with
+ *  `next:` at the top of the outer body). The walk from the inner exit reaches that header only by
+ *  the back edge, which it never follows, so it never meets the target and the loop stays declined. */
+const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %8: s32 = add %5, %7
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb1(%8), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
 test.each([
   ['a third exit target', THREE_EXIT_TARGETS],
   ['a target outside the enclosing loop', TARGET_PAST_THE_ENCLOSING_LOOP],
+  ["the enclosing loop's header", TARGET_IS_THE_ENCLOSING_HEADER],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
 });
