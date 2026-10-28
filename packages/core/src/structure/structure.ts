@@ -2807,11 +2807,73 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
   return t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
 }
 
+/** Where a loop reading that copies a ret tail with an effect into the body (`retCopyingReadings`)
+ *  ranks, and whether a structuring committed one. */
+interface RetCopyRanking {
+  /** Behind every `while (1)` reading, the two-level one included. Otherwise it ranks as the other
+   *  `while` and `do-while` readings do, save for a tail code around the loop also enters, which
+   *  waits behind the `while (1)` readings that add no variable. */
+  readonly last: boolean;
+  took: boolean;
+}
+
+/** A RET-TAIL COPY CLASSIFICATION ACCEPTS, EMISSION MAY STILL NOT SPELL. A `while` or `do-while`
+ *  reading takes an edge into a ret-terminated tail it does not own as an early `return`, and only
+ *  emission learns whether the body can hold it: on gcc2.7.2kmc, `for (j = 0; j < 8; j++) { if
+ *  (hit) goto out; } k(i); out: gA[0] = i;` reads as a do-while whose hit branch then finds no join
+ *  in the body ("unrecovered back-edge"), and on gcc2.7.2 the same loop in a switch arm whose merge
+ *  is the function's `t(); return` reaches that merge from inside the loop, which no `break;` spells
+ *  (`switchBreakAt`). Such a structuring is run again with every such reading last
+ *  (`RetCopyRanking.last`), where `while (1)` spells the loop, and the first run's refusal stands if
+ *  the second declines too. The first run's observation hooks are held until it is known to stand,
+ *  so a site is reported once, by the structuring that is returned. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
   hooks: StructureHooks = {},
   memo?: DefaultAcceptsMemo,
+): SFn {
+  const held: (() => void)[] = [];
+  const hold =
+    <A extends unknown[]>(f: (...args: A) => void) =>
+    (...args: A) => {
+      held.push(() => f(...args));
+    };
+  const first: RetCopyRanking = { last: false, took: false };
+  try {
+    const sfn = structureRanked(
+      fn,
+      opts,
+      {
+        ...hooks,
+        onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
+        onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
+        onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+      },
+      memo,
+      first,
+    );
+    held.forEach((f) => f());
+    return sfn;
+  } catch (error) {
+    if (!(error instanceof StructureError) || !first.took) {
+      held.forEach((f) => f());
+      throw error;
+    }
+    try {
+      return structureRanked(fn, opts, hooks, memo, { last: true, took: false });
+    } catch (again) {
+      throw again instanceof StructureError ? error : again;
+    }
+  }
+}
+
+function structureRanked(
+  fn: Fn,
+  opts: StructureOptions,
+  hooks: StructureHooks,
+  memo: DefaultAcceptsMemo | undefined,
+  retCopy: RetCopyRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -3589,22 +3651,23 @@ export function structure(
     // tried every exit without it (below): a `do-while` whose arm copies the tail keeps its bottom test
     // (`a \`do-while\` whose arm needs the exit path's tail keeps its bottom test`), where `while (1)`
     // with the copy would spell it `if (!(i < n)) break;`.
-    // A RET TARGET THE EDGE DOES NOT OWN, holding an effect, that code around the loop also enters
-    // (the header does not dominate it) is copied into the body as an early `return`, and the copy
-    // spells twice code the asm runs once for both. A tail only the loop's own paths reach is the
-    // arms' to copy (`a pure tail only the arms of a \`do-while\` enter`). `while (1)` refuses
-    // the copy of an effect outright (`foreverShape`); here it is the reading of last
-    // resort (`retCopyingReadings`), taken only where every `while (1)` reading, the two-level one
-    // included, declines. The tail is often where a `switch` ends: in `switch (x) { case 1: for (…)
-    // { if (hit) goto out; } k(); out: break; … } t();` on gcc2.7.2 the search loop is a do-while
-    // whose hit enters `t(); return` straight from the loop, which no `break;` reaches from inside
-    // it (`switchBreakAt`), and gcc2.7.2kmc's do-while reading of the same edge leaves its inner
-    // branch no join in the body. The two-level reading spells it `if (f != 0) break;`.
+    // A RET TARGET THE EDGE DOES NOT OWN, holding an effect, is copied into the body as an early
+    // `return` (`retCopyingReadings`). Where code around the loop also enters it (the header does
+    // not dominate it), the reading waits behind the `while (1)` readings that add no variable, and
+    // goes ahead of the two-level one (`TwoLevelExit`), whose flag the asm does not hold either:
+    // ido7.1's `for (…) { if (t[i] == x) { *out = r; return; } } gMiss = 1; *out = r;` merges the
+    // two `*out = r; return` and is spelled by `while (1)` with the hit's `return` inside
+    // (`retpost_tail`), and agbcc's cross-jumped `for (…) if (hit) { s->f = i; return; }` keeps the
+    // copy where the flag would add `v = 1; break;` the source never wrote. A tail only the loop's
+    // own paths reach is the arms' to copy (`a pure tail only the arms of a \`do-while\` enter`).
+    // Classification cannot tell whether emission spells the copy, so a structuring that committed
+    // one and declined is run again with every such reading last of all (`RetCopyRanking`).
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
       let copiesEffect = false;
+      let shared = false;
       for (const e of nl.exitEdges) {
         if (e.from === exitFrom && e.to === exit) {
           continue;
@@ -3622,20 +3685,21 @@ export function structure(
           breakArms.push({ from: e.from, to: e.to, region });
         } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
           return null;
-        } else if (!owned && e.to.ops.some(effectful) && !dom.get(e.to)!.has(h)) {
+        } else if (!owned && e.to.ops.some(effectful)) {
           copiesEffect = true;
+          shared ||= !dom.get(e.to)!.has(h);
         }
       }
-      return { arms, breaks, breakArms, copiesEffect };
+      return { arms, breaks, breakArms, copiesEffect, shared };
     };
     const plain = readArms(false);
     const read = plain ?? readArms(true);
     if (read === null) {
       continue;
     }
-    const { arms, breaks, breakArms, copiesEffect } = read;
+    const { arms, breaks, breakArms, copiesEffect, shared } = read;
 
-    const commit =
+    const reading =
       kind === 'while'
         ? () =>
             whileLoops.set(h, {
@@ -3658,8 +3722,12 @@ export function structure(
               body: nl.body,
               arms,
             });
+    const commit = () => {
+      retCopy.took ||= copiesEffect;
+      reading();
+    };
     // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
-    if (copiesEffect) {
+    if (copiesEffect && (shared || retCopy.last)) {
       retCopyingReadings.set(h, commit);
     } else if (plain === null) {
       copyingReadings.set(h, commit);
@@ -3759,23 +3827,33 @@ export function structure(
   // with one. agbcc rotates `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail;` so the
   // `break` arm leaves by the latch and the count test mid-body: taking the arm for the exit, the
   // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
-  // the source's two `break`s and one `tail`. Past all of them comes the two-level exit
-  // (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop that
-  // every other reading declines but one, the `while` or `do-while` that copies a ret tail with an
-  // effect into the body (`retCopyingReadings`), which comes last of all.
+  // the source's two `break`s and one `tail`. Then comes the `while` or `do-while` that copies a
+  // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
+  // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
+  // that every other reading declines. A structuring run again because emission refused such a
+  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
     const shape = open ? foreverShape(nl, false) : null;
     const copying = copyingReadings.get(h);
+    const retCopying = open ? retCopyingReadings.get(h) : undefined;
     if (open && shape === null && copying !== undefined) {
       copying();
     } else {
-      const copied = shape ?? (open ? (foreverShape(nl, true) ?? foreverShape(nl, false, true)) : null);
+      const copied = shape ?? (open ? foreverShape(nl, true) : null);
+      const twoLevel = () => (open ? foreverShape(nl, false, true) : null);
       if (copied !== null) {
         foreverLoops.set(h, copied);
-      } else if (open) {
-        retCopyingReadings.get(h)?.();
+      } else if (retCopying !== undefined && !retCopy.last) {
+        retCopying();
+      } else {
+        const flagged = twoLevel();
+        if (flagged !== null) {
+          foreverLoops.set(h, flagged);
+        } else {
+          retCopying?.();
+        }
       }
     }
   }

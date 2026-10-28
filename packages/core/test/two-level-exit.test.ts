@@ -621,10 +621,10 @@ test('two loops `goto`ing the end of one switch arm each render once', () => {
  *  lanes: `switch (i) { case 0: case 1: case 4: for (j…) { if (hit) goto out; } k(i); out: break;
  *  case 2: h(i); break; } t(i);`), so the arm's merge ends in `ret`. The inner loop is a guarded
  *  do-while, and its hit's edge into that merge is a ret target it could copy as `t(i); return;`.
- *  Such a copy runs again code the asm runs once, so that reading waits behind every `while (1)`
- *  reading, and the two-level one takes the loop: `if (f != 0) break;` leaves the switch, and
- *  `t(i)` renders once. Read as the do-while, the edge reaches the merge from inside the loop,
- *  where no `break;` can say so, and the switch declines. */
+ *  Read as that do-while, the edge reaches the merge from inside the loop, where no `break;` can say
+ *  so, and the switch declines; the structuring is run again with the copy behind every `while (1)`
+ *  reading (`RetCopyRanking`), and the two-level one takes the loop: `if (f != 0) break;` leaves
+ *  the switch, and `t(i)` renders once. */
 const GOTO_RET_MERGE = `fn gotoretmerge {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -663,6 +663,101 @@ test('a `goto` to the end of a switch arm whose merge returns lifts as a flag, n
   expect(agreement.judged).toBe(SEEDS.length);
   expectCovered(GOTO_RET_MERGE);
   expect(covers(GOTO_RET_MERGE).noLoop).toBeGreaterThan(0);
+});
+
+/** `for (j = 0; j < 8; j++) { if (skip(i) < x && probe(j, i) == x) goto out; } k(i); out: t(i);`
+ *  as gcc2.7.2kmc lays it out (`synthetic`-style probe `cret`): no zero-trip guard, so the loop's
+ *  header dominates `t(i); return`, and the do-while reading copies it into the hit. Emission
+ *  finds that hit's branch no join in the body ("unrecovered back-edge"), and the structuring run
+ *  again with the copy last (`RetCopyRanking`) spells the loop `while (1)` with two `break`s. */
+const CONST_TRIP_RET = `fn consttripret {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: s32 = call %0 {target="mark"}
+  br ^bb1(%3)
+^bb1(%5: s32):
+  %6: s32 = call %0 {target="skip"}
+  %7: u32 = icmp_slt %6, %2
+  cond_br %7, ^bb3(), ^bb2()
+^bb2():
+  %10: s32 = const {value=8}
+  %11: s32 = add %5, %10
+  br ^bb4(%11)
+^bb3():
+  %13: s32 = call %5, %0 {target="probe"}
+  %14: u32 = icmp_eq %13, %2
+  %15: s32 = const {value=8}
+  %16: s32 = add %5, %15
+  cond_br %14, ^bb6(), ^bb4(%16)
+^bb4(%17: s32):
+  %18: s32 = const {value=64}
+  %19: u32 = icmp_slt %17, %18
+  cond_br %19, ^bb1(%17), ^bb5()
+^bb5():
+  %20: s32 = call %0 {target="k"}
+  br ^bb6()
+^bb6():
+  %21: s32 = call %0 {target="t"}
+  ret
+}`;
+
+test('a ret-tail copy emission cannot spell falls back to `while (1)`, the tail written once', () => {
+  const { src, agreement, shipped } = judged(CONST_TRIP_RET);
+  expect(src).toContain('while (1) {');
+  expect(src.match(/\bt\(a0\);/g)).toHaveLength(1);
+  expect(src.match(/\bk\(a0\);/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const seen = covers(CONST_TRIP_RET);
+  expect(seen.firstHit + seen.laterHit).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
+});
+
+/** agbcc's cross-jumped `for (…) if (hit) { s->f = i; return; }` (pokeemerald
+ *  `DecideStop_NoBias_Reel3_Bet1`): the search loop's hit enters the function's last block, which
+ *  code around the loop enters too, and its own exit runs on into a loop another path also enters,
+ *  so no `while (1)` reading without a variable takes it. The do-while that copies the tail as an
+ *  early `return` goes ahead of the two-level exit, whose flag the asm does not hold. */
+const SHARED_TAIL_LOOP_AFTER = `fn sharedtailloop {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: s32 = const {value=1}
+  %5: s32 = call %0 {target="mark"}
+  %6: u32 = icmp_slt %1, %3
+  cond_br %6, ^bb6(), ^bb7()
+^bb7():
+  %18: u32 = icmp_slt %0, %3
+  cond_br %18, ^bb3(%3), ^bb1(%3)
+^bb1(%7: s32):
+  %8: s32 = call %7, %0 {target="probe"}
+  %9: u32 = icmp_eq %8, %2
+  cond_br %9, ^bb6(), ^bb2()
+^bb2():
+  %10: s32 = add %7, %4
+  %11: u32 = icmp_slt %1, %10
+  cond_br %11, ^bb3(%3), ^bb1(%10)
+^bb3(%12: s32):
+  %13: s32 = call %12 {target="k"}
+  %14: u32 = icmp_eq %13, %2
+  cond_br %14, ^bb6(), ^bb4()
+^bb4():
+  %15: s32 = add %12, %4
+  %16: u32 = icmp_slt %15, %1
+  cond_br %16, ^bb3(%15), ^bb6()
+^bb6():
+  %17: s32 = call %0 {target="t"}
+  ret
+}`;
+
+test('a shared ret tail no flag-free `while (1)` takes is copied, not flagged', () => {
+  const { src, agreement, shipped } = judged(SHARED_TAIL_LOOP_AFTER);
+  expect(src).toContain('            do {\n                if (probe(v2, a0) == a2) {\n                    t(a0);\n');
+  expect(src).not.toMatch(/= 1;\n\s*break;/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(SHARED_TAIL_LOOP_AFTER);
 });
 
 /** The falling arm's `goto` lands INSIDE the arm it falls into (`… k(i); case 2: h(i); out: g(i);

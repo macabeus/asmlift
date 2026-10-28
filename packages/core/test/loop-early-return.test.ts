@@ -11,7 +11,7 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
-import { StructureError, structure } from '../src/structure/structure';
+import { structure } from '../src/structure/structure';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -277,7 +277,10 @@ test('two in-body sides meeting below the loop bottom join where they meet, writ
 
 // REFUSAL — the arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2`
 // dominates `^bb5`, so ownership by dominance alone would claim it; but the loop's own exit reaches
-// it too, and emitting it on both paths writes `gOut` twice.
+// it too, and emitting it on both paths writes `gOut` twice. The arm owns nothing, and the do-while
+// reading that copies `^bb5` in as an early `return` finds no join in the body; the structuring
+// that asks `while (1)` first (`RetCopyRanking`) breaks to `^bb5` from both edges, and `gOut` is
+// written once, after the loop.
 const ARM_ON_POSTLOOP_JOIN = `fn sharedtail {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}
@@ -305,9 +308,14 @@ const ARM_ON_POSTLOOP_JOIN = `fn sharedtail {
 }
 `;
 
-test('an arm landing on the post-loop join owns nothing — declines', () => {
+test('an arm landing on the post-loop join owns nothing — `while (1)` breaks to it', () => {
   expect(() => emit(SCAN_STORE_HIT)).not.toThrow();
-  expect(() => emit(ARM_ON_POSTLOOP_JOIN)).toThrow(StructureError);
+  const src = emit(ARM_ON_POSTLOOP_JOIN);
+  expect(src.match(/gOut = /g)).toHaveLength(1);
+  expect(src).toContain(
+    '    while (1) {\n        if (gF == 0) break;\n        if (v0 + 1 >= 10) {\n            v0 = 99;\n' +
+      '            break;\n        }\n        v0 = v0 + 1;\n    }\n    gOut = v0;\n    return v0;\n',
+  );
 });
 
 // The same conditional latch with a value-only arm — the half that miscompiled on `main`, returning
