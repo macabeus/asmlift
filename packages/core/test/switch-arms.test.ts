@@ -730,7 +730,7 @@ test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LO
 // switch's region into the tail other arms were cross-jumped into, and reads as a `break` with no
 // region — while cases 2 and 3, whose `gOut = v; gOut2 = 5;` agbcc cross-jumped into the default,
 // both fall into it. The copy is safe because of where that tail GOES: only on to the merge.
-// Nothing here is agbcc's: the last test below pins the same copies on IDO 7.1, which has no PRE.
+// Nothing here is agbcc's: the ido7.1 `jl_cont` test below pins the same copies with no PRE.
 
 /** synthetic:jt_xjdefpre:agbcc, the benchmark's own object text. */
 const xjdefpre = readFileSync(new URL('corpus/agbcc-jtxjdefpre.s', import.meta.url), 'utf8');
@@ -757,10 +757,9 @@ test('two arms cross-jumped into a default the PRE dispatch does not dominate ea
   expect(out).not.toContain('default:');
 });
 
-// CONSERVATIVE, not sound: with `forwardToMerge` forced true both shapes below lift, and read as
-// the same program written out longer (case 6's `f(7)` in every entrant; the loop in every
-// entrant). The refusals spare that duplication; switch-recover.ts' `onlyReturns` says which of
-// its refusals are measured so and which were never reached.
+// CONSERVATIVE, not needed for soundness: with `forwardToMerge` forced true both shapes below lift,
+// and read as the same program written out longer (case 6's `f(7)` in every entrant; the loop in
+// every entrant). The refusals spare that duplication (switch-recover.ts `onlyReturns`).
 test('…but not where the tail runs into a sibling arm, or round a cycle: those decline LOUD, conservatively', () => {
   // The tail re-enters case 6's body, which now leaves for the merge on its own.
   const sibling = xjdefpre
@@ -814,8 +813,8 @@ test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnd
 
 // The same copies with NO PRE: IDO 7.1 has no gcse, and the tail cases 2, 3 and the default share
 // still leaves the switch's region, because it runs on into the second jump table, which the
-// `if (c)` branch around the switch reaches too. `corpus/ido71-jlcont.{asm,txt}` are ido7.1's object for, at its
-// canonical flags (the `.txt` its `objdump -s -r -t`):
+// `if (c)` branch around the switch reaches too. `corpus/ido71-jlcont.{asm,txt}` are ido7.1's
+// object for, at its canonical flags (the `.txt` its `objdump -s -r -t`):
 //
 //   for (i = 0; i < 3; i++) {
 //       if (c) { gOut = x - 37; } else {

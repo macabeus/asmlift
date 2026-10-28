@@ -14075,22 +14075,19 @@ export const SYNTHETIC: SynthSpec[] = [
   //      cross-jumped into the default, on item 8's dispatch. gcse's PRE insertion before the
   //      tablejump keeps the dispatch block apart from its bounds test, which also branches to the
   //      default, so the switch does not dominate the default's successors. switch-recover.ts
-  //      `analyzeArmExit` then reads the default as a `break` with no region (it escapes), and
-  //      `copySharedFallTargets` writes copies only into a sibling with a region. Neither arm gets
-  //      the default's code back, and `chainArms` refuses two fall-throughs into one arm ("case arms
-  //      do not linearize"). In EntityCreate the default's tail is also where other arms cross-jump
+  //      `analyzeArmExit` then reads the default as a `break` with no region (it escapes). Unless
+  //      `copySharedFallTargets` copies such a sibling, neither arm gets the default's code back and
+  //      `chainArms` refuses two fall-throughs into one arm ("case arms do not linearize"). In EntityCreate the default's tail is also where other arms cross-jump
   //      and where the next switch's index is recomputed; the row does not need either. Controls:
   //      jt_xjdefpre_body gives `case 4` a body, so the insertion moves to the join (MATCH), and
   //      jt_xjdefpre_one cross-jumps one arm (lifts; its residue is jt_pre_midg's). jt_xjdef itself
   //      MATCHes. GCC 2.7.2 has no gcse, so gcc2.7.2kmc and gcc2.7.2 MATCH the row (controls).
   //      ido7.1 and mwcc_242_81 keep each tail and lift the row with the residue their controls
-  //      carry too. The copies now also take a sibling that leaves sideways where every block it
-  //      leaves into runs only on to the merge or a `ret` (`copySharedFallTargets`' `sidewaysEnds`,
-  //      switch-recover.ts `forwardToMerge`), so jt_xjdefpre lifts on agbcc with the default's tail
-  //      once in each of cases 2 and 3 and once on the out-of-range path, and EntityCreate lifts.
-  //      That copy is not agbcc's or PRE's: any shared tail that leaves the switch's region only on
-  //      its way to the merge takes it, on IDO 7.1 too (core switch-arms.test.ts, `jl_cont`). No
-  //      row here pins that wider reach; the rows above stay as they were.
+  //      carry too. The copies take a sibling that leaves sideways where every block it leaves into
+  //      runs only on to the merge or a `ret` (switch-recover.ts `forwardToMerge`), so jt_xjdefpre
+  //      lifts on agbcc with the default's tail once in each of cases 2 and 3 and once on the
+  //      out-of-range path, and EntityCreate lifts. That copy is not PRE's: IDO 7.1 takes it too
+  //      (core switch-arms.test.ts, `jl_cont`), a reach no row here pins.
   //  25. sw_loopret / sw_loopret_ctl (sub_08016EEC). A jump table with no `default` as a `for` body,
   //      so its holes and bounds test go to the loop's latch, with one arm that `return`s, and an
   //      early `return` after the loop. agbcc and IDO then merge every `return` into one epilogue,

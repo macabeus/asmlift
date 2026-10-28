@@ -93,12 +93,10 @@ export interface SwitchRecoverDeps {
  *  falling one: `case 1: if (a) { if (b) break; g(1); } h(2); break;`. A closed arm that leaves
  *  sideways, into a block the switch does not dominate, has none: its paths through such a block
  *  are not the arm's, and it structures to the CFG's joins. It names those blocks instead
- *  (`escapedTo`, the first block outside the region on each such path), which is what decides
- *  whether its body can still be copied into the arms that fall into it (`copySharedFallTargets`).
- *  An arm that took such a copy carries the SIBLING's `escapedTo`, not its own first outside block
- *  (which is the sibling's entry wherever the switch does not dominate it, as in
- *  `synthetic:jt_xjdefpre`): those are the blocks where the copy it writes out steps sideways, the
- *  only thing the copies ask of the set. */
+ *  (`escapedTo`, the first block outside the region on each such path), which decide whether its
+ *  body can still be copied into the arms that fall into it (`copySharedFallTargets`). An arm that
+ *  took such a copy carries the SIBLING's `escapedTo`, not its own first outside block: the blocks
+ *  where the copy steps sideways, which is all the copies read of it. */
 export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
@@ -336,11 +334,11 @@ function singleton(r: Ranges): number | null {
  *  blocks the switch does not dominate (`escapedTo`). Its body is still the switch's end on every
  *  path where each of those blocks runs only on to the merge or a `ret` — never back into the
  *  dispatch, a sibling (the entrants among them) or round a cycle; a path out through the
- *  enclosing loop's exit is one more path to a `ret` — which `sidewaysEnds` answers per block (switch-recover's `forwardToMerge`, the caller's to hand
- *  in; absent, no such sibling is copied). Nothing in it is particular to one compiler: it is
- *  asked of every jump table whose shared tail lost its region because a block on the tail's way
- *  to the merge is also reached from outside the switch. Measured shapes, each host-differential
- *  SAME against its source:
+ *  enclosing loop's exit is one more path to a `ret`. `sidewaysEnds` answers that per block
+ *  (`forwardToMerge`, the caller's to hand in; absent, no such sibling is copied). Nothing in it is
+ *  particular to one compiler: it is asked of every jump table whose shared tail lost its region
+ *  because a block on the tail's way to the merge is also reached from outside the switch. Where it
+ *  shows:
  *  - agbcc's gcse PRE puts the next switch's index in the dispatch block, which then no longer
  *    dominates the default the bounds test reaches too, and the default's tail runs on through
  *    blocks other arms cross-jumped into (`synthetic:jt_xjdefpre`, kleod EntityCreate);
@@ -766,29 +764,18 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // irreducible one, which a dominance test does not see). An edge to a block that dominates its
   // source is refused too, since that block may lie above `s` where the walk never put it.
   //
-  // WITH `mergeEnds` it is the copies' question instead (`forwardToMerge`): a path may also END at
-  // the merge. Everything it refuses here it refuses there too, and nothing more. A path out
-  // through the enclosing loop's exit is one more forward path to a `ret`: the copy writes the code
-  // past the loop and its `return;` inside the case arm, whether the exit is the path's first
-  // sideways block or a later one (agbcc `while (1) { … switch (x) { case 2: h(v); goto out; …
-  // default: gOut = v; if (v & 1) f(v); goto out; } … } out: p[3] = x;` lifts with the tail and the
-  // store copied into each entrant, host differential SAME). A step round the loop to its header
-  // needs no test of its own: the header dominates every block of the loop, and a path that enters
-  // it from outside comes back to it, so the dominance and cycle tests refuse it either way.
+  // WITH `mergeEnds` it is the copies' question (`forwardToMerge`): a path may also END at the
+  // merge, and nothing more is admitted. A path out through the enclosing loop's exit is one more
+  // forward path to a `ret`, wherever it falls on the path: the copy writes the code past the loop
+  // and its `return;` inside the case arm. A step round the loop to its header needs no test of its
+  // own: the header dominates every block of the loop, so the dominance test refuses it from inside,
+  // and the cycle test from a path that entered at the header.
   //
-  // There, NONE of those refusals is shown load-bearing; each is CONSERVATIVE, a loud decline where
-  // the copies would be a longer program, not where they would be a wrong one. Measured by forcing
-  // `forwardToMerge` true (an agbcc/IDO/mwcc/gcc 2.7.2 probe set, host differential on every lift):
-  // - a step into a SIBLING refuses correct copies: agbcc `jb_ret` (the `jt_xjdefpre` shape with
-  //   `if (v == 9) return;` in the shared tail, so the epilogue is the merge and the empty `case 4:`
-  //   pointing at the second switch is a sibling) lifts SAME with them, writing case 4's body (that
-  //   second switch) into each entrant; switch-arms.test.ts' tail that re-enters case 6 lifts too,
-  //   and reads as the same duplication (that fixture is hand-edited asm, with no source to run);
-  // - a CYCLE refuses copies that read correct: the same test's tail that loops on itself lifts,
-  //   the loop written out in each entrant;
-  // - the dispatch and a dominating block were not isolated either.
-  // So they stand for the duplication they spare, not for soundness: dropping one needs only a
-  // differential over the shapes it then admits.
+  // There the SIBLING and CYCLE refusals are conservative, not needed for soundness: forced off, a
+  // tail that steps into a sibling (agbcc, the `jt_xjdefpre` shape with `if (v == 9) return;` in the
+  // tail, so the epilogue is the merge and the empty `case 4:` is a sibling) or round a cycle lifts
+  // correct, that sibling's body or the loop written out in each entrant. They spare that
+  // duplication; dropping one needs a differential over the shapes it then admits.
   const onlyReturns = (
     s: Block,
     b: Block,
