@@ -61,6 +61,7 @@ import { UNTHREAD_GATES } from '../src/raise/unthread';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import {
+  BYPASS_TAIL_GATES,
   CARRIER_NAME_GATES,
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
@@ -148,6 +149,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
   // structure.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
   EXIT_TAIL_GATES: EXIT_TAIL_GATES as readonly Gate<never>[],
+  // ... and when an arm writes a copy of a return tail a path that bypasses the loop also enters
+  BYPASS_TAIL_GATES: BYPASS_TAIL_GATES as readonly Gate<never>[],
   // structure.ts's two-level exit: which edge `foreverShape` takes for one, and the two places it
   // is spelled (the loop's region, and the `break` out of a block)
   TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],

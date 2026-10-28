@@ -2095,6 +2095,8 @@ export interface StructureHooks {
   preUpdateSinkGates?: readonly Gate<SinkCandidate>[];
   /** `earlyReturnArm`'s `exitTail` rules (`EXIT_TAIL_GATES`), ablatable the same way. */
   exitTailGates?: readonly Gate<ExitTailCandidate>[];
+  /** `earlyReturnArm`'s `bypassTail` rules (`BYPASS_TAIL_GATES`), ablatable the same way. */
+  bypassTailGates?: readonly Gate<BypassTailCandidate>[];
   /** `foreverShape`'s two-level exit rules (`TWO_LEVEL_EXIT_GATES`), ablatable the same way. */
   twoLevelExitGates?: readonly Gate<TwoLevelCandidate>[];
   /** `emitForever`'s two-level exit rule (`TWO_LEVEL_REGION_GATES`), ablatable the same way. */
@@ -2617,6 +2619,37 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
   },
 ];
 
+/** One block the `bypassTail` count (at `earlyReturnArm`) weighs for an arm: a return
+ *  tail the loop's own exit path does not run, which a path from outside the loop also enters. */
+export interface BypassTailCandidate {
+  /** neither the block nor anything past it holds a cycle */
+  readonly acyclicPast: boolean;
+}
+
+/** When an early-`return` arm may write a copy of a return tail another path from outside the loop
+ *  also enters, off the loop's exit path. The argument is at `earlyReturnArm` ("A PATH THAT
+ *  BYPASSES THE LOOP"); like `EXIT_TAIL_GATES`, no rule is sound, since every copy runs on a path
+ *  exclusive of the others. Not in the table: the count's scope — the reading asked for it
+ *  (`BypassCounts.offExitPath`), the block has an effect, and the loop's own exit path does not run
+ *  it — which is the walk's own condition. */
+export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
+  {
+    id: 'bypass-tail-holds-cycle',
+    why: 'a tail holding a loop would be written once per arm where the asm holds it once',
+    sound: false,
+    guardedBy: 'loop-exit-return-tail.test.ts: a bypassed tail holding a loop of its own is not written in the arm',
+    rejects: (c) => !c.acyclicPast,
+  },
+];
+
+/** Which of `earlyReturnArm`'s counts for a path that bypasses the loop a reading asks for (A PATH
+ *  THAT BYPASSES THE LOOP, at `earlyReturnArm`). */
+interface BypassCounts {
+  /** `bypassTail`: a return tail off the loop's exit path that a path from outside also enters */
+  readonly offExitPath: boolean;
+}
+const NO_BYPASS: BypassCounts = { offExitPath: false };
+
 // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
 // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
 // return site just sets the return register and branches there, so a second body exit that lands on
@@ -2717,6 +2750,22 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
 // What it would buy is an `else` before the loop that cross-jumps into the arms' tail (agbcc's
 // `else { pong(9); hit(a); return; }`), and that lifts only through the same re-spelling.
 //
+// A PATH THAT BYPASSES THE LOOP. agbcc cross-jumps an arm's `fin(..); return;` onto the identical
+// tail of an `if` branch before the loop or of a sibling `case` of an outer switch (jump.c
+// `find_cross_jump`), so the arm runs into a `call; ret` block a path from outside the loop also
+// enters, and the loop fit no reading: the function declined. A count takes it, sound for the
+// policy's reason, and asked for by the reading (`BypassCounts`), never by default:
+//   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run is
+//     admitted whoever else enters it, the arm's own head included, when no rule of
+//     `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through the arm's
+//     copy, which ends in its `return`; a path from outside never ran the arm, and the exit never
+//     reaches it. It is not owned: a path that did not take the arm runs it too
+//     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). The paragraph above is why a reading asks
+//     for it only where the exit is laid out past the loop's body (`foreverShape`): that is the
+//     code after the loop, so the epilogue the paragraph names is on the exit path and never this
+//     count's. An exit inside the loop's span is the early `return` read as the exit, which is what
+//     made the post-loop epilogue look off the exit path; there the count waits for the last resort.
+//
 // Returns the blocks the arm OWNS — the ones that run ahead of the loop's update on every path that
 // reaches them — or null when this is not an early-`return` arm. The arm writes every block its walk
 // admits, owned or not: an `exitTail` block is admitted but not owned, since the exit path runs it
@@ -2732,6 +2781,8 @@ function earlyReturnArm(
   latches: readonly Block[],
   copyExitTail: boolean,
   exitTailGates: readonly Gate<ExitTailCandidate>[] = EXIT_TAIL_GATES,
+  bypass: BypassCounts = NO_BYPASS,
+  bypassTailGates: readonly Gate<BypassTailCandidate>[] = BYPASS_TAIL_GATES,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
   const offExitPath = offExitPathOf(exit, dom);
@@ -2746,6 +2797,7 @@ function earlyReturnArm(
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
   // a return tail the loop's own exit path also runs, after a block of its own (THE EXIT PATH RUNS IT
   // TOO, above), asked for only when the caller has found no reading without it
+  const acyclicPast = (bb: Block) => ![bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y));
   const exitTail = (bb: Block): boolean =>
     copyExitTail &&
     !offExitPath(bb) &&
@@ -2763,7 +2815,18 @@ function earlyReturnArm(
         return (preds.get(bb) ?? []).every((p) => armOfBody(p) || !offExitPath(p));
       },
       get acyclicPast() {
-        return ![bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y));
+        return acyclicPast(bb);
+      },
+    }) === null;
+  // a return tail off the exit path that a path from outside the loop also enters (A PATH THAT
+  // BYPASSES THE LOOP, above), asked for by the reading
+  const bypassTail = (bb: Block): boolean =>
+    bypass.offExitPath &&
+    offExitPath(bb) &&
+    bb !== exit &&
+    firstRejection(bypassTailGates, {
+      get acyclicPast() {
+        return acyclicPast(bb);
       },
     }) === null;
   const owned = new Set<Block>();
@@ -2780,7 +2843,7 @@ function earlyReturnArm(
     } // re-enters the loop → not an exit
     if ((entryOwned && dom.get(bb)!.has(to)) || armsOnly(bb)) {
       owned.add(bb);
-    } else if (bb.ops.some(effectful) && !exitTail(bb)) {
+    } else if (bb.ops.some(effectful) && !exitTail(bb) && !bypassTail(bb)) {
       return null;
     }
     const t = bb.ops[bb.ops.length - 1];
@@ -3532,6 +3595,7 @@ function structureRanked(
     exit: Block,
     codeArms: boolean,
     copyExitTail: boolean,
+    bypass: BypassCounts = NO_BYPASS,
   ) => {
     const region =
       codeArms && !innerBodyHas(nl, e.from) ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true) : null;
@@ -3546,6 +3610,8 @@ function structureRanked(
             nl.latches,
             copyExitTail,
             hooks.exitTailGates,
+            bypass,
+            hooks.bypassTailGates,
           )
         : null;
     return { region, owned };
@@ -3747,7 +3813,12 @@ function structureRanked(
   // after a loop there and an early `return` inside the loop's span, so block order alone would take
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
-  const foreverShape = (nl: NaturalLoop, copyExitTail: boolean, twoLevel = false): ForeverLoopInfo | null => {
+  const foreverShape = (
+    nl: NaturalLoop,
+    copyExitTail: boolean,
+    twoLevel = false,
+    lastResort = false,
+  ): ForeverLoopInfo | null => {
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -3767,6 +3838,10 @@ function structureRanked(
     const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
     for (const exit of targets) {
+      // an arm may copy a return tail a path from outside the loop also enters where the exit is the
+      // code after the loop, and under any other exit only at the last resort (A PATH THAT BYPASSES
+      // THE LOOP, at `earlyReturnArm`)
+      const bypass = { offExitPath: lastResort || rank(exit) < fn.blocks.length };
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
@@ -3776,7 +3851,7 @@ function structureRanked(
           breaks.add(e.from);
           return !innerBodyHas(nl, e.from);
         }
-        const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail);
+        const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail, bypass);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
@@ -3831,7 +3906,10 @@ function structureRanked(
   // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
   // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
   // that every other reading declines. A structuring run again because emission refused such a
-  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy.
+  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy. Right behind the two-level
+  // exit comes `while (1)` with every copy, where an arm also copies a return tail a path that
+  // bypasses the loop enters under an exit inside the loop's span (A PATH THAT BYPASSES THE LOOP, at
+  // `earlyReturnArm`).
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
@@ -3842,7 +3920,7 @@ function structureRanked(
       copying();
     } else {
       const copied = shape ?? (open ? foreverShape(nl, true) : null);
-      const twoLevel = () => (open ? foreverShape(nl, false, true) : null);
+      const twoLevel = () => (open ? (foreverShape(nl, false, true) ?? foreverShape(nl, true, false, true)) : null);
       if (copied !== null) {
         foreverLoops.set(h, copied);
       } else if (retCopying !== undefined && !retCopy.last) {
