@@ -14473,15 +14473,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //     arg0 spill word; imgidx with a spilled argument says `u8[48]` at the same site.
   //  28. brk2sw / brk2sw_one / brk2sw_ctl (sub_0800D188, `goto exit_loop`). An inner search loop
   //      sits in a `switch` arm, and its `goto` lands on that arm's `break`, past the code after
-  //      the loop. Structure finds the two-level exit (item 27's flag). It used to decline with
-  //      "skips the end of the region the loop sits in" (structure.ts `TWO_LEVEL_REGION_GATES`,
-  //      `skips-region-end`): the arm's join (`armJoin`) deleted the loop's edge to the switch's
-  //      merge as if it were a `break;`, so the zero-trip guard around the loop joined at the
-  //      loop's own exit, inside the code the exit skips. That edge now runs to the arm's end
-  //      (`twoLevelOutOf`), and the flag spelling lifts. On sub_0800D188 the loop is the one with
-  //      an inner switch whose two arms `goto exit_loop` (header test `unkF <= 0x18`), not the
-  //      `goto exit_loop2` loop. brk2sw keeps that shape (outer loop, outer switch arm, an `if`,
-  //      an inner switch with two gotos); brk2sw_one is one loop in one arm, no outer loop.
+  //      the loop. Structure finds the two-level exit (item 27's flag). The zero-trip guard around
+  //      the loop joins at the loop's own exit, inside the code the exit skips, so `if (f == 0)`
+  //      cannot hold that code; the target is the arm's `break`, which a `break;` after the loop
+  //      reaches, so the flag reads `if (f != 0) break;` (structure.ts `emitForever`). Where no
+  //      `break;` reaches the target, it declines with "skips the end of the region the loop sits
+  //      in" (`skips-region-end`). On sub_0800D188 the loop is the one with an inner switch whose
+  //      two arms `goto exit_loop` (header test `unkF <= 0x18`), not the `goto exit_loop2` loop.
+  //      brk2sw keeps that shape (outer loop, outer switch arm, an `if`, an inner switch with two
+  //      gotos); brk2sw_one is one loop in one arm, no outer loop.
   //      brk2sw_ctl is brk2sw's loop in an `if`/`else` arm instead: it lifts on every lane.
   //      agbcc: both lift. gcc2.7.2kmc and gcc2.7.2: brk2sw lifts; brk2sw_one declines earlier
   //      (kmc: "unrecovered back-edge"; gcc2.7.2: its loop reads as a do-while, so "a case body

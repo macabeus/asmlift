@@ -8,8 +8,8 @@
 // it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
 // on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
 // shapes the reading does not take: a third exit target, a target outside the enclosing loop, the
-// enclosing loop's header, a second exit out of a case body, and one out of a switch arm that falls
-// into the next.
+// enclosing loop's header, a second exit out of a case body, and one into the switch arm its own
+// arm falls into.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -267,9 +267,9 @@ test('a two-level exit needs no loop around it', () => {
 /** The loop in a SWITCH ARM, its `goto` landing on the arm's `break` (`synthetic:brk2sw_one`'s
  *  shape: `case 0: case 1: case 4: for (j…) { if (hit) goto out; } k(i); out: break; case 2:
  *  h(i); break;`). The hit's edge goes to the switch's merge, which a `break;` cannot reach from
- *  inside the loop: it is the loop's two-level exit, and the arm's join reads it as running to the
- *  arm's end (structure.ts `twoLevelOutOf`), so the zero-trip guard around the loop joins at the
- *  merge and not at `k(i)`, the code the exit skips. */
+ *  inside the loop: it is the loop's two-level exit. The zero-trip guard around the loop joins at
+ *  `k(i)`, the code the exit skips, so the flag reads `if (f != 0) break;` inside the guard, where
+ *  that `break;` leaves the switch, and `k(i)` renders once, after the guard. */
 const GOTO_ARM_END = `fn gotoarmend {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -314,8 +314,8 @@ test('a `goto` to the end of its switch arm lifts as a flag inside the arm', () 
       '                        while (1) {\n                            if (probe(v3, v2) == a2) {\n' +
       '                                v4 = 1;\n                                break;\n                            }\n' +
       '                            v3 = v3 + v1;\n                            if (a1 < v3) break;\n                        }\n' +
-      '                        if (v4 == 0) k(v2);\n                    } else {\n                        k(v2);\n' +
-      '                    }\n                    break;\n                case 2:\n                    h(v2);\n' +
+      '                        if (v4 != 0) break;\n                    }\n                    k(v2);\n' +
+      '                    break;\n                case 2:\n                    h(v2);\n' +
       '                    break;\n            }\n            v2 = v2 + v1;\n        } while (v2 < a0);\n    }\n' +
       '    return;\n}\n',
   );
@@ -508,9 +508,10 @@ const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
 }`;
 
 /** The same arm FALLING into the next one: `k(i)` runs on into `case 2: h(i); break;`, and the
- *  hit's `goto` lands past both, on the switch's merge. The arm ends where it falls, inside the code
- *  the exit skips, so the flag's `if (f == 0)` would run past the arm's end into the arm the switch
- *  renders after it (`TWO_LEVEL_REGION_GATES`, `skips-region-end`). */
+ *  hit's `goto` lands past both, on the switch's merge (agbcc cross-jumps a post-loop `k(i)` into a
+ *  sibling `case 2: k(i); break;` this way). The arm ends where it falls, inside the code the exit
+ *  skips, and a `break;` after the loop still reaches the merge: `if (f != 0) break;`, then the
+ *  fall. */
 const FALLING_ARM = `fn fallingarm {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -545,12 +546,124 @@ const FALLING_ARM = `fn fallingarm {
   ret
 }`;
 
+test('a `goto` out of a switch arm that falls into the next lifts as a flag break before the fall', () => {
+  const { src, agreement, shipped } = judged(FALLING_ARM);
+  expect(src).toMatch(/if \(v\d+ != 0\) break;\n\s*}\n\s*k\(v\d+\);\n\s*case 2:/);
+  expect(src.match(/h\(v\d+\);/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(FALLING_ARM);
+});
+
+/** Two search loops in one arm, each `goto`ing the arm's end (`for (j…) { if (hit) goto out; }
+ *  k(i); for (j…) { if (j == i) goto out; } g(i); out: break;`). Each zero-trip guard joins at its
+ *  own loop's exit, so each loop and each call renders once: read to the merge instead, every
+ *  guard's `else` would copy the rest of the arm, doubling per loop. */
+const TWO_LOOPS_IN_ARM = `fn twoloops {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  cond_br %9, ^bb10(), ^bb11(%3)
+^bb11(%20: s32):
+  %21: s32 = call %20, %5 {target="probe"}
+  %22: u32 = icmp_eq %21, %5
+  cond_br %22, ^bb6(), ^bb12()
+^bb12():
+  %23: s32 = add %20, %7
+  %24: u32 = icmp_slt %1, %23
+  cond_br %24, ^bb10(), ^bb11(%23)
+^bb10():
+  %25: s32 = call %5 {target="g"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+test('two loops `goto`ing the end of one switch arm each render once', () => {
+  const { src, agreement, shipped } = judged(TWO_LOOPS_IN_ARM);
+  expect(src.match(/while \(1\)/g)).toHaveLength(2);
+  expect(src.match(/\bk\(v\d+\);/g)).toHaveLength(1);
+  expect(src.match(/g\(v\d+\);/g)).toHaveLength(1);
+  expect(src.match(/if \(v\d+ != 0\) break;/g)).toHaveLength(2);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(TWO_LOOPS_IN_ARM);
+});
+
+/** The falling arm's `goto` lands INSIDE the arm it falls into (`… k(i); case 2: h(i); out: g(i);
+ *  break;`, agbcc's cross-jump of a shared `g(i); break;` tail). No `break;` reaches that target,
+ *  and the flag's `if (f == 0)` would run past the arm's end into the arm the switch renders after
+ *  it (`TWO_LEVEL_REGION_GATES`, `skips-region-end`). */
+const GOTO_INTO_NEXT_ARM = `fn intonextarm {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb8()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb9()
+^bb9():
+  %18: s32 = call %5 {target="g"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
 test.each([
   ['a third exit target', THREE_EXIT_TARGETS],
   ['a target outside the enclosing loop', TARGET_PAST_THE_ENCLOSING_LOOP],
   ["the enclosing loop's header", TARGET_IS_THE_ENCLOSING_HEADER],
   ['a second exit out of a case body', SECOND_EXIT_FROM_A_CASE_BODY],
-  ['a second exit out of a switch arm that falls into the next', FALLING_ARM],
+  ['a second exit into the switch arm its own arm falls into', GOTO_INTO_NEXT_ARM],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
 });
@@ -577,7 +690,7 @@ test('each decline is refused by the two-level rule its shape names', () => {
   expect(refusalsOf(THREE_EXIT_TARGETS)).toEqual(['exit-never-meets-target', 'second-target-elsewhere']);
   expect(refusalsOf(TARGET_IS_THE_ENCLOSING_HEADER)).toEqual(['skip-reenters-loop', 'target-is-enclosing-header']);
   expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
-  expect(refusalsOf(FALLING_ARM)).toEqual(['skips-region-end']);
+  expect(refusalsOf(GOTO_INTO_NEXT_ARM)).toEqual(['skips-region-end']);
   // the `goto` out of both loops declines before the inner loop is asked for a two-level exit
   expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([]);
 });
@@ -605,13 +718,13 @@ test('without skip-reenters-loop the two-level continue lifts, and agrees: the r
   expectCovered(TARGET_IS_THE_ENCLOSING_HEADER);
 });
 
-test('without skips-region-end the falling arm lifts, and agrees: the rule refuses a correct reading', () => {
-  // the arm it falls into renders twice, once inside `if (f == 0)` ahead of a `break;` and once as
+test('without skips-region-end the goto into the next arm lifts, and agrees: the rule refuses a correct reading', () => {
+  // the arm it falls into renders twice, once inside `if (f == 0)` ahead of the target and once as
   // its own case; each copy ends in a jump, so neither falls into the other
-  const { src, agreement, shipped } = judged(FALLING_ARM, { twoLevelRegionGates: [] });
+  const { src, agreement, shipped } = judged(GOTO_INTO_NEXT_ARM, { twoLevelRegionGates: [] });
   expect(src.match(/h\(v\d+\);/g)).toHaveLength(2);
   expect(agreement.disagree).toBe(0);
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
-  expectCovered(FALLING_ARM);
+  expectCovered(GOTO_INTO_NEXT_ARM);
 });

@@ -1278,6 +1278,9 @@ export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
 export interface TwoLevelRegion {
   /** the region holding the loop ends inside the code the exit skips (`stop` among it) */
   readonly skipsRegionEnd: boolean;
+  /** the second target is the merge of the switch arm the loop sits in, and a `break;` after the
+   *  loop leaves that switch (`switchBreaks`) */
+  readonly breakReachesTarget: boolean;
 }
 
 /** When `emitForever` spells a two-level exit in the region it is asked for. The argument is at
@@ -1288,8 +1291,8 @@ export const TWO_LEVEL_REGION_GATES: readonly Gate<TwoLevelRegion>[] = [
     why: 'the code from the second target would render past the end of the region, and its owner renders it again',
     sound: false,
     guardedBy:
-      'two-level-exit.test.ts: without skips-region-end the falling arm lifts, and agrees: the rule refuses a correct reading',
-    rejects: (c) => c.skipsRegionEnd,
+      'two-level-exit.test.ts: without skips-region-end the goto into the next arm lifts, and agrees: the rule refuses a correct reading',
+    rejects: (c) => c.skipsRegionEnd && !c.breakReachesTarget,
   },
 ];
 
@@ -6313,20 +6316,11 @@ export function structure(
     }
     return [{ k: 'break', ofSwitch: true }];
   };
-  // The blocks of a closed arm whose edge to the switch's `merge` is the two-level exit
-  // (`TwoLevelExit`) of a `while (1)` opened in the arm: its header is one of the arm's blocks and
-  // its second target is the merge. Only that exit: an edge from another loop's body to the merge
-  // is that loop's own reading, and an edge from the arm outside any loop a `break;`.
-  const twoLevelOutOf = (region: ReadonlySet<Block>, merge: Block): Set<Block> => {
-    const out = new Set<Block>();
-    for (const fl of foreverLoops.values()) {
-      if (region.has(fl.header) && fl.twoLevel?.to === merge) {
-        for (const x of fl.twoLevel.from) {
-          out.add(x);
-        }
-      }
-    }
-    return out;
+  // Does a `break;` written here reach `b`: `b` is the merge of the innermost arm with a region, and
+  // no loop was entered since that arm began? `switchBreakAt`'s yes, asked without its refusal.
+  const switchBreaks = (b: Block): boolean => {
+    const f = switchFrames[switchFrames.length - 1];
+    return f !== undefined && f.region !== null && f.merge === b && f.loop === loopCtx;
   };
   // THE JOIN OF A BRANCH INSIDE AN ARM. The CFG's join for `if (c) break;` lies past the switch —
   // in a falling arm the fall-through path reaches the merge too, through the next arm, and in a
@@ -6340,16 +6334,6 @@ export function structure(
   // on the other side's path, which the falling path cannot jump over. Null ⇒ the paths meet only
   // at the arm's end. Asked only in the innermost arm frame and outside any loop entered since,
   // which is where `switchBreakAt` would spell the `break;`.
-  //
-  // A LOOP'S TWO-LEVEL EXIT TO THE MERGE IS NO `break;` EITHER (`twoLevelOutOf`). `case 1: for (j…)
-  // { if (hit) goto out; } k(i); out: break;` leaves the loop opened in the arm from `hit` straight
-  // to the merge, and a `break;` there would leave the loop, not the switch: `emitForever` spells
-  // it `f = 1; break;` and runs the code it skips under `if (f == 0)`, up to the merge. In a closed
-  // arm the merge is the arm's end, so its path runs there, and it goes to EXIT. Deleted, the guard
-  // around such a loop (`if (0 <= m)`, its zero-trip test) would join at the loop's own exit,
-  // `k(i)`, the very code the two-level exit skips, and `emitForever` would refuse the region
-  // (`TWO_LEVEL_REGION_GATES`). In a falling arm the merge lies past the sibling the arm falls into,
-  // so the edge jumps over the arm's end and stays deleted, as a `break;` would be.
   const armJoins = new Map<ReadonlySet<Block>, Map<Block, Block | null>>();
   const armJoin = (b: Block, stop: Block | null): Block | null | undefined => {
     const f = switchFrames[switchFrames.length - 1];
@@ -6359,13 +6343,7 @@ export function structure(
     const region = f.region;
     let pd = armJoins.get(region);
     if (pd === undefined) {
-      pd = regionJoins(
-        region,
-        null,
-        false,
-        f.fallsTo,
-        f.fallsTo === null && f.merge !== null ? twoLevelOutOf(region, f.merge) : undefined,
-      );
+      pd = regionJoins(region, null, false, f.fallsTo);
       armJoins.set(region, pd);
     }
     const join = pd.get(b) ?? null;
@@ -8024,14 +8002,12 @@ export function structure(
   // The post-dominators `loopJoin` reads, over `body` with every edge out of it and every edge back
   // to `header` (when there is one) deleted — save an edge to `toExit`, which goes to EXIT. Also
   // the join inside a switch arm (`armJoin`), whose `toExit` is the sibling a falling arm runs into
-  // and null for a closed one, and whose `exitsFrom` are the blocks of a loop in a closed arm that
-  // leave it for the merge by its two-level exit (`twoLevelOutOf`): each of those goes to EXIT too.
+  // and null for a closed one.
   function regionJoins(
     body: ReadonlySet<Block>,
     header: Block | null,
     endsCut: boolean,
     toExit: Block | null = null,
-    exitsFrom: ReadonlySet<Block> = new Set(),
   ): Map<Block, Block | null> {
     const inBody = (n: Block): Block[] => [...new Set(successorsOf(n))].filter((x) => body.has(x) && x !== header);
     const ends = (n: Block): boolean =>
@@ -8040,7 +8016,7 @@ export function structure(
       n.ops[n.ops.length - 1].opcode === 'br' &&
       n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
       !(successorsOf(n)[0] === header && new Set(preds.get(n)?.filter((q) => body.has(q))).size > 1);
-    const exits = (n: Block): boolean => (toExit !== null && successorsOf(n).includes(toExit)) || exitsFrom.has(n);
+    const exits = (n: Block): boolean => toExit !== null && successorsOf(n).includes(toExit);
     // IN A FALLING ARM, A PATH THAT CANNOT FALL ENDS WHERE IT LEAVES THE FALLING PATHS. Deleting the
     // edge to the merge or a `ret` covers only a jump straight off the branch (`if (b) break;`).
     // When the leaving path runs code first — `if (b) { g(7); break; }`, or a `return k` through a
@@ -8138,12 +8114,19 @@ export function structure(
   // A TWO-LEVEL EXIT (`TwoLevelExit`) adds its flag: cleared ahead of the loop, so every entry
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
-  // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
-  // before the second target (`stop` among the skipped code, `TWO_LEVEL_REGION_GATES`): the code
-  // from the second target on would render past the end of the region, and the region's owner
-  // renders it again. That copy is not a proven wrong (where it ends in a `return`, `break` or
-  // `continue` it lifts correct); the refusal stays until a reading proves it never falls through
-  // into the owner's. Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to:
+  // that `if`, once, for both ways out.
+  //
+  // Where the region holding the loop ends before the second target (`stop` among the skipped
+  // code) and that target is the merge of the switch arm the loop sits in, a `break;` after the
+  // loop reaches it (`switchBreaks`): the flag reads `if (f != 0) break;`, and the skipped code
+  // renders after it up to `stop`, where the region's owner renders the rest. That `stop` is a
+  // zero-trip guard's join at the loop's exit (`case 1: for (j…) { if (hit) goto out; } k(i); out:
+  // break;`, which `armJoin` reads as running to `k(i)`), or the sibling a falling arm runs into
+  // (agbcc cross-jumps a post-loop `k(i)` into `case 3: k(i); break;`). Refused, loud, where no
+  // `break;` reaches the target (`TWO_LEVEL_REGION_GATES`): the code from the second target on
+  // would render past the end of the region, and the region's owner renders it again. That copy is
+  // not a proven wrong (where it ends in a `return`, `break` or `continue` it lifts correct); the
+  // refusal stays until a reading proves it never falls through into the owner's. Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to:
   // …; Z:`) are not refused: they render inside the `if` and again after it, each copy ending in a
   // jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
@@ -8178,11 +8161,12 @@ export function structure(
       return [loop, ...after(() => structureRegion(exit, stop))];
     }
     const skipped = twoLevelSkip(exit, second.to);
+    const skipsRegionEnd = skipped !== null && stop !== null && skipped.has(stop);
+    const breakReachesTarget = switchBreaks(second.to);
     if (
       skipped === null ||
-      firstRejection(hooks.twoLevelRegionGates ?? TWO_LEVEL_REGION_GATES, {
-        skipsRegionEnd: stop !== null && skipped.has(stop),
-      }) !== null
+      firstRejection(hooks.twoLevelRegionGates ?? TWO_LEVEL_REGION_GATES, { skipsRegionEnd, breakReachesTarget }) !==
+        null
     ) {
       throw new StructureError(
         `cannot structure '${fn.name}': a two-level exit out of the loop at block #${fn.blocks.indexOf(fl.header)} ` +
@@ -8190,6 +8174,18 @@ export function structure(
       );
     }
     const flag = twoLevelFlag(fl.header);
+    if (skipsRegionEnd && breakReachesTarget) {
+      return [
+        { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
+        loop,
+        mkIf(
+          { k: 'bin', op: '!=', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
+          [{ k: 'break', ofSwitch: true }],
+          [],
+        ),
+        ...after(() => structureRegion(exit, stop)),
+      ];
+    }
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
       loop,
