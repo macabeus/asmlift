@@ -5804,6 +5804,10 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
       `\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}.Lg: .word gMag\n`;
     expect(dc('f', merged('\tldrh\tr2, [r2]\n', '\tldrb\tr2, [r2, #4]\n')).source).toContain('<= -');
     expect(() => dc('f', merged('\tldrh\tr2, [r2]\n', '\tldr\tr2, [r2, #4]\n'))).toThrow(gap);
+    // A negative constant arm (agbcc's `v = c ? -2 : gB`) beside a byte reload unions as integers,
+    // [-2, 255], not as the word 0xfffffffe beside [0, 255], which would span INT_MIN.
+    expect(dc('f', merged('\tmov\tr2, #2\n\tneg\tr2, r2\n', '\tldrb\tr2, [r2, #4]\n')).source).toContain('<= -');
+    expect(() => dc('f', merged('\tmov\tr2, #2\n\tneg\tr2, r2\n', '\tldr\tr2, [r2, #4]\n'))).toThrow(gap);
     // A carry branch refuses for its own reason, bound or no bound.
     expect(() => dc('f', store('\tldrh\tr2, [r2]\n', 'bcs'))).toThrow(
       "conditional branch 'bcs' tests the carry of a 'cmn', and the carry out of a + b is not a >=u -b",

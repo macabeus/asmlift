@@ -5283,9 +5283,12 @@ export function structure(
       // an address it cannot match — so the question goes to the shared word evaluator, and fails
       // closed: a constant it cannot compute refuses too — unless what its ops leave cannot make
       // 0x80000000 at all (a halfword or byte reload of that memory, a narrowing cast, a param
-      // whose every arm passes one: `stridedRange`), whatever the evaluator could not say.
-      // An operand that is INT_MIN on some paths only still lifts; that is the "might hold" case.
-      // Only hand-written asm reaches the refusal — agbcc folds the negation of a constant.
+      // whose arms pass such reloads or small constants: `stridedRange`), whatever the evaluator
+      // could not say. An operand that is INT_MIN on some paths only still lifts; that is the
+      // "might hold" case. Compiled C reaches the refusal too, not only hand-written asm: agbcc
+      // folds the negation of a constant it sees, but a whole-word reload of memory a store before
+      // it may have overwritten (`p->x -= 8; if (p->x <= -gMag)` with an s32 gMag) is a word this
+      // cannot compute, and declining it is the fail-closed answer.
       const x = e(d.operands[0]);
       wordCtx ??= {
         defs,

@@ -187,6 +187,25 @@ describe('addressRangeOf — what a computed address may be', () => {
     expect(rangeIn([entry, left, join], q)).toEqual({ lo: 0x40000bc, hi: 0x40000c8, stride: 12 });
   });
 
+  test('merged arms that straddle zero as integers are moved into one word arm by arm', () => {
+    // {-1, 0} is no word interval as integers; arm by arm it is {0, 0xffffffff}, every word it holds
+    const p = v();
+    const entry = block([p]);
+    const q = v();
+    const join = block([q]);
+    const left = block();
+    condBr(entry, p, [left, []], [join, [entry.op('const', { value: 0 })]]);
+    br(left, join, [left.op('const', { value: -1 })]);
+    expect(rangeIn([entry, left, join], q)).toEqual({ lo: 0, hi: 0xffffffff, stride: 0xffffffff });
+    // arms on one side of zero name the same words either way
+    const r = v();
+    const join2 = block([r]);
+    const left2 = block();
+    condBr(entry, p, [left2, []], [join2, [entry.op('const', { value: -3 })]]);
+    br(left2, join2, [left2.op('const', { value: -1 })]);
+    expect(rangeIn([entry, left2, join2], r)).toEqual({ lo: 0xfffffffd, hi: 0xffffffff, stride: 2 });
+  });
+
   test('a value whose range depends on itself through a loop bounds nothing', () => {
     // for (q = 0; ; q++) — every iteration adds one, and no interval over the loop holds that
     const p = v();

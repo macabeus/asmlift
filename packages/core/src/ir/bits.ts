@@ -263,9 +263,12 @@ export function constWord(ctx: WordCtx, v: Value): number | null {
  *  memory this function overwrote is a constant this cannot compute, but never INT_MIN, and nor is
  *  a param both of whose arms pass such a reload. */
 export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
-  const r = integerRange(rangeCtxOf(ctx), v);
-  if (r !== undefined && !rangeMayBe(r, w)) {
-    return false;
+  const rc = rangeCtxOf(ctx);
+  for (const wordFirst of [false, true]) {
+    const r = integerRange(rc, v, wordFirst);
+    if (r !== undefined && !rangeMayBe(r, w)) {
+      return false;
+    }
   }
   const x = wordOf(ctx, v);
   return x.k === 'konst' || x.k === 'top' || (x.k === 'word' && x.w === (w | 0));
@@ -648,6 +651,10 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
   if (d.opcode === 'mul' && d.operands.length === 2 && k !== undefined) {
     return scaled(d.operands[0], k);
   }
+  // the wrapping `0 - x`, a ring operation too: agbcc's `mov rN, #2; neg rN, rN` is the constant -2
+  if (d.opcode === 'neg' && d.operands.length === 1) {
+    return scaled(d.operands[0], -1);
+  }
   if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
     const x = linearTerms(ctx, d.operands[0], depth + 1);
     const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
@@ -701,8 +708,13 @@ const RANGE_BUDGET = 256;
  *  narrow value among them: `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold
  *  every word the machine can compute there, and a wider one only proves less. */
 export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
-  const r = integerRange(ctx, v);
-  return r === undefined ? undefined : intoWord(r);
+  const r = integerRange(ctx, v, false);
+  const one = r === undefined ? undefined : intoWord(r);
+  if (one !== undefined || r === undefined) {
+    return one;
+  }
+  const moved = integerRange(ctx, v, true);
+  return moved === undefined ? undefined : intoWord(moved);
 }
 
 /** An integer range moved into one unsigned word, or undefined when it crosses a multiple of
@@ -746,11 +758,16 @@ function narrowLeaf(d: Op): StridedRange | undefined {
 }
 
 /** `stridedRange` before the move into one word: integers, every one of which is congruent modulo
- *  2^32 to a word `v` may hold, and which cover them all. A param's in-edges are each moved into
- *  one word where they fit one before the union (a constant -1 beside a 0 is {0, 2^32 - 1}, not
- *  [-1, 0]) and kept as integers where they do not (a signed narrow arm), so a union never loses a
- *  word either way. */
-function integerRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
+ *  2^32 to a word `v` may hold, and which cover them all. A block param is the union of what its
+ *  in-edges pass, read one of two ways, each a sound cover on its own: as the integers they are
+ *  (`wordFirst` false: a constant -1 beside a halfword reload is [-1, 65535], which no word
+ *  interval names but which excludes INT_MIN), or each moved into one word first where it fits one
+ *  (`wordFirst` true: a -1 beside a 0 is {0, 2^32 - 1}, one word interval where [-1, 0] is none).
+ *  The two never mix in one union. Where the integer union fits one word, both readings name the
+ *  same words (every edge then shares one multiple of 2^32), so `stridedRange` asks the integer
+ *  reading first and the moved one only where that crosses a multiple; `mayAlwaysHold` asks both,
+ *  and a word either excludes cannot be held. */
+function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
   const bits: BitsCtx = {
@@ -783,7 +800,7 @@ function integerRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
         if (whole === undefined) {
           return undefined;
         }
-        const r = intoWord(whole) ?? whole;
+        const r = wordFirst ? (intoWord(whole) ?? whole) : whole;
         out =
           out === undefined
             ? r

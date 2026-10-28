@@ -597,6 +597,32 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
     expect(mayAlwaysHold(at([a, d], null), m, INT_MIN)).toBe(true);
   });
 
+  test('a negative constant arm beside a narrow reload is unioned as integers, so it is never INT_MIN', () => {
+    // agbcc's `v = c ? -1 : gA` (s16) and `v = c ? -2 : gB` (u8) after an overwriting store: moved
+    // into one word first, -1 is 0xffffffff and its union with [-32768, 32767] spans 0x80000000;
+    // as integers the arms are [-32768, 32767] and [-2, 255], and neither holds INT_MIN.
+    const defs = new Map<Value, Op>();
+    const s16 = def(defs, 'load', { off: 0, width: 2, signed: true }, [v()]);
+    const u8 = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const minus1 = def(defs, 'const', { value: -1 });
+    const minus2 = def(defs, 'const', { value: -2 });
+    const big = def(defs, 'const', { value: 0x7fffff00 });
+    const m = v();
+    const at = (args: Value[]): WordCtx => ({
+      defs,
+      overwritten: new Set([s16, u8, word].map((x) => defs.get(x)!)),
+      incoming: new Map([[m, args]]),
+      entry: new Set(),
+    });
+    expect(mayAlwaysHold(at([minus1, s16]), m, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(at([minus2, u8]), m, INT_MIN)).toBe(false);
+    // the integer union of -2 and a constant past 2^31 - 256 is [-2, 0x7fffff00]: still no INT_MIN
+    expect(mayAlwaysHold(at([minus2, big]), m, INT_MIN)).toBe(false);
+    // a whole-word arm still refuses, whichever way the constant arm is read
+    expect(mayAlwaysHold(at([minus1, word]), m, INT_MIN)).toBe(true);
+  });
+
   test("a struct-array aload's elemSize is its stride, which bounds nothing", () => {
     const defs = new Map<Value, Op>();
     const flat = def(defs, 'aload', { elemSize: 2, signed: false }, [v(), v()]);
