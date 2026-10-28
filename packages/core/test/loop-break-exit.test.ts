@@ -1321,8 +1321,8 @@ describe('early-return arms that share their tail', () => {
     expect(src.match(/return hit\(a0\);/g)).toHaveLength(2);
     expect(src.match(/ping\(/g)).toHaveLength(1);
     expect(src.match(/pong\(/g)).toHaveLength(1);
-    expect(agreement).toEqual({ judged: 180, disagree: 0 });
-    expect(shipped).toEqual({ judged: 180, disagree: 0 });
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test("a tail the loop's own exit also runs is written once, after the loop", () => {

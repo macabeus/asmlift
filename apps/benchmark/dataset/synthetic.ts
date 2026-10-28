@@ -14473,20 +14473,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //     arg0 spill word; imgidx with a spilled argument says `u8[48]` at the same site.
   //  28. brk2sw / brk2sw_one / brk2sw_ctl (sub_0800D188, `goto exit_loop`). An inner search loop
   //      sits in a `switch` arm, and its `goto` lands on that arm's `break`, past the code after
-  //      the loop. Structure finds the two-level exit (item 27's flag), but the region holding the
-  //      loop stops at the loop's own exit, which the skipped code contains, so `emitForever`
-  //      refuses it (structure.ts `TWO_LEVEL_REGION_GATES`, `skips-region-end`: "skips the end of
-  //      the region the loop sits in"). On sub_0800D188 the refused loop is the one with an inner
-  //      switch whose two arms `goto exit_loop` (header test `unkF <= 0x18`), not the
-  //      `goto exit_loop2` loop. brk2sw keeps that shape (outer loop, outer switch arm, an `if`,
-  //      an inner switch with two gotos); brk2sw_one is one loop in one arm, no outer loop.
+  //      the loop. Structure finds the two-level exit (item 27's flag). The zero-trip guard around
+  //      the loop joins at the loop's own exit, inside the code the exit skips, so `if (f == 0)`
+  //      cannot hold that code; the target is the arm's `break`, which a `break;` after the loop
+  //      reaches, so the flag reads `if (f != 0) break;` (structure.ts `emitForever`). Where no
+  //      `break;` reaches the target, it declines with "skips the end of the region the loop sits
+  //      in" (`skips-region-end`). On sub_0800D188 the loop is the one with an inner switch whose
+  //      two arms `goto exit_loop` (header test `unkF <= 0x18`), not the `goto exit_loop2` loop.
+  //      brk2sw keeps that shape (outer loop, outer switch arm, an `if`, an inner switch with two
+  //      gotos); brk2sw_one is one loop in one arm, no outer loop.
   //      brk2sw_ctl is brk2sw's loop in an `if`/`else` arm instead: it lifts on every lane.
-  //      agbcc: both decline with these words. gcc2.7.2kmc and gcc2.7.2: brk2sw declines with
-  //      them too; brk2sw_one declines earlier (kmc: "unrecovered back-edge"; gcc2.7.2: "a case
-  //      body leaves its switch from inside a nested loop"). ido7.1: brk2sw_one declines with
-  //      them; brk2sw declines at the flag's `break` ("sits in a case body, where `break` would
-  //      leave only the switch", `TWO_LEVEL_BREAK_GATES`). mwcc_242_81: brk2sw lifts (nonmatch);
-  //      brk2sw_one declines on the `lis`/`@l` pair of gA first, a link of its own.
+  //      On the MIPS gcc lanes brk2sw_one's switch is the function's tail, so the arm's merge ends
+  //      in `ret` and the loop's hit edge into it reads as a do-while copying that tail as an early
+  //      `return`, which emission cannot spell from inside the switch arm. The structuring is run
+  //      again with that copy behind every `while (1)` reading (structure.ts `RetCopyRanking`), and
+  //      the two-level reading takes the loop there too.
+  //      agbcc, gcc2.7.2kmc and gcc2.7.2: both lift. ido7.1: brk2sw_one lifts; brk2sw declines
+  //      at the flag's `break` ("sits in a case body, where `break` would leave only the switch",
+  //      `TWO_LEVEL_BREAK_GATES`). mwcc_242_81: brk2sw lifts; brk2sw_one declines on the
+  //      `lis`/`@l` pair of gA first, a link of its own.
   //  29. sw_xjret / sw_xjret_case / sw_xjret_ctl (sub_08016EEC). A `for` loop around a jump table
   //      whose arm does `fin(...); return;`, where code that is NOT downstream of the loop (an
   //      `if` branch before it, or a sibling `case` of an outer switch) ends in the same

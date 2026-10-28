@@ -407,8 +407,38 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           return 'break';
         case 'continue':
           return 'continue';
+        // A `switch` runs the arm its scrutinee selects, then the arms it falls into
+        // (`fallsThrough`), in printed order, the default at `defaultAt`, until one leaves: a
+        // `break` leaves the switch, a `continue` or `return` what encloses it. A case that falls
+        // may fall into the default; the default never falls on (the printer closes a non-final one
+        // with `break;`).
+        case 'switch': {
+          const v = evalExpr(s.scrutinee);
+          if (v === UNDEF) {
+            throw new Error('switch on an undefined value');
+          }
+          const arms = s.cases.map((c) => ({ body: c.body, falls: c.fallsThrough, values: c.values }));
+          if (s.default !== undefined) {
+            arms.splice(s.defaultAt ?? arms.length, 0, { body: s.default, falls: false, values: [] });
+          }
+          let at = arms.findIndex((c) => c.values.includes(v));
+          if (at < 0 && s.default !== undefined) {
+            at = s.defaultAt ?? s.cases.length;
+          }
+          let sig: 'none' | 'break' | 'continue' | 'return' = 'none';
+          for (; at >= 0 && at < arms.length; at++) {
+            sig = exec(arms[at].body);
+            if (sig !== 'none' || !arms[at].falls) {
+              break;
+            }
+          }
+          if (sig === 'continue' || sig === 'return') {
+            return sig;
+          }
+          break;
+        }
         default:
-          throw new Error(`the generator does not emit ${s.k}`);
+          throw new Error(`the generator does not emit ${(s as { k: string }).k}`);
       }
     }
     return 'none';
@@ -448,10 +478,11 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
  *  step cap.
  *
  *  AN ORACLE FOR THE SYNTHETIC GENERATOR'S VOCABULARY, and calling it more than that would be a
- *  claim it cannot meet. It models 14 of the IR's 48 registered opcodes (`const`, `add`, `sub`,
+ *  claim it cannot meet. It models 15 of the IR's 48 registered opcodes (`const`, `add`, `sub`,
  *  `icmp_slt`, `icmp_sge`, `icmp_eq`, `logic_and`, `logic_or`, `call`, `gaddr`, `store`, `ret`,
- *  `br`, `cond_br`) — exactly what `generateSsaFn` emits. Measured on this repo's own agbcc corpus,
- *  re-parsed from each function's recovered IR dump: 24 of the 30 `test/corpus` functions round-trip
+ *  `br`, `cond_br`) — exactly what `generateSsaFn` emits — plus `switch_br`, for the hand-written
+ *  fixtures that put a loop in a case arm (`two-level-exit.test.ts`). Measured on this repo's own
+ *  agbcc corpus, re-parsed from each function's recovered IR dump: 24 of the 30 `test/corpus` functions round-trip
  *  the dump at all and this judges 2 of those 24. Blockers, by function: `load` 8, `shl` 6, `icmp_ne`
  *  3, `aload` 1, `mul` 1, `smod` 1, `icmp_uge` 1, `undef` 1.
  *
@@ -534,6 +565,12 @@ export function irTraceOf(fn: Fn, seed: number): Event[] {
         case 'cond_br':
           next = o[0] !== 0 ? op.successors[0] : op.successors[1];
           break;
+        // the case whose value matches, else the default, the last successor
+        case 'switch_br': {
+          const at = (op.attrs.cases as number[]).indexOf(o[0]);
+          next = op.successors[at < 0 ? op.successors.length - 1 : at];
+          break;
+        }
         default:
           throw new Error(`the generator does not emit ${op.opcode}`);
       }

@@ -1278,6 +1278,9 @@ export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
 export interface TwoLevelRegion {
   /** the region holding the loop ends inside the code the exit skips (`stop` among it) */
   readonly skipsRegionEnd: boolean;
+  /** the second target is the merge of the switch arm the loop sits in, and a `break;` after the
+   *  loop leaves that switch (`switchBreaks`) */
+  readonly breakReachesTarget: boolean;
 }
 
 /** When `emitForever` spells a two-level exit in the region it is asked for. The argument is at
@@ -1287,7 +1290,9 @@ export const TWO_LEVEL_REGION_GATES: readonly Gate<TwoLevelRegion>[] = [
     id: 'skips-region-end',
     why: 'the code from the second target would render past the end of the region, and its owner renders it again',
     sound: false,
-    rejects: (c) => c.skipsRegionEnd,
+    guardedBy:
+      'two-level-exit.test.ts: without skips-region-end the goto into the next arm lifts, and agrees: the rule refuses a correct reading',
+    rejects: (c) => c.skipsRegionEnd && !c.breakReachesTarget,
   },
 ];
 
@@ -2802,11 +2807,73 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
   return t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
 }
 
+/** Where a loop reading that copies a ret tail with an effect into the body (`retCopyingReadings`)
+ *  ranks, and whether a structuring committed one. */
+interface RetCopyRanking {
+  /** Behind every `while (1)` reading, the two-level one included. Otherwise it ranks as the other
+   *  `while` and `do-while` readings do, save for a tail code around the loop also enters, which
+   *  waits behind the `while (1)` readings that add no variable. */
+  readonly last: boolean;
+  took: boolean;
+}
+
+/** A RET-TAIL COPY CLASSIFICATION ACCEPTS, EMISSION MAY STILL NOT SPELL. A `while` or `do-while`
+ *  reading takes an edge into a ret-terminated tail it does not own as an early `return`, and only
+ *  emission learns whether the body can hold it: on gcc2.7.2kmc, `for (j = 0; j < 8; j++) { if
+ *  (hit) goto out; } k(i); out: gA[0] = i;` reads as a do-while whose hit branch then finds no join
+ *  in the body ("unrecovered back-edge"), and on gcc2.7.2 the same loop in a switch arm whose merge
+ *  is the function's `t(); return` reaches that merge from inside the loop, which no `break;` spells
+ *  (`switchBreakAt`). Such a structuring is run again with every such reading last
+ *  (`RetCopyRanking.last`), where `while (1)` spells the loop, and the first run's refusal stands if
+ *  the second declines too. The first run's observation hooks are held until it is known to stand,
+ *  so a site is reported once, by the structuring that is returned. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
   hooks: StructureHooks = {},
   memo?: DefaultAcceptsMemo,
+): SFn {
+  const held: (() => void)[] = [];
+  const hold =
+    <A extends unknown[]>(f: (...args: A) => void) =>
+    (...args: A) => {
+      held.push(() => f(...args));
+    };
+  const first: RetCopyRanking = { last: false, took: false };
+  try {
+    const sfn = structureRanked(
+      fn,
+      opts,
+      {
+        ...hooks,
+        onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
+        onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
+        onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+      },
+      memo,
+      first,
+    );
+    held.forEach((f) => f());
+    return sfn;
+  } catch (error) {
+    if (!(error instanceof StructureError) || !first.took) {
+      held.forEach((f) => f());
+      throw error;
+    }
+    try {
+      return structureRanked(fn, opts, hooks, memo, { last: true, took: false });
+    } catch (again) {
+      throw again instanceof StructureError ? error : again;
+    }
+  }
+}
+
+function structureRanked(
+  fn: Fn,
+  opts: StructureOptions,
+  hooks: StructureHooks,
+  memo: DefaultAcceptsMemo | undefined,
+  retCopy: RetCopyRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -3486,6 +3553,7 @@ export function structure(
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   const copyingReadings = new Map<Block, () => void>();
+  const retCopyingReadings = new Map<Block, () => void>();
   const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
@@ -3583,10 +3651,23 @@ export function structure(
     // tried every exit without it (below): a `do-while` whose arm copies the tail keeps its bottom test
     // (`a \`do-while\` whose arm needs the exit path's tail keeps its bottom test`), where `while (1)`
     // with the copy would spell it `if (!(i < n)) break;`.
+    // A RET TARGET THE EDGE DOES NOT OWN, holding an effect, is copied into the body as an early
+    // `return` (`retCopyingReadings`). Where code around the loop also enters it (the header does
+    // not dominate it), the reading waits behind the `while (1)` readings that add no variable, and
+    // goes ahead of the two-level one (`TwoLevelExit`), whose flag the asm does not hold either:
+    // ido7.1's `for (…) { if (t[i] == x) { *out = r; return; } } gMiss = 1; *out = r;` merges the
+    // two `*out = r; return` and is spelled by `while (1)` with the hit's `return` inside
+    // (`retpost_tail`), and agbcc's cross-jumped `for (…) if (hit) { s->f = i; return; }` keeps the
+    // copy where the flag would add `v = 1; break;` the source never wrote. A tail only the loop's
+    // own paths reach is the arms' to copy (`a pure tail only the arms of a \`do-while\` enter`).
+    // Classification cannot tell whether emission spells the copy, so a structuring that committed
+    // one and declined is run again with every such reading last of all (`RetCopyRanking`).
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
+      let copiesEffect = false;
+      let shared = false;
       for (const e of nl.exitEdges) {
         if (e.from === exitFrom && e.to === exit) {
           continue;
@@ -3604,18 +3685,21 @@ export function structure(
           breakArms.push({ from: e.from, to: e.to, region });
         } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
           return null;
+        } else if (!owned && e.to.ops.some(effectful)) {
+          copiesEffect = true;
+          shared ||= !dom.get(e.to)!.has(h);
         }
       }
-      return { arms, breaks, breakArms };
+      return { arms, breaks, breakArms, copiesEffect, shared };
     };
     const plain = readArms(false);
     const read = plain ?? readArms(true);
     if (read === null) {
       continue;
     }
-    const { arms, breaks, breakArms } = read;
+    const { arms, breaks, breakArms, copiesEffect, shared } = read;
 
-    const commit =
+    const reading =
       kind === 'while'
         ? () =>
             whileLoops.set(h, {
@@ -3638,8 +3722,14 @@ export function structure(
               body: nl.body,
               arms,
             });
+    const commit = () => {
+      retCopy.took ||= copiesEffect;
+      reading();
+    };
     // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
-    if (plain === null) {
+    if (copiesEffect && (shared || retCopy.last)) {
+      retCopyingReadings.set(h, commit);
+    } else if (plain === null) {
       copyingReadings.set(h, commit);
     } else {
       commit();
@@ -3737,20 +3827,33 @@ export function structure(
   // with one. agbcc rotates `for (i = 0; i < 8; i++) { if (bit(i)) { x = i; break; } } tail;` so the
   // `break` arm leaves by the latch and the count test mid-body: taking the arm for the exit, the
   // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
-  // the source's two `break`s and one `tail`. Past all of them comes the two-level exit
-  // (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop that
-  // every other reading declines.
+  // the source's two `break`s and one `tail`. Then comes the `while` or `do-while` that copies a
+  // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
+  // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
+  // that every other reading declines. A structuring run again because emission refused such a
+  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
     const shape = open ? foreverShape(nl, false) : null;
     const copying = copyingReadings.get(h);
+    const retCopying = open ? retCopyingReadings.get(h) : undefined;
     if (open && shape === null && copying !== undefined) {
       copying();
     } else {
-      const copied = shape ?? (open ? (foreverShape(nl, true) ?? foreverShape(nl, false, true)) : null);
+      const copied = shape ?? (open ? foreverShape(nl, true) : null);
+      const twoLevel = () => (open ? foreverShape(nl, false, true) : null);
       if (copied !== null) {
         foreverLoops.set(h, copied);
+      } else if (retCopying !== undefined && !retCopy.last) {
+        retCopying();
+      } else {
+        const flagged = twoLevel();
+        if (flagged !== null) {
+          foreverLoops.set(h, flagged);
+        } else {
+          retCopying?.();
+        }
       }
     }
   }
@@ -6291,10 +6394,17 @@ export function structure(
     fallsTo: Block | null;
   };
   const switchFrames: SwitchFrame[] = [];
+  // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
+  // does where `b` is the merge of the innermost arm with a region and no loop was entered since
+  // that arm began. `switchBreakAt` spells it, and `emitForever` asks it for a flag's `break`.
+  const switchBreaks = (b: Block): boolean => {
+    const f = switchFrames[switchFrames.length - 1];
+    return f !== undefined && f.region !== null && f.merge === b && f.loop === loopCtx;
+  };
   // Is `b` the merge of an arm with a region, reached before that arm's end, and may `break;` say so
-  // from here? Undefined when no such arm ends at `b`. (At an arm's own end, `stop` is the merge and
-  // `structureRegion` returns before asking.) Throws when one does but a nested loop or switch would
-  // capture the statement.
+  // from here (`switchBreaks`)? Undefined when no such arm ends at `b`. (At an arm's own end, `stop`
+  // is the merge and `structureRegion` returns before asking.) Throws when one does but a nested
+  // loop or switch would capture the statement.
   const switchBreakAt = (b: Block): Stmt[] | undefined => {
     let i = switchFrames.length - 1;
     while (i >= 0 && (switchFrames[i].region === null || switchFrames[i].merge !== b)) {
@@ -6303,7 +6413,7 @@ export function structure(
     if (i < 0) {
       return undefined;
     }
-    if (i !== switchFrames.length - 1 || switchFrames[i].loop !== loopCtx) {
+    if (!switchBreaks(b)) {
       throw new StructureError(
         `cannot structure '${fn.name}': a case body leaves its switch from inside a nested ` +
           `${i !== switchFrames.length - 1 ? 'switch' : 'loop'}, where \`break\` would leave that instead`,
@@ -8103,14 +8213,22 @@ export function structure(
   // A TWO-LEVEL EXIT (`TwoLevelExit`) adds its flag: cleared ahead of the loop, so every entry
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
-  // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
-  // before the second target (`stop` among the skipped code, `TWO_LEVEL_REGION_GATES`): the code
-  // from the second target on would render past the end of the region, and the region's owner
-  // renders it again. That copy is not a proven wrong (where it ends in a `return`, `break` or
-  // `continue` it lifts correct); the refusal stays until a reading proves it never falls through
-  // into the owner's. Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to:
-  // …; Z:`) are not refused: they render inside the `if` and again after it, each copy ending in a
-  // jump.
+  // that `if`, once, for both ways out.
+  //
+  // Where the region holding the loop ends before the second target (`stop` among the skipped
+  // code) and that target is the merge of the switch arm the loop sits in, a `break;` after the
+  // loop reaches it (`switchBreaks`): the flag reads `if (f != 0) break;`, and the skipped code
+  // renders after it up to `stop`, where the region's owner renders the rest. That `stop` is a
+  // zero-trip guard's join at the loop's exit (`case 1: for (j…) { if (hit) goto out; } k(i); out:
+  // break;`, where `armJoin` takes the hit's edge to the merge for a `break;` and the guard joins at
+  // `k(i)`), or the sibling a falling arm runs into (agbcc cross-jumps a post-loop `k(i)` into
+  // `case 3: k(i); break;`). Refused, loud, where no `break;` reaches the target
+  // (`TWO_LEVEL_REGION_GATES`): the code from the second target on would render past the end of the
+  // region, and the region's owner renders it again. That copy is not a proven wrong (where it ends
+  // in a `return`, `break` or `continue` it lifts correct); the refusal stays until a reading proves
+  // it never falls through into the owner's. Paths from `exit` that pass `to` without meeting it
+  // (`if (q) goto Z; … to: …; Z:`) are not refused: they render inside the `if` and again after it,
+  // each copy ending in a jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const frame = {
@@ -8143,11 +8261,12 @@ export function structure(
       return [loop, ...after(() => structureRegion(exit, stop))];
     }
     const skipped = twoLevelSkip(exit, second.to);
+    const skipsRegionEnd = skipped !== null && stop !== null && skipped.has(stop);
+    const breakReachesTarget = switchBreaks(second.to);
     if (
       skipped === null ||
-      firstRejection(hooks.twoLevelRegionGates ?? TWO_LEVEL_REGION_GATES, {
-        skipsRegionEnd: stop !== null && skipped.has(stop),
-      }) !== null
+      firstRejection(hooks.twoLevelRegionGates ?? TWO_LEVEL_REGION_GATES, { skipsRegionEnd, breakReachesTarget }) !==
+        null
     ) {
       throw new StructureError(
         `cannot structure '${fn.name}': a two-level exit out of the loop at block #${fn.blocks.indexOf(fl.header)} ` +
@@ -8155,6 +8274,18 @@ export function structure(
       );
     }
     const flag = twoLevelFlag(fl.header);
+    if (skipsRegionEnd && breakReachesTarget) {
+      return [
+        { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
+        loop,
+        mkIf(
+          { k: 'bin', op: '!=', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
+          [{ k: 'break', ofSwitch: true }],
+          [],
+        ),
+        ...after(() => structureRegion(exit, stop)),
+      ];
+    }
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
       loop,
