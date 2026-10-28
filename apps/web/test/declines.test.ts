@@ -1251,6 +1251,11 @@ describe('a class may not outlive the message it classifies', () => {
     ],
     ['non-compare-flags', 'the flags it tests were written by ', 'packages/core/src/frontend/thumb.ts'],
     ['cmn-carry', "tests the carry of a 'cmn'", 'packages/core/src/frontend/thumb.ts'],
+    [
+      'cmn-int-min',
+      'the mathematical negation of the constant 0x80000000 has no int spelling',
+      'packages/core/src/structure/structure.ts',
+    ],
     ['local-image', "reads the compiler's anonymous constant", 'packages/core/src/structure/structure.ts'],
     ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],
@@ -1399,6 +1404,9 @@ describe('the classifier is measured against the messages core can throw, not on
     // written by arithmetic or a call, a block with no predecessor). Both halves are pinned above,
     // and the shapes themselves in `thumb-frontend.test.ts` and `ppc-frontend.test.ts`.
     'cross-block-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
+    // A GAP, not a throw: structure.ts's `neg_s` rule returns it through `mkGap`, so the C prints it as
+    // an ASMLIFT_ERROR and no throw site carries it. Pinned above against its producer.
+    'cmn-int-min': "structure.ts's neg_s rule returns a gap (mkGap), never a throw",
     'entry-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
     'non-compare-flags': 'thumb.ts interpolates the reason, and the class keys on the reason',
     // Same shape, one layer down: `l3/ast.ts`'s `gapReasonFor` builds this one and `structure.ts`
