@@ -166,9 +166,9 @@ describe('constWord — the word a value always holds', () => {
   test('an op it has no rule for is no word, but MAY be one', () => {
     const defs = new Map<Value, Op>();
     const k = def(defs, 'const', { value: 0x80000000 });
-    const ext = def(defs, 'zext', { width: 16 }, [k]);
-    expect(constWord(W(defs), ext)).toBeNull();
-    expect(mayAlwaysHold(W(defs), ext, 0x80000000)).toBe(true);
+    const rot = def(defs, 'rotr', {}, [k, def(defs, 'const', { value: 0 })]);
+    expect(constWord(W(defs), rot)).toBeNull();
+    expect(mayAlwaysHold(W(defs), rot, 0x80000000)).toBe(true);
     // A register shift by 32 or more: Thumb gives 0, MIPS masks the amount to five bits.
     const wide = def(defs, 'shl', {}, [def(defs, 'const', { value: 1 }), def(defs, 'const', { value: 32 })]);
     expect(constWord(W(defs), wide)).toBeNull();
@@ -511,5 +511,71 @@ describe('storeForwards — the store a load must read', () => {
     const at = (vals: Value[]): WordCtx => ({ defs, forwarded: new Map([[defs.get(load)!, vals]]) });
     expect(mayAlwaysHold(at([m1, m2]), load, 0x80000000)).toBe(true);
     expect(mayAlwaysHold(at([m1, five]), load, 0x80000000)).toBe(false);
+  });
+});
+
+describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
+  const INT_MIN = 0x80000000;
+  const overwritten = (defs: Map<Value, Op>, ...vs: Value[]): WordCtx => ({
+    defs,
+    overwritten: new Set(vs.map((x) => defs.get(x)!)),
+  });
+
+  test('an overwritten reload narrower than a word is a constant it cannot compute, but never INT_MIN', () => {
+    const defs = new Map<Value, Op>();
+    const narrow = [1, 2].flatMap((width) =>
+      [false, true].map((signed) => def(defs, 'load', { off: 0, width, signed }, [v()])),
+    );
+    for (const l of narrow) {
+      expect(constWord(overwritten(defs, l), l)).toBeNull();
+      expect(mayAlwaysHold(overwritten(defs, l), l, INT_MIN)).toBe(false);
+    }
+    // A whole word may be anything this function wrote: it still refuses.
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    expect(mayAlwaysHold(overwritten(defs, word), word, INT_MIN)).toBe(true);
+  });
+
+  test('the bound is the range the width and signedness leave, not merely "not INT_MIN"', () => {
+    const defs = new Map<Value, Op>();
+    const u16 = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const s16 = def(defs, 'load', { off: 0, width: 2, signed: true }, [v()]);
+    const u8 = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const ctx = overwritten(defs, u16, s16, u8);
+    expect(mayAlwaysHold(ctx, u16, 0xffff)).toBe(true);
+    expect(mayAlwaysHold(ctx, u16, -1)).toBe(false);
+    expect(mayAlwaysHold(ctx, s16, -1)).toBe(true);
+    expect(mayAlwaysHold(ctx, s16, -0x8000)).toBe(true);
+    expect(mayAlwaysHold(ctx, s16, 0x8000)).toBe(false);
+    expect(mayAlwaysHold(ctx, u8, 0x100)).toBe(false);
+  });
+
+  test('a narrow read shifted back up to the sign bit is bounded by nothing: 0x8000 << 16 is INT_MIN', () => {
+    const defs = new Map<Value, Op>();
+    const h = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const up = def(defs, 'shl', { imm: 16 }, [h]);
+    expect(mayAlwaysHold(overwritten(defs, h), up, INT_MIN)).toBe(true);
+  });
+
+  test('a narrowing cast of anything is never INT_MIN; the constant itself still is', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: INT_MIN });
+    expect(mayAlwaysHold({ defs }, k, INT_MIN)).toBe(true);
+    for (const op of ['zext', 'sext']) {
+      for (const width of [8, 16]) {
+        expect(mayAlwaysHold({ defs }, def(defs, op, { width }, [k]), INT_MIN)).toBe(false);
+      }
+    }
+    // provableBits' bound: a zero-fill shift right leaves fewer than 32 bits.
+    expect(mayAlwaysHold({ defs }, def(defs, 'shr_u', { imm: 1 }, [k]), INT_MIN)).toBe(false);
+    expect(mayAlwaysHold({ defs }, def(defs, 'and', { imm: 0x7fffffff }, [k]), INT_MIN)).toBe(false);
+  });
+
+  test("a struct-array aload's elemSize is its stride, which bounds nothing", () => {
+    const defs = new Map<Value, Op>();
+    const flat = def(defs, 'aload', { elemSize: 2, signed: false }, [v(), v()]);
+    const field = def(defs, 'aload', { elemSize: 2, signed: false, fieldOff: 0 }, [v(), v()]);
+    const ctx = overwritten(defs, flat, field);
+    expect(mayAlwaysHold(ctx, flat, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(ctx, field, INT_MIN)).toBe(true);
   });
 });

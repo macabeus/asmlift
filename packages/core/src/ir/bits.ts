@@ -16,7 +16,7 @@ import { OPCODES, type OpSig } from './opcodes';
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
  *  literal this analysis may fold through. Callers that have no materialization model pass none. */
 export interface BitsCtx {
-  defs: Map<Value, Op>;
+  defs: ReadonlyMap<Value, Op>;
   materialize?: ReadonlySet<Op>;
   /** A bound a CALLER already knows for a def — the escape hatch for facts this layer cannot see,
    *  such as a bitfield read a rendering pass has recognized and can price from the declaration.
@@ -255,10 +255,44 @@ export function constWord(ctx: WordCtx, v: Value): number | null {
  *  evaluator cannot compute, or a value the solver never settled (a param no executed edge
  *  feeds). The fail-closed reading of `constWord`, for a caller to whom a constant it cannot name
  *  is as bad as the one it is looking for. A value that varies, or that is `w` on some paths only,
- *  answers false. */
+ *  answers false — and so does one whose own op cannot produce `w` at all (`ownRange`): a halfword
+ *  reload of memory this function overwrote is a constant this cannot compute, but never INT_MIN. */
 export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
+  const range = ownRange(ctx.defs, v);
+  if (range !== null && ((w | 0) < range.lo || (w | 0) > range.hi)) {
+    return false;
+  }
   const x = wordOf(ctx, v);
   return x.k === 'konst' || x.k === 'top' || (x.k === 'word' && x.w === (w | 0));
+}
+
+/** The signed-word interval a value's OWN def confines it to, whatever its operands hold, or null.
+ *  It reads the op alone — never what memory or an operand holds — so it stays true where the word
+ *  evaluator above can only say "a constant I cannot compute" (a narrow reload of memory this
+ *  function overwrote): a `load`/`aload` narrower than a word (signed by its `signed` attr; a
+ *  struct-array `aload`'s `elemSize` is the stride, not the field it reads, so it bounds nothing), a
+ *  `zext`/`sext`, and whatever `provableBits` bounds below 32. It does not read THROUGH anything:
+ *  a narrow read shifted back up (`ldrh; lsl #16`, INT_MIN at 0x8000) is bounded by nothing here. */
+function ownRange(defs: ReadonlyMap<Value, Op>, v: Value): { lo: number; hi: number } | null {
+  const d = defs.get(v);
+  if (d === undefined) {
+    return null;
+  }
+  const bits =
+    d.opcode === 'load' && typeof d.attrs.width === 'number'
+      ? d.attrs.width * 8
+      : d.opcode === 'aload' && typeof d.attrs.elemSize === 'number' && d.attrs.fieldOff === undefined
+        ? d.attrs.elemSize * 8
+        : (d.opcode === 'zext' || d.opcode === 'sext') && typeof d.attrs.width === 'number'
+          ? d.attrs.width
+          : 32;
+  if (bits > 0 && bits < 32) {
+    return d.opcode === 'sext' || (d.opcode !== 'zext' && d.attrs.signed === true)
+      ? { lo: -(2 ** (bits - 1)), hi: 2 ** (bits - 1) - 1 }
+      : { lo: 0, hi: 2 ** bits - 1 };
+  }
+  const n = provableBits({ defs }, v);
+  return n < 32 ? { lo: 0, hi: 2 ** n - 1 } : null;
 }
 
 /** Where an access lands, normalised: a ROOT (one SSA value, one symbol, or the absolute address
