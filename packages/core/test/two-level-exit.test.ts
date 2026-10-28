@@ -406,8 +406,8 @@ const THREE_EXIT_TARGETS = `fn threetargets {
 }`;
 
 /** The hit leaves BOTH loops (`goto done` past the outer one, a merge that also takes the outer
- *  loop's own exit): a flag read after the inner loop cannot reach it without a second `break`, and
- *  the loop declines before the inner loop is asked for a two-level exit. */
+ *  loop's own exit): a flag read after the inner loop cannot reach it without a second `break`, so
+ *  the two-level rules refuse it, and the loop declines. */
 const TARGET_PAST_THE_ENCLOSING_LOOP = `fn pastouter {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -617,6 +617,54 @@ test('two loops `goto`ing the end of one switch arm each render once', () => {
   expectCovered(TWO_LOOPS_IN_ARM);
 });
 
+/** The switch is the function's last statement (`synthetic:brk2sw_one`'s shape on the MIPS gcc
+ *  lanes: `switch (i) { case 0: case 1: case 4: for (j…) { if (hit) goto out; } k(i); out: break;
+ *  case 2: h(i); break; } t(i);`), so the arm's merge ends in `ret`. The inner loop is a guarded
+ *  do-while, and its hit's edge into that merge is a ret target it could copy as `t(i); return;`.
+ *  Such a copy runs again code the asm runs once, so that reading waits behind every `while (1)`
+ *  reading, and the two-level one takes the loop: `if (f != 0) break;` leaves the switch, and
+ *  `t(i)` renders once. Read as the do-while, the edge reaches the merge from inside the loop,
+ *  where no `break;` can say so, and the switch declines. */
+const GOTO_RET_MERGE = `fn gotoretmerge {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %6: s32 = call %0 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %0, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %0 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %0 {target="k"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %0 {target="h"}
+  br ^bb6()
+^bb6():
+  %18: s32 = call %0 {target="t"}
+  ret
+}`;
+
+test('a `goto` to the end of a switch arm whose merge returns lifts as a flag, not a copied tail', () => {
+  const { src, agreement, shipped } = judged(GOTO_RET_MERGE);
+  expect(src.match(/if \(v\d+ != 0\) break;/g)).toHaveLength(1);
+  expect(src.match(/\bt\(a0\);/g)).toHaveLength(1);
+  expect(src.match(/\bk\(a0\);/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(GOTO_RET_MERGE);
+  expect(covers(GOTO_RET_MERGE).noLoop).toBeGreaterThan(0);
+});
+
 /** The falling arm's `goto` lands INSIDE the arm it falls into (`… k(i); case 2: h(i); out: g(i);
  *  break;`, agbcc's cross-jump of a shared `g(i); break;` tail). No `break;` reaches that target,
  *  and the flag's `if (f == 0)` would run past the arm's end into the arm the switch renders after
@@ -691,8 +739,12 @@ test('each decline is refused by the two-level rule its shape names', () => {
   expect(refusalsOf(TARGET_IS_THE_ENCLOSING_HEADER)).toEqual(['skip-reenters-loop', 'target-is-enclosing-header']);
   expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
   expect(refusalsOf(GOTO_INTO_NEXT_ARM)).toEqual(['skips-region-end']);
-  // the `goto` out of both loops declines before the inner loop is asked for a two-level exit
-  expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([]);
+  // the inner loop's do-while would copy `after(…); return;` into the hit, a tail the outer
+  // loop's exit also runs: that reading waits behind the two-level one, which refuses the target
+  expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([
+    'exit-past-enclosing-loop',
+    'target-past-enclosing-loop',
+  ]);
 });
 
 test('without second-target-elsewhere a third exit target is still refused where its break is written', () => {

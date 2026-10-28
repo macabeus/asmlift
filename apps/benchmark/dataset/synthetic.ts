@@ -14483,9 +14483,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      brk2sw keeps that shape (outer loop, outer switch arm, an `if`, an inner switch with two
   //      gotos); brk2sw_one is one loop in one arm, no outer loop.
   //      brk2sw_ctl is brk2sw's loop in an `if`/`else` arm instead: it lifts on every lane.
-  //      agbcc: both lift. gcc2.7.2kmc and gcc2.7.2: brk2sw lifts; brk2sw_one declines earlier
-  //      (kmc: "unrecovered back-edge"; gcc2.7.2: its loop reads as a do-while, so "a case body
-  //      leaves its switch from inside a nested loop"). ido7.1: brk2sw_one lifts; brk2sw declines
+  //      On the MIPS gcc lanes brk2sw_one's switch is the function's tail, so the arm's merge ends
+  //      in `ret` and the loop's hit edge into it could read as a do-while copying that tail as an
+  //      early `return`. A copy of a tail with an effect is the loop reading of last resort
+  //      (structure.ts `retCopyingReadings`), so the two-level reading takes the loop there too.
+  //      agbcc, gcc2.7.2kmc and gcc2.7.2: both lift. ido7.1: brk2sw_one lifts; brk2sw declines
   //      at the flag's `break` ("sits in a case body, where `break` would leave only the switch",
   //      `TWO_LEVEL_BREAK_GATES`). mwcc_242_81: brk2sw lifts; brk2sw_one declines on the
   //      `lis`/`@l` pair of gA first, a link of its own.

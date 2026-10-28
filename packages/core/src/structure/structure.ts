@@ -3491,6 +3491,7 @@ export function structure(
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   const copyingReadings = new Map<Block, () => void>();
+  const retCopyingReadings = new Map<Block, () => void>();
   const keptGuardDoWhiles = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
@@ -3588,10 +3589,22 @@ export function structure(
     // tried every exit without it (below): a `do-while` whose arm copies the tail keeps its bottom test
     // (`a \`do-while\` whose arm needs the exit path's tail keeps its bottom test`), where `while (1)`
     // with the copy would spell it `if (!(i < n)) break;`.
+    // A RET TARGET THE EDGE DOES NOT OWN, holding an effect, that code around the loop also enters
+    // (the header does not dominate it) is copied into the body as an early `return`, and the copy
+    // spells twice code the asm runs once for both. A tail only the loop's own paths reach is the
+    // arms' to copy (`a pure tail only the arms of a \`do-while\` enter`). `while (1)` refuses
+    // the copy of an effect outright (`foreverShape`); here it is the reading of last
+    // resort (`retCopyingReadings`), taken only where every `while (1)` reading, the two-level one
+    // included, declines. The tail is often where a `switch` ends: in `switch (x) { case 1: for (…)
+    // { if (hit) goto out; } k(); out: break; … } t();` on gcc2.7.2 the search loop is a do-while
+    // whose hit enters `t(); return` straight from the loop, which no `break;` reaches from inside
+    // it (`switchBreakAt`), and gcc2.7.2kmc's do-while reading of the same edge leaves its inner
+    // branch no join in the body. The two-level reading spells it `if (f != 0) break;`.
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
+      let copiesEffect = false;
       for (const e of nl.exitEdges) {
         if (e.from === exitFrom && e.to === exit) {
           continue;
@@ -3609,16 +3622,18 @@ export function structure(
           breakArms.push({ from: e.from, to: e.to, region });
         } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
           return null;
+        } else if (!owned && e.to.ops.some(effectful) && !dom.get(e.to)!.has(h)) {
+          copiesEffect = true;
         }
       }
-      return { arms, breaks, breakArms };
+      return { arms, breaks, breakArms, copiesEffect };
     };
     const plain = readArms(false);
     const read = plain ?? readArms(true);
     if (read === null) {
       continue;
     }
-    const { arms, breaks, breakArms } = read;
+    const { arms, breaks, breakArms, copiesEffect } = read;
 
     const commit =
       kind === 'while'
@@ -3644,7 +3659,9 @@ export function structure(
               arms,
             });
     // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
-    if (plain === null) {
+    if (copiesEffect) {
+      retCopyingReadings.set(h, commit);
+    } else if (plain === null) {
       copyingReadings.set(h, commit);
     } else {
       commit();
@@ -3744,7 +3761,8 @@ export function structure(
   // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
   // the source's two `break`s and one `tail`. Past all of them comes the two-level exit
   // (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop that
-  // every other reading declines.
+  // every other reading declines but one, the `while` or `do-while` that copies a ret tail with an
+  // effect into the body (`retCopyingReadings`), which comes last of all.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
@@ -3756,6 +3774,8 @@ export function structure(
       const copied = shape ?? (open ? (foreverShape(nl, true) ?? foreverShape(nl, false, true)) : null);
       if (copied !== null) {
         foreverLoops.set(h, copied);
+      } else if (open) {
+        retCopyingReadings.get(h)?.();
       }
     }
   }
