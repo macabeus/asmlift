@@ -587,6 +587,15 @@ const BYPASS_RET_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypass
   .replace('  %5: s32 = add %4, %4\n', '  %5: s32 = call %4 {target="t"}\n')
   .replace('  %11: s32 = call %10 {target="miss"}\n  br ^bb9(%10)\n', '  ret %10\n');
 
+/** The same loop whose exit path also ends in the tail: `miss(i); fin(i); return;` after the loop,
+ *  agbcc's three `fin` sites in one block (`synthetic:sw_xjret_post`). On the exit path: the
+ *  `exitTail` count copies the tail past the exit's `miss`, and the last resort waives its
+ *  `entry-bypasses-exit` rule for the guard's path, which ran neither the arm nor the exit. */
+const BYPASS_ON_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypasson').replace(
+  '  %11: s32 = call %10 {target="miss"}\n  br ^bb9(%10)\n',
+  '  %11: s32 = call %10 {target="miss"}\n  br ^bb5(%10)\n',
+);
+
 describe('a return tail a path that bypasses the loop also enters', () => {
   /** the loop's text, from `while (1) {` to its closing brace at the same indentation */
   const loopOf = (src: string) => {
@@ -614,6 +623,18 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     const loop = loopOf(src);
     expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);
     expect(loop).toMatch(/if \(v\d+ >= a1\) break;/);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('on the exit path: the arm copies the tail past the bypassing entrant', () => {
+    const { src, agreement, shipped } = judged(BYPASS_ON_EXIT_IR);
+    const loop = loopOf(src);
+    expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);
+    expect(loop).toMatch(/if \(v\d+ >= a1\) break;/);
+    // the exit path runs `miss` after the loop and then the copy written there, never inside it
+    expect(loop).not.toContain('miss(');
+    expect(src).toMatch(/\n\s+miss\(v\d+\);\n\s+\}\n\s+fin\(v\d+\);\n\s+return v\d+;/);
     expect(agreement).toEqual({ judged: 300, disagree: 0 });
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });

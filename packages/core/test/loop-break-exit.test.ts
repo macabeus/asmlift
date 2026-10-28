@@ -1249,8 +1249,15 @@ describe('a loop whose exit jumps over an `else`', () => {
     expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test('declines without the fold: the structurer has no second reading of the two exit targets', () => {
-    expect(() => judged(EXIT_OVER_ELSE)).toThrow(/unrecovered back-edge/);
+  test('without the fold only the last resort reads the two exit targets: the arm copies the join', () => {
+    // the arm's `out(id); return` is the exit path's tail past the bodyless `j`, which the `else` also
+    // enters; no reading takes it but the last resort's (A PATH THAT BYPASSES THE LOOP, at
+    // `earlyReturnArm`), which writes `out` twice where the fold's `break` writes it once
+    const r = judged(EXIT_OVER_ELSE);
+    expect(r.src).toContain('while (1) {');
+    expect(r.src.match(/out\(/g)).toHaveLength(2);
+    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a header whose way out is a break arm sharing its tail with the `else` leaves `while` to `while (1)`', () => {
