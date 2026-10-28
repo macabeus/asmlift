@@ -94,7 +94,11 @@ export interface SwitchRecoverDeps {
  *  sideways, into a block the switch does not dominate, has none: its paths through such a block
  *  are not the arm's, and it structures to the CFG's joins. It names those blocks instead
  *  (`escapedTo`, the first block outside the region on each such path), which is what decides
- *  whether its body can still be copied into the arms that fall into it (`copySharedFallTargets`). */
+ *  whether its body can still be copied into the arms that fall into it (`copySharedFallTargets`).
+ *  An arm that took such a copy carries the SIBLING's `escapedTo`, not its own first outside block
+ *  (which is the sibling's entry wherever the switch does not dominate it, as in
+ *  `synthetic:jt_xjdefpre`): those are the blocks where the copy it writes out steps sideways, the
+ *  only thing the copies ask of the set. */
 export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
@@ -333,12 +337,21 @@ function singleton(r: Ranges): number | null {
  *  path where each of those blocks runs only on to the merge or a `ret` — never back into the
  *  dispatch, a sibling (the entrants among them), round a cycle or out of the enclosing loop —
  *  which `sidewaysEnds` answers per block (switch-recover's `forwardToMerge`, the caller's to hand
- *  in; absent, no such sibling is copied). It shows where the default is ALSO entered from outside
- *  the dispatch: gcse's PRE puts code in the dispatch block, which then no longer dominates the
- *  default that the bounds test reaches too, and the default's tail runs on through blocks other
- *  arms cross-jumped into (`synthetic:jt_xjdefpre`, kleod EntityCreate). Each copying entrant
- *  then has no region either: like every arm that leaves sideways, it structures to the CFG's
- *  joins, which walks the sibling's blocks once inside it and stops at the merge.
+ *  in; absent, no such sibling is copied). Nothing in it is particular to one compiler: it is
+ *  asked of every jump table whose shared tail lost its region because a block on the tail's way
+ *  to the merge is also reached from outside the switch. Measured shapes, each host-differential
+ *  SAME against its source:
+ *  - agbcc's gcse PRE puts the next switch's index in the dispatch block, which then no longer
+ *    dominates the default the bounds test reaches too, and the default's tail runs on through
+ *    blocks other arms cross-jumped into (`synthetic:jt_xjdefpre`, kleod EntityCreate);
+ *  - with no PRE at all (IDO 7.1 has no gcse), the tail runs on into a second jump table after the
+ *    switch that the other branch of an `if` around it reaches too, and from there to the switch's
+ *    end: in a `for` whose tail `continue`s (switch-arms.test.ts, the ido7.1 `jl_cont` fixture),
+ *    or where a `return` in the tail makes the epilogue the merge, and the copies then write that
+ *    whole second switch into each entrant.
+ *  Each copying entrant then has no region either: like every arm that leaves sideways, it
+ *  structures to the CFG's joins, which walks the sibling's blocks once inside it and stops at the
+ *  merge.
  *
  *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
  *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
@@ -757,6 +770,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // the merge, and may not leave the enclosing loop (a step to its header or its exit), since the
   // copy writes the path out inside a case arm, where neither spells. Everything else it refuses
   // here it refuses there too.
+  //
+  // There, NONE of those refusals is shown load-bearing; each is CONSERVATIVE, a loud decline where
+  // the copies would be a longer program, not where they would be a wrong one. Measured by forcing
+  // `forwardToMerge` true (an agbcc/IDO/mwcc/gcc 2.7.2 probe set, host differential on every lift):
+  // - a step into a SIBLING refuses correct copies: agbcc `jb_ret` (the `jt_xjdefpre` shape with
+  //   `if (v == 9) return;` in the shared tail, so the epilogue is the merge and the empty `case 4:`
+  //   pointing at the second switch is a sibling) lifts SAME with them, writing case 4's body (that
+  //   second switch) into each entrant; switch-arms.test.ts' tail that re-enters case 6 lifts too,
+  //   and reads as the same duplication (that fixture is hand-edited asm, with no source to run);
+  // - a CYCLE refuses copies that read correct: the same test's tail that loops on itself lifts,
+  //   the loop written out in each entrant;
+  // - a step to the enclosing LOOP's header or exit was reached by no probe (`break` and
+  //   `continue` in a copied tail inside a `for`, on every lane): defensive only;
+  // - the dispatch and a dominating block were not isolated either.
+  // So they stand for the duplication they spare, not for soundness: dropping one needs only a
+  // differential over the shapes it then admits.
   const onlyReturns = (
     s: Block,
     b: Block,

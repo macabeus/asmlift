@@ -14088,6 +14088,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      leaves into runs only on to the merge or a `ret` (`copySharedFallTargets`' `sidewaysEnds`,
   //      switch-recover.ts `forwardToMerge`), so jt_xjdefpre lifts on agbcc with the default's tail
   //      once in each of cases 2 and 3 and once on the out-of-range path, and EntityCreate lifts.
+  //      That copy is not agbcc's or PRE's: any shared tail that leaves the switch's region only on
+  //      its way to the merge takes it, on IDO 7.1 too (core switch-arms.test.ts, `jl_cont`). No
+  //      row here pins that wider reach; the rows above stay as they were.
   //  25. sw_loopret / sw_loopret_ctl (sub_08016EEC). A jump table with no `default` as a `for` body,
   //      so its holes and bounds test go to the loop's latch, with one arm that `return`s, and an
   //      early `return` after the loop. agbcc and IDO then merge every `return` into one epilogue,

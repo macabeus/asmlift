@@ -9,6 +9,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
 import { pascalBackend } from '../src/backend/pascal';
+import { parseAsmData } from '../src/frontend/asmdata';
 import { frontendFor } from '../src/frontend/registry';
 import { mkOp } from '../src/ir/core';
 import type { Block } from '../src/ir/core';
@@ -729,6 +730,7 @@ test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LO
 // switch's region into the tail other arms were cross-jumped into, and reads as a `break` with no
 // region — while cases 2 and 3, whose `gOut = v; gOut2 = 5;` agbcc cross-jumped into the default,
 // both fall into it. The copy is safe because of where that tail GOES: only on to the merge.
+// Nothing here is agbcc's: the last test below pins the same copies on IDO 7.1, which has no PRE.
 
 /** synthetic:jt_xjdefpre:agbcc, the benchmark's own object text. */
 const xjdefpre = readFileSync(new URL('corpus/agbcc-jtxjdefpre.s', import.meta.url), 'utf8');
@@ -755,7 +757,11 @@ test('two arms cross-jumped into a default the PRE dispatch does not dominate ea
   expect(out).not.toContain('default:');
 });
 
-test('…but not where the tail runs into a sibling arm, or round a cycle: those still fail LOUD', () => {
+// CONSERVATIVE, not sound: with `forwardToMerge` forced true both shapes below lift, and read as
+// the same program written out longer (case 6's `f(7)` in every entrant; the loop in every
+// entrant). The refusals spare that duplication; switch-recover.ts' `onlyReturns` says which of
+// its refusals are measured so and which were never reached.
+test('…but not where the tail runs into a sibling arm, or round a cycle: those decline LOUD, conservatively', () => {
   // The tail re-enters case 6's body, which now leaves for the merge on its own.
   const sibling = xjdefpre
     .replace('\tsub\tr1, r1, #0x25\n.L4:', '\tsub\tr1, r1, #0x25\n\tcmp\tr5, #0x9\n\tbeq\t.L11\t@cond_branch\n.L4:')
@@ -804,6 +810,54 @@ test('copySharedFallTargets copies a region-less sibling only where `sidewaysEnd
   expect(one.get(e2)).toBe(exits.get(e2));
   expect(one.get(e1)).toEqual({ kind: 'break', escapedTo: new Set([s]) });
   expect(kept).toBe(1);
+});
+
+// The same copies with NO PRE: IDO 7.1 has no gcse, and the tail cases 2, 3 and the default share
+// still leaves the switch's region, because it runs on into the second jump table, which the
+// `if (c)` branch around the switch reaches too. `corpus/ido71-jlcont.{asm,txt}` are ido7.1's object for, at its
+// canonical flags (the `.txt` its `objdump -s -r -t`):
+//
+//   for (i = 0; i < 3; i++) {
+//       if (c) { gOut = x - 37; } else {
+//           switch (x) {
+//           case 1: f(1); break;
+//           case 2: h(v); gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           case 3: m(v); gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           case 4: break;
+//           case 5: q(v); break;
+//           case 6: f(7); break;
+//           default: gOut = v; gOut2 = 5; if (v == 3) continue; f(i); break;
+//           }
+//       }
+//       switch (x) { case 37: p[9] += 1; break; … case 44: p[16] += 8; break; }
+//       v++;
+//   }
+//
+// Without the region-less copies it declines "do not linearize"; with them it lifts, and the host
+// differential against that source is SAME.
+test('ido7.1, no PRE: a shared tail that runs on into code outside the switch is copied into its entrants', () => {
+  const fixture = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+  const dump = fixture('ido71-jlcont.txt');
+  const out = decompile('jl_cont', fixture('ido71-jlcont.asm'), MIPS_IDO, {
+    prototypes: {
+      jl_cont: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1, returnsVoid: true },
+    },
+    asmData: parseAsmData(dump, dump, dump, true),
+  }).source;
+  // The tail once per arm that runs it (labels are `x - 1`): two arms print it whole, source case 2
+  // (`case 1:`) and the default; source case 3 keeps the original, and falls on into case 4's
+  // empty body, which IS the code after the switch. The `continue` is the skipped `f(i)`, second
+  // switch and `v++`, so no `continue` is spelled.
+  const tail = /gOut = a3;\s+gOut2 = v\d+;\s+if \(a3 != v\d+\) \{\s+f\(v\d+\);\s+switch \(a0 \+ -37\)/g;
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;/);
+  expect(out).toMatch(/default:\s+gOut = a3;/);
+  expect([...out.matchAll(tail)]).toHaveLength(2);
+  expect(count(out, 'gOut = a3;')).toBe(3);
+  expect(out).not.toContain('continue');
 });
 
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
