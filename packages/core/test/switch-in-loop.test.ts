@@ -279,3 +279,74 @@ test('agbcc: a returning arm falls through into the next case', () => {
   expect(sw).not.toContain('default:');
   expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
 });
+
+test('agbcc: an arm falls through beside a returning tail a guard outside any loop shares', () => {
+  // No loop. agbcc cross-jumps the guard's `k(7); return;` and the arm's into one tail the switch
+  // does not dominate, so the arm escapes to it; the escape only returns, so the arm still falls
+  // into `case 1`. The rule belongs to the arm, not to the loop clamp.
+  //
+  //   if (n < 0) { k(7); return; }
+  //   switch (gId[a]) {
+  //   case 0: if (gV[a] == n) { k(7); return; } gOut = 1;
+  //   case 1: gOut += 2; break;
+  //   case 2: k(2); break;
+  //   case 3: k(3); break;
+  //   case 4: gOut = 4; break;
+  //   case 5: k(5); break;
+  //   }
+  //   gV[0] = 5;
+  const out = lift('ha', 'agbcc', 'agbcc-swnoloopfall.s');
+  const sw = switchOf(out);
+  expect(armOf(sw, 'case 0')).toMatch(/k\(7\);\s*return;/);
+  expect(sw).toMatch(/gOut = 1;\s*case 1:\s*gOut = gOut \+ 2;\s*break;/);
+  expect(sw).not.toContain('default:');
+  expect(out.indexOf('= 5;', out.indexOf(sw) + sw.length)).toBeGreaterThan(0);
+});
+
+test('agbcc: a comparison-tree arm falling through beside a `goto` past the loop declines to if-recovery', () => {
+  // A sparse switch is a comparison tree (Regime A), which has if-recovery to fall back on. Its
+  // `case 5` falls into `case 9` and escapes to `out:`, past the loop's exit. Committing to the
+  // `switch` there fails the whole function at emission ("leaves its switch for a loop exit"), so
+  // such an arm stays unstructurable in Regime A and the tree is spelled as `if`s.
+  //
+  //   for (i = 0; i <= n; i++) {
+  //       switch (gId[i]) {
+  //       case 5: if (gV[7] == 1) goto out; s += 2;
+  //       case 9: k(29); return t + 29;
+  //       case 40: if (gV[6] == 0) goto out; s += 2;
+  //       case 2000: k(2020);
+  //       }
+  //       s += 1;
+  //   }
+  //   gOut = s;
+  //   out: k(t); k(s); return t;
+  const out = decompile('q35', corpus('agbcc-swtreeescape.s'), TOOLCHAIN_TARGETS.agbcc.description, {
+    prototypes: { q35: { params: 2 }, k: { params: 1, returnsVoid: true } },
+  }).source;
+  expect(out).not.toContain('switch (');
+  expect(out).toMatch(/k\(29\);\s*return a0 \+ 29;/);
+  expect(out).toContain('gOut = ');
+});
+
+test('ido7.1: an escape that runs round an irreducible cycle does not count as only returning', () => {
+  // `case 0`'s `goto out` reaches a `while` entered in its middle (`goto mid`), a cycle whose
+  // back edge targets no dominator. The path never reaches a `ret` without going round it, so the
+  // arm cannot fall through beside that escape: the arms still do not linearize, loud.
+  //
+  //   for (i = 0; i <= n; i++) {
+  //       switch (gId[i]) {
+  //       case 0: if (gV[i] == a) goto out; gOut = 1;
+  //       case 1: gOut += 2; break;
+  //       case 2: k(2);
+  //       case 3: k(i); break;
+  //       case 4: gOut = 4; break;
+  //       case 5: k(5); break;
+  //       }
+  //   }
+  //   i = 0;
+  //   out: if (a > 2) goto mid;
+  //   while (i < 7) { k(i); mid: i++; gOut += i; }
+  expect(() => lift('ib', 'ido7.1', 'ido71-swloopirreducible.asm', 'ido71-swloopirreducible.txt')).toThrow(
+    /the jump table's case arms do not linearize/,
+  );
+});
