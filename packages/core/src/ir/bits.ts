@@ -16,7 +16,7 @@ import { OPCODES, type OpSig } from './opcodes';
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
  *  literal this analysis may fold through. Callers that have no materialization model pass none. */
 export interface BitsCtx {
-  defs: Map<Value, Op>;
+  defs: ReadonlyMap<Value, Op>;
   materialize?: ReadonlySet<Op>;
   /** A bound a CALLER already knows for a def — the escape hatch for facts this layer cannot see,
    *  such as a bitfield read a rendering pass has recognized and can price from the declaration.
@@ -64,6 +64,9 @@ export interface WordCtx {
    *  evaluator cannot compute: the memory the function wrote, through an address it cannot match
    *  to the read's, may be every word that read sees. Passed only beside `forwarded`. */
   overwritten?: ReadonlySet<Op>;
+  /** The function's own parameters. Given beside `incoming`, `mayAlwaysHold` also bounds a block
+   *  param by the ranges its in-edges pass (`stridedRange`); without it no param is bounded. */
+  entry?: ReadonlySet<Value>;
 }
 
 /** A value's word, over a lattice: not yet seen (`top`, a loop-carried param before its back
@@ -255,10 +258,36 @@ export function constWord(ctx: WordCtx, v: Value): number | null {
  *  evaluator cannot compute, or a value the solver never settled (a param no executed edge
  *  feeds). The fail-closed reading of `constWord`, for a caller to whom a constant it cannot name
  *  is as bad as the one it is looking for. A value that varies, or that is `w` on some paths only,
- *  answers false. */
+ *  answers false — and so does one that cannot hold `w` at all by what its ops leave
+ *  (`stridedRange`'s bounds, which read widths and arithmetic, never memory): a halfword reload of
+ *  memory this function overwrote is a constant this cannot compute, but never INT_MIN, and nor is
+ *  a param both of whose arms pass such a reload. */
 export function mayAlwaysHold(ctx: WordCtx, v: Value, w: number): boolean {
+  const rc = rangeCtxOf(ctx);
+  for (const wordFirst of [false, true]) {
+    const r = integerRange(rc, v, wordFirst);
+    if (r !== undefined && !rangeMayBe(r, w)) {
+      return false;
+    }
+  }
   const x = wordOf(ctx, v);
   return x.k === 'konst' || x.k === 'top' || (x.k === 'word' && x.w === (w | 0));
+}
+
+/** The range question's reading of a word context. A block param is read through its in-edges
+ *  only when the caller names the function's own params (`entry`), which arrive from a caller and
+ *  hold anything even where a back edge passes them a bounded value. */
+function rangeCtxOf(ctx: WordCtx): RangeCtx {
+  const entry = ctx.entry;
+  return {
+    defs: ctx.defs,
+    constOf: (x) => {
+      const d = ctx.defs.get(x);
+      return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : undefined;
+    },
+    incoming: entry === undefined ? new Map() : (ctx.incoming ?? new Map()),
+    entry: entry ?? new Set(),
+  };
 }
 
 /** Where an access lands, normalised: a ROOT (one SSA value, one symbol, or the absolute address
@@ -601,7 +630,10 @@ export interface LinearCtx {
 /** `v` as a sum of runtime values times constants, plus a constant (the `1` key): agbcc's `ch *
  *  12` is `((ch << 1) + ch) << 2`, which is 12 times `ch` only once the two `ch` terms are added.
  *  Every rule is a ring operation, so the form equals the machine's word modulo 2^32 whatever
- *  wraps on the way. A value this cannot read further is its own term. */
+ *  wraps on the way. A value this cannot read further is its own term. A coefficient is a JS
+ *  number, exact only up to 2^53: one past that rounds, and a later `sub` could cancel the rounded
+ *  coefficient to 0 and drop a term the word still holds, so a form whose coefficient leaves the
+ *  safe integers is no form (undefined). */
 export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1, number> | undefined {
   const c = ctx.constOf(v);
   if (c !== undefined) {
@@ -613,7 +645,8 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
   }
   const scaled = (x: Value, by: number) => {
     const l = linearTerms(ctx, x, depth + 1);
-    return l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+    const out = l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+    return out && [...out.values()].every(Number.isSafeInteger) ? out : undefined;
   };
   const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : ctx.constOf(d.operands[1]);
   if (d.opcode === 'shl' && k !== undefined && k >= 0 && k < 31) {
@@ -622,6 +655,10 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
   if (d.opcode === 'mul' && d.operands.length === 2 && k !== undefined) {
     return scaled(d.operands[0], k);
   }
+  // the wrapping `0 - x`, a ring operation too: agbcc's `mov rN, #2; neg rN, rN` is the constant -2
+  if (d.opcode === 'neg' && d.operands.length === 1) {
+    return scaled(d.operands[0], -1);
+  }
   if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
     const x = linearTerms(ctx, d.operands[0], depth + 1);
     const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
@@ -629,7 +666,7 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
       return undefined;
     }
     y.forEach((n, t) => x.set(t, (x.get(t) ?? 0) + n));
-    return x;
+    return [...x.values()].every(Number.isSafeInteger) ? x : undefined;
   }
   return new Map([[v, 1]]);
 }
@@ -641,7 +678,8 @@ export function linearFactor(ctx: LinearCtx, v: Value): number {
 }
 
 /** Every word a value may hold is `lo + stride * n` for some `n >= 0`, and lies in `[lo, hi]`, an
- *  unsigned closed interval. `stride` is 0 exactly when `lo === hi`. */
+ *  unsigned closed interval. `stride` is 0 exactly when `lo === hi`. (Inside this module the same
+ *  shape also carries an integer range before its move into one word, which may start below 0.) */
 export interface StridedRange {
   readonly lo: number;
   readonly hi: number;
@@ -664,24 +702,80 @@ const RANGE_BUDGET = 256;
 
 /** Every word `v` may hold, or undefined when this cannot bound it. The form is `linearTerms`; a
  *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
- *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, or, a block
- *  param, by the union of what its in-edges pass. Anything else — a function parameter, a whole
- *  word loaded from memory, a name nothing places, a param whose range depends on itself through a
- *  loop — bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the
- *  words are the sum's integer range moved into one word, when it fits one; a sum whose range
- *  crosses a multiple of 2^32 holds words on both sides of zero, which no interval names. Exact is
- *  not the point: an answer must hold every word the machine can compute there, and a wider one
- *  only proves less.
- *
- *  KNOWN GAP: a signed narrow index bounds nothing. Every leaf is unsigned (`provableBits` reads a
- *  signed value as 32 bits), and each in-edge of a param is moved into one word before the union,
- *  so `8 * (s8)i` — [-1024, 1016], across zero — names no interval even with a signed leaf. Both
- *  would have to change; no real GBA DMA function measured yet needs either. */
+ *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
+ *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), or, a block param, by the
+ *  union of what its in-edges pass. Anything else — a function parameter, a whole word loaded
+ *  from memory, a name nothing places, a param whose range depends on itself through a loop —
+ *  bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the words
+ *  are the sum's integer range moved into one word, when it fits one; a sum whose range crosses a
+ *  multiple of 2^32 holds words on both sides of zero, which no interval names (a lone signed
+ *  narrow value among them: `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold
+ *  every word the machine can compute there, and a wider one only proves less. */
 export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
+  const r = integerRange(ctx, v, false);
+  const one = r === undefined ? undefined : intoWord(r);
+  if (one !== undefined || r === undefined) {
+    return one;
+  }
+  const moved = integerRange(ctx, v, true);
+  return moved === undefined ? undefined : intoWord(moved);
+}
+
+/** An integer range moved into one unsigned word, or undefined when it crosses a multiple of
+ *  2^32. Every integer in the answer is congruent modulo 2^32 to the one it moved. */
+function intoWord(r: StridedRange): StridedRange | undefined {
+  const base = Math.floor(r.lo / WORD) * WORD;
+  return r.hi - base >= WORD ? undefined : { lo: r.lo - base, hi: r.hi - base, stride: r.stride };
+}
+
+/** Whether an integer range holds an integer congruent to `w` modulo 2^32 — a word the machine
+ *  may compute there. Fails open (true) past a range too wide to walk. */
+function rangeMayBe(r: StridedRange, w: number): boolean {
+  let x = r.lo + mod(mod(w) - r.lo);
+  for (let n = 0; x <= r.hi; x += WORD, n++) {
+    if (n > 64 || (r.stride === 0 ? x === r.lo : (x - r.lo) % r.stride === 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The range a narrow read or a `sext` leaves whatever it reads, where `provableBits` names none:
+ *  a sign-extending `load`, a `sext` (its `width` in bits), and a flat array's `aload` (whose
+ *  `elemSize` is the element it reads; a struct-array `aload`'s, with a `fieldOff`, is the stride,
+ *  not the field, and bounds nothing). An integer range: a signed one straddles zero. */
+function narrowLeaf(d: Op): StridedRange | undefined {
+  const bits =
+    d.opcode === 'sext'
+      ? d.attrs.width
+      : d.opcode === 'load' && d.attrs.signed === true && typeof d.attrs.width === 'number'
+        ? d.attrs.width * 8
+        : d.opcode === 'aload' && d.attrs.fieldOff === undefined && typeof d.attrs.elemSize === 'number'
+          ? d.attrs.elemSize * 8
+          : undefined;
+  if (typeof bits !== 'number' || !(bits > 0 && bits < 32)) {
+    return undefined;
+  }
+  return d.opcode === 'sext' || d.attrs.signed === true
+    ? { lo: -(2 ** (bits - 1)), hi: 2 ** (bits - 1) - 1, stride: 1 }
+    : { lo: 0, hi: 2 ** bits - 1, stride: 1 };
+}
+
+/** `stridedRange` before the move into one word: integers, every one of which is congruent modulo
+ *  2^32 to a word `v` may hold, and which cover them all. A block param is the union of what its
+ *  in-edges pass, read one of two ways, each a sound cover on its own: as the integers they are
+ *  (`wordFirst` false: a constant -1 beside a halfword reload is [-1, 65535], which no word
+ *  interval names but which excludes INT_MIN), or each moved into one word first where it fits one
+ *  (`wordFirst` true: a -1 beside a 0 is {0, 2^32 - 1}, one word interval where [-1, 0] is none).
+ *  The two never mix in one union. Where the integer union fits one word, both readings name the
+ *  same words (every edge then shares one multiple of 2^32), so `stridedRange` asks the integer
+ *  reading first and the moved one only where that crosses a multiple; `mayAlwaysHold` asks both,
+ *  and a word either excludes cannot be held. */
+function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
   const bits: BitsCtx = {
-    defs: ctx.defs as Map<Value, Op>,
+    defs: ctx.defs,
     bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
   };
   const termRange = (t: Value): StridedRange | undefined => {
@@ -689,7 +783,12 @@ export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined 
     if (at !== undefined) {
       return { lo: mod(at), hi: mod(at), stride: 0 };
     }
-    if (ctx.defs.has(t)) {
+    const d = ctx.defs.get(t);
+    if (d !== undefined) {
+      const leaf = narrowLeaf(d);
+      if (leaf !== undefined) {
+        return leaf;
+      }
       const n = provableBits(bits, t);
       return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
     }
@@ -701,10 +800,11 @@ export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined 
     try {
       let out: StridedRange | undefined;
       for (const x of ins) {
-        const r = x === undefined ? undefined : rangeOf(x);
-        if (r === undefined) {
+        const whole = x === undefined ? undefined : rangeOf(x);
+        if (whole === undefined) {
           return undefined;
         }
+        const r = wordFirst ? (intoWord(whole) ?? whole) : whole;
         out =
           out === undefined
             ? r
@@ -735,15 +835,16 @@ export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined 
       if (r === undefined) {
         return undefined;
       }
-      lo += c > 0 ? c * r.lo : c * r.hi;
-      hi += c > 0 ? c * r.hi : c * r.lo;
-      stride = gcdOf(stride, c * r.stride);
+      const parts = [c * r.lo, c * r.hi, c * r.stride];
+      lo += c > 0 ? parts[0] : parts[1];
+      hi += c > 0 ? parts[1] : parts[0];
+      // every product and partial sum stays exact, or a rounded one could cancel to a false range
+      if (![...parts, lo, hi].every(Number.isSafeInteger)) {
+        return undefined;
+      }
+      stride = gcdOf(stride, parts[2]);
     }
-    if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) {
-      return undefined;
-    }
-    const base = Math.floor(lo / WORD) * WORD;
-    return hi - base >= WORD ? undefined : { lo: lo - base, hi: hi - base, stride };
+    return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };
   return rangeOf(v);
 }

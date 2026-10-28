@@ -5777,6 +5777,42 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     ).toContain('a0 <= -v0');
   });
 
+  test('a reload narrower than a word is never INT_MIN, whatever the write before it left', () => {
+    // cmn_store's shape (`p->x -= 8; if (p->x <= -gMag)`, u16 gMag): the `strh` through p may land
+    // on gMag, so the reload reads a word the evaluator cannot compute — but a zero- or
+    // sign-extended halfword or byte is never 0x80000000, so the negation has an int spelling.
+    const gap = 'the mathematical negation of the constant 0x80000000 has no int spelling';
+    const store = (load: string, br = 'bgt') =>
+      `\tldr\tr2, .Lg\n\tstrh\tr1, [r3]\n${load}\tcmn\tr0, r2\n\t${br}\t.Ltrue\n${TAIL}.Lg: .word gMag\n`;
+    for (const load of [
+      '\tldrh\tr2, [r2]\n',
+      '\tldrb\tr2, [r2]\n',
+      '\tmov\tr4, #0\n\tldrsh\tr2, [r2, r4]\n',
+      '\tmov\tr4, #0\n\tldrsb\tr2, [r2, r4]\n',
+    ]) {
+      expect(dc('f', store(load)).source).toContain('<= -');
+    }
+    // The same reload as a whole word may be what the store left there: it still refuses.
+    expect(() => dc('f', store('\tldr\tr2, [r2]\n'))).toThrow(gap);
+    // A halfword shifted back up to the sign bit is INT_MIN at 0x8000: [0, 0xffff0000] holds it.
+    expect(() => dc('f', store('\tldrh\tr2, [r2]\n\tlsl\tr2, r2, #16\n'))).toThrow(gap);
+    // Merged by a param (agbcc's `m = c ? gA : gD`, a halfword in one arm, a byte in the other), the
+    // bound is the union of the arms'; one whole-word arm leaves the refusal.
+    const merged = (left: string, right: string) =>
+      `\tldr\tr2, .Lg\n\tstrh\tr1, [r3]\n\tcmp\tr4, #0\n\tbeq\t.Lb\n${left}\tb\t.Lj\n.Lb:\n${right}.Lj:\n` +
+      `\tcmn\tr0, r2\n\tbgt\t.Ltrue\n${TAIL}.Lg: .word gMag\n`;
+    expect(dc('f', merged('\tldrh\tr2, [r2]\n', '\tldrb\tr2, [r2, #4]\n')).source).toContain('<= -');
+    expect(() => dc('f', merged('\tldrh\tr2, [r2]\n', '\tldr\tr2, [r2, #4]\n'))).toThrow(gap);
+    // A negative constant arm (agbcc's `v = c ? -2 : gB`) beside a byte reload unions as integers,
+    // [-2, 255], not as the word 0xfffffffe beside [0, 255], which would span INT_MIN.
+    expect(dc('f', merged('\tmov\tr2, #2\n\tneg\tr2, r2\n', '\tldrb\tr2, [r2, #4]\n')).source).toContain('<= -');
+    expect(() => dc('f', merged('\tmov\tr2, #2\n\tneg\tr2, r2\n', '\tldr\tr2, [r2, #4]\n'))).toThrow(gap);
+    // A carry branch refuses for its own reason, bound or no bound.
+    expect(() => dc('f', store('\tldrh\tr2, [r2]\n', 'bcs'))).toThrow(
+      "conditional branch 'bcs' tests the carry of a 'cmn', and the carry out of a + b is not a >=u -b",
+    );
+  });
+
   test('switch recovery never reads a guard against the mathematical negation of INT_MIN as a bound', () => {
     // `bgt .Lhi` is never taken (a0 - 2^31 is never > 0), so this always returns 0. Folding the
     // `neg_s` as a wrapping negation would make the guard `a0 > INT_MIN`, true for every case, and

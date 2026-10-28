@@ -5281,15 +5281,20 @@ export function structure(
       // `sub`/`orr`/`eor` of constants, a param both arms of a diamond set, a reload of a store
       // nothing can have overwritten, a reload of memory this function wrote on every path through
       // an address it cannot match — so the question goes to the shared word evaluator, and fails
-      // closed: a constant it cannot compute refuses too.
-      // An operand that is INT_MIN on some paths only still lifts; that is the "might hold" case.
-      // Only hand-written asm reaches the refusal — agbcc folds the negation of a constant.
+      // closed: a constant it cannot compute refuses too — unless what its ops leave cannot make
+      // 0x80000000 at all (a halfword or byte reload of that memory, a narrowing cast, a param
+      // whose arms pass such reloads or small constants: `stridedRange`), whatever the evaluator
+      // could not say. An operand that is INT_MIN on some paths only still lifts; that is the
+      // "might hold" case. agbcc folds the negation of a constant it sees, but compiled C still
+      // reaches the refusal: a whole-word reload of memory a store before it may have overwritten
+      // (`p->x -= 8; if (p->x <= -gMag)` with an s32 gMag) is a word this cannot compute.
       const x = e(d.operands[0]);
       wordCtx ??= {
         defs,
         incoming: incomingArgs(fn.blocks),
         forwarded: storeForwards(fn.blocks),
         overwritten: overwrittenReads(fn.blocks),
+        entry: new Set(fn.blocks[0]?.params ?? []),
       };
       if (mayAlwaysHold(wordCtx, d.operands[0], 0x80000000)) {
         return mkGap('the mathematical negation of the constant 0x80000000 has no int spelling', [x]);

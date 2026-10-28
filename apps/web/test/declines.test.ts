@@ -983,6 +983,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
+    // `cmn_store:agbcc` lifts: its reload is a halfword, never INT_MIN.
+    'cmn-int-min',
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',

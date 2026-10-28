@@ -166,9 +166,9 @@ describe('constWord — the word a value always holds', () => {
   test('an op it has no rule for is no word, but MAY be one', () => {
     const defs = new Map<Value, Op>();
     const k = def(defs, 'const', { value: 0x80000000 });
-    const ext = def(defs, 'zext', { width: 16 }, [k]);
-    expect(constWord(W(defs), ext)).toBeNull();
-    expect(mayAlwaysHold(W(defs), ext, 0x80000000)).toBe(true);
+    const rot = def(defs, 'rotr', {}, [k, def(defs, 'const', { value: 0 })]);
+    expect(constWord(W(defs), rot)).toBeNull();
+    expect(mayAlwaysHold(W(defs), rot, 0x80000000)).toBe(true);
     // A register shift by 32 or more: Thumb gives 0, MIPS masks the amount to five bits.
     const wide = def(defs, 'shl', {}, [def(defs, 'const', { value: 1 }), def(defs, 'const', { value: 32 })]);
     expect(constWord(W(defs), wide)).toBeNull();
@@ -511,5 +511,143 @@ describe('storeForwards — the store a load must read', () => {
     const at = (vals: Value[]): WordCtx => ({ defs, forwarded: new Map([[defs.get(load)!, vals]]) });
     expect(mayAlwaysHold(at([m1, m2]), load, 0x80000000)).toBe(true);
     expect(mayAlwaysHold(at([m1, five]), load, 0x80000000)).toBe(false);
+  });
+});
+
+describe("mayAlwaysHold — a word the value's ops cannot produce", () => {
+  const INT_MIN = 0x80000000;
+  const overwritten = (defs: Map<Value, Op>, ...vs: Value[]): WordCtx => ({
+    defs,
+    overwritten: new Set(vs.map((x) => defs.get(x)!)),
+  });
+
+  test('an overwritten reload narrower than a word is a constant it cannot compute, but never INT_MIN', () => {
+    const defs = new Map<Value, Op>();
+    const narrow = [1, 2].flatMap((width) =>
+      [false, true].map((signed) => def(defs, 'load', { off: 0, width, signed }, [v()])),
+    );
+    for (const l of narrow) {
+      expect(constWord(overwritten(defs, l), l)).toBeNull();
+      expect(mayAlwaysHold(overwritten(defs, l), l, INT_MIN)).toBe(false);
+    }
+    // A whole word may be anything this function wrote: it still refuses.
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    expect(mayAlwaysHold(overwritten(defs, word), word, INT_MIN)).toBe(true);
+  });
+
+  test('the bound is the range the width and signedness leave, not merely "not INT_MIN"', () => {
+    const defs = new Map<Value, Op>();
+    const u16 = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const s16 = def(defs, 'load', { off: 0, width: 2, signed: true }, [v()]);
+    const u8 = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const ctx = overwritten(defs, u16, s16, u8);
+    expect(mayAlwaysHold(ctx, u16, 0xffff)).toBe(true);
+    expect(mayAlwaysHold(ctx, u16, -1)).toBe(false);
+    expect(mayAlwaysHold(ctx, s16, -1)).toBe(true);
+    expect(mayAlwaysHold(ctx, s16, -0x8000)).toBe(true);
+    expect(mayAlwaysHold(ctx, s16, 0x8000)).toBe(false);
+    expect(mayAlwaysHold(ctx, u8, 0x100)).toBe(false);
+  });
+
+  test('a narrow read shifted back up to the sign bit may be INT_MIN: 0x8000 << 16 is', () => {
+    const defs = new Map<Value, Op>();
+    const h = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const up = def(defs, 'shl', { imm: 16 }, [h]);
+    expect(mayAlwaysHold(overwritten(defs, h), up, INT_MIN)).toBe(true);
+  });
+
+  test('a narrowing cast of anything is never INT_MIN; the constant itself still is', () => {
+    const defs = new Map<Value, Op>();
+    const k = def(defs, 'const', { value: INT_MIN });
+    expect(mayAlwaysHold({ defs }, k, INT_MIN)).toBe(true);
+    for (const op of ['zext', 'sext']) {
+      for (const width of [8, 16]) {
+        expect(mayAlwaysHold({ defs }, def(defs, op, { width }, [k]), INT_MIN)).toBe(false);
+      }
+    }
+    // provableBits' bound: a zero-fill shift right or a non-negative mask leaves fewer than 32 bits.
+    expect(mayAlwaysHold({ defs }, def(defs, 'shr_u', { imm: 1 }, [k]), INT_MIN)).toBe(false);
+    expect(mayAlwaysHold({ defs }, def(defs, 'and', { imm: 0x7fffffff }, [k]), INT_MIN)).toBe(false);
+  });
+
+  test('a param whose every in-edge passes an overwritten narrow reload is never INT_MIN', () => {
+    // agbcc's `m = c ? gA : gD` (u16, u8) after a store that may land on either: the word evaluator
+    // meets two constants it cannot compute, but the range their widths leave is [0, 0xffff].
+    const defs = new Map<Value, Op>();
+    const a = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
+    const d = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const s8 = def(defs, 'load', { off: 0, width: 1, signed: true }, [v()]);
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const m = v();
+    const at = (args: Value[], entry: Set<Value> | null = new Set()): WordCtx => ({
+      defs,
+      overwritten: new Set([a, d, s8, word].map((x) => defs.get(x)!)),
+      incoming: new Map([[m, args]]),
+      ...(entry === null ? {} : { entry }),
+    });
+    expect(mayAlwaysHold(at([a, d]), m, INT_MIN)).toBe(false);
+    // a signed arm straddles zero, and still holds no INT_MIN
+    expect(mayAlwaysHold(at([a, s8]), m, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(at([a, s8]), m, -1)).toBe(true);
+    // one whole-word arm may be what the store left: it refuses
+    expect(mayAlwaysHold(at([a, word]), m, INT_MIN)).toBe(true);
+    // a function parameter arrives from a caller whatever its back edges pass
+    expect(mayAlwaysHold(at([a, d], new Set([m])), m, INT_MIN)).toBe(true);
+    // a caller that names no entry params gets no param bound at all
+    expect(mayAlwaysHold(at([a, d], null), m, INT_MIN)).toBe(true);
+  });
+
+  test('a negative constant arm beside a narrow reload is unioned as integers, so it is never INT_MIN', () => {
+    // agbcc's `v = c ? -1 : gA` (s16) and `v = c ? -2 : gB` (u8) after an overwriting store: moved
+    // into one word first, -1 is 0xffffffff and its union with [-32768, 32767] spans 0x80000000;
+    // as integers the arms are [-32768, 32767] and [-2, 255], and neither holds INT_MIN.
+    const defs = new Map<Value, Op>();
+    const s16 = def(defs, 'load', { off: 0, width: 2, signed: true }, [v()]);
+    const u8 = def(defs, 'load', { off: 0, width: 1, signed: false }, [v()]);
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const minus1 = def(defs, 'const', { value: -1 });
+    const minus2 = def(defs, 'const', { value: -2 });
+    const big = def(defs, 'const', { value: 0x7fffff00 });
+    const m = v();
+    const at = (args: Value[]): WordCtx => ({
+      defs,
+      overwritten: new Set([s16, u8, word].map((x) => defs.get(x)!)),
+      incoming: new Map([[m, args]]),
+      entry: new Set(),
+    });
+    expect(mayAlwaysHold(at([minus1, s16]), m, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(at([minus2, u8]), m, INT_MIN)).toBe(false);
+    // 2^31 - 256 beside the s16 reload: as integers [-32768, 0x7fffff00], no INT_MIN; moved into
+    // one word first the reload's negatives sit at 0xffff8000.. and the union spans 0x80000000.
+    // The constant arm meets the reload to KONST, so only the integer union answers false here
+    // (two distinct constant arms would meet to VAR and answer false without any range).
+    expect(mayAlwaysHold(at([big, s16]), m, INT_MIN)).toBe(false);
+    // a whole-word arm still refuses, whichever way the constant arm is read
+    expect(mayAlwaysHold(at([minus1, word]), m, INT_MIN)).toBe(true);
+  });
+
+  test('a coefficient past 2^53 bounds nothing, so a rounded one cannot cancel to a false range', () => {
+    // `b = w & 1` of an overwritten whole word, then `(b<<30<<30<<30) + (b<<16<<15) - (b<<30<<30<<30)`:
+    // the word is b << 31, INT_MIN whenever b is 1. As doubles 2^90 + 2^31 rounds to 2^90, and
+    // the sub cancels it to 0, a range of {0} that would wrongly exclude INT_MIN.
+    const defs = new Map<Value, Op>();
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const b = def(defs, 'and', { imm: 1 }, [word]);
+    const shl = (x: Value, imm: number) => def(defs, 'shl', { imm }, [x]);
+    const big = shl(shl(shl(b, 30), 30), 30);
+    const sum = def(defs, 'add', {}, [big, shl(shl(b, 16), 15)]);
+    const out = def(defs, 'sub', {}, [sum, big]);
+    expect(mayAlwaysHold(overwritten(defs, word), out, INT_MIN)).toBe(true);
+    // the same word spelled directly refuses too
+    expect(mayAlwaysHold(overwritten(defs, word), shl(shl(b, 16), 15), INT_MIN)).toBe(true);
+  });
+
+  test("a struct-array aload's elemSize is its stride, which bounds nothing", () => {
+    const defs = new Map<Value, Op>();
+    const flat = def(defs, 'aload', { elemSize: 2, signed: false }, [v(), v()]);
+    const field = def(defs, 'aload', { elemSize: 2, signed: false, fieldOff: 0 }, [v(), v()]);
+    const ctx = overwritten(defs, flat, field);
+    expect(mayAlwaysHold(ctx, flat, INT_MIN)).toBe(false);
+    expect(mayAlwaysHold(ctx, field, INT_MIN)).toBe(true);
   });
 });

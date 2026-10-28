@@ -248,9 +248,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // A `cmn`'s negation whose operand MAY ALWAYS be INT_MIN (`structure/structure.ts`, the `neg_s`
     // rule over ir/bits.ts `mayAlwaysHold`), fail-closed: `-(s32)0x80000000` has no C spelling
-    // that is the machine's +2^31. Its one row, `cmn_store`, refuses past need: a zero-extended
-    // halfword reloaded after a store through another pointer reads as a constant the evaluator
-    // cannot compute, though no halfword is 0x80000000.
+    // that is the machine's +2^31. No row reaches it: `cmn_store:agbcc`, its last, lifts because a
+    // halfword reloaded after a store through another pointer is bounded by its width, and what
+    // still refuses (a whole-word reload of that memory) has no row.
     key: 'cmn-int-min',
     label: 'Thumb cmn whose negated operand may always be INT_MIN (a reload after a store)',
     pattern: /the mathematical negation of the constant 0x80000000 has no int spelling/,

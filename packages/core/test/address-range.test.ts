@@ -108,6 +108,31 @@ describe('addressRangeOf — what a computed address may be', () => {
     expect(rangeIn([entry], entry.op('zext', { width: 8 }, [p]))).toEqual({ lo: 0, hi: 0xff, stride: 1 });
   });
 
+  test('a signed narrow index straddles zero: alone it names no interval, off a placed base it does', () => {
+    const p = v();
+    const entry = block([p]);
+    const i = entry.op('load', { off: 0, width: 1, signed: true }, [p]);
+    const base = entry.op('const', { value: 0x3003440 });
+    const addr = entry.op('add', {}, [base, entry.op('shl', { imm: 3 }, [i])]);
+    expect(rangeIn([entry], addr)).toEqual({ lo: 0x3003440 - 1024, hi: 0x3003440 + 1016, stride: 8 });
+    expect(rangeIn([entry], entry.op('add', {}, [base, entry.op('sext', { width: 16 }, [p])]))).toEqual({
+      lo: 0x3003440 - 0x8000,
+      hi: 0x3003440 + 0x7fff,
+      stride: 1,
+    });
+    // a sign-extending arm merged by a param keeps its integers until the base moves them
+    const left = block();
+    const right = block();
+    const q = v();
+    const join = block([q]);
+    condBr(entry, p, [left, []], [right, []]);
+    br(left, join, [left.op('load', { off: 0, width: 1, signed: true }, [p])]);
+    br(right, join, [right.op('load', { off: 0, width: 1, signed: false }, [p])]);
+    const at = join.op('add', {}, [q, join.op('const', { value: 0x3003440 })]);
+    expect(rangeIn([entry, left, right, join], at)).toEqual({ lo: 0x3003440 - 128, hi: 0x3003440 + 255, stride: 1 });
+    expect(rangeIn([entry, left, right, join], q)).toBeUndefined();
+  });
+
   test('a mask and a zero-fill shift bound their result whatever they take; a shift left carries it', () => {
     const p = v();
     const entry = block([p]);
@@ -160,6 +185,25 @@ describe('addressRangeOf — what a computed address may be', () => {
     condBr(entry, p, [left, []], [join, [entry.op('const', { value: 0x40000c8 })]]);
     br(left, join, [left.op('const', { value: 0x40000bc })]);
     expect(rangeIn([entry, left, join], q)).toEqual({ lo: 0x40000bc, hi: 0x40000c8, stride: 12 });
+  });
+
+  test('merged arms that straddle zero as integers are moved into one word arm by arm', () => {
+    // {-1, 0} is no word interval as integers; arm by arm it is {0, 0xffffffff}, every word it holds
+    const p = v();
+    const entry = block([p]);
+    const q = v();
+    const join = block([q]);
+    const left = block();
+    condBr(entry, p, [left, []], [join, [entry.op('const', { value: 0 })]]);
+    br(left, join, [left.op('const', { value: -1 })]);
+    expect(rangeIn([entry, left, join], q)).toEqual({ lo: 0, hi: 0xffffffff, stride: 0xffffffff });
+    // arms on one side of zero name the same words either way
+    const r = v();
+    const join2 = block([r]);
+    const left2 = block();
+    condBr(entry, p, [left2, []], [join2, [entry.op('const', { value: -3 })]]);
+    br(left2, join2, [left2.op('const', { value: -1 })]);
+    expect(rangeIn([entry, left2, join2], r)).toEqual({ lo: 0xfffffffd, hi: 0xffffffff, stride: 2 });
   });
 
   test('a value whose range depends on itself through a loop bounds nothing', () => {
