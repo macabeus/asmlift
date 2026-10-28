@@ -6311,6 +6311,21 @@ export function structure(
     }
     return [{ k: 'break', ofSwitch: true }];
   };
+  // The blocks of a closed arm whose edge to the switch's `merge` is the two-level exit
+  // (`TwoLevelExit`) of a `while (1)` opened in the arm: its header is one of the arm's blocks and
+  // its second target is the merge. Only that exit: an edge from another loop's body to the merge
+  // is that loop's own reading, and an edge from the arm outside any loop a `break;`.
+  const twoLevelOutOf = (region: ReadonlySet<Block>, merge: Block): Set<Block> => {
+    const out = new Set<Block>();
+    for (const fl of foreverLoops.values()) {
+      if (region.has(fl.header) && fl.twoLevel?.to === merge) {
+        for (const x of fl.twoLevel.from) {
+          out.add(x);
+        }
+      }
+    }
+    return out;
+  };
   // THE JOIN OF A BRANCH INSIDE AN ARM. The CFG's join for `if (c) break;` lies past the switch —
   // in a falling arm the fall-through path reaches the merge too, through the next arm, and in a
   // closed arm the merge IS the join — so structuring to it would copy the next arm, or the rest of
@@ -6323,6 +6338,16 @@ export function structure(
   // on the other side's path, which the falling path cannot jump over. Null ⇒ the paths meet only
   // at the arm's end. Asked only in the innermost arm frame and outside any loop entered since,
   // which is where `switchBreakAt` would spell the `break;`.
+  //
+  // A LOOP'S TWO-LEVEL EXIT TO THE MERGE IS NO `break;` EITHER (`twoLevelOutOf`). `case 1: for (j…)
+  // { if (hit) goto out; } k(i); out: break;` leaves the loop opened in the arm from `hit` straight
+  // to the merge, and a `break;` there would leave the loop, not the switch: `emitForever` spells
+  // it `f = 1; break;` and runs the code it skips under `if (f == 0)`, up to the merge. In a closed
+  // arm the merge is the arm's end, so its path runs there, and it goes to EXIT. Deleted, the guard
+  // around such a loop (`if (0 <= m)`, its zero-trip test) would join at the loop's own exit,
+  // `k(i)`, the very code the two-level exit skips, and `emitForever` would refuse the region
+  // (`TWO_LEVEL_REGION_GATES`). In a falling arm the merge lies past the sibling the arm falls into,
+  // so the edge jumps over the arm's end and stays deleted, as a `break;` would be.
   const armJoins = new Map<ReadonlySet<Block>, Map<Block, Block | null>>();
   const armJoin = (b: Block, stop: Block | null): Block | null | undefined => {
     const f = switchFrames[switchFrames.length - 1];
@@ -6332,7 +6357,13 @@ export function structure(
     const region = f.region;
     let pd = armJoins.get(region);
     if (pd === undefined) {
-      pd = regionJoins(region, null, false, f.fallsTo);
+      pd = regionJoins(
+        region,
+        null,
+        false,
+        f.fallsTo,
+        f.fallsTo === null && f.merge !== null ? twoLevelOutOf(region, f.merge) : undefined,
+      );
       armJoins.set(region, pd);
     }
     const join = pd.get(b) ?? null;
@@ -7991,12 +8022,14 @@ export function structure(
   // The post-dominators `loopJoin` reads, over `body` with every edge out of it and every edge back
   // to `header` (when there is one) deleted — save an edge to `toExit`, which goes to EXIT. Also
   // the join inside a switch arm (`armJoin`), whose `toExit` is the sibling a falling arm runs into
-  // and null for a closed one.
+  // and null for a closed one, and whose `exitsFrom` are the blocks of a loop in a closed arm that
+  // leave it for the merge by its two-level exit (`twoLevelOutOf`): each of those goes to EXIT too.
   function regionJoins(
     body: ReadonlySet<Block>,
     header: Block | null,
     endsCut: boolean,
     toExit: Block | null = null,
+    exitsFrom: ReadonlySet<Block> = new Set(),
   ): Map<Block, Block | null> {
     const inBody = (n: Block): Block[] => [...new Set(successorsOf(n))].filter((x) => body.has(x) && x !== header);
     const ends = (n: Block): boolean =>
@@ -8005,7 +8038,7 @@ export function structure(
       n.ops[n.ops.length - 1].opcode === 'br' &&
       n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
       !(successorsOf(n)[0] === header && new Set(preds.get(n)?.filter((q) => body.has(q))).size > 1);
-    const exits = (n: Block): boolean => toExit !== null && successorsOf(n).includes(toExit);
+    const exits = (n: Block): boolean => (toExit !== null && successorsOf(n).includes(toExit)) || exitsFrom.has(n);
     // IN A FALLING ARM, A PATH THAT CANNOT FALL ENDS WHERE IT LEAVES THE FALLING PATHS. Deleting the
     // edge to the merge or a `ret` covers only a jump straight off the branch (`if (b) break;`).
     // When the leaving path runs code first — `if (b) { g(7); break; }`, or a `return k` through a

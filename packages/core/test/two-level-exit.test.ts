@@ -42,10 +42,11 @@ const judged = (ir: string, hooks: StructureHooks = {}) => {
 
 /** What the seeds exercise, read off the IR's own traces: per outer iteration (each `mark`), how
  *  many `probe` calls ran and whether `k` followed. A hit is an iteration that probed and skipped
- *  `k`; a first-element hit probed once. */
+ *  `k`; a first-element hit probed once; a zero-trip one ran `k` without probing, and one that did
+ *  neither took a path around the loop (another case arm). */
 const covers = (ir: string) => {
   const fn = parse(ir);
-  const seen = { zeroTrips: 0, firstHit: 0, laterHit: 0, noHit: 0 };
+  const seen = { zeroTrips: 0, firstHit: 0, laterHit: 0, noHit: 0, noLoop: 0 };
   for (const seed of SEEDS) {
     let trace;
     try {
@@ -65,7 +66,11 @@ const covers = (ir: string) => {
     }
     for (const it of iterations) {
       if (it.probes === 0) {
-        seen.zeroTrips++;
+        if (it.k) {
+          seen.zeroTrips++;
+        } else {
+          seen.noLoop++;
+        }
       } else if (it.k) {
         seen.noHit++;
       } else if (it.probes === 1) {
@@ -256,6 +261,68 @@ test('a two-level exit needs no loop around it', () => {
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
   expectCovered(NO_ENCLOSING_LOOP);
+});
+
+/** The loop in a SWITCH ARM, its `goto` landing on the arm's `break` (`synthetic:brk2sw_one`'s
+ *  shape: `case 0: case 1: case 4: for (j…) { if (hit) goto out; } k(i); out: break; case 2:
+ *  h(i); break;`). The hit's edge goes to the switch's merge, which a `break;` cannot reach from
+ *  inside the loop: it is the loop's two-level exit, and the arm's join reads it as running to the
+ *  arm's end (structure.ts `twoLevelOutOf`), so the zero-trip guard around the loop joins at the
+ *  merge and not at `k(i)`, the code the exit skips. */
+const GOTO_ARM_END = `fn gotoarmend {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+test('a `goto` to the end of its switch arm lifts as a flag inside the arm', () => {
+  const { src, agreement, shipped } = judged(GOTO_ARM_END);
+  expect(src).toBe(
+    'void gotoarmend(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n' +
+      '    v0 = 0;\n    if (v0 < a0) {\n        v2 = v0;\n        do {\n            mark(v2);\n            v1 = 1;\n' +
+      '            switch (v2) {\n                case 0:\n                case 1:\n                case 4:\n' +
+      '                    if (a1 >= v0) {\n                        v3 = v0;\n                        v4 = 0;\n' +
+      '                        while (1) {\n                            if (probe(v3, v2) == a2) {\n' +
+      '                                v4 = 1;\n                                break;\n                            }\n' +
+      '                            v3 = v3 + v1;\n                            if (a1 < v3) break;\n                        }\n' +
+      '                        if (v4 == 0) k(v2);\n                    } else {\n                        k(v2);\n' +
+      '                    }\n                    break;\n                case 2:\n                    h(v2);\n' +
+      '                    break;\n            }\n            v2 = v2 + v1;\n        } while (v2 < a0);\n    }\n' +
+      '    return;\n}\n',
+  );
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(GOTO_ARM_END);
+  expect(covers(GOTO_ARM_END).noLoop).toBeGreaterThan(0);
 });
 
 /** The skipped code may itself leave the enclosing loop: `if (k(i) == a2) break;` sits between the
