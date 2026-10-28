@@ -38,8 +38,10 @@
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
 // (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
 // StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
-// merge that no flag spells (a third target, or a second one outside the enclosing loop), a `break`
-// out of a nested loop's body, a `break` whose exit copies would clobber, and mixed-entry self-loops
+// merge that no flag spells (among them a third target, a second one outside the enclosing loop or
+// at its header, and a second one that runs code of its own before it joins the code after the
+// first: `goto hit; } k(i); goto next; hit: y(i); next:`, where the walk from `k(i)` never meets
+// `hit`), a `break` out of a nested loop's body, a `break` whose exit copies would clobber, and mixed-entry self-loops
 // (a guarded header also entered by a plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
@@ -7318,9 +7320,12 @@ export function structure(
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
     // code from the second target inside the loop. In a case body opened in this loop it is refused
-    // outright, since `break` there leaves only the switch. No probe or fixture has reached that
-    // refusal yet (the switch-in-loop shapes tried were taken by the tail-copying readings or
-    // declined in switch recovery), so it rests on that reading of C, not on a failing fixture.
+    // outright, since `break` there leaves only the switch. agbcc -O2 reaches this refusal: a case
+    // that falls through after `if (h(j)) goto T;` inside the inner loop (the case-body fixture in
+    // two-level-exit.test.ts is that shape as IR). It is not the only guard there: without it the
+    // case-body refusal just below declines the same input, because the second target is a loop
+    // exit past the switch's end too. The other four toolchains lay the same source out so that it
+    // lifts (ido, kmc and gcc 2.7.2 through the flag).
     const twoLevel =
       loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
         ? loopCtx.twoLevel

@@ -7,8 +7,8 @@
 // judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as
 // it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
 // on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
-// shapes the reading does not take: a third exit target, a target outside the enclosing loop, and
-// the enclosing loop's header.
+// shapes the reading does not take: a third exit target, a target outside the enclosing loop, the
+// enclosing loop's header, and a second exit out of a case body.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -391,10 +391,51 @@ const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
   ret
 }`;
 
+/** The hit sits in a case body of a switch inside the inner loop, a case that falls into the next
+ *  one when it misses (agbcc -O2's layout of `switch (probe(j)) { case 0: if (a(j) == x) goto
+ *  next; case 1: b(j); }`). `break` there would leave only the switch, so the second exit cannot
+ *  set the flag and break. Two refusals in structure.ts each decline it: the two-level one and the
+ *  older one for a case body that leaves its switch for a loop exit past the switch's end. */
+const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  switch_br %11, ^bb20(), ^bb21(), ^bb4() {cases=[0;1]}
+^bb20():
+  %30: s32 = call %10 {target="a"}
+  %32: u32 = icmp_eq %30, %2
+  cond_br %32, ^bb6(), ^bb21()
+^bb21():
+  %31: s32 = call %10 {target="b"}
+  br ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
 test.each([
   ['a third exit target', THREE_EXIT_TARGETS],
   ['a target outside the enclosing loop', TARGET_PAST_THE_ENCLOSING_LOOP],
   ["the enclosing loop's header", TARGET_IS_THE_ENCLOSING_HEADER],
+  ['a second exit out of a case body', SECOND_EXIT_FROM_A_CASE_BODY],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
 });
