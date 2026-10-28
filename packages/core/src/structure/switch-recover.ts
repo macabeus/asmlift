@@ -767,9 +767,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // source is refused too, since that block may lie above `s` where the walk never put it.
   //
   // WITH `mergeEnds` it is the copies' question instead (`forwardToMerge`): a path may also END at
-  // the merge, and may not leave the enclosing loop (a step to its header or its exit), since the
-  // copy writes the path out inside a case arm, where neither spells. Everything else it refuses
-  // here it refuses there too.
+  // the merge. Everything it refuses here it refuses there too, and nothing more. A path out
+  // through the enclosing loop's exit is one more forward path to a `ret`: the copy writes the code
+  // past the loop and its `return;` inside the case arm, whether the exit is the path's first
+  // sideways block or a later one (agbcc `while (1) { … switch (x) { case 2: h(v); goto out; …
+  // default: gOut = v; if (v & 1) f(v); goto out; } … } out: p[3] = x;` lifts with the tail and the
+  // store copied into each entrant, host differential SAME). A step round the loop to its header
+  // needs no test of its own: the header dominates every block of the loop, and a path that enters
+  // it from outside comes back to it, so the dominance and cycle tests refuse it either way.
   //
   // There, NONE of those refusals is shown load-bearing; each is CONSERVATIVE, a loud decline where
   // the copies would be a longer program, not where they would be a wrong one. Measured by forcing
@@ -781,8 +786,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //   and reads as the same duplication (that fixture is hand-edited asm, with no source to run);
   // - a CYCLE refuses copies that read correct: the same test's tail that loops on itself lifts,
   //   the loop written out in each entrant;
-  // - a step to the enclosing LOOP's header or exit was reached by no probe (`break` and
-  //   `continue` in a copied tail inside a `for`, on every lane): defensive only;
   // - the dispatch and a dominating block were not isolated either.
   // So they stand for the duplication they spare, not for soundness: dropping one needs only a
   // differential over the shapes it then admits.
@@ -793,7 +796,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     siblings: ReadonlySet<Block>,
     mergeEnds = false,
   ): boolean => {
-    const loop = mergeEnds ? enclosingLoop() : null;
     const done = new Set<Block>();
     const onPath = new Set<Block>([s]);
     const stack: { x: Block; next: number }[] = [{ x: s, next: 0 }];
@@ -812,9 +814,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       const y = succ[top.next++];
       if (mergeEnds && y === merge && merge !== null) {
         continue; // a path that reaches the switch's end
-      }
-      if (loop !== null && (y === loop.header || y === loop.exit)) {
-        return false; // out of the loop the switch sits in, or round it
       }
       if (y === b || y === merge || siblings.has(y) || onPath.has(y) || dom.get(top.x)!.has(y)) {
         return false; // back into the switch, or a cycle

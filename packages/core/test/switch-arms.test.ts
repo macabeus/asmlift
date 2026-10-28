@@ -860,6 +860,49 @@ test('ido7.1, no PRE: a shared tail that runs on into code outside the switch is
   expect(out).not.toContain('continue');
 });
 
+// A shared tail that LEAVES THE ENCLOSING LOOP on its way to the end is copied too: the copy
+// writes the code past the loop and its `return;` inside each entrant. `corpus/agbcc-xwh2.s` is
+// agbcc's object for, at its canonical flags:
+//
+//   s32 i = 0;
+//   while (1) {
+//       if (++i > c) break;
+//       if (i == 3) goto L;
+//       switch (x) {
+//       case 1: f(1); break;
+//       case 2: h(v); gOut = v; if (v & 1) f(v); goto out;
+//       case 3: m(v); gOut = v; if (v & 1) f(v); goto out;
+//       case 4: break;
+//       case 6: f(7); break;
+//       default: L: gOut = v; if (v & 1) f(v); goto out;
+//       }
+//       k(i);
+//   }
+//   out: p[3] = x;
+//
+// The tail's `if` puts one block between the switch's region and the loop's exit. A refusal of
+// any step to the loop's exit declined this "do not linearize", while the same tail without the
+// `if` (its first sideways block the exit itself) lifted; both lift now, host differential SAME.
+test('agbcc: a shared tail that leaves the enclosing loop is copied into its entrants, with the code past the loop', () => {
+  const out = decompile('x_wh2', readFileSync(new URL('corpus/agbcc-xwh2.s', import.meta.url), 'utf8'), ARMV4T_AGBCC, {
+    prototypes: {
+      x_wh2: { returnsVoid: true },
+      f: { params: 1, returnsVoid: true },
+      h: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+    },
+  }).source;
+  const exit = /gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/g;
+  // labels are `x - 1`: cases 2 and 3 (`case 1:`, `case 2:`), x == 5 and the default each spell it
+  expect(out).toMatch(/case 1:\s+h\(a3\);\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect(out).toMatch(/case 2:\s+m\(a3\);\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect(out).toMatch(/default:\s+gOut = a3;\s+if \(\(1 & a3\) != 0\) f\(a3\);\s+a1\[3\] = a0;\s+return;/);
+  expect([...out.matchAll(exit)]).toHaveLength(4);
+  // and the `goto L` path, which breaks out of the loop into the one store past it
+  expect(count(out, 'a1[3] = a0;')).toBe(5);
+});
+
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
 // `emit_case_nodes` tests a subtree's BOUND rather than its value once the remaining range has
 // collapsed to one, so agbcc spells `case 0:` of an unsigned switch as `cmp r0, #1 / bcc` — the
