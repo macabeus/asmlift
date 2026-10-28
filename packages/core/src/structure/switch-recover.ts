@@ -92,9 +92,11 @@ export interface SwitchRecoverDeps {
  *  path to the merge in the middle of the arm as `break;` (`switchBreakAt`), in a closed arm as in a
  *  falling one: `case 1: if (a) { if (b) break; g(1); } h(2); break;`. A closed arm that leaves
  *  sideways, into a block the switch does not dominate, has none: its paths through such a block
- *  are not the arm's, and it structures to the CFG's joins. */
+ *  are not the arm's, and it structures to the CFG's joins. It names those blocks instead
+ *  (`escapedTo`, the first block outside the region on each such path), which is what decides
+ *  whether its body can still be copied into the arms that fall into it (`copySharedFallTargets`). */
 export type ArmExit =
-  | { kind: 'break'; region?: ReadonlySet<Block> }
+  | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
   | { kind: 'unstructurable'; why: string };
 
@@ -816,7 +818,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
     if (into.size === 0) {
-      return escapedTo.size > 0 ? { kind: 'break' } : { kind: 'break', region: seen };
+      return escapedTo.size > 0 ? { kind: 'break', escapedTo } : { kind: 'break', region: seen };
     }
     // A path to the merge beside the fall-through is the arm's own `break;` — switch-scoped, so it
     // spells only where nothing breakable sits between that edge and the arm, which the structurer
