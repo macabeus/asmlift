@@ -630,7 +630,10 @@ export interface LinearCtx {
 /** `v` as a sum of runtime values times constants, plus a constant (the `1` key): agbcc's `ch *
  *  12` is `((ch << 1) + ch) << 2`, which is 12 times `ch` only once the two `ch` terms are added.
  *  Every rule is a ring operation, so the form equals the machine's word modulo 2^32 whatever
- *  wraps on the way. A value this cannot read further is its own term. */
+ *  wraps on the way. A value this cannot read further is its own term. A coefficient is a JS
+ *  number, exact only up to 2^53: one past that rounds, and a later `sub` could cancel the rounded
+ *  coefficient to 0 and drop a term the word still holds, so a form whose coefficient leaves the
+ *  safe integers is no form (undefined). */
 export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1, number> | undefined {
   const c = ctx.constOf(v);
   if (c !== undefined) {
@@ -642,7 +645,8 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
   }
   const scaled = (x: Value, by: number) => {
     const l = linearTerms(ctx, x, depth + 1);
-    return l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+    const out = l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+    return out && [...out.values()].every(Number.isSafeInteger) ? out : undefined;
   };
   const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : ctx.constOf(d.operands[1]);
   if (d.opcode === 'shl' && k !== undefined && k >= 0 && k < 31) {
@@ -662,7 +666,7 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
       return undefined;
     }
     y.forEach((n, t) => x.set(t, (x.get(t) ?? 0) + n));
-    return x;
+    return [...x.values()].every(Number.isSafeInteger) ? x : undefined;
   }
   return new Map([[v, 1]]);
 }
@@ -831,9 +835,14 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       if (r === undefined) {
         return undefined;
       }
-      lo += c > 0 ? c * r.lo : c * r.hi;
-      hi += c > 0 ? c * r.hi : c * r.lo;
-      stride = gcdOf(stride, c * r.stride);
+      const parts = [c * r.lo, c * r.hi, c * r.stride];
+      lo += c > 0 ? parts[0] : parts[1];
+      hi += c > 0 ? parts[1] : parts[0];
+      // every product and partial sum stays exact, or a rounded one could cancel to a false range
+      if (![...parts, lo, hi].every(Number.isSafeInteger)) {
+        return undefined;
+      }
+      stride = gcdOf(stride, parts[2]);
     }
     return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };

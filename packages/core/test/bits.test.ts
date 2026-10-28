@@ -623,6 +623,22 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
     expect(mayAlwaysHold(at([minus1, word]), m, INT_MIN)).toBe(true);
   });
 
+  test('a coefficient past 2^53 bounds nothing, so a rounded one cannot cancel to a false range', () => {
+    // `b = w & 1` of an overwritten whole word, then `(b<<30<<30<<30) + (b<<16<<15) - (b<<30<<30<<30)`:
+    // the word is b << 31, INT_MIN whenever b is 1. As doubles 2^90 + 2^31 rounds to 2^90, and
+    // the sub cancels it to 0, a range of {0} that would wrongly exclude INT_MIN.
+    const defs = new Map<Value, Op>();
+    const word = def(defs, 'load', { off: 0, width: 4, signed: false }, [v()]);
+    const b = def(defs, 'and', { imm: 1 }, [word]);
+    const shl = (x: Value, imm: number) => def(defs, 'shl', { imm }, [x]);
+    const big = shl(shl(shl(b, 30), 30), 30);
+    const sum = def(defs, 'add', {}, [big, shl(shl(b, 16), 15)]);
+    const out = def(defs, 'sub', {}, [sum, big]);
+    expect(mayAlwaysHold(overwritten(defs, word), out, INT_MIN)).toBe(true);
+    // the same word spelled directly refuses too
+    expect(mayAlwaysHold(overwritten(defs, word), shl(shl(b, 16), 15), INT_MIN)).toBe(true);
+  });
+
   test("a struct-array aload's elemSize is its stride, which bounds nothing", () => {
     const defs = new Map<Value, Op>();
     const flat = def(defs, 'aload', { elemSize: 2, signed: false }, [v(), v()]);
