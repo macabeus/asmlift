@@ -1182,13 +1182,134 @@ interface ForeverLoopInfo {
 // A SECOND EXIT PAST THE CODE AFTER THE LOOP: `for (j…) { if (hit) goto next; } k(i); next: …`, the
 // `goto` a search loop takes out of its own exit region. The loop leaves to `exit` and, from the
 // blocks in `from`, to `to`, a block every path from `exit` reaches unless it leaves first
-// (`twoLevelTarget`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
+// (`twoLevelCandidate`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
 // break;` on the edge to `to`, and the code from `exit` up to `to` under `if (f == 0)` after it
 // (`emitForever`). Only a `while (1)` takes one, and only where no other reading fits.
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
 }
+
+/** One edge out of a loop's body that `foreverShape`'s last resort weighs as a two-level exit: from
+ *  `from` in the body to `to`, beside the loop's own `exit`. Every field is a getter, so a walk runs
+ *  only when the rules ahead of it admit. */
+export interface TwoLevelCandidate {
+  /** the edge leaves from an inner loop's body, not this loop's own */
+  readonly fromInnerBody: boolean;
+  /** another edge of this loop already took a second target, and it is not `to` */
+  readonly secondTargetElsewhere: boolean;
+  /** `to` is the loop's own exit or lies in its body */
+  readonly targetIsExitOrInLoop: boolean;
+  /** a loop encloses this one and `to` lies outside its body (a `goto` out of both loops) */
+  readonly targetPastEnclosingLoop: boolean;
+  /** a loop encloses this one and `exit` lies outside its body */
+  readonly exitPastEnclosingLoop: boolean;
+  /** `to` is the enclosing loop's header (a two-level `continue`) */
+  readonly targetIsEnclosingHeader: boolean;
+  /** no forward path from `exit` meets `to` (`twoLevelSkip` is null) */
+  readonly exitNeverMeetsTarget: boolean;
+  /** the code from `exit` up to `to` re-enters the loop's body */
+  readonly skipReentersLoop: boolean;
+}
+
+/** When `foreverShape`'s last resort takes an edge for a two-level exit (`TwoLevelExit`). The
+ *  argument for each rule is at `twoLevelCandidate` and at that clause. Not in the table: the scope (a
+ *  two-level exit is asked only of a `while (1)` reading that failed every other way, `foreverShape`'s
+ *  `twoLevel`); the two refusals where the exit is spelled, which judge other contexts
+ *  (`TWO_LEVEL_REGION_GATES`, `TWO_LEVEL_BREAK_GATES`); `breakRule`'s DEFENSIVE `leaves for a second
+ *  target a loop with a test of its own cannot spell`, read with that function's other refusal
+ *  strings; and `emitForever`'s `skipped === null`, a re-check of `exit-never-meets-target`. */
+export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
+  {
+    id: 'from-inner-body',
+    why: 'an edge out of an inner loop is that loop’s to read first (defensive)',
+    sound: false,
+    rejects: (c) => c.fromInnerBody,
+  },
+  {
+    id: 'second-target-elsewhere',
+    why: 'one flag read after the loop spells one second target, and a third way out has none',
+    sound: false,
+    guardedBy:
+      'two-level-exit.test.ts: without second-target-elsewhere a third exit target is still refused where its break is written',
+    rejects: (c) => c.secondTargetElsewhere,
+  },
+  {
+    id: 'target-is-exit-or-in-loop',
+    why: 'the loop’s own exit and its own body are not a second target (defensive)',
+    sound: false,
+    rejects: (c) => c.targetIsExitOrInLoop,
+  },
+  {
+    id: 'target-past-enclosing-loop',
+    why: 'a target past the enclosing loop is a break out of both loops, which one flag read here cannot spell',
+    sound: false,
+    rejects: (c) => c.targetPastEnclosingLoop,
+  },
+  {
+    id: 'exit-past-enclosing-loop',
+    why: 'the loop’s own exit lies in the enclosing loop whenever its code meets the target there (defensive)',
+    sound: false,
+    rejects: (c) => c.exitPastEnclosingLoop,
+  },
+  {
+    id: 'target-is-enclosing-header',
+    why: 'the enclosing header is a two-level continue, which no flag read after the loop spells',
+    sound: false,
+    guardedBy: 'two-level-exit.test.ts: each decline is refused by the two-level rule its shape names',
+    rejects: (c) => c.targetIsEnclosingHeader,
+  },
+  {
+    id: 'exit-never-meets-target',
+    why: 'where the code after the loop never meets the target, no if after the loop holds the code it skips',
+    sound: false,
+    guardedBy: 'two-level-exit.test.ts: each decline is refused by the two-level rule its shape names',
+    rejects: (c) => c.exitNeverMeetsTarget,
+  },
+  {
+    id: 'skip-reenters-loop',
+    why: 'code past the loop that runs back into it is the enclosing header read as the loop exit, not yet weighed',
+    sound: false,
+    guardedBy: 'two-level-exit.test.ts: without skip-reenters-loop the two-level continue lifts, and agrees',
+    rejects: (c) => c.skipReentersLoop,
+  },
+];
+
+/** A two-level exit about to be spelled where its `while (1)` sits (`emitForever`). */
+export interface TwoLevelRegion {
+  /** the region holding the loop ends inside the code the exit skips (`stop` among it) */
+  readonly skipsRegionEnd: boolean;
+}
+
+/** When `emitForever` spells a two-level exit in the region it is asked for. The argument is at
+ *  `emitForever`. */
+export const TWO_LEVEL_REGION_GATES: readonly Gate<TwoLevelRegion>[] = [
+  {
+    id: 'skips-region-end',
+    why: 'the code from the second target would render past the end of the region, and its owner renders it again',
+    sound: false,
+    rejects: (c) => c.skipsRegionEnd,
+  },
+];
+
+/** A two-level exit's `break` about to be written out of one block (`structureBlock`). */
+export interface TwoLevelBreak {
+  /** the block sits in a case body opened inside the loop, where `break` leaves only the switch */
+  readonly inCaseBody: boolean;
+}
+
+/** When a block's edge to a two-level exit's second target is written `flag = 1; break;`. The
+ *  argument is at the refusal in `structureBlock`. */
+export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
+  {
+    id: 'from-a-case-body',
+    why: 'inside a case body a break leaves only the switch, not the loop',
+    sound: false,
+    guardedBy:
+      'two-level-exit.test.ts: without from-a-case-body the case-body exit is refused by the switch-exit rule behind it',
+    rejects: (c) => c.inCaseBody,
+  },
+];
 
 // A test-at-top multi-block `while`. The header is a pure test whose cond_br enters `bodyEntry`
 // (inside the loop) or leaves to `exit` (the single loop exit). Unlike LoopInfo the condition reads
@@ -1970,6 +2091,12 @@ export interface StructureHooks {
   preUpdateSinkGates?: readonly Gate<SinkCandidate>[];
   /** `earlyReturnArm`'s `exitTail` rules (`EXIT_TAIL_GATES`), ablatable the same way. */
   exitTailGates?: readonly Gate<ExitTailCandidate>[];
+  /** `foreverShape`'s two-level exit rules (`TWO_LEVEL_EXIT_GATES`), ablatable the same way. */
+  twoLevelExitGates?: readonly Gate<TwoLevelCandidate>[];
+  /** `emitForever`'s two-level exit rule (`TWO_LEVEL_REGION_GATES`), ablatable the same way. */
+  twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
+  /** the two-level exit's `break` rule (`TWO_LEVEL_BREAK_GATES`), ablatable the same way. */
+  twoLevelBreakGates?: readonly Gate<TwoLevelBreak>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -3264,27 +3391,65 @@ export function structure(
   // May the edge from `nl`'s body to `to` be a two-level exit past `exit`? `to` lies outside the
   // loop and is not `exit`; inside a loop around this one, `to` lies in that loop's body (a target
   // past it is a `break` out of both loops, which one flag read after this loop cannot spell); and
-  // the code from `exit` meets `to` (`twoLevelSkip`). That walk is what refuses the enclosing
-  // loop's header (a two-level `continue`): it reaches the header only by a back edge, which it
-  // never follows. Both refusals are loud capability gaps, not wrong code. Asked only of an edge no
-  // other reading takes (`foreverShape`), so a loop that lifted without it reads as it did.
-  //
-  // The other three tests are DEFENSIVE, never seen to fire, and no fixture fails without them: on
-  // a reducible CFG, once back edges are dropped no path leads from a loop's body out and back into
-  // it, so `exit` lies in the enclosing body whenever the walk from it meets `to` there, the skipped
-  // code never re-enters `nl`, and `to` is never the enclosing header. They hold the reading to that
-  // promise on a CFG that breaks it.
-  const twoLevelTarget = (nl: NaturalLoop, exit: Block, to: Block): boolean => {
-    if (to === exit || nl.body.has(to)) {
-      return false;
-    }
+  // the code from `exit` meets `to` (`twoLevelSkip`). Asked only of an edge no other reading takes
+  // (`foreverShape`), so a loop that lifted without it reads as it did. The rules are
+  // `TWO_LEVEL_EXIT_GATES`, read here as the fields of one edge; every refusal is a loud capability
+  // gap, and no rule is sound. What each one was measured to do, by dropping it from the table over
+  // `two-level-exit.test.ts`'s fixtures:
+  //   - `second-target-elsewhere` refuses the third exit target, and `exit-never-meets-target` the
+  //     same loop read with its other exit; without the first the `break` it would write is refused
+  //     where it is emitted, still loud.
+  //   - A TWO-LEVEL `continue` (the hit going straight to the enclosing header) is refused twice
+  //     over. Read with its count exit for `exit`, the target is the header
+  //     (`target-is-enclosing-header`; `exit-never-meets-target` refuses it too, the walk reaching
+  //     the header only by a back edge). Read the other way round, with the header for `exit` and
+  //     the count exit for `to`, the walk from the header runs back into the loop
+  //     (`skip-reenters-loop`). That refusal is NOT proven-wrong code: without it the fixture lifts,
+  //     `f = 1; break;` on the count exit and `if (f == 0) continue;` after the loop, and agrees with
+  //     its IR on every seed. It stays, a reading of the header as an exit that no bench row has
+  //     weighed, until one does.
+  //   - `target-past-enclosing-loop` no fixture reaches: the `goto` out of both loops declines
+  //     before the inner loop is asked for a two-level exit.
+  //   - `from-inner-body`, `target-is-exit-or-in-loop` and `exit-past-enclosing-loop` are DEFENSIVE,
+  //     never seen to fire: an edge out of an inner loop is that loop's to read first, an exit edge
+  //     never lands in its own loop, and on a reducible CFG the walk from `exit` meets a `to` inside
+  //     the enclosing body only from inside it.
+  const twoLevelCandidate = (
+    nl: NaturalLoop,
+    exit: Block,
+    from: Block,
+    to: Block,
+    second: TwoLevelExit | undefined,
+  ): TwoLevelCandidate => {
     const outer = forest.parent.get(nl.header);
     const outerBody = outer ? forest.byHeader.get(outer)!.body : null;
-    if (outerBody !== null && (!outerBody.has(to) || !outerBody.has(exit) || to === outer)) {
-      return false; // `!outerBody.has(to)` refuses; the other two are DEFENSIVE (above)
-    }
-    const skip = twoLevelSkip(exit, to);
-    return skip !== null && ![...skip].some((x) => nl.body.has(x)); // the second test is DEFENSIVE
+    let skip: Set<Block> | null | undefined;
+    const skipped = () => (skip === undefined ? (skip = twoLevelSkip(exit, to)) : skip);
+    return {
+      get fromInnerBody() {
+        return innerBodyHas(nl, from);
+      },
+      secondTargetElsewhere: second !== undefined && second.to !== to,
+      get targetIsExitOrInLoop() {
+        return to === exit || nl.body.has(to);
+      },
+      get targetPastEnclosingLoop() {
+        return outerBody !== null && !outerBody.has(to);
+      },
+      get exitPastEnclosingLoop() {
+        return outerBody !== null && !outerBody.has(exit);
+      },
+      get targetIsEnclosingHeader() {
+        return outerBody !== null && to === outer;
+      },
+      get exitNeverMeetsTarget() {
+        return skipped() === null;
+      },
+      get skipReentersLoop() {
+        const s = skipped();
+        return s !== null && [...s].some((x) => nl.body.has(x));
+      },
+    };
   };
   const admissible = (nl: NaturalLoop): boolean =>
     [...forest.byHeader.values()].every(
@@ -3541,15 +3706,14 @@ export function structure(
         if (owned !== null || (isRet(e.to) && !e.to.ops.some(effectful))) {
           return true;
         }
-        // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body.
-        // The inner-body test is DEFENSIVE: an inner loop's edge out of `nl` must first be taken by
-        // that loop's own reading, and none takes a non-`ret` target past its enclosing body, so the
-        // inner loop declines before this one is asked; no fixture fails without it.
+        // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body
+        // (`TWO_LEVEL_EXIT_GATES`; what each rule does is at `twoLevelCandidate`)
         if (
           !twoLevel ||
-          innerBodyHas(nl, e.from) ||
-          (second !== undefined && second.to !== e.to) ||
-          (second === undefined && !twoLevelTarget(nl, exit, e.to))
+          firstRejection(
+            hooks.twoLevelExitGates ?? TWO_LEVEL_EXIT_GATES,
+            twoLevelCandidate(nl, exit, e.from, e.to, second),
+          ) !== null
         ) {
           return false;
         }
@@ -7320,7 +7484,7 @@ export function structure(
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
     // code from the second target inside the loop. In a case body opened in this loop it is refused
-    // outright, since `break` there leaves only the switch. agbcc -O2 reaches this refusal: a case
+    // outright, since `break` there leaves only the switch (`TWO_LEVEL_BREAK_GATES`). agbcc -O2 reaches this refusal: a case
     // that falls through after `if (h(j)) goto T;` inside the inner loop (the case-body fixture in
     // two-level-exit.test.ts is that shape as IR). It is not the only guard there: without it the
     // case-body refusal just below declines the same input, because the second target is a loop
@@ -7330,7 +7494,10 @@ export function structure(
       loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
         ? loopCtx.twoLevel
         : undefined;
-    if (twoLevel !== undefined && armCapturesBreak) {
+    if (
+      twoLevel !== undefined &&
+      firstRejection(hooks.twoLevelBreakGates ?? TWO_LEVEL_BREAK_GATES, { inCaseBody: armCapturesBreak }) !== null
+    ) {
       throw new StructureError(
         `cannot structure '${fn.name}': a two-level exit out of block #${fn.blocks.indexOf(b)} sits in a case ` +
           `body, where \`break\` would leave only the switch`,
@@ -7938,7 +8105,7 @@ export function structure(
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
   // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
-  // before the second target (`stop` among the skipped code): the code from the second target on
+  // before the second target (`stop` among the skipped code, `TWO_LEVEL_REGION_GATES`): the code from the second target on
   // would render past the end of the region, and the region's owner renders it again after. That
   // is a copy, not yet a proven wrong: with the refusal removed, the probes it refuses (an inner
   // loop under a guard whose join it skips; ido7.1's loop in a case arm with the target past the
@@ -7978,7 +8145,12 @@ export function structure(
       return [loop, ...after(() => structureRegion(exit, stop))];
     }
     const skipped = twoLevelSkip(exit, second.to);
-    if (skipped === null || (stop !== null && skipped.has(stop))) {
+    if (
+      skipped === null ||
+      firstRejection(hooks.twoLevelRegionGates ?? TWO_LEVEL_REGION_GATES, {
+        skipsRegionEnd: stop !== null && skipped.has(stop),
+      }) !== null
+    ) {
       throw new StructureError(
         `cannot structure '${fn.name}': a two-level exit out of the loop at block #${fn.blocks.indexOf(fl.header)} ` +
           `skips the end of the region the loop sits in`,

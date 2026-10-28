@@ -14,18 +14,25 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { tallying, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import {
+  type StructureHooks,
+  TWO_LEVEL_BREAK_GATES,
+  TWO_LEVEL_EXIT_GATES,
+  TWO_LEVEL_REGION_GATES,
+  structure,
+} from '../src/structure/structure';
 import { irAgreement, irTraceOf } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
 
-const judged = (ir: string) => {
+const judged = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn);
+  const sfn = structure(fn, {}, hooks);
   return {
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
@@ -362,8 +369,9 @@ const TARGET_PAST_THE_ENCLOSING_LOOP = `fn pastouter {
 }`;
 
 /** The hit goes straight to the enclosing loop's header (a two-level `continue`, `goto next` with
- *  `next:` at the top of the outer body). The walk from the inner exit reaches that header only by
- *  the back edge, which it never follows, so it never meets the target and the loop stays declined. */
+ *  `next:` at the top of the outer body). Read with the count exit for the loop's exit, the target is
+ *  the header; read the other way round, the walk from the header runs back into the loop. Both are
+ *  refused (`TWO_LEVEL_EXIT_GATES`), and the loop stays declined. */
 const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -438,4 +446,53 @@ test.each([
   ['a second exit out of a case body', SECOND_EXIT_FROM_A_CASE_BODY],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
+});
+
+/** Which rule of the two-level tables refuses each decline fixture, counted with `tallying`: the
+ *  census the tables exist for, read without editing the pass. */
+const refusalsOf = (ir: string): string[] => {
+  const tables = [
+    tallying(TWO_LEVEL_EXIT_GATES),
+    tallying(TWO_LEVEL_REGION_GATES),
+    tallying(TWO_LEVEL_BREAK_GATES),
+  ] as const;
+  expect(() =>
+    judged(ir, {
+      twoLevelExitGates: tables[0].gates,
+      twoLevelRegionGates: tables[1].gates,
+      twoLevelBreakGates: tables[2].gates,
+    }),
+  ).toThrow(/cannot structure/);
+  return tables.flatMap((t) => t.refusals().map(([id]) => id)).sort();
+};
+
+test('each decline is refused by the two-level rule its shape names', () => {
+  expect(refusalsOf(THREE_EXIT_TARGETS)).toEqual(['exit-never-meets-target', 'second-target-elsewhere']);
+  expect(refusalsOf(TARGET_IS_THE_ENCLOSING_HEADER)).toEqual(['skip-reenters-loop', 'target-is-enclosing-header']);
+  expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
+  // the `goto` out of both loops declines before the inner loop is asked for a two-level exit
+  expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([]);
+});
+
+test('without second-target-elsewhere a third exit target is still refused where its break is written', () => {
+  expect(() =>
+    judged(THREE_EXIT_TARGETS, { twoLevelExitGates: without(TWO_LEVEL_EXIT_GATES, 'second-target-elsewhere') }),
+  ).toThrow(/a break out of block #\d+ has no edge beside it that stays in the loop/);
+});
+
+test('without from-a-case-body the case-body exit is refused by the switch-exit rule behind it', () => {
+  expect(() => judged(SECOND_EXIT_FROM_A_CASE_BODY, { twoLevelBreakGates: [] })).toThrow(
+    /a case body leaves its switch for a loop exit past the switch's end/,
+  );
+});
+
+test('without skip-reenters-loop the two-level continue lifts, and agrees: the rule refuses a correct reading', () => {
+  const { src, agreement, shipped } = judged(TARGET_IS_THE_ENCLOSING_HEADER, {
+    twoLevelExitGates: without(TWO_LEVEL_EXIT_GATES, 'skip-reenters-loop'),
+  });
+  expect(src).toMatch(/if \(v\d+ == 0\) continue;/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(TARGET_IS_THE_ENCLOSING_HEADER);
 });
