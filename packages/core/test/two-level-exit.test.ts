@@ -8,7 +8,8 @@
 // it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop, a hit
 // on the first and on a later element, and no hit at all (`covers`). The decline fixtures are the
 // shapes the reading does not take: a third exit target, a target outside the enclosing loop, the
-// enclosing loop's header, and a second exit out of a case body.
+// enclosing loop's header, a second exit out of a case body, and one out of a switch arm that falls
+// into the next.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -506,11 +507,50 @@ const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
   ret
 }`;
 
+/** The same arm FALLING into the next one: `k(i)` runs on into `case 2: h(i); break;`, and the
+ *  hit's `goto` lands past both, on the switch's merge. The arm ends where it falls, inside the code
+ *  the exit skips, so the flag's `if (f == 0)` would run past the arm's end into the arm the switch
+ *  renders after it (`TWO_LEVEL_REGION_GATES`, `skips-region-end`). */
+const FALLING_ARM = `fn fallingarm {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb6(), ^bb4()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb8()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
 test.each([
   ['a third exit target', THREE_EXIT_TARGETS],
   ['a target outside the enclosing loop', TARGET_PAST_THE_ENCLOSING_LOOP],
   ["the enclosing loop's header", TARGET_IS_THE_ENCLOSING_HEADER],
   ['a second exit out of a case body', SECOND_EXIT_FROM_A_CASE_BODY],
+  ['a second exit out of a switch arm that falls into the next', FALLING_ARM],
 ])('%s stays declined', (_, ir) => {
   expect(() => judged(ir)).toThrow(/cannot structure/);
 });
@@ -537,6 +577,7 @@ test('each decline is refused by the two-level rule its shape names', () => {
   expect(refusalsOf(THREE_EXIT_TARGETS)).toEqual(['exit-never-meets-target', 'second-target-elsewhere']);
   expect(refusalsOf(TARGET_IS_THE_ENCLOSING_HEADER)).toEqual(['skip-reenters-loop', 'target-is-enclosing-header']);
   expect(refusalsOf(SECOND_EXIT_FROM_A_CASE_BODY)).toEqual(['from-a-case-body']);
+  expect(refusalsOf(FALLING_ARM)).toEqual(['skips-region-end']);
   // the `goto` out of both loops declines before the inner loop is asked for a two-level exit
   expect(refusalsOf(TARGET_PAST_THE_ENCLOSING_LOOP)).toEqual([]);
 });
@@ -562,4 +603,15 @@ test('without skip-reenters-loop the two-level continue lifts, and agrees: the r
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
   expectCovered(TARGET_IS_THE_ENCLOSING_HEADER);
+});
+
+test('without skips-region-end the falling arm lifts, and agrees: the rule refuses a correct reading', () => {
+  // the arm it falls into renders twice, once inside `if (f == 0)` ahead of a `break;` and once as
+  // its own case; each copy ends in a jump, so neither falls into the other
+  const { src, agreement, shipped } = judged(FALLING_ARM, { twoLevelRegionGates: [] });
+  expect(src.match(/h\(v\d+\);/g)).toHaveLength(2);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  expectCovered(FALLING_ARM);
 });

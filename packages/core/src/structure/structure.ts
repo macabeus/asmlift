@@ -1287,6 +1287,8 @@ export const TWO_LEVEL_REGION_GATES: readonly Gate<TwoLevelRegion>[] = [
     id: 'skips-region-end',
     why: 'the code from the second target would render past the end of the region, and its owner renders it again',
     sound: false,
+    guardedBy:
+      'two-level-exit.test.ts: without skips-region-end the falling arm lifts, and agrees: the rule refuses a correct reading',
     rejects: (c) => c.skipsRegionEnd,
   },
 ];
