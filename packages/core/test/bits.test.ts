@@ -617,8 +617,11 @@ describe("mayAlwaysHold — a word the value's ops cannot produce", () => {
     });
     expect(mayAlwaysHold(at([minus1, s16]), m, INT_MIN)).toBe(false);
     expect(mayAlwaysHold(at([minus2, u8]), m, INT_MIN)).toBe(false);
-    // the integer union of -2 and 2^31 - 256 is [-2, 0x7fffff00]: still no INT_MIN
-    expect(mayAlwaysHold(at([minus2, big]), m, INT_MIN)).toBe(false);
+    // 2^31 - 256 beside the s16 reload: as integers [-32768, 0x7fffff00], no INT_MIN; moved into
+    // one word first the reload's negatives sit at 0xffff8000.. and the union spans 0x80000000.
+    // The constant arm meets the reload to KONST, so only the integer union answers false here
+    // (two distinct constant arms would meet to VAR and answer false without any range).
+    expect(mayAlwaysHold(at([big, s16]), m, INT_MIN)).toBe(false);
     // a whole-word arm still refuses, whichever way the constant arm is read
     expect(mayAlwaysHold(at([minus1, word]), m, INT_MIN)).toBe(true);
   });
