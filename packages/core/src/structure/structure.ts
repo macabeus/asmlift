@@ -2765,11 +2765,16 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //     `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through the arm's
 //     copy, which ends in its `return`; a path from outside never ran the arm, and the exit never
 //     reaches it. It is not owned: a path that did not take the arm runs it too
-//     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). The paragraph above is why a reading asks
-//     for it only where the exit is laid out past the loop's body (`foreverShape`): that is the
-//     code after the loop, so the epilogue the paragraph names is on the exit path and never this
-//     count's. An exit inside the loop's span is the early `return` read as the exit, which is what
-//     made the post-loop epilogue look off the exit path; there the count waits for the last resort;
+//     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). It is asked at the last resort, and once
+//     earlier, by `while (1)` (`foreverShape`): where a reading without it takes an exit inside the
+//     loop's span, an exit laid out past the loop's body that fits with it goes first. An exit in the
+//     span is an early `return` read as the exit, which is what made the post-loop epilogue the
+//     paragraph above names look off the exit path; an exit past the body is the code after the
+//     loop, so that epilogue is on the exit path and never this count's. Klonoa's sub_08016EEC has
+//     the shape: a loop that ends a `case` takes the arm's own head for its exit, and declines at
+//     the switch inside it. Nowhere else does the count rank ahead of another reading: on
+//     gcc2.7.2 and gcc2.7.2kmc the same `sw_xjret` loop is a `do-while` whose arm copies the merged
+//     tail (`retCopyingReadings`), which the count must not displace;
 //   - `onExitPath`, at the reading of last resort only: the `exitTail` count waives
 //     `entry-bypasses-exit`, so a tail the exit path runs past code of its own is copied although a
 //     path from before the loop also lands on it: that path ran neither the arm nor the exit
@@ -3849,11 +3854,9 @@ function structureRanked(
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
     const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
-    for (const exit of targets) {
-      // an arm may copy a return tail a path from outside the loop also enters where the exit is the
-      // code after the loop, and under any other exit only at the last resort, which alone copies such
-      // a tail past the exit's own code (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`)
-      const bypass = { offExitPath: lastResort || rank(exit) < fn.blocks.length, onExitPath: lastResort };
+    const pastLoop = (x: Block) => rank(x) < fn.blocks.length;
+    const asked: BypassCounts = { offExitPath: lastResort, onExitPath: lastResort };
+    const fitAt = (exit: Block, bypass: BypassCounts): ForeverLoopInfo | null => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
@@ -3893,18 +3896,38 @@ function structureRanked(
         breaks.add(e.from);
         return true;
       });
-      if (fits) {
-        return {
-          header: nl.header,
-          latches: nl.latches,
-          forwardPreds: nl.forwardPreds,
-          exit,
-          body: nl.body,
-          arms,
-          breaks,
-          breakArms,
-          ...(second !== undefined ? { twoLevel: second } : {}),
-        };
+      return fits
+        ? {
+            header: nl.header,
+            latches: nl.latches,
+            forwardPreds: nl.forwardPreds,
+            exit,
+            body: nl.body,
+            arms,
+            breaks,
+            breakArms,
+            ...(second !== undefined ? { twoLevel: second } : {}),
+          }
+        : null;
+    };
+    // an exit inside the loop's span is an early `return` read as the exit: where the code after the
+    // loop fits as the exit once an arm copies a return tail a path from outside the loop also
+    // enters, that reading goes first (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`)
+    const pastFirst = (exit: Block, shape: ForeverLoopInfo): ForeverLoopInfo => {
+      if (!pastLoop(exit) && !asked.offExitPath) {
+        for (const past of targets.filter(pastLoop)) {
+          const copied = fitAt(past, { ...asked, offExitPath: true });
+          if (copied !== null) {
+            return copied;
+          }
+        }
+      }
+      return shape;
+    };
+    for (const exit of targets) {
+      const shape = fitAt(exit, asked);
+      if (shape !== null) {
+        return pastFirst(exit, shape);
       }
     }
     return null;
