@@ -338,8 +338,8 @@ const THREE_EXIT_TARGETS = `fn threetargets {
 }`;
 
 /** The hit leaves BOTH loops (`goto done` past the outer one, a merge that also takes the outer
- *  loop's own exit): the target lies outside the enclosing loop, which a flag read after the inner
- *  loop cannot reach without a second `break`. */
+ *  loop's own exit): a flag read after the inner loop cannot reach it without a second `break`, and
+ *  the loop declines before the inner loop is asked for a two-level exit. */
 const TARGET_PAST_THE_ENCLOSING_LOOP = `fn pastouter {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -403,7 +403,7 @@ const TARGET_IS_THE_ENCLOSING_HEADER = `fn outerheader {
  *  one when it misses (agbcc -O2's layout of `switch (probe(j)) { case 0: if (a(j) == x) goto
  *  next; case 1: b(j); }`). `break` there would leave only the switch, so the second exit cannot
  *  set the flag and break. Two refusals in structure.ts each decline it: the two-level one and the
- *  older one for a case body that leaves its switch for a loop exit past the switch's end. */
+ *  one for a case body that leaves its switch for a loop exit past the switch's end. */
 const SECOND_EXIT_FROM_A_CASE_BODY = `fn casebody {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}

@@ -14118,7 +14118,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      `goto exit_loop`. The inner loop then exits to two places, its own exit and the outer
   //      latch. L3 has no `goto`, so structure spells the second exit with a flag (`f = 1; break;`,
   //      the skipped code under `if (f == 0)`: structure.ts `TwoLevelExit`), and brk2lvl lifts
-  //      correct but short of a match: every goto-free spelling of it written inside one function
+  //      correct but short of a match: each of nine goto-free spellings written inside one function
   //      compiles to another object on all five lanes, the flag one and brk2lvl_flag (`break` and
   //      `if (j > m)`, which lifts on its own) among them. Same exits on all five lanes.
   {

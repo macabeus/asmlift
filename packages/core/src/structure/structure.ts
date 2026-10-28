@@ -39,10 +39,9 @@
 // (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
 // StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
 // merge that no flag spells (among them a third target, a second one outside the enclosing loop or
-// at its header, and a second one that runs code of its own before it joins the code after the
-// first: `goto hit; } k(i); goto next; hit: y(i); next:`, where the walk from `k(i)` never meets
-// `hit`), a `break` out of a nested loop's body, a `break` whose exit copies would clobber, and mixed-entry self-loops
-// (a guarded header also entered by a plain br).
+// at its header, and one whose code never joins the code after the first exit: `goto hit; } k(i);
+// goto next; hit: y(i); next:`), a `break` out of a nested loop's body, a `break` whose exit copies
+// would clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
@@ -3392,28 +3391,23 @@ export function structure(
   // loop and is not `exit`; inside a loop around this one, `to` lies in that loop's body (a target
   // past it is a `break` out of both loops, which one flag read after this loop cannot spell); and
   // the code from `exit` meets `to` (`twoLevelSkip`). Asked only of an edge no other reading takes
-  // (`foreverShape`), so a loop that lifted without it reads as it did. The rules are
+  // (`foreverShape`), so a loop any other reading takes never reads through it. The rules are
   // `TWO_LEVEL_EXIT_GATES`, read here as the fields of one edge; every refusal is a loud capability
-  // gap, and no rule is sound. What each one was measured to do, by dropping it from the table over
-  // `two-level-exit.test.ts`'s fixtures:
-  //   - `second-target-elsewhere` refuses the third exit target, and `exit-never-meets-target` the
-  //     same loop read with its other exit; without the first the `break` it would write is refused
-  //     where it is emitted, still loud.
+  // gap, and no rule is sound:
+  //   - `second-target-elsewhere` refuses a third exit target; without it the `break` it would
+  //     write is refused where it is emitted, still loud.
   //   - A TWO-LEVEL `continue` (the hit going straight to the enclosing header) is refused twice
   //     over. Read with its count exit for `exit`, the target is the header
-  //     (`target-is-enclosing-header`; `exit-never-meets-target` refuses it too, the walk reaching
-  //     the header only by a back edge). Read the other way round, with the header for `exit` and
-  //     the count exit for `to`, the walk from the header runs back into the loop
-  //     (`skip-reenters-loop`). That refusal is NOT proven-wrong code: without it the fixture lifts,
-  //     `f = 1; break;` on the count exit and `if (f == 0) continue;` after the loop, and agrees with
-  //     its IR on every seed. It stays, a reading of the header as an exit that no bench row has
-  //     weighed, until one does.
-  //   - `target-past-enclosing-loop` no fixture reaches: the `goto` out of both loops declines
-  //     before the inner loop is asked for a two-level exit.
-  //   - `from-inner-body`, `target-is-exit-or-in-loop` and `exit-past-enclosing-loop` are DEFENSIVE,
-  //     never seen to fire: an edge out of an inner loop is that loop's to read first, an exit edge
-  //     never lands in its own loop, and on a reducible CFG the walk from `exit` meets a `to` inside
-  //     the enclosing body only from inside it.
+  //     (`target-is-enclosing-header`; the walk reaches the header only by a back edge, so
+  //     `exit-never-meets-target` refuses it too). Read with the header for `exit`, the walk runs
+  //     back into the loop (`skip-reenters-loop`). That one refuses a correct lift, `if (f == 0)
+  //     continue;` after the loop: it stays until a bench row weighs the header as an exit.
+  //   - `target-past-enclosing-loop`: the `goto` out of both loops declines before the inner loop
+  //     is asked for a two-level exit, so no fixture reaches it.
+  //   - `from-inner-body`, `target-is-exit-or-in-loop` and `exit-past-enclosing-loop` are DEFENSIVE:
+  //     an edge out of an inner loop is that loop's to read first, an exit edge never lands in its
+  //     own loop, and on a reducible CFG the walk from `exit` meets a `to` inside the enclosing body
+  //     only from inside it.
   const twoLevelCandidate = (
     nl: NaturalLoop,
     exit: Block,
@@ -3745,7 +3739,7 @@ export function structure(
   // count test's edge copies `tail` past `x = i`, where the reading with `tail` for the exit writes
   // the source's two `break`s and one `tail`. Past all of them comes the two-level exit
   // (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop that
-  // every other reading declines, so no loop that lifted before reads differently.
+  // every other reading declines.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
@@ -7484,12 +7478,9 @@ export function structure(
     // A TWO-LEVEL EXIT out of this block (`TwoLevelExit`): its edge to the second target is the
     // `break`, and sets the flag first. Any refusal of it is loud: if-recovery would structure the
     // code from the second target inside the loop. In a case body opened in this loop it is refused
-    // outright, since `break` there leaves only the switch (`TWO_LEVEL_BREAK_GATES`). agbcc -O2 reaches this refusal: a case
-    // that falls through after `if (h(j)) goto T;` inside the inner loop (the case-body fixture in
-    // two-level-exit.test.ts is that shape as IR). It is not the only guard there: without it the
-    // case-body refusal just below declines the same input, because the second target is a loop
-    // exit past the switch's end too. The other four toolchains lay the same source out so that it
-    // lifts (ido, kmc and gcc 2.7.2 through the flag).
+    // outright, since `break` there leaves only the switch (`TWO_LEVEL_BREAK_GATES`): agbcc -O2
+    // lays out a case that falls through after `if (h(j)) goto T;` that way. The case-body refusal
+    // below declines the same input too, the second target being a loop exit past the switch's end.
     const twoLevel =
       loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
         ? loopCtx.twoLevel
@@ -8105,14 +8096,13 @@ export function structure(
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
   // that `if`, once, for both ways out. Refused, loud, where the region holding the loop ends
-  // before the second target (`stop` among the skipped code, `TWO_LEVEL_REGION_GATES`): the code from the second target on
-  // would render past the end of the region, and the region's owner renders it again after. That
-  // is a copy, not yet a proven wrong: with the refusal removed, the probes it refuses (an inner
-  // loop under a guard whose join it skips; ido7.1's loop in a case arm with the target past the
-  // switch) lifted correct, the copy ending in a `return`, `break` or `continue`. No fixture fails
-  // without it; it stays until a reading proves the copy can never fall through into the owner's.
-  // Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to: …; Z:`) are not
-  // refused: they render inside the `if` and again after it, a copy that always ends in a jump.
+  // before the second target (`stop` among the skipped code, `TWO_LEVEL_REGION_GATES`): the code
+  // from the second target on would render past the end of the region, and the region's owner
+  // renders it again. That copy is not a proven wrong (where it ends in a `return`, `break` or
+  // `continue` it lifts correct); the refusal stays until a reading proves it never falls through
+  // into the owner's. Paths from `exit` that pass `to` without meeting it (`if (q) goto Z; … to:
+  // …; Z:`) are not refused: they render inside the `if` and again after it, each copy ending in a
+  // jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const frame = {
