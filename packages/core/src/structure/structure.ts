@@ -5285,10 +5285,9 @@ export function structure(
       // 0x80000000 at all (a halfword or byte reload of that memory, a narrowing cast, a param
       // whose arms pass such reloads or small constants: `stridedRange`), whatever the evaluator
       // could not say. An operand that is INT_MIN on some paths only still lifts; that is the
-      // "might hold" case. Compiled C reaches the refusal too, not only hand-written asm: agbcc
-      // folds the negation of a constant it sees, but a whole-word reload of memory a store before
-      // it may have overwritten (`p->x -= 8; if (p->x <= -gMag)` with an s32 gMag) is a word this
-      // cannot compute, and declining it is the fail-closed answer.
+      // "might hold" case. agbcc folds the negation of a constant it sees, but compiled C still
+      // reaches the refusal: a whole-word reload of memory a store before it may have overwritten
+      // (`p->x -= 8; if (p->x <= -gMag)` with an s32 gMag) is a word this cannot compute.
       const x = e(d.operands[0]);
       wordCtx ??= {
         defs,

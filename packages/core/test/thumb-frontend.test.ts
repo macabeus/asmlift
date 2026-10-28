@@ -5794,8 +5794,7 @@ describe('`cmn` is a compare against the negation, for every branch but the carr
     }
     // The same reload as a whole word may be what the store left there: it still refuses.
     expect(() => dc('f', store('\tldr\tr2, [r2]\n'))).toThrow(gap);
-    // A halfword shifted back up to the sign bit is INT_MIN at 0x8000: the bound is the reload's,
-    // and nothing past it carries one.
+    // A halfword shifted back up to the sign bit is INT_MIN at 0x8000: [0, 0xffff0000] holds it.
     expect(() => dc('f', store('\tldrh\tr2, [r2]\n\tlsl\tr2, r2, #16\n'))).toThrow(gap);
     // Merged by a param (agbcc's `m = c ? gA : gD`, a halfword in one arm, a byte in the other), the
     // bound is the union of the arms'; one whole-word arm leaves the refusal.

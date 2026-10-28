@@ -514,7 +514,7 @@ describe('storeForwards — the store a load must read', () => {
   });
 });
 
-describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
+describe("mayAlwaysHold — a word the value's ops cannot produce", () => {
   const INT_MIN = 0x80000000;
   const overwritten = (defs: Map<Value, Op>, ...vs: Value[]): WordCtx => ({
     defs,
@@ -549,7 +549,7 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
     expect(mayAlwaysHold(ctx, u8, 0x100)).toBe(false);
   });
 
-  test('a narrow read shifted back up to the sign bit is bounded by nothing: 0x8000 << 16 is INT_MIN', () => {
+  test('a narrow read shifted back up to the sign bit may be INT_MIN: 0x8000 << 16 is', () => {
     const defs = new Map<Value, Op>();
     const h = def(defs, 'load', { off: 0, width: 2, signed: false }, [v()]);
     const up = def(defs, 'shl', { imm: 16 }, [h]);
@@ -565,7 +565,7 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
         expect(mayAlwaysHold({ defs }, def(defs, op, { width }, [k]), INT_MIN)).toBe(false);
       }
     }
-    // provableBits' bound: a zero-fill shift right leaves fewer than 32 bits.
+    // provableBits' bound: a zero-fill shift right or a non-negative mask leaves fewer than 32 bits.
     expect(mayAlwaysHold({ defs }, def(defs, 'shr_u', { imm: 1 }, [k]), INT_MIN)).toBe(false);
     expect(mayAlwaysHold({ defs }, def(defs, 'and', { imm: 0x7fffffff }, [k]), INT_MIN)).toBe(false);
   });
@@ -617,7 +617,7 @@ describe("mayAlwaysHold — a word the value's own op cannot produce", () => {
     });
     expect(mayAlwaysHold(at([minus1, s16]), m, INT_MIN)).toBe(false);
     expect(mayAlwaysHold(at([minus2, u8]), m, INT_MIN)).toBe(false);
-    // the integer union of -2 and a constant past 2^31 - 256 is [-2, 0x7fffff00]: still no INT_MIN
+    // the integer union of -2 and 2^31 - 256 is [-2, 0x7fffff00]: still no INT_MIN
     expect(mayAlwaysHold(at([minus2, big]), m, INT_MIN)).toBe(false);
     // a whole-word arm still refuses, whichever way the constant arm is read
     expect(mayAlwaysHold(at([minus1, word]), m, INT_MIN)).toBe(true);
