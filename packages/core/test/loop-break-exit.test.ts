@@ -835,14 +835,20 @@ test('a `break` whose arm runs code renders the arm ahead of the `break`', () =>
   }
 });
 
-test('an arm another path also enters is not a `break` arm, and the loop declines', () => {
+test('an arm another path also enters is not a `break` arm', () => {
   // ^bb0 enters the arm too (agbcc's peeled first test in `synthetic:break_code`, kleod
   // `TextBoxInit`'s out-of-loop merge): rendering it inside the loop would drop that path's copy.
+  // No single-level reading takes the loop, so it is the two-level exit's (`two-level-exit.test.ts`):
+  // the arm renders after the loop, under the flag the count test's `break` sets.
   const shared = CODE_ARM.replace(
     '  %1: s32 = const {value=0}\n  br ^bb1(%1)',
     '  %1: s32 = const {value=0}\n  %20: u32 = icmp_slt %0, %1\n  cond_br %20, ^bb2(), ^bb1(%1)',
   ).replace('%6: s32 = call %2 {target="hit"}', '%6: s32 = call {target="hit"}');
-  expect(() => emit(shared)).toThrow(/unrecovered back-edge/);
+  const { src, agreement, shipped } = judged(shared);
+  expect(src).not.toMatch(/hit\(\);\n\s+break;/);
+  expect(src).toMatch(/if \(v\d == 0\) hit\(\);/);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 // ── AN `else break;` INSIDE A TESTED LOOP (structure.ts `loopJoin`) ─────────────────────────

@@ -325,7 +325,13 @@ describe('the exit-path return tail, against its own IR', () => {
       '  cond_br %3, ^bb6(), ^bb4(%2)\n^bb6():\n  %20: s32 = const {value=7}\n  %21: u32 = icmp_eq %1, %20\n' +
         '  cond_br %21, ^bb5(%2), ^bb1(%2)\n',
     );
-    expect(() => judged(bypass)).toThrow(/unrecovered back-edge/);
+    // no arm copies the tail: the loop is left to the two-level exit (`two-level-exit.test.ts`), which
+    // writes the store once, after the loop, and the exit's `miss` under its flag
+    const flagged = judged(bypass);
+    expect(flagged.src.match(/\*\(s32 \*\)a0 = /g)).toHaveLength(1);
+    expect(flagged.src).toMatch(/if \(v\d == 0\) miss\(v\d\);/);
+    expect(flagged.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(flagged.shipped).toEqual({ judged: 300, disagree: 0 });
     // the refusal is the rule's: without it the arm copies the tail past the guard's own entry
     expect(judged(bypass, withoutRule('entry-bypasses-exit')).agreement).toEqual({ judged: 300, disagree: 0 });
   });
@@ -339,7 +345,12 @@ describe('the exit-path return tail, against its own IR', () => {
         '  %31: s32 = call %30 {target="more"}\n  %32: u32 = icmp_eq %31, %0\n  cond_br %32, ^bb6(%31), ^bb7()\n' +
         '^bb7():\n  ret %12',
     );
-    expect(() => judged(cyclic)).toThrow(/unrecovered back-edge/);
+    // the two-level exit takes the loop instead, and writes the tail's loop once
+    const flagged = judged(cyclic);
+    expect(flagged.src.match(/more\(/g)).toHaveLength(1);
+    expect(flagged.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(flagged.shipped).toEqual({ judged: 300, disagree: 0 });
+    expect(judged(cyclic, withoutRule('tail-holds-cycle')).src.match(/more\(/g)).toHaveLength(2);
     expect(judged(cyclic, withoutRule('tail-holds-cycle')).agreement).toEqual({ judged: 300, disagree: 0 });
   });
 

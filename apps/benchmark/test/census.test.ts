@@ -61,8 +61,9 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
     );
     expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([
       'pokeemerald:CreateBattleTowerMon:agbcc  unsigned/unreduce',
-      // the goto-free control of the two-level loop exit (a nested search loop, `brk2lvl`)
+      // the two-level loop exit (a nested search loop, lifted with a flag) and its goto-free control
       'synthetic:brk2lvl_flag:mwcc_242_81  unsigned/unreduce',
+      'synthetic:brk2lvl:mwcc_242_81  unsigned/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
       'synthetic:sw_h4:mwcc_242_81  signed/unreduce',

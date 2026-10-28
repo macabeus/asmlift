@@ -65,6 +65,9 @@ import {
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
   FRESH_MERGE_GATES,
+  TWO_LEVEL_BREAK_GATES,
+  TWO_LEVEL_EXIT_GATES,
+  TWO_LEVEL_REGION_GATES,
 } from '../src/structure/structure';
 
 // Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
@@ -145,6 +148,11 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
   // structure.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
   EXIT_TAIL_GATES: EXIT_TAIL_GATES as readonly Gate<never>[],
+  // structure.ts's two-level exit: which edge `foreverShape` takes for one, and the two places it
+  // is spelled (the loop's region, and the `break` out of a block)
+  TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],
+  TWO_LEVEL_REGION_GATES: TWO_LEVEL_REGION_GATES as readonly Gate<never>[],
+  TWO_LEVEL_BREAK_GATES: TWO_LEVEL_BREAK_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
