@@ -2694,9 +2694,6 @@ export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
   },
 ];
 
-/** Which copies past the duplication policy's defaults a reading asks an exit arm for: the counts
- *  for a path that bypasses the loop (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`), and a
- *  tail holding a loop. */
 /** What one `while (1)` reading asks of `foreverShape` past the default: an arm may copy a tail the
  *  exit path also runs (`copyExitTail`), take one edge as a two-level exit (`twoLevel`,
  *  `TwoLevelExit`), copy past `entry-bypasses-exit` and a bypassed return tail (`lastResort`,
@@ -2709,6 +2706,9 @@ interface ForeverAsk {
   readonly cycles?: boolean;
 }
 
+/** Which copies past the duplication policy's defaults a reading asks an exit arm for: the counts
+ *  for a path that bypasses the loop (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`), and a
+ *  tail holding a loop. */
 interface ArmCopies {
   /** `bypassTail`: a return tail off the loop's exit path that a path from outside also enters */
   readonly offExitPath: boolean;
@@ -2978,9 +2978,10 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
 /** Where a loop reading that copies a ret tail with an effect into the body (`retCopyingReadings`)
  *  ranks, and whether a structuring committed one. */
 interface RetCopyRanking {
-  /** Behind every `while (1)` reading, the two-level one included. Otherwise it ranks as the other
-   *  `while` and `do-while` readings do, save for a tail code around the loop also enters, which
-   *  waits behind the `while (1)` readings that add no variable. */
+  /** Behind every `while (1)` reading that copies no loop, the two-level one included, and ahead of
+   *  the last rung's readings that copy one in a tail they share (`ForeverAsk.cycles`). Otherwise it
+   *  ranks as the other `while` and `do-while` readings do, save for a tail code around the loop
+   *  also enters, which waits behind the `while (1)` readings that add no variable. */
   readonly last: boolean;
   took: boolean;
 }
