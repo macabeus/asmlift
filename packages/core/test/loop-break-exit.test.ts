@@ -15,7 +15,7 @@ import { tallying, without } from '../src/l3/gates';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { foldExitTrampolines } from '../src/raise/latch';
 import { recoverTypes } from '../src/raise/recover';
-import { BREAK_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import { BREAK_TAIL_GATES, BYPASS_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -1201,10 +1201,9 @@ describe('break arms that share a tail', () => {
   });
 
   // `hit` and `hit2` call each other round a cycle the first arm enters at one block and the second
-  // arm at the other: no copy of it is a loop. Refused where the arm is read; emission refuses the
-  // cycle too, so the rule is defensive.
+  // arm at the other: no copy of it is a loop, and no rule of `BREAK_TAIL_GATES` is needed to refuse
+  // it. Emission declines it loud, whether or not the last-rung rule holds the copy back.
   test('a cycle in the shared tail entered at two blocks declines', () => {
-    const t = tallying(BREAK_TAIL_GATES);
     const ir = SHARED_TAIL_TOP_TESTED.replace(
       '  %12: s32 = call %11 {target="f"}\n  br ^bb6()',
       '  %12: s32 = call %11 {target="f"}\n  br ^bb9()',
@@ -1213,11 +1212,30 @@ describe('break arms that share a tail', () => {
       '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  cond_br %13, ^bb9(), ^bb7()\n' +
         '^bb9():\n  %40: s32 = call %3 {target="hit2"}\n  cond_br %40, ^bb6(), ^bb7()',
     );
-    expect(() => judged(ir, { breakTailGates: t.gates })).toThrow(/cannot structure/);
-    expect(new Map(t.refusals()).get('shared-cycle-entered-mid-cycle')).toBeGreaterThan(0);
-    expect(() => judged(ir, { breakTailGates: without(BREAK_TAIL_GATES, 'shared-cycle-entered-mid-cycle') })).toThrow(
-      /cannot structure/,
+    expect(() => judged(ir)).toThrow(/cannot structure.*unrecovered back-edge/);
+    expect(() => judged(ir, { breakTailGates: [] })).toThrow(/cannot structure.*unrecovered back-edge/);
+  });
+
+  // The same search loop in a tail ending in `return` (A LOOP IN THE TAIL, at `earlyReturnArm`):
+  // each arm writes its own copy of the loop ahead of its `return`, at the same last rung, by the
+  // same rule (`bypass-tail-holds-cycle`, held to `ArmCopies.cycles`).
+  test('a shared tail holding a search loop and ending in `return` is written in each arm', () => {
+    const ir = SHARED_TAIL_SEARCH.replace(
+      '  %13: s32 = call %36 {target="hit"}\n  br ^bb7()',
+      '  %13: s32 = call %36 {target="hit"}\n  ret %13',
     );
+    // every rung ahead of the last refuses the copy (`bypass-tail-holds-cycle`), and the last takes it
+    const t = tallying(BYPASS_TAIL_GATES);
+    const { src, agreement, shipped } = judged(ir, { bypassTailGates: t.gates });
+    expect(new Map(t.refusals()).get('bypass-tail-holds-cycle')).toBeGreaterThan(0);
+    expect(src).toContain('while (1) {');
+    expect(
+      src.match(/for \(v\d = v\d; v\d < a0; v\d = v\d \+ 1\) \{\n {16}if \(t\(v\d\) == v\d\) break;/g),
+    ).toHaveLength(2);
+    expect(src.match(/return hit\(v\d\);/g)).toHaveLength(2);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
 

@@ -1317,15 +1317,18 @@ export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
 
 /** A tail several `break` arms share that holds a cycle (`codeBreakArm`, shared). */
 export interface BreakTailCycle {
-  /** asked by `while (1)`'s last rung, once every reading that copies no cycle has failed */
-  readonly lastResort: boolean;
-  /** some cycle in the tail is entered at two blocks, at one nesting level or inside another */
-  readonly enteredMidCycle: boolean;
+  /** asked by `while (1)`'s last rung (`ArmCopies.cycles`), once every reading that copies no cycle
+   *  has failed */
+  readonly cycleRung: boolean;
 }
 
 /** When a tail several arms share may hold a cycle, so each arm writes its own copy of the loop in
- *  it. The argument is at `codeBreakArm`. Not in the table: the acyclic tail (admitted without
- *  asking), and every other refusal of `codeBreakArm`, which are its own walk's. */
+ *  it. The argument is at `codeBreakArm`; the rule is the duplication policy's one rule for a cycle,
+ *  which `EXIT_TAIL_GATES`' `tail-holds-cycle` and `BYPASS_TAIL_GATES` hold a return tail to. Not in
+ *  the table: the acyclic tail (admitted without asking), every other refusal of `codeBreakArm`,
+ *  which are its own walk's, and a cycle entered at two blocks, which no copy can spell as a loop and
+ *  emission declines loud ("unrecovered back-edge"), as it does wherever the loop forest holds no
+ *  loop for a cycle. */
 export const BREAK_TAIL_GATES: readonly Gate<BreakTailCycle>[] = [
   {
     id: 'shared-cycle-before-last-resort',
@@ -1333,13 +1336,7 @@ export const BREAK_TAIL_GATES: readonly Gate<BreakTailCycle>[] = [
     sound: false,
     guardedBy:
       'loop-break-exit.test.ts: a loop in the tail the arm and the `else` share is copied only once the flag reading fails',
-    rejects: (c) => !c.lastResort,
-  },
-  {
-    id: 'shared-cycle-entered-mid-cycle',
-    why: 'a cycle entered at two blocks is no loop each arm can write a copy of (defensive)',
-    sound: false,
-    rejects: (c) => c.enteredMidCycle,
+    rejects: (c) => !c.cycleRung,
   },
 ];
 
@@ -2493,7 +2490,7 @@ function codeBreakArm(
   body: ReadonlySet<Block>,
   exit: Block,
   shared = false,
-  cycles: { lastResort: boolean; gates: readonly Gate<BreakTailCycle>[] } = NO_SHARED_CYCLES,
+  cycles: { cycleRung: boolean; gates: readonly Gate<BreakTailCycle>[] } = NO_SHARED_CYCLES,
 ): Set<Block> | null {
   if (to === exit || body.has(to)) {
     return null;
@@ -2550,55 +2547,14 @@ function codeBreakArm(
   // again only through `exit`, and the exit does not reach it, so every path runs one copy, and runs
   // the loop in it exactly as the asm runs its one loop. A cycle cannot leave the region but to
   // `exit`, where the arm's `break` stands, and it never re-enters the body (the walk above). Each
-  // copy is structured by the reading its own natural loop takes, so every cycle must be one: entered
-  // at one block, at every nesting level (`entersMidCycle`), or the copy has no loop to write.
-  // Asked for only by `while (1)`'s last rung (`BREAK_TAIL_GATES`): the copy is the reading the asm
-  // does not hold (one loop, two copies), so every reading that copies none goes first.
-  return firstRejection(cycles.gates, {
-    lastResort: cycles.lastResort,
-    get enteredMidCycle() {
-      return entersMidCycle(region, preds);
-    },
-  }) === null
-    ? region
-    : null;
+  // copy is structured by the reading its own natural loop takes; a cycle entered at two blocks has
+  // none, and emission declines it loud. Asked for only by `while (1)`'s last rung
+  // (`BREAK_TAIL_GATES`, the duplication policy's rule for a cycle, at `earlyReturnArm`): the copy is
+  // the reading the asm does not hold (one loop, two copies), so every reading that copies none goes
+  // first.
+  return firstRejection(cycles.gates, { cycleRung: cycles.cycleRung }) === null ? region : null;
 }
-const NO_SHARED_CYCLES = { lastResort: false, gates: BREAK_TAIL_GATES } as const;
-/** Is some cycle among `blocks` entered at two blocks? Each strongly connected component with a
- *  cycle is asked for the blocks an edge from outside it enters; a component entered at one block
- *  (its header) is asked again without that block, for the loops nested inside it. True exactly
- *  where the blocks hold an irreducible cycle. */
-function entersMidCycle(blocks: ReadonlySet<Block>, preds: ReadonlyMap<Block, Block[]>): boolean {
-  const reach = (x: Block): Set<Block> => {
-    const out = new Set<Block>();
-    for (const stack = successorsOf(x).filter((y) => blocks.has(y)); stack.length > 0;) {
-      const y = stack.pop()!;
-      if (!out.has(y)) {
-        out.add(y);
-        stack.push(...successorsOf(y).filter((z) => blocks.has(z)));
-      }
-    }
-    return out;
-  };
-  const reached = new Map([...blocks].map((x) => [x, reach(x)] as const));
-  const seen = new Set<Block>();
-  for (const x of blocks) {
-    if (seen.has(x) || !reached.get(x)!.has(x)) {
-      continue;
-    }
-    const scc = new Set([...reached.get(x)!].filter((y) => reached.get(y)!.has(x)));
-    scc.forEach((y) => seen.add(y));
-    const entries = [...scc].filter((y) => (preds.get(y) ?? []).some((p) => !scc.has(p)));
-    if (entries.length !== 1) {
-      return true;
-    }
-    scc.delete(entries[0]);
-    if (entersMidCycle(scc, preds)) {
-      return true;
-    }
-  }
-  return false;
-}
+const NO_SHARED_CYCLES = { cycleRung: false, gates: BREAK_TAIL_GATES } as const;
 /** The duplication policy's admission (written at `earlyReturnArm`): is a block one the loop's own
  *  exit path does not run? Forward only (`reachForward`): round an enclosing loop's back-edge the exit
  *  reaches the inner loop again, which is the next iteration running the block again in the asm too,
@@ -2653,9 +2609,11 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
 export interface ExitTailCandidate {
   /** the arm's edge leaves from a latch, the loop's own way out */
   readonly armLeavesByLatch: boolean;
-  /** the reading of last resort asked for the copy (`BypassCounts.onExitPath`): a path from before
+  /** the reading of last resort asked for the copy (`ArmCopies.onExitPath`): a path from before
    *  the loop that skips the exit may enter the tail too (A PATH THAT BYPASSES THE LOOP) */
   readonly lastResort: boolean;
+  /** asked by `while (1)`'s last rung (`ArmCopies.cycles`): the tail may hold a loop */
+  readonly cycleRung: boolean;
   /** a latch, or a path from before the loop (the zero-trip guard), enters the exit */
   readonly exitIsTestOut: boolean;
   /** the exit path runs a block of its own before the tail: the arm never reaches `exit` */
@@ -2704,16 +2662,18 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
   },
   {
     id: 'tail-holds-cycle',
-    why: 'a tail holding a loop would be written once per arm where the asm holds it once',
+    why: 'a tail holding a loop would be written once per arm where the asm holds it once: the reading of last resort, after every reading that copies none',
     sound: false,
     guardedBy: 'loop-exit-return-tail.test.ts: a tail holding a loop of its own stays refused',
-    rejects: (c) => !c.acyclicPast,
+    rejects: (c) => !c.cycleRung && !c.acyclicPast,
   },
 ];
 
 /** One block the `bypassTail` count (at `earlyReturnArm`) weighs for an arm: a return
  *  tail the loop's own exit path does not run, which a path from outside the loop also enters. */
 export interface BypassTailCandidate {
+  /** asked by `while (1)`'s last rung (`ArmCopies.cycles`): the tail may hold a loop */
+  readonly cycleRung: boolean;
   /** neither the block nor anything past it holds a cycle */
   readonly acyclicPast: boolean;
 }
@@ -2722,27 +2682,31 @@ export interface BypassTailCandidate {
  *  also enters, off the loop's exit path. The argument is at `earlyReturnArm` ("A PATH THAT
  *  BYPASSES THE LOOP"); like `EXIT_TAIL_GATES`, no rule is sound, since every copy runs on a path
  *  exclusive of the others. Not in the table: the count's scope — the reading asked for it
- *  (`BypassCounts.offExitPath`), the block has an effect, the loop's own exit path does not run it,
+ *  (`ArmCopies.offExitPath`), the block has an effect, the loop's own exit path does not run it,
  *  and a path from outside the loop enters it — which is the walk's own condition. */
 export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
   {
     id: 'bypass-tail-holds-cycle',
-    why: 'a tail holding a loop would be written once per arm where the asm holds it once',
+    why: 'a tail holding a loop would be written once per arm where the asm holds it once: the reading of last resort, after every reading that copies none',
     sound: false,
     guardedBy: 'loop-exit-return-tail.test.ts: a bypassed tail holding a loop of its own is not written in the arm',
-    rejects: (c) => !c.acyclicPast,
+    rejects: (c) => !c.cycleRung && !c.acyclicPast,
   },
 ];
 
-/** Which of `earlyReturnArm`'s counts for a path that bypasses the loop a reading asks for (A PATH
- *  THAT BYPASSES THE LOOP, at `earlyReturnArm`). */
-interface BypassCounts {
+/** Which copies past the duplication policy's defaults a reading asks an exit arm for: the counts
+ *  for a path that bypasses the loop (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`), and a
+ *  tail holding a loop. */
+interface ArmCopies {
   /** `bypassTail`: a return tail off the loop's exit path that a path from outside also enters */
   readonly offExitPath: boolean;
   /** the `exitTail` count waives `entry-bypasses-exit` */
   readonly onExitPath: boolean;
+  /** `while (1)`'s last rung: a tail an arm copies may hold a loop, a `break` tail
+   *  (`BREAK_TAIL_GATES`) and a return tail (`tail-holds-cycle`, `BYPASS_TAIL_GATES`) alike */
+  readonly cycles: boolean;
 }
-const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
+const NO_COPIES: ArmCopies = { offExitPath: false, onExitPath: false, cycles: false };
 
 // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
 // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
@@ -2757,7 +2721,7 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //
 // ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
 // effects may be written once per arm when the loop's own exit path does not run it
-// (`offExitPathOf`) and it holds no cycle, whoever else enters it — another arm, or a path from
+// (`offExitPathOf`) and it holds no cycle (save at `while (1)`'s last rung, below), whoever else enters it — another arm, or a path from
 // before the loop (an `else` beside it). A path that left the body by an arm reaches the block only
 // through that arm, because the exit does not reach it; a path from before the loop never ran an arm.
 // The paths are exclusive, so each runs one copy once, the arm's or the one written where the block
@@ -2829,7 +2793,8 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //     forward path — never an entry from before the loop that bypasses the exit (the paragraph below
 //     says why), save at the reading of last resort (A PATH THAT BYPASSES THE LOOP);
 //   - `tail-holds-cycle`: neither the block nor anything past it holds a cycle, so the region past it
-//     only returns, and each copy is one walk, never a loop written once per arm.
+//     only returns, and each copy is one walk, never a loop written once per arm, save at the last
+//     rung (A LOOP IN THE TAIL, below).
 // None is `sound`: each copy runs on a path exclusive of the others, so a refusal here picks which
 // reading of the loop is written, never whether the C means the asm. What keeps a copied tail sound
 // is that the arm does not own it (`emitDoWhile`'s escape check, `a tail the exit path also runs
@@ -2849,7 +2814,7 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 // tail of an `if` branch before the loop or of a sibling `case` of an outer switch (jump.c
 // `find_cross_jump`), so the arm runs into a `call; ret` block a path from outside the loop also
 // enters, which no count above admits. Two counts take it, each sound for the policy's reason, and
-// each asked for by the reading (`BypassCounts`), never by default. Neither can tell a cross-jump
+// each asked for by the reading (`ArmCopies`), never by default. Neither can tell a cross-jump
 // from a source `goto` into a shared tail, since the asm is the same: what each admits is the shape,
 // on every toolchain, and the rows name the cross-jump only as its commonest source:
 //   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run, which a
@@ -2880,6 +2845,16 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //     ido7.1 as on agbcc) lifts this way with the join written in the arm, where a two-level exit
 //     carrying the value would write it once; an unrolled search writes it once per arm.
 //
+// A LOOP IN THE TAIL. A cycle in a copied tail is the policy's one exception, and it is one rule
+// wherever the tail ends: in `break` (`codeBreakArm`, `BREAK_TAIL_GATES`) or in `return`
+// (`tail-holds-cycle` above, `BYPASS_TAIL_GATES`). Each arm may write its own copy of the loop, but
+// only at `while (1)`'s last rung (`ArmCopies.cycles`), after every reading that copies none: one
+// loop the asm holds once, written twice. The copies are exclusive for the policy's reason, so each
+// path runs one copy and runs its loop as the asm runs the one loop; the walk never re-enters the
+// body, so no copy's loop reaches back into it; and a block on the cycle is never owned (`armsOnly`
+// asks for none). Each copy is structured by the reading its own natural loop takes, and a cycle
+// entered at two blocks, which has none, declines loud at emission.
+//
 // Returns the blocks the arm OWNS — the ones that run ahead of the loop's update on every path that
 // reaches them — or null when this is not an early-`return` arm. The arm writes every block its walk
 // admits, owned or not: an `exitTail` block is admitted but not owned, since the exit path runs it
@@ -2895,7 +2870,7 @@ function earlyReturnArm(
   latches: readonly Block[],
   copyExitTail: boolean,
   exitTailGates: readonly Gate<ExitTailCandidate>[] = EXIT_TAIL_GATES,
-  bypass: BypassCounts = NO_BYPASS,
+  bypass: ArmCopies = NO_COPIES,
   bypassTailGates: readonly Gate<BypassTailCandidate>[] = BYPASS_TAIL_GATES,
 ): Set<Block> | null {
   // does the loop's own exit path run it? forward only (`offExitPathOf`)
@@ -2918,6 +2893,7 @@ function earlyReturnArm(
     firstRejection(exitTailGates, {
       armLeavesByLatch: latches.includes(from),
       lastResort: bypass.onExitPath,
+      cycleRung: bypass.cycles,
       get exitIsTestOut() {
         return (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
       },
@@ -2941,6 +2917,7 @@ function earlyReturnArm(
     bb !== exit &&
     !armOfBody(bb) &&
     firstRejection(bypassTailGates, {
+      cycleRung: bypass.cycles,
       get acyclicPast() {
         return acyclicPast(bb);
       },
@@ -3742,13 +3719,12 @@ function structureRanked(
     exit: Block,
     codeArms: boolean,
     copyExitTail: boolean,
-    bypass: BypassCounts = NO_BYPASS,
-    sharedCycles = false,
+    bypass: ArmCopies = NO_COPIES,
   ) => {
     const region =
       codeArms && !innerBodyHas(nl, e.from)
         ? codeBreakArm(preds, dom, e.from, e.to, nl.body, exit, true, {
-            lastResort: sharedCycles,
+            cycleRung: bypass.cycles,
             gates: hooks.breakTailGates ?? BREAK_TAIL_GATES,
           })
         : null;
@@ -3828,7 +3804,7 @@ function structureRanked(
           return false;
         }
         const region = codeBreakArm(preds, dom, h, hOut[0].block, nl.body, e.to, true, {
-          lastResort: false,
+          cycleRung: false,
           gates: hooks.breakTailGates ?? BREAK_TAIL_GATES,
         });
         const bareReturn = e.to.ops.length === 1 && e.to.ops[0].opcode === 'ret' && e.to.ops[0].operands.length === 0;
@@ -3999,8 +3975,8 @@ function structureRanked(
     const pastLoop = (x: Block) => rank(x) < fn.blocks.length;
     // laid out between the body's first and last blocks: never a block ahead of the loop
     const inSpan = (x: Block) => fn.blocks.indexOf(x) > first && fn.blocks.indexOf(x) < last;
-    const asked: BypassCounts = { offExitPath: lastResort, onExitPath: lastResort };
-    const fitAt = (exit: Block, bypass: BypassCounts): ForeverLoopInfo | null => {
+    const asked: ArmCopies = { offExitPath: lastResort, onExitPath: lastResort, cycles: sharedCycles };
+    const fitAt = (exit: Block, bypass: ArmCopies): ForeverLoopInfo | null => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
@@ -4010,7 +3986,7 @@ function structureRanked(
           breaks.add(e.from);
           return !innerBodyHas(nl, e.from);
         }
-        const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail, bypass, sharedCycles);
+        const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail, bypass);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
@@ -4091,8 +4067,9 @@ function structureRanked(
   // exit comes `while (1)` with every copy, where an arm also copies a return tail a path that
   // bypasses the loop enters, under an exit inside the loop's span or on the exit path (A PATH THAT
   // BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no reading fits and no ret copy
-  // waits, the same two readings run again with a break arm writing its own copy of a loop in a tail
-  // another arm shares (`codeBreakArm`, `BREAK_TAIL_GATES`): two copies of a loop the asm holds once.
+  // waits, the same two readings run again with an arm writing its own copy of a loop in a tail it
+  // shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at `earlyReturnArm`): two copies of
+  // a loop the asm holds once.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
@@ -4116,8 +4093,8 @@ function structureRanked(
         } else if (retCopying !== undefined) {
           retCopying();
         } else {
-          // the last rung: the same readings, an arm now writing its copy of a loop in a tail
-          // another arm shares (`BREAK_TAIL_GATES`)
+          // the last rung: the same readings, an arm now writing its copy of a loop in a tail it
+          // shares (`ArmCopies.cycles`)
           const cyclic = twoLevel(true);
           if (cyclic !== null) {
             foreverLoops.set(h, cyclic);
