@@ -582,7 +582,8 @@ const BYPASS_OFF_EXIT_IR = `fn bypassoff {
  *  fin(i + a); return; } } return i;`, the shape of a loop at the end of a `case` (Klonoa's
  *  sub_08016EEC). The call leaves no `while` reading, and the arm's head `^bb3`, inside the loop's
  *  span, fits `while (1)` as an exit, the `ret` past the loop being a plain `ret` target. The exit
- *  laid out past the loop is the code after it, and is read first. */
+ *  laid out past the loop fits too once the arm copies the tail; the asm does not say which the
+ *  source wrote, and the one read first stands where nothing declines with it (`PastExitRanking`). */
 const BYPASS_RET_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypassret')
   .replace('  %5: s32 = add %4, %4\n', '  %5: s32 = call %4 {target="t"}\n')
   .replace('  %11: s32 = call %10 {target="miss"}\n  br ^bb9(%10)\n', '  ret %10\n');
@@ -659,6 +660,43 @@ const PRE_LOOP_TAIL_IR = `fn preloop {
   ret %2
 }`;
 
+/** `synthetic:sw_xjret_end`'s agbcc listing (`-O2 -mthumb-interwork`): `switch (c) { case 3: for (i =
+ *  gLo; i <= gHi; i++) { switch (gE[i].id) { case 5: if (gE[i].x != a) { gOut = 1; break; } fin(gE[a].x,
+ *  gE[a].y, 2, a); return; .. } } break; case 4: if (gOut == 9) { fin(gE[a].x, gE[a].y, 2, a); return; }
+ *  k(4); break; }`. Case 5's `fin` is cross-jumped onto case 4's at `.L27`, and its head `.L11` is laid
+ *  out inside the loop's span. */
+const AGBCC_SW_XJRET_END =
+  'sw_xjret_end:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tcmp\tr1, #0x3\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tcmp\tr1, #0x4\n\tbne\t.LCB11\n\tb\t.L23\t@long jump\n.LCB11:\n\tb\t.L2\n.L4:\n\tldr\tr0, .L28\n' +
+  '\tldr\tr4, [r0]\n\tldr\tr0, .L28+0x4\n\tldr\tr0, [r0]\n\tcmp\tr4, r0\n\tble\t.LCB22\n' +
+  '\tb\t.L2\t@long jump\n.LCB22:\n.L8:\n\tldr\tr1, .L28+0x8\n\tlsl\tr2, r4, #0x1\n\tadd\tr0, r2, r4\n' +
+  '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x8]\n\tsub\tr0, r0, #0x5\n' +
+  '\tadd\tr3, r1, #0\n\tcmp\tr0, #0x7\n\tbhi\t.L7\t@cond_branch\n\tlsl\tr0, r0, #0x2\n' +
+  '\tldr\tr1, .L28+0xc\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L29:\n\t.align\t2, 0\n' +
+  '.L28:\n\t.word\tgLo\n\t.word\tgHi\n\t.word\tgE\n\t.word\t.L20\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+  '.L20:\n\t.word\t.L10\n\t.word\t.L12\n\t.word\t.L7\n\t.word\t.L14\n\t.word\t.L16\n\t.word\t.L7\n' +
+  '\t.word\t.L17\n\t.word\t.L19\n.L10:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n' +
+  '\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbeq\t.L11\t@cond_branch\n\tldr\tr1, .L30\n\tmov\tr0, #0x1\n' +
+  '\tstr\tr0, [r1]\n\tb\t.L7\n.L31:\n\t.align\t2, 0\n.L30:\n\t.word\tgOut\n.L11:\n\tlsl\tr1, r5, #0x1\n' +
+  '\tadd\tr1, r1, r5\n\tlsl\tr1, r1, #0x2\n\tadd\tr0, r1, r3\n\tldr\tr0, [r0]\n\tadd\tr2, r3, #0x4\n' +
+  '\tb\t.L27\n.L12:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n' +
+  '\tcmp\tr0, r5\n\tble\t.L7\t@cond_branch\n\tldr\tr1, .L32\n\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n' +
+  '\tb\t.L7\n.L33:\n\t.align\t2, 0\n.L32:\n\t.word\tgOut\n.L14:\n\tadd\tr0, r2, r4\n' +
+  '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbge\t.L7\t@cond_branch\n' +
+  '\tldr\tr1, .L34\n\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.L7\n.L35:\n\t.align\t2, 0\n.L34:\n' +
+  '\t.word\tgOut\n.L16:\n\tldr\tr1, .L36\n\tmov\tr0, #0x4\n\tstr\tr0, [r1]\n\tb\t.L7\n.L37:\n' +
+  '\t.align\t2, 0\n.L36:\n\t.word\tgOut\n.L17:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n' +
+  '\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbeq\t.L7\t@cond_branch\n\tldr\tr1, .L38\n' +
+  '\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n\tb\t.L7\n.L39:\n\t.align\t2, 0\n.L38:\n\t.word\tgOut\n.L19:\n' +
+  '\tadd\tr0, r4, #0\n\tbl\tk\n.L7:\n\tadd\tr4, r4, #0x1\n\tldr\tr0, .L40\n\tldr\tr0, [r0]\n' +
+  '\tcmp\tr4, r0\n\tble\t.L8\t@cond_branch\n\tb\t.L2\n.L41:\n\t.align\t2, 0\n.L40:\n\t.word\tgHi\n' +
+  '.L23:\n\tldr\tr0, .L42\n\tldr\tr0, [r0]\n\tcmp\tr0, #0x9\n\tbne\t.L24\t@cond_branch\n' +
+  '\tldr\tr2, .L42+0x4\n\tlsl\tr1, r5, #0x1\n\tadd\tr1, r1, r5\n\tlsl\tr1, r1, #0x2\n' +
+  '\tadd\tr0, r1, r2\n\tldr\tr0, [r0]\n\tadd\tr2, r2, #0x4\n.L27:\n\tadd\tr1, r1, r2\n\tldr\tr1, [r1]\n' +
+  '\tmov\tr2, #0x2\n\tadd\tr3, r5, #0\n\tbl\tfin\n\tb\t.L2\n.L43:\n\t.align\t2, 0\n.L42:\n' +
+  '\t.word\tgOut\n\t.word\tgE\n.L24:\n\tmov\tr0, #0x4\n\tbl\tk\n.L2:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n' +
+  '\tbx\tr0\n';
+
 describe('a return tail a path that bypasses the loop also enters', () => {
   /** the loop's text, from `while (1) {` to its closing brace at the same indentation */
   const loopOf = (src: string) => {
@@ -680,14 +718,33 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test("the exit laid out past the loop is read before the arm's head inside it", () => {
+  test("the arm's head inside the loop's span stays the exit where nothing declines with it", () => {
     const { src, agreement, shipped } = judged(BYPASS_RET_EXIT_IR);
-    // the arm keeps its `return` in the loop; it is not the loop's `break` to a `fin` after it
+    // the arm is the loop's `break` to the `fin` written after it; the exit past the loop returns
     const loop = loopOf(src);
-    expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);
-    expect(loop).toMatch(/if \(v\d+ >= a1\) break;/);
+    expect(loop).toMatch(/if \(t\(v\d+\) == a0\) break;/);
+    expect(loop).toMatch(/if \(v\d+ >= a1\) return v\d+;/);
+    expect(loop).not.toContain('fin(');
     expect(agreement).toEqual({ judged: 300, disagree: 0 });
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test("agbcc: a loop ending a `case` reads its exit past the loop where the arm's head declines", () => {
+    // with the arm's head for the exit, the switch inside the loop finds case 5's body leaving for an
+    // exit past the switch's end; run again with the exit past the loop first, the arm copies the
+    // cross-jumped `fin(..); return;` and `case 4:` keeps its own
+    const out = decompile('sw_xjret_end', AGBCC_SW_XJRET_END, ARMV4T_AGBCC, {
+      prototypes: {
+        sw_xjret_end: { params: 2, returnsVoid: true },
+        fin: { params: 4, returnsVoid: true },
+        k: { params: 1, returnsVoid: true },
+      },
+    });
+    expect(out.diagnostics).toEqual([]);
+    const loop = loopOf(out.source);
+    expect(loop).toMatch(/fin\([^;]*, 2, a0\);\n\s+return;\n\s+\}\n\s+gOut = 1;\n\s+break;/);
+    expect(loop).toMatch(/if \(v\d+ > \(s32\)gHi\) break;/);
+    expect(out.source.match(/fin\(/g)).toHaveLength(2);
   });
 
   test('on the exit path: the arm copies the tail past the bypassing entrant', () => {

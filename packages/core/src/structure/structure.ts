@@ -2759,30 +2759,38 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 // tail of an `if` branch before the loop or of a sibling `case` of an outer switch (jump.c
 // `find_cross_jump`), so the arm runs into a `call; ret` block a path from outside the loop also
 // enters, and the loop fit no reading: the function declined. Two counts take it, each sound for the
-// policy's reason, and each asked for by the reading (`BypassCounts`), never by default:
+// policy's reason, and each asked for by the reading (`BypassCounts`), never by default. Neither can
+// tell a cross-jump from a source `goto` into a shared tail, since the asm is the same: what each
+// admits is the shape, on every toolchain, and the rows name the cross-jump only as its commonest
+// source:
 //   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run, which a
 //     path from outside the loop enters (not only the loop's arms: a tail only they enter is a
 //     `break` target, written once after the loop), is admitted, the arm's own head included, when
 //     no rule of `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through
 //     the arm's copy, which ends in its `return`; a path from outside never ran the arm, and the exit
 //     never reaches it. It is not owned: a path that did not take the arm runs it too
-//     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). It is asked at the last resort, and once
-//     earlier, by `while (1)` (`foreverShape`): where a reading without it takes an exit laid out
-//     between the body's first and last blocks, an exit past the loop's body that fits with it goes
-//     first (never over an exit laid out ahead of the loop: a label a `goto` jumps back to). An exit
-//     in the span is an early `return` read as the exit, which is what made the post-loop epilogue
-//     the paragraph above names look off the exit path; an exit past the body is the code after the
-//     loop, so that epilogue is on the exit path and never this count's. Klonoa's sub_08016EEC has
-//     the shape (`synthetic:sw_xjret_end`): a loop that ends a `case` takes the arm's own head for
-//     its exit, and declines at the switch inside it. Nowhere else does the count rank ahead of another reading: on
-//     gcc2.7.2 and gcc2.7.2kmc the same `sw_xjret` loop is a `do-while` whose arm copies the merged
-//     tail (`retCopyingReadings`), which the count must not displace;
+//     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). It is asked at the last resort, and by
+//     `while (1)` (`foreverShape`) where a reading without it takes an exit laid out between the
+//     body's first and last blocks and an exit past the loop's body fits with it (never an exit laid
+//     out ahead of the loop: a label a `goto` jumps back to). An exit in the span may be an early
+//     `return` read as the exit, which is what made the post-loop epilogue the paragraph above names
+//     look off the exit path; an exit past the body is the code after the loop, so that epilogue is
+//     on the exit path and never this count's. Both are correct C for the same asm and neither
+//     scores better on every toolchain, so the in-span exit stays first and the exit past the loop is
+//     taken only by a structuring run again because the first declined (`PastExitRanking`, at
+//     `structure`). Klonoa's sub_08016EEC has the shape (`synthetic:sw_xjret_end`): a loop that ends
+//     a `case` takes the arm's own head for its exit, and declines at the switch inside it;
 //   - `onExitPath`, at the reading of last resort only: the `exitTail` count waives
 //     `entry-bypasses-exit`, so a tail the exit path runs past code of its own is copied although a
 //     path from before the loop also lands on it: that path ran neither the arm nor the exit
 //     (`synthetic:sw_xjret_post`, where the code after the loop ends in the same `fin(..); return;`).
-//     Every other `exitTail` rule still holds. The zero-trip epilogue the paragraph above names is
-//     not taken this way where any other reading fits, since this one is asked last.
+//     Every other `exitTail` rule still holds. What it admits is any effectful return tail a branch
+//     before the loop also enters, cross-jumped or not: the zero-trip epilogue the paragraph above
+//     names among them, taken only where every other reading declines. A search loop's found arm
+//     that jumps past the not-found code into a join the guard also enters (`if (f) { for (..) if
+//     (hit) { id = i; goto j; } id = 3; } else id = 26; j: out(id);`, on gcc2.7.2, gcc2.7.2kmc and
+//     ido7.1 as on agbcc) lifts this way with the join written in the arm, where a two-level exit
+//     carrying the value would write it once; an unrolled search writes it once per arm.
 //
 // Returns the blocks the arm OWNS — the ones that run ahead of the loop's update on every path that
 // reaches them — or null when this is not an early-`return` arm. The arm writes every block its walk
@@ -2900,6 +2908,14 @@ interface RetCopyRanking {
   took: boolean;
 }
 
+/** Whether `while (1)` (`foreverShape`) takes a fitting exit laid out past the loop's body ahead of
+ *  the exit inside the body's span it reads first otherwise, and whether a structuring met a loop
+ *  where that order reads differently (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). */
+interface PastExitRanking {
+  readonly first: boolean;
+  could: boolean;
+}
+
 /** A RET-TAIL COPY CLASSIFICATION ACCEPTS, EMISSION MAY STILL NOT SPELL. A `while` or `do-while`
  *  reading takes an edge into a ret-terminated tail it does not own as an early `return`, and only
  *  emission learns whether the body can hold it: on gcc2.7.2kmc, `for (j = 0; j < 8; j++) { if
@@ -2907,48 +2923,70 @@ interface RetCopyRanking {
  *  in the body ("unrecovered back-edge"), and on gcc2.7.2 the same loop in a switch arm whose merge
  *  is the function's `t(); return` reaches that merge from inside the loop, which no `break;` spells
  *  (`switchBreakAt`). Such a structuring is run again with every such reading last
- *  (`RetCopyRanking.last`), where `while (1)` spells the loop, and the first run's refusal stands if
- *  the second declines too. The first run's observation hooks are held until it is known to stand,
- *  so a site is reported once, by the structuring that is returned. */
+ *  (`RetCopyRanking.last`), where `while (1)` spells the loop.
+ *
+ *  AN EXIT PAST THE LOOP, LIKEWISE. Where `while (1)` takes an exit inside the loop's span and an
+ *  exit past its body would fit once an arm copies a return tail a path from outside the loop also
+ *  enters, both readings are the same asm, and neither scores better on every toolchain: the one
+ *  read first is kept. Only a structuring that declines with it — Klonoa's sub_08016EEC
+ *  (`synthetic:sw_xjret_end`), where the switch inside the loop finds a case body leaving for the
+ *  in-span exit past the switch's end — is run again with the exit past the loop first
+ *  (`PastExitRanking.first`), and with the ret-tail copies last as well if that one committed one.
+ *
+ *  The first run's refusal stands if every rerun declines too. Each run's observation hooks are held
+ *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
+ *  by the first run where none is. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
   hooks: StructureHooks = {},
   memo?: DefaultAcceptsMemo,
 ): SFn {
-  const held: (() => void)[] = [];
-  const hold =
-    <A extends unknown[]>(f: (...args: A) => void) =>
-    (...args: A) => {
-      held.push(() => f(...args));
-    };
-  const first: RetCopyRanking = { last: false, took: false };
-  try {
-    const sfn = structureRanked(
-      fn,
-      opts,
-      {
-        ...hooks,
-        onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
-        onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
-        onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
-      },
-      memo,
-      first,
-    );
-    held.forEach((f) => f());
-    return sfn;
-  } catch (error) {
-    if (!(error instanceof StructureError) || !first.took) {
-      held.forEach((f) => f());
-      throw error;
-    }
+  let refused: { error: StructureError; held: (() => void)[] } | undefined;
+  const attempt = (retCopy: RetCopyRanking, pastExit: PastExitRanking): SFn | null => {
+    const held: (() => void)[] = [];
+    const hold =
+      <A extends unknown[]>(f: (...args: A) => void) =>
+      (...args: A) => {
+        held.push(() => f(...args));
+      };
     try {
-      return structureRanked(fn, opts, hooks, memo, { last: true, took: false });
-    } catch (again) {
-      throw again instanceof StructureError ? error : again;
+      const sfn = structureRanked(
+        fn,
+        opts,
+        {
+          ...hooks,
+          onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
+          onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
+          onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+        },
+        memo,
+        retCopy,
+        pastExit,
+      );
+      held.forEach((f) => f());
+      return sfn;
+    } catch (error) {
+      if (!(error instanceof StructureError)) {
+        throw error;
+      }
+      refused ??= { error, held };
+      return null;
     }
+  };
+  const first: RetCopyRanking = { last: false, took: false };
+  const inSpan: PastExitRanking = { first: false, could: false };
+  const past: RetCopyRanking = { last: false, took: false };
+  const sfn =
+    attempt(first, inSpan) ??
+    (first.took ? attempt({ last: true, took: false }, inSpan) : null) ??
+    (inSpan.could ? attempt(past, { first: true, could: false }) : null) ??
+    (past.took ? attempt({ last: true, took: false }, { first: true, could: false }) : null);
+  if (sfn !== null) {
+    return sfn;
   }
+  refused!.held.forEach((f) => f());
+  throw refused!.error;
 }
 
 function structureRanked(
@@ -2957,6 +2995,7 @@ function structureRanked(
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
   retCopy: RetCopyRanking,
+  pastExit: PastExitRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -3917,16 +3956,19 @@ function structureRanked(
           }
         : null;
     };
-    // an exit inside the loop's span is an early `return` read as the exit: where the code after the
-    // loop fits as the exit once an arm copies a return tail a path from outside the loop also
-    // enters, that reading goes first (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). An exit
-    // laid out ahead of the loop is a `goto` back to a label before it, which a `break` spells once.
+    // an exit inside the loop's span may be an early `return` read as the exit: where the code after
+    // the loop fits as the exit once an arm copies a return tail a path from outside the loop also
+    // enters, that reading is noted, and taken only by a structuring run again because the first
+    // declined (`PastExitRanking`, at `structure`; A PATH THAT BYPASSES THE LOOP, at
+    // `earlyReturnArm`). An exit laid out ahead of the loop is a `goto` back to a label before it,
+    // which a `break` spells once.
     const pastFirst = (exit: Block, shape: ForeverLoopInfo): ForeverLoopInfo => {
       if (inSpan(exit) && !asked.offExitPath) {
         for (const past of targets.filter(pastLoop)) {
           const copied = fitAt(past, { ...asked, offExitPath: true });
           if (copied !== null) {
-            return copied;
+            pastExit.could = true;
+            return pastExit.first ? copied : shape;
           }
         }
       }
