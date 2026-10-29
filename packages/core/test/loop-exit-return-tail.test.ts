@@ -26,7 +26,7 @@ import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { EXIT_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import { BYPASS_TAIL_GATES, EXIT_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -527,4 +527,269 @@ test("a `do-while` whose arm needs the exit path's tail keeps its bottom test", 
   expect(src.match(/\*\(s32 \*\)a0 = a1;/g)).toHaveLength(2);
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+// A RETURN TAIL A PATH THAT BYPASSES THE LOOP ALSO ENTERS (`BypassCounts`, at `earlyReturnArm`).
+// agbcc cross-jumps an arm's `fin(..); return;` onto the identical tail of a branch before the loop
+// (jump.c `find_cross_jump`; `synthetic:sw_xjret`), so the arm runs a block of its own (`^bb3`, the
+// argument) and lands on a `call; ret` the branch ahead of the loop also enters. No other count
+// admits that entrant, the two-level exit included (the exit's code never meets the arm's head). The
+// arm writes the tail without owning it, and the path from before the loop keeps the copy written
+// where the tail sits.
+
+/** `if (a == 7) { if (n == 0) { fin(0); return; } i = 0; } else { for (i = 0; i < n; i++) { if (i +
+ *  i == a) { fin(i + a); return; } } miss(i); } done(i);` with the two `fin(..); return;`
+ *  cross-jumped into `^bb5`, which the loop's exit `^bb4` never reaches: off the exit path.
+ *  The exit joins the branch before the loop at `done`, as the rows' post-loop code does, so it is no
+ *  `ret` target of its own; the arm's own block `^bb3` sits inside the loop's span, where agbcc lays
+ *  it out. */
+const BYPASS_OFF_EXIT_IR = `fn bypassoff {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %20: s32 = const {value=7}
+  %21: u32 = icmp_eq %0, %20
+  cond_br %21, ^bb10(), ^bb6()
+^bb10():
+  %22: u32 = icmp_eq %1, %2
+  cond_br %22, ^bb5(%2), ^bb9(%2)
+^bb6():
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4(%2)
+^bb1(%4: s32):
+  %5: s32 = add %4, %4
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb3(), ^bb2()
+^bb3():
+  %13: s32 = add %4, %0
+  br ^bb5(%13)
+^bb2():
+  %7: s32 = const {value=1}
+  %8: s32 = add %4, %7
+  %9: u32 = icmp_slt %8, %1
+  cond_br %9, ^bb1(%8), ^bb4(%8)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="miss"}
+  br ^bb9(%10)
+^bb5(%12: s32):
+  %14: s32 = call %12 {target="fin"}
+  ret %12
+^bb9(%15: s32):
+  %16: s32 = call %15 {target="done"}
+  ret %15
+}`;
+
+/** The same loop whose exit only returns and whose header calls: `for (..) { if (t(i) == a) {
+ *  fin(i + a); return; } } return i;`, the shape of a loop at the end of a `case` (Klonoa's
+ *  sub_08016EEC). The call leaves no `while` reading, and the arm's head `^bb3`, inside the loop's
+ *  span, fits `while (1)` as an exit, the `ret` past the loop being a plain `ret` target. The exit
+ *  laid out past the loop fits too once the arm copies the tail; the asm does not say which the
+ *  source wrote, and the one read first stands where nothing declines with it (`PastExitRanking`). */
+const BYPASS_RET_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypassret')
+  .replace('  %5: s32 = add %4, %4\n', '  %5: s32 = call %4 {target="t"}\n')
+  .replace('  %11: s32 = call %10 {target="miss"}\n  br ^bb9(%10)\n', '  ret %10\n');
+
+/** The same loop whose exit path also ends in the tail: `miss(i); fin(i); return;` after the loop,
+ *  agbcc's three `fin` sites in one block (`synthetic:sw_xjret_post`). On the exit path: the
+ *  `exitTail` count copies the tail past the exit's `miss`, and the last resort waives its
+ *  `entry-bypasses-exit` rule for the guard's path, which ran neither the arm nor the exit. */
+const BYPASS_ON_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypasson').replace(
+  '  %11: s32 = call %10 {target="miss"}\n  br ^bb9(%10)\n',
+  '  %11: s32 = call %10 {target="miss"}\n  br ^bb5(%10)\n',
+);
+
+/** `for (i = 0; i < n; i++) { if (t(i) == a) goto hit; if (u(i) == a) goto hit; } return 0; hit:
+ *  fin(i); if (i == 0) k(0); return i;`, with `hit` laid out inside the loop's span: two arms enter
+ *  the tail and nothing from outside the loop does, so it is no bypassed tail, and the loop `break`s
+ *  to it once. */
+const ARMS_ONLY_TAIL_IR = `fn armsonly {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4()
+^bb1(%4: s32):
+  %5: s32 = call %4 {target="t"}
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb5(%4), ^bb6()
+^bb6():
+  %7: s32 = call %4 {target="u"}
+  %8: u32 = icmp_eq %7, %0
+  cond_br %8, ^bb5(%4), ^bb2()
+^bb5(%12: s32):
+  %14: s32 = call %12 {target="fin"}
+  %15: u32 = icmp_eq %12, %2
+  cond_br %15, ^bb7(), ^bb8()
+^bb7():
+  %16: s32 = call %2 {target="k"}
+  br ^bb8()
+^bb8():
+  ret %12
+^bb2():
+  %9: s32 = const {value=1}
+  %10: s32 = add %4, %9
+  %11: u32 = icmp_slt %10, %1
+  cond_br %11, ^bb1(%10), ^bb4()
+^bb4():
+  ret %2
+}`;
+
+/** `if (a == 7) { hit: fin(a); return a; } for (i = 0; i < n; i++) { if (t(i) == a) goto hit; }
+ *  return 0;`: the tail a branch before the loop also enters is laid out AHEAD of the loop, a label
+ *  the arm jumps back to. It is no early `return` inside the loop's span, so the loop `break`s to it
+ *  rather than copying it into the arm. */
+const PRE_LOOP_TAIL_IR = `fn preloop {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %20: s32 = const {value=7}
+  %21: u32 = icmp_eq %0, %20
+  cond_br %21, ^bb5(), ^bb6()
+^bb5():
+  %14: s32 = call %0 {target="fin"}
+  ret %0
+^bb6():
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4()
+^bb1(%4: s32):
+  %5: s32 = call %4 {target="t"}
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb5(), ^bb2()
+^bb2():
+  %9: s32 = const {value=1}
+  %10: s32 = add %4, %9
+  %11: u32 = icmp_slt %10, %1
+  cond_br %11, ^bb1(%10), ^bb4()
+^bb4():
+  ret %2
+}`;
+
+/** `synthetic:sw_xjret_end`'s agbcc listing (`-O2 -mthumb-interwork`): `switch (c) { case 3: for (i =
+ *  gLo; i <= gHi; i++) { switch (gE[i].id) { case 5: if (gE[i].x != a) { gOut = 1; break; } fin(gE[a].x,
+ *  gE[a].y, 2, a); return; .. } } break; case 4: if (gOut == 9) { fin(gE[a].x, gE[a].y, 2, a); return; }
+ *  k(4); break; }`. Case 5's `fin` is cross-jumped onto case 4's at `.L27`, and its head `.L11` is laid
+ *  out inside the loop's span. */
+const AGBCC_SW_XJRET_END =
+  'sw_xjret_end:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tcmp\tr1, #0x3\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tcmp\tr1, #0x4\n\tbne\t.LCB11\n\tb\t.L23\t@long jump\n.LCB11:\n\tb\t.L2\n.L4:\n\tldr\tr0, .L28\n' +
+  '\tldr\tr4, [r0]\n\tldr\tr0, .L28+0x4\n\tldr\tr0, [r0]\n\tcmp\tr4, r0\n\tble\t.LCB22\n' +
+  '\tb\t.L2\t@long jump\n.LCB22:\n.L8:\n\tldr\tr1, .L28+0x8\n\tlsl\tr2, r4, #0x1\n\tadd\tr0, r2, r4\n' +
+  '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x8]\n\tsub\tr0, r0, #0x5\n' +
+  '\tadd\tr3, r1, #0\n\tcmp\tr0, #0x7\n\tbhi\t.L7\t@cond_branch\n\tlsl\tr0, r0, #0x2\n' +
+  '\tldr\tr1, .L28+0xc\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L29:\n\t.align\t2, 0\n' +
+  '.L28:\n\t.word\tgLo\n\t.word\tgHi\n\t.word\tgE\n\t.word\t.L20\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+  '.L20:\n\t.word\t.L10\n\t.word\t.L12\n\t.word\t.L7\n\t.word\t.L14\n\t.word\t.L16\n\t.word\t.L7\n' +
+  '\t.word\t.L17\n\t.word\t.L19\n.L10:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n' +
+  '\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbeq\t.L11\t@cond_branch\n\tldr\tr1, .L30\n\tmov\tr0, #0x1\n' +
+  '\tstr\tr0, [r1]\n\tb\t.L7\n.L31:\n\t.align\t2, 0\n.L30:\n\t.word\tgOut\n.L11:\n\tlsl\tr1, r5, #0x1\n' +
+  '\tadd\tr1, r1, r5\n\tlsl\tr1, r1, #0x2\n\tadd\tr0, r1, r3\n\tldr\tr0, [r0]\n\tadd\tr2, r3, #0x4\n' +
+  '\tb\t.L27\n.L12:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n' +
+  '\tcmp\tr0, r5\n\tble\t.L7\t@cond_branch\n\tldr\tr1, .L32\n\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n' +
+  '\tb\t.L7\n.L33:\n\t.align\t2, 0\n.L32:\n\t.word\tgOut\n.L14:\n\tadd\tr0, r2, r4\n' +
+  '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbge\t.L7\t@cond_branch\n' +
+  '\tldr\tr1, .L34\n\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.L7\n.L35:\n\t.align\t2, 0\n.L34:\n' +
+  '\t.word\tgOut\n.L16:\n\tldr\tr1, .L36\n\tmov\tr0, #0x4\n\tstr\tr0, [r1]\n\tb\t.L7\n.L37:\n' +
+  '\t.align\t2, 0\n.L36:\n\t.word\tgOut\n.L17:\n\tadd\tr0, r2, r4\n\tlsl\tr0, r0, #0x2\n' +
+  '\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tcmp\tr0, r5\n\tbeq\t.L7\t@cond_branch\n\tldr\tr1, .L38\n' +
+  '\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n\tb\t.L7\n.L39:\n\t.align\t2, 0\n.L38:\n\t.word\tgOut\n.L19:\n' +
+  '\tadd\tr0, r4, #0\n\tbl\tk\n.L7:\n\tadd\tr4, r4, #0x1\n\tldr\tr0, .L40\n\tldr\tr0, [r0]\n' +
+  '\tcmp\tr4, r0\n\tble\t.L8\t@cond_branch\n\tb\t.L2\n.L41:\n\t.align\t2, 0\n.L40:\n\t.word\tgHi\n' +
+  '.L23:\n\tldr\tr0, .L42\n\tldr\tr0, [r0]\n\tcmp\tr0, #0x9\n\tbne\t.L24\t@cond_branch\n' +
+  '\tldr\tr2, .L42+0x4\n\tlsl\tr1, r5, #0x1\n\tadd\tr1, r1, r5\n\tlsl\tr1, r1, #0x2\n' +
+  '\tadd\tr0, r1, r2\n\tldr\tr0, [r0]\n\tadd\tr2, r2, #0x4\n.L27:\n\tadd\tr1, r1, r2\n\tldr\tr1, [r1]\n' +
+  '\tmov\tr2, #0x2\n\tadd\tr3, r5, #0\n\tbl\tfin\n\tb\t.L2\n.L43:\n\t.align\t2, 0\n.L42:\n' +
+  '\t.word\tgOut\n\t.word\tgE\n.L24:\n\tmov\tr0, #0x4\n\tbl\tk\n.L2:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n' +
+  '\tbx\tr0\n';
+
+describe('a return tail a path that bypasses the loop also enters', () => {
+  /** the loop's text, from `while (1) {` to its closing brace at the same indentation */
+  const loopOf = (src: string) => {
+    const at = src.indexOf('while (1) {');
+    const indent = src.slice(src.lastIndexOf('\n', at) + 1, at);
+    return src.slice(at, src.indexOf(`\n${indent}}`, at));
+  };
+
+  test('off the exit path: the arm writes the tail, the branch before the loop keeps its own', () => {
+    const { src, agreement, shipped } = judged(BYPASS_OFF_EXIT_IR);
+    // the arm returns from inside the loop with its own copy; the latch's edge is the loop's `break`
+    const loop = loopOf(src);
+    expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);
+    expect(loop).toMatch(/if \(v\d+ >= a1\) break;/);
+    expect(loop).not.toMatch(/miss\(|done\(/);
+    // once in the arm, once where the branch before the loop reaches it
+    expect(src.match(/fin\(/g)).toHaveLength(2);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test("the arm's head inside the loop's span stays the exit where nothing declines with it", () => {
+    const { src, agreement, shipped } = judged(BYPASS_RET_EXIT_IR);
+    // the arm is the loop's `break` to the `fin` written after it; the exit past the loop returns
+    const loop = loopOf(src);
+    expect(loop).toMatch(/if \(t\(v\d+\) == a0\) break;/);
+    expect(loop).toMatch(/if \(v\d+ >= a1\) return v\d+;/);
+    expect(loop).not.toContain('fin(');
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test("agbcc: a loop ending a `case` reads its exit past the loop where the arm's head declines", () => {
+    // with the arm's head for the exit, the switch inside the loop finds case 5's body leaving for an
+    // exit past the switch's end; run again with the exit past the loop first, the arm copies the
+    // cross-jumped `fin(..); return;` and `case 4:` keeps its own
+    const out = decompile('sw_xjret_end', AGBCC_SW_XJRET_END, ARMV4T_AGBCC, {
+      prototypes: {
+        sw_xjret_end: { params: 2, returnsVoid: true },
+        fin: { params: 4, returnsVoid: true },
+        k: { params: 1, returnsVoid: true },
+      },
+    });
+    expect(out.diagnostics).toEqual([]);
+    const loop = loopOf(out.source);
+    expect(loop).toMatch(/fin\([^;]*, 2, a0\);\n\s+return;\n\s+\}\n\s+gOut = 1;\n\s+break;/);
+    expect(loop).toMatch(/if \(v\d+ > \(s32\)gHi\) break;/);
+    expect(out.source.match(/fin\(/g)).toHaveLength(2);
+  });
+
+  test('on the exit path: the arm copies the tail past the bypassing entrant', () => {
+    const { src, agreement, shipped } = judged(BYPASS_ON_EXIT_IR);
+    const loop = loopOf(src);
+    expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);
+    expect(loop).toMatch(/if \(v\d+ >= a1\) break;/);
+    // the exit path runs `miss` after the loop and then the copy written there, never inside it
+    expect(loop).not.toContain('miss(');
+    expect(src).toMatch(/\n\s+miss\(v\d+\);\n\s+\}\n\s+fin\(v\d+\);\n\s+return v\d+;/);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a bypassed tail holding a loop of its own is not written in the arm', () => {
+    // past the call, `do { v = more(v); } while (v == a0);`: refused in the arm, so the last resort
+    // takes the arm for the loop's exit instead and writes the tail's loop after it
+    const cyclic = BYPASS_OFF_EXIT_IR.replace(
+      '  %14: s32 = call %12 {target="fin"}\n  ret %12',
+      '  %14: s32 = call %12 {target="fin"}\n  br ^bb7(%12)\n^bb7(%30: s32):\n' +
+        '  %31: s32 = call %30 {target="more"}\n  %32: u32 = icmp_eq %31, %0\n  cond_br %32, ^bb7(%31), ^bb8()\n' +
+        '^bb8():\n  ret %12',
+    );
+    const flagged = judged(cyclic);
+    expect(loopOf(flagged.src)).not.toContain('more(');
+    expect(flagged.agreement).toEqual({ judged: 300, disagree: 0 });
+    // without the rule the arm writes that loop a second time inside the first
+    const ablated = judged(cyclic, { bypassTailGates: without(BYPASS_TAIL_GATES, 'bypass-tail-holds-cycle') });
+    expect(loopOf(ablated.src)).toContain('more(');
+    expect(ablated.agreement).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail only arms of the loop enter is a `break` target, not a copy', () => {
+    const { src, agreement, shipped } = judged(ARMS_ONLY_TAIL_IR);
+    expect(loopOf(src)).not.toContain('fin(');
+    expect(src.match(/fin\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail laid out ahead of the loop is a `break` target, not a copy', () => {
+    const { src, agreement, shipped } = judged(PRE_LOOP_TAIL_IR);
+    expect(loopOf(src)).not.toContain('fin(');
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
 });
