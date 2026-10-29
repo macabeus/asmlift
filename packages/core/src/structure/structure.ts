@@ -2630,8 +2630,8 @@ export interface BypassTailCandidate {
  *  also enters, off the loop's exit path. The argument is at `earlyReturnArm` ("A PATH THAT
  *  BYPASSES THE LOOP"); like `EXIT_TAIL_GATES`, no rule is sound, since every copy runs on a path
  *  exclusive of the others. Not in the table: the count's scope — the reading asked for it
- *  (`BypassCounts.offExitPath`), the block has an effect, and the loop's own exit path does not run
- *  it — which is the walk's own condition. */
+ *  (`BypassCounts.offExitPath`), the block has an effect, the loop's own exit path does not run it,
+ *  and a path from outside the loop enters it — which is the walk's own condition. */
 export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
   {
     id: 'bypass-tail-holds-cycle',
@@ -2760,11 +2760,12 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 // `find_cross_jump`), so the arm runs into a `call; ret` block a path from outside the loop also
 // enters, and the loop fit no reading: the function declined. Two counts take it, each sound for the
 // policy's reason, and each asked for by the reading (`BypassCounts`), never by default:
-//   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run is
-//     admitted whoever else enters it, the arm's own head included, when no rule of
-//     `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through the arm's
-//     copy, which ends in its `return`; a path from outside never ran the arm, and the exit never
-//     reaches it. It is not owned: a path that did not take the arm runs it too
+//   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run, which a
+//     path from outside the loop enters (not only the loop's arms: a tail only they enter is a
+//     `break` target, written once after the loop), is admitted, the arm's own head included, when
+//     no rule of `BYPASS_TAIL_GATES` refuses it. A path that took the arm reaches it only through
+//     the arm's copy, which ends in its `return`; a path from outside never ran the arm, and the exit
+//     never reaches it. It is not owned: a path that did not take the arm runs it too
 //     (`synthetic:sw_xjret`, `synthetic:sw_xjret_case`). It is asked at the last resort, and once
 //     earlier, by `while (1)` (`foreverShape`): where a reading without it takes an exit inside the
 //     loop's span, an exit laid out past the loop's body that fits with it goes first. An exit in the
@@ -2841,6 +2842,7 @@ function earlyReturnArm(
     bypass.offExitPath &&
     offExitPath(bb) &&
     bb !== exit &&
+    !armOfBody(bb) &&
     firstRejection(bypassTailGates, {
       get acyclicPast() {
         return acyclicPast(bb);

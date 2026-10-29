@@ -596,6 +596,40 @@ const BYPASS_ON_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypasso
   '  %11: s32 = call %10 {target="miss"}\n  br ^bb5(%10)\n',
 );
 
+/** `for (i = 0; i < n; i++) { if (t(i) == a) goto hit; if (u(i) == a) goto hit; } return 0; hit:
+ *  fin(i); if (i == 0) k(0); return i;`, with `hit` laid out inside the loop's span: two arms enter the tail and nothing
+ *  from outside the loop does, so it is no bypassed tail, and the loop `break`s to it once. */
+const ARMS_ONLY_TAIL_IR = `fn armsonly {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4()
+^bb1(%4: s32):
+  %5: s32 = call %4 {target="t"}
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb5(%4), ^bb6()
+^bb6():
+  %7: s32 = call %4 {target="u"}
+  %8: u32 = icmp_eq %7, %0
+  cond_br %8, ^bb5(%4), ^bb2()
+^bb5(%12: s32):
+  %14: s32 = call %12 {target="fin"}
+  %15: u32 = icmp_eq %12, %2
+  cond_br %15, ^bb7(), ^bb8()
+^bb7():
+  %16: s32 = call %2 {target="k"}
+  br ^bb8()
+^bb8():
+  ret %12
+^bb2():
+  %9: s32 = const {value=1}
+  %10: s32 = add %4, %9
+  %11: u32 = icmp_slt %10, %1
+  cond_br %11, ^bb1(%10), ^bb4()
+^bb4():
+  ret %2
+}`;
+
 describe('a return tail a path that bypasses the loop also enters', () => {
   /** the loop's text, from `while (1) {` to its closing brace at the same indentation */
   const loopOf = (src: string) => {
@@ -655,5 +689,13 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     const ablated = judged(cyclic, { bypassTailGates: without(BYPASS_TAIL_GATES, 'bypass-tail-holds-cycle') });
     expect(loopOf(ablated.src)).toContain('more(');
     expect(ablated.agreement).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail only arms of the loop enter is a `break` target, not a copy', () => {
+    const { src, agreement, shipped } = judged(ARMS_ONLY_TAIL_IR);
+    expect(loopOf(src)).not.toContain('fin(');
+    expect(src.match(/fin\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
