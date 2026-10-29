@@ -2559,11 +2559,14 @@ function acyclicThrough(x: Block, region: ReadonlySet<Block>): boolean {
   return true;
 }
 /** One block the `exitTail` count (at `earlyReturnArm`) weighs for an arm: a return tail the loop's
- *  own exit path also runs, which the arm would write a copy of. Every field past the first is a
+ *  own exit path also runs, which the arm would write a copy of. Every field past the first two is a
  *  getter, so its walk runs only when the rules ahead of it admit. */
 export interface ExitTailCandidate {
   /** the arm's edge leaves from a latch, the loop's own way out */
   readonly armLeavesByLatch: boolean;
+  /** the reading of last resort asked for the copy (`BypassCounts.onExitPath`): a path from before
+   *  the loop that skips the exit may enter the tail too (A PATH THAT BYPASSES THE LOOP) */
+  readonly lastResort: boolean;
   /** a latch, or a path from before the loop (the zero-trip guard), enters the exit */
   readonly exitIsTestOut: boolean;
   /** the exit path runs a block of its own before the tail: the arm never reaches `exit` */
@@ -2608,7 +2611,7 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
     sound: false,
     guardedBy:
       'loop-exit-return-tail.test.ts: a tail also entered straight from before the loop, past the exit, stays refused',
-    rejects: (c) => !c.enteredByArmsOrExitPath,
+    rejects: (c) => !c.lastResort && !c.enteredByArmsOrExitPath,
   },
   {
     id: 'tail-holds-cycle',
@@ -2641,9 +2644,6 @@ export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
     rejects: (c) => !c.acyclicPast,
   },
 ];
-
-/** The `exitTail` rule the last-resort reading waives (`BypassCounts.onExitPath`, at `earlyReturnArm`). */
-const BYPASSED_EXIT_TAIL_RULE = 'entry-bypasses-exit';
 
 /** Which of `earlyReturnArm`'s counts for a path that bypasses the loop a reading asks for (A PATH
  *  THAT BYPASSES THE LOOP, at `earlyReturnArm`). */
@@ -2815,13 +2815,13 @@ function earlyReturnArm(
     bb !== to && bb !== exit && armOfBody(bb) && offExitPath(bb) && !reachFrom(bb).has(bb);
   // a return tail the loop's own exit path also runs, after a block of its own (THE EXIT PATH RUNS IT
   // TOO, above), asked for only when the caller has found no reading without it
-  const tailGates = bypass.onExitPath ? exitTailGates.filter((g) => g.id !== BYPASSED_EXIT_TAIL_RULE) : exitTailGates;
   const acyclicPast = (bb: Block) => ![bb, ...reachFrom(bb)].some((y) => reachFrom(y).has(y));
   const exitTail = (bb: Block): boolean =>
     copyExitTail &&
     !offExitPath(bb) &&
-    firstRejection(tailGates, {
+    firstRejection(exitTailGates, {
       armLeavesByLatch: latches.includes(from),
+      lastResort: bypass.onExitPath,
       get exitIsTestOut() {
         return (preds.get(exit) ?? []).some((p) => !body.has(p) || latches.includes(p));
       },
