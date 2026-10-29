@@ -14936,6 +14936,392 @@ export const SYNTHETIC: SynthSpec[] = [
       'void cmn_store(struct E *p);',
     proto: { cmn_store: { returnsVoid: true } },
   },
+  // ── kleod decline census, measured on 938e8d4f: the two functions still declining ──────────────
+  // Two kleod functions still decline on main 938e8d4f (the CLI over build/kleod/src/<unit>.s with
+  // the unit's .i context). Each refusal was watched firing on the real function and on the rows
+  // below, through a patched copy of the CLI bundle (no core change):
+  //  31. imgidxsp / cpyidxsp (sub_0804D0B0: "reads the compiler's anonymous constant ('.LC184')
+  //      whose copy fills 'sp0', a u8[36]"). imgidx covers its FIRST blocker and no row covered the
+  //      second. First: frame-objects.ts `provenParts` keeps the one object whole because a runtime
+  //      index reaches it (imgidx's refusal, watched on both). Second, and what the 36 bytes are: the
+  //      arg0 spill word at [sp,#0x20] is in the object because `RELIFT_HAND_BACK_GATES`
+  //      `runtime-index` keeps every word a runtime index may reach, so the word is never handed back
+  //      to the slot model. With provenParts' index refusal ablated, sub_0804D0B0 and imgidxsp both
+  //      decline on the second image ("'.LC186' ... 'sp16', a u8[20]": the word joins the upper
+  //      part); with the hand-back gate ablated as well, both lift. imgidx has no spill word, so a
+  //      fix to provenParts alone lifts imgidx and leaves sub_0804D0B0 declining. Item 23's reading
+  //      that imgspill pins the spill word does not hold: with no runtime index the gate hands the
+  //      word back, which is why imgspill MATCHes. imgidxsp is imgidx with five values live across
+  //      two calls, so agbcc spills one word above the arrays (reload1.c:2274 `alter_reg`; thumb.h
+  //      569/573, the frame grows up); agbcc only, for item 2's reason. cpyidxsp is the same pair of
+  //      gates without images: smoked, then with the index refusal ablated, then both, agbcc
+  //      59/90 -> 17/79 -> MATCH, gcc2.7.2kmc 36/79 -> 36/79 -> MATCH, gcc2.7.2 44/81 -> 44/81 ->
+  //      17/80, ido7.1 65/83 -> 65/83 -> 36/74 (ido spills below the arrays; the gate keeps those
+  //      words from the bottom). mwcc_242_81 never asks for parts, so neither gate fires there and the
+  //      row has no lane on it.
+  //  32. brk2out / brk2out_sw / brk2out_ctl (sub_0800D188: "the jump table's case arms do not
+  //      linearize"). The refusing switch is the 115-entry table over `gEntityInfo[var_sb].id` in the
+  //      `for (var_sb = gUnk_030051D8; var_sb <= gUnk_03004788; var_sb++)` loop, whose arms either
+  //      `continue` or `break` the switch and then the loop. It refuses because that loop is never
+  //      classified (`loopCtx` null), so its latch is a sibling that every `continue` arm and the
+  //      default fall into. At the loop's own exit `foreverShape` refuses four exit edges, for two
+  //      causes; this item is the first. In cases 0x13/0x16 and 0x1F an inner search loop's hit does
+  //      `goto no_continue;` where `no_continue: break;` ends the case, and the loop's `break;`
+  //      follows the switch, while the search loop's normal exit `continue`s. agbcc threads that
+  //      jump to the block after the outer loop (jump.c:1785 `follow_jumps`), so the edge leaves
+  //      both loops from inside the inner body: no break arm, and the two-level exit refuses it
+  //      (`TWO_LEVEL_EXIT_GATES` `from-inner-body`; item 27's flag reaches a target inside the
+  //      outer loop's body, never past the outer loop).
+  //      brk2out is that alone, with no switch. brk2out_sw keeps the real function's switch and its
+  //      words. Those words are agbcc's alone, from layout: once the arms are long enough that the
+  //      guard's branch to the latch is a long jump (`b%D1 .LCB; b .L @long jump`, thumb.md:928-930;
+  //      eight statements in one arm do it), the switch is structured before the latch's back edge
+  //      is walked. Shorter arms, and every other lane, decline on the same unclassified loop with
+  //      "unrecovered back-edge". On all five lanes the only edge refused at the loop's own exit is
+  //      the inner one. brk2out_ctl ends the search loop's hit with `break;` and the arm with
+  //      `break;`, so no edge leaves both loops: it lifts on every lane.
+  //  33. brktail_loop / brktail_loop_ctl (sub_0800D188, the second cause behind item 32). The
+  //      MAGNET/BOX case does `if (id == MAGNET) { if (...) continue; ...; }`, and everything after
+  //      it ends in `break`, so it is outside the loop's body and two exit edges enter it, one per
+  //      side of that `if`. It holds the `goto exit_loop2` search loop. structure.ts `codeBreakArm`
+  //      admits a tail that two exit edges share only when it holds no cycle (its last line,
+  //      `acyclicThrough`), so both edges are refused (watched refusing there on the real function
+  //      and on all five lanes). Without the other `break` arm (case 7) the row lifts, so the arm
+  //      stays. brktail_loop_ctl
+  //      drops the inner `if (...) continue;`, so one edge enters the tail: it lifts on every lane.
+  //      Both causes block sub_0800D188 together: fixing either alone leaves the loop unclassified
+  //      (a prediction from the four refused edges; the lift costs ~9 min and 1.2 GB).
+  {
+    sym: 'imgidxsp',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void imgidxsp(u32 i){ s8 a[16] = {32,36,-24,-8,8,14,20,8,40,-20,-30,32,46,24,64,48}; u8 b[16] = {130,96,100,92,107,76,120,77,130,80,128,70,124,82,112,70};\n' +
+      ' u32 v0,v1,v2,v3,v4;\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];\n' +
+      ' sink(v0,v1,v2,v3); sink(v4,v0,v1,v2);\n' +
+      ' gO[i].x = a[i * 2 + 1]; gO[i].y = b[i * 2]; gA[i] = v0+v1+v2+v3+v4; }',
+    features: ['array', 'variable-index', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void imgidxsp(u32 i);',
+    proto: { imgidxsp: { returnsVoid: true }, sink: { params: 4, returnsVoid: true } },
+  },
+  {
+    sym: 'cpyidxsp',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 cpyidxsp(u32 i){ u8 a[64]; u8 b[64]; u32 v0,v1,v2,v3,v4,v5,v6,v7; memcpy(a, gS1, 64); memcpy(b, gS2, 64);\n' +
+      ' v0=gA[0];v1=gA[1];v2=gA[2];v3=gA[3];v4=gA[4];v5=gA[5];v6=gA[6];v7=gA[7];\n' +
+      ' sink(v0,v1,v2,v3); sink(v4,v5,v6,v7); sink(v0+v4,v1+v5,v2+v6,v3+v7);\n' +
+      ' return a[3] + b[i] + v0+v1+v2+v3+v4+v5+v6+v7; }',
+    features: ['stack-addr', 'array', 'variable-index', 'multi-arg'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'u32 cpyidxsp(u32 i);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'brk2out',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gA[i] == 0)\n' +
+      '            continue;\n' +
+      '        for (j = 0; j < 2; j++) {\n' +
+      '            if (gE[j + 19].f == 28) {\n' +
+      '                gE[j + 19].x = gE[i].x;\n' +
+      '                k(j);\n' +
+      '                goto hit;\n' +
+      '            }\n' +
+      '        }\n' +
+      '    }\n' +
+      'hit:\n' +
+      '    gOut = gOut + 1;\n' +
+      '}',
+    features: ['branch'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out(s32 lo, s32 hi);',
+    proto: { brk2out: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'brk2out_sw',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out_sw(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '            case 2:\n' +
+      '                if (gE[i].x > 5)\n' +
+      '                    continue;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 4:\n' +
+      '                if (gA[i] == 0)\n' +
+      '                    continue;\n' +
+      '                for (j = 0; j < 2; j++) {\n' +
+      '                    if (gE[j + 19].f == 28) {\n' +
+      '                        gE[j + 19].x = gE[i].x;\n' +
+      '                        k(j);\n' +
+      '                        goto hit;\n' +
+      '                    }\n' +
+      '                }\n' +
+      '                continue;\n' +
+      '            hit:\n' +
+      '                break;\n' +
+      '            case 9:\n' +
+      '            case 10:\n' +
+      '                gA[i + 1] = gE[i + 1].x + 1;\n' +
+      '                gA[i + 2] = gE[i + 2].x + 2;\n' +
+      '                gA[i + 3] = gE[i + 3].x + 3;\n' +
+      '                gA[i + 4] = gE[i + 4].x + 4;\n' +
+      '                gA[i + 5] = gE[i + 5].x + 5;\n' +
+      '                gA[i + 6] = gE[i + 6].x + 6;\n' +
+      '                gA[i + 7] = gE[i + 7].x + 7;\n' +
+      '                gA[i + 8] = gE[i + 8].x + 8;\n' +
+      '                gA[i + 9] = gE[i + 9].x + 9;\n' +
+      '                gA[i + 10] = gE[i + 10].x + 10;\n' +
+      '                gA[i + 11] = gE[i + 11].x + 11;\n' +
+      '                gA[i + 12] = gE[i + 12].x + 12;\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    gOut = gOut + 1;\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out_sw(s32 lo, s32 hi);',
+    proto: { brk2out_sw: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'brk2out_ctl',
+    src:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out_ctl(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '            case 2:\n' +
+      '                if (gE[i].x > 5)\n' +
+      '                    continue;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 4:\n' +
+      '                if (gA[i] == 0)\n' +
+      '                    continue;\n' +
+      '                for (j = 0; j < 2; j++) {\n' +
+      '                    if (gE[j + 19].f == 28) {\n' +
+      '                        gE[j + 19].x = gE[i].x;\n' +
+      '                        k(j);\n' +
+      '                        break;\n' +
+      '                    }\n' +
+      '                }\n' +
+      '                break;\n' +
+      '            case 9:\n' +
+      '            case 10:\n' +
+      '                gA[i + 1] = gE[i + 1].x + 1;\n' +
+      '                gA[i + 2] = gE[i + 2].x + 2;\n' +
+      '                gA[i + 3] = gE[i + 3].x + 3;\n' +
+      '                gA[i + 4] = gE[i + 4].x + 4;\n' +
+      '                gA[i + 5] = gE[i + 5].x + 5;\n' +
+      '                gA[i + 6] = gE[i + 6].x + 6;\n' +
+      '                gA[i + 7] = gE[i + 7].x + 7;\n' +
+      '                gA[i + 8] = gE[i + 8].x + 8;\n' +
+      '                gA[i + 9] = gE[i + 9].x + 9;\n' +
+      '                gA[i + 10] = gE[i + 10].x + 10;\n' +
+      '                gA[i + 11] = gE[i + 11].x + 11;\n' +
+      '                gA[i + 12] = gE[i + 12].x + 12;\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    gOut = gOut + 1;\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brk2out_ctl(s32 lo, s32 hi);',
+    proto: { brk2out_ctl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'brktail_loop',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brktail_loop(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '            case 2:\n' +
+      '                if (gE[i].x > 5)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                if (gE[i].id == 1) {\n' +
+      '                    if (gE[i].u == 1)\n' +
+      '                        continue;\n' +
+      '                    gE[i].v = 0;\n' +
+      '                }\n' +
+      '                if (gE[i].f != 0)\n' +
+      '                    gA[3] = 60;\n' +
+      '                for (j = lo; j <= hi; j++) {\n' +
+      '                    if (j != i && gE[j].f <= 26) {\n' +
+      '                        k(j);\n' +
+      '                        break;\n' +
+      '                    }\n' +
+      '                }\n' +
+      '                gE[i].f = 19;\n' +
+      '                gA[2] = i;\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    gOut = gOut + 1;\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brktail_loop(s32 lo, s32 hi);',
+    proto: { brktail_loop: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'brktail_loop_ctl',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brktail_loop_ctl(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i, j;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '            case 2:\n' +
+      '                if (gE[i].x > 5)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                if (gE[i].f != 0)\n' +
+      '                    gA[3] = 60;\n' +
+      '                for (j = lo; j <= hi; j++) {\n' +
+      '                    if (j != i && gE[j].f <= 26) {\n' +
+      '                        k(j);\n' +
+      '                        break;\n' +
+      '                    }\n' +
+      '                }\n' +
+      '                gE[i].f = 19;\n' +
+      '                gA[2] = i;\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    gOut = gOut + 1;\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void brktail_loop_ctl(s32 lo, s32 hi);',
+    proto: { brktail_loop_ctl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
   // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
   // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a
