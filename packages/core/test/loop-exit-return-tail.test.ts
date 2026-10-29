@@ -630,6 +630,35 @@ const ARMS_ONLY_TAIL_IR = `fn armsonly {
   ret %2
 }`;
 
+/** `if (a == 7) { hit: fin(a); return a; } for (i = 0; i < n; i++) { if (t(i) == a) goto hit; }
+ *  return 0;`: the tail a branch before the loop also enters is laid out AHEAD of the loop, a label
+ *  the arm jumps back to. It is no early `return` inside the loop's span, so the loop `break`s to it
+ *  rather than copying it into the arm. */
+const PRE_LOOP_TAIL_IR = `fn preloop {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %20: s32 = const {value=7}
+  %21: u32 = icmp_eq %0, %20
+  cond_br %21, ^bb5(), ^bb6()
+^bb5():
+  %14: s32 = call %0 {target="fin"}
+  ret %0
+^bb6():
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(%2), ^bb4()
+^bb1(%4: s32):
+  %5: s32 = call %4 {target="t"}
+  %6: u32 = icmp_eq %5, %0
+  cond_br %6, ^bb5(), ^bb2()
+^bb2():
+  %9: s32 = const {value=1}
+  %10: s32 = add %4, %9
+  %11: u32 = icmp_slt %10, %1
+  cond_br %11, ^bb1(%10), ^bb4()
+^bb4():
+  ret %2
+}`;
+
 describe('a return tail a path that bypasses the loop also enters', () => {
   /** the loop's text, from `while (1) {` to its closing brace at the same indentation */
   const loopOf = (src: string) => {
@@ -695,6 +724,13 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     const { src, agreement, shipped } = judged(ARMS_ONLY_TAIL_IR);
     expect(loopOf(src)).not.toContain('fin(');
     expect(src.match(/fin\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a tail laid out ahead of the loop is a `break` target, not a copy', () => {
+    const { src, agreement, shipped } = judged(PRE_LOOP_TAIL_IR);
+    expect(loopOf(src)).not.toContain('fin(');
     expect(agreement).toEqual({ judged: 300, disagree: 0 });
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
