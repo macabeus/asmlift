@@ -2697,6 +2697,18 @@ export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
 /** Which copies past the duplication policy's defaults a reading asks an exit arm for: the counts
  *  for a path that bypasses the loop (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`), and a
  *  tail holding a loop. */
+/** What one `while (1)` reading asks of `foreverShape` past the default: an arm may copy a tail the
+ *  exit path also runs (`copyExitTail`), take one edge as a two-level exit (`twoLevel`,
+ *  `TwoLevelExit`), copy past `entry-bypasses-exit` and a bypassed return tail (`lastResort`,
+ *  `ArmCopies.offExitPath` and `onExitPath`), and copy a loop in a tail it shares (`cycles`,
+ *  `ArmCopies.cycles`). */
+interface ForeverAsk {
+  readonly copyExitTail?: boolean;
+  readonly twoLevel?: boolean;
+  readonly lastResort?: boolean;
+  readonly cycles?: boolean;
+}
+
 interface ArmCopies {
   /** `bypassTail`: a return tail off the loop's exit path that a path from outside also enters */
   readonly offExitPath: boolean;
@@ -3945,13 +3957,8 @@ function structureRanked(
   // after a loop there and an early `return` inside the loop's span, so block order alone would take
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
-  const foreverShape = (
-    nl: NaturalLoop,
-    copyExitTail: boolean,
-    twoLevel = false,
-    lastResort = false,
-    sharedCycles = false,
-  ): ForeverLoopInfo | null => {
+  const foreverShape = (nl: NaturalLoop, ask: ForeverAsk): ForeverLoopInfo | null => {
+    const { copyExitTail = false, twoLevel = false, lastResort = false, cycles = false } = ask;
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -3975,7 +3982,7 @@ function structureRanked(
     const pastLoop = (x: Block) => rank(x) < fn.blocks.length;
     // laid out between the body's first and last blocks: never a block ahead of the loop
     const inSpan = (x: Block) => fn.blocks.indexOf(x) > first && fn.blocks.indexOf(x) < last;
-    const asked: ArmCopies = { offExitPath: lastResort, onExitPath: lastResort, cycles: sharedCycles };
+    const asked: ArmCopies = { offExitPath: lastResort, onExitPath: lastResort, cycles };
     const fitAt = (exit: Block, bypass: ArmCopies): ForeverLoopInfo | null => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
@@ -4067,35 +4074,42 @@ function structureRanked(
   // exit comes `while (1)` with every copy, where an arm also copies a return tail a path that
   // bypasses the loop enters, under an exit inside the loop's span or on the exit path (A PATH THAT
   // BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no reading fits and no ret copy
-  // waits, the same two readings run again with an arm writing its own copy of a loop in a tail it
-  // shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at `earlyReturnArm`): two copies of
-  // a loop the asm holds once.
+  // waits, every `while (1)` reading above runs again, in the same order, with an arm writing its own
+  // copy of a loop in a tail it shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at
+  // `earlyReturnArm`): two copies of a loop the asm holds once. `cycles` is an axis over the rungs
+  // (`rungs`), not a rung of its own, so a rung added to `rungs` is asked with it too.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
-    const shape = open ? foreverShape(nl, false) : null;
+    const rungs = (cycles: boolean) => {
+      const read = (ask: ForeverAsk) => (open ? foreverShape(nl, { ...ask, cycles }) : null);
+      return {
+        plain: () => read({}),
+        copied: () => read({ copyExitTail: true }),
+        flagged: () => read({ twoLevel: true }) ?? read({ copyExitTail: true, lastResort: true }),
+      };
+    };
+    const first = rungs(false);
+    const shape = first.plain();
     const copying = copyingReadings.get(h);
     const retCopying = open ? retCopyingReadings.get(h) : undefined;
     if (open && shape === null && copying !== undefined) {
       copying();
     } else {
-      const copied = shape ?? (open ? foreverShape(nl, true) : null);
-      const twoLevel = (cycles = false) =>
-        open ? (foreverShape(nl, false, true, false, cycles) ?? foreverShape(nl, true, false, true, cycles)) : null;
+      const copied = shape ?? first.copied();
       if (copied !== null) {
         foreverLoops.set(h, copied);
       } else if (retCopying !== undefined && !retCopy.last) {
         retCopying();
       } else {
-        const flagged = twoLevel();
+        const flagged = first.flagged();
         if (flagged !== null) {
           foreverLoops.set(h, flagged);
         } else if (retCopying !== undefined) {
           retCopying();
         } else {
-          // the last rung: the same readings, an arm now writing its copy of a loop in a tail it
-          // shares (`ArmCopies.cycles`)
-          const cyclic = twoLevel(true);
+          const last = rungs(true);
+          const cyclic = last.plain() ?? last.copied() ?? last.flagged();
           if (cyclic !== null) {
             foreverLoops.set(h, cyclic);
           }
