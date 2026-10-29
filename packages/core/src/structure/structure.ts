@@ -2677,9 +2677,9 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 // exit path also runs is, for a `break`, written once, after the loop: the arm's `break` reaches it
 // there. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms bound it and it
 // takes no size limit. This walk applies the same policy to a tail that ends in its own `return`:
-// an effectful block is admitted only on one of the three counts below, and refused otherwise. The
-// third is the one place an arm copies a block the exit path also runs: a `return` tail no `break`
-// can reach without running the exit's own code first.
+// an effectful block is admitted only on one of the counts below, and refused otherwise. `exitTail`
+// is the one place an arm copies a block the exit path also runs: a `return` tail no `break` can
+// reach without running the exit's own code first.
 //
 // THE EDGE OWNS IT. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
@@ -2753,16 +2753,16 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 // the exit and copy `out(0); return;` into the body, where the asm holds it once after the loop
 // (ido7.1 and mwcc_242_81 re-spell `while (1)` that way, equivalent but not the source's shape).
 // What it would buy is an `else` before the loop that cross-jumps into the arms' tail (agbcc's
-// `else { pong(9); hit(a); return; }`), and that lifts only through the same re-spelling.
+// `else { pong(9); hit(a); return; }`), and that is taken only at the reading of last resort (A PATH
+// THAT BYPASSES THE LOOP).
 //
 // A PATH THAT BYPASSES THE LOOP. agbcc cross-jumps an arm's `fin(..); return;` onto the identical
 // tail of an `if` branch before the loop or of a sibling `case` of an outer switch (jump.c
 // `find_cross_jump`), so the arm runs into a `call; ret` block a path from outside the loop also
-// enters, and the loop fit no reading: the function declined. Two counts take it, each sound for the
-// policy's reason, and each asked for by the reading (`BypassCounts`), never by default. Neither can
-// tell a cross-jump from a source `goto` into a shared tail, since the asm is the same: what each
-// admits is the shape, on every toolchain, and the rows name the cross-jump only as its commonest
-// source:
+// enters, which no count above admits. Two counts take it, each sound for the policy's reason, and
+// each asked for by the reading (`BypassCounts`), never by default. Neither can tell a cross-jump
+// from a source `goto` into a shared tail, since the asm is the same: what each admits is the shape,
+// on every toolchain, and the rows name the cross-jump only as its commonest source:
 //   - `bypassTail` (`offExitPath`): an effectful block the loop's own exit path does not run, which a
 //     path from outside the loop enters (not only the loop's arms: a tail only they enter is a
 //     `break` target, written once after the loop), is admitted, the arm's own head included, when
@@ -2773,13 +2773,12 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //     `while (1)` (`foreverShape`) where a reading without it takes an exit laid out between the
 //     body's first and last blocks and an exit past the loop's body fits with it (never an exit laid
 //     out ahead of the loop: a label a `goto` jumps back to). An exit in the span may be an early
-//     `return` read as the exit, which is what made the post-loop epilogue the paragraph above names
-//     look off the exit path; an exit past the body is the code after the loop, so that epilogue is
-//     on the exit path and never this count's. Both are correct C for the same asm and neither
-//     scores better on every toolchain, so the in-span exit stays first and the exit past the loop is
-//     taken only by a structuring run again because the first declined (`PastExitRanking`, at
-//     `structure`). Klonoa's sub_08016EEC has the shape (`synthetic:sw_xjret_end`): a loop that ends
-//     a `case` takes the arm's own head for its exit, and declines at the switch inside it;
+//     `return` read as the exit, which leaves the post-loop epilogue the paragraph above names off
+//     the exit path; under an exit past the body that epilogue is on it, never this count's. The
+//     in-span exit stays first, and the exit past the loop is taken only by a structuring run again
+//     because the first declined (`PastExitRanking`, at `structure`). Klonoa's sub_08016EEC has the
+//     shape (`synthetic:sw_xjret_end`): a loop that ends a `case` takes the arm's own head for its
+//     exit, and declines at the switch inside it;
 //   - `onExitPath`, at the reading of last resort only: the `exitTail` count waives
 //     `entry-bypasses-exit`, so a tail the exit path runs past code of its own is copied although a
 //     path from before the loop also lands on it: that path ran neither the arm nor the exit
@@ -3956,12 +3955,10 @@ function structureRanked(
           }
         : null;
     };
-    // an exit inside the loop's span may be an early `return` read as the exit: where the code after
-    // the loop fits as the exit once an arm copies a return tail a path from outside the loop also
-    // enters, that reading is noted, and taken only by a structuring run again because the first
-    // declined (`PastExitRanking`, at `structure`; A PATH THAT BYPASSES THE LOOP, at
-    // `earlyReturnArm`). An exit laid out ahead of the loop is a `goto` back to a label before it,
-    // which a `break` spells once.
+    // an exit inside the loop's span may be an early `return` read as the exit: an exit past the
+    // loop that fits once an arm copies a bypassed return tail is noted here, and taken only on a
+    // rerun (`PastExitRanking`; A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). An exit laid out
+    // ahead of the loop is a `goto` back to a label before it, which a `break` spells once.
     const pastFirst = (exit: Block, shape: ForeverLoopInfo): ForeverLoopInfo => {
       if (inSpan(exit) && !asked.offExitPath) {
         for (const past of targets.filter(pastLoop)) {

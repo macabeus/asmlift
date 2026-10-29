@@ -14507,13 +14507,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //      That is two shapes, one per loop of sub_08016EEC. Off the loop's exit path: the tail
   //      is entered by the arm and by code the loop's exit never reaches (loop 355, whose arm
   //      runs into the tail loop 139's arm reaches too); sw_xjret (an `if`/`else`, the tail in
-  //      the branch before the loop) and sw_xjret_case (a sibling `case`) pin it, and the arm's
-  //      walk refuses the outside entrant. ON the exit path: the code after the loop also ends
-  //      in the tail (loop 139, whose post-loop `else` runs the same call and leaves the outer
-  //      switch); sw_xjret_post pins it, and #380's exit-path copy refuses the entrant that
-  //      bypasses the exit (`EXIT_TAIL_GATES` `entry-bypasses-exit`). sw_xjret_ctl ends the
-  //      outside branch with another call, so nothing cross-jumps: it lifts on every lane.
-  //      agbcc only declines: the other four lanes lift the three original rows (nonmatch).
+  //      the branch before the loop) and sw_xjret_case (a sibling `case`) pin it: no count of
+  //      the arm's walk but `bypassTail` admits the outside entrant. ON the exit path: the code
+  //      after the loop also ends in the tail (loop 139, whose post-loop `else` runs the same
+  //      call and leaves the outer switch); sw_xjret_post pins it, and #380's exit-path copy
+  //      admits the entrant that bypasses the exit only at the last resort (`EXIT_TAIL_GATES`
+  //      `entry-bypasses-exit`). sw_xjret_ctl ends the outside branch with another call, so
+  //      nothing cross-jumps: it lifts on every lane. agbcc only declines: the other four lanes
+  //      lift sw_xjret and sw_xjret_case (nonmatch).
   //      sw_xjret_end is loop 355's own layout: the loop ends a `case` with nothing after the
   //      outer switch, and the arm's own code falls through inside the loop's span, so `while (1)`
   //      first fits the arm's head as the exit and the switch inside the loop then declines ("a

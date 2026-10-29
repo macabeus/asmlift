@@ -532,10 +532,10 @@ test("a `do-while` whose arm needs the exit path's tail keeps its bottom test", 
 // A RETURN TAIL A PATH THAT BYPASSES THE LOOP ALSO ENTERS (`BypassCounts`, at `earlyReturnArm`).
 // agbcc cross-jumps an arm's `fin(..); return;` onto the identical tail of a branch before the loop
 // (jump.c `find_cross_jump`; `synthetic:sw_xjret`), so the arm runs a block of its own (`^bb3`, the
-// argument) and lands on a `call; ret` the branch ahead of the loop also enters. Every count refused
-// that entrant, the two-level exit included (the exit's code never meets the arm's head), so the
-// loop was never classified. Under an exit laid out past the loop, the arm now writes the tail
-// without owning it, and the path from before the loop keeps the copy written where the tail sits.
+// argument) and lands on a `call; ret` the branch ahead of the loop also enters. No other count
+// admits that entrant, the two-level exit included (the exit's code never meets the arm's head). The
+// arm writes the tail without owning it, and the path from before the loop keeps the copy written
+// where the tail sits.
 
 /** `if (a == 7) { if (n == 0) { fin(0); return; } i = 0; } else { for (i = 0; i < n; i++) { if (i +
  *  i == a) { fin(i + a); return; } } miss(i); } done(i);` with the two `fin(..); return;`
@@ -598,8 +598,9 @@ const BYPASS_ON_EXIT_IR = BYPASS_OFF_EXIT_IR.replace('fn bypassoff', 'fn bypasso
 );
 
 /** `for (i = 0; i < n; i++) { if (t(i) == a) goto hit; if (u(i) == a) goto hit; } return 0; hit:
- *  fin(i); if (i == 0) k(0); return i;`, with `hit` laid out inside the loop's span: two arms enter the tail and nothing
- *  from outside the loop does, so it is no bypassed tail, and the loop `break`s to it once. */
+ *  fin(i); if (i == 0) k(0); return i;`, with `hit` laid out inside the loop's span: two arms enter
+ *  the tail and nothing from outside the loop does, so it is no bypassed tail, and the loop `break`s
+ *  to it once. */
 const ARMS_ONLY_TAIL_IR = `fn armsonly {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
