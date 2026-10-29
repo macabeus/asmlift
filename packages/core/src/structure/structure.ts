@@ -1323,12 +1323,12 @@ export interface BreakTailCycle {
 }
 
 /** When a tail several arms share may hold a cycle, so each arm writes its own copy of the loop in
- *  it. The argument is at `codeBreakArm`; the rule is the duplication policy's one rule for a cycle,
- *  which `EXIT_TAIL_GATES`' `tail-holds-cycle` and `BYPASS_TAIL_GATES` hold a return tail to. Not in
- *  the table: the acyclic tail (admitted without asking), every other refusal of `codeBreakArm`,
- *  which are its own walk's, and a cycle entered at two blocks, which no copy can spell as a loop and
- *  emission declines loud ("unrecovered back-edge"), as it does wherever the loop forest holds no
- *  loop for a cycle. */
+ *  it. The argument is at `earlyReturnArm` (A LOOP IN THE TAIL): the duplication policy's one rule
+ *  for a cycle, which `EXIT_TAIL_GATES`' `tail-holds-cycle` and `BYPASS_TAIL_GATES` hold a return
+ *  tail to. Not in the table: the acyclic tail (admitted without asking), every other refusal of
+ *  `codeBreakArm`, which are its own walk's, and a cycle entered at two blocks, which no copy can
+ *  spell as a loop and emission declines loud ("unrecovered back-edge"), as it does wherever the
+ *  loop forest holds no loop for a cycle. */
 export const BREAK_TAIL_GATES: readonly Gate<BreakTailCycle>[] = [
   {
     id: 'shared-cycle-before-last-resort',
@@ -2468,12 +2468,13 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
  *  into which comes from the body without passing `exit`: the other arm's own blocks, whose exit
  *  edge the classifier must admit as an arm of its own, or the loop declines), every other block an
  *  edge from outside enters is one the loop's own exit path does not run (`offExitPath`), and the
- *  region holds no cycle, but at `while (1)`'s last rung (`BREAK_TAIL_GATES`, below). Each arm writes the shared blocks again ahead of its own `break`, a shared
- *  `ret` as one `return` per arm, and a path from outside the loop (an `else` before it) structures
- *  its own copy where the block sits. Those paths are exclusive — a path that left the body by an arm
- *  reaches a region block again only through `exit`, and the exit does not reach it — so every path
- *  runs the tail once, as the asm does, whatever the tail does; where the compiler cross-jumps, the
- *  copies are the same code (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
+ *  region holds no cycle, save at `while (1)`'s last rung (`BREAK_TAIL_GATES`). Each arm writes the
+ *  shared blocks again ahead of its own `break`, a shared `ret` as one `return` per arm, and a path
+ *  from outside the loop (an `else` before it) structures its own copy where the block sits. Those
+ *  paths are exclusive — a path that left the body by an arm reaches a region block again only
+ *  through `exit`, and the exit does not reach it — so every path runs the tail once, as the asm
+ *  does, whatever the tail does; where the compiler cross-jumps, the copies are the same code
+ *  (gcc2.7.2kmc byte-identical, agbcc up to register allocation).
  *
  *  THE COST where it does not: ido keeps one tail, and only the source's single copy at the arms'
  *  join recompiles to it. `synthetic:brmerge:ido7.1`'s row source is byte-identical to its target;
@@ -2542,16 +2543,8 @@ function codeBreakArm(
   }
   // A SHARED TAIL HOLDING A LOOP: agbcc's `case MAGNET: if (..) continue; ... for (j = 0; j < n; j++)
   // if (t[j] == id) goto found; ... break;` cross-jumps two cases' `break`s into one search loop.
-  // Each arm writes its own copy of that loop ahead of its `break`. The copies are exclusive for
-  // the reason the acyclic copies are: a path that left the body by an arm reaches a region block
-  // again only through `exit`, and the exit does not reach it, so every path runs one copy, and runs
-  // the loop in it exactly as the asm runs its one loop. A cycle cannot leave the region but to
-  // `exit`, where the arm's `break` stands, and it never re-enters the body (the walk above). Each
-  // copy is structured by the reading its own natural loop takes; a cycle entered at two blocks has
-  // none, and emission declines it loud. Asked for only by `while (1)`'s last rung
-  // (`BREAK_TAIL_GATES`, the duplication policy's rule for a cycle, at `earlyReturnArm`): the copy is
-  // the reading the asm does not hold (one loop, two copies), so every reading that copies none goes
-  // first.
+  // Each arm writes its own copy of that loop ahead of its `break`, at `while (1)`'s last rung only
+  // (A LOOP IN THE TAIL, at `earlyReturnArm`).
   return firstRejection(cycles.gates, { cycleRung: cycles.cycleRung }) === null ? region : null;
 }
 const NO_SHARED_CYCLES = { cycleRung: false, gates: BREAK_TAIL_GATES } as const;
@@ -2732,19 +2725,19 @@ const NO_COPIES: ArmCopies = { offExitPath: false, onExitPath: false, cycles: fa
 // is a FIDELITY rule, not a soundness one.
 //
 // ONE DUPLICATION POLICY for loop exit arms, here and in `codeBreakArm`'s shared mode. A block with
-// effects may be written once per arm when the loop's own exit path does not run it
-// (`offExitPathOf`) and it holds no cycle (save at `while (1)`'s last rung, below), whoever else enters it — another arm, or a path from
-// before the loop (an `else` beside it). A path that left the body by an arm reaches the block only
-// through that arm, because the exit does not reach it; a path from before the loop never ran an arm.
-// The paths are exclusive, so each runs one copy once, the arm's or the one written where the block
-// sits; on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) those copies are the source the one
-// block came from. Whether the block has an effect does not enter into it. A block the loop's own
-// exit path also runs is, for a `break`, written once, after the loop: the arm's `break` reaches it
-// there. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms bound it and it
-// takes no size limit. This walk applies the same policy to a tail that ends in its own `return`:
-// an effectful block is admitted only on one of the counts below, and refused otherwise. `exitTail`
-// is the one place an arm copies a block the exit path also runs: a `return` tail no `break` can
-// reach without running the exit's own code first.
+// effects may be written once per arm when the loop's own exit path does not run it (`offExitPathOf`)
+// and it holds no cycle (save at `while (1)`'s last rung, below), whoever else enters it — another
+// arm, or a path from before the loop (an `else` beside it). A path that left the body by an arm
+// reaches the block only through that arm, because the exit does not reach it; a path from before the
+// loop never ran an arm. The paths are exclusive, so each runs one copy once, the arm's or the one
+// written where the block sits; on a compiler that cross-jumps (agbcc, gcc2.7.2: jump.c) those copies
+// are the source the one block came from. Whether the block has an effect does not enter into it. A
+// block the loop's own exit path also runs is, for a `break`, written once, after the loop: the arm's
+// `break` reaches it there. `codeBreakArm`'s shared region stops at `exit`, so the loop's own arms
+// bound it and it takes no size limit. This walk applies the same policy to a tail that ends in its
+// own `return`: an effectful block is admitted only on one of the counts below, and refused
+// otherwise. `exitTail` is the one place an arm copies a block the exit path also runs: a `return`
+// tail no `break` can reach without running the exit's own code first.
 //
 // THE EDGE OWNS IT. `from` dominates `to` and `to` dominates the block, so every path reaching it
 // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
