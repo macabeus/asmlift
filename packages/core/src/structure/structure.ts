@@ -2773,8 +2773,8 @@ const NO_BYPASS: BypassCounts = { offExitPath: false, onExitPath: false };
 //     in the span is an early `return` read as the exit, which is what made the post-loop epilogue
 //     the paragraph above names look off the exit path; an exit past the body is the code after the
 //     loop, so that epilogue is on the exit path and never this count's. Klonoa's sub_08016EEC has
-//     the shape: a loop that ends a `case` takes the arm's own head for its exit, and declines at
-//     the switch inside it. Nowhere else does the count rank ahead of another reading: on
+//     the shape (`synthetic:sw_xjret_end`): a loop that ends a `case` takes the arm's own head for
+//     its exit, and declines at the switch inside it. Nowhere else does the count rank ahead of another reading: on
 //     gcc2.7.2 and gcc2.7.2kmc the same `sw_xjret` loop is a `do-while` whose arm copies the merged
 //     tail (`retCopyingReadings`), which the count must not displace;
 //   - `onExitPath`, at the reading of last resort only: the `exitTail` count waives

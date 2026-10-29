@@ -14514,6 +14514,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //      bypasses the exit (`EXIT_TAIL_GATES` `entry-bypasses-exit`). sw_xjret_ctl ends the
   //      outside branch with another call, so nothing cross-jumps: it lifts on every lane.
   //      agbcc only declines: the other four lanes lift the three original rows (nonmatch).
+  //      sw_xjret_end is loop 355's own layout: the loop ends a `case` with nothing after the
+  //      outer switch, and the arm's own code falls through inside the loop's span, so `while (1)`
+  //      first fits the arm's head as the exit and the switch inside the loop then declines ("a
+  //      case body leaves its switch for a loop exit past the switch's end") on agbcc, gcc2.7.2
+  //      and gcc2.7.2kmc; it lifts only where the exit past the loop is read first.
   //  30. cmn_store (sub_08022CA0). `p->x -= 8; if (p->x <= -gMag)` with `u16 gMag`: agbcc's
   //      `cmpsi` expander folds the negation into `cmn` (thumb.md, `cmnsi`), which the frontend
   //      lifts as the mathematical negation `neg_s` (frontend/thumb.ts). Its INT_MIN guard asks
@@ -14859,6 +14864,56 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_xjret_post(s32 a, s32 c);',
     proto: {
       sw_xjret_post: { returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      fin: { params: 4, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sw_xjret_end',
+    src:
+      'struct E { s32 x; s32 y; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void fin(s32 x, s32 y, s32 b, s32 a);\n' +
+      'void sw_xjret_end(s32 a, s32 c)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    switch (c) {\n' +
+      '    case 3:\n' +
+      '        for (i = gLo; i <= gHi; i++) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 5: if (gE[i].x != a) { gOut = 1; break; } fin(gE[a].x, gE[a].y, 2, a); return;\n' +
+      '            case 6: if (gE[i].x > a) gOut = 2; break;\n' +
+      '            case 8: if (gE[i].x < a) gOut = 3; break;\n' +
+      '            case 9: gOut = 4; break;\n' +
+      '            case 11: if (gE[i].x != a) gOut = 5; break;\n' +
+      '            case 12: k(i); break;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        break;\n' +
+      '    case 4:\n' +
+      '        if (gOut == 9) {\n' +
+      '            fin(gE[a].x, gE[a].y, 2, a);\n' +
+      '            return;\n' +
+      '        }\n' +
+      '        k(4);\n' +
+      '        break;\n' +
+      '    }\n' +
+      '}',
+    features: ['dense', 'switch-arms', 'break'],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; s32 y; u8 id; u8 f; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void fin(s32 x, s32 y, s32 b, s32 a);\n' +
+      'void sw_xjret_end(s32 a, s32 c);',
+    proto: {
+      sw_xjret_end: { returnsVoid: true },
       k: { params: 1, returnsVoid: true },
       fin: { params: 4, returnsVoid: true },
     },
