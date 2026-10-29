@@ -11,10 +11,11 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { tallying, without } from '../src/l3/gates';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { foldExitTrampolines } from '../src/raise/latch';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { BREAK_TAIL_GATES, BYPASS_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -88,11 +89,11 @@ test('a header value read after a break is not re-derived from the updated name'
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
 type Agreement = { judged: number; disagree: number };
-const judged = (ir: string): { src: string; agreement: Agreement; shipped: Agreement } => {
+const judged = (ir: string, hooks: StructureHooks = {}): { src: string; agreement: Agreement; shipped: Agreement } => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn);
+  const sfn = structure(fn, {}, hooks);
   return {
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
@@ -400,13 +401,13 @@ test('a `break` the header-exit copies would overwrite declines', () => {
 
 // ── EMPTY EXIT TRAMPOLINES (raise/latch.ts `foldExitTrampolines`) ──────────────────────────────
 
-const folded = (ir: string) => {
+const folded = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
   const n = foldExitTrampolines(fn);
   verify(fn);
-  const sfn = structure(fn);
+  const sfn = structure(fn, {}, hooks);
   return {
     n,
     src: cBackend.emit(sfn),
@@ -1072,6 +1073,28 @@ const PURE_TAIL_ELSE = `fn elsetail {
   ret %18
 }`;
 
+/** `SHARED_TAIL_TOP_TESTED` with a search loop in the tail: `if (a(i) == k) f(1); else if (b(i) == k)
+ *  f(2); else continue; for (j = 0; j < n; j++) if (t(j) == i) break; hit(j); break;`. */
+const SHARED_TAIL_SEARCH = SHARED_TAIL_TOP_TESTED.replace(
+  '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  br ^bb7()',
+  `^bb6():
+  br ^bb9(%2)
+^bb9(%30: s32):
+  %31: u32 = icmp_slt %30, %0
+  cond_br %31, ^bb10(), ^bb11(%30)
+^bb10():
+  %32: s32 = call %30 {target="t"}
+  %33: u32 = icmp_eq %32, %3
+  cond_br %33, ^bb11(%30), ^bb12()
+^bb12():
+  %34: s32 = const {value=1}
+  %35: s32 = add %30, %34
+  br ^bb9(%35)
+^bb11(%36: s32):
+  %13: s32 = call %36 {target="hit"}
+  br ^bb7()`,
+);
+
 describe('break arms that share a tail', () => {
   test('a top-tested loop writes the shared tail in each arm, ahead of its `break`', () => {
     const { src, agreement, shipped } = judged(SHARED_TAIL_TOP_TESTED);
@@ -1149,13 +1172,70 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test('a shared tail holding a loop of its own is refused', () => {
-    declines(
+  // A SHARED TAIL HOLDING A LOOP (`BREAK_TAIL_GATES`): agbcc cross-jumps two cases' `break`s into
+  // one search loop. Each arm writes its own copy of the loop ahead of its `break`, by `while (1)`'s
+  // last rung, and each path runs one copy: the trace oracle sees every `t(j)` the asm makes.
+  test('a shared tail holding a search loop is written in each arm, and each path runs it once', () => {
+    const { src, agreement, shipped } = judged(SHARED_TAIL_SEARCH);
+    expect(src).toContain('while (1) {');
+    expect(
+      src.match(/for \(v\d = v\d; v\d < a0; v\d = v\d \+ 1\) \{\n {16}if \(t\(v\d\) == v\d\) break;/g),
+    ).toHaveLength(2);
+    expect(src.match(/hit\(v\d\);\n {12}break;/g)).toHaveLength(2);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  test('a shared tail holding a loop of its own lifts the same way', () => {
+    const { src, agreement, shipped } = judged(
       SHARED_TAIL_TOP_TESTED.replace(
         '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  br ^bb7()',
         '^bb6():\n  br ^bb9()\n^bb9():\n  %13: s32 = call %3 {target="hit"}\n  cond_br %13, ^bb9(), ^bb7()',
       ),
     );
+    expect(src.match(/do \{\n {12}\} while \(hit\(v0\)\);\n {12}break;/g)).toHaveLength(2);
+    // a seed whose `hit` never returns 0 runs past the interpreter's step cap, and is not judged
+    expect(agreement).toEqual({ judged: 252, disagree: 0 });
+    expect(shipped).toEqual({ judged: 252, disagree: 0 });
+  });
+
+  // `hit` and `hit2` call each other round a cycle the first arm enters at one block and the second
+  // arm at the other: no copy of it is a loop, and no rule of `BREAK_TAIL_GATES` is needed to refuse
+  // it. Emission declines it loud, whether or not the last-rung rule holds the copy back.
+  test('a cycle in the shared tail entered at two blocks declines', () => {
+    const ir = SHARED_TAIL_TOP_TESTED.replace(
+      '  %12: s32 = call %11 {target="f"}\n  br ^bb6()',
+      '  %12: s32 = call %11 {target="f"}\n  br ^bb9()',
+    ).replace(
+      '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  br ^bb7()',
+      '^bb6():\n  %13: s32 = call %3 {target="hit"}\n  cond_br %13, ^bb9(), ^bb7()\n' +
+        '^bb9():\n  %40: s32 = call %3 {target="hit2"}\n  cond_br %40, ^bb6(), ^bb7()',
+    );
+    expect(() => judged(ir)).toThrow(/cannot structure.*unrecovered back-edge/);
+    expect(() => judged(ir, { breakTailGates: [] })).toThrow(/cannot structure.*unrecovered back-edge/);
+  });
+
+  // The same search loop in a tail ending in `return` (A LOOP IN THE TAIL, at `earlyReturnArm`):
+  // each arm writes its own copy of the loop ahead of its `return`, at the same last rung, by the
+  // same rule (`bypass-tail-holds-cycle`, held to `ArmCopies.cycles`).
+  test('a shared tail holding a search loop and ending in `return` is written in each arm', () => {
+    const ir = SHARED_TAIL_SEARCH.replace(
+      '  %13: s32 = call %36 {target="hit"}\n  br ^bb7()',
+      '  %13: s32 = call %36 {target="hit"}\n  ret %13',
+    );
+    // every rung ahead of the last refuses the copy (`bypass-tail-holds-cycle`), and the last takes it
+    const t = tallying(BYPASS_TAIL_GATES);
+    const { src, agreement, shipped } = judged(ir, { bypassTailGates: t.gates });
+    expect(new Map(t.refusals()).get('bypass-tail-holds-cycle')).toBeGreaterThan(0);
+    expect(src).toContain('while (1) {');
+    expect(
+      src.match(/for \(v\d = v\d; v\d < a0; v\d = v\d \+ 1\) \{\n {16}if \(t\(v\d\) == v\d\) break;/g),
+    ).toHaveLength(2);
+    expect(src.match(/return hit\(v\d\);/g)).toHaveLength(2);
+    expect(src.match(/out\(\)/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 });
 
@@ -1269,6 +1349,28 @@ describe('a loop whose exit jumps over an `else`', () => {
     expect(r.src.match(/out\(/g)).toHaveLength(1);
     expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
     expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+  });
+
+  // The same shape with a loop in the tail the arm and the `else` share: the two-level flag reads
+  // it ahead of the copy (`shared-cycle-before-last-resort`), and with that rule dropped the arm
+  // writes its own copy of the loop instead. Both agree with the IR; the rule orders them.
+  test('a loop in the tail the arm and the `else` share is copied only once the flag reading fails', () => {
+    const cyclic = ARM_OVER_ELSE.replace(
+      '  %22: s32 = sub %21, %20\n  br ^bb7(%22)',
+      '  %22: s32 = sub %21, %20\n  %23: u32 = icmp_slt %22, %0\n  cond_br %23, ^bb5(%22), ^bb7(%22)',
+    );
+    const flag = folded(cyclic);
+    expect(flag.src).toMatch(/v\d = 1;\n {16}break;/);
+    expect(flag.src.match(/do \{/g)).toHaveLength(2);
+    expect(flag.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(flag.shipped).toEqual({ judged: 300, disagree: 0 });
+    const copy = folded(cyclic, {
+      breakTailGates: without(BREAK_TAIL_GATES, 'shared-cycle-before-last-resort'),
+    });
+    expect(copy.src).not.toMatch(/v\d = 1;\n {16}break;/);
+    expect(copy.src).toMatch(/\} while \(v\d < a0\);\n {16}v\d = v\d;\n {16}break;/);
+    expect(copy.agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(copy.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a second exit that reaches the target only round an enclosing loop does not count', () => {

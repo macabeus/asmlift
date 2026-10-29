@@ -529,7 +529,7 @@ test("a `do-while` whose arm needs the exit path's tail keeps its bottom test", 
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
-// A RETURN TAIL A PATH THAT BYPASSES THE LOOP ALSO ENTERS (`BypassCounts`, at `earlyReturnArm`).
+// A RETURN TAIL A PATH THAT BYPASSES THE LOOP ALSO ENTERS (`ArmCopies`, at `earlyReturnArm`).
 // agbcc cross-jumps an arm's `fin(..); return;` onto the identical tail of a branch before the loop
 // (jump.c `find_cross_jump`; `synthetic:sw_xjret`), so the arm runs a block of its own (`^bb3`, the
 // argument) and lands on a `call; ret` the branch ahead of the loop also enters. No other count

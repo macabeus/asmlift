@@ -61,6 +61,7 @@ import { UNTHREAD_GATES } from '../src/raise/unthread';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import {
+  BREAK_TAIL_GATES,
   BYPASS_TAIL_GATES,
   CARRIER_NAME_GATES,
   ENCLOSING_CARRIER_GATES,
@@ -156,6 +157,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],
   TWO_LEVEL_REGION_GATES: TWO_LEVEL_REGION_GATES as readonly Gate<never>[],
   TWO_LEVEL_BREAK_GATES: TWO_LEVEL_BREAK_GATES as readonly Gate<never>[],
+  BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
