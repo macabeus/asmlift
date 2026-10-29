@@ -38,10 +38,11 @@
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
 // (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
 // StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
-// merge that no flag spells (among them a third target, a second one outside the enclosing loop or
-// at its header, and one whose code never joins the code after the first exit: `goto hit; } k(i);
-// goto next; hit: y(i); next:`), a `break` out of a nested loop's body, a `break` whose exit copies
-// would clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
+// merge that no flag spells (among them a third target, a second one at the enclosing loop's header
+// or past it short of its exit, and one whose code never joins the code after the first exit: `goto
+// hit; } k(i); goto next; hit: y(i); next:`), a `break` out of a nested loop's body other than a
+// flag handed out one loop at a time (`TwoLevelExit.outward`), a `break` whose exit copies would
+// clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
@@ -1176,6 +1177,9 @@ interface ForeverLoopInfo {
   breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`, or whose edge enters a `breakArms` arm
   breakArms: BreakArm[];
   twoLevel?: TwoLevelExit;
+  /** the inner loops that hand this loop an outward two-level exit (`TwoLevelExit.outward`), by
+   *  header, each with the blocks its hit leaves from */
+  handed?: Map<Block, Set<Block>>;
 }
 
 // A SECOND EXIT PAST THE CODE AFTER THE LOOP: `for (j…) { if (hit) goto next; } k(i); next: …`, the
@@ -1184,9 +1188,16 @@ interface ForeverLoopInfo {
 // (`twoLevelCandidate`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
 // break;` on the edge to `to`, and the code from `exit` up to `to` under `if (f == 0)` after it
 // (`emitForever`). Only a `while (1)` takes one, and only where no other reading fits.
+//
+// OUTWARD: `for (i…) { for (j…) { if (hit) { s(j); goto out; } } k(i); } out:`, the `goto` out of
+// BOTH loops. `to` lies past the enclosing loop, and the code from it runs on to that loop's own exit
+// (`outwardExitOf`). The flag is handed out one loop at a time: the hit runs that code and `f = 1;
+// break;`, and `if (f != 0) break;` follows the loop at once, ahead of everything the hit skips.
+// Both loops must take the reading, the enclosing one recording it as `handed`, or neither does.
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
+  outward?: true;
 }
 
 /** One edge out of a loop's body that `foreverShape`'s last resort weighs as a two-level exit: from
@@ -1201,6 +1212,14 @@ export interface TwoLevelCandidate {
   readonly targetIsExitOrInLoop: boolean;
   /** a loop encloses this one and `to` lies outside its body (a `goto` out of both loops) */
   readonly targetPastEnclosingLoop: boolean;
+  /** the reading may hand the exit out to the enclosing loop (`TwoLevelExit.outward`): asked only
+   *  once every other reading has failed */
+  readonly outwardAsked: boolean;
+  /** the outward rung's first pass, where the loop takes no two-level exit of its own: only an
+   *  outward one */
+  readonly ownTargetHeldBack: boolean;
+  /** `to` lies past the loop around the enclosing one too (a `goto` out of three loops) */
+  readonly targetTwoLoopsOut: boolean;
   /** a loop encloses this one and `exit` lies outside its body */
   readonly exitPastEnclosingLoop: boolean;
   /** `to` is the enclosing loop's header (a two-level `continue`) */
@@ -1241,9 +1260,23 @@ export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
   },
   {
     id: 'target-past-enclosing-loop',
-    why: 'a target past the enclosing loop is a break out of both loops, which one flag read here cannot spell',
+    why: 'a break out of both loops hands its flag out to the enclosing loop, asked only once every other reading failed',
     sound: false,
-    rejects: (c) => c.targetPastEnclosingLoop,
+    rejects: (c) => c.targetPastEnclosingLoop && !c.outwardAsked,
+  },
+  {
+    id: 'own-target-held-back',
+    why: 'on the outward rung every exit is tried with no flag of the loop’s own first, so the hit’s code laid out ahead of the code after the loop is not read as the exit',
+    sound: false,
+    guardedBy:
+      'two-level-exit.test.ts: a `goto` out of both loops takes one flag whichever of its code and the code after the loop is laid out first',
+    rejects: (c) => c.ownTargetHeldBack && !c.targetPastEnclosingLoop,
+  },
+  {
+    id: 'target-two-loops-out',
+    why: 'a flag handed out one loop at a time is read by the enclosing loop alone, never the one around it',
+    sound: false,
+    rejects: (c) => c.targetTwoLoopsOut,
   },
   {
     id: 'exit-past-enclosing-loop',
@@ -1271,6 +1304,39 @@ export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
     sound: false,
     guardedBy: 'two-level-exit.test.ts: without skip-reenters-loop the two-level continue lifts, and agrees',
     rejects: (c) => c.skipReentersLoop,
+  },
+];
+
+/** An exit edge of a `while (1)` that leaves from an inner loop's body, weighed as the inner loop's
+ *  outward two-level exit handed out to this one (`TwoLevelExit.outward`, `outwardExitOf`). */
+export interface OutwardExitCandidate {
+  /** the innermost loop the edge leaves from is not a child of this one, but nested deeper */
+  readonly fromDeeperLoop: boolean;
+  /** the code from the edge's target is not a break arm of this loop (`codeBreakArm`): it re-enters
+   *  the loop, dispatches, leaves for another target, or is entered where the duplication policy
+   *  writes it once, after the loop */
+  readonly notABreakArm: boolean;
+}
+
+/** When `foreverShape`'s outward rung takes an edge out of an inner loop's body as that loop's
+ *  outward two-level exit. The argument is at `outwardExitOf`. Not in the table: the inner loop
+ *  taking the same edge for its own (`TWO_LEVEL_EXIT_GATES`), checked once both are classified.
+ *  `from-a-deeper-loop` is DEFENSIVE: on a `goto` out of three loops the middle loop never reads
+ *  the edge as a break arm of its own (the code from the target misses its exit), and the check
+ *  that both loops took the reading sends the outer one back to its other readings. */
+export const OUTWARD_EXIT_GATES: readonly Gate<OutwardExitCandidate>[] = [
+  {
+    id: 'from-a-deeper-loop',
+    why: 'the flag is handed out one loop at a time, so the edge must leave a loop this one holds directly',
+    sound: false,
+    rejects: (c) => c.fromDeeperLoop,
+  },
+  {
+    id: 'not-a-break-arm',
+    why: 'the code the exit runs is written in the inner loop ahead of its break, so it must be one this loop’s break arm may write',
+    sound: false,
+    guardedBy: 'two-level-exit.test.ts: each decline is refused by the two-level rule its shape names',
+    rejects: (c) => c.notABreakArm,
   },
 ];
 
@@ -2124,6 +2190,8 @@ export interface StructureHooks {
   bypassTailGates?: readonly Gate<BypassTailCandidate>[];
   /** `foreverShape`'s two-level exit rules (`TWO_LEVEL_EXIT_GATES`), ablatable the same way. */
   twoLevelExitGates?: readonly Gate<TwoLevelCandidate>[];
+  /** `outwardExitOf`'s rules (`OUTWARD_EXIT_GATES`), ablatable the same way. */
+  outwardExitGates?: readonly Gate<OutwardExitCandidate>[];
   /** `codeBreakArm`'s rules for a shared tail holding a cycle (`BREAK_TAIL_GATES`), ablatable the
    *  same way. */
   breakTailGates?: readonly Gate<BreakTailCycle>[];
@@ -2689,12 +2757,16 @@ export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
 
 /** What one `while (1)` reading asks of `foreverShape` past the default: an arm may copy a tail the
  *  exit path also runs (`copyExitTail`), take one edge as a two-level exit (`twoLevel`,
- *  `TwoLevelExit`), copy past `entry-bypasses-exit` and a bypassed return tail (`lastResort`,
- *  `ArmCopies.offExitPath` and `onExitPath`), and copy a loop in a tail it shares (`cycles`,
- *  `ArmCopies.cycles`). */
+/** What one `while (1)` reading asks of `foreverShape` past the default: an arm may copy a tail the
+ *  exit path also runs (`copyExitTail`), take one edge as a two-level exit (`twoLevel`,
+ *  `TwoLevelExit`), hand a `goto` out of both loops out one loop at a time (`outward`,
+ *  `TwoLevelExit.outward`), copy past `entry-bypasses-exit` and a bypassed return tail
+ *  (`lastResort`, `ArmCopies.offExitPath` and `onExitPath`), and copy a loop in a tail it shares
+ *  (`cycles`, `ArmCopies.cycles`). */
 interface ForeverAsk {
   readonly copyExitTail?: boolean;
   readonly twoLevel?: boolean;
+  readonly outward?: boolean;
   readonly lastResort?: boolean;
   readonly cycles?: boolean;
 }
@@ -2987,6 +3059,13 @@ interface PastExitRanking {
   could: boolean;
 }
 
+/** Whether `while (1)` asks its outward rung (`TwoLevelExit.outward`), and whether a structuring met
+ *  a loop that rung reads. */
+interface OutwardRanking {
+  readonly asked: boolean;
+  could: boolean;
+}
+
 /** A RET-TAIL COPY CLASSIFICATION ACCEPTS, EMISSION MAY STILL NOT SPELL. A `while` or `do-while`
  *  reading takes an edge into a ret-terminated tail it does not own as an early `return`, and only
  *  emission learns whether the body can hold it: on gcc2.7.2kmc, `for (j = 0; j < 8; j++) { if
@@ -3004,6 +3083,14 @@ interface PastExitRanking {
  *  in-span exit past the switch's end — is run again with the exit past the loop first
  *  (`PastExitRanking.first`), and with the ret-tail copies last as well if that one committed one.
  *
+ *  A GOTO OUT OF BOTH LOOPS, LAST OF ALL. The outward flag (`TwoLevelExit.outward`) is a variable
+ *  the asm does not hold, and one loop's ladder cannot see whether the readings of its partner
+ *  would have structured the nest without it: on mwcc_242_81, `for (i…) { k(i); for (j…) if (a(j))
+ *  goto out; } out: gOut += i;` lifts with the hit copying the ret tail once the ret copies rank last,
+ *  where asking the outward rung there hands the flag out instead. So every run above is made with
+ *  the rung unasked, and only where all of them decline and some loop's rung would have read it are
+ *  they made again with it asked (`OutwardRanking`).
+ *
  *  The first run's refusal stands if every rerun declines too. Each run's observation hooks are held
  *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
  *  by the first run where none is. */
@@ -3014,7 +3101,7 @@ export function structure(
   memo?: DefaultAcceptsMemo,
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
-  const attempt = (retCopy: RetCopyRanking, pastExit: PastExitRanking): SFn | null => {
+  const attempt = (retCopy: RetCopyRanking, pastExit: PastExitRanking, outward: OutwardRanking): SFn | null => {
     const held: (() => void)[] = [];
     const hold =
       <A extends unknown[]>(f: (...args: A) => void) =>
@@ -3034,6 +3121,7 @@ export function structure(
         memo,
         retCopy,
         pastExit,
+        outward,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3045,14 +3133,19 @@ export function structure(
       return null;
     }
   };
-  const first: RetCopyRanking = { last: false, took: false };
-  const inSpan: PastExitRanking = { first: false, could: false };
-  const past: RetCopyRanking = { last: false, took: false };
-  const sfn =
-    attempt(first, inSpan) ??
-    (first.took ? attempt({ last: true, took: false }, inSpan) : null) ??
-    (inSpan.could ? attempt(past, { first: true, could: false }) : null) ??
-    (past.took ? attempt({ last: true, took: false }, { first: true, could: false }) : null);
+  const ranked = (outward: OutwardRanking): SFn | null => {
+    const first: RetCopyRanking = { last: false, took: false };
+    const inSpan: PastExitRanking = { first: false, could: false };
+    const past: RetCopyRanking = { last: false, took: false };
+    return (
+      attempt(first, inSpan, outward) ??
+      (first.took ? attempt({ last: true, took: false }, inSpan, outward) : null) ??
+      (inSpan.could ? attempt(past, { first: true, could: false }, outward) : null) ??
+      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward) : null)
+    );
+  };
+  const unasked: OutwardRanking = { asked: false, could: false };
+  const sfn = ranked(unasked) ?? (unasked.could ? ranked({ asked: true, could: false }) : null);
   if (sfn !== null) {
     return sfn;
   }
@@ -3067,6 +3160,7 @@ function structureRanked(
   memo: DefaultAcceptsMemo | undefined,
   retCopy: RetCopyRanking,
   pastExit: PastExitRanking,
+  outwardRank: OutwardRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -3648,9 +3742,10 @@ function structureRanked(
     return meets ? region : null;
   };
   // May the edge from `nl`'s body to `to` be a two-level exit past `exit`? `to` lies outside the
-  // loop and is not `exit`; inside a loop around this one, `to` lies in that loop's body (a target
-  // past it is a `break` out of both loops, which one flag read after this loop cannot spell); and
-  // the code from `exit` meets `to` (`twoLevelSkip`). Asked only of an edge no other reading takes
+  // loop and is not `exit`; inside a loop around this one, `to` lies in that loop's body, or, on the
+  // outward rung only (`outwardAsked`), past that loop and no further (an outward exit, handed out
+  // to it: `TwoLevelExit.outward`); and the code from `exit` meets `to` (`twoLevelSkip`), which an
+  // outward exit does not ask. Asked only of an edge no other reading takes
   // (`foreverShape`), so a loop any other reading takes never reads through it. The rules are
   // `TWO_LEVEL_EXIT_GATES`, read here as the fields of one edge; every refusal is a loud capability
   // gap, and no rule is sound:
@@ -3662,8 +3757,11 @@ function structureRanked(
   //     `exit-never-meets-target` refuses it too). Read with the header for `exit`, the walk runs
   //     back into the loop (`skip-reenters-loop`). That one refuses a correct lift, `if (f == 0)
   //     continue;` after the loop: it stays until a bench row weighs the header as an exit.
-  //   - `target-past-enclosing-loop`: the `goto` out of both loops declines before the inner loop
-  //     is asked for a two-level exit, so no fixture reaches it.
+  //   - `target-past-enclosing-loop` keeps the `goto` out of both loops for the outward rung, and
+  //     `own-target-held-back` keeps that rung's first pass to it (`foreverShape`'s `ownFlag`).
+  //   - `target-two-loops-out` is DEFENSIVE: on a `goto` out of three loops the middle loop refuses
+  //     the hand-out (`not-a-break-arm`, OUTWARD_EXIT_GATES: the code from the target misses its
+  //     exit), and the check that both loops took the reading sends the innermost one back.
   //   - `from-inner-body`, `target-is-exit-or-in-loop` and `exit-past-enclosing-loop` are DEFENSIVE:
   //     an edge out of an inner loop is that loop's to read first, an exit edge never lands in its
   //     own loop, and on a reducible CFG the walk from `exit` meets a `to` inside the enclosing body
@@ -3674,11 +3772,17 @@ function structureRanked(
     from: Block,
     to: Block,
     second: TwoLevelExit | undefined,
+    outwardAsked: boolean,
+    ownTargetHeldBack: boolean,
   ): TwoLevelCandidate => {
     const outer = forest.parent.get(nl.header);
     const outerBody = outer ? forest.byHeader.get(outer)!.body : null;
+    const grand = outer ? forest.parent.get(outer) : null;
+    const outward = outerBody !== null && !outerBody.has(to);
     let skip: Set<Block> | null | undefined;
-    const skipped = () => (skip === undefined ? (skip = twoLevelSkip(exit, to)) : skip);
+    // an outward exit skips nothing a walk from `exit` meets: the code it skips is the rest of the
+    // enclosing loop, which `if (f != 0) break;` leaves
+    const skipped = () => (skip === undefined ? (skip = outward ? new Set() : twoLevelSkip(exit, to)) : skip);
     return {
       get fromInnerBody() {
         return innerBodyHas(nl, from);
@@ -3687,8 +3791,11 @@ function structureRanked(
       get targetIsExitOrInLoop() {
         return to === exit || nl.body.has(to);
       },
-      get targetPastEnclosingLoop() {
-        return outerBody !== null && !outerBody.has(to);
+      targetPastEnclosingLoop: outward,
+      outwardAsked,
+      ownTargetHeldBack,
+      get targetTwoLoopsOut() {
+        return outward && grand !== null && grand !== undefined && !forest.byHeader.get(grand)!.body.has(to);
       },
       get exitPastEnclosingLoop() {
         return outerBody !== null && !outerBody.has(exit);
@@ -3702,6 +3809,39 @@ function structureRanked(
       get skipReentersLoop() {
         const s = skipped();
         return s !== null && [...s].some((x) => nl.body.has(x));
+      },
+    };
+  };
+  // May the exit edge `from -> to` of `nl`, leaving from an inner loop's body, be that loop's outward
+  // two-level exit (`TwoLevelExit.outward`) handed out to `nl`, which leaves for `exit`? The edge
+  // leaves a loop `nl` holds directly (`child`), and the code from `to` (none where `to` is `exit`) is
+  // a break arm of `nl` (`codeBreakArm`, shared, with its one duplication policy): the hit writes it
+  // inside the inner loop, ahead of `f = 1; break;`, and `if (f != 0) break;` then lands where that
+  // code went. The rules are `OUTWARD_EXIT_GATES`; every refusal is a loud capability gap.
+  const outwardExitOf = (
+    nl: NaturalLoop,
+    from: Block,
+    to: Block,
+    exit: Block,
+  ): { child: Block; candidate: OutwardExitCandidate } => {
+    let child: NaturalLoop | undefined;
+    for (const l of forest.byHeader.values()) {
+      if (
+        l !== nl &&
+        nl.body.has(l.header) &&
+        l.body.has(from) &&
+        (child === undefined || l.body.size < child.body.size)
+      ) {
+        child = l;
+      }
+    }
+    return {
+      child: child!.header,
+      candidate: {
+        fromDeeperLoop: forest.parent.get(child!.header) !== nl.header,
+        get notABreakArm() {
+          return to !== exit && codeBreakArm(preds, dom, from, to, nl.body, exit, true) === null;
+        },
       },
     };
   };
@@ -3952,7 +4092,7 @@ function structureRanked(
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop, ask: ForeverAsk): ForeverLoopInfo | null => {
-    const { copyExitTail = false, twoLevel = false, lastResort = false, cycles = false } = ask;
+    const { copyExitTail = false, twoLevel = false, outward = false, lastResort = false, cycles = false } = ask;
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -3977,15 +4117,28 @@ function structureRanked(
     // laid out between the body's first and last blocks: never a block ahead of the loop
     const inSpan = (x: Block) => fn.blocks.indexOf(x) > first && fn.blocks.indexOf(x) < last;
     const asked: ArmCopies = { offExitPath: lastResort, onExitPath: lastResort, cycles };
-    const fitAt = (exit: Block, bypass: ArmCopies): ForeverLoopInfo | null => {
+    const fitAt = (exit: Block, bypass: ArmCopies, ownFlag: boolean): ForeverLoopInfo | null => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
       const breakArms: BreakArm[] = [];
       let second: TwoLevelExit | undefined;
+      let handed: Map<Block, Set<Block>> | undefined;
+      // an edge out of an inner loop's body, on the outward rung: that loop's outward two-level exit,
+      // handed out to this one (`outwardExitOf`)
+      const handOut = (e: { from: Block; to: Block }): boolean => {
+        const { child, candidate } = outwardExitOf(nl, e.from, e.to, exit);
+        if (firstRejection(hooks.outwardExitGates ?? OUTWARD_EXIT_GATES, candidate) !== null) {
+          return false;
+        }
+        handed ??= new Map();
+        handed.set(child, (handed.get(child) ?? new Set()).add(e.from));
+        breaks.add(e.from);
+        return true;
+      };
       const fits = nl.exitEdges.every((e) => {
         if (e.to === exit) {
           breaks.add(e.from);
-          return !innerBodyHas(nl, e.from);
+          return !innerBodyHas(nl, e.from) || (outward && handOut(e));
         }
         const { region, owned } = exitArmOf(nl, e, exit, true, copyExitTail, bypass);
         if (owned) {
@@ -4001,18 +4154,20 @@ function structureRanked(
         if (owned !== null || (isRet(e.to) && !e.to.ops.some(effectful))) {
           return true;
         }
+        if (outward && innerBodyHas(nl, e.from)) {
+          return handOut(e);
+        }
         // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body
         // (`TWO_LEVEL_EXIT_GATES`; what each rule does is at `twoLevelCandidate`)
-        if (
-          !twoLevel ||
-          firstRejection(
-            hooks.twoLevelExitGates ?? TWO_LEVEL_EXIT_GATES,
-            twoLevelCandidate(nl, exit, e.from, e.to, second),
-          ) !== null
-        ) {
+        const candidate = twoLevel ? twoLevelCandidate(nl, exit, e.from, e.to, second, outward, !ownFlag) : null;
+        if (candidate === null || firstRejection(hooks.twoLevelExitGates ?? TWO_LEVEL_EXIT_GATES, candidate) !== null) {
           return false;
         }
-        second ??= { to: e.to, from: new Set() };
+        second ??= {
+          to: e.to,
+          from: new Set(),
+          ...(candidate.targetPastEnclosingLoop ? { outward: true as const } : {}),
+        };
         second.from.add(e.from);
         breaks.add(e.from);
         return true;
@@ -4028,6 +4183,7 @@ function structureRanked(
             breaks,
             breakArms,
             ...(second !== undefined ? { twoLevel: second } : {}),
+            ...(handed !== undefined ? { handed } : {}),
           }
         : null;
     };
@@ -4035,10 +4191,10 @@ function structureRanked(
     // loop that fits once an arm copies a bypassed return tail is noted here, and taken only on a
     // rerun (`PastExitRanking`; A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). An exit laid out
     // ahead of the loop is a `goto` back to a label before it, which a `break` spells once.
-    const pastFirst = (exit: Block, shape: ForeverLoopInfo): ForeverLoopInfo => {
+    const pastFirst = (exit: Block, shape: ForeverLoopInfo, ownFlag: boolean): ForeverLoopInfo => {
       if (inSpan(exit) && !asked.offExitPath) {
         for (const past of targets.filter(pastLoop)) {
-          const copied = fitAt(past, { ...asked, offExitPath: true });
+          const copied = fitAt(past, { ...asked, offExitPath: true }, ownFlag);
           if (copied !== null) {
             pastExit.could = true;
             return pastExit.first ? copied : shape;
@@ -4047,10 +4203,15 @@ function structureRanked(
       }
       return shape;
     };
-    for (const exit of targets) {
-      const shape = fitAt(exit, asked);
-      if (shape !== null) {
-        return pastFirst(exit, shape);
+    // On the outward rung every exit is tried first with no two-level exit of the loop's own, so
+    // a `goto` out of both loops whose code is laid out ahead of the code after the loop is not
+    // read as the exit with the loop's other way out as a second flag the asm does not hold.
+    for (const ownFlag of outward ? [false, true] : [true]) {
+      for (const exit of targets) {
+        const shape = fitAt(exit, asked, ownFlag);
+        if (shape !== null) {
+          return pastFirst(exit, shape, ownFlag);
+        }
       }
     }
     return null;
@@ -4064,29 +4225,61 @@ function structureRanked(
   // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
   // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
   // that every other reading declines. A structuring run again because emission refused such a
-  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy. Right behind the two-level
-  // exit comes `while (1)` with every copy, where an arm also copies a return tail a path that
-  // bypasses the loop enters, under an exit inside the loop's span or on the exit path (A PATH THAT
-  // BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no reading fits and no ret copy
-  // waits, every `while (1)` reading above runs again, in the same order, with an arm writing its own
-  // copy of a loop in a tail it shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at
-  // `earlyReturnArm`): two copies of a loop the asm holds once. `rungs` asks every reading with or
-  // without `cycles`, so a reading added to `rungs` is asked again with it at the last rung.
+  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy. Behind it the same rung
+  // asks again with `outward`, where a `goto` out of both loops is handed out
+  // (`TwoLevelExit.outward`) — only on a run every structuring without it declined
+  // (`OutwardRanking`) — and right behind that `while (1)` with every copy, where an arm also
+  // copies a return tail a path that bypasses the loop enters, under an exit inside the loop's span
+  // or on the exit path (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no
+  // reading fits and no ret copy waits, every `while (1)` reading above runs again, in the same
+  // order, with an arm writing its own copy of a loop in a tail it shares, ending in `break` or in
+  // `return` (A LOOP IN THE TAIL, at `earlyReturnArm`): two copies of a loop the asm holds once.
+  // `rungs` asks every reading with or without `cycles`, so a reading added to `rungs` is asked
+  // again with it at the last rung. A loop whose outward reading its partner refused runs the ladder
+  // from the two-level rung again with `outward` off (`handedFallbacks`).
+  const handedFallbacks = new Map<Block, () => void>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
+    const copying = copyingReadings.get(h);
+    const retCopying = open ? retCopyingReadings.get(h) : undefined;
     const rungs = (cycles: boolean) => {
       const read = (ask: ForeverAsk) => (open ? foreverShape(nl, { ...ask, cycles }) : null);
+      // unasked, the outward rung only notes whether it reads the loop, a probe that leaves no
+      // ranking of its own behind
+      const handingOut = (): ForeverLoopInfo | null => {
+        if (outwardRank.asked) {
+          return read({ twoLevel: true, outward: true });
+        }
+        const pastCould = pastExit.could;
+        outwardRank.could ||= read({ twoLevel: true, outward: true }) !== null;
+        pastExit.could = pastCould;
+        return null;
+      };
       return {
         plain: () => read({}),
         copied: () => read({ copyExitTail: true }),
-        flagged: () => read({ twoLevel: true }) ?? read({ copyExitTail: true, lastResort: true }),
+        flagged: (outward: boolean) =>
+          read({ twoLevel: true }) ?? (outward ? handingOut() : null) ?? read({ copyExitTail: true, lastResort: true }),
       };
     };
     const first = rungs(false);
     const shape = first.plain();
-    const copying = copyingReadings.get(h);
-    const retCopying = open ? retCopyingReadings.get(h) : undefined;
+    // the ladder from the two-level rung on, settled: the loop it read, else the ret copy behind it,
+    // else, where none waits, the last rung
+    const fromFlagged = (outward: boolean): ForeverLoopInfo | null => {
+      let fl = first.flagged(outward);
+      if (fl === null && retCopying === undefined) {
+        const last = rungs(true);
+        fl = last.plain() ?? last.copied() ?? last.flagged(outward);
+      }
+      if (fl !== null) {
+        foreverLoops.set(h, fl);
+      } else {
+        retCopying?.();
+      }
+      return fl;
+    };
     if (open && shape === null && copying !== undefined) {
       copying();
     } else {
@@ -4096,18 +4289,39 @@ function structureRanked(
       } else if (retCopying !== undefined && !retCopy.last) {
         retCopying();
       } else {
-        const flagged = first.flagged();
-        if (flagged !== null) {
-          foreverLoops.set(h, flagged);
-        } else if (retCopying !== undefined) {
-          retCopying();
-        } else {
-          const last = rungs(true);
-          const cyclic = last.plain() ?? last.copied() ?? last.flagged();
-          if (cyclic !== null) {
-            foreverLoops.set(h, cyclic);
-          }
+        const flagged = fromFlagged(true);
+        // only an `outward` reading hands an exit out, or takes one handed out
+        if (flagged !== null && (flagged.handed !== undefined || flagged.twoLevel?.outward === true)) {
+          handedFallbacks.set(h, () => fromFlagged(false));
         }
+      }
+    }
+  }
+  // AN OUTWARD EXIT TAKES BOTH LOOPS OR NEITHER. Each loop's outward rung reads its own edges, so the
+  // enclosing loop's `handed` must name exactly the hits the inner loop took for its outward exit, to
+  // the one target; a loop whose partner read the edge another way (or not at all) goes back to what
+  // it would have taken without the rung, and a loop left unread declines loud where it is emitted.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [h, fallback] of handedFallbacks) {
+      const fl = foreverLoops.get(h)!;
+      const parent = forest.parent.get(h);
+      const outer = parent !== null && parent !== undefined ? foreverLoops.get(parent) : undefined;
+      const handedOk = [...(fl.handed ?? [])].every(([child, from]) => {
+        const inner = foreverLoops.get(child)?.twoLevel;
+        return (
+          inner?.outward === true &&
+          inner.from.size === from.size &&
+          [...from].every((b) => inner.from.has(b) && successorsOf(b).includes(inner.to))
+        );
+      });
+      const outwardOk =
+        fl.twoLevel?.outward !== true || (outer?.handed?.get(h) !== undefined && handedFallbacks.has(parent!));
+      if (!handedOk || !outwardOk) {
+        foreverLoops.delete(h);
+        handedFallbacks.delete(h);
+        fallback();
+        changed = true;
       }
     }
   }
@@ -6619,6 +6833,8 @@ function structureRanked(
     breaks: ReadonlySet<Block>;
     breakArms?: readonly BreakArm[];
     twoLevel?: TwoLevelExit;
+    /** the loop an outward two-level exit is handed out to (`TwoLevelExit.outward`) */
+    enclosing?: LoopFrame;
   };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
@@ -6646,8 +6862,46 @@ function structureRanked(
     loop: LoopFrame | null;
     region: ReadonlySet<Block> | null;
     fallsTo: Block | null;
+    /** the flags of the outward two-level exits handed out through this arm's switch
+     *  (`handedThroughSwitch`) */
+    flags: Set<string> | null;
   };
   const switchFrames: SwitchFrame[] = [];
+  // AN OUTWARD EXIT HANDED OUT THROUGH A SWITCH (`emitForever`): in a case body `if (f != 0) break;`
+  // leaves only the switch, so the switch is followed at once by a second `if (f != 0) break;` that
+  // leaves the loop, and is preceded by `f = 0;`, since a path that never entered the inner loop
+  // reaches that test too. One scope per switch being emitted, opened by `withSwitchFlags` around
+  // its arms (Regime A from `handedThroughSwitch`, Regime B at the jump table); each arm's frame
+  // holds its switch's.
+  const switchFlagScopes: Set<string>[] = [];
+  const withSwitchFlags = <R>(run: () => R): [R, ReadonlySet<string>] => {
+    const flags = new Set<string>();
+    switchFlagScopes.push(flags);
+    try {
+      return [run(), flags];
+    } finally {
+      switchFlagScopes.pop();
+    }
+  };
+  const handedThroughSwitch = <S extends Stmt[] | null>(run: () => S): S => {
+    const [out, flags] = withSwitchFlags(run);
+    const at = out === null ? -1 : out.findIndex((st) => st.k === 'switch');
+    return out === null || at < 0
+      ? out
+      : ([...out.slice(0, at), ...aroundSwitch(flags, out[at]), ...out.slice(at + 1)] as S);
+  };
+  // `if (f != 0) break;`, the one spelling of a flag read where it is handed out
+  const breakOnFlag = (name: string, ofSwitch: boolean): Stmt =>
+    mkIf(
+      { k: 'bin', op: '!=', l: { k: 'var', name }, r: { k: 'const', value: 0 } },
+      [{ k: 'break', ...(ofSwitch ? { ofSwitch: true } : {}) }],
+      [],
+    );
+  const aroundSwitch = (flags: ReadonlySet<string>, sw: Stmt): Stmt[] => [
+    ...[...flags].map((name): Stmt => ({ k: 'assign', name, value: { k: 'const', value: 0 } })),
+    sw,
+    ...[...flags].map((name) => breakOnFlag(name, false)),
+  ];
   // THE ONE RULE THAT BINDS A `break;` TO A SWITCH ARM: does a `break;` written here reach `b`? It
   // does where `b` is the merge of the innermost arm with a region and no loop was entered since
   // that arm began. `switchBreakAt` spells it, and `emitForever` asks it for a flag's `break`.
@@ -6871,7 +7125,13 @@ function structureRanked(
       exit === undefined || exit.kind === 'unstructurable' || (exit.kind === 'break' && !spellSwitchBreak)
         ? null
         : (exit.region ?? null);
-    switchFrames.push({ merge, loop: loopCtx, region, fallsTo: exit?.kind === 'fallthrough' ? exit.to : null });
+    switchFrames.push({
+      merge,
+      loop: loopCtx,
+      region,
+      fallsTo: exit?.kind === 'fallthrough' ? exit.to : null,
+      flags: switchFlagScopes[switchFlagScopes.length - 1] ?? null,
+    });
     try {
       return structureRegion(entry, stop);
     } finally {
@@ -7351,25 +7611,27 @@ function structureRanked(
         deadDefaultEdge &&
         (armOf.has(defEdge.block) ||
           ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block));
-      const bodies = emitOrder.map((a, i) => {
-        // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
-        // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
-        // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
-        if (read.refusal !== null && read.refusal.at === i) {
-          read.refusal.raise();
-        }
-        if (deadDefault && i === emitOrder.length - 1) {
-          return { body: [], fallsThrough: false };
-        }
-        const exit = exitOf.get(a.entry)!;
-        const ft = exit.kind === 'fallthrough';
-        return {
-          // A falling-through arm stops AT its successor arm, which then emits that body once under
-          // its own labels; a closed arm runs to the merge as before.
-          body: [...edgeCopies[i], ...structureArm(a.entry, ft ? exit.to : merge, merge, exit)],
-          fallsThrough: ft,
-        };
-      });
+      const [bodies, flags] = withSwitchFlags(() =>
+        emitOrder.map((a, i) => {
+          // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
+          // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
+          // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
+          if (read.refusal !== null && read.refusal.at === i) {
+            read.refusal.raise();
+          }
+          if (deadDefault && i === emitOrder.length - 1) {
+            return { body: [], fallsThrough: false };
+          }
+          const exit = exitOf.get(a.entry)!;
+          const ft = exit.kind === 'fallthrough';
+          return {
+            // A falling-through arm stops AT its successor arm, which then emits that body once under
+            // its own labels; a closed arm runs to the merge as before.
+            body: [...edgeCopies[i], ...structureArm(a.entry, ft ? exit.to : merge, merge, exit)],
+            fallsThrough: ft,
+          };
+        }),
+      );
       const outCases: SwitchCase[] = ordered.map((a, i) => ({ values: a.values, ...bodies[i] }));
       // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
       // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
@@ -7381,7 +7643,7 @@ function structureRanked(
         cases: outCases,
         ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
       };
-      out.push(sw);
+      out.push(...aroundSwitch(flags, sw));
       if (merge && merge !== stop) {
         out.push(...structureRegion(merge, stop));
       }
@@ -7883,11 +8145,16 @@ function structureRanked(
       const breakIsTaken = takenB === (twoLevel?.to ?? arm?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
       const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
+      // an outward exit also leaves the enclosing loop, for its exit: judged there as that loop's break
+      const outer = twoLevel?.outward === true ? frame.enclosing : undefined;
+      const outerRule = outer !== undefined ? breakRule(outer, b, writtenAhead(outer, b), outer.exit) : null;
       const rule = continueRefused
         ? { refusal: 'would continue the loop from a region that ends past the loop bottom' }
-        : frame.body.has(stayB)
-          ? breakRule(frame, b, writtenAhead(frame, b), twoLevel?.to ?? frame.exit)
-          : { refusal: 'has no edge beside it that stays in the loop' };
+        : !frame.body.has(stayB)
+          ? { refusal: 'has no edge beside it that stays in the loop' }
+          : outerRule !== null && 'refusal' in outerRule
+            ? outerRule
+            : breakRule(frame, b, writtenAhead(frame, b), twoLevel?.to ?? frame.exit);
       if ('bare' in rule) {
         let leaveCond = expr(term.operands[0]);
         if (!breakIsTaken) {
@@ -7900,6 +8167,7 @@ function structureRanked(
             [
               ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
               ...(arm !== undefined && twoLevel === undefined ? structureRegion(arm.to, frame.exit) : []),
+              ...(outer !== undefined ? structureRegion(twoLevel!.to, outer.exit) : []),
               ...(twoLevel !== undefined
                 ? [{ k: 'assign', name: twoLevelFlag(frame.header), value: { k: 'const', value: 1 } } as Stmt]
                 : []),
@@ -7926,7 +8194,7 @@ function structureRanked(
     // Regime-A switch: if this cond_br roots a comparison tree over a single scrutinee, emit a
     // `switch`. A pre-check here — mirroring the guard-fused-loop check above — so it sees the raw
     // tree before if-recovery claims the diamonds. Declines (null) fall through to plain if-recovery.
-    const asSwitch = recognizeSwitch(b, stop);
+    const asSwitch = handedThroughSwitch(() => recognizeSwitch(b, stop));
     if (asSwitch) {
       out.push(...asSwitch);
       return out;
@@ -8467,7 +8735,9 @@ function structureRanked(
   // A TWO-LEVEL EXIT (`TwoLevelExit`) adds its flag: cleared ahead of the loop, so every entry
   // starts it clear, and read once after it, where the code from `exit` up to the second target
   // runs only if the loop left by its own exit. The second target and what follows render after
-  // that `if`, once, for both ways out.
+  // that `if`, once, for both ways out. An OUTWARD one is read at once, `if (f != 0) break;`, which
+  // leaves the enclosing loop ahead of all the code between the two loops; in a case body that
+  // `break;` leaves the switch, and the switch hands the flag on (`handedThroughSwitch`).
   //
   // Where the region holding the loop ends before the second target (`stop` among the skipped
   // code) and that target is the merge of the switch arm the loop sits in, a `break;` after the
@@ -8484,6 +8754,26 @@ function structureRanked(
   // (`if (q) goto Z; … to: …; Z:`) are not refused: they render inside the `if` and again after it,
   // each copy ending in a jump.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
+    // an outward exit is handed out to the loop this one sits in, which must be the enclosing loop
+    // that took it (`handed`); in a case body opened in it, through that one switch
+    // (`handedThroughSwitch`), never through a switch in a switch. Only the switch-in-switch test
+    // decides anything; the rest is DEFENSIVE: AN OUTWARD EXIT TAKES BOTH LOOPS OR NEITHER settles
+    // `enclosing` and `handed` before emission, and every switch arm's frame is pushed inside
+    // `withSwitchFlags`, so its `flags` is never null.
+    const enclosing = fl.twoLevel?.outward === true ? loopCtx : null;
+    const through = switchFrames.filter((f) => f.loop === enclosing);
+    if (
+      fl.twoLevel?.outward === true &&
+      (enclosing === null ||
+        foreverLoops.get(enclosing.header)?.handed?.has(fl.header) !== true ||
+        through.length > 1 ||
+        through.some((f) => f.flags === null))
+    ) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a two-level exit out of the loop at block #${fn.blocks.indexOf(fl.header)} ` +
+          `leaves the enclosing loop from where a \`break\` cannot reach its exit`,
+      );
+    }
     dwActive.add(fl.header);
     const frame = {
       header: fl.header,
@@ -8493,6 +8783,7 @@ function structureRanked(
       breaks: fl.breaks,
       breakArms: fl.breakArms,
       ...(fl.twoLevel !== undefined ? { twoLevel: fl.twoLevel } : {}),
+      ...(enclosing !== null ? { enclosing } : {}),
     };
     const body = withLoop(frame, () => structureBlock(fl.header, fl.header));
     dwActive.delete(fl.header);
@@ -8514,6 +8805,16 @@ function structureRanked(
     if (second === undefined) {
       return [loop, ...after(() => structureRegion(exit, stop))];
     }
+    if (second.outward === true) {
+      const flag = twoLevelFlag(fl.header);
+      through[0]?.flags!.add(flag);
+      return [
+        { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
+        loop,
+        breakOnFlag(flag, through.length > 0),
+        ...after(() => structureRegion(exit, stop)),
+      ];
+    }
     const skipped = twoLevelSkip(exit, second.to);
     const skipsRegionEnd = skipped !== null && stop !== null && skipped.has(stop);
     const breakReachesTarget = switchBreaks(second.to);
@@ -8532,11 +8833,7 @@ function structureRanked(
       return [
         { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
         loop,
-        mkIf(
-          { k: 'bin', op: '!=', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
-          [{ k: 'break', ofSwitch: true }],
-          [],
-        ),
+        breakOnFlag(flag, true),
         ...after(() => structureRegion(exit, stop)),
       ];
     }

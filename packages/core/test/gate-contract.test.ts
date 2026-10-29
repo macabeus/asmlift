@@ -67,6 +67,7 @@ import {
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
   FRESH_MERGE_GATES,
+  OUTWARD_EXIT_GATES,
   TWO_LEVEL_BREAK_GATES,
   TWO_LEVEL_EXIT_GATES,
   TWO_LEVEL_REGION_GATES,
@@ -157,6 +158,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],
   TWO_LEVEL_REGION_GATES: TWO_LEVEL_REGION_GATES as readonly Gate<never>[],
   TWO_LEVEL_BREAK_GATES: TWO_LEVEL_BREAK_GATES as readonly Gate<never>[],
+  // ... and when an edge out of an inner loop's body is that loop's outward exit, handed out
+  OUTWARD_EXIT_GATES: OUTWARD_EXIT_GATES as readonly Gate<never>[],
   BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
