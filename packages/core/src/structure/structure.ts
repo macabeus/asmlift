@@ -4076,8 +4076,8 @@ function structureRanked(
   // BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no reading fits and no ret copy
   // waits, every `while (1)` reading above runs again, in the same order, with an arm writing its own
   // copy of a loop in a tail it shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at
-  // `earlyReturnArm`): two copies of a loop the asm holds once. `cycles` is an axis over the rungs
-  // (`rungs`), not a rung of its own, so a rung added to `rungs` is asked with it too.
+  // `earlyReturnArm`): two copies of a loop the asm holds once. `rungs` asks every reading with or
+  // without `cycles`, so a reading added to `rungs` is asked again with it at the last rung.
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
