@@ -137,14 +137,12 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
   // `addressRangeOf`: where `literalAddrOf` names one address, this names every value a word may
   // hold (ir/bits.ts `stridedRange`), an address or not, a placed name being the one leaf only this
   // module reads.
-  // A block param is read through what each in-edge's branch proves (`edges`): a loop counter's
-  // latch test bounds the counter its back edge passes.
-  const edges = incomingEdges(irBlocks);
+  // A block param is read through what each in-edge's branch proves: a loop counter's latch test
+  // bounds the counter its back edge passes.
   const rangeCtx: RangeCtx = {
     defs: defOf,
     constOf,
-    incoming: new Map([...edges].map(([p, es]) => [p, es.map((e) => e.arg)])),
-    edges,
+    incoming: incomingEdges(irBlocks),
     entry: new Set(irBlocks[0]?.params ?? []),
     pointOf: (v) => (defOf.get(v)?.opcode === 'gaddr' ? literalAddrOf(v) : undefined),
   };
