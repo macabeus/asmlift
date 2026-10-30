@@ -421,7 +421,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // arm at 54, and as the `for` at 27; two nested-loop probes go 81 → 68 and 55 → 44.
   //
   // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): only a `while (1)` loop that passes
-  // `forPlanAt`'s shape checks can change, and the OFF sibling reports meeting one
+  // every one of `forPlanAt`'s checks can change, and the OFF sibling reports meeting one
   // (`onForOffered`). In the strip closure, and reset by `assertDefaultAccepts`: a first run that
   // spells every such loop `for` can structure a function the default (with its own reruns) refuses.
   {

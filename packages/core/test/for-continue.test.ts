@@ -320,3 +320,16 @@ test('/for-continue leaves a latch with an effect as `while (1)`, and offers not
   expect(off.offered).toBe(0);
   expect(structured(ir, true).src).toBe(off.src);
 });
+
+test('/for-continue is not offered where a later check of the `for` refuses it', () => {
+  // the loop passes the shape checks, but `lo >= hi` is not its test read on the entry values, so the
+  // `for` is refused under the option too: offering it would only structure the same tree again
+  const ir = forJt({
+    guard: '%4: u32 = icmp_sge %0, %1\n  cond_br %4, ^bb12(), ^bb1(%0)',
+    exitTail: '%70: s32 = const {value=99}\n  %69: s32 = call %70 {target="k"}\n  ret',
+  }).replace(/\^bb13\(%71[\s\S]*$/, '}');
+  const off = structured(ir, false);
+  expect(off.src).toContain('while (1)');
+  expect(off.offered).toBe(0);
+  expect(structured(ir, true).src).toBe(off.src);
+});
