@@ -2231,7 +2231,7 @@ export interface StructureHooks {
   /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes every check of
    *  `forPlanAt` — a single pure latch, a guard or plain entry, a test and update read only from the
    *  latch, the header's params and values from outside the loop, one update copy, and the guard
-   *  read on the entry values — the one place `spellCountedLoopsFor` changes what the structurer
+   *  (or the folded first test) read on the entry values — the one place `spellCountedLoopsFor` changes what the structurer
    *  reads. A structuring with that option off that never fires it builds the same tree as the same
    *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
    *  `assertDefaultAccepts`' structuring. */
@@ -3117,8 +3117,8 @@ interface ForRanking {
  *  holds the update and the test as `if (!c) break; i++;` at the foot of the body, which has no
  *  `continue` into it: a jump table arm that reaches both the latch and the loop's exit is then a
  *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Where every run above declines, they
- *  are made again with each `while (1)` loop spelled `for` where the guard ahead of it is its own
- *  test (`ForRanking`), once more for each loop that run adds. The loops asked are the ones where
+ *  are made again with each `while (1)` loop spelled `for` where `forPlanAt` reads one
+ *  (`ForRanking`), once more for each loop that run adds. The loops asked are the ones where
  *  ANY of those runs — the ret-copy, past-exit and outward reruns as well as the first — met one of
  *  three jump-table refusals (`wantFor`), so the published refusal, which is the first run's, need
  *  not be one of them: a function that declines on "unrecovered back-edge" can lift here because a
@@ -7280,7 +7280,7 @@ function structureRanked(
     }
     if (term.opcode === 'br') {
       const target = term.successors[0].block;
-      // a `while (1)` the rerun spells `for` whose first test the compiler folded away (`forPlanAt`)
+      // a `while (1)` spelled `for` (`forPlanAt`) whose first test the compiler folded away
       const fl = foreverLoops.get(target);
       const plan = fl !== undefined && !onStack.has(target) ? forPlanAt(b, fl) : null;
       if (plan !== null) {
@@ -7788,8 +7788,8 @@ function structureRanked(
       return out;
     }
 
-    // The guard of a `while (1)` the rerun spells `for` (THE LOOP AS A `for`, at `forPlanAt`): the
-    // `for`'s own first test, so it is dropped rather than kept as an `if`.
+    // The guard of a `while (1)` spelled `for` (THE LOOP AS A `for`, at `forPlanAt`): the `for`'s
+    // own first test, so it is dropped rather than kept as an `if`.
     for (const h of [takenB, fallB]) {
       const fl = foreverLoops.get(h);
       const plan = fl !== undefined && !onStack.has(h) ? forPlanAt(b, fl) : null;
@@ -8902,9 +8902,8 @@ function structureRanked(
   // entry is the `for`'s too where the test, read on the entry values, provably stays in.
   //
   // Taken only for a loop the rerun asks (`ForRanking`), or for every loop under `/for-continue`
-  // (`spellCountedLoopsFor`), from the block `g` that enters it — a guard
-  // or a plain `br` — and refused (null) unless every part of the `for` is the asm's, read where the
-  // `for` reads it:
+  // (`spellCountedLoopsFor`), from the block `g` that enters it — a guard or a plain `br` — and
+  // refused (null) unless every part of the `for` is the asm's, read where the `for` reads it:
   //   • `g` branches only to the header and the exit, or only to the header, and is the header's one
   //     way in beside the one latch, which branches only to the header and the exit. `g`'s way to
   //     the exit may pass a RELAY, a block whose one op jumps there and that nothing else reaches:
@@ -8994,8 +8993,8 @@ function structureRanked(
       return null;
     }
     // A loop no run asked for is spelled `for` only under `/for-continue`, and a structuring without it
-    // reports that it met one — only once every check below has passed, just ahead of the copies it
-    // would emit, so the report is exact: a loop the `for` refuses anyway is never offered. Those
+    // reports that it met one — only once every check has passed, just ahead of the copies it would
+    // emit, so the report is exact: a loop the `for` refuses anyway is never offered. Those
     // checks read the update's and the init's copies, whose spelling can push a gap or refuse; read
     // for a loop that is only being offered, that is undone, so the structuring that reports it keeps
     // exactly the outcome it had before it asked.

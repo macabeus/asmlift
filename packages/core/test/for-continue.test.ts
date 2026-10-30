@@ -6,10 +6,12 @@
 // continue; } break; }`, agbcc's layout of which `while (1)` cannot spell (a loop `break` inside a
 // case body binds to the switch). Every fixture is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The
-// `for` takes a guard that is its test, no guard where its first test folds to true, and an update
-// the header computes. It refuses a guard that is not the loop's test, a constant first test that
-// leaves, two updates, a latch with an effect, an exit that takes a value and an update from a call,
-// and those fixtures lift through the rerun's `while (1)` instead, judged the same way.
+// `for` takes a guard that is its test, a guard whose exit edge passes a relay block, no guard where
+// its first test folds to true, and an update the header computes. It refuses a guard that is not
+// the loop's test, a constant first test that leaves, two updates, a latch with an effect, an exit
+// that takes a value and an update from a call, and those fixtures lift through the rerun's
+// `while (1)` instead, judged the same way; a relay something else enters refuses it too, and that
+// fixture declines.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -164,7 +166,7 @@ test('a guard that reaches the exit through a relay block lifts as the `for`', (
 });
 
 test('a relay block an arm enters too refuses the `for`', () => {
-  // the relay is the exit's only way in from case 1, so it is no longer the guard's own edge
+  // case 1 reaches the exit through the relay too, so the relay is not the guard's own edge
   const ir = forJt({
     guard: '%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb15(), ^bb1(%0)\n^bb15():\n  br ^bb12()',
   }).replace('%24: s32 = call %23 {target="k"}\n  br ^bb12()', '%24: s32 = call %23 {target="k"}\n  br ^bb15()');
