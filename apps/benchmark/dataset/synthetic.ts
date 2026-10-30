@@ -15759,6 +15759,56 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidxx_ind(void);',
     proto: { bidxx_ind: { returnsVoid: true } },
   },
+  // `bidx_ind` with an s32 counter: agbcc's latch is the SIGNED `k + 1 <= 7`, which bounds the
+  // counter on one side only (every negative k passes it), so the range needs the counter's start
+  // as well, an induction over the loop (ir/bits.ts `integerRange`). The real sub_0804D0B0 loop
+  // is this shape: from 13 while `k + 1 < gUnk_03005428`, a u8, so k stays in [13, 254].
+  // `bidxx_sind` starts the counter at an s32 global, so (u8)k may be anything: it must stay one
+  // object.
+  {
+    sym: 'bidx_sind',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidx_sind(void)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    s32 k;\n' +
+      '    for (k = 0; k < 8; k++) {\n' +
+      '        u8 m = k;\n' +
+      '        gO[m].x = a[m * 2 + 1];\n' +
+      '        gO[m].y = b[m * 2];\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow', 'signed'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidx_sind(void);',
+    proto: { bidx_sind: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_sind',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern s32 gS;\n' +
+      'void bidxx_sind(void)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    s32 k;\n' +
+      '    for (k = gS; k < 8; k++) {\n' +
+      '        u8 m = k;\n' +
+      '        gO[m].x = a[m * 2 + 1];\n' +
+      '        gO[m].y = b[m * 2];\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow', 'signed'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'extern s32 gS;\n' + 'void bidxx_sind(void);',
+    proto: { bidxx_sind: { returnsVoid: true } },
+  },
   {
     sym: 'bidx_rem',
     src:
