@@ -2666,7 +2666,8 @@ function keepAsOneObject({
  *  folded into its own local (l3/constinit.ts).
  *
  *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
- *  (it names no byte, so it may reach every one), an escape nothing bounds (a callee or a holder
+ *  nothing bounds (it names no byte, so it may reach every one) or one whose reach (`indexReaches`,
+ *  the range ir/bits.ts proves of the index: `a[(i & 7) * 2]`) crosses a part, an escape nothing bounds (a callee or a holder
  *  that may reach any byte from the address it was given), a byte no use names (nothing says
  *  which side it belongs to), or a use through a member that lands outside the part its own
  *  address lies in (`&a[16]` read at [-1]: one pointer walking two parts is one object). The
@@ -2679,13 +2680,25 @@ function provenParts(
   alignment: number,
 ): FrameRange[] {
   const whole = [{ from, to }];
-  if (uses.indexed.size > 0) {
-    return whole;
-  }
   const touched: { owner: number; lo: number; hi: number }[] = [];
-  for (const [op, { off }] of uses.accessOps) {
+  for (const [op, { off, through }] of uses.accessOps) {
+    // …an access through a runtime index is not at its own displacement: it is its reach (below)
+    if (op.operands[0] !== through) {
+      continue;
+    }
     const at = off + (op.attrs.off as number);
     touched.push({ owner: off, lo: at, hi: at + (op.attrs.width as number) });
+  }
+  // A runtime index touches every byte it may reach (`indexReaches`), so it chains the runs it
+  // spans as one access as wide would — a reach across a copy's start makes the two copies one
+  // part — and a reach that starts in a part other than its object's fails the owner test below
+  for (const [off, reaches] of uses.indexReaches) {
+    for (const r of reaches) {
+      if (r === null) {
+        return whole;
+      }
+      touched.push({ owner: off, ...r });
+    }
   }
   for (const [off, reads] of uses.byValueReads) {
     reads.forEach(({ type }) =>

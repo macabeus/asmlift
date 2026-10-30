@@ -670,6 +670,39 @@ describe('keepAsOneObject', () => {
     expect(calls.map((op) => op.operands[0])).toEqual([a.results[0], b.results[0]]);
   });
 
+  // `x[(i & mask) + by]` read through the lower (`a`) or the upper (`b`) copy's address, with the
+  // other copy read at a fixed offset
+  const masked =
+    (into: 'a' | 'b', mask: number, by: number) =>
+    (a: Value, b: Value, i: Value): Op[] => {
+      const [m, k] = [konst(mask), konst(by)];
+      const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+      const plus = mkOp('add', { operands: [and.results[0], k.results[0]], results: [value()] });
+      const at = mkOp('add', { operands: [into === 'a' ? a : b, plus.results[0]], results: [value()] });
+      const other = into === 'a' ? load(b, 1, 1) : load(a, 3, 1);
+      return [m, k, and, plus, at, load(at.results[0], 0, 1), other];
+    };
+
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[i & 3] + b[1];` — the index holds
+  // 0..3 (ir/bits.ts `stridedRange`), so it reaches the lower copy's bytes and no other
+  test('splits the one object where a runtime index provably stays inside one copy', () => {
+    const lower = copies([4, 4], masked('a', 3, 0));
+    expect(kept(lower)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(objectsOf(lower)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    const [a] = lower.ops;
+    const indexed = lower.ops.find((op) => op.opcode === 'add' && op.operands.includes(a.results[0]))!;
+    expect(lower.ops.find((op) => op.opcode === 'load' && op.operands[0] === indexed.results[0])).toBeDefined();
+    // …and based at the upper copy, `b[(i & 1) + 2]` reaches [6, 8)
+    const upper = copies([4, 4], masked('b', 1, 2));
+    expect(objectsOf(withKept(upper))).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+  });
+
   test('keeps one object where a use proves no boundary between two addresses', () => {
     // a copy over both parts, then a read through the second address
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
@@ -683,6 +716,10 @@ describe('keepAsOneObject', () => {
       return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
     });
     expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // …and so may a masked index whose range crosses into it: `a[(i & 3) + 2]` reaches [2, 6),
+    // and `a[i & 7]` [0, 8)
+    expect(objectsOf(withKept(copies([4, 4], masked('a', 3, 2))))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(copies([4, 4], masked('a', 7, 0))))).toEqual([[0, 8]]);
     // …and based in the middle of it
     const midIndexed = copies([4, 4], (a, b, i) => {
       const mid = laddr(2);
