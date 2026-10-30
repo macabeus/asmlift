@@ -986,6 +986,42 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: STRUCTURE,
     seeAlso: ['unmerge', 'shared-tail'],
   },
+  'for-continue': {
+    title: 'Counted loop spelled as a `for`',
+    summary: 'a `while (1)` whose last block steps and tests a counter is written `for (init; test; step)`',
+    detail:
+      'A loop whose last block adds to a counter and tests it is written by default as `while (1)` with ' +
+      '`i++; if (!(test)) break;` at the foot of its body, and a jump-table arm inside it that leaves the ' +
+      'loop copies the code after the loop and returns. This writes it as `for (i = init; test; i++)` instead, ' +
+      'so an arm that reaches the step is `continue;`, an arm that leaves the loop ends the switch, and a ' +
+      '`break;` after the switch leaves the loop. Only a loop whose entry test is the same test (or folds to ' +
+      'true) and whose last block does nothing but step one counter and test it is written this way.',
+    compilerBehavior:
+      'agbcc and gcc 2.7.2 lay a `for` out as a guard, the body and a latch that steps and tests, which is ' +
+      'also how they lay out the `while (1)` spelling of the same loop. Which one the source wrote decides ' +
+      'how the arms that leave the loop are laid out, and that is not in the assembly before it is compiled.',
+    offeredWhen: {
+      when: 'Structuring this lift without it met a `while (1)` loop whose last block steps one counter and tests it.',
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit:
+        'struct E { s32 x; u8 id; u8 u; }; extern struct E gE[]; void k(s32);\n' +
+        'void example(s32 lo, s32 hi) { s32 i; @ k(99); }',
+      before:
+        'if (lo <= hi) { i = lo; while (1) { switch (gE[i].id) { case 1: if (gE[i].u != 1) { k(4); k(99); return; } break; ' +
+        'case 2: if (gE[i].x <= 20) { k(5); k(99); return; } break; case 3: if (gE[i].x >= 0) { k(6); k(99); return; } break; ' +
+        'case 4: if (gE[i].x > 2) { k(7); k(99); return; } break; } i++; if (i > hi) break; } }',
+      after:
+        'for (i = lo; i <= hi; i++) { switch (gE[i].id) { case 1: if (gE[i].u == 1) continue; k(4); break; ' +
+        'case 2: if (gE[i].x > 20) continue; k(5); break; case 3: if (gE[i].x < 0) continue; k(6); break; ' +
+        'case 4: if (gE[i].x <= 2) continue; k(7); break; default: continue; } break; }',
+      note: 'every arm either goes round the loop or calls `k` and leaves it',
+    },
+    implementedIn: STRUCTURE,
+    seeAlso: ['tail-copies'],
+  },
 
   // ── respell ─────────────────────────────────────────────────────────────────────────────────
   unmerge: {

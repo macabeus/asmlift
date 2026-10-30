@@ -79,12 +79,13 @@ export interface StructureVariation {
     | 'freshMerge'
     | 'copyDefPos'
     | 'siteSense'
-    | 'tailCopies';
+    | 'tailCopies'
+    | 'forContinue';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
-  offWitness?: 'onTailFallerKept';
+  offWitness?: 'onTailFallerKept' | 'onForOffered';
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -407,6 +408,27 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     name: 'tail-copies',
     options: (on) => ({ copyEveryTailEntrant: on }),
     offWitness: 'onTailFallerKept',
+    strip: true,
+  },
+  // `/for-continue` — A COUNTED LOOP AS `for` WHERE THE DEFAULT LIFTS IT AS `while (1)` (structure.ts
+  // `spellCountedLoopsFor`, `forPlanAt`). A loop whose latch steps one counter and tests it, entered
+  // through the same test, is one asm under both spellings, and the `for` is the one a jump-table arm
+  // inside it can `continue` and leave by `break;` after the switch. structure() reaches that `for`
+  // on its own only where every `while (1)` structuring declined (`ForRanking`); here it is ranked
+  // where the default lifts. Measured on agbcc, objdump instruction lines off the target, both lifts
+  // 0/20000 against the source in a host differential: a `for` whose five jump-table arms each
+  // `continue` or call and leave lifts as `while (1)` with the code after the loop copied into every
+  // arm at 54, and as the `for` at 27; two nested-loop probes go 81 → 68 and 55 → 44.
+  //
+  // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): only a `while (1)` loop that passes
+  // `forPlanAt`'s shape checks can change, and the OFF sibling reports meeting one
+  // (`onForOffered`). In the strip closure, and reset by `assertDefaultAccepts`: a first run that
+  // spells every such loop `for` can structure a function the default (with its own reruns) refuses.
+  {
+    flag: 'forContinue',
+    name: 'for-continue',
+    options: (on) => ({ spellCountedLoopsFor: on }),
+    offWitness: 'onForOffered',
     strip: true,
   },
 ];
