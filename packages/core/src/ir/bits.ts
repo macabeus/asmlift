@@ -581,42 +581,82 @@ export interface EdgeTest {
   readonly rhs: Value;
 }
 
-/** One in-edge of a block param: the value it passes, and what its branch proves on the way. */
+/** One in-edge of a block param: the value it passes, and what the branches on the way prove. */
 export interface InEdge {
   readonly arg: Value | undefined;
-  readonly holds?: EdgeTest;
+  readonly holds?: readonly EdgeTest[];
 }
 
-/** Block param -> its in-edges, each with the comparison its branch proves: a `cond_br` on an
- *  `icmp_*` proves the compare on its first successor and the negation (`NEGATED_ICMP`) on its
- *  second. An edge out of a `cond_br` whose two successors are one block proves nothing — the same
- *  edge is taken either way — and nor does any other branch. */
+/** An edge: its branch `op` in block `from`, to successor `si`. */
+interface EdgeOut {
+  readonly from: Block;
+  readonly op: Op;
+  readonly si: number;
+}
+
+/** The most compares one edge carries, the nearest first; an older one is dropped. */
+const EDGE_TESTS = 8;
+
+/** Block param -> its in-edges, each with the comparisons that hold whenever it is taken. A
+ *  `cond_br` on an `icmp_*` proves the compare on its first successor and the negation
+ *  (`NEGATED_ICMP`) on its second; an edge out of a `cond_br` whose two successors are one block
+ *  proves nothing — the same edge is taken either way — and nor does any other branch. What an
+ *  edge proves also holds on every edge out of a block that edge is the only way into, and so on
+ *  down such a chain: agbcc's far latch `bhi .LCB; b .Lhead @long jump` tests in one block and
+ *  jumps back from the next. The chain reads no block twice, and a compare's operands are values,
+ *  so the one each edge reads is the instance its test read. */
 export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
   const defs = new Map<Value, Op>();
+  /** a block -> the one edge into it, or null where there are more, or the caller enters it */
+  const only = new Map<Block, EdgeOut | null>();
+  if (blocks[0] !== undefined) {
+    only.set(blocks[0], null);
+  }
   for (const b of blocks) {
     for (const op of b.ops) {
       op.results.forEach((r) => defs.set(r, op));
+      op.successors.forEach((s, si) => only.set(s.block, only.has(s.block) ? null : { from: b, op, si }));
     }
   }
+  const tested = (op: Op, si: number): EdgeTest | undefined => {
+    const c = op.opcode === 'cond_br' ? defs.get(op.operands[0]) : undefined;
+    return c !== undefined &&
+      c.operands.length === 2 &&
+      NEGATED_ICMP[c.opcode] !== undefined &&
+      op.successors.length === 2 &&
+      op.successors[0].block !== op.successors[1].block
+      ? { opcode: si === 0 ? c.opcode : NEGATED_ICMP[c.opcode], lhs: c.operands[0], rhs: c.operands[1] }
+      : undefined;
+  };
+  const holdsOn = (from: Block, op: Op, si: number): EdgeTest[] => {
+    const out: EdgeTest[] = [];
+    const seen = new Set<Block>();
+    for (
+      let e: EdgeOut | null = { from, op, si };
+      e !== null && out.length < EDGE_TESTS && !seen.has(e.from);
+      e = only.get(e.from) ?? null
+    ) {
+      const t = tested(e.op, e.si);
+      if (t !== undefined) {
+        out.push(t);
+      }
+      seen.add(e.from);
+    }
+    return out;
+  };
   const out = new Map<Value, InEdge[]>();
   for (const b of blocks) {
     for (const op of b.ops) {
-      const c = op.opcode === 'cond_br' ? defs.get(op.operands[0]) : undefined;
-      const tested =
-        c !== undefined &&
-        c.operands.length === 2 &&
-        NEGATED_ICMP[c.opcode] !== undefined &&
-        op.successors.length === 2 &&
-        op.successors[0].block !== op.successors[1].block;
       op.successors.forEach((s, si) => {
-        const holds: EdgeTest | undefined = tested
-          ? { opcode: si === 0 ? c.opcode : NEGATED_ICMP[c.opcode], lhs: c.operands[0], rhs: c.operands[1] }
-          : undefined;
+        if (s.block.params.length === 0) {
+          return;
+        }
+        const holds = holdsOn(b, op, si);
         s.block.params.forEach((p, i) => {
           if (!out.has(p)) {
             out.set(p, []);
           }
-          out.get(p)!.push(holds === undefined ? { arg: s.args[i] } : { arg: s.args[i], holds });
+          out.get(p)!.push(holds.length === 0 ? { arg: s.args[i] } : { arg: s.args[i], holds });
         });
       });
     }
@@ -996,23 +1036,27 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     const facts = e.holds === undefined ? NO_FACTS : factsOf(e.holds);
     return { range: e.arg === undefined ? undefined : rangeOf(e.arg, facts), facts };
   };
-  /** The bound a compare puts on each side, from the other side's range (read with no facts). */
-  const factsOf = (h: EdgeTest): Facts => {
+  /** The bound each compare puts on each side, from the other side's range (read with no facts);
+   *  of two bounds on one value, each holds, and the narrower is kept. */
+  const factsOf = (hs: readonly EdgeTest[]): Facts => {
     const out = new Map<Value, EdgeBound>();
-    if (h.lhs === h.rhs) {
-      return out;
-    }
-    for (const [x, y, opcode] of [
-      [h.lhs, h.rhs, h.opcode],
-      [h.rhs, h.lhs, SWAPPED_ICMP[h.opcode]],
-    ] as const) {
-      if (opcode === undefined || ctx.constOf(x) !== undefined) {
+    for (const h of hs) {
+      if (h.lhs === h.rhs) {
         continue;
       }
-      const other = rangeOf(y, NO_FACTS);
-      const b = other === undefined ? undefined : testBound(opcode, other);
-      if (b !== undefined) {
-        out.set(x, b);
+      for (const [x, y, opcode] of [
+        [h.lhs, h.rhs, h.opcode],
+        [h.rhs, h.lhs, SWAPPED_ICMP[h.opcode]],
+      ] as const) {
+        if (opcode === undefined || ctx.constOf(x) !== undefined) {
+          continue;
+        }
+        const other = rangeOf(y, NO_FACTS);
+        const b = other === undefined ? undefined : testBound(opcode, other);
+        const had = out.get(x);
+        if (b !== undefined && (had === undefined || b.r.hi - b.r.lo < had.r.hi - had.r.lo)) {
+          out.set(x, b);
+        }
       }
     }
     return out;

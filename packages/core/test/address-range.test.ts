@@ -352,7 +352,8 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     // a test against a value the loop carries unbounded proves nothing of the counter
     const carried = loop(0, (h, next, q) => h.op('icmp_ult', {}, [next, q]));
     expect(rangeIn(carried.blocks, carried.q)).toBeUndefined();
-    // a second back edge, from a block the latch does not guard, passes `q + 1` unbounded
+    // a second back edge, from the block the latch's false edge enters, passes `q + 1` past it:
+    // `next > 7` is all that edge proves, so the counter may be every word
     const entry = block();
     const q = v();
     const head = block([q]);
@@ -362,7 +363,49 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     const next = head.op('add', {}, [q, k(head, 1)]);
     condBr(head, head.op('icmp_ule', {}, [next, k(head, 7)]), [head, [next]], [side, []]);
     condBr(side, side.op('load', { off: 0, width: 1 }, [v()]), [head, [next]], [exit, []]);
-    expect(rangeIn([entry, head, side, exit], q)).toBeUndefined();
+    expect(rangeIn([entry, head, side, exit], q)).toEqual({ lo: 0, hi: 2 ** 32 - 1, stride: 1 });
+  });
+
+  test("agbcc's far latch: the test's edge enters a block that jumps back, and what it proves holds there", () => {
+    // `bhi .LCB; b .Lhead @long jump`: the body is past a short branch's reach
+    const relayed = (into: (relay: Block, head: Block, next: Value) => Block[] = (r, h, n) => (br(r, h, [n]), [])) => {
+      const entry = block();
+      const q = v();
+      const head = block([q]);
+      const relay = block();
+      const exit = block();
+      br(entry, head, [k(entry, 0)]);
+      const next = head.op('add', {}, [q, k(head, 1)]);
+      condBr(head, head.op('icmp_ule', {}, [next, k(head, 7)]), [relay, []], [exit, []]);
+      return { blocks: [entry, head, relay, exit, ...into(relay, head, next)], relay, q };
+    };
+    const far = relayed();
+    expect(rangeIn(far.blocks, far.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // two hops
+    const hops = relayed((relay, head, next) => {
+      const hop = block();
+      br(relay, hop);
+      br(hop, head, [next]);
+      return [hop];
+    });
+    expect(rangeIn(hops.blocks, hops.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // a relay that another edge also enters proves nothing of that edge's way in
+    const other = block();
+    const shared = relayed((relay, head, next) => (br(relay, head, [next]), br(other, relay), [other]));
+    expect(rangeIn(shared.blocks, shared.q)).toBeUndefined();
+  });
+
+  test('a test at the top of the loop bounds what its body passes back', () => {
+    // `for (q = 0; q < 8; q++) body`: head tests q, the body adds one and jumps back
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const body = block();
+    const exit = block();
+    br(entry, head, [k(entry, 0)]);
+    condBr(head, head.op('icmp_ult', {}, [q, k(head, 8)]), [body, []], [exit, []]);
+    br(body, head, [body.op('add', {}, [q, k(body, 1)])]);
+    expect(rangeIn([entry, head, body, exit], q)).toEqual({ lo: 0, hi: 8, stride: 1 });
   });
 
   test('a signed latch bounds one side; the start bounds the other, by induction', () => {
