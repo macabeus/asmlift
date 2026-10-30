@@ -1849,6 +1849,12 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  variation: which arm the source wrote the tail under is not in the asm, and one compiler answers
    *  both ways, so the differ referees it. Inert where no switch has such a sibling. */
   copyEveryTailEntrant?: boolean;
+  /** Spell EVERY `while (1)` loop `forPlanAt` accepts as `for (init; cond; inc)` on the first
+   *  structuring, not only one a declined run asked for (`ForRanking`). rank.ts's `/for-continue`
+   *  variation: a counted loop whose latch holds the update and the test is the same asm as
+   *  `while (1)` with that latch at the foot of the body and as a `for` whose `continue` runs it, so
+   *  the differ referees the two where both lift. Inert where `forPlanAt` refuses every loop. */
+  spellCountedLoopsFor?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A compiler behavior, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
@@ -2222,6 +2228,16 @@ export interface StructureHooks {
    *  cross-jumped block. Not fired by `assertDefaultAccepts`' structuring, which is not the
    *  setting being observed. */
   onTailFallerKept?: () => void;
+  /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes `forPlanAt`'s shape
+   *  checks — a single pure latch, a guard or plain entry, and a test and update read only from the
+   *  latch, the header's params and values from outside the loop — the one place
+   *  `spellCountedLoopsFor` changes what the structurer reads. A structuring with that option off
+   *  that never fires it builds the same tree as the same options with it on, so rank.ts skips
+   *  `/for-continue` on its sibling. It can fire where the `for` is still refused by the checks
+   *  after those (the update's copy, the guard read on the entry values): that costs one structuring
+   *  of a tree the dedup discards, never a candidate. Not fired by `assertDefaultAccepts`'
+   *  structuring. */
+  onForOffered?: () => void;
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -2258,6 +2274,7 @@ function assertDefaultAccepts(
     anchorLoopEntryConsts: false,
     followEarlyReturns: false,
     copyEveryTailEntrant: false,
+    spellCountedLoopsFor: false,
   };
   if (memo === undefined) {
     structure(fn, reset, hooks);
@@ -3101,9 +3118,15 @@ interface ForRanking {
  *  A `for` WHOSE `continue` RUNS THE UPDATE, LAST. `while (1)` spells a counted loop whose latch
  *  holds the update and the test as `if (!c) break; i++;` at the foot of the body, which has no
  *  `continue` into it: a jump table arm that reaches both the latch and the loop's exit is then a
- *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Only where every run above declines,
- *  and inside a `while (1)` loop, are they made again with each such loop spelled `for` where the
- *  guard ahead of it is its own test (`ForRanking`), once more for each loop that run adds.
+ *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Where every run above declines, they
+ *  are made again with each `while (1)` loop spelled `for` where the guard ahead of it is its own
+ *  test (`ForRanking`), once more for each loop that run adds. The loops asked are the ones where
+ *  ANY of those runs — the ret-copy, past-exit and outward reruns as well as the first — met one of
+ *  three jump-table refusals (`wantFor`), so the published refusal, which is the first run's, need
+ *  not be one of them: a function that declines on "unrecovered back-edge" can lift here because a
+ *  later rung reached the jump table. Any structure decline in a function with a `while (1)` loop
+ *  holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
+ *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  The first run's refusal stands if every rerun declines too. Each run's observation hooks are held
  *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
@@ -3136,6 +3159,7 @@ export function structure(
           onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
           onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+          onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
         },
         memo,
         retCopy,
@@ -3206,6 +3230,7 @@ function structureRanked(
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     copyEveryTailEntrant = false,
+    spellCountedLoopsFor = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
     switchArmsFollowLayout = false,
@@ -3335,11 +3360,12 @@ function structureRanked(
     homeEscapingExtensions ||
     anchorConstCopies ||
     followEarlyReturns ||
-    copyEveryTailEntrant
+    copyEveryTailEntrant ||
+    spellCountedLoopsFor
   ) {
-    // The observation hook is this setting's, not the default's: dropped for that run, which also
+    // The observation hooks are this setting's, not the default's: dropped for that run, which also
     // leaves it answerable from `memo`.
-    assertDefaultAccepts(fn, opts, { ...hooks, onTailFallerKept: undefined }, memo);
+    assertDefaultAccepts(fn, opts, { ...hooks, onTailFallerKept: undefined, onForOffered: undefined }, memo);
   }
   const defs = defOpMap(fn);
   // The word evaluator's view of `fn`, built at the first `neg_s` (no other rule asks it).
@@ -8877,7 +8903,8 @@ function structureRanked(
   // i < 40; i++)` enters its body at once, from a block `g` that ends in a `br` to the header. That
   // entry is the `for`'s too where the test, read on the entry values, provably stays in.
   //
-  // Taken only for a loop the rerun asks (`ForRanking`), from the block `g` that enters it — a guard
+  // Taken only for a loop the rerun asks (`ForRanking`), or for every loop under `/for-continue`
+  // (`spellCountedLoopsFor`), from the block `g` that enters it — a guard
   // or a plain `br` — and refused (null) unless every part of the `for` is the asm's, read where the
   // `for` reads it:
   //   • `g` branches only to the header and the exit, or only to the header, and is the header's one
@@ -8911,7 +8938,6 @@ function structureRanked(
       t.successors.some((sc) => sc.block === exit);
     const guarded = gterm.opcode === 'cond_br';
     if (
-      !forRank.asked.has(h) ||
       exit === null ||
       latch === undefined ||
       latch === h ||
@@ -8948,6 +8974,12 @@ function structureRanked(
     const initEdge = successorTo(g, h)!;
     const cond = lterm!.operands[0];
     if (!closed(cond) || !back.args.every((a) => closed(a))) {
+      return null;
+    }
+    // a loop no run asked for is spelled `for` only under `/for-continue`, and a structuring without it
+    // reports that it met one; nothing above this line writes any state
+    if (!spellCountedLoopsFor && !forRank.asked.has(h)) {
+      hooks.onForOffered?.();
       return null;
     }
     const auditMark = droppedUndefCopies.length;

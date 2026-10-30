@@ -262,3 +262,61 @@ test('a case arm that continues a `while (1)` and falls into the next case lifts
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
 });
+
+// `/for-continue` (rank.ts, `spellCountedLoopsFor`): where the default LIFTS, the `for` is a ranked
+// alternative rather than a rerun. With the code after the loop a call and a `return`, every arm
+// that leaves the loop copies it, so `while (1)` lifts and no rerun ever asks the loop; the option
+// asks it on the first run, and the OFF structuring reports that it met a loop it could ask.
+const tailRet = forJt({
+  exitTail: '%70: s32 = const {value=99}\n  %69: s32 = call %70 {target="k"}\n  ret',
+}).replace(/\^bb13\(%71[\s\S]*$/, '}');
+
+const structured = (ir: string, spellCountedLoopsFor: boolean) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  let offered = 0;
+  const sfn = structure(fn, { spellCountedLoopsFor }, { onForOffered: () => offered++ });
+  return {
+    src: cBackend.emit(sfn),
+    offered,
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+test('/for-continue spells a counted loop the default lifts as `while (1)` as its `for`', () => {
+  const off = structured(tailRet, false);
+  expect(off.src).toContain('while (1)');
+  expect(off.src).not.toContain('for (');
+  expect(off.offered).toBeGreaterThan(0);
+  const on = structured(tailRet, true);
+  expect(on.src).toContain('for (v0 = a0; a1 >= v0; v0 = v0 + 1) {');
+  expect(on.src).not.toContain('while (1)');
+  expect(on.offered).toBe(0);
+  for (const r of [off, on]) {
+    expect(r.agreement.disagree).toBe(0);
+    expect(r.shipped.disagree).toBe(0);
+    expect(r.agreement.judged).toBe(SEEDS.length);
+  }
+});
+
+test('/for-continue is not offered where no `while (1)` loop has a counted latch', () => {
+  // the `while (1)` here has no latch that steps and tests a counter, so the option builds the same tree
+  const off = structured(foreverJt, false);
+  expect(off.offered).toBe(0);
+  expect(structured(foreverJt, true).src).toBe(off.src);
+});
+
+test('/for-continue leaves a latch with an effect as `while (1)`, and offers nothing', () => {
+  const latch =
+    '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %52: s32 = call %36 {target="tick"}\n' +
+    '  %37: u32 = icmp_slt %1, %36\n  cond_br %37, ^bb12(), ^bb1(%36)';
+  const ir = forJt({
+    latch,
+    exitTail: '%70: s32 = const {value=99}\n  %69: s32 = call %70 {target="k"}\n  ret',
+  }).replace(/\^bb13\(%71[\s\S]*$/, '}');
+  const off = structured(ir, false);
+  expect(off.offered).toBe(0);
+  expect(structured(ir, true).src).toBe(off.src);
+});
