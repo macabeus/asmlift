@@ -44,6 +44,16 @@ describe('provableBits — what the instruction itself proves', () => {
     expect(provableBits(ctx(defs), def(defs, 'shr_u', { imm: 27 }, [v()]))).toBe(5);
   });
 
+  test('a zero-fill shift right of a bounded operand leaves n fewer of ITS bits, never below 0', () => {
+    const defs = new Map<Value, Op>();
+    const byte = def(defs, 'load', { width: 1, off: 0, signed: false }, [v()]);
+    expect(provableBits(ctx(defs), def(defs, 'shr_u', { imm: 4 }, [byte]))).toBe(4);
+    expect(provableBits(ctx(defs), def(defs, 'shr_u', { imm: 9 }, [byte]))).toBe(0);
+    // a SIGNED byte carries all 32 bits, so the shift leaves 32 - n as of a word
+    const sbyte = def(defs, 'load', { width: 1, off: 0, signed: true }, [v()]);
+    expect(provableBits(ctx(defs), def(defs, 'shr_u', { imm: 4 }, [sbyte]))).toBe(28);
+  });
+
   test('an ARITHMETIC shift right proves nothing — it fills from the sign bit', () => {
     const defs = new Map<Value, Op>();
     expect(provableBits(ctx(defs), def(defs, 'shr_s', { imm: 27 }, [v()]))).toBe(32);

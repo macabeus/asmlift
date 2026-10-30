@@ -4400,6 +4400,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         const across = decompile('f', masked(31), ARMV4T_AGBCC, { prototypes }).source;
         expect(across).toContain('u8 sp0[36];');
         expect(across).toContain('((s32 *)sp0)[8] = a1;');
+        // …and so does a byte shifted down: `s[16 + (*p >> 4)]` reads [16, 32), `s[16 + (*p >> 3)]`
+        // [16, 48)
+        const shifted = (by: number) =>
+          reached.replace('\tadd\tr4, r4, #0x10\n', `\tldrb\tr4, [r4]\n\tlsr\tr4, r4, #${by}\n\tadd\tr4, r4, #0x10\n`);
+        const narrow = decompile('f', shifted(4), ARMV4T_AGBCC, { prototypes }).source;
+        expect(narrow).toContain('u8 sp0[32];');
+        expect(narrow).not.toContain('= a1;');
+        const wide = decompile('f', shifted(3), ARMV4T_AGBCC, { prototypes }).source;
+        expect(wide).toContain('u8 sp0[36];');
+        expect(wide).toContain('((s32 *)sp0)[8] = a1;');
       });
       test('an array a callee nothing bounds is handed keeps the one object', () => {
         const handed = copies('\tadd\tr0, r4, #0\n\tbl\tfill\n');
