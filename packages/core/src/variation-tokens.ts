@@ -359,9 +359,11 @@ interface NamedCandidate {
  *
  *  Throws on any candidate whose name `variationsDefect` refuses — an unregistered variation, a
  *  first variation that is not a signedness, parts out of kind order. The bench tallies every fan
- *  it ranks, every candidate of it, on both tiers, so this is where a malformed mint is caught: the
- *  artifact keeps only the winner's and the refused candidates' names, and a test that re-enumerated
- *  the synthetic tier to read the rest cost minutes and never saw the real one. */
+ *  it ranks to a verdict or refuses whole, every candidate of it, on both tiers, so this is where a
+ *  malformed mint is caught: the artifact keeps only the winner's and the refused candidates' names,
+ *  and a test that re-enumerated the synthetic tier to read the rest cost minutes and never saw the
+ *  real one. A rank a scorer dies in leaves a `noncompile` row with no fan, so nothing is tallied
+ *  there. */
 export function tallyFanVariations(fan: {
   candidates: readonly NamedCandidate[];
   dropped: readonly NamedCandidate[];

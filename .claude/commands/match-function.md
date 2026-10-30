@@ -346,19 +346,20 @@ Four things this gate does not catch by itself:
   A gate list spelled as `test:offline` + `apps/benchmark/test` +
   `test:matching` — which is what several rounds have run — leaves `apps/web/test` collected by
   nobody, and a change to the DEFAULT map-less spelling lands there: the playground preset pins its
-  own map-less source byte for byte. Run `pnpm test:root` (the root config, which is a strict
-  SUPERSET of those three CI suites — `packages/{core,cli/test/offline,toolchains}/test` plus
+  own map-less source byte for byte. Run `pnpm test:root` (the root config, which collects the same
+  file set as those three CI suites — `packages/{core,cli/test/offline,toolchains}/test` plus
   `apps/*/test`; read `include` in `vitest.config.ts`) and `pnpm test:matching`, and **quote both
-  `gate:` lines**. Do NOT also run `test:offline`, `vitest run apps/benchmark/test` or
-  `vitest run apps/web/test` locally: all three read the same root config — same `env`,
-  `globalSetup` and `setupFiles` — and `vitest list --filesOnly` collects 312 + 85 + 31 files
-  under them, exactly the 428 `test:root` collects (2026-10-30, at `f9389ba4`), so a second run
-  re-runs the same files under a weaker exit check (its price is in `docs/bench-cost.md` §1).
-  `ci.yml` keeps all three as its hosted steps. Both run through `scripts/gate-vitest.sh`, which exits 0 only when every
-  collected file and test passed and vitest exited 0 — vitest alone exits 0 on a run that skipped
-  files and 1 on a green run that hit a load timeout, and a gate read off its exit status alone has
-  been wrong both ways. It runs 3 workers; that was the faster run on this machine, not only the
-  quieter one (the script's header has the measurement). The shapes to expect are in [`docs/bench-cost.md`](../../docs/bench-cost.md) §1, dated
+  `gate:` lines**. Both `test:root` and `test:matching` run through `scripts/gate-vitest.sh`,
+  which exits 0 only when every collected file and test passed and vitest exited 0 — vitest alone
+  exits 0 on a run that skipped files and 1 on a green run that hit a load timeout, and a gate read
+  off its exit status alone has been wrong both ways. It runs 3 workers; that was the faster run on
+  this machine, not only the quieter one (the script's header has the measurement). Do NOT also
+  run `test:offline`, `vitest run apps/benchmark/test` or `vitest run apps/web/test` locally: all
+  three read the same root config — same `env`, `globalSetup` and `setupFiles` — and
+  `vitest list --filesOnly` collects 312 + 85 + 31 files under them, exactly the 428 `test:root`
+  collects (2026-10-30, at `f9389ba4`), so a second run re-runs the same files under a weaker exit
+  check (its price is in `docs/bench-cost.md` §1). `ci.yml` keeps all three as its hosted steps.
+  The shapes to expect are in [`docs/bench-cost.md`](../../docs/bench-cost.md) §1, dated
   and re-measured there rather than here — **both counts GROW as tests are added, so yours
   disagreeing is not a failure; yours missing a whole suite is.** The skips are the tell: a
   `test:matching` run that

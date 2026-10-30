@@ -11,8 +11,9 @@
 //   2. every name ENUMERATION mints parses the same way. The artifact stores the winner and the
 //      refused candidates only, a fraction of what enumeration mints, so only an enumeration closes
 //      the set — and the bench does that one: `tallyFanVariations` refuses every candidate of every
-//      fan it ranks, on both tiers, by the same `variationsDefect` this file uses
-//      (`packages/core/test/variation-tokens.test.ts` proves the refusal fires). What the bench
+//      fan it ranks to a verdict or refuses whole, on both tiers, by the same `variationsDefect` this
+//      file uses (`packages/core/test/variation-tokens.test.ts` proves the refusal fires); a rank a
+//      scorer dies in publishes `noncompile` with no fan, and is not tallied. What the bench
 //      never ranks is a row that carries a symbol map, enumerated WITHOUT it: it hands `c.symbols`
 //      to every such row (run/runner.ts). That configuration alone is enumerated here. It needs the
 //      rows' toolchains to build their targets, so it is SKIPPED where they are absent — CI among
