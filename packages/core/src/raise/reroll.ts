@@ -49,7 +49,7 @@ import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { intWidth } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
-import { foldConstPair } from './const';
+import { evalIntPair, isIntPairOpcode } from './const';
 
 /** One loop whose shape admits a re-roll, and the facts its admission reads. */
 export interface PeeledTest {
@@ -266,7 +266,7 @@ export interface FoldedTopTest {
   /** the exit test on the entry values: `stays` (provably not taken), `leaves`, `guarded` (not a
    *  constant, but the test of the guard the loop is entered under, on the same values and leaving
    *  for the same exit), or `unknown` (not a constant: a memory read, a call, a parameter, an opcode
-   *  `EVAL` does not fold) */
+   *  `evalIntPair` does not fold) */
   atEntry: 'stays' | 'leaves' | 'guarded' | 'unknown';
 }
 
@@ -292,25 +292,6 @@ export const TOP_TEST_GATES: readonly Gate<FoldedTopTest>[] = [
     rejects: (c) => c.atEntry === 'leaves' || c.atEntry === 'unknown',
   },
 ];
-
-/** Integer opcodes `evalConst` folds, as int32; `add` and `or` through raise/const.ts's `foldConstPair`. */
-const EVAL: Readonly<Record<string, (a: number, b: number) => number>> = {
-  add: (a, b) => foldConstPair('add', a, b)!,
-  or: (a, b) => foldConstPair('or', a, b)!,
-  sub: (a, b) => (a - b) | 0,
-  and: (a, b) => a & b,
-  xor: (a, b) => a ^ b,
-  icmp_eq: (a, b) => +(a === b),
-  icmp_ne: (a, b) => +(a !== b),
-  icmp_slt: (a, b) => +(a < b),
-  icmp_sle: (a, b) => +(a <= b),
-  icmp_sgt: (a, b) => +(a > b),
-  icmp_sge: (a, b) => +(a >= b),
-  icmp_ult: (a, b) => +(a >>> 0 < b >>> 0),
-  icmp_ule: (a, b) => +(a >>> 0 <= b >>> 0),
-  icmp_ugt: (a, b) => +(a >>> 0 > b >>> 0),
-  icmp_uge: (a, b) => +(a >>> 0 >= b >>> 0),
-};
 
 /** RESTORE THE TOP TEST THE COMPILER FOLDED AWAY. A loop `rerollOne` just rotated is now
  *
@@ -387,13 +368,12 @@ function restoreTopTest(
     if (d.opcode === 'const') {
       return typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
     }
-    const f = EVAL[d.opcode];
-    if (!f || d.operands.length !== 2 || !(moved.has(d) || E.ops.includes(d))) {
+    if (!isIntPairOpcode(d.opcode) || d.operands.length !== 2 || !(moved.has(d) || E.ops.includes(d))) {
       return null;
     }
     const x = evalConst(d.operands[0]);
     const y = evalConst(d.operands[1]);
-    return x === null || y === null ? null : f(x, y);
+    return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
   };
   const cond = evalConst(hTerm.operands[0]);
   const guard = cond === null ? entryGuard(fn, preds, defs, { E, H, exit, back, B, A, moved }) : null;

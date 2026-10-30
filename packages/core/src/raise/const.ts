@@ -72,6 +72,31 @@ export function foldConstPair(opcode: string, a: number, b: number): number | nu
   return f ? f(a, b) : null;
 }
 
+/** Integer opcodes whose const/const form a test can be read on, as int32: `foldConstPair`'s `add`
+ *  and `or`, the rest of the arithmetic and the comparisons. `null` for any other opcode. Shared by
+ *  the reroll's folded top test (`restoreTopTest`) and the `for` whose first test the compiler
+ *  folded away (structure.ts, `forPlanAt`): which opcodes a test folds through is one decision. */
+const EVAL: Readonly<Record<string, (a: number, b: number) => number>> = {
+  add: (a, b) => foldConstPair('add', a, b)!,
+  or: (a, b) => foldConstPair('or', a, b)!,
+  sub: (a, b) => (a - b) | 0,
+  and: (a, b) => a & b,
+  xor: (a, b) => a ^ b,
+  icmp_eq: (a, b) => +(a === b),
+  icmp_ne: (a, b) => +(a !== b),
+  icmp_slt: (a, b) => +(a < b),
+  icmp_sle: (a, b) => +(a <= b),
+  icmp_sgt: (a, b) => +(a > b),
+  icmp_sge: (a, b) => +(a >= b),
+  icmp_ult: (a, b) => +(a >>> 0 < b >>> 0),
+  icmp_ule: (a, b) => +(a >>> 0 <= b >>> 0),
+  icmp_ugt: (a, b) => +(a >>> 0 > b >>> 0),
+  icmp_uge: (a, b) => +(a >>> 0 >= b >>> 0),
+};
+export const evalIntPair = (opcode: string, a: number, b: number): number | null =>
+  opcode in EVAL ? EVAL[opcode](a, b) : null;
+export const isIntPairOpcode = (opcode: string): boolean => opcode in EVAL;
+
 /** Does this opcode's const/const form denote a constant? The membership half of `foldConstPair`,
  *  for callers that must classify an op before they have its operands' values. */
 export const isConstFoldOpcode = (opcode: string): boolean => opcode in FOLD;

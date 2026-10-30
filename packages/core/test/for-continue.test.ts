@@ -6,8 +6,10 @@
 // continue; } break; }`, agbcc's layout of which `while (1)` cannot spell (a loop `break` inside a
 // case body binds to the switch). Every fixture is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The
-// decline fixtures are the ones the `for` does not take: a guard that is not the loop's test, two
-// updates, a latch with an effect, and an exit that takes a value.
+// `for` takes a guard that is its test, no guard where its first test folds to true, and an update
+// the header computes. It refuses a guard that is not the loop's test, a constant first test that
+// leaves, two updates, a latch with an effect, an exit that takes a value and an update from a call,
+// and those fixtures lift through the rerun's `while (1)` instead, judged the same way.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -32,23 +34,23 @@ const judged = (ir: string) => {
   };
 };
 
-const declines = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  try {
-    structure(fn, {});
-  } catch (e) {
-    return (e as Error).message;
-  }
-  return 'lifted';
+/** The `for` refused: the rerun reads the loop as the `while (1)` it is, where an arm's edge into the
+ *  header is `continue;` and an arm that reaches the latch takes a copy of its update and test. That
+ *  reading is judged like the `for`. */
+const refusesFor = (ir: string): void => {
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).not.toContain('for (');
+  expect(src).toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
 };
 
 /** `synthetic:sw_forjt:agbcc`'s shape with its loads as calls: the guard `lo > hi` skips the loop,
  *  the header tests `f(i)`, the jump table's arms each `continue` (an edge to the latch #11) or call
  *  `k` and leave the loop (an edge to #12), the default and two holes are the latch, and the latch is
  *  `i + 1`, then `hi < i + 1` leaves. A loop follows, so no arm can copy the code after the loop as
- *  an early `return`. `guard`, `latch` and the exit are the parts the declines vary. */
+ *  an early `return`. `guard`, `latch` and the exit are the parts the refusals vary. */
 const forJt = ({
   guard = '%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb12(), ^bb1(%0)',
   latch = '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %37: u32 = icmp_slt %1, %36\n  cond_br %37, ^bb12(), ^bb1(%36)',
@@ -142,33 +144,121 @@ test('two arms entering a third case body are written back as copies inside the 
   expect(agreement.judged).toBe(SEEDS.length);
 });
 
-test('a guard that is not the loop test keeps the decline', () => {
+test('a guard that is not the loop test refuses the `for`', () => {
   // `lo >= hi` skips a loop whose test is `hi < i + 1`: `lo == hi` runs the body once
-  expect(declines(forJt({ guard: '%4: u32 = icmp_sge %0, %1\n  cond_br %4, ^bb12(), ^bb1(%0)' }))).toMatch(
-    /case body leaves its switch for a loop exit/,
-  );
+  refusesFor(forJt({ guard: '%4: u32 = icmp_sge %0, %1\n  cond_br %4, ^bb12(), ^bb1(%0)' }));
 });
 
-test('a latch that runs a second update keeps the decline', () => {
+test('a latch that runs a second update refuses the `for`', () => {
   // two loop variables would need a comma in the `for`'s update, which L3 does not spell
   const ir = forJt()
     .replace('^bb1(%5: s32):', '^bb1(%5: s32, %50: s32):')
     .replace('^bb1(%0)', '^bb1(%0, %0)')
     .replace('cond_br %37, ^bb12(), ^bb1(%36)', '%51: s32 = add %50, %36\n  cond_br %37, ^bb12(), ^bb1(%36, %51)')
     .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %50 {target="k"}');
-  expect(declines(ir)).toMatch(/case body leaves its switch for a loop exit/);
+  refusesFor(ir);
 });
 
-test('a latch with an effect keeps the decline', () => {
+test('a latch with an effect refuses the `for`', () => {
   const latch =
     '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %52: s32 = call %36 {target="tick"}\n' +
     '  %37: u32 = icmp_slt %1, %36\n  cond_br %37, ^bb12(), ^bb1(%36)';
-  expect(declines(forJt({ latch }))).toMatch(/case body leaves its switch for a loop exit/);
+  refusesFor(forJt({ latch }));
 });
 
-test('an exit that takes a value keeps the decline', () => {
+test('an exit that takes a value refuses the `for`', () => {
   const ir = forJt({ exitParams: '%60: s32', exitTail: 'br ^bb13(%60)' })
     .replace('cond_br %4, ^bb12(), ^bb1(%0)', 'cond_br %4, ^bb12(%0), ^bb1(%0)')
     .replace('cond_br %37, ^bb12(), ^bb1(%36)', 'cond_br %37, ^bb12(%36), ^bb1(%36)');
-  expect(declines(ir)).not.toBe('lifted');
+  refusesFor(ir);
+});
+
+/** `for (i = 0; i < 40; i++)`: the first test on the constant start is true, so the compiler leaves
+ *  no guard and the entry block's `br` enters the body at once. */
+const constFor = (start: number) =>
+  forJt({
+    guard: `%2: s32 = const {value=${start}}\n  br ^bb1(%2)`,
+    latch:
+      '%35: s32 = const {value=1}\n  %36: s32 = add %5, %35\n  %38: s32 = const {value=40}\n' +
+      '  %37: u32 = icmp_sge %36, %38\n  cond_br %37, ^bb12(), ^bb1(%36)',
+  });
+
+test('a counted loop whose first test the compiler folded away lifts as a `for` with no guard', () => {
+  const { src, agreement, shipped } = judged(constFor(0));
+  expect(src).toMatch(/for \(v0 = 0; v0 < 40; v0 = v0 \+ 1\) \{/);
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('a guardless loop whose test leaves on the entry values refuses the `for`', () => {
+  // `i = 50; do { .. } while (++i < 40)` runs the body once, where a `for` would skip it
+  refusesFor(constFor(50));
+});
+
+/** agbcc's `i + 1` kept from a body that reads it: the header computes the value the latch hands
+ *  round, and the latch only tests it. */
+const cseFor = (next: string) =>
+  forJt({
+    latch: '%37: u32 = icmp_slt %1, %6\n  cond_br %37, ^bb12(), ^bb1(%6)',
+  })
+    .replace('%7: s32 = call %5 {target="f"}', `${next}\n  %7: s32 = call %6 {target="f"}`)
+    .replace('%20: s32 = call %5 {target="v"}', '%20: s32 = call %6 {target="v"}');
+
+test('an update the header computes for the body lifts as the `for`s own', () => {
+  const { src, agreement, shipped } = judged(cseFor('%60: s32 = const {value=1}\n  %6: s32 = add %5, %60'));
+  expect(src).toMatch(/for \(v0 = a0; .*; v0 = .*\) \{/);
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('an update the header gets from a call refuses the `for`', () => {
+  // the `for` would make the call again where it updates, once more than the asm does
+  refusesFor(cseFor('%6: s32 = call %5 {target="nxt"}'));
+});
+
+/** `while (1) { k(0); if (gx(a)) { switch (next(a)) { case 0: if (g1(a)) continue; case 1: k(2); break;
+ *  case 2: k(3); break; default: return; } } k(9); }`: case 0 reaches case 1 and the loop's header. */
+const foreverJt = `fn forever {
+^bb0(%0: s32):
+  br ^bb1()
+^bb1():
+  %1: s32 = const {value=0}
+  %2: s32 = call %1 {target="k"}
+  %3: s32 = call %0 {target="gx"}
+  %4: u32 = icmp_eq %3, %1
+  cond_br %4, ^bb6(), ^bb2()
+^bb2():
+  %6: s32 = call %0 {target="next"}
+  switch_br %6, ^bb3(), ^bb4(), ^bb5(), ^bb7() {cases=[0;1;2]}
+^bb3():
+  %7: s32 = call %0 {target="g1"}
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb4(), ^bb1()
+^bb4():
+  %9: s32 = const {value=2}
+  %10: s32 = call %9 {target="k"}
+  br ^bb6()
+^bb5():
+  %11: s32 = const {value=3}
+  %12: s32 = call %11 {target="k"}
+  br ^bb6()
+^bb6():
+  %13: s32 = const {value=9}
+  %14: s32 = call %13 {target="k"}
+  br ^bb1()
+^bb7():
+  ret
+}`;
+
+test('a case arm that continues a `while (1)` and falls into the next case lifts on the rerun', () => {
+  const { src, agreement, shipped } = judged(foreverJt);
+  expect(src).toContain('while (1)');
+  expect(src).toMatch(/if \(g1\(a0\) != v0\) continue;\n\s*case 1:/);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
 });
