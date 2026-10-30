@@ -15455,6 +15455,126 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_gotocase1(s32 lo, s32 hi);',
     proto: { sw_gotocase1: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      sw_forjt / sw_forjt_goto1 are item 34's jump-table controls (sw_gotocase1 is a comparison
+  //      tree on all four lanes and never reaches the jump table). sw_forjt is the frame with no
+  //      goto: every arm either `continue`s the `for` or calls `k` and leaves it through the
+  //      `break;` after the switch. agbcc and gcc2.7.2 declined it on "a case body leaves its switch
+  //      for a loop exit past the switch's end": `while (1)` spells the latch's `i++` at the foot of
+  //      the body, where no `continue` reaches it, so the loop's `break` sits in a case body. The
+  //      source's `for`, whose `continue` runs the update, is the reading that spells it.
+  //      sw_forjt_goto1 adds one `goto` into a case label, which C spells as a fall-through.
+  {
+    sym: 'sw_forjt',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt(s32 lo, s32 hi);',
+    proto: { sw_forjt: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_forjt_goto1',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_goto1(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '            shared:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_goto1(s32 lo, s32 hi);',
+    proto: { sw_forjt_goto1: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   //  35. bidx_* / bidxx_* and bcpy_* / bcpyx_* (sub_0804D0B0: "reads the compiler's anonymous
   //      constant ('.LC184') whose copy fills 'sp0', a u8[36]"). Item 31's rows have unbounded u32
   //      indexes, so no sound proof can split them. The real index is bounded: `(u8)(r4 % 8) * 2`
