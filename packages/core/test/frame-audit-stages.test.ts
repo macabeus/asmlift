@@ -282,7 +282,7 @@ describe('classifyFrameUses', () => {
     const a = laddr(0);
     const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
     const { uses } = classify([{ params: [i], ops: [a, at, load(at.results[0], 0, 1), ret()] }]);
-    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false }]);
+    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false, reach: null }]);
     expect(uses.accesses.get(0)).toEqual([]);
   });
 
@@ -301,7 +301,7 @@ describe('classifyFrameUses', () => {
       const { uses } = classify([{ params: [i], ops: [a, ...idx, at, load(at.results[0], 0, width), ret()] }], {
         owned: { from: 0, to: 16 },
       });
-      return uses.indexReaches.get(0);
+      return uses.indexed.get(0)?.map((x) => x.reach);
     };
     expect(reachOf(true)).toEqual([{ lo: 1, hi: 16 }]);
     expect(reachOf(true, 2)).toEqual([{ lo: 1, hi: 17 }]);
