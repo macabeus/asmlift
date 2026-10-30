@@ -295,6 +295,40 @@ export function splitVariations(name: string): string[] {
   return variations;
 }
 
+/** What is wrong with one candidate's name, or `undefined`: no variation at all, a variation the
+ *  registry does not hold, a first variation that is not a signedness, or a variation after one of
+ *  a later kind. The mint sites are typed, so none of these is a `tsc` error; enumeration data is
+ *  the only place one shows, and `tallyFanVariations` asks this of every candidate it counts. */
+export function variationsDefect(variations: readonly string[]): string | undefined {
+  try {
+    return orderDefect(variations, (part) => kindIndex(parseVariation(part).name));
+  } catch (e) {
+    return `${variations.join('/')}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+const kindIndex = (name: string): number => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
+
+/** `variationsDefect` past the registry lookup, which `kindOf` does (and throws from) so the tally
+ *  can serve it from its own cache. */
+function orderDefect(variations: readonly string[], kindOf: (part: string) => number): string | undefined {
+  if (variations.length === 0) {
+    return 'a candidate with no variations: it applies at least its signedness';
+  }
+  let previous = -1;
+  for (const [i, part] of variations.entries()) {
+    const kind = kindOf(part);
+    if (i === 0 && VARIATION_KINDS[kind] !== 'signedness') {
+      return `${variations.join('/')}: the first variation is '${part}', not a signedness`;
+    }
+    if (kind < previous) {
+      return `${variations.join('/')}: '${part}' (${VARIATION_KINDS[kind]}) after a ${VARIATION_KINDS[previous]} variation`;
+    }
+    previous = kind;
+  }
+  return undefined;
+}
+
 /** How many of one fan's candidates carry one variation. `candidates` counts the whole fan —
  *  scored, dropped, withheld and never compiled alike — and `dropped`, `withheld` and
  *  `notCompiled` are the parts of that count the ranking did not score, each absent when 0.
@@ -321,7 +355,13 @@ interface NamedCandidate {
  *
  *  A tally, not a factorisation: enumeration gates prune the fan, so the counts do not multiply to
  *  its size. Keys run in kind order, then by name, so two tallies of one fan serialize to the same
- *  bytes whatever order the fan was listed in. Throws on a variation the registry does not hold. */
+ *  bytes whatever order the fan was listed in.
+ *
+ *  Throws on any candidate whose name `variationsDefect` refuses — an unregistered variation, a
+ *  first variation that is not a signedness, parts out of kind order. The bench tallies every fan
+ *  it ranks, every candidate of it, on both tiers, so this is where a malformed mint is caught: the
+ *  artifact keeps only the winner's and the refused candidates' names, and a test that re-enumerated
+ *  the synthetic tier to read the rest cost minutes and never saw the real one. */
 export function tallyFanVariations(fan: {
   candidates: readonly NamedCandidate[];
   dropped: readonly NamedCandidate[];
@@ -337,9 +377,23 @@ export function tallyFanVariations(fan: {
     }
     return name;
   };
+  const kindOfName = new Map<string, number>();
+  const kindOf = (part: string): number => {
+    const name = nameOf(part);
+    let kind = kindOfName.get(name);
+    if (kind === undefined) {
+      kind = kindIndex(name);
+      kindOfName.set(name, kind);
+    }
+    return kind;
+  };
   const counts = new Map<string, { candidates: number; dropped: number; withheld: number; notCompiled: number }>();
   const add = (list: readonly NamedCandidate[], refusal: 'dropped' | 'withheld' | 'notCompiled' | undefined): void => {
     for (const c of list) {
+      const defect = orderDefect(c.variations, kindOf);
+      if (defect !== undefined) {
+        throw new Error(`a fan candidate's name is malformed — ${defect} (packages/core/src/variation-tokens.ts)`);
+      }
       for (const name of new Set(c.variations.map(nameOf))) {
         let n = counts.get(name);
         if (n === undefined) {
@@ -357,7 +411,6 @@ export function tallyFanVariations(fan: {
   add(fan.dropped, 'dropped');
   add(fan.withheld, 'withheld');
   add(fan.notCompiled, 'notCompiled');
-  const kindIndex = (name: string): number => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
   const names = [...counts.keys()].sort((a, b) => kindIndex(a) - kindIndex(b) || (a < b ? -1 : a > b ? 1 : 0));
   return Object.fromEntries(
     names.map((name) => {

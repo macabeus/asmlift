@@ -323,9 +323,10 @@ export async function runAsmlift(
   // published nowhere; this is the part that scales with the fan.
   //
   // ONLY THE RANKING sits inside the `try`, because only its throw is a verdict. The fan tally
-  // parses every candidate's variations and throws on a name the registry does not hold: that is a
-  // harness defect, and caught here it would publish a match as `noncompile`. It propagates instead,
-  // from both paths below, and the runner reports the row as missing.
+  // parses every candidate's variations and throws on a name the registry does not hold, or whose
+  // parts are not signedness first and in kind order (`variationsDefect`): that is a harness
+  // defect, and caught here it would publish a match as `noncompile`. It propagates instead, from
+  // both paths below, and the runner reports the row as missing.
   const rankT0 = Date.now();
   let ranked: RankedResult;
   try {

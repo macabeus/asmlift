@@ -1,8 +1,9 @@
 // The variation registry, held to itself and to the shipped targets.
 //
 // Whether the code that mints variations still mints every entry is `variation-mints.test.ts`. The
-// corpus-scale checks — every name the committed artifact publishes and every name the enumerated
-// corpus mints — live in `apps/benchmark/test/variation-closure.test.ts`, because only that tree
+// corpus-scale checks live elsewhere: every name the enumerated corpus mints is refused by the
+// bench's own `tallyFanVariations` (its refusals are pinned below), and every name the committed
+// artifact publishes is `apps/benchmark/test/variation-closure.test.ts`, because only that tree
 // reads the artifact and the dataset.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +23,7 @@ import {
   splitVariations,
   tallyFanVariations,
   variationToken,
+  variationsDefect,
   withSubject,
 } from '../src/variation-tokens';
 
@@ -273,6 +275,41 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
         notCompiled: [],
       }),
     ).toThrow(/names no registered variation/);
+  });
+
+  // The bench tallies every fan it ranks, so these throws are what refuse a malformed mint on both
+  // tiers — each in whichever of the four lists the candidate landed in.
+  test.each([
+    [['defsite', 'unsigned'], /the first variation is 'defsite', not a signedness/],
+    [['unsigned', 'raw-globals', 'defsite'], /'defsite' \(structure\) after a symbol-map variation/],
+    [['signed', 'unmerge', 'setup-args'], /'setup-args' \(lift\) after a respell variation/],
+    [[], /no variations/],
+  ])('a candidate named %j throws', (variations, message) => {
+    for (const list of ['candidates', 'dropped', 'withheld', 'notCompiled'] as const) {
+      const lists: Record<typeof list, Named[]> = { candidates: [], dropped: [], withheld: [], notCompiled: [] };
+      lists[list] = [{ variations }];
+      expect(() => tallyFanVariations(lists)).toThrow(message);
+    }
+  });
+
+  test('every candidate of a real fan is well-formed, and its tally does not throw', () => {
+    expect(fan.flatMap((c) => variationsDefect(c.variations) ?? [])).toEqual([]);
+    expect(() => tallyFanVariations(partition)).not.toThrow();
+  });
+});
+
+describe('variationsDefect names what is wrong with a name, and nothing for a well-formed one', () => {
+  test('well-formed: signedness first, kinds non-decreasing, repeats of one kind allowed', () => {
+    expect(variationsDefect(['unsigned'])).toBeUndefined();
+    expect(variationsDefect(['signed', 'defsite', 'flip-join', 'coalesce-v0-v1', 'volatile-p0', 'raw-globals'])).toBe(
+      undefined,
+    );
+  });
+
+  test('defects come back as text, an unregistered part included, never a throw', () => {
+    expect(variationsDefect(['unsigned', 'nosuch'])).toMatch(/^unsigned\/nosuch: 'nosuch' names no registered/);
+    expect(variationsDefect(['winner'])).toMatch(/names no registered variation/);
+    expect(variationsDefect(['raw-globals', 'unsigned'])).toMatch(/not a signedness/);
   });
 });
 
