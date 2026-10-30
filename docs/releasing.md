@@ -20,7 +20,10 @@ mistaken for a passing one.
 1. `pnpm run typecheck`
 2. `pnpm run lint` — 0 errors (warnings are pre-existing)
 3. `pnpm run format:check`
-4. `pnpm run test:offline`
+4. _(no step)_ `pnpm run test:offline` is hosted CI's gate, not a local one: gate 5's first half,
+   `test:root`, runs the same root `vitest.config.ts` over every file it collects — and over
+   `apps/benchmark/test` and `apps/web/test`, CI's other two vitest steps — so running it here
+   too only runs those files twice.
 5. **`pnpm test` — the FULL suite, including the toolchain-backed matching tests.** It fails on a
    skipped file or test (`scripts/gate-vitest.sh`), so it needs every toolchain, the Docker drive,
    the project checkouts `pnpm bench setup` materializes, and the hand-cloned klonoa checkout whose
