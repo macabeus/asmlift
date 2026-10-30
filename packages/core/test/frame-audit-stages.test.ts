@@ -307,6 +307,44 @@ describe('classifyFrameUses', () => {
     expect(reachOf(true, 2)).toEqual([{ lo: 1, hi: 17 }]);
     expect(reachOf(false)).toEqual([null]);
   });
+
+  // `for (k = 0; k < n; k++) a[(u8)k * 2 + 1]` at sp+0, agbcc's latch `k + 1 <= n - 1`: the counter
+  // holds 0..n-1, so with n = 8 a byte access reaches [1, 16) and with n = 9 it reaches [1, 18)
+  test('records the bytes a loop counter its latch bounds may reach', () => {
+    const reachOf = (n: number) => {
+      const q = value();
+      const a = laddr(0);
+      const zero = konst(0);
+      const [s24, s1, one, last] = [konst(24), konst(1), konst(1), konst(n - 1)];
+      const up = mkOp('shl', { operands: [q, s24.results[0]], results: [value()] });
+      const u8 = mkOp('shr_u', { operands: [up.results[0], s24.results[0]], results: [value()] });
+      const sh = mkOp('shl', { operands: [u8.results[0], s1.results[0]], results: [value()] });
+      const plus = mkOp('add', { operands: [sh.results[0], one.results[0]], results: [value()] });
+      const at = mkOp('add', { operands: [a.results[0], plus.results[0]], results: [value()] });
+      const next = mkOp('add', { operands: [q, one.results[0]], results: [value()] });
+      const c = mkOp('icmp_ule', { operands: [next.results[0], last.results[0]], results: [value()] });
+      const exit: Block = { params: [], ops: [ret()] };
+      const head: Block = { params: [q], ops: [] };
+      head.ops.push(s24, s1, one, last, up, u8, sh, plus, at, load(at.results[0], 0, 1), next, c);
+      head.ops.push(
+        mkOp('cond_br', {
+          operands: [c.results[0]],
+          successors: [
+            { block: head, args: [next.results[0]] },
+            { block: exit, args: [] },
+          ],
+        }),
+      );
+      const entry: Block = {
+        params: [],
+        ops: [a, zero, mkOp('br', { successors: [{ block: head, args: [zero.results[0]] }] })],
+      };
+      const { uses } = classify([entry, head, exit], { owned: { from: 0, to: 32 } });
+      return uses.indexed.get(0)?.map((x) => x.reach);
+    };
+    expect(reachOf(8)).toEqual([{ lo: 1, hi: 16 }]);
+    expect(reachOf(9)).toEqual([{ lo: 1, hi: 18 }]);
+  });
 });
 
 describe('readWindow', () => {

@@ -11,7 +11,7 @@
 // it directly: reachable only through emitted C, a wrong answer for one opcode reads as a silent
 // wrong address in a row nobody is looking at.
 import type { Block, Op, Value } from './core';
-import { OPCODES, type OpSig } from './opcodes';
+import { NEGATED_ICMP, OPCODES, type OpSig } from './opcodes';
 
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
  *  literal this analysis may fold through. Callers that have no materialization model pass none. */
@@ -568,17 +568,54 @@ export function overwrittenReads(blocks: readonly Block[]): Set<Op> {
 
 /** Block param -> the values its in-edges pass, for `WordCtx.incoming`. */
 export function incomingArgs(blocks: readonly Block[]): Map<Value, (Value | undefined)[]> {
-  const out = new Map<Value, (Value | undefined)[]>();
+  return new Map([...incomingEdges(blocks)].map(([p, es]) => [p, es.map((e) => e.arg)]));
+}
+
+/** A comparison an edge proves: `lhs <opcode> rhs` holds whenever control takes it. */
+export interface EdgeTest {
+  readonly opcode: string;
+  readonly lhs: Value;
+  readonly rhs: Value;
+}
+
+/** One in-edge of a block param: the value it passes, and what its branch proves on the way. */
+export interface InEdge {
+  readonly arg: Value | undefined;
+  readonly holds?: EdgeTest;
+}
+
+/** Block param -> its in-edges, each with the comparison its branch proves: a `cond_br` on an
+ *  `icmp_*` proves the compare on its first successor and the negation (`NEGATED_ICMP`) on its
+ *  second. An edge out of a `cond_br` whose two successors are one block proves nothing — the same
+ *  edge is taken either way — and nor does any other branch. */
+export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
+  const defs = new Map<Value, Op>();
   for (const b of blocks) {
     for (const op of b.ops) {
-      for (const s of op.successors) {
+      op.results.forEach((r) => defs.set(r, op));
+    }
+  }
+  const out = new Map<Value, InEdge[]>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      const c = op.opcode === 'cond_br' ? defs.get(op.operands[0]) : undefined;
+      const tested =
+        c !== undefined &&
+        c.operands.length === 2 &&
+        NEGATED_ICMP[c.opcode] !== undefined &&
+        op.successors.length === 2 &&
+        op.successors[0].block !== op.successors[1].block;
+      op.successors.forEach((s, si) => {
+        const holds: EdgeTest | undefined = tested
+          ? { opcode: si === 0 ? c.opcode : NEGATED_ICMP[c.opcode], lhs: c.operands[0], rhs: c.operands[1] }
+          : undefined;
         s.block.params.forEach((p, i) => {
           if (!out.has(p)) {
             out.set(p, []);
           }
-          out.get(p)!.push(s.args[i]);
+          out.get(p)!.push(holds === undefined ? { arg: s.args[i] } : { arg: s.args[i], holds });
         });
-      }
+      });
     }
   }
   return out;
@@ -633,18 +670,23 @@ export interface LinearCtx {
  *  wraps on the way. A value this cannot read further is its own term. A coefficient is a JS
  *  number, exact only up to 2^53: one past that rounds, and a later `sub` could cancel the rounded
  *  coefficient to 0 and drop a term the word still holds, so a form whose coefficient leaves the
- *  safe integers is no form (undefined). */
-export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1, number> | undefined {
+ *  safe integers is no form (undefined). A value in `opaque` is read no further: it is a term. */
+export function linearTerms(
+  ctx: LinearCtx,
+  v: Value,
+  depth = 0,
+  opaque?: { has(v: Value): boolean },
+): Map<Value | 1, number> | undefined {
   const c = ctx.constOf(v);
   if (c !== undefined) {
     return new Map([[1, c]]);
   }
-  const d = ctx.defs.get(v);
+  const d = opaque?.has(v) === true ? undefined : ctx.defs.get(v);
   if (d === undefined || depth > 8) {
     return new Map([[v, 1]]);
   }
   const scaled = (x: Value, by: number) => {
-    const l = linearTerms(ctx, x, depth + 1);
+    const l = linearTerms(ctx, x, depth + 1, opaque);
     const out = l && new Map([...l].map(([t, k]) => [t, k * by] as const));
     return out && [...out.values()].every(Number.isSafeInteger) ? out : undefined;
   };
@@ -660,7 +702,7 @@ export function linearTerms(ctx: LinearCtx, v: Value, depth = 0): Map<Value | 1,
     return scaled(d.operands[0], -1);
   }
   if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
-    const x = linearTerms(ctx, d.operands[0], depth + 1);
+    const x = linearTerms(ctx, d.operands[0], depth + 1, opaque);
     const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
     if (x === undefined || y === undefined) {
       return undefined;
@@ -690,6 +732,9 @@ export interface StridedRange {
 export interface RangeCtx extends LinearCtx {
   /** block param -> the value each in-edge passes (`incomingArgs`) */
   readonly incoming: ReadonlyMap<Value, readonly (Value | undefined)[]>;
+  /** block param -> its in-edges with what each one's branch proves (`incomingEdges`); where it
+   *  is given, it is read in place of `incoming` */
+  readonly edges?: ReadonlyMap<Value, readonly InEdge[]>;
   /** the function's own parameters, which arrive from a caller and hold anything */
   readonly entry: ReadonlySet<Value>;
   /** the one word a term the form cannot read is known to be — a name a symbol map places */
@@ -808,15 +853,28 @@ function zeroNarrowing(ctx: LinearCtx, d: Op): { readonly of: Value; readonly bi
  *  The two never mix in one union. Where the integer union fits one word, both readings name the
  *  same words (every edge then shares one multiple of 2^32), so `stridedRange` asks the integer
  *  reading first and the moved one only where that crosses a multiple; `mayAlwaysHold` asks both,
- *  and a word either excludes cannot be held. */
+ *  and a word either excludes cannot be held. Where `edges` name what an in-edge's branch proves,
+ *  that edge's argument is read under it (`edgeRange`): a loop's latch `k + 1 <= 7` bounds the
+ *  `k + 1` its back edge passes, which no reading of `k` alone could, `k` depending on itself. */
 function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
+  /** what the in-edge being read proves, by the value it bounds; each is read as a term */
+  let facts = new Map<Value, EdgeBound>();
   const bits: BitsCtx = {
     defs: ctx.defs,
     bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
   };
   const termRange = (t: Value): StridedRange | undefined => {
+    const fact = facts.get(t);
+    if (fact !== undefined) {
+      facts.delete(t);
+      try {
+        return meetBound(rangeOf(t), fact);
+      } finally {
+        facts.set(t, fact);
+      }
+    }
     const at = ctx.pointOf?.(t);
     if (at !== undefined) {
       return { lo: mod(at), hi: mod(at), stride: 0 };
@@ -838,35 +896,60 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       const n = provableBits(bits, t);
       return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
     }
-    const ins = ctx.entry.has(t) ? undefined : ctx.incoming.get(t);
+    const ins = ctx.entry.has(t) ? undefined : (ctx.edges?.get(t) ?? ctx.incoming.get(t)?.map((arg) => ({ arg })));
     if (ins === undefined || ins.length === 0 || open.has(t) || --left < 0) {
       return undefined;
     }
     open.add(t);
+    const outer = facts;
     try {
-      let out: StridedRange | undefined;
-      for (const x of ins) {
-        const whole = x === undefined ? undefined : rangeOf(x);
+      const each: StridedRange[] = [];
+      for (const e of ins) {
+        const whole = edgeRange(e);
         if (whole === undefined) {
           return undefined;
         }
-        const r = wordFirst ? (intoWord(whole) ?? whole) : whole;
-        out =
-          out === undefined
-            ? r
-            : {
-                lo: Math.min(out.lo, r.lo),
-                hi: Math.max(out.hi, r.hi),
-                stride: gcdOf(gcdOf(out.stride, r.stride), r.lo - out.lo),
-              };
+        each.push(wordFirst ? (intoWord(whole) ?? whole) : whole);
       }
-      return out;
+      return hullOf(each);
     } finally {
+      facts = outer;
       open.delete(t);
     }
   };
+  /** What one in-edge passes, read under what its branch proves. Every value the argument reads is
+   *  the instance the branch tested, so a bound on it holds wherever the argument reads it; a param
+   *  read on the way is read under its own in-edges' facts, never these. */
+  const edgeRange = (e: InEdge): StridedRange | undefined => {
+    facts = new Map();
+    if (e.holds !== undefined) {
+      facts = factsOf(e.holds);
+    }
+    return e.arg === undefined ? undefined : rangeOf(e.arg);
+  };
+  /** The bound a compare puts on each side, from the other side's range (read with no facts). */
+  const factsOf = (h: EdgeTest): Map<Value, EdgeBound> => {
+    const out = new Map<Value, EdgeBound>();
+    if (h.lhs === h.rhs) {
+      return out;
+    }
+    for (const [x, y, opcode] of [
+      [h.lhs, h.rhs, h.opcode],
+      [h.rhs, h.lhs, SWAPPED_ICMP[h.opcode]],
+    ] as const) {
+      if (opcode === undefined || ctx.constOf(x) !== undefined) {
+        continue;
+      }
+      const other = rangeOf(y);
+      const b = other === undefined ? undefined : testBound(opcode, other);
+      if (b !== undefined) {
+        out.set(x, b);
+      }
+    }
+    return out;
+  };
   const rangeOf = (x: Value): StridedRange | undefined => {
-    const form = linearTerms(ctx, x);
+    const form = linearTerms(ctx, x, 0, facts);
     if (form === undefined) {
       return undefined;
     }
@@ -893,6 +976,110 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };
   return rangeOf(v);
+}
+
+/** The integers every range in a list holds, and the stride all of them sit on. */
+function hullOf(rs: readonly StridedRange[]): StridedRange | undefined {
+  let out: StridedRange | undefined;
+  for (const r of rs) {
+    out =
+      out === undefined
+        ? r
+        : {
+            lo: Math.min(out.lo, r.lo),
+            hi: Math.max(out.hi, r.hi),
+            stride: gcdOf(gcdOf(out.stride, r.stride), r.lo - out.lo),
+          };
+  }
+  return out;
+}
+
+/** What a branch proves of a value: the integers of one window it may be, unsigned words (`u`,
+ *  from `icmp_u*` and `icmp_eq`) or the signed ones (`s`, from `icmp_s*`). */
+interface EdgeBound {
+  readonly r: StridedRange;
+  readonly window: 'u' | 's';
+}
+
+const S_MIN = -(2 ** 31);
+const S_MAX = 2 ** 31 - 1;
+
+/** `a <op> b` as `b <op'> a`. */
+const SWAPPED_ICMP: Readonly<Record<string, string>> = {
+  icmp_eq: 'icmp_eq',
+  icmp_ne: 'icmp_ne',
+  icmp_slt: 'icmp_sgt',
+  icmp_sgt: 'icmp_slt',
+  icmp_sle: 'icmp_sge',
+  icmp_sge: 'icmp_sle',
+  icmp_ult: 'icmp_ugt',
+  icmp_ugt: 'icmp_ult',
+  icmp_ule: 'icmp_uge',
+  icmp_uge: 'icmp_ule',
+};
+
+/** An integer range as signed words, or undefined when it holds words on both sides of the sign. */
+function intoSigned(r: StridedRange): StridedRange | undefined {
+  if (r.lo >= S_MIN && r.hi <= S_MAX) {
+    return r;
+  }
+  const w = intoWord(r);
+  if (w === undefined || w.hi <= S_MAX) {
+    return w;
+  }
+  return w.lo > S_MAX ? { lo: w.lo - WORD, hi: w.hi - WORD, stride: w.stride } : undefined;
+}
+
+/** What `x <opcode> y` proves of `x`, `y` being somewhere in `other`; undefined for `icmp_ne`, and
+ *  for a compare no `x` can pass (an edge that is never taken bounds nothing here). */
+function testBound(opcode: string, other: StridedRange): EdgeBound | undefined {
+  const span = (lo: number, hi: number, window: 'u' | 's'): EdgeBound | undefined =>
+    lo > hi ? undefined : { r: { lo, hi, stride: lo === hi ? 0 : 1 }, window };
+  const w = intoWord(other);
+  const s = intoSigned(other);
+  switch (opcode) {
+    case 'icmp_eq':
+      return w === undefined ? undefined : { r: w, window: 'u' };
+    case 'icmp_ult':
+      return w && span(0, w.hi - 1, 'u');
+    case 'icmp_ule':
+      return w && span(0, w.hi, 'u');
+    case 'icmp_ugt':
+      return w && span(w.lo + 1, WORD - 1, 'u');
+    case 'icmp_uge':
+      return w && span(w.lo, WORD - 1, 'u');
+    case 'icmp_slt':
+      return s && span(S_MIN, s.hi - 1, 's');
+    case 'icmp_sle':
+      return s && span(S_MIN, s.hi, 's');
+    case 'icmp_sgt':
+      return s && span(s.lo + 1, S_MAX, 's');
+    case 'icmp_sge':
+      return s && span(s.lo, S_MAX, 's');
+    default:
+      return undefined;
+  }
+}
+
+/** A value's range where a branch also bounds it: the two met in the branch's window, or, where
+ *  the range has words on both sides of that window's edge, the narrower of the two (each covers
+ *  every word on its own). A meet that holds nothing bounds nothing. */
+function meetBound(r: StridedRange | undefined, b: EdgeBound): StridedRange | undefined {
+  if (r === undefined) {
+    return b.r;
+  }
+  const m = b.window === 'u' ? intoWord(r) : intoSigned(r);
+  if (m === undefined) {
+    return r.hi - r.lo <= b.r.hi - b.r.lo ? r : b.r;
+  }
+  const lo = Math.max(m.lo, b.r.lo);
+  const hi = Math.min(m.hi, b.r.hi);
+  if (m.stride === 0) {
+    return lo <= hi ? m : undefined;
+  }
+  const first = m.lo + Math.ceil((lo - m.lo) / m.stride) * m.stride;
+  const last = m.lo + Math.floor((hi - m.lo) / m.stride) * m.stride;
+  return first > last ? undefined : { lo: first, hi: last, stride: first === last ? 0 : m.stride };
 }
 
 const mod = (w: number): number => ((w % WORD) + WORD) % WORD;

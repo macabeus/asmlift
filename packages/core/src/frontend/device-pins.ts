@@ -54,7 +54,7 @@
  *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
  *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
  *  another instruction sequence. */
-import { type RangeCtx, type StridedRange, incomingArgs, stridedRange } from '../ir/bits';
+import { type RangeCtx, type StridedRange, incomingEdges, stridedRange } from '../ir/bits';
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -137,10 +137,14 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
   // `addressRangeOf`: where `literalAddrOf` names one address, this names every value a word may
   // hold (ir/bits.ts `stridedRange`), an address or not, a placed name being the one leaf only this
   // module reads.
+  // A block param is read through what each in-edge's branch proves (`edges`): a loop counter's
+  // latch test bounds the counter its back edge passes.
+  const edges = incomingEdges(irBlocks);
   const rangeCtx: RangeCtx = {
     defs: defOf,
     constOf,
-    incoming: incomingArgs(irBlocks),
+    incoming: new Map([...edges].map(([p, es]) => [p, es.map((e) => e.arg)])),
+    edges,
     entry: new Set(irBlocks[0]?.params ?? []),
     pointOf: (v) => (defOf.get(v)?.opcode === 'gaddr' ? literalAddrOf(v) : undefined),
   };
