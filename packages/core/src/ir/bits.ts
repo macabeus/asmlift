@@ -749,17 +749,17 @@ const RANGE_BUDGET = 256;
 /** Every word `v` may hold, or undefined when this cannot bound it. The form is `linearTerms`; a
  *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
  *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
- *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by the range of what a
- *  zero-filling narrowing keeps where that already fits it (`zeroNarrowing`), or, a block param,
- *  by the union of what its in-edges pass, each read under what its branch proves, or
- *  by a range every in-edge provably keeps it in (`integerRange`'s induction, for a loop counter
- *  whose latch bounds one side). Anything else — a function parameter, a whole word loaded from
- *  memory, a name nothing places, a param whose range depends on itself through a loop that no
- *  branch bounds — bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the words
- *  are the sum's integer range moved into one word, when it fits one; a sum whose range crosses a
- *  multiple of 2^32 holds words on both sides of zero, which no interval names (a lone signed
- *  narrow value among them: `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold
- *  every word the machine can compute there, and a wider one only proves less. */
+ *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by what a shift or a mask
+ *  leaves of its operand's range (`shiftMaskRange`), or, a block param, by the union of what its
+ *  in-edges pass, each read under what its branch proves, or by a range every in-edge provably
+ *  keeps it in (`integerRange`'s induction, for a loop counter whose latch bounds one side).
+ *  Anything else — a function parameter, a whole word loaded from memory, a name nothing places, a
+ *  param whose range depends on itself through a loop that no branch bounds — bounds nothing, and
+ *  nothing is the answer. The form equals the word modulo 2^32, so the words are the sum's integer
+ *  range moved into one word, when it fits one; a sum whose range crosses a multiple of 2^32 holds
+ *  words on both sides of zero, which no interval names (a lone signed narrow value among them:
+ *  `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold every word the machine can
+ *  compute there, and a wider one only proves less. */
 export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
   const r = integerRange(ctx, v, false);
   const one = r === undefined ? undefined : intoWord(r);
@@ -810,42 +810,58 @@ function narrowLeaf(d: Op): StridedRange | undefined {
     : { lo: 0, hi: 2 ** bits - 1, stride: 1 };
 }
 
-/** The value a zero-filling narrowing reads and the low bits it keeps: `zext` (its `width`), an
- *  `and` with `2^n - 1`, and a shift left then a zero-fill shift right by one amount (agbcc's
- *  `lsl #24; lsr #24`). Each leaves every word below `2^bits` exactly as it is, so a value whose
- *  words all sit there keeps its own range through it. */
-function zeroNarrowing(ctx: LinearCtx, d: Op): { readonly of: Value; readonly bits: number } | undefined {
-  const amount = (o: Op): number | undefined =>
-    o.operands.length === 1
-      ? typeof o.attrs.imm === 'number'
-        ? o.attrs.imm
+/** The words a `zext`, an `and` with a constant or a zero-fill shift right by a constant leaves,
+ *  from the words its operand may hold (`wordsOf`, undefined where nothing bounds them): a `zext`
+ *  or a mask of `2^n - 1` keeps every word that already fits it, `x & m` is no greater than `x` or
+ *  `m`, and `x >>> s` is each word divided by `2^s`, rounded down. A shift left is a product,
+ *  which `linearTerms` reads, so agbcc's `(u8)k * 2`, `lsl #24; lsr #23`, is `k`'s range doubled
+ *  where that fits a word. Undefined where it names nothing, and the width bound
+ *  (`provableBits`) is all there is. */
+function shiftMaskRange(
+  ctx: LinearCtx,
+  d: Op,
+  wordsOf: (x: Value) => StridedRange | undefined,
+): StridedRange | undefined {
+  const amount =
+    d.operands.length === 1
+      ? typeof d.attrs.imm === 'number'
+        ? d.attrs.imm
         : undefined
-      : o.operands.length === 2
-        ? ctx.constOf(o.operands[1])
+      : d.operands.length === 2
+        ? ctx.constOf(d.operands[1])
         : undefined;
   if (d.opcode === 'zext' && typeof d.attrs.width === 'number' && d.attrs.width > 0 && d.attrs.width < 32) {
-    return { of: d.operands[0], bits: d.attrs.width };
+    const w = wordsOf(d.operands[0]);
+    return w !== undefined && w.hi < 2 ** d.attrs.width ? w : undefined;
   }
   if (d.opcode === 'and') {
-    const masked: [Value, number | undefined][] =
-      d.operands.length === 1
-        ? [[d.operands[0], amount(d)]]
-        : [
-            [d.operands[0], ctx.constOf(d.operands[1])],
-            [d.operands[1], ctx.constOf(d.operands[0])],
-          ];
-    for (const [of, m] of masked) {
-      if (m !== undefined && m > 0 && m < 2 ** 31 && (m & (m + 1)) === 0) {
-        return { of, bits: 32 - Math.clz32(m) };
-      }
+    const [x, c] =
+      amount !== undefined
+        ? [d.operands[0], amount]
+        : d.operands.length === 2
+          ? [d.operands[1], ctx.constOf(d.operands[0])]
+          : [undefined, undefined];
+    if (x === undefined || c === undefined) {
+      return undefined;
     }
-    return undefined;
+    const m = mod(c);
+    const w = wordsOf(x);
+    if (w !== undefined && w.hi <= m && Number.isInteger(Math.log2(m + 1))) {
+      return w;
+    }
+    const hi = Math.min(m, w?.hi ?? m);
+    return { lo: 0, hi, stride: hi === 0 ? 0 : 1 };
   }
-  const s = d.opcode === 'shr_u' ? amount(d) : undefined;
-  const up = s === undefined ? undefined : ctx.defs.get(d.operands[0]);
-  return s !== undefined && s > 0 && s < 32 && up?.opcode === 'shl' && amount(up) === s
-    ? { of: up.operands[0], bits: 32 - s }
-    : undefined;
+  if (d.opcode === 'shr_u' && amount !== undefined && amount > 0 && amount < 32) {
+    const w = wordsOf(d.operands[0]);
+    if (w === undefined) {
+      return undefined;
+    }
+    const by = 2 ** amount;
+    const [lo, hi] = [Math.floor(w.lo / by), Math.floor(w.hi / by)];
+    return { lo, hi, stride: lo === hi ? 0 : w.stride % by === 0 ? w.stride / by : 1 };
+  }
+  return undefined;
 }
 
 /** `stridedRange` before the move into one word: integers, every one of which is congruent modulo
@@ -887,16 +903,15 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       if (leaf !== undefined) {
         return leaf;
       }
-      // a narrowing of a value that already fits its width is that value: agbcc's `(u8)k` of a
-      // counter that stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
-      const z = zeroNarrowing(ctx, d);
-      const inner = z === undefined || --left < 0 ? undefined : rangeOf(z.of, facts);
-      const fits = inner === undefined ? undefined : intoWord(inner);
-      if (z !== undefined && fits !== undefined && fits.hi < 2 ** z.bits) {
-        return fits;
-      }
+      // what a shift or a mask leaves of its operand's range: agbcc's `(u8)k` of a counter that
+      // stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
+      const moved = shiftMaskRange(ctx, d, (x) => {
+        const r = --left < 0 ? undefined : rangeOf(x, facts);
+        return r === undefined ? undefined : intoWord(r);
+      });
       const n = provableBits(bits, t);
-      return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
+      const width = n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
+      return moved !== undefined && (width === undefined || moved.hi - moved.lo <= width.hi - width.lo) ? moved : width;
     }
     const hypothesis = assumed.get(t);
     if (hypothesis !== undefined) {

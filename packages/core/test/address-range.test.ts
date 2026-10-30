@@ -220,7 +220,7 @@ describe('addressRangeOf — what a computed address may be', () => {
   });
 });
 
-describe('addressRangeOf — a narrowing of a value that already fits', () => {
+describe('addressRangeOf — what a shift or a mask leaves of its operand', () => {
   /** `q` merges two constants: `p ? lo : hi`. */
   const merged = (lo: number, hi: number) => {
     const p = v();
@@ -255,13 +255,30 @@ describe('addressRangeOf — a narrowing of a value that already fits', () => {
     const neg = merged(-1, 0);
     expect(rangeIn(neg.blocks, u8Of(neg.join, neg.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
     expect(rangeIn(neg.blocks, neg.join.op('and', { imm: 0xff }, [neg.q]))).toEqual({ lo: 0, hi: 255, stride: 1 });
-    // a mask that is not 2^n - 1 is no narrowing: 0x0f & {0, 0x10} is {0}, not the operand's range
+    expect(rangeIn(neg.blocks, neg.join.op('shr_u', { imm: 1 }, [neg.q]))).toEqual({
+      lo: 0,
+      hi: 2 ** 31 - 1,
+      stride: 1,
+    });
+    // a mask that is not 2^n - 1 keeps no range: 0x0e & {0, 0x10} is {0}, under both 0x0e and 0x10
     const gap = merged(0, 0x10);
-    expect(rangeIn(gap.blocks, gap.join.op('and', { imm: 0x0e }, [gap.q]))).toEqual({ lo: 0, hi: 0x0f, stride: 1 });
-    // shifts by two amounts are no narrowing either
+    expect(rangeIn(gap.blocks, gap.join.op('and', { imm: 0x0e }, [gap.q]))).toEqual({ lo: 0, hi: 0x0e, stride: 1 });
+  });
+
+  test('a zero-fill shift right divides the range it shifts, a shift left multiplies it', () => {
     const s = merged(0, 5);
+    // {0, 5 << 16} >> 24 is {0}
     const odd = s.join.op('shr_u', { imm: 24 }, [s.join.op('shl', { imm: 16 }, [s.q])]);
-    expect(rangeIn(s.blocks, odd)).toEqual({ lo: 0, hi: 255, stride: 1 });
+    expect(rangeIn(s.blocks, odd)).toEqual({ lo: 0, hi: 0, stride: 0 });
+    const r = merged(0, 7);
+    expect(rangeIn(r.blocks, r.join.op('shr_u', { imm: 1 }, [r.q]))).toEqual({ lo: 0, hi: 3, stride: 1 });
+    // agbcc's `(u8)q * 2`, `lsl #24; lsr #23`: narrowed, then doubled, keeping the stride
+    const twice = r.join.op('shr_u', { imm: 23 }, [r.join.op('shl', { imm: 24 }, [r.q])]);
+    expect(rangeIn(r.blocks, twice)).toEqual({ lo: 0, hi: 14, stride: 14 });
+    // past the width, `lsl #24` leaves the word: only the 9 bits `lsr #23` keeps bound it
+    const wide = merged(0, 300);
+    const wideTwice = wide.join.op('shr_u', { imm: 23 }, [wide.join.op('shl', { imm: 24 }, [wide.q])]);
+    expect(rangeIn(wide.blocks, wideTwice)).toEqual({ lo: 0, hi: 511, stride: 1 });
   });
 });
 
