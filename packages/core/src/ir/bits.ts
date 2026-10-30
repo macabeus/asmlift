@@ -761,6 +761,44 @@ function narrowLeaf(d: Op): StridedRange | undefined {
     : { lo: 0, hi: 2 ** bits - 1, stride: 1 };
 }
 
+/** The value a zero-filling narrowing reads and the low bits it keeps: `zext` (its `width`), an
+ *  `and` with `2^n - 1`, and a shift left then a zero-fill shift right by one amount (agbcc's
+ *  `lsl #24; lsr #24`). Each leaves every word below `2^bits` exactly as it is, so a value whose
+ *  words all sit there keeps its own range through it. */
+function zeroNarrowing(ctx: LinearCtx, d: Op): { readonly of: Value; readonly bits: number } | undefined {
+  const amount = (o: Op): number | undefined =>
+    o.operands.length === 1
+      ? typeof o.attrs.imm === 'number'
+        ? o.attrs.imm
+        : undefined
+      : o.operands.length === 2
+        ? ctx.constOf(o.operands[1])
+        : undefined;
+  if (d.opcode === 'zext' && typeof d.attrs.width === 'number' && d.attrs.width > 0 && d.attrs.width < 32) {
+    return { of: d.operands[0], bits: d.attrs.width };
+  }
+  if (d.opcode === 'and') {
+    const masked: [Value, number | undefined][] =
+      d.operands.length === 1
+        ? [[d.operands[0], amount(d)]]
+        : [
+            [d.operands[0], ctx.constOf(d.operands[1])],
+            [d.operands[1], ctx.constOf(d.operands[0])],
+          ];
+    for (const [of, m] of masked) {
+      if (m !== undefined && m > 0 && m < 2 ** 31 && (m & (m + 1)) === 0) {
+        return { of, bits: 32 - Math.clz32(m) };
+      }
+    }
+    return undefined;
+  }
+  const s = d.opcode === 'shr_u' ? amount(d) : undefined;
+  const up = s === undefined ? undefined : ctx.defs.get(d.operands[0]);
+  return s !== undefined && s > 0 && s < 32 && up?.opcode === 'shl' && amount(up) === s
+    ? { of: up.operands[0], bits: 32 - s }
+    : undefined;
+}
+
 /** `stridedRange` before the move into one word: integers, every one of which is congruent modulo
  *  2^32 to a word `v` may hold, and which cover them all. A block param is the union of what its
  *  in-edges pass, read one of two ways, each a sound cover on its own: as the integers they are
@@ -788,6 +826,14 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       const leaf = narrowLeaf(d);
       if (leaf !== undefined) {
         return leaf;
+      }
+      // a narrowing of a value that already fits its width is that value: agbcc's `(u8)k` of a
+      // counter that stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
+      const z = zeroNarrowing(ctx, d);
+      const inner = z === undefined || --left < 0 ? undefined : rangeOf(z.of);
+      const fits = inner === undefined ? undefined : intoWord(inner);
+      if (z !== undefined && fits !== undefined && fits.hi < 2 ** z.bits) {
+        return fits;
       }
       const n = provableBits(bits, t);
       return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
