@@ -861,6 +861,10 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
   let left = RANGE_BUDGET;
   /** what the in-edge being read proves, by the value it bounds; each is read as a term */
   let facts = new Map<Value, EdgeBound>();
+  /** params met again while their own in-edges were being read */
+  const cyclic = new Set<Value>();
+  /** the induction hypotheses under test: each param holds only this range */
+  const assumed = new Map<Value, StridedRange>();
   const bits: BitsCtx = {
     defs: ctx.defs,
     bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
@@ -896,26 +900,82 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       const n = provableBits(bits, t);
       return n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
     }
+    const hypothesis = assumed.get(t);
+    if (hypothesis !== undefined) {
+      return hypothesis;
+    }
     const ins = ctx.entry.has(t) ? undefined : (ctx.edges?.get(t) ?? ctx.incoming.get(t)?.map((arg) => ({ arg })));
-    if (ins === undefined || ins.length === 0 || open.has(t) || --left < 0) {
+    if (open.has(t)) {
+      cyclic.add(t);
+      return undefined;
+    }
+    if (ins === undefined || ins.length === 0 || --left < 0) {
       return undefined;
     }
     open.add(t);
     const outer = facts;
     try {
-      const each: StridedRange[] = [];
-      for (const e of ins) {
-        const whole = edgeRange(e);
-        if (whole === undefined) {
-          return undefined;
-        }
-        each.push(wordFirst ? (intoWord(whole) ?? whole) : whole);
+      // each in-edge as it reads, and apart those that read without the param: an induction's start
+      let readsItself = false;
+      const seeds: (StridedRange | undefined)[] = [];
+      const direct = ins.map((e) => {
+        const r = edgeRange(e);
+        const self = cyclic.delete(t);
+        readsItself ||= self;
+        seeds.push(self ? undefined : r);
+        return r;
+      });
+      let out = direct.every((r) => r !== undefined)
+        ? hullOf(direct.map((r) => (wordFirst ? (intoWord(r) ?? r) : r)))
+        : undefined;
+      // a param read through itself may still hold a range every in-edge keeps it in
+      const proven = readsItself ? inductive(t, ins, seeds) : undefined;
+      if (proven !== undefined && (out === undefined || proven.hi - proven.lo < out.hi - out.lo)) {
+        out = wordFirst ? (intoWord(proven) ?? proven) : proven;
       }
-      return hullOf(each);
+      return out;
     } finally {
       facts = outer;
       open.delete(t);
     }
+  };
+  /** A range `r` for a param that reads itself, proven by induction: every in-edge, read with the
+   *  param anywhere in `r` and under what its branch proves, passes a value inside `r`, so no run
+   *  of the loop can leave it. A signed latch bounds its counter on one side only (`k + 1 <= 7`
+   *  holds of every negative k), and only the counter's start bounds the other. The hypothesis
+   *  starts at the in-edges that read without the param, takes in what they pass, and once the
+   *  bounds the branches name; every sum is exact and a bound read outside its window holds alone,
+   *  so a counter that can wrap, an update on some paths only or an unbounded start never settles
+   *  and proves nothing. */
+  const inductive = (
+    t: Value,
+    ins: readonly InEdge[],
+    seeds: readonly (StridedRange | undefined)[],
+  ): StridedRange | undefined => {
+    let r = hullOf(seeds.filter((x): x is StridedRange => x !== undefined));
+    for (let round = 0; r !== undefined && round < INDUCTION_ROUNDS; round++) {
+      const passed: StridedRange[] = [];
+      const named: StridedRange[] = [];
+      assumed.set(t, r);
+      try {
+        for (const e of ins) {
+          const x = edgeRange(e);
+          if (x === undefined) {
+            return undefined;
+          }
+          passed.push(x);
+          facts.forEach((b) => named.push(...boundSides(b)));
+        }
+      } finally {
+        assumed.delete(t);
+      }
+      const next = hullOf([r, ...passed])!;
+      if (next.lo === r.lo && next.hi === r.hi && next.stride === r.stride) {
+        return r;
+      }
+      r = round === 0 ? hullOf([next, ...named]) : next;
+    }
+    return undefined;
   };
   /** What one in-edge passes, read under what its branch proves. Every value the argument reads is
    *  the instance the branch tested, so a bound on it holds wherever the argument reads it; a param
@@ -1017,6 +1077,17 @@ const SWAPPED_ICMP: Readonly<Record<string, string>> = {
   icmp_ule: 'icmp_uge',
   icmp_uge: 'icmp_ule',
 };
+
+/** The rounds an induction hypothesis may grow before it proves nothing. */
+const INDUCTION_ROUNDS = 4;
+
+/** The sides of a branch's bound that are not its window's edge, each as a one-value range. */
+function boundSides(b: EdgeBound): StridedRange[] {
+  const [floor, ceil] = b.window === 'u' ? [0, WORD - 1] : [S_MIN, S_MAX];
+  return [b.r.lo === floor ? undefined : b.r.lo, b.r.hi === ceil ? undefined : b.r.hi]
+    .filter((x): x is number => x !== undefined)
+    .map((x) => ({ lo: x, hi: x, stride: 0 }));
+}
 
 /** An integer range as signed words, or undefined when it holds words on both sides of the sign. */
 function intoSigned(r: StridedRange): StridedRange | undefined {

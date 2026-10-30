@@ -348,9 +348,54 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn([entry, head, side, exit], q)).toBeUndefined();
   });
 
-  test('a signed latch bounds one side only, so alone it leaves the counter unbounded below', () => {
-    // s32 k: `k + 1 <= 7` signed holds of every negative k too
+  test('a signed latch bounds one side; the start bounds the other, by induction', () => {
+    // s32 k: `k + 1 <= 7` signed holds of every negative k too, but k starts at 0 and only grows
     const { blocks, head, q } = loop(0, (h, next) => h.op('icmp_sle', {}, [next, k(h, 7)]));
-    expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // the latch tests the counter, not what it passes: `if (k < 7) goto head(k + 1)`
+    const before = loop(0, (h, _next, q) => h.op('icmp_slt', {}, [q, k(h, 7)]));
+    expect(rangeIn(before.blocks, before.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // counting down: `for (k = 7; k - 1 >= 0; k--)`
+    const down = loop(7, (h, next) => h.op('icmp_sge', {}, [next, k(h, 0)]), { step: -1 });
+    expect(rangeIn(down.blocks, down.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // a step of two keeps it in [0, 7] too
+    const two = loop(0, (h, next) => h.op('icmp_sle', {}, [next, k(h, 7)]), { step: 2 });
+    expect(rangeIn(two.blocks, two.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+  });
+
+  test("kleod's sub_0804D0B0 loop: from 13 while `k + 1 < n`, n a u8 reload, is [13, 254]", () => {
+    const { blocks, q } = loop(13, (h, next) =>
+      h.op('icmp_slt', {}, [next, h.op('load', { off: 0, width: 1, signed: false }, [v()])]),
+    );
+    expect(rangeIn(blocks, q)).toEqual({ lo: 13, hi: 254, stride: 1 });
+  });
+
+  test('what no induction proves: an unbounded start, a counter that may wrap, a second update', () => {
+    // `for (k = gS; k < 8; k++)`: the start is any word
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const exit = block();
+    br(entry, head, [entry.op('load', { off: 0, width: 4, signed: true }, [v()])]);
+    const next = head.op('add', {}, [q, k(head, 1)]);
+    condBr(head, head.op('icmp_sle', {}, [next, k(head, 7)]), [head, [next]], [exit, []]);
+    expect(rangeIn([entry, head, exit], q)).toBeUndefined();
+    expect(rangeIn([entry, head, exit], u8Of(head, q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    // `for (k = 1; k + 1 > 0; k++)` runs until k + 1 wraps to INT_MIN: the latch alone bounds what
+    // its edge passes, every positive word, and no induction narrows it (nothing settles below)
+    const wraps = loop(1, (h, next) => h.op('icmp_sgt', {}, [next, k(h, 0)]));
+    expect(rangeIn(wraps.blocks, wraps.q)).toEqual({ lo: 1, hi: 2 ** 31 - 1, stride: 1 });
+    // a signed latch beside a second back edge that adds two and is not tested
+    const e2 = block();
+    const q2 = v();
+    const h2 = block([q2]);
+    const side = block();
+    const x2 = block();
+    br(e2, h2, [k(e2, 0)]);
+    const n1 = h2.op('add', {}, [q2, k(h2, 1)]);
+    condBr(h2, h2.op('icmp_sle', {}, [n1, k(h2, 7)]), [h2, [n1]], [side, []]);
+    condBr(side, side.op('load', { off: 0, width: 1 }, [v()]), [h2, [side.op('add', {}, [q2, k(side, 2)])]], [x2, []]);
+    expect(rangeIn([e2, h2, side, x2], q2)).toBeUndefined();
   });
 });
