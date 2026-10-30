@@ -2228,15 +2228,13 @@ export interface StructureHooks {
    *  cross-jumped block. Not fired by `assertDefaultAccepts`' structuring, which is not the
    *  setting being observed. */
   onTailFallerKept?: () => void;
-  /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes `forPlanAt`'s shape
-   *  checks — a single pure latch, a guard or plain entry, and a test and update read only from the
-   *  latch, the header's params and values from outside the loop — the one place
-   *  `spellCountedLoopsFor` changes what the structurer reads. A structuring with that option off
-   *  that never fires it builds the same tree as the same options with it on, so rank.ts skips
-   *  `/for-continue` on its sibling. It can fire where the `for` is still refused by the checks
-   *  after those (the update's copy, the guard read on the entry values): that costs one structuring
-   *  of a tree the dedup discards, never a candidate. Not fired by `assertDefaultAccepts`'
-   *  structuring. */
+  /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes every check of
+   *  `forPlanAt` — a single pure latch, a guard or plain entry, a test and update read only from the
+   *  latch, the header's params and values from outside the loop, one update copy, and the guard
+   *  read on the entry values — the one place `spellCountedLoopsFor` changes what the structurer
+   *  reads. A structuring with that option off that never fires it builds the same tree as the same
+   *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
+   *  `assertDefaultAccepts`' structuring. */
   onForOffered?: () => void;
 }
 
@@ -8976,16 +8974,31 @@ function structureRanked(
     if (!closed(cond) || !back.args.every((a) => closed(a))) {
       return null;
     }
-    // a loop no run asked for is spelled `for` only under `/for-continue`, and a structuring without it
-    // reports that it met one; nothing above this line writes any state
-    if (!spellCountedLoopsFor && !forRank.asked.has(h)) {
-      hooks.onForOffered?.();
-      return null;
-    }
+    // A loop no run asked for is spelled `for` only under `/for-continue`, and a structuring without it
+    // reports that it met one — only once every check below has passed, just ahead of the copies it
+    // would emit, so the report is exact: a loop the `for` refuses anyway is never offered. Those
+    // checks read the update's and the init's copies, whose spelling can push a gap or refuse; read
+    // for a loop that is only being offered, that is undone, so the structuring that reports it keeps
+    // exactly the outcome it had before it asked.
+    const offered = !spellCountedLoopsFor && !forRank.asked.has(h);
     const auditMark = droppedUndefCopies.length;
-    const updateRecs = edgeCopyRecords(latch, back);
-    const initRecs = edgeCopyRecords(g, initEdge);
-    droppedUndefCopies.length = auditMark;
+    const gapMark = strictGaps.length;
+    let updateRecs: ReturnType<typeof edgeCopyRecords>;
+    let initRecs: ReturnType<typeof edgeCopyRecords>;
+    try {
+      updateRecs = edgeCopyRecords(latch, back);
+      initRecs = edgeCopyRecords(g, initEdge);
+    } catch (e) {
+      if (offered && e instanceof StructureError) {
+        return null;
+      }
+      throw e;
+    } finally {
+      droppedUndefCopies.length = auditMark;
+      if (offered) {
+        strictGaps.length = gapMark;
+      }
+    }
     const iv = updateRecs.length === 1 ? updateRecs[0].name : undefined;
     const ivInit = initRecs.find((r) => r.name === iv);
     if (
@@ -9039,6 +9052,10 @@ function structureRanked(
       if (first === null || (first !== 0) !== contIsTaken) {
         return null;
       }
+    }
+    if (offered) {
+      hooks.onForOffered?.();
+      return null;
     }
     const [inc] = argAssigns(latch, h);
     const inits = argAssigns(g, h);
