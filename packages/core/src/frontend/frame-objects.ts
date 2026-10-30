@@ -599,8 +599,9 @@ function reliftRange({
   const extents = [...uses.escapeExtents.values()].flat();
   const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
   const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
+  const indexReaches = [...uses.indexReaches.values()].flat();
   const kept = (word: number): boolean =>
-    firstRejection(gates, { word, extents, bounded, fills, splits, indexed: uses.indexed.size > 0 }) !== null;
+    firstRejection(gates, { word, extents, bounded, fills, splits, indexReaches }) !== null;
   const scalarWord = (w: number, pastScalar: boolean): boolean => {
     const touching = uses.fixed.filter((f) => overlaps(f.at, f.width, w, 4));
     const owners = [...objects.keys()].filter((o) => overlaps(o, 1, w, 4));
@@ -654,8 +655,9 @@ export interface HandBack {
   readonly fills: ReadonlySet<number>;
   /** the target may split the one object (`splitsOneObject`) */
   readonly splits: boolean;
-  /** some access reaches the frame through a runtime index */
-  readonly indexed: boolean;
+  /** every access through a runtime index, as the frame bytes it may reach (`indexReaches`),
+   *  `null` where nothing bounds the index */
+  readonly indexReaches: readonly IndexReach[];
 }
 
 /** WHAT KEEPS AN END WORD IN THE ONE OBJECT (`reliftRange`): a reach through the object that may
@@ -680,16 +682,18 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     guardedBy: 'frame-audit-stages.test.ts: keeps a word a bounded copy reaches',
     rejects: (c) => c.bounded.some((e) => overlaps(c.word, 4, e.lo, e.hi - e.lo)),
   },
-  // An index reaches every byte of the object it is based in, so no split follows it
-  // (`provenParts` keeps the one object whole), and a word handed back would only leave the bytes
-  // the index may reach. `*(u32 *)(s + 32) = x; return s[16 + i];` on agbcc is spelled exactly as
-  // a spill slot beside an index is.
+  // An index nothing bounds reaches every byte of the object it is based in, so no split follows
+  // it (`provenParts` keeps the one object whole), and a word handed back would only leave the
+  // bytes the index may reach. `*(u32 *)(s + 32) = x; return s[16 + i];` on agbcc is spelled
+  // exactly as a spill slot beside an index is. An index whose range is proven (`indexReaches`:
+  // `s[16 + (i & 7) * 2]`) reaches only the bytes it names, so a word outside every such reach is
+  // read through no index, and handing it back loses nothing an index could read.
   {
     id: 'runtime-index',
-    why: 'a runtime index may reach every byte of the object, this word included',
+    why: 'a runtime index may reach this word: nothing bounds it, or its bounded reach covers it',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: a word a runtime index may reach is not handed back to the slot model',
-    rejects: (c) => c.indexed,
+    rejects: (c) => c.indexReaches.some((r) => r === null || overlaps(c.word, 4, r.lo, r.hi - r.lo)),
   },
   // Handing back buys a split and nothing else: two or more copies with a literal count must fill
   // the area, on a target that splits at all (PPC_MWCC places address-taken arrays in no order
