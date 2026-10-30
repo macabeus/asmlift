@@ -644,7 +644,7 @@ function splitsOneObject(target: TargetDescription): boolean {
  *  escape and runtime index of the frame as the bytes each may reach (`frameReaches`). */
 export interface HandBack {
   readonly word: number;
-  /** every reach through the frame, `null` where nothing bounds it */
+  /** every escape and runtime index, with the bytes each may reach */
   readonly reaches: readonly OwnedReach[];
   /** where a bounded copy writes into the frame */
   readonly fills: ReadonlySet<number>;
@@ -1236,7 +1236,7 @@ interface FrameAccessOp {
 
 /** THE FRAME BYTES `[lo, hi)` ONE USE MAY TOUCH, or `null` where nothing bounds it, which is every
  *  byte: a runtime index's reach (`FrameUses.indexed`) and an escape's extent
- *  (`FrameUses.escapeExtents`) are each one. `mayTouch` is the one reading of `null`. */
+ *  (`FrameUses.escapeExtents`) are each one. */
 type FrameReach = { readonly lo: number; readonly hi: number } | null;
 
 /** Whether a use reaching `r` may touch any of the `width` bytes at `lo`: every byte where
@@ -1311,11 +1311,7 @@ interface FrameUses {
   readonly byValueReads: ReadonlyMap<number, readonly { readonly op: Op; readonly type: IrType }[]>;
   readonly useCount: ReadonlyMap<number, number>;
   /** every runtime-indexed access of each object, with the frame bytes `[lo, hi)` it may touch
-   *  (`reach`): the object's offset plus every value its index may hold (`addressRangeOf`),
-   *  widened by the access's own width — or `null` where nothing bounds the index. The width rule
-   *  of the one object (`keepAsOneObject`), its split (`provenParts`) and the words handed back to
-   *  the slot model (`reliftRange`) read a bounded reach as the bytes it names, and `null` as
-   *  every byte. */
+   *  (`reach`, `indexedAccess`), or `null` where nothing bounds the index */
   readonly indexed: ReadonlyMap<number, readonly IndexedAccess[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
