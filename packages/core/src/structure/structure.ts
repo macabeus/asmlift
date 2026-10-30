@@ -123,7 +123,7 @@ import {
 } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import type { ContextGlobals } from '../proto-context';
-import { foldConstPair, isConstFoldOpcode } from '../raise/const';
+import { evalIntPair, foldConstPair, isConstFoldOpcode, isIntPairOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
 import { storeSigned } from '../raise/storesign';
@@ -7256,6 +7256,18 @@ function structureRanked(
     }
     if (term.opcode === 'br') {
       const target = term.successors[0].block;
+      // a `while (1)` the rerun spells `for` whose first test the compiler folded away (`forPlanAt`)
+      const fl = foreverLoops.get(target);
+      const plan = fl !== undefined && !onStack.has(target) ? forPlanAt(b, fl) : null;
+      if (plan !== null) {
+        onStack.add(target);
+        try {
+          out.push(...emitForever(fl!, stop, plan));
+        } finally {
+          onStack.delete(target);
+        }
+        return out;
+      }
       out.push(...argAssignsFor(b, term.successors[0]));
       out.push(...structureRegion(target, stop));
       return out;
@@ -7366,9 +7378,16 @@ function structureRanked(
           siblings.add(defEdge.block);
         }
         // The latch of the `for` the switch sits in is no sibling: an edge into it is `continue;`.
-        const jumps = new Set<Block>(
-          loopCtx?.forLatch !== undefined && loopCtx.forLatch !== at ? [loopCtx.forLatch] : [],
-        );
+        // Nor, once the rerun asks the loop (`ForRanking`) and it is not spelled `for`, is the header
+        // of the `while (1)` it sits in, which structureRegion spells `continue;` too. Only asked: an
+        // arm that reaches the latch of a counted loop then takes a copy of its test and update,
+        // which a first run must not prefer to the `for` the rerun reads.
+        const continueTo =
+          loopCtx === null
+            ? undefined
+            : (loopCtx.forLatch ??
+              (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
+        const jumps = new Set<Block>(continueTo !== undefined && continueTo !== at ? [continueTo] : []);
         jumps.forEach((x) => siblings.delete(x));
         // `analyzeArmExit` does not depend on emission order, so the exits can be settled before
         // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
@@ -8854,20 +8873,30 @@ function structureRanked(
   // bytes as `if (i <= n) do { .. } while (++i <= n)` only where no `continue` exists — so the guard
   // is the `for`'s own first test, and the reading drops it.
   //
-  // Taken only for a loop the rerun asks (`ForRanking`), from the guard `g` that enters it, and
-  // refused (null) unless every part of the `for` is the asm's, read where the `for` reads it:
-  //   • the guard branches only to the header and the exit, and is the header's one way in beside
-  //     the one latch, which branches only to the header and the exit;
+  // Where the first test is constant, the compiler folds it away and leaves no guard: `for (i = 0;
+  // i < 40; i++)` enters its body at once, from a block `g` that ends in a `br` to the header. That
+  // entry is the `for`'s too where the test, read on the entry values, provably stays in.
+  //
+  // Taken only for a loop the rerun asks (`ForRanking`), from the block `g` that enters it — a guard
+  // or a plain `br` — and refused (null) unless every part of the `for` is the asm's, read where the
+  // `for` reads it:
+  //   • `g` branches only to the header and the exit, or only to the header, and is the header's one
+  //     way in beside the one latch, which branches only to the header and the exit;
   //   • the exit and the latch take no params: no edge into either carries a copy;
   //   • the latch is pure — no effect, no qualified access, no named or anchored def — and what its
   //     test and update read is its own ops over the header's params and values from outside the
-  //     loop, since the `for` evaluates them after the update and, the first time, before the body;
-  //   • the update is ONE copy, `inc`, and the guard's copies into the header name that variable
-  //     with a value that reads no other copy's name, `init`; the rest precede the `for`;
+  //     loop, since the `for` evaluates them after the update and, the first time, before the body.
+  //     A back-edge value the header computes from those by pure ops is the update's too (agbcc
+  //     keeps `i + 1` from a body that reads it, and the latch hands that register round): the
+  //     update runs after the header did on every path, and the test reads it only as the variable
+  //     it updates;
+  //   • the update is ONE copy, `inc`, and `g`'s copies into the header name that variable with a
+  //     value that reads no other copy's name, `init`; the rest precede the `for`;
   //   • the test reads no variable the update writes except through its back-edge value, and no
   //     inner loop's value (`latchInnerSub`);
-  //   • the guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load
-  //     on either side read through only where it is evaluated at the test.
+  //   • a guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load on
+  //     either side read through only where it is evaluated at the test; with no guard, that test
+  //     folds to a constant that stays in the loop.
   type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo): ForPlan | null => {
     const h = fl.header;
@@ -8880,13 +8909,14 @@ function structureRanked(
       t.successors.length === 2 &&
       t.successors.some((sc) => sc.block === h) &&
       t.successors.some((sc) => sc.block === exit);
+    const guarded = gterm.opcode === 'cond_br';
     if (
       !forRank.asked.has(h) ||
       exit === null ||
       latch === undefined ||
       latch === h ||
       fl.body.has(g) ||
-      !onlyTo(gterm) ||
+      !(guarded ? onlyTo(gterm) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
       !onlyTo(lterm) ||
       exit.params.length > 0 ||
       latch.params.length > 0 ||
@@ -8896,7 +8926,10 @@ function structureRanked(
     ) {
       return null;
     }
-    const closed = (v: Value, seen = new Set<Value>()): boolean => {
+    const back = successorTo(latch, h)!;
+    const backArgs = new Set<Value>(back.args);
+    // `pure`: below a back-edge value the header computes, where only pure ops may be read
+    const closed = (v: Value, pure = false, seen = new Set<Value>()): boolean => {
       if (seen.has(v)) {
         return true;
       }
@@ -8906,9 +8939,12 @@ function structureRanked(
       if (at === undefined || !fl.body.has(at) || (d === undefined && at === h)) {
         return true;
       }
-      return d !== undefined && at === latch && d.operands.every((o) => closed(o, seen));
+      if (d === undefined || (pure && (effectful(d) || orderSensitive(d)))) {
+        return false;
+      }
+      const inHeader = at === h && (pure || backArgs.has(v)) && !effectful(d) && !orderSensitive(d);
+      return (at === latch || inHeader) && d.operands.every((o) => closed(o, pure || inHeader, seen));
     };
-    const back = successorTo(latch, h)!;
     const initEdge = successorTo(g, h)!;
     const cond = lterm!.operands[0];
     if (!closed(cond) || !back.args.every((a) => closed(a))) {
@@ -8945,9 +8981,32 @@ function structureRanked(
       return at === latch || (at === g && !g.ops.slice(opIndex.get(d)! + 1).some(effectful));
     };
     const contIsTaken = lterm!.successors[0].block === h;
-    const enterIsTaken = gterm.successors[0].block === h;
-    if (!sameAtEntry(cond, gterm.operands[0], entryVals, enterIsTaken !== contIsTaken, atTest)) {
-      return null;
+    // the test on the entry values, where it folds: each leaf a constant, each op one `evalIntPair` reads
+    const atEntry = (v0: Value): number | null => {
+      const v = entryVals.get(v0) ?? v0;
+      const d = defs.get(v);
+      if (d === undefined || intWidth(v.type) !== 32) {
+        return null;
+      }
+      if (d.opcode === 'const') {
+        return typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
+      }
+      if (!isIntPairOpcode(d.opcode) || d.operands.length !== 2) {
+        return null;
+      }
+      const [x, y] = [atEntry(d.operands[0]), atEntry(d.operands[1])];
+      return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
+    };
+    if (guarded) {
+      const enterIsTaken = gterm.successors[0].block === h;
+      if (!sameAtEntry(cond, gterm.operands[0], entryVals, enterIsTaken !== contIsTaken, atTest)) {
+        return null;
+      }
+    } else {
+      const first = atEntry(cond);
+      if (first === null || (first !== 0) !== contIsTaken) {
+        return null;
+      }
     }
     const [inc] = argAssigns(latch, h);
     const inits = argAssigns(g, h);
