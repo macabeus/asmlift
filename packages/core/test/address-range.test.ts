@@ -219,3 +219,48 @@ describe('addressRangeOf — what a computed address may be', () => {
     expect(rangeIn([entry, head], q)).toBeUndefined();
   });
 });
+
+describe('addressRangeOf — a narrowing of a value that already fits', () => {
+  /** `q` merges two constants: `p ? lo : hi`. */
+  const merged = (lo: number, hi: number) => {
+    const p = v();
+    const entry = block([p]);
+    const left = block();
+    const q = v();
+    const join = block([q]);
+    condBr(entry, p, [left, []], [join, [entry.op('const', { value: hi })]]);
+    br(left, join, [left.op('const', { value: lo })]);
+    return { blocks: [entry, left, join], join, q };
+  };
+
+  test("agbcc's `(u8)q`, a mask and a zext keep the range of a value that fits their width", () => {
+    const { blocks, join, q } = merged(0, 5);
+    expect(rangeIn(blocks, u8Of(join, q))).toEqual({ lo: 0, hi: 5, stride: 5 });
+    expect(rangeIn(blocks, join.op('and', { imm: 0xff }, [q]))).toEqual({ lo: 0, hi: 5, stride: 5 });
+    expect(rangeIn(blocks, join.op('and', {}, [join.op('const', { value: 7 }), q]))).toEqual({
+      lo: 0,
+      hi: 5,
+      stride: 5,
+    });
+    expect(rangeIn(blocks, join.op('zext', { width: 8 }, [q]))).toEqual({ lo: 0, hi: 5, stride: 5 });
+    // scaled, as an index: `(u8)q * 2 + 1`
+    const at = join.op('add', {}, [join.op('shl', { imm: 1 }, [u8Of(join, q)]), join.op('const', { value: 1 })]);
+    expect(rangeIn(blocks, at)).toEqual({ lo: 1, hi: 11, stride: 10 });
+  });
+
+  test('a value past the width, or one that wraps into it, keeps only the width bound', () => {
+    const wide = merged(0, 300);
+    expect(rangeIn(wide.blocks, u8Of(wide.join, wide.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    // -1 is 0xffffffff: (u8)-1 is 255, never -1
+    const neg = merged(-1, 0);
+    expect(rangeIn(neg.blocks, u8Of(neg.join, neg.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    expect(rangeIn(neg.blocks, neg.join.op('and', { imm: 0xff }, [neg.q]))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    // a mask that is not 2^n - 1 is no narrowing: 0x0f & {0, 0x10} is {0}, not the operand's range
+    const gap = merged(0, 0x10);
+    expect(rangeIn(gap.blocks, gap.join.op('and', { imm: 0x0e }, [gap.q]))).toEqual({ lo: 0, hi: 0x0f, stride: 1 });
+    // shifts by two amounts are no narrowing either
+    const s = merged(0, 5);
+    const odd = s.join.op('shr_u', { imm: 24 }, [s.join.op('shl', { imm: 16 }, [s.q])]);
+    expect(rangeIn(s.blocks, odd)).toEqual({ lo: 0, hi: 255, stride: 1 });
+  });
+});
