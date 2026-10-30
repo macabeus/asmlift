@@ -9896,10 +9896,10 @@ function calledOnly(
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/
 // for targets THAT loop, so we do not descend into them; but `if`/`switch` do not capture `continue`,
-// so we scan through those. DEFENSIVE: the structurer does not currently emit an explicit `continue`
-// node (the in-body early-exit is an IMPLICIT continue — a fall-through to the loop bottom — and a
-// conditional continue DECLINES), so this never fires today; it guards the one case where the while→for
-// re-bracketing would change semantics (a `continue` runs `inc` under `for`, skips it under `while`).
+// so we scan through those. The structurer emits `continue;` for an edge into the header of a `while
+// (1)` (structureRegion) and into the latch of a `for` (`forPlanAt`), so a `while` can hold one: this
+// guards the one case where the while→for re-bracketing would change semantics (a `continue` runs
+// `inc` under `for`, skips it under `while`).
 function hasEnclosingContinue(stmts: Stmt[]): boolean {
   const scan = (s: Stmt): boolean => {
     switch (s.k) {
