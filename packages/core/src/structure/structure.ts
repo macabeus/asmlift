@@ -8906,7 +8906,10 @@ function structureRanked(
   // or a plain `br` — and refused (null) unless every part of the `for` is the asm's, read where the
   // `for` reads it:
   //   • `g` branches only to the header and the exit, or only to the header, and is the header's one
-  //     way in beside the one latch, which branches only to the header and the exit;
+  //     way in beside the one latch, which branches only to the header and the exit. `g`'s way to
+  //     the exit may pass a RELAY, a block whose one op jumps there and that nothing else reaches:
+  //     agbcc writes `ble .LCB; b .L4 @long jump` (or `bl .L4 @far jump`) where the exit is past a
+  //     Thumb conditional branch's range, and that `b` is the same edge;
   //   • the exit and the latch take no params: no edge into either carries a copy;
   //   • the latch is pure — no effect, no qualified access, no named or anchored def — and what its
   //     test and update read is its own ops over the header's params and values from outside the
@@ -8929,18 +8932,34 @@ function structureRanked(
     const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
     const gterm = g.ops[g.ops.length - 1];
     const lterm = latch?.ops[latch.ops.length - 1];
-    const onlyTo = (t: Op | undefined): boolean =>
+    // `b`, or the exit where `b` is a relay into it that only `g` enters
+    const relayed = (b: Block): Block => {
+      const t = b.ops[0];
+      const from = preds.get(b) ?? [];
+      return b !== exit &&
+        exit !== null &&
+        b.params.length === 0 &&
+        b.ops.length === 1 &&
+        t.opcode === 'br' &&
+        t.successors[0]?.block === exit &&
+        t.successors[0].args.length === 0 &&
+        from.length > 0 &&
+        from.every((p) => p === g)
+        ? exit
+        : b;
+    };
+    const onlyTo = (t: Op | undefined, via: (b: Block) => Block = (b) => b): boolean =>
       t?.opcode === 'cond_br' &&
       t.successors.length === 2 &&
       t.successors.some((sc) => sc.block === h) &&
-      t.successors.some((sc) => sc.block === exit);
+      t.successors.some((sc) => via(sc.block) === exit);
     const guarded = gterm.opcode === 'cond_br';
     if (
       exit === null ||
       latch === undefined ||
       latch === h ||
       fl.body.has(g) ||
-      !(guarded ? onlyTo(gterm) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
+      !(guarded ? onlyTo(gterm, relayed) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
       !onlyTo(lterm) ||
       exit.params.length > 0 ||
       latch.params.length > 0 ||

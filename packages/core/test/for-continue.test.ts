@@ -149,6 +149,31 @@ test('a guard that is not the loop test refuses the `for`', () => {
   refusesFor(forJt({ guard: '%4: u32 = icmp_sge %0, %1\n  cond_br %4, ^bb12(), ^bb1(%0)' }));
 });
 
+test('a guard that reaches the exit through a relay block lifts as the `for`', () => {
+  // agbcc's `ble .LCB; b .L4 @long jump` where the exit is past a conditional branch's range: the
+  // guard's exit edge is a block whose one op jumps to the exit
+  const ir = forJt({
+    guard: '%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb15(), ^bb1(%0)\n^bb15():\n  br ^bb12()',
+  });
+  const { src, agreement, shipped } = judged(ir);
+  expect(src).toContain('for (v0 = a0; a1 >= v0; v0 = v0 + 1) {');
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('a relay block an arm enters too refuses the `for`', () => {
+  // the relay is the exit's only way in from case 1, so it is no longer the guard's own edge
+  const ir = forJt({
+    guard: '%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb15(), ^bb1(%0)\n^bb15():\n  br ^bb12()',
+  }).replace('%24: s32 = call %23 {target="k"}\n  br ^bb12()', '%24: s32 = call %23 {target="k"}\n  br ^bb15()');
+  expect(ir).toContain('br ^bb15()\n^bb7');
+  // the `for` is not read through a relay something else enters, and the function declines as it
+  // does with no `for` reading at all
+  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+});
+
 test('a latch that runs a second update refuses the `for`', () => {
   // two loop variables would need a comma in the `for`'s update, which L3 does not spell
   const ir = forJt()
