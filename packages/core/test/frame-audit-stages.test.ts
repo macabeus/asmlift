@@ -843,4 +843,22 @@ describe('keepAsOneObject', () => {
     kept(blk);
     return blk;
   };
+  // `u16 a[2]; u32 b; … return ((u16 *)a)[i & mask] + b;` — a 2-byte index beside a 4-byte read
+  // of the other copy: two widths meet only at a byte the index may reach
+  test('asks the width rule of a bounded index only at the bytes it may reach', () => {
+    const halves = (mask: number) =>
+      copies([4, 4], (a, b, i) => {
+        const [m, one] = [konst(mask), konst(1)];
+        const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+        const sh = mkOp('shl', { operands: [and.results[0], one.results[0]], results: [value()] });
+        const at = mkOp('add', { operands: [a, sh.results[0]], results: [value()] });
+        return [m, one, and, sh, at, load(at.results[0], 0, 2), load(b, 0, 4)];
+      });
+    // `i & 1` reaches [0, 4), the lower copy alone
+    expect(kept(halves(1))).toEqual({ policy: 'one-object', sinks: [] });
+    // `i & 3` reaches [0, 8), the word at 4 included
+    expect(() => kept(halves(3))).toThrow(
+      'the byte at [sp,#4] of the bytes [sp,#0) to [sp,#8) kept as one object is accessed 4 bytes wide and by a runtime index 2 bytes wide',
+    );
+  });
 });

@@ -2504,13 +2504,23 @@ function keepAsOneObject({
     fail(`${kept} cannot hold every writer — ${writer}`);
   }
   // A runtime index names no byte, so the rule below is asked of it at EVERY byte it may reach:
-  // all of them. Two indexed widths refuse here; an index beside a member of another width
-  // refuses after the members are checked against each other, so a member pair keeps naming its
-  // own byte (`indexedWidth` says why one width is enough).
-  const index = indexedWidth([...uses.indexed.values()].flat());
-  if (index.refusal !== null) {
-    fail(`a runtime index into ${kept} ${index.refusal}`);
-  }
+  // all of them where nothing bounds it, the bytes its `reach` names where one does — a byte no
+  // index reaches is read at one type whatever the index's is, and accesses that share no byte
+  // cannot serve each other a stale value. Two indexed widths that may share a byte refuse here;
+  // an index beside a member of another width refuses after the members are checked against each
+  // other, so a member pair keeps naming its own byte (`indexedWidth` says why one width is
+  // enough).
+  const indexes = [...uses.indexed.values()].flat();
+  const reaches = (x: IndexedAccess, lo: number, hi: number): boolean =>
+    x.reach === null || overlaps(lo, hi - lo, x.reach.lo, x.reach.hi - x.reach.lo);
+  indexes.forEach((x, i) => {
+    for (const y of indexes.slice(i + 1)) {
+      const { refusal } = indexedWidth([x, y]);
+      if (refusal !== null && (y.reach === null || reaches(x, y.reach.lo, y.reach.hi))) {
+        fail(`a runtime index into ${kept} ${refusal}`);
+      }
+    }
+  });
   // ONE TYPE PER BYTE, OR ONE UNION. agbcc at -O2 turns on type-based alias analysis
   // (toplev.c:3616), and compiled, a `u32` read through a cast is served the earlier `u32` store
   // straight past a `u16` store to the same bytes — a stale value. So a byte two accesses of
@@ -2546,8 +2556,9 @@ function keepAsOneObject({
     }
   }
   if (twoWidths !== undefined) {
-    // any runtime index, a byte one too: `indexedWidth` leaves width 1 out because a char access
-    // agrees with every width, but a union view is still spelled for fixed offsets alone
+    // any runtime index, a byte one too, and wherever its reach lies: `indexedWidth` leaves width
+    // 1 out because a char access agrees with every width, but a union view is spelled for fixed
+    // offsets on the object alone, and an indexed access is not one (the rewrite below refuses it)
     const why = unionRefusal({ from, to, uses, indexed: uses.indexed.size > 0 });
     if (why !== null) {
       fail(
@@ -2557,9 +2568,10 @@ function keepAsOneObject({
     }
   }
   for (const [b, had] of widthAt) {
-    if (index.width !== null && had !== index.width) {
+    const by = indexes.find((x) => x.width !== 1 && x.width !== had && reaches(x, b, b + 1));
+    if (by !== undefined) {
       fail(
-        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
+        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${by.width} ` +
           `bytes wide, ${STALE_ACROSS_TYPES}`,
       );
     }
