@@ -2337,15 +2337,20 @@ export function enumerateCandidates(
             // OFF sibling structured without firing the witness would rebuild that sibling's tree, so
             // it is skipped and reported as the tree dedup it is. A sibling not structured in this
             // pass (dropped, or skipped above) witnessed nothing, and the setting is structured.
-            if (
-              STRUCTURE_VARIATIONS.some((variation) => {
-                if (variation.offWitness === undefined || !s[variation.flag]) {
-                  return false;
-                }
-                const seen = witnessed.get(s.variations.filter((v) => v !== variation.name).join('/'));
-                return seen !== undefined && !seen.has(variation.offWitness);
-              })
-            ) {
+            //
+            // A setting skipped HERE builds its sibling's structuring, so it fires the hooks the
+            // sibling fired, and it is recorded with the sibling's set. Without that the gate does
+            // not compose: a setting carrying two witnessed variations (`tail-copies/for-continue`)
+            // finds each sibling unrecorded and is structured however inert both are.
+            const sameAs = STRUCTURE_VARIATIONS.flatMap((variation) => {
+              if (variation.offWitness === undefined || !s[variation.flag]) {
+                return [];
+              }
+              const seen = witnessed.get(s.variations.filter((v) => v !== variation.name).join('/'));
+              return seen !== undefined && !seen.has(variation.offWitness) ? [seen] : [];
+            });
+            if (sameAs.length > 0) {
+              witnessed.set(key, sameAs[0]);
               opts.onTreeDeduped?.();
               continue;
             }
