@@ -66,8 +66,9 @@ export interface LiteralAddresses {
   constOf(v: Value): number | undefined;
   /** the literal address `v` denotes, or undefined when this cannot say */
   literalAddrOf(v: Value): number | undefined;
-  /** every address `v` may denote, as a strided unsigned interval, or undefined when this cannot
-   *  bound it */
+  /** every value the word `v` may hold, as a strided unsigned interval, or undefined when this
+   *  cannot bound it: not only the addresses an address may denote — a runtime index into a frame
+   *  object is bounded here too (frame-objects.ts `indexedAccess`) */
   addressRangeOf(v: Value): StridedRange | undefined;
 }
 
@@ -133,8 +134,9 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     }
     return undefined;
   };
-  // `addressRangeOf`: where `literalAddrOf` names one address, this names every address a value
-  // may hold (ir/bits.ts `stridedRange`), a placed name being the one leaf only this module reads.
+  // `addressRangeOf`: where `literalAddrOf` names one address, this names every value a word may
+  // hold (ir/bits.ts `stridedRange`), an address or not, a placed name being the one leaf only this
+  // module reads.
   const rangeCtx: RangeCtx = {
     defs: defOf,
     constOf,
