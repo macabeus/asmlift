@@ -285,7 +285,10 @@ function rangeCtxOf(ctx: WordCtx): RangeCtx {
       const d = ctx.defs.get(x);
       return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value : undefined;
     },
-    incoming: entry === undefined ? new Map() : (ctx.incoming ?? new Map()),
+    incoming:
+      entry === undefined || ctx.incoming === undefined
+        ? new Map()
+        : new Map([...ctx.incoming].map(([p, args]) => [p, args.map((arg) => ({ arg }))])),
     entry: entry ?? new Set(),
   };
 }
@@ -730,11 +733,9 @@ export interface StridedRange {
 
 /** What a strided range may read beyond a linear form. */
 export interface RangeCtx extends LinearCtx {
-  /** block param -> the value each in-edge passes (`incomingArgs`) */
-  readonly incoming: ReadonlyMap<Value, readonly (Value | undefined)[]>;
-  /** block param -> its in-edges with what each one's branch proves (`incomingEdges`); where it
-   *  is given, it is read in place of `incoming` */
-  readonly edges?: ReadonlyMap<Value, readonly InEdge[]>;
+  /** block param -> its in-edges, each with what its branch proves where that is known
+   *  (`incomingEdges`) */
+  readonly incoming: ReadonlyMap<Value, readonly InEdge[]>;
   /** the function's own parameters, which arrive from a caller and hold anything */
   readonly entry: ReadonlySet<Value>;
   /** the one word a term the form cannot read is known to be — a name a symbol map places */
@@ -750,7 +751,7 @@ const RANGE_BUDGET = 256;
  *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
  *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by the range of what a
  *  zero-filling narrowing keeps where that already fits it (`zeroNarrowing`), or, a block param,
- *  by the union of what its in-edges pass, each read under what its branch proves (`edges`), or
+ *  by the union of what its in-edges pass, each read under what its branch proves, or
  *  by a range every in-edge provably keeps it in (`integerRange`'s induction, for a loop counter
  *  whose latch bounds one side). Anything else — a function parameter, a whole word loaded from
  *  memory, a name nothing places, a param whose range depends on itself through a loop that no
@@ -856,14 +857,12 @@ function zeroNarrowing(ctx: LinearCtx, d: Op): { readonly of: Value; readonly bi
  *  The two never mix in one union. Where the integer union fits one word, both readings name the
  *  same words (every edge then shares one multiple of 2^32), so `stridedRange` asks the integer
  *  reading first and the moved one only where that crosses a multiple; `mayAlwaysHold` asks both,
- *  and a word either excludes cannot be held. Where `edges` name what an in-edge's branch proves,
+ *  and a word either excludes cannot be held. Where an in-edge names what its branch proves,
  *  that edge's argument is read under it (`edgeRange`): a loop's latch `k + 1 <= 7` bounds the
  *  `k + 1` its back edge passes, which no reading of `k` alone could, `k` depending on itself. */
 function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
-  /** what the in-edge being read proves, by the value it bounds; each is read as a term */
-  let facts = new Map<Value, EdgeBound>();
   /** params met again while their own in-edges were being read */
   const cyclic = new Set<Value>();
   /** the induction hypotheses under test: each param holds only this range */
@@ -872,15 +871,11 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     defs: ctx.defs,
     bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
   };
-  const termRange = (t: Value): StridedRange | undefined => {
+  /** `facts`: what the in-edge being read proves, by the value it bounds; each is read as a term */
+  const termRange = (t: Value, facts: Facts): StridedRange | undefined => {
     const fact = facts.get(t);
     if (fact !== undefined) {
-      facts.delete(t);
-      try {
-        return meetBound(rangeOf(t), fact);
-      } finally {
-        facts.set(t, fact);
-      }
+      return meetBound(rangeOf(t, new Map([...facts].filter(([x]) => x !== t))), fact);
     }
     const at = ctx.pointOf?.(t);
     if (at !== undefined) {
@@ -895,7 +890,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       // a narrowing of a value that already fits its width is that value: agbcc's `(u8)k` of a
       // counter that stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
       const z = zeroNarrowing(ctx, d);
-      const inner = z === undefined || --left < 0 ? undefined : rangeOf(z.of);
+      const inner = z === undefined || --left < 0 ? undefined : rangeOf(z.of, facts);
       const fits = inner === undefined ? undefined : intoWord(inner);
       if (z !== undefined && fits !== undefined && fits.hi < 2 ** z.bits) {
         return fits;
@@ -907,7 +902,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     if (hypothesis !== undefined) {
       return hypothesis;
     }
-    const ins = ctx.entry.has(t) ? undefined : (ctx.edges?.get(t) ?? ctx.incoming.get(t)?.map((arg) => ({ arg })));
+    const ins = ctx.entry.has(t) ? undefined : ctx.incoming.get(t);
     if (open.has(t)) {
       cyclic.add(t);
       return undefined;
@@ -916,17 +911,16 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       return undefined;
     }
     open.add(t);
-    const outer = facts;
     try {
       // each in-edge as it reads, and apart those that read without the param: an induction's start
       let readsItself = false;
       const seeds: (StridedRange | undefined)[] = [];
       const direct = ins.map((e) => {
-        const r = edgeRange(e);
+        const { range } = edgeRange(e);
         const self = cyclic.delete(t);
         readsItself ||= self;
-        seeds.push(self ? undefined : r);
-        return r;
+        seeds.push(self ? undefined : range);
+        return range;
       });
       let out = direct.every((r) => r !== undefined)
         ? hullOf(direct.map((r) => (wordFirst ? (intoWord(r) ?? r) : r)))
@@ -938,7 +932,6 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       }
       return out;
     } finally {
-      facts = outer;
       open.delete(t);
     }
   };
@@ -962,11 +955,11 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       assumed.set(t, r);
       try {
         for (const e of ins) {
-          const x = edgeRange(e);
-          if (x === undefined) {
+          const { range, facts } = edgeRange(e);
+          if (range === undefined) {
             return undefined;
           }
-          passed.push(x);
+          passed.push(range);
           facts.forEach((b) => named.push(...boundSides(b)));
         }
       } finally {
@@ -980,18 +973,16 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return undefined;
   };
-  /** What one in-edge passes, read under what its branch proves. Every value the argument reads is
-   *  the instance the branch tested, so a bound on it holds wherever the argument reads it; a param
-   *  read on the way is read under its own in-edges' facts, never these. */
-  const edgeRange = (e: InEdge): StridedRange | undefined => {
-    facts = new Map();
-    if (e.holds !== undefined) {
-      facts = factsOf(e.holds);
-    }
-    return e.arg === undefined ? undefined : rangeOf(e.arg);
+  /** What one in-edge passes, read under what its branch proves (`facts`, returned beside it).
+   *  Every value the argument reads is the instance the branch tested, so a bound on it holds
+   *  wherever the argument reads it; a param read on the way is read under its own in-edges'
+   *  facts, never these. */
+  const edgeRange = (e: InEdge): { readonly range: StridedRange | undefined; readonly facts: Facts } => {
+    const facts = e.holds === undefined ? NO_FACTS : factsOf(e.holds);
+    return { range: e.arg === undefined ? undefined : rangeOf(e.arg, facts), facts };
   };
   /** The bound a compare puts on each side, from the other side's range (read with no facts). */
-  const factsOf = (h: EdgeTest): Map<Value, EdgeBound> => {
+  const factsOf = (h: EdgeTest): Facts => {
     const out = new Map<Value, EdgeBound>();
     if (h.lhs === h.rhs) {
       return out;
@@ -1003,7 +994,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       if (opcode === undefined || ctx.constOf(x) !== undefined) {
         continue;
       }
-      const other = rangeOf(y);
+      const other = rangeOf(y, NO_FACTS);
       const b = other === undefined ? undefined : testBound(opcode, other);
       if (b !== undefined) {
         out.set(x, b);
@@ -1011,7 +1002,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return out;
   };
-  const rangeOf = (x: Value): StridedRange | undefined => {
+  const rangeOf = (x: Value, facts: Facts): StridedRange | undefined => {
     const form = linearTerms(ctx, x, 0, facts);
     if (form === undefined) {
       return undefined;
@@ -1023,7 +1014,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       if (c === 0) {
         continue;
       }
-      const r = t === 1 ? { lo: 1, hi: 1, stride: 0 } : termRange(t);
+      const r = t === 1 ? { lo: 1, hi: 1, stride: 0 } : termRange(t, facts);
       if (r === undefined) {
         return undefined;
       }
@@ -1038,7 +1029,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };
-  return rangeOf(v);
+  return rangeOf(v, NO_FACTS);
 }
 
 /** The integers every range in a list holds, and the stride all of them sit on. */
@@ -1063,6 +1054,10 @@ interface EdgeBound {
   readonly r: StridedRange;
   readonly window: 'u' | 's';
 }
+
+/** What an in-edge's branch proves, by the value each bound is on. */
+type Facts = ReadonlyMap<Value, EdgeBound>;
+const NO_FACTS: Facts = new Map();
 
 const S_MIN = -(2 ** 31);
 const S_MAX = 2 ** 31 - 1;
