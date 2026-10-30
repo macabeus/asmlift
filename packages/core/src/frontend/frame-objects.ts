@@ -1686,8 +1686,8 @@ function transferRead(
 // bytes with or without the `+ 0`.
 //
 // WHAT IT MAY REACH is the object's offset plus every value the index may hold (`range`, ir/bits.ts
-// `stridedRange`: a non-negative mask, a zero-fill shift, an unsigned narrow load, a `zext`, and
-// linear forms of them), widened by the access's width — the stride is dropped, so the bytes are
+// `stridedRange`: a non-negative mask, a zero-fill shift, an unsigned narrow load, a `zext`, a
+// loop counter its latch bounds, and linear forms of them), widened by the access's width — the stride is dropped, so the bytes are
 // a superset of the ones reached. Every element is at displacement 0 from the sum (above), so the
 // address is exactly the capture plus the index. An index nothing bounds, or one whose sum could
 // wrap past the top of the address space back below the object, reaches every byte (`null`).

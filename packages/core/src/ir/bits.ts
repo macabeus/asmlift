@@ -748,10 +748,13 @@ const RANGE_BUDGET = 256;
 /** Every word `v` may hold, or undefined when this cannot bound it. The form is `linearTerms`; a
  *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
  *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
- *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), or, a block param, by the
- *  union of what its in-edges pass. Anything else — a function parameter, a whole word loaded
- *  from memory, a name nothing places, a param whose range depends on itself through a loop —
- *  bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the words
+ *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by the range of what a
+ *  zero-filling narrowing keeps where that already fits it (`zeroNarrowing`), or, a block param,
+ *  by the union of what its in-edges pass, each read under what its branch proves (`edges`), or
+ *  by a range every in-edge provably keeps it in (`integerRange`'s induction, for a loop counter
+ *  whose latch bounds one side). Anything else — a function parameter, a whole word loaded from
+ *  memory, a name nothing places, a param whose range depends on itself through a loop that no
+ *  branch bounds — bounds nothing, and nothing is the answer. The form equals the word modulo 2^32, so the words
  *  are the sum's integer range moved into one word, when it fits one; a sum whose range crosses a
  *  multiple of 2^32 holds words on both sides of zero, which no interval names (a lone signed
  *  narrow value among them: `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold
