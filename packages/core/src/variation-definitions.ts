@@ -1012,12 +1012,14 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       before:
         'if (lo <= hi) { i = lo; while (1) { switch (gE[i].id) { case 1: if (gE[i].u != 1) { k(4); k(99); return; } break; ' +
         'case 2: if (gE[i].x <= 20) { k(5); k(99); return; } break; case 3: if (gE[i].x >= 0) { k(6); k(99); return; } break; ' +
-        'case 4: if (gE[i].x > 2) { k(7); k(99); return; } break; } i++; if (i > hi) break; } }',
+        'case 4: if (gE[i].x > 2) { k(7); k(99); return; } break; case 5: if (gE[i].x != 9) { k(8); k(99); return; } break; } ' +
+        'i++; if (i > hi) break; } }',
       after:
         'for (i = lo; i <= hi; i++) { switch (gE[i].id) { case 1: if (gE[i].u == 1) continue; k(4); break; ' +
         'case 2: if (gE[i].x > 20) continue; k(5); break; case 3: if (gE[i].x < 0) continue; k(6); break; ' +
-        'case 4: if (gE[i].x <= 2) continue; k(7); break; default: continue; } break; }',
-      note: 'every arm either goes round the loop or calls `k` and leaves it',
+        'case 4: if (gE[i].x <= 2) continue; k(7); break; case 5: if (gE[i].x == 9) continue; k(8); break; ' +
+        'default: continue; } break; }',
+      note: 'every arm either goes round the loop or calls `k` and leaves it; five arms, so agbcc dispatches through a jump table',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['tail-copies'],
