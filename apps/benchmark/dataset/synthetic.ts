@@ -15322,6 +15322,781 @@ export const SYNTHETIC: SynthSpec[] = [
       'void brktail_loop_ctl(s32 lo, s32 hi);',
     proto: { brktail_loop_ctl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  // ── kleod decline census, measured on 51c420f2: the two functions still declining ──────────────
+  // Both still decline on main 51c420f2 (the CLI over build/kleod/src/<unit>.s with the unit's .i
+  // context). Each refusal below was watched firing on the real function and on the rows, through a
+  // patched copy of the CLI bundle (no core change):
+  //  34. sw_gotocase2 / sw_gotocase1 (sub_0800D188, the third cause behind items 32 and 33: "the jump
+  //      table's case arms do not linearize"). With both causes fixed on main, loop #1488 is now
+  //      classified: `foreverShape` takes it at the last rung with the outward flag (`while (1)`, exit
+  //      the block after the loop), on the run that asks the outward rung. The 115-entry switch in it
+  //      still refuses. Read at the CFG merge past the loop, the nine `continue` arms fall into the
+  //      latch, which is also the `default:` arm, so `chainArms` refuses. THE LOOP CLAMP then reads it at
+  //      the body's own join, the latch: those nine become plain `break`s, and what is left is two
+  //      arms falling into one. GATE_SWITCH and WATER_SWITCH each do `if (..) continue; goto
+  //      block_1643;`, and `block_1643:` is the ROTATION_SWITCH case label, so both enter that case's
+  //      body. The copies reading (`copySharedFallTargets`) does not give them the body back:
+  //      switch-recover.ts refuses a shared sibling whose body escapes to a block that does not run
+  //      on to the switch's end (`sidewaysEnds`), and this one ends in `break;` after the switch, a
+  //      loop exit. agbcc does not cross-jump a source copy of the body into the goto's bytes: a
+  //      per-arm copy compiles to two instructions more (a reload of `x` kept in one arm), so the
+  //      goto is the source's spelling. sw_gotocase2 is that shape in a 4-case switch, with a loop
+  //      after the outer loop so the post-loop code is no return tail an arm can copy. agbcc and
+  //      gcc2.7.2 decline with the real function's words, and the copy refusal fires there and on
+  //      ido7.1, which declines on "a case body reaches sibling case #8 on one path and, on
+  //      another, a block the switch does not dominate". gcc2.7.2kmc declines earlier, on "a case
+  //      body reaches several sibling cases", where the copy refusal never fires: the same goto,
+  //      refused at the arm reading. sw_gotocase1 drops WATER_SWITCH's case, so one arm falls into the
+  //      shared body, which C spells: it lifts on all four lanes (control). Off mwcc_242_81: both rows
+  //      decline in the frontend ("the high half of 'gA' ... reaches a merge"), an unrelated link.
+  {
+    sym: 'sw_gotocase2',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_gotocase2(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '            shared:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_gotocase2(s32 lo, s32 hi);',
+    proto: { sw_gotocase2: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_gotocase1',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_gotocase1(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '            shared:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_gotocase1(s32 lo, s32 hi);',
+    proto: { sw_gotocase1: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  //  35. bidx_* / bidxx_* and bcpy_* / bcpyx_* (sub_0804D0B0: "reads the compiler's anonymous
+  //      constant ('.LC184') whose copy fills 'sp0', a u8[36]"). Item 31's rows have unbounded u32
+  //      indexes, so no sound proof can split them. The real index is bounded: `(u8)(r4 % 8) * 2`
+  //      and `+ 1`, with r4 a loop counter from 13 while `r4 < gUnk_03005428` (a u8), so it stays in
+  //      one 16-byte array. Both gates (frame-objects.ts `provenParts` and `RELIFT_HAND_BACK_GATES`
+  //      `runtime-index`) keep every byte an index might reach. Splitting soundly needs three
+  //      capabilities, and each row isolates one so they can be built one at a time:
+  //        - the EXTENT CHECK: whether a proven index range stays inside the copy-destination extent
+  //          that holds its base (one array's copy), in both gates (`bidx_mask`, `i & 7`; with a spill
+  //          word above the arrays, `bidx_spmask`);
+  //        - the INDUCTION RANGE of a loop-carried value from its init, step and test (`bidx_ind`,
+  //          `k` from 0 while `k < 8`, read through a `u8` so loop.c does not strength-reduce it);
+  //        - the SIGNED REMAINDER range of `x % 2^k`, which agbcc emits as `cmp; bge; add #7; asr;
+  //          lsl; sub` (the real function's sequence; `bidx_rem`, `i % 8 + 8`, range [-7, 7]).
+  //      `bidx_comb` is the real function's shape: two loops from 13 to a u8 global, each indexing one
+  //      array through `(u8)(k % 8) * 2`, with an arg spilled above the arrays. It needs all three.
+  //      Each `bidxx_` row is the same row with an index that CAN cross: `i & 15` into the other
+  //      array, `+ 4` past `b` into the spill word, `k < 9`, `(u8)(i % 8)` (a negative remainder
+  //      wraps to 249..255), and a loop that starts at an s32 global. They decline today and must
+  //      stay declined or correct: an index that can cross must never be split into another object.
+  //      Ablation ladder, agbcc, through the CLI on each row's source (index refusal ablated in
+  //      provenParts / the hand-back gate ablated / both): bidx_mask, bidx_ind, bidx_rem and their
+  //      controls decline on "'.LC0' ... 'sp0', a u8[32]" and lift once provenParts is ablated
+  //      (bidx_mask 5/36, bidx_ind 5/37, bidx_rem 24/43); the gate alone moves nothing, as no
+  //      word sits past the arrays. bidx_spmask, bidx_comb and their controls go u8[40] -> "'.LC2'
+  //      ... 'sp16', a u8[24]" -> u8[32] -> lift, the real function's ladder (u8[36] -> "'.LC186'
+  //      ... 'sp16', a u8[20]" -> u8[32] -> lifts). Every control lifts under the same ablations,
+  //      which is the unsound split the controls pin. The image rows run on agbcc only: gcc2.7.2 and
+  //      gcc2.7.2kmc copy the image with `swl` ("unmodelled store-class instruction"), ido7.1's
+  //      candidates read the image through `&.data` and never compile, and mwcc_242_81 names it
+  //      through an anonymous pool entry ('@4'), each an unrelated link.
+  //      The bcpy rows are the same capabilities on item 31's cpyidxsp shape (two 64-byte memcpy
+  //      arrays, eight values live across three calls), so they reach the MIPS lanes. Bench smoke
+  //      runs with provenParts / the gate / both ablated: bcpy_mask agbcc 63/93 -> 23/82 / 36/83 /
+  //      MATCH, gcc2.7.2kmc 38/82 -> 38/82 / 50/81 / MATCH, gcc2.7.2 45/82 -> 45/82 / 66/81 /
+  //      17/81, ido7.1 63/82 -> 63/82 / 38/76 / 36/75. bcpy_ind agbcc declined -> declined / 44/90 /
+  //      MATCH, gcc2.7.2kmc 36/94 -> 36/94 / 73/91 / 4/89, gcc2.7.2 23/87 -> 22/87 / 23/87 / 22/87.
+  //      bcpy_rem agbcc 71/104 -> 71/104 / 19/86 / 26/86, ido7.1 68/87 -> 68/87 / 50/83 / 52/80.
+  //      bcpy_comb agbcc declined -> declined / 49/109 / 38/108, gcc2.7.2 20/99 -> 17/99 / 20/99 /
+  //      17/99. The bcpyx controls move alongside (bcpyx_mask and bcpyx_ind reach MATCH on agbcc,
+  //      bcpyx_rem too): a byte-exact match through an index that reads past its array is exactly
+  //      the false proof a range check has to refuse. Lanes are kept only where the ladder moves:
+  //      no lane moves on mwcc_242_81 (it never asks for parts, item 31), nor ido7.1 on _ind and _comb,
+  //      nor gcc2.7.2 on _rem. gcc2.7.2kmc already MATCHes bcpy_rem and declines bcpyx_rem and both
+  //      _comb rows on "the captured address is never dereferenced ... and another address-taken
+  //      object shares the frame", an unrelated link.
+  {
+    sym: 'bidx_mask',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidx_mask(u32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 k = i & 7;\n' +
+      '    gO[k].x = a[k * 2 + 1];\n' +
+      '    gO[k].y = b[k * 2];\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidx_mask(u32 i);',
+    proto: { bidx_mask: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_mask',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidxx_mask(u32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 k = i & 15;\n' +
+      '    gO[k].x = a[k * 2 + 1];\n' +
+      '    gO[k].y = b[k * 2];\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidxx_mask(u32 i);',
+    proto: { bidxx_mask: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidx_spmask',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void bidx_spmask(u32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 v0, v1, v2, v3, v4;\n' +
+      '    u32 k = i & 7;\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v0, v1, v2);\n' +
+      '    gO[k].x = a[k * 2 + 1];\n' +
+      '    gO[k].y = b[k * 2];\n' +
+      '    gA[i] = v0 + v1 + v2 + v3 + v4;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void bidx_spmask(u32 i);',
+    proto: { bidx_spmask: { returnsVoid: true }, sink: { params: 4, returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_spmask',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void bidxx_spmask(u32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 v0, v1, v2, v3, v4;\n' +
+      '    u32 k = i & 7;\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v0, v1, v2);\n' +
+      '    gO[k].x = a[k * 2 + 1];\n' +
+      '    gO[k].y = b[k * 2 + 4];\n' +
+      '    gA[i] = v0 + v1 + v2 + v3 + v4;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'void bidxx_spmask(u32 i);',
+    proto: { bidxx_spmask: { returnsVoid: true }, sink: { params: 4, returnsVoid: true } },
+  },
+  {
+    sym: 'bidx_ind',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidx_ind(void)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 k;\n' +
+      '    for (k = 0; k < 8; k++) {\n' +
+      '        u8 m = k;\n' +
+      '        gO[m].x = a[m * 2 + 1];\n' +
+      '        gO[m].y = b[m * 2];\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidx_ind(void);',
+    proto: { bidx_ind: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_ind',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidxx_ind(void)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u32 k;\n' +
+      '    for (k = 0; k < 9; k++) {\n' +
+      '        u8 m = k;\n' +
+      '        gO[m].x = a[m * 2 + 1];\n' +
+      '        gO[m].y = b[m * 2];\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidxx_ind(void);',
+    proto: { bidxx_ind: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidx_rem',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidx_rem(s32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    s32 k = i % 8;\n' +
+      '    gO[k + 7].x = a[k + 8];\n' +
+      '    gO[k + 7].y = b[k + 7];\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidx_rem(s32 i);',
+    proto: { bidx_rem: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_rem',
+    src:
+      'struct O { u16 x, y, w, h; };\n' +
+      'extern struct O gO[16];\n' +
+      'void bidxx_rem(s32 i)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    u8 k = i % 8;\n' +
+      '    gO[k].x = a[k * 2 + 1];\n' +
+      '    gO[k].y = b[k * 2];\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx: 'struct O { u16 x, y, w, h; };\n' + 'extern struct O gO[16];\n' + 'void bidxx_rem(s32 i);',
+    proto: { bidxx_rem: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidx_comb',
+    src:
+      'struct E { u8 vis; u8 id; u8 mat; u8 f; s32 x; s32 y; s16 sx, sy; };\n' +
+      'struct T { u8 pad[3]; u8 st; s32 w; s16 c; };\n' +
+      'struct A { s16 pa, pb, pc, pd; };\n' +
+      'extern struct E gE[];\n' +
+      'extern struct T gT[];\n' +
+      'extern struct A gAff[];\n' +
+      'extern u8 gN;\n' +
+      'void bidx_comb(s32 arg0)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    s32 k;\n' +
+      '    if (gT[arg0].c > 0) {\n' +
+      '        for (k = 13; k < gN; k++) {\n' +
+      '            u8 m = k % 8;\n' +
+      '            if (gE[k].id != 0x50) { gE[k].vis = 0; continue; }\n' +
+      '            gE[k].vis = 1;\n' +
+      '            gE[k].mat = m;\n' +
+      '            gE[k].x = b[m * 2] * 16;\n' +
+      '            gE[k].y = b[m * 2 + 1] * 16;\n' +
+      '            gAff[m].pa = 0x100 + (m + 1) * 0x30;\n' +
+      '            gAff[m].pb = 0;\n' +
+      '            gAff[m].pc = 0;\n' +
+      '            gAff[m].pd = 0x100 + (m + 1) * 0x30;\n' +
+      '            gE[k].sx = gE[k].x >> 4;\n' +
+      '            gE[k].sy = gE[k].y >> 4;\n' +
+      '        }\n' +
+      '        for (k = 13; k < gN; k++) {\n' +
+      '            if (gE[k].id != 0x50) continue;\n' +
+      '            gE[k].x += a[(u8)(k % 8) * 2];\n' +
+      '            gE[k].y += a[(u8)(k % 8) * 2 + 1];\n' +
+      '        }\n' +
+      '        gT[arg0].st = 1;\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct E { u8 vis; u8 id; u8 mat; u8 f; s32 x; s32 y; s16 sx, sy; };\n' +
+      'struct T { u8 pad[3]; u8 st; s32 w; s16 c; };\n' +
+      'struct A { s16 pa, pb, pc, pd; };\n' +
+      'extern struct E gE[];\n' +
+      'extern struct T gT[];\n' +
+      'extern struct A gAff[];\n' +
+      'extern u8 gN;\n' +
+      'void bidx_comb(s32 arg0);',
+    proto: { bidx_comb: { returnsVoid: true } },
+  },
+  {
+    sym: 'bidxx_comb',
+    src:
+      'struct E { u8 vis; u8 id; u8 mat; u8 f; s32 x; s32 y; s16 sx, sy; };\n' +
+      'struct T { u8 pad[3]; u8 st; s32 w; s16 c; };\n' +
+      'struct A { s16 pa, pb, pc, pd; };\n' +
+      'extern struct E gE[];\n' +
+      'extern struct T gT[];\n' +
+      'extern struct A gAff[];\n' +
+      'extern u8 gN;\n' +
+      'extern s32 gS;\n' +
+      'void bidxx_comb(s32 arg0)\n' +
+      '{\n' +
+      '    s8 a[16] = {32, 36, -24, -8, 8, 14, 20, 8, 40, -20, -30, 32, 46, 24, 64, 48};\n' +
+      '    u8 b[16] = {130, 96, 100, 92, 107, 76, 120, 77, 130, 80, 128, 70, 124, 82, 112, 70};\n' +
+      '    s32 k;\n' +
+      '    if (gT[arg0].c > 0) {\n' +
+      '        for (k = gS; k < gN; k++) {\n' +
+      '            u8 m = k % 8;\n' +
+      '            if (gE[k].id != 0x50) { gE[k].vis = 0; continue; }\n' +
+      '            gE[k].vis = 1;\n' +
+      '            gE[k].mat = m;\n' +
+      '            gE[k].x = b[m * 2] * 16;\n' +
+      '            gE[k].y = b[m * 2 + 1] * 16;\n' +
+      '            gAff[m].pa = 0x100 + (m + 1) * 0x30;\n' +
+      '            gAff[m].pb = 0;\n' +
+      '            gAff[m].pc = 0;\n' +
+      '            gAff[m].pd = 0x100 + (m + 1) * 0x30;\n' +
+      '            gE[k].sx = gE[k].x >> 4;\n' +
+      '            gE[k].sy = gE[k].y >> 4;\n' +
+      '        }\n' +
+      '        for (k = gS; k < gN; k++) {\n' +
+      '            if (gE[k].id != 0x50) continue;\n' +
+      '            gE[k].x += a[(u8)(k % 8) * 2];\n' +
+      '            gE[k].y += a[(u8)(k % 8) * 2 + 1];\n' +
+      '        }\n' +
+      '        gT[arg0].st = 1;\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct E { u8 vis; u8 id; u8 mat; u8 f; s32 x; s32 y; s16 sx, sy; };\n' +
+      'struct T { u8 pad[3]; u8 st; s32 w; s16 c; };\n' +
+      'struct A { s16 pa, pb, pc, pd; };\n' +
+      'extern struct E gE[];\n' +
+      'extern struct T gT[];\n' +
+      'extern struct A gAff[];\n' +
+      'extern u8 gN;\n' +
+      'extern s32 gS;\n' +
+      'void bidxx_comb(s32 arg0);',
+    proto: { bidxx_comb: { returnsVoid: true } },
+  },
+  {
+    sym: 'bcpy_mask',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_mask(u32 i)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    \n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '\n' +
+      '    return a[3] + b[i & 63] + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_mask(u32 i);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpyx_mask',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_mask(u32 i)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    \n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '\n' +
+      '    return a[3] + b[i & 127] + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mask', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_mask(u32 i);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpy_ind',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_ind(void)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    u32 k, s = 0;\n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '    for (k = 0; k < 64; k++)\n' +
+      '        s += b[(u8)k];\n' +
+      '    return a[3] + s + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_ind(void);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpyx_ind',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_ind(void)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    u32 k, s = 0;\n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '    for (k = 0; k < 65; k++)\n' +
+      '        s += b[(u8)k];\n' +
+      '    return a[3] + s + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'narrow', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_ind(void);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpy_rem',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_rem(s32 i)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    \n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '\n' +
+      '    return a[3] + b[i % 32 + 32] + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'ido7.1'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpy_rem(s32 i);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpyx_rem',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_rem(s32 i)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    \n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '\n' +
+      '    return a[3] + b[(u8)(i % 64)] + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'ido7.1'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      '\n' +
+      'u32 bcpyx_rem(s32 i);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpy_comb',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'extern u8 gN;\n' +
+      'u32 bcpy_comb(void)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    s32 k; u32 s = 0;\n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '    for (k = 13; k < gN; k++)\n' +
+      '        s += b[(u8)(k % 64)];\n' +
+      '    return a[3] + s + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'extern u8 gN;\n' +
+      'u32 bcpy_comb(void);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
+  {
+    sym: 'bcpyx_comb',
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'extern u8 gN;\n' +
+      'extern s32 gS;\n' +
+      'u32 bcpyx_comb(void)\n' +
+      '{\n' +
+      '    u8 a[64];\n' +
+      '    u8 b[64];\n' +
+      '    u32 v0, v1, v2, v3, v4, v5, v6, v7;\n' +
+      '    s32 k; u32 s = 0;\n' +
+      '    memcpy(a, gS1, 64);\n' +
+      '    memcpy(b, gS2, 64);\n' +
+      '    v0 = gA[0]; v1 = gA[1]; v2 = gA[2]; v3 = gA[3]; v4 = gA[4]; v5 = gA[5]; v6 = gA[6]; v7 = gA[7];\n' +
+      '    sink(v0, v1, v2, v3);\n' +
+      '    sink(v4, v5, v6, v7);\n' +
+      '    sink(v0 + v4, v1 + v5, v2 + v6, v3 + v7);\n' +
+      '    for (k = gS; k < gN; k++)\n' +
+      '        s += b[(u8)(k % 64)];\n' +
+      '    return a[3] + s + v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7;\n' +
+      '}',
+    features: ['array', 'variable-index', 'mod-pow2', 'signed', 'narrow', 'multi-arg', 'stack-addr'],
+    toolchains: ['agbcc', 'gcc2.7.2'],
+    ctx:
+      'void *memcpy(void *, const void *, unsigned long);\n' +
+      'extern const u8 gS1[64];\n' +
+      'extern const u8 gS2[64];\n' +
+      'extern u32 gA[16];\n' +
+      'void sink(u32 a, u32 b, u32 c, u32 d);\n' +
+      'extern u8 gN;\n' +
+      'extern s32 gS;\n' +
+      'u32 bcpyx_comb(void);',
+    proto: {
+      sink: { params: 4, returnsVoid: true },
+      memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
+    },
+  },
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
   // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
   // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a
