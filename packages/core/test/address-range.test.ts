@@ -264,3 +264,93 @@ describe('addressRangeOf — a narrowing of a value that already fits', () => {
     expect(rangeIn(s.blocks, odd)).toEqual({ lo: 0, hi: 255, stride: 1 });
   });
 });
+
+describe('addressRangeOf — what a loop latch proves of the counter its back edge passes', () => {
+  /** `for (q = init; ; ) { body; next = step(q); if (test(next)) continue; else break; }`, the latch
+   *  a `cond_br` on the compare `latch` builds from `next`: its true edge goes back unless `exitOnTrue`. */
+  const loop = (
+    init: number,
+    latch: (head: ReturnType<typeof block>, next: Value, q: Value) => Value,
+    { exitOnTrue = false, step = 1 } = {},
+  ) => {
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const exit = block();
+    br(entry, head, [entry.op('const', { value: init })]);
+    const next = head.op('add', {}, [q, head.op('const', { value: step })]);
+    const c = latch(head, next, q);
+    if (exitOnTrue) {
+      condBr(head, c, [exit, []], [head, [next]]);
+    } else {
+      condBr(head, c, [head, [next]], [exit, []]);
+    }
+    return { blocks: [entry, head, exit], head, q, next };
+  };
+  const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
+
+  test("agbcc's `for (k = 0; k < 8; k++) a[(u8)k * 2 + 1]`: the latch `k + 1 <= 7` bounds the index", () => {
+    const { blocks, head, q } = loop(0, (h, next) => h.op('icmp_ule', {}, [next, k(h, 7)]));
+    expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    const at = head.op('add', {}, [head.op('shl', { imm: 1 }, [u8Of(head, q)]), k(head, 1)]);
+    expect(rangeIn(blocks, at)).toEqual({ lo: 1, hi: 15, stride: 2 });
+  });
+
+  test('the control `k < 9` reaches 8, past a 16-byte array at `k * 2 + 1`', () => {
+    const { blocks, head, q } = loop(0, (h, next) => h.op('icmp_ule', {}, [next, k(h, 8)]));
+    const at = head.op('add', {}, [head.op('shl', { imm: 1 }, [u8Of(head, q)]), k(head, 1)]);
+    expect(rangeIn(blocks, at)).toEqual({ lo: 1, hi: 17, stride: 2 });
+  });
+
+  test('a test on the false edge is negated, and swapped operands read the other way round', () => {
+    const neg = loop(0, (h, next) => h.op('icmp_ugt', {}, [next, k(h, 7)]), { exitOnTrue: true });
+    expect(rangeIn(neg.blocks, neg.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    const swapped = loop(0, (h, next) => h.op('icmp_uge', {}, [k(h, 63), next]));
+    expect(rangeIn(swapped.blocks, swapped.q)).toEqual({ lo: 0, hi: 63, stride: 1 });
+    // a bound on a value that is itself bounded: `next < n`, n a u8 reload, is `next <= 254`
+    const byLoad = loop(0, (h, next) => h.op('icmp_ult', {}, [next, h.op('load', { off: 0, width: 1 }, [v()])]));
+    expect(rangeIn(byLoad.blocks, byLoad.q)).toEqual({ lo: 0, hi: 254, stride: 1 });
+  });
+
+  test("MIPS's `andi` passed, the unmasked sum tested: the bound reaches the term it names", () => {
+    // gcc2.7.2's `for (k = 0; k < 64; k++) b[(u8)k]`: `v = k + 1; if (v < 64) goto head(v & 255, v)`
+    const entry = block();
+    const [q, kk] = [v(), v()];
+    const head = block([q, kk]);
+    const exit = block();
+    br(entry, head, [entry.op('and', { imm: 0xff }, [k(entry, 0)]), k(entry, 0)]);
+    const next = head.op('add', {}, [kk, k(head, 1)]);
+    const c = head.op('icmp_ult', {}, [next, k(head, 64)]);
+    condBr(head, c, [head, [head.op('and', { imm: 0xff }, [next]), next]], [exit, []]);
+    expect(rangeIn([entry, head, exit], q)).toEqual({ lo: 0, hi: 63, stride: 1 });
+    expect(rangeIn([entry, head, exit], kk)).toEqual({ lo: 0, hi: 63, stride: 1 });
+  });
+
+  test('what bounds nothing: a test on another value, a not-equal, a back edge left untested', () => {
+    const other = loop(0, (h) => h.op('icmp_ule', {}, [h.op('load', { off: 0, width: 4 }, [v()]), k(h, 7)]));
+    expect(rangeIn(other.blocks, other.q)).toBeUndefined();
+    expect(rangeIn(other.blocks, u8Of(other.head, other.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    const ne = loop(0, (h, next) => h.op('icmp_ne', {}, [next, k(h, 8)]));
+    expect(rangeIn(ne.blocks, ne.q)).toBeUndefined();
+    // a test against a value the loop carries unbounded proves nothing of the counter
+    const carried = loop(0, (h, next, q) => h.op('icmp_ult', {}, [next, q]));
+    expect(rangeIn(carried.blocks, carried.q)).toBeUndefined();
+    // a second back edge, from a block the latch does not guard, passes `q + 1` unbounded
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const side = block();
+    const exit = block();
+    br(entry, head, [k(entry, 0)]);
+    const next = head.op('add', {}, [q, k(head, 1)]);
+    condBr(head, head.op('icmp_ule', {}, [next, k(head, 7)]), [head, [next]], [side, []]);
+    condBr(side, side.op('load', { off: 0, width: 1 }, [v()]), [head, [next]], [exit, []]);
+    expect(rangeIn([entry, head, side, exit], q)).toBeUndefined();
+  });
+
+  test('a signed latch bounds one side only, so alone it leaves the counter unbounded below', () => {
+    // s32 k: `k + 1 <= 7` signed holds of every negative k too
+    const { blocks, head, q } = loop(0, (h, next) => h.op('icmp_sle', {}, [next, k(h, 7)]));
+    expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 255, stride: 1 });
+  });
+});
