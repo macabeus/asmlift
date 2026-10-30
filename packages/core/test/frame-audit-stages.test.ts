@@ -285,6 +285,28 @@ describe('classifyFrameUses', () => {
     expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false }]);
     expect(uses.accesses.get(0)).toEqual([]);
   });
+
+  // `u8 a[16]; … a[(i & 7) * 2 + 1]` at sp+0: the index holds 1..15, so a byte access reaches
+  // [1, 16); a parameter nothing bounds reaches every byte
+  test('records the bytes a runtime index may reach, or null where nothing bounds it', () => {
+    const reachOf = (masked: boolean, width = 1) => {
+      const i = value();
+      const a = laddr(0);
+      const [m, one] = [konst(7), konst(1)];
+      const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+      const sh = mkOp('shl', { operands: [and.results[0], one.results[0]], results: [value()] });
+      const plus = mkOp('add', { operands: [sh.results[0], one.results[0]], results: [value()] });
+      const idx = masked ? [m, one, and, sh, plus] : [];
+      const at = mkOp('add', { operands: [a.results[0], masked ? plus.results[0] : i], results: [value()] });
+      const { uses } = classify([{ params: [i], ops: [a, ...idx, at, load(at.results[0], 0, width), ret()] }], {
+        owned: { from: 0, to: 16 },
+      });
+      return uses.indexReaches.get(0);
+    };
+    expect(reachOf(true)).toEqual([{ lo: 1, hi: 16 }]);
+    expect(reachOf(true, 2)).toEqual([{ lo: 1, hi: 17 }]);
+    expect(reachOf(false)).toEqual([null]);
+  });
 });
 
 describe('readWindow', () => {

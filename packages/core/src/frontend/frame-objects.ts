@@ -17,7 +17,7 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
-import { linearFactor } from '../ir/bits';
+import { type StridedRange, linearFactor } from '../ir/bits';
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -1235,6 +1235,10 @@ interface FrameAccessOp {
   readonly through: Value;
 }
 
+/** The frame bytes `[lo, hi)` one runtime-indexed access may touch (`FrameUses.indexReaches`),
+ *  or `null` where nothing bounds its index. */
+type IndexReach = { readonly lo: number; readonly hi: number } | null;
+
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
  *  declared, with the question it answers, where `classifyFrameUses` builds it. */
 interface FrameUses {
@@ -1255,6 +1259,12 @@ interface FrameUses {
   readonly byValueReads: ReadonlyMap<number, readonly { readonly op: Op; readonly type: IrType }[]>;
   readonly useCount: ReadonlyMap<number, number>;
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
+  /** every runtime-indexed access of each object, as the frame bytes `[lo, hi)` it may touch: the
+   *  object's offset plus every value its index may hold (`addressRangeOf`), widened by the
+   *  access's own width — or `null` where nothing bounds the index. One entry per entry of
+   *  `indexed`. The split of the one object (`provenParts`) and the words handed back to the slot
+   *  model (`reliftRange`) read a bounded reach as the bytes it names, and `null` as every byte. */
+  readonly indexReaches: ReadonlyMap<number, readonly IndexReach[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
   /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
@@ -1376,6 +1386,8 @@ function classifyFrameUses({
   // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
   // `a`.
   const indexed = new Map<number, { width: number; signed: boolean }[]>();
+  // …and, beside each, the bytes it may touch (`indexReaches`)
+  const indexReaches = new Map<number, IndexReach[]>();
   for (const off of objects.keys()) {
     accesses.set(off, []);
   }
@@ -1504,7 +1516,14 @@ function classifyFrameUses({
         // judged with the rest (`objectShapes`).
         const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
         if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
-          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], facts.constOf, fail);
+          indexedAccess(
+            irBlocks,
+            { indexed, indexReaches, accessOps },
+            { off, through: v },
+            { sum: op.results[0], range: facts.addressRangeOf(other) },
+            facts.constOf,
+            fail,
+          );
           continue;
         }
         // A CONSTANT move left after the fold (`foldMovedCaptures`) moves a capture a phi carried.
@@ -1545,6 +1564,7 @@ function classifyFrameUses({
     byValueReads,
     useCount,
     indexed,
+    indexReaches,
     members,
     memberRefusal: memberRefusals.find(([off]) => !returnTemps.has(off) && !byValueReads.has(off))?.[1],
     escapeExtents,
@@ -1619,19 +1639,34 @@ function transferRead(
 // compiles to `add r4, r4, sp` and the source's `mov r1, sp / add r0, r1, r4` does not: the `u16`
 // twin `((u16 *)sp0)[a0]` misses the same way. Left raw, the access compiles to the source's
 // bytes with or without the `+ 0`.
+//
+// WHAT IT MAY REACH is the object's offset plus every value the index may hold (`range`, ir/bits.ts
+// `stridedRange`: a non-negative mask, a zero-fill shift, an unsigned narrow load, a `zext`, and
+// linear forms of them), widened by the access's width — the stride is dropped, so the bytes are
+// a superset of the ones reached. Every element is at displacement 0 from the sum (above), so the
+// address is exactly the capture plus the index. An index nothing bounds, or one whose sum could
+// wrap past the top of the address space back below the object, reaches every byte (`null`).
 function indexedAccess(
   irBlocks: readonly Block[],
   {
     indexed,
+    indexReaches,
     accessOps,
-  }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
+  }: {
+    indexed: Map<number, { width: number; signed: boolean }[]>;
+    indexReaches: Map<number, IndexReach[]>;
+    accessOps: Map<Op, FrameAccessOp>;
+  },
   object: FrameAccessOp,
-  sum: Value,
+  { sum, range }: { sum: Value; range: StridedRange | undefined },
   constOf: (v: Value) => number | undefined,
   fail: Refuse,
 ): void {
   const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
+  const reaches = indexReaches.get(off) ?? indexReaches.set(off, []).get(off)!;
+  const reach = (width: number): IndexReach =>
+    range === undefined || off + range.hi + width > 2 ** 32 ? null : { lo: off + range.lo, hi: off + range.hi + width };
   const judge = (at: Value, by: number): void => {
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
@@ -1663,6 +1698,7 @@ function indexedAccess(
             );
           }
           got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+          reaches.push(reach(op.attrs.width as number));
           accessOps.set(op, object);
         }
       }
