@@ -3066,6 +3066,13 @@ interface OutwardRanking {
   could: boolean;
 }
 
+/** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
+ *  AS A `for`, at `forPlanAt`), by header, and the ones a structuring declined inside of. */
+interface ForRanking {
+  readonly asked: ReadonlySet<Block>;
+  readonly wanted: Set<Block>;
+}
+
 /** A RET-TAIL COPY CLASSIFICATION ACCEPTS, EMISSION MAY STILL NOT SPELL. A `while` or `do-while`
  *  reading takes an edge into a ret-terminated tail it does not own as an early `return`, and only
  *  emission learns whether the body can hold it: on gcc2.7.2kmc, `for (j = 0; j < 8; j++) { if
@@ -3091,6 +3098,13 @@ interface OutwardRanking {
  *  the rung unasked, and only where all of them decline and some loop's rung would have read it are
  *  they made again with it asked (`OutwardRanking`).
  *
+ *  A `for` WHOSE `continue` RUNS THE UPDATE, LAST. `while (1)` spells a counted loop whose latch
+ *  holds the update and the test as `if (!c) break; i++;` at the foot of the body, which has no
+ *  `continue` into it: a jump table arm that reaches both the latch and the loop's exit is then a
+ *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Only where every run above declines,
+ *  and inside a `while (1)` loop, are they made again with each such loop spelled `for` where the
+ *  guard ahead of it is its own test (`ForRanking`), once more for each loop that run adds.
+ *
  *  The first run's refusal stands if every rerun declines too. Each run's observation hooks are held
  *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
  *  by the first run where none is. */
@@ -3101,7 +3115,12 @@ export function structure(
   memo?: DefaultAcceptsMemo,
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
-  const attempt = (retCopy: RetCopyRanking, pastExit: PastExitRanking, outward: OutwardRanking): SFn | null => {
+  const attempt = (
+    retCopy: RetCopyRanking,
+    pastExit: PastExitRanking,
+    outward: OutwardRanking,
+    forRank: ForRanking,
+  ): SFn | null => {
     const held: (() => void)[] = [];
     const hold =
       <A extends unknown[]>(f: (...args: A) => void) =>
@@ -3122,6 +3141,7 @@ export function structure(
         retCopy,
         pastExit,
         outward,
+        forRank,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3133,19 +3153,32 @@ export function structure(
       return null;
     }
   };
-  const ranked = (outward: OutwardRanking): SFn | null => {
+  const ranked = (outward: OutwardRanking, forRank: ForRanking): SFn | null => {
     const first: RetCopyRanking = { last: false, took: false };
     const inSpan: PastExitRanking = { first: false, could: false };
     const past: RetCopyRanking = { last: false, took: false };
     return (
-      attempt(first, inSpan, outward) ??
-      (first.took ? attempt({ last: true, took: false }, inSpan, outward) : null) ??
-      (inSpan.could ? attempt(past, { first: true, could: false }, outward) : null) ??
-      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward) : null)
+      attempt(first, inSpan, outward, forRank) ??
+      (first.took ? attempt({ last: true, took: false }, inSpan, outward, forRank) : null) ??
+      (inSpan.could ? attempt(past, { first: true, could: false }, outward, forRank) : null) ??
+      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward, forRank) : null)
     );
   };
-  const unasked: OutwardRanking = { asked: false, could: false };
-  const sfn = ranked(unasked) ?? (unasked.could ? ranked({ asked: true, could: false }) : null);
+  const outwardRanked = (forRank: ForRanking): SFn | null => {
+    const unasked: OutwardRanking = { asked: false, could: false };
+    return ranked(unasked, forRank) ?? (unasked.could ? ranked({ asked: true, could: false }, forRank) : null);
+  };
+  let forRank: ForRanking = { asked: new Set(), wanted: new Set() };
+  let sfn = outwardRanked(forRank);
+  // each rerun asks every loop the runs before it declined inside of; a nest needs one per level
+  for (let n = 0; sfn === null && n < 4; n++) {
+    const asked = new Set([...forRank.asked, ...forRank.wanted]);
+    if (asked.size === forRank.asked.size) {
+      break;
+    }
+    forRank = { asked, wanted: new Set() };
+    sfn = outwardRanked(forRank);
+  }
   if (sfn !== null) {
     return sfn;
   }
@@ -3161,6 +3194,7 @@ function structureRanked(
   retCopy: RetCopyRanking,
   pastExit: PastExitRanking,
   outwardRank: OutwardRanking,
+  forRank: ForRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -6835,8 +6869,17 @@ function structureRanked(
     twoLevel?: TwoLevelExit;
     /** the loop an outward two-level exit is handed out to (`TwoLevelExit.outward`) */
     enclosing?: LoopFrame;
+    /** the latch of a `while (1)` spelled `for` (`ForPlan`): an edge into it is `continue;`, and one
+     *  into `exit` is `break;` */
+    forLatch?: Block;
   };
   let loopCtx: LoopFrame | null = null;
+  // A jump table in a `while (1)` that declines: the rerun spells that loop `for` (`ForRanking`).
+  const wantFor = (): void => {
+    if (loopCtx !== null && loopCtx.forLatch === undefined && foreverLoops.has(loopCtx.header)) {
+      forRank.wanted.add(loopCtx.header);
+    }
+  };
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
     loopCtx = frame;
@@ -6867,6 +6910,8 @@ function structureRanked(
     flags: Set<string> | null;
   };
   const switchFrames: SwitchFrame[] = [];
+  // the latches and exits of every `for` (`ForPlan`) whose body is being structured
+  const forJumps = new Set<Block>();
   // AN OUTWARD EXIT HANDED OUT THROUGH A SWITCH (`emitForever`): in a case body `if (f != 0) break;`
   // leaves only the switch, so the switch is followed at once by a second `if (f != 0) break;` that
   // leaves the loop, and is preceded by `f = 0;`, since a path that never entered the inner loop
@@ -7092,6 +7137,28 @@ function structureRanked(
     if (loopCtx !== null && b === loopCtx.header && foreverLoops.has(b)) {
       return [{ k: 'continue' }];
     }
+    // THE LOOP AS A `for` (`ForPlan`): its latch runs the update and the test, so an edge into it
+    // is `continue;`, and one into its exit is `break;` — a jump table's arms reach both. The
+    // `break;` is refused, loud, inside a case body opened in this loop, which binds it to the
+    // switch, and either jump is refused from a loop nested inside, which binds it to that loop.
+    if (loopCtx?.forLatch !== undefined && (b === loopCtx.forLatch || b === loopCtx.exit)) {
+      if (b === loopCtx.forLatch) {
+        return [{ k: 'continue' }];
+      }
+      if (switchFrames.some((f) => f.loop === loopCtx)) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a case body leaves its switch for the exit of the \`for\` it sits ` +
+            `in (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
+        );
+      }
+      return [{ k: 'break' }];
+    }
+    if (forJumps.has(b)) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a nested loop reaches the latch or the exit of the \`for\` around it ` +
+          `(block #${fn.blocks.indexOf(b)}), which \`continue\` or \`break\` would bind to the nested loop`,
+      );
+    }
     if (onStack.has(b)) {
       throw new StructureError(
         `cannot structure '${fn.name}': unrecovered back-edge into block #${fn.blocks.indexOf(b)} ` +
@@ -7298,6 +7365,11 @@ function structureRanked(
         if (defEdge.block !== at) {
           siblings.add(defEdge.block);
         }
+        // The latch of the `for` the switch sits in is no sibling: an edge into it is `continue;`.
+        const jumps = new Set<Block>(
+          loopCtx?.forLatch !== undefined && loopCtx.forLatch !== at ? [loopCtx.forLatch] : [],
+        );
+        jumps.forEach((x) => siblings.delete(x));
         // `analyzeArmExit` does not depend on emission order, so the exits can be settled before
         // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
         // block, so no two sort keys can be equal and the tie-break Regime A needs on shared bodies
@@ -7305,7 +7377,7 @@ function structureRanked(
         const walked = new Map<Block, ArmExit>();
         for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
           if (!walked.has(entry)) {
-            walked.set(entry, analyzeArmExit(entry, b, at, siblings));
+            walked.set(entry, analyzeArmExit(entry, b, at, siblings, false, jumps));
           }
         }
         // A table whose default block is ALSO a case target is that case's arm, not a separate
@@ -7571,6 +7643,7 @@ function structureRanked(
       }
       const chained = read.chain;
       if (chained === null) {
+        wantFor();
         throw new StructureError(
           `cannot structure '${fn.name}': the jump table's case arms do not linearize — two arms fall ` +
             `into one, the default arm falls into a case, or the fall-through is a cycle`,
@@ -7617,6 +7690,7 @@ function structureRanked(
           // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
           // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
           if (read.refusal !== null && read.refusal.at === i) {
+            wantFor();
             read.refusal.raise();
           }
           if (deadDefault && i === emitOrder.length - 1) {
@@ -7669,6 +7743,22 @@ function structureRanked(
     if (wl) {
       out.push(...emitTestAtTopWhile(wl, stop));
       return out;
+    }
+
+    // The guard of a `while (1)` the rerun spells `for` (THE LOOP AS A `for`, at `forPlanAt`): the
+    // `for`'s own first test, so it is dropped rather than kept as an `if`.
+    for (const h of [takenB, fallB]) {
+      const fl = foreverLoops.get(h);
+      const plan = fl !== undefined && !onStack.has(h) ? forPlanAt(b, fl) : null;
+      if (plan !== null) {
+        onStack.add(h);
+        try {
+          out.push(...emitForever(fl!, stop, plan));
+        } finally {
+          onStack.delete(h);
+        }
+        return out;
+      }
     }
 
     // guarded self-loop: this cond_br decides "enter loop header h vs its exit". Emit the inits
@@ -8132,6 +8222,7 @@ function structureRanked(
       const exit = loopCtx.exit;
       const tailReturns = exit !== null && (isArm(exit) || isRet(exit));
       if ((exit === null || armFrame!.merge !== exit) && !tailReturns) {
+        wantFor();
         throw new StructureError(
           `cannot structure '${fn.name}': a case body leaves its switch for a loop exit past the ` +
             `switch's end (block #${fn.blocks.indexOf(b)}), where \`break\` would leave only the switch`,
@@ -8753,7 +8844,129 @@ function structureRanked(
   // it never falls through into the owner's. Paths from `exit` that pass `to` without meeting it
   // (`if (q) goto Z; … to: …; Z:`) are not refused: they render inside the `if` and again after it,
   // each copy ending in a jump.
-  const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
+  // THE LOOP AS A `for`. `while (1)` writes a latch that runs the update and the test as `if (!c)
+  // break; i++;` at the foot of the body, where nothing but the body's own end reaches it. C has one
+  // loop whose `continue;` runs an update before the test, `for (init; cond; inc)`, and only it
+  // spells a body that reaches the latch from inside a jump table whose other arms leave the loop:
+  // `switch (..) { case 1: if (c) continue; k(); break; default: continue; } break;`. Every arm then
+  // ends the switch at the loop's exit, and `break;` after the switch leaves the loop. agbcc and gcc
+  // 2.7.2 compile that source to a guard, the body and a latch `i++; if (i <= n) goto top`, the same
+  // bytes as `if (i <= n) do { .. } while (++i <= n)` only where no `continue` exists — so the guard
+  // is the `for`'s own first test, and the reading drops it.
+  //
+  // Taken only for a loop the rerun asks (`ForRanking`), from the guard `g` that enters it, and
+  // refused (null) unless every part of the `for` is the asm's, read where the `for` reads it:
+  //   • the guard branches only to the header and the exit, and is the header's one way in beside
+  //     the one latch, which branches only to the header and the exit;
+  //   • the exit and the latch take no params: no edge into either carries a copy;
+  //   • the latch is pure — no effect, no qualified access, no named or anchored def — and what its
+  //     test and update read is its own ops over the header's params and values from outside the
+  //     loop, since the `for` evaluates them after the update and, the first time, before the body;
+  //   • the update is ONE copy, `inc`, and the guard's copies into the header name that variable
+  //     with a value that reads no other copy's name, `init`; the rest precede the `for`;
+  //   • the test reads no variable the update writes except through its back-edge value, and no
+  //     inner loop's value (`latchInnerSub`);
+  //   • the guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load
+  //     on either side read through only where it is evaluated at the test.
+  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
+  const forPlanAt = (g: Block, fl: ForeverLoopInfo): ForPlan | null => {
+    const h = fl.header;
+    const exit = fl.exit;
+    const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
+    const gterm = g.ops[g.ops.length - 1];
+    const lterm = latch?.ops[latch.ops.length - 1];
+    const onlyTo = (t: Op | undefined): boolean =>
+      t?.opcode === 'cond_br' &&
+      t.successors.length === 2 &&
+      t.successors.some((sc) => sc.block === h) &&
+      t.successors.some((sc) => sc.block === exit);
+    if (
+      !forRank.asked.has(h) ||
+      exit === null ||
+      latch === undefined ||
+      latch === h ||
+      fl.body.has(g) ||
+      !onlyTo(gterm) ||
+      !onlyTo(lterm) ||
+      exit.params.length > 0 ||
+      latch.params.length > 0 ||
+      new Set(preds.get(h) ?? []).size !== 2 ||
+      !(preds.get(h) ?? []).every((p) => p === g || p === latch) ||
+      latch.ops.slice(0, -1).some((o) => effectful(o) || qualified(o) || materialize.has(o) || anchoredAt.has(o))
+    ) {
+      return null;
+    }
+    const closed = (v: Value, seen = new Set<Value>()): boolean => {
+      if (seen.has(v)) {
+        return true;
+      }
+      seen.add(v);
+      const d = defs.get(v);
+      const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
+      if (at === undefined || !fl.body.has(at) || (d === undefined && at === h)) {
+        return true;
+      }
+      return d !== undefined && at === latch && d.operands.every((o) => closed(o, seen));
+    };
+    const back = successorTo(latch, h)!;
+    const initEdge = successorTo(g, h)!;
+    const cond = lterm!.operands[0];
+    if (!closed(cond) || !back.args.every((a) => closed(a))) {
+      return null;
+    }
+    const auditMark = droppedUndefCopies.length;
+    const updateRecs = edgeCopyRecords(latch, back);
+    const initRecs = edgeCopyRecords(g, initEdge);
+    droppedUndefCopies.length = auditMark;
+    const iv = updateRecs.length === 1 ? updateRecs[0].name : undefined;
+    const ivInit = initRecs.find((r) => r.name === iv);
+    if (
+      iv === undefined ||
+      ivInit === undefined ||
+      copySetIsCyclic(initRecs) ||
+      initRecs.some((r) => r !== ivInit && exprVars(ivInit.value).has(r.name))
+    ) {
+      return null;
+    }
+    const sub = subFor(h.params, back.args as Value[]);
+    const inner = latchInnerSub(h, fl.body, [latch]);
+    if (inner.sub.size > 0 || inner.unreadable.size > 0 || readsClobbered(cond, sub, new Set([iv]))) {
+      return null;
+    }
+    const entryVals = new Map<Value, Value>();
+    h.params.forEach((p, i) => entryVals.set(p, initEdge.args[i] as Value));
+    h.params.forEach((_, i) => entryVals.set(back.args[i] as Value, initEdge.args[i] as Value));
+    const atTest = (v: Value): boolean => {
+      const d = defs.get(v);
+      if (d === undefined || !orderSensitive(d)) {
+        return true;
+      }
+      const at = opBlock.get(d);
+      return at === latch || (at === g && !g.ops.slice(opIndex.get(d)! + 1).some(effectful));
+    };
+    const contIsTaken = lterm!.successors[0].block === h;
+    const enterIsTaken = gterm.successors[0].block === h;
+    if (!sameAtEntry(cond, gterm.operands[0], entryVals, enterIsTaken !== contIsTaken, atTest)) {
+      return null;
+    }
+    const [inc] = argAssigns(latch, h);
+    const inits = argAssigns(g, h);
+    const init = inits.find((st) => st.k === 'assign' && st.name === iv);
+    if (inc?.k !== 'assign' || init === undefined) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(h)} lost its update or its init copy`,
+      );
+    }
+    const test = exprWith(sub)(cond);
+    return {
+      latch,
+      inits: inits.filter((st) => st !== init),
+      init,
+      cond: contIsTaken ? test : negateCond(test),
+      inc,
+    };
+  };
+  const emitForever = (fl: ForeverLoopInfo, stop: Block | null, asFor?: ForPlan): Stmt[] => {
     // an outward exit is handed out to the loop this one sits in, which must be the enclosing loop
     // that took it (`handed`); in a case body opened in it, through that one switch
     // (`handedThroughSwitch`), never through a switch in a switch. Only the switch-in-switch test
@@ -8784,14 +8997,40 @@ function structureRanked(
       breakArms: fl.breakArms,
       ...(fl.twoLevel !== undefined ? { twoLevel: fl.twoLevel } : {}),
       ...(enclosing !== null ? { enclosing } : {}),
+      ...(asFor !== undefined ? { forLatch: asFor.latch } : {}),
     };
-    const body = withLoop(frame, () => structureBlock(fl.header, fl.header));
+    // a `for`'s body ends at its latch, and its jumps are refused from any loop nested inside
+    const jumps = asFor === undefined ? [] : [asFor.latch, fl.exit!].filter((x) => !forJumps.has(x));
+    jumps.forEach((x) => forJumps.add(x));
+    let body: Stmt[];
+    try {
+      body = withLoop(frame, () => structureBlock(fl.header, asFor?.latch ?? fl.header));
+    } finally {
+      jumps.forEach((x) => forJumps.delete(x));
+    }
     dwActive.delete(fl.header);
-    const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body };
+    const loop: Stmt =
+      asFor === undefined
+        ? { k: 'while', cond: { k: 'const', value: 1 }, body }
+        : { k: 'for', init: asFor.init, cond: asFor.cond, inc: asFor.inc, body };
     const exit = fl.exit;
+    if (asFor !== undefined) {
+      return [...asFor.inits, ...emitForeverExit(fl, stop, exit!, loop, through)];
+    }
     if (exit === null || !breaksOut(body)) {
       return [loop];
     }
+    return emitForeverExit(fl, stop, exit, loop, through);
+  };
+  // The code after a `while (1)` (or its `for`, `ForPlan`) that leaves to `exit`, and the flag of a
+  // two-level exit out of it.
+  const emitForeverExit = (
+    fl: ForeverLoopInfo,
+    stop: Block | null,
+    exit: Block,
+    loop: Stmt,
+    through: SwitchFrame[],
+  ): Stmt[] => {
     const region = exitRegion(exit, fl.body, stop);
     const { sub: innerSub, unreadable } = latchInnerSub(fl.header, fl.body, [...fl.breaks], region);
     if (unreadable.size > 0 && rootsOf(region).some((r) => rendersThrough(r, innerSub, unreadable))) {

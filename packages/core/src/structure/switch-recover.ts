@@ -107,7 +107,14 @@ export interface SwitchRecovery {
   /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
    *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
    *  Regime B, which has no fallback, fails loud. */
-  analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>, stopAtLoop?: boolean) => ArmExit;
+  analyzeArmExit: (
+    entry: Block,
+    b: Block,
+    merge: Block | null,
+    siblings: Set<Block>,
+    stopAtLoop?: boolean,
+    jumps?: ReadonlySet<Block>,
+  ) => ArmExit;
   /** may the copies write out a sibling that leaves sideways into `s`? (`copySharedFallTargets`) */
   forwardToMerge: (s: Block, b: Block, merge: Block | null, siblings: ReadonlySet<Block>) => boolean;
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
@@ -843,15 +850,23 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // under this arm. That is duplication, not a wrong dispatch — the same duplication the structurer
   // already does for any tail two arms share, and how the case bodies agbcc tail-merged are put
   // back. Costly for matching, correct to run.
+  //
+  // `jumps` are blocks an edge into which is a jump that ends its path where it sits, whatever the
+  // switch: the latch of a loop spelled `for`, which the structurer writes as `continue;`. Such an
+  // edge is neither a fall into a sibling nor an escape, and an arm that IS one is a bare jump.
   const analyzeArmExit = (
     entry: Block,
     b: Block,
     merge: Block | null,
     siblings: Set<Block>,
     stopAtLoop = false,
+    jumps: ReadonlySet<Block> = new Set(),
   ): ArmExit => {
     if (entry === merge) {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
+    }
+    if (jumps.has(entry)) {
+      return { kind: 'break', region: new Set([entry]) };
     }
     const into = new Set<Block>(); // sibling entries this arm flows into
     const escapedTo = new Set<Block>(); // the blocks outside the switch's region it steps into
@@ -865,6 +880,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       for (const s of successorsOf(cur)) {
         if (s === merge) {
           toMerge = true;
+        } else if (jumps.has(s)) {
+          continue;
         } else if (s !== entry && siblings.has(s)) {
           into.add(s);
         } else if (s !== entry && !seen.has(s)) {
