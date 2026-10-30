@@ -282,8 +282,30 @@ describe('classifyFrameUses', () => {
     const a = laddr(0);
     const at = mkOp('add', { operands: [a.results[0], i], results: [value()] });
     const { uses } = classify([{ params: [i], ops: [a, at, load(at.results[0], 0, 1), ret()] }]);
-    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false }]);
+    expect(uses.indexed.get(0)).toEqual([{ width: 1, signed: false, reach: null }]);
     expect(uses.accesses.get(0)).toEqual([]);
+  });
+
+  // `u8 a[16]; … a[(i & 7) * 2 + 1]` at sp+0: the index holds 1..15, so a byte access reaches
+  // [1, 16); a parameter nothing bounds reaches every byte
+  test('records the bytes a runtime index may reach, or null where nothing bounds it', () => {
+    const reachOf = (masked: boolean, width = 1) => {
+      const i = value();
+      const a = laddr(0);
+      const [m, one] = [konst(7), konst(1)];
+      const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+      const sh = mkOp('shl', { operands: [and.results[0], one.results[0]], results: [value()] });
+      const plus = mkOp('add', { operands: [sh.results[0], one.results[0]], results: [value()] });
+      const idx = masked ? [m, one, and, sh, plus] : [];
+      const at = mkOp('add', { operands: [a.results[0], masked ? plus.results[0] : i], results: [value()] });
+      const { uses } = classify([{ params: [i], ops: [a, ...idx, at, load(at.results[0], 0, width), ret()] }], {
+        owned: { from: 0, to: 16 },
+      });
+      return uses.indexed.get(0)?.map((x) => x.reach);
+    };
+    expect(reachOf(true)).toEqual([{ lo: 1, hi: 16 }]);
+    expect(reachOf(true, 2)).toEqual([{ lo: 1, hi: 17 }]);
+    expect(reachOf(false)).toEqual([null]);
   });
 });
 
@@ -648,6 +670,39 @@ describe('keepAsOneObject', () => {
     expect(calls.map((op) => op.operands[0])).toEqual([a.results[0], b.results[0]]);
   });
 
+  // `x[(i & mask) + by]` read through the lower (`a`) or the upper (`b`) copy's address, with the
+  // other copy read at a fixed offset
+  const masked =
+    (into: 'a' | 'b', mask: number, by: number) =>
+    (a: Value, b: Value, i: Value): Op[] => {
+      const [m, k] = [konst(mask), konst(by)];
+      const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+      const plus = mkOp('add', { operands: [and.results[0], k.results[0]], results: [value()] });
+      const at = mkOp('add', { operands: [into === 'a' ? a : b, plus.results[0]], results: [value()] });
+      const other = into === 'a' ? load(b, 1, 1) : load(a, 3, 1);
+      return [m, k, and, plus, at, load(at.results[0], 0, 1), other];
+    };
+
+  // `u8 a[4], b[4]; memcpy(a, s, 4); memcpy(b, t, 4); return a[i & 3] + b[1];` — the index holds
+  // 0..3 (ir/bits.ts `stridedRange`), so it reaches the lower copy's bytes and no other
+  test('splits the one object where a runtime index provably stays inside one copy', () => {
+    const lower = copies([4, 4], masked('a', 3, 0));
+    expect(kept(lower)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(objectsOf(lower)).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    const [a] = lower.ops;
+    const indexed = lower.ops.find((op) => op.opcode === 'add' && op.operands.includes(a.results[0]))!;
+    expect(lower.ops.find((op) => op.opcode === 'load' && op.operands[0] === indexed.results[0])).toBeDefined();
+    // …and based at the upper copy, `b[(i & 1) + 2]` reaches [6, 8)
+    const upper = copies([4, 4], masked('b', 1, 2));
+    expect(objectsOf(withKept(upper))).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+  });
+
   test('keeps one object where a use proves no boundary between two addresses', () => {
     // a copy over both parts, then a read through the second address
     expect(objectsOf(withKept(copies([8, 4])))).toEqual([[0, 8]]);
@@ -661,6 +716,10 @@ describe('keepAsOneObject', () => {
       return [at, load(at.results[0], 0, 1), load(b, 1, 1)];
     });
     expect(objectsOf(withKept(indexed))).toEqual([[0, 8]]);
+    // …and so may a masked index whose range crosses into it: `a[(i & 3) + 2]` reaches [2, 6),
+    // and `a[i & 7]` [0, 8)
+    expect(objectsOf(withKept(copies([4, 4], masked('a', 3, 2))))).toEqual([[0, 8]]);
+    expect(objectsOf(withKept(copies([4, 4], masked('a', 7, 0))))).toEqual([[0, 8]]);
     // …and based in the middle of it
     const midIndexed = copies([4, 4], (a, b, i) => {
       const mid = laddr(2);
@@ -784,4 +843,22 @@ describe('keepAsOneObject', () => {
     kept(blk);
     return blk;
   };
+  // `u16 a[2]; u32 b; … return ((u16 *)a)[i & mask] + b;` — a 2-byte index beside a 4-byte read
+  // of the other copy: two widths meet only at a byte the index may reach
+  test('asks the width rule of a bounded index only at the bytes it may reach', () => {
+    const halves = (mask: number) =>
+      copies([4, 4], (a, b, i) => {
+        const [m, one] = [konst(mask), konst(1)];
+        const and = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+        const sh = mkOp('shl', { operands: [and.results[0], one.results[0]], results: [value()] });
+        const at = mkOp('add', { operands: [a, sh.results[0]], results: [value()] });
+        return [m, one, and, sh, at, load(at.results[0], 0, 2), load(b, 0, 4)];
+      });
+    // `i & 1` reaches [0, 4), the lower copy alone
+    expect(kept(halves(1))).toEqual({ policy: 'one-object', sinks: [] });
+    // `i & 3` reaches [0, 8), the word at 4 included
+    expect(() => kept(halves(3))).toThrow(
+      'the byte at [sp,#4] of the bytes [sp,#0) to [sp,#8) kept as one object is accessed 4 bytes wide and by a runtime index 2 bytes wide',
+    );
+  });
 });

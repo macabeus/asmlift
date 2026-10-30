@@ -4353,6 +4353,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // s[16 + i];` at agbcc -O2: the word at [sp,#0x20] is spelled as a spill slot is, but the
       // index may reach it. Handed back to the slot model it is a local nothing reads, so the
       // recompile drops the store an index into the frame may read; kept, it stays memory.
+      //
+      // A MASKED index reaches only the bytes its range names: `s[16 + (i & 15)]` reads [16, 32)
+      // and never the word at 32, which goes back to the slot model as the spill slot it is
+      // spelled as; `s[16 + (i & 31)]` reaches [16, 48), the word included, and keeps it.
       test('a word a runtime index may reach is not handed back to the slot model', () => {
         const reached =
           '\t.align\t2, 0\n' +
@@ -4387,6 +4391,25 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         const prototypes = { f: { params: 2 } };
         const src = decompile('f', reached, ARMV4T_AGBCC, { prototypes }).source;
         expect(src).toMatch(/\)\[\d+\] = a1;/);
+        const masked = (mask: number) =>
+          reached.replace('\tadd\tr4, r4, #0x10\n', `\tmov\tr0, #${mask}\n\tand\tr4, r0\n\tadd\tr4, r4, #0x10\n`);
+        const inside = decompile('f', masked(15), ARMV4T_AGBCC, { prototypes }).source;
+        expect(inside).toContain('u8 sp0[32];');
+        expect(inside).not.toContain('= a1;');
+        expect(inside).toContain('return ((u8 *)sp0)[(a0 & 15) + 16];');
+        const across = decompile('f', masked(31), ARMV4T_AGBCC, { prototypes }).source;
+        expect(across).toContain('u8 sp0[36];');
+        expect(across).toContain('((s32 *)sp0)[8] = a1;');
+        // …and so does a byte shifted down: `s[16 + (*p >> 4)]` reads [16, 32), `s[16 + (*p >> 3)]`
+        // [16, 48)
+        const shifted = (by: number) =>
+          reached.replace('\tadd\tr4, r4, #0x10\n', `\tldrb\tr4, [r4]\n\tlsr\tr4, r4, #${by}\n\tadd\tr4, r4, #0x10\n`);
+        const narrow = decompile('f', shifted(4), ARMV4T_AGBCC, { prototypes }).source;
+        expect(narrow).toContain('u8 sp0[32];');
+        expect(narrow).not.toContain('= a1;');
+        const wide = decompile('f', shifted(3), ARMV4T_AGBCC, { prototypes }).source;
+        expect(wide).toContain('u8 sp0[36];');
+        expect(wide).toContain('((s32 *)sp0)[8] = a1;');
       });
       test('an array a callee nothing bounds is handed keeps the one object', () => {
         const handed = copies('\tadd\tr0, r4, #0\n\tbl\tfill\n');

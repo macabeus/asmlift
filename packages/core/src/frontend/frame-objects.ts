@@ -17,7 +17,7 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
-import { linearFactor } from '../ir/bits';
+import { type StridedRange, linearFactor } from '../ir/bits';
 import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -596,11 +596,9 @@ function reliftRange({
   gates: readonly Gate<HandBack>[];
 }): FrameRange {
   const whole = { from: declared.from, to: declared.to };
-  const extents = [...uses.escapeExtents.values()].flat();
-  const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
-  const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
-  const kept = (word: number): boolean =>
-    firstRejection(gates, { word, extents, bounded, fills, splits, indexed: uses.indexed.size > 0 }) !== null;
+  const reaches = frameReaches(uses);
+  const fills = copyStarts(reaches);
+  const kept = (word: number): boolean => firstRejection(gates, { word, reaches, fills, splits }) !== null;
   const scalarWord = (w: number, pastScalar: boolean): boolean => {
     const touching = uses.fixed.filter((f) => overlaps(f.at, f.width, w, 4));
     const owners = [...objects.keys()].filter((o) => overlaps(o, 1, w, 4));
@@ -642,20 +640,16 @@ function splitsOneObject(target: TargetDescription): boolean {
   );
 }
 
-/** What `RELIFT_HAND_BACK_GATES` asks of one end word of the local area: the word, and the
- *  function's escapes as the bytes each may reach (`FrameUses.escapeExtents`). */
+/** What `RELIFT_HAND_BACK_GATES` asks of one end word of the local area: the word, and every
+ *  escape and runtime index of the frame as the bytes each may reach (`frameReaches`). */
 export interface HandBack {
   readonly word: number;
-  /** every escape's extent, `null` where nothing bounds it */
-  readonly extents: readonly ({ readonly lo: number; readonly hi: number } | null)[];
-  /** the bounded ones */
-  readonly bounded: readonly { readonly lo: number; readonly hi: number }[];
+  /** every escape and runtime index, with the bytes each may reach */
+  readonly reaches: readonly OwnedReach[];
   /** where a bounded copy writes into the frame */
   readonly fills: ReadonlySet<number>;
   /** the target may split the one object (`splitsOneObject`) */
   readonly splits: boolean;
-  /** some access reaches the frame through a runtime index */
-  readonly indexed: boolean;
 }
 
 /** WHAT KEEPS AN END WORD IN THE ONE OBJECT (`reliftRange`): a reach through the object that may
@@ -670,7 +664,7 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     why: 'a callee handed an address nothing bounds may reach any byte of the frame from it',
     sound: true,
     guardedBy: 'frame-audit-stages.test.ts: keeps every word where an escape no literal count bounds may reach it',
-    rejects: (c) => c.bounded.length < c.extents.length,
+    rejects: (c) => c.reaches.some((r) => r.by === 'escape' && r.reach === null),
   },
   // `memcpy(s + 4, src, 8)` over a slot keyed at 8 writes the word the slot model would keep
   {
@@ -678,18 +672,20 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     why: 'a block copy into or out of the frame names the bytes it moves, and this word is one of them',
     sound: true,
     guardedBy: 'frame-audit-stages.test.ts: keeps a word a bounded copy reaches',
-    rejects: (c) => c.bounded.some((e) => overlaps(c.word, 4, e.lo, e.hi - e.lo)),
+    rejects: (c) => c.reaches.some((r) => r.by === 'escape' && r.reach !== null && mayTouch(r.reach, c.word, 4)),
   },
-  // An index reaches every byte of the object it is based in, so no split follows it
-  // (`provenParts` keeps the one object whole), and a word handed back would only leave the bytes
-  // the index may reach. `*(u32 *)(s + 32) = x; return s[16 + i];` on agbcc is spelled exactly as
-  // a spill slot beside an index is.
+  // An index nothing bounds reaches every byte of the object it is based in, so no split follows
+  // it (`provenParts` keeps the one object whole), and a word handed back would only leave the
+  // bytes the index may reach. `*(u32 *)(s + 32) = x; return s[16 + i];` on agbcc is spelled
+  // exactly as a spill slot beside an index is. An index whose range is proven (its `reach`:
+  // `s[16 + (i & 7) * 2]`) reaches only the bytes it names, so a word outside every such reach is
+  // read through no index, and handing it back loses nothing an index could read.
   {
     id: 'runtime-index',
-    why: 'a runtime index may reach every byte of the object, this word included',
+    why: 'a runtime index may reach this word: nothing bounds it, or its bounded reach covers it',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: a word a runtime index may reach is not handed back to the slot model',
-    rejects: (c) => c.indexed,
+    rejects: (c) => c.reaches.some((r) => r.by === 'index' && mayTouch(r.reach, c.word, 4)),
   },
   // Handing back buys a split and nothing else: two or more copies with a literal count must fill
   // the area, on a target that splits at all (PPC_MWCC places address-taken arrays in no order
@@ -1229,10 +1225,70 @@ interface FrameAccess {
 }
 
 /** A load or store judged an access to the object at `off`, and the address value it reaches the
- *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one. */
+ *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one,
+ *  and then `index` is the access as `FrameUses.indexed` records it. Without `index` the access
+ *  is at its own displacement from `through`. */
 interface FrameAccessOp {
   readonly off: number;
   readonly through: Value;
+  readonly index?: IndexedAccess;
+}
+
+/** THE FRAME BYTES `[lo, hi)` ONE USE MAY TOUCH, or `null` where nothing bounds it, which is every
+ *  byte: a runtime index's reach (`FrameUses.indexed`) and an escape's extent
+ *  (`FrameUses.escapeExtents`) are each one. */
+type FrameReach = { readonly lo: number; readonly hi: number } | null;
+
+/** Whether a use reaching `r` may touch any of the `width` bytes at `lo`: every byte where
+ *  nothing bounds it. */
+function mayTouch(r: FrameReach, lo: number, width: number): boolean {
+  return r === null || overlaps(lo, width, r.lo, r.hi - r.lo);
+}
+
+/** Whether two reaches may share a byte. */
+function mayShare(a: FrameReach, b: FrameReach): boolean {
+  return b === null || mayTouch(a, b.lo, b.hi - b.lo);
+}
+
+/** One reach through the frame, with the object whose address it starts from (`owner`), what
+ *  makes it (`by`: an escape of that address, or a runtime index into it), and `into` where it is
+ *  a bounded block copy that WRITES the bytes (the address is its destination). */
+interface OwnedReach {
+  readonly owner: number;
+  readonly by: 'escape' | 'index';
+  readonly reach: FrameReach;
+  readonly into: boolean;
+}
+
+/** EVERY REACH THROUGH THE FRAME, the one list the split of the one object (`provenParts`) and
+ *  the words handed back to the slot model (`reliftRange`) read: each escape's extent, and each
+ *  runtime-indexed access's reach. */
+function frameReaches(uses: FrameUses): OwnedReach[] {
+  return [
+    ...[...uses.escapeExtents].flatMap(([owner, extents]) =>
+      extents.map((e): OwnedReach => ({
+        owner,
+        by: 'escape',
+        reach: e === null ? null : { lo: e.lo, hi: e.hi },
+        into: e?.into === true,
+      })),
+    ),
+    ...[...uses.indexed].flatMap(([owner, accesses]) =>
+      accesses.map((x): OwnedReach => ({ owner, by: 'index', reach: x.reach, into: false })),
+    ),
+  ];
+}
+
+/** Where a bounded block copy writes into the frame: the start of each copy's destination. */
+function copyStarts(reaches: readonly OwnedReach[]): Set<number> {
+  return new Set(reaches.flatMap((r) => (r.into && r.reach !== null ? [r.reach.lo] : [])));
+}
+
+/** One access through a runtime index: its width and signedness, and the bytes it may touch. */
+interface IndexedAccess {
+  readonly width: number;
+  readonly signed: boolean;
+  readonly reach: FrameReach;
 }
 
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
@@ -1254,7 +1310,9 @@ interface FrameUses {
   /** the calls each object is passed to BY VALUE (`foldByValueArgs`), with the struct each passes */
   readonly byValueReads: ReadonlyMap<number, readonly { readonly op: Op; readonly type: IrType }[]>;
   readonly useCount: ReadonlyMap<number, number>;
-  readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
+  /** every runtime-indexed access of each object, with the frame bytes `[lo, hi)` it may touch
+   *  (`reach`, `indexedAccess`), or `null` where nothing bounds the index */
+  readonly indexed: ReadonlyMap<number, readonly IndexedAccess[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
   /** every escape of each object's address, as the frame bytes it may reach: `[lo, hi)` where a
@@ -1375,7 +1433,7 @@ function classifyFrameUses({
   // The accesses through a runtime-indexed address, per object — kept apart from `accesses`,
   // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
   // `a`.
-  const indexed = new Map<number, { width: number; signed: boolean }[]>();
+  const indexed = new Map<number, IndexedAccess[]>();
   for (const off of objects.keys()) {
     accesses.set(off, []);
   }
@@ -1504,7 +1562,14 @@ function classifyFrameUses({
         // judged with the rest (`objectShapes`).
         const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
         if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
-          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], facts.constOf, fail);
+          indexedAccess(
+            irBlocks,
+            { indexed, accessOps },
+            { off, through: v },
+            { sum: op.results[0], range: facts.addressRangeOf(other) },
+            facts.constOf,
+            fail,
+          );
           continue;
         }
         // A CONSTANT move left after the fold (`foldMovedCaptures`) moves a capture a phi carried.
@@ -1619,19 +1684,27 @@ function transferRead(
 // compiles to `add r4, r4, sp` and the source's `mov r1, sp / add r0, r1, r4` does not: the `u16`
 // twin `((u16 *)sp0)[a0]` misses the same way. Left raw, the access compiles to the source's
 // bytes with or without the `+ 0`.
+//
+// WHAT IT MAY REACH is the object's offset plus every value the index may hold (`range`, ir/bits.ts
+// `stridedRange`: a non-negative mask, a zero-fill shift, an unsigned narrow load, a `zext`, and
+// linear forms of them), widened by the access's width — the stride is dropped, so the bytes are
+// a superset of the ones reached. Every element is at displacement 0 from the sum (above), so the
+// address is exactly the capture plus the index. An index nothing bounds, or one whose sum could
+// wrap past the top of the address space back below the object, reaches every byte (`null`).
 function indexedAccess(
   irBlocks: readonly Block[],
-  {
-    indexed,
-    accessOps,
-  }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
+  { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
   object: FrameAccessOp,
-  sum: Value,
+  { sum, range }: { sum: Value; range: StridedRange | undefined },
   constOf: (v: Value) => number | undefined,
   fail: Refuse,
 ): void {
   const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
+  const reach = (width: number): FrameReach => {
+    const starts = range === undefined ? null : displaced(range, off, width);
+    return starts === null ? null : { lo: starts.lo, hi: starts.hi + width };
+  };
   const judge = (at: Value, by: number): void => {
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
@@ -1662,8 +1735,10 @@ function indexedAccess(
                 'only a load or store at the indexed address is modelled',
             );
           }
-          got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
-          accessOps.set(op, object);
+          const width = op.attrs.width as number;
+          const index = { width, signed: op.opcode === 'load' && op.attrs.signed === true, reach: reach(width) };
+          got.push(index);
+          accessOps.set(op, { ...object, index });
         }
       }
     }
@@ -1865,6 +1940,16 @@ function readWindow(
   return { lo, hi, why: 'that reads through it', ...(spared ? { sparedByMiss: true as const } : {}) };
 }
 
+/** The addresses a strided range moved by `off` may hold, where an access `width` bytes wide at
+ *  any of them stays inside one address space — or null where a start could fall below 0 or an
+ *  access wrap past 2^32, so no interval names the bytes it touches. What a runtime index into the
+ *  frame may reach (`indexedAccess`) and where a computed store may land (`misses`) both read it. */
+function displaced(r: StridedRange, off: number, width: number): StridedRange | null {
+  const lo = r.lo + off;
+  const hi = r.hi + off;
+  return lo < 0 || hi + width > 2 ** 32 ? null : { lo, hi, stride: r.stride };
+}
+
 /** A store through a computed pointer that provably misses the control halfword at `cnt`: no
  *  address its base may hold (`addressRangeOf`, a strided interval), displaced by the store's own
  *  offset, starts a store whose bytes overlap `[cnt, cnt + 2)`. agbcc's `gEnts[i].f = 1` after a
@@ -1880,13 +1965,12 @@ function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
   if (r === undefined) {
     return false;
   }
-  const off = op.attrs.off as number;
   const width = op.attrs.width as number;
-  const lo = r.lo + off;
-  const hi = r.hi + off;
-  if (lo < 0 || hi + width > 2 ** 32) {
+  const starts = displaced(r, op.attrs.off as number, width);
+  if (starts === null) {
     return false;
   }
+  const { lo, hi } = starts;
   // the first start at or above the lowest one that overlaps, against the highest that does
   const from = cnt - width + 1;
   const first = from <= lo || r.stride === 0 ? lo : lo + Math.ceil((from - lo) / r.stride) * r.stride;
@@ -2458,13 +2542,21 @@ function keepAsOneObject({
     fail(`${kept} cannot hold every writer — ${writer}`);
   }
   // A runtime index names no byte, so the rule below is asked of it at EVERY byte it may reach:
-  // all of them. Two indexed widths refuse here; an index beside a member of another width
-  // refuses after the members are checked against each other, so a member pair keeps naming its
-  // own byte (`indexedWidth` says why one width is enough).
-  const index = indexedWidth([...uses.indexed.values()].flat());
-  if (index.refusal !== null) {
-    fail(`a runtime index into ${kept} ${index.refusal}`);
-  }
+  // all of them where nothing bounds it, the bytes its `reach` names where one does — a byte no
+  // index reaches is read at one type whatever the index's is, and accesses that share no byte
+  // cannot serve each other a stale value. Two indexed widths that may share a byte refuse here;
+  // an index beside a member of another width refuses after the members are checked against each
+  // other, so a member pair keeps naming its own byte (`indexedWidth` says why one width is
+  // enough).
+  const indexes = [...uses.indexed.values()].flat();
+  indexes.forEach((x, i) => {
+    for (const y of indexes.slice(i + 1)) {
+      const { refusal } = indexedWidth([x, y]);
+      if (refusal !== null && mayShare(x.reach, y.reach)) {
+        fail(`a runtime index into ${kept} ${refusal}`);
+      }
+    }
+  });
   // ONE TYPE PER BYTE, OR ONE UNION. agbcc at -O2 turns on type-based alias analysis
   // (toplev.c:3616), and compiled, a `u32` read through a cast is served the earlier `u32` store
   // straight past a `u16` store to the same bytes — a stale value. So a byte two accesses of
@@ -2500,8 +2592,9 @@ function keepAsOneObject({
     }
   }
   if (twoWidths !== undefined) {
-    // any runtime index, a byte one too: `indexedWidth` leaves width 1 out because a char access
-    // agrees with every width, but a union view is still spelled for fixed offsets alone
+    // any runtime index, a byte one too, and wherever its reach lies: `indexedWidth` leaves width
+    // 1 out because a char access agrees with every width, but a union view is spelled for fixed
+    // offsets on the object alone, and an indexed access is not one (the rewrite below refuses it)
     const why = unionRefusal({ from, to, uses, indexed: uses.indexed.size > 0 });
     if (why !== null) {
       fail(
@@ -2511,9 +2604,10 @@ function keepAsOneObject({
     }
   }
   for (const [b, had] of widthAt) {
-    if (index.width !== null && had !== index.width) {
+    const by = indexes.find((x) => x.width !== 1 && x.width !== had && mayTouch(x.reach, b, 1));
+    if (by !== undefined) {
       fail(
-        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
+        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${by.width} ` +
           `bytes wide, ${STALE_ACROSS_TYPES}`,
       );
     }
@@ -2630,10 +2724,11 @@ function keepAsOneObject({
  *  folded into its own local (l3/constinit.ts).
  *
  *  ONE PART, never a refusal, whenever a byte could be read through two parts: a runtime index
- *  (it names no byte, so it may reach every one), an escape nothing bounds (a callee or a holder
- *  that may reach any byte from the address it was given), a byte no use names (nothing says
- *  which side it belongs to), or a use through a member that lands outside the part its own
- *  address lies in (`&a[16]` read at [-1]: one pointer walking two parts is one object). The
+ *  nothing bounds (it names no byte, so it may reach every one) or one whose `reach` (the range
+ *  ir/bits.ts proves of the index: `a[(i & 7) * 2]`) crosses a part, an escape nothing bounds (a
+ *  callee or a holder that may reach any byte from the address it was given), a byte no use names
+ *  (nothing says which side it belongs to), or a use through a member that lands outside the part
+ *  its own address lies in (`&a[16]` read at [-1]: one pointer walking two parts is one object). The
  *  union views of two widths at one byte are not split either (the caller asks only without
  *  them). An access straddling two runs chains them into one part by construction. */
 function provenParts(
@@ -2643,26 +2738,30 @@ function provenParts(
   alignment: number,
 ): FrameRange[] {
   const whole = [{ from, to }];
-  if (uses.indexed.size > 0) {
-    return whole;
-  }
   const touched: { owner: number; lo: number; hi: number }[] = [];
-  for (const [op, { off }] of uses.accessOps) {
+  for (const [op, { off, index }] of uses.accessOps) {
+    // …an access through a runtime index is not at its own displacement: it is its reach (below)
+    if (index !== undefined) {
+      continue;
+    }
     const at = off + (op.attrs.off as number);
     touched.push({ owner: off, lo: at, hi: at + (op.attrs.width as number) });
+  }
+  // An escape and a runtime index each touch every byte they may reach (`frameReaches`), so each
+  // chains the runs it spans as one access as wide would — a reach across a copy's start makes
+  // the two copies one part — and a reach that starts in a part other than its object's fails the
+  // owner test below
+  const reaches = frameReaches(uses);
+  for (const { owner, reach } of reaches) {
+    if (reach === null) {
+      return whole;
+    }
+    touched.push({ owner, ...reach });
   }
   for (const [off, reads] of uses.byValueReads) {
     reads.forEach(({ type }) =>
       touched.push({ owner: off, lo: off, hi: off + (type.kind === 'struct' ? (type.size ?? Infinity) : Infinity) }),
     );
-  }
-  for (const [off, extents] of uses.escapeExtents) {
-    for (const e of extents) {
-      if (e === null) {
-        return whole;
-      }
-      touched.push({ owner: off, ...e });
-    }
   }
   // …and a boundary only where a bounded copy starts: an address handed to `memcpy` is where
   // the source put an object it fills. A run starting anywhere else is bytes reached from below,
@@ -2674,7 +2773,7 @@ function provenParts(
   // reads `buf[6]` through a base it holds where the target re-formed sp+6. Only a copy's
   // DESTINATION counts: a copy reading OUT of the frame says where the source took bytes from,
   // which is as likely `memcpy(g, &w[2], 8)` from the middle of one array as a second object.
-  const starts = new Set([...uses.escapeExtents.values()].flat().flatMap((e) => (e?.into ? [e.lo] : [])));
+  const starts = copyStarts(reaches);
   const parts: { from: number; to: number }[] = [];
   for (const { lo, hi } of [...touched].sort((a, b) => a.lo - b.lo)) {
     const last = parts.at(-1);

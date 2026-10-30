@@ -586,7 +586,7 @@ export function incomingArgs(blocks: readonly Block[]): Map<Value, (Value | unde
 
 /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every answer
  *  below 32 comes from an instruction or from a caller's declaration-backed `bound`:
- *    · a zero-fill shift right by n leaves 32 - n;
+ *    · a zero-fill shift right by n leaves n fewer bits than its operand has (32 - n of a word);
  *    · a load leaves its width in bits — UNLESS it sign-extends, which leaves all 32;
  *    · an `and` with a non-negative constant leaves that constant's top set bit.
  *  A SIGNED anything is 32: sign extension sets the high bits, and a bound that ignores it turns a
@@ -601,7 +601,7 @@ export function provableBits(ctx: BitsCtx, v: Value): number {
     return given;
   }
   if (d.opcode === 'shr_u' && d.operands.length === 1 && typeof d.attrs.imm === 'number') {
-    return 32 - (d.attrs.imm as number);
+    return Math.max(0, provableBits(ctx, d.operands[0]) - (d.attrs.imm as number));
   }
   if (d.opcode === 'load') {
     return d.attrs.signed === true ? 32 : (d.attrs.width as number) * 8;
