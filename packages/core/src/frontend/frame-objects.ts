@@ -596,12 +596,9 @@ function reliftRange({
   gates: readonly Gate<HandBack>[];
 }): FrameRange {
   const whole = { from: declared.from, to: declared.to };
-  const extents = [...uses.escapeExtents.values()].flat();
-  const bounded = extents.flatMap((e) => (e === null ? [] : [e]));
-  const fills = new Set(bounded.flatMap((e) => (e.into ? [e.lo] : [])));
-  const indexReaches = [...uses.indexed.values()].flat().map((x) => x.reach);
-  const kept = (word: number): boolean =>
-    firstRejection(gates, { word, extents, bounded, fills, splits, indexReaches }) !== null;
+  const reaches = frameReaches(uses);
+  const fills = copyStarts(reaches);
+  const kept = (word: number): boolean => firstRejection(gates, { word, reaches, fills, splits }) !== null;
   const scalarWord = (w: number, pastScalar: boolean): boolean => {
     const touching = uses.fixed.filter((f) => overlaps(f.at, f.width, w, 4));
     const owners = [...objects.keys()].filter((o) => overlaps(o, 1, w, 4));
@@ -643,21 +640,16 @@ function splitsOneObject(target: TargetDescription): boolean {
   );
 }
 
-/** What `RELIFT_HAND_BACK_GATES` asks of one end word of the local area: the word, and the
- *  function's escapes as the bytes each may reach (`FrameUses.escapeExtents`). */
+/** What `RELIFT_HAND_BACK_GATES` asks of one end word of the local area: the word, and every
+ *  escape and runtime index of the frame as the bytes each may reach (`frameReaches`). */
 export interface HandBack {
   readonly word: number;
-  /** every escape's extent, `null` where nothing bounds it */
-  readonly extents: readonly ({ readonly lo: number; readonly hi: number } | null)[];
-  /** the bounded ones */
-  readonly bounded: readonly { readonly lo: number; readonly hi: number }[];
+  /** every reach through the frame, `null` where nothing bounds it */
+  readonly reaches: readonly OwnedReach[];
   /** where a bounded copy writes into the frame */
   readonly fills: ReadonlySet<number>;
   /** the target may split the one object (`splitsOneObject`) */
   readonly splits: boolean;
-  /** every access through a runtime index, as the frame bytes it may reach (`FrameUses.indexed`),
-   *  `null` where nothing bounds the index */
-  readonly indexReaches: readonly IndexReach[];
 }
 
 /** WHAT KEEPS AN END WORD IN THE ONE OBJECT (`reliftRange`): a reach through the object that may
@@ -672,7 +664,7 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     why: 'a callee handed an address nothing bounds may reach any byte of the frame from it',
     sound: true,
     guardedBy: 'frame-audit-stages.test.ts: keeps every word where an escape no literal count bounds may reach it',
-    rejects: (c) => c.bounded.length < c.extents.length,
+    rejects: (c) => c.reaches.some((r) => r.by === 'escape' && r.reach === null),
   },
   // `memcpy(s + 4, src, 8)` over a slot keyed at 8 writes the word the slot model would keep
   {
@@ -680,7 +672,7 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     why: 'a block copy into or out of the frame names the bytes it moves, and this word is one of them',
     sound: true,
     guardedBy: 'frame-audit-stages.test.ts: keeps a word a bounded copy reaches',
-    rejects: (c) => c.bounded.some((e) => overlaps(c.word, 4, e.lo, e.hi - e.lo)),
+    rejects: (c) => c.reaches.some((r) => r.by === 'escape' && r.reach !== null && mayTouch(r.reach, c.word, 4)),
   },
   // An index nothing bounds reaches every byte of the object it is based in, so no split follows
   // it (`provenParts` keeps the one object whole), and a word handed back would only leave the
@@ -693,7 +685,7 @@ export const RELIFT_HAND_BACK_GATES: readonly Gate<HandBack>[] = [
     why: 'a runtime index may reach this word: nothing bounds it, or its bounded reach covers it',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: a word a runtime index may reach is not handed back to the slot model',
-    rejects: (c) => c.indexReaches.some((r) => r === null || overlaps(c.word, 4, r.lo, r.hi - r.lo)),
+    rejects: (c) => c.reaches.some((r) => r.by === 'index' && mayTouch(r.reach, c.word, 4)),
   },
   // Handing back buys a split and nothing else: two or more copies with a literal count must fill
   // the area, on a target that splits at all (PPC_MWCC places address-taken arrays in no order
@@ -1233,21 +1225,70 @@ interface FrameAccess {
 }
 
 /** A load or store judged an access to the object at `off`, and the address value it reaches the
- *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one. */
+ *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one,
+ *  and then `index` is the access as `FrameUses.indexed` records it. Without `index` the access
+ *  is at its own displacement from `through`. */
 interface FrameAccessOp {
   readonly off: number;
   readonly through: Value;
+  readonly index?: IndexedAccess;
 }
 
-/** The frame bytes `[lo, hi)` one runtime-indexed access may touch (`FrameUses.indexed`), or
- *  `null` where nothing bounds its index. */
-type IndexReach = { readonly lo: number; readonly hi: number } | null;
+/** THE FRAME BYTES `[lo, hi)` ONE USE MAY TOUCH, or `null` where nothing bounds it, which is every
+ *  byte: a runtime index's reach (`FrameUses.indexed`) and an escape's extent
+ *  (`FrameUses.escapeExtents`) are each one. `mayTouch` is the one reading of `null`. */
+type FrameReach = { readonly lo: number; readonly hi: number } | null;
+
+/** Whether a use reaching `r` may touch any of the `width` bytes at `lo`: every byte where
+ *  nothing bounds it. */
+function mayTouch(r: FrameReach, lo: number, width: number): boolean {
+  return r === null || overlaps(lo, width, r.lo, r.hi - r.lo);
+}
+
+/** Whether two reaches may share a byte. */
+function mayShare(a: FrameReach, b: FrameReach): boolean {
+  return b === null || mayTouch(a, b.lo, b.hi - b.lo);
+}
+
+/** One reach through the frame, with the object whose address it starts from (`owner`), what
+ *  makes it (`by`: an escape of that address, or a runtime index into it), and `into` where it is
+ *  a bounded block copy that WRITES the bytes (the address is its destination). */
+interface OwnedReach {
+  readonly owner: number;
+  readonly by: 'escape' | 'index';
+  readonly reach: FrameReach;
+  readonly into: boolean;
+}
+
+/** EVERY REACH THROUGH THE FRAME, the one list the split of the one object (`provenParts`) and
+ *  the words handed back to the slot model (`reliftRange`) read: each escape's extent, and each
+ *  runtime-indexed access's reach. */
+function frameReaches(uses: FrameUses): OwnedReach[] {
+  return [
+    ...[...uses.escapeExtents].flatMap(([owner, extents]) =>
+      extents.map((e): OwnedReach => ({
+        owner,
+        by: 'escape',
+        reach: e === null ? null : { lo: e.lo, hi: e.hi },
+        into: e?.into === true,
+      })),
+    ),
+    ...[...uses.indexed].flatMap(([owner, accesses]) =>
+      accesses.map((x): OwnedReach => ({ owner, by: 'index', reach: x.reach, into: false })),
+    ),
+  ];
+}
+
+/** Where a bounded block copy writes into the frame: the start of each copy's destination. */
+function copyStarts(reaches: readonly OwnedReach[]): Set<number> {
+  return new Set(reaches.flatMap((r) => (r.into && r.reach !== null ? [r.reach.lo] : [])));
+}
 
 /** One access through a runtime index: its width and signedness, and the bytes it may touch. */
 interface IndexedAccess {
   readonly width: number;
   readonly signed: boolean;
-  readonly reach: IndexReach;
+  readonly reach: FrameReach;
 }
 
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
@@ -1664,7 +1705,7 @@ function indexedAccess(
 ): void {
   const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
-  const reach = (width: number): IndexReach => {
+  const reach = (width: number): FrameReach => {
     const starts = range === undefined ? null : displaced(range, off, width);
     return starts === null ? null : { lo: starts.lo, hi: starts.hi + width };
   };
@@ -1699,8 +1740,9 @@ function indexedAccess(
             );
           }
           const width = op.attrs.width as number;
-          got.push({ width, signed: op.opcode === 'load' && op.attrs.signed === true, reach: reach(width) });
-          accessOps.set(op, object);
+          const index = { width, signed: op.opcode === 'load' && op.attrs.signed === true, reach: reach(width) };
+          got.push(index);
+          accessOps.set(op, { ...object, index });
         }
       }
     }
@@ -2511,12 +2553,10 @@ function keepAsOneObject({
   // other, so a member pair keeps naming its own byte (`indexedWidth` says why one width is
   // enough).
   const indexes = [...uses.indexed.values()].flat();
-  const reaches = (x: IndexedAccess, lo: number, hi: number): boolean =>
-    x.reach === null || overlaps(lo, hi - lo, x.reach.lo, x.reach.hi - x.reach.lo);
   indexes.forEach((x, i) => {
     for (const y of indexes.slice(i + 1)) {
       const { refusal } = indexedWidth([x, y]);
-      if (refusal !== null && (y.reach === null || reaches(x, y.reach.lo, y.reach.hi))) {
+      if (refusal !== null && mayShare(x.reach, y.reach)) {
         fail(`a runtime index into ${kept} ${refusal}`);
       }
     }
@@ -2568,7 +2608,7 @@ function keepAsOneObject({
     }
   }
   for (const [b, had] of widthAt) {
-    const by = indexes.find((x) => x.width !== 1 && x.width !== had && reaches(x, b, b + 1));
+    const by = indexes.find((x) => x.width !== 1 && x.width !== had && mayTouch(x.reach, b, 1));
     if (by !== undefined) {
       fail(
         `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${by.width} ` +
@@ -2703,37 +2743,29 @@ function provenParts(
 ): FrameRange[] {
   const whole = [{ from, to }];
   const touched: { owner: number; lo: number; hi: number }[] = [];
-  for (const [op, { off, through }] of uses.accessOps) {
+  for (const [op, { off, index }] of uses.accessOps) {
     // …an access through a runtime index is not at its own displacement: it is its reach (below)
-    if (op.operands[0] !== through) {
+    if (index !== undefined) {
       continue;
     }
     const at = off + (op.attrs.off as number);
     touched.push({ owner: off, lo: at, hi: at + (op.attrs.width as number) });
   }
-  // A runtime index touches every byte it may reach (its `reach`), so it chains the runs it
-  // spans as one access as wide would — a reach across a copy's start makes the two copies one
-  // part — and a reach that starts in a part other than its object's fails the owner test below
-  for (const [off, accesses] of uses.indexed) {
-    for (const { reach } of accesses) {
-      if (reach === null) {
-        return whole;
-      }
-      touched.push({ owner: off, ...reach });
+  // An escape and a runtime index each touch every byte they may reach (`frameReaches`), so each
+  // chains the runs it spans as one access as wide would — a reach across a copy's start makes
+  // the two copies one part — and a reach that starts in a part other than its object's fails the
+  // owner test below
+  const reaches = frameReaches(uses);
+  for (const { owner, reach } of reaches) {
+    if (reach === null) {
+      return whole;
     }
+    touched.push({ owner, ...reach });
   }
   for (const [off, reads] of uses.byValueReads) {
     reads.forEach(({ type }) =>
       touched.push({ owner: off, lo: off, hi: off + (type.kind === 'struct' ? (type.size ?? Infinity) : Infinity) }),
     );
-  }
-  for (const [off, extents] of uses.escapeExtents) {
-    for (const e of extents) {
-      if (e === null) {
-        return whole;
-      }
-      touched.push({ owner: off, ...e });
-    }
   }
   // …and a boundary only where a bounded copy starts: an address handed to `memcpy` is where
   // the source put an object it fills. A run starting anywhere else is bytes reached from below,
@@ -2745,7 +2777,7 @@ function provenParts(
   // reads `buf[6]` through a base it holds where the target re-formed sp+6. Only a copy's
   // DESTINATION counts: a copy reading OUT of the frame says where the source took bytes from,
   // which is as likely `memcpy(g, &w[2], 8)` from the middle of one array as a second object.
-  const starts = new Set([...uses.escapeExtents.values()].flat().flatMap((e) => (e?.into ? [e.lo] : [])));
+  const starts = copyStarts(reaches);
   const parts: { from: number; to: number }[] = [];
   for (const { lo, hi } of [...touched].sort((a, b) => a.lo - b.lo)) {
     const last = parts.at(-1);
