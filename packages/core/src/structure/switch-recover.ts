@@ -7,6 +7,7 @@
 import { constWord } from '../ir/bits';
 import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from '../ir/core';
 import { orderSensitive } from '../ir/discipline';
+import { SWAPPED_ICMP } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
 /** Which side of a relational test a compiler's dispatch lands a pinned case body on. */
@@ -193,18 +194,6 @@ const INT_MIN = -0x80000000;
 const INT_MAX = 0x7fffffff;
 const ALL: Ranges = [[INT_MIN, INT_MAX]];
 
-/** The same opcode with its operands swapped: `k < x` is `x > k`. */
-const MIRRORED: Record<string, string> = {
-  icmp_slt: 'icmp_sgt',
-  icmp_sgt: 'icmp_slt',
-  icmp_sle: 'icmp_sge',
-  icmp_sge: 'icmp_sle',
-  icmp_ult: 'icmp_ugt',
-  icmp_ugt: 'icmp_ult',
-  icmp_ule: 'icmp_uge',
-  icmp_uge: 'icmp_ule',
-};
-
 /** `[lo, hi]` of the UNSIGNED order as signed intervals: one, or two where it straddles 2^31. */
 function fromUnsigned(lo: number, hi: number): Ranges {
   if (lo > hi) {
@@ -249,7 +238,7 @@ function intersect(a: Ranges, b: Ranges): Ranges {
 
 /** The register values that take the test's BRANCH. */
 function takenBy(ti: TestInfo): Ranges {
-  const op = ti.xOnLeft ? ti.opcode : (MIRRORED[ti.opcode] ?? ti.opcode);
+  const op = ti.xOnLeft ? ti.opcode : (SWAPPED_ICMP[ti.opcode] ?? ti.opcode);
   if (op === 'icmp_eq' || op === 'icmp_ne') {
     const k = ti.k | 0;
     return op === 'icmp_eq' ? [[k, k]] : complement([[k, k]]);

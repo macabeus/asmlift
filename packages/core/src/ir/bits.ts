@@ -11,7 +11,7 @@
 // it directly: reachable only through emitted C, a wrong answer for one opcode reads as a silent
 // wrong address in a row nobody is looking at.
 import type { Block, Op, Value } from './core';
-import { NEGATED_ICMP, OPCODES, type OpSig } from './opcodes';
+import { NEGATED_ICMP, OPCODES, type OpSig, SWAPPED_ICMP } from './opcodes';
 
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
  *  literal this analysis may fold through. Callers that have no materialization model pass none. */
@@ -1120,20 +1120,6 @@ const NO_FACTS: Facts = new Map();
 
 const S_MIN = -(2 ** 31);
 const S_MAX = 2 ** 31 - 1;
-
-/** `a <op> b` as `b <op'> a`. */
-const SWAPPED_ICMP: Readonly<Record<string, string>> = {
-  icmp_eq: 'icmp_eq',
-  icmp_ne: 'icmp_ne',
-  icmp_slt: 'icmp_sgt',
-  icmp_sgt: 'icmp_slt',
-  icmp_sle: 'icmp_sge',
-  icmp_sge: 'icmp_sle',
-  icmp_ult: 'icmp_ugt',
-  icmp_ugt: 'icmp_ult',
-  icmp_ule: 'icmp_uge',
-  icmp_uge: 'icmp_ule',
-};
 
 /** The rounds an induction hypothesis may grow before it proves nothing. */
 const INDUCTION_ROUNDS = 4;
