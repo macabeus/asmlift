@@ -93,6 +93,7 @@ import {
   Expr,
   SFn,
   Stmt,
+  SwitchCase,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
@@ -502,12 +503,13 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
       return {
         ...s,
         scrutinee,
-        cases: cases as { values: number[]; body: Stmt[]; fallsThrough: boolean }[],
+        cases: cases as SwitchCase[],
         default: dflt ?? undefined,
       };
     }
     case 'break':
     case 'continue':
+    case 'goto':
       return s;
   }
 }

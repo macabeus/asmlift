@@ -104,6 +104,7 @@ import {
   mapStmtExprs,
   mentionedName,
   negateCond,
+  reachesEnd,
   regainsHelperRel,
   splitHelperBreak,
   stmtChildren,
@@ -167,7 +168,13 @@ import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
-import { type ArmExit, type SwitchBoundCase, copySharedFallTargets, makeSwitchRecovery } from './switch-recover';
+import {
+  type ArmExit,
+  type SwitchBoundCase,
+  copySharedFallTargets,
+  jumpSharedFallTargets,
+  makeSwitchRecovery,
+} from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
 // struct pointer (raise/structs.ts), the byte offset resolves to a NAMED field (`base->field_<off>`);
@@ -1849,6 +1856,15 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  variation: which arm the source wrote the tail under is not in the asm, and one compiler answers
    *  both ways, so the differ referees it. Inert where no switch has such a sibling. */
   copyEveryTailEntrant?: boolean;
+  /** In a jump table where two or more arms enter one sibling CASE arm's body and the copies would
+   *  write that body back into the entrants (`copySharedFallTargets`), spell them with the one
+   *  fall-through and `goto`s to that case's label instead (`jumpSharedFallTargets`), the source's
+   *  own spelling of the shape. rank.ts's `/case-goto` variation: a cross-jump of copies and a goto
+   *  are one asm where the cross-jump merges the whole copy, and the copies are a goto-free reading
+   *  that compiles elsewhere (agbcc's CSE stops the cross-jump short of a copy that re-reads an
+   *  address the arm already formed), so the differ referees it. Inert where no switch has such a
+   *  sibling. */
+  jumpToSharedCases?: boolean;
   /** Spell EVERY `while (1)` loop `forPlanAt` accepts as `for (init; cond; inc)` on the first
    *  structuring, not only one a declined run asked for (`ForRanking`). rank.ts's `/for-continue`
    *  variation: a counted loop whose latch holds the update and the test is the same asm as
@@ -2228,6 +2244,12 @@ export interface StructureHooks {
    *  cross-jumped block. Not fired by `assertDefaultAccepts`' structuring, which is not the
    *  setting being observed. */
   onTailFallerKept?: () => void;
+  /** Fired each time the copies write a CASE arm's body back into an entrant
+   *  (`copySharedFallTargets`' `onCopied`, a sibling that is not the `default:` arm) — the one
+   *  place `jumpToSharedCases` changes what the structurer reads. A structuring with that option off
+   *  that never fires it builds the same tree as the same options with it on, so rank.ts skips
+   *  `/case-goto` on its sibling. Not fired by `assertDefaultAccepts`' structuring. */
+  onCaseCopied?: () => void;
   /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes every check of
    *  `forPlanAt` — a single pure latch, a guard or plain entry, a test and update read only from the
    *  latch, the header's params and values from outside the loop, one update copy, and the guard
@@ -2272,6 +2294,7 @@ function assertDefaultAccepts(
     anchorLoopEntryConsts: false,
     followEarlyReturns: false,
     copyEveryTailEntrant: false,
+    jumpToSharedCases: false,
     spellCountedLoopsFor: false,
   };
   if (memo === undefined) {
@@ -3081,6 +3104,13 @@ interface OutwardRanking {
   could: boolean;
 }
 
+/** Whether a jump table asks its jump rungs (THE JUMPS, in the per-switch ladder), and whether a
+ *  structuring met a switch where every goto-free rung declined and a jump rung read it. */
+interface JumpRanking {
+  readonly asked: boolean;
+  could: boolean;
+}
+
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
  *  AS A `for`, at `forPlanAt`), by header, and the ones a structuring declined inside of. */
 interface ForRanking {
@@ -3126,9 +3156,21 @@ interface ForRanking {
  *  holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
- *  The first run's refusal stands if every rerun declines too. Each run's observation hooks are held
- *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
- *  by the first run where none is. */
+ *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
+ *  `jumpSharedFallTargets`) write the one goto L3 holds, and the default writes one only where
+ *  every goto-free reading declines. One switch's ladder sees only
+ *  its own rungs, not the whole-function reruns above: a `while (1)` jump table whose copies decline
+ *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
+ *  the first run adopts them there and never makes that rerun. So every run above is made with the
+ *  jump rungs unasked, and only where all of them decline, the `for` reruns included, and some
+ *  switch's jump rung would have read it, are they all made again with it asked (`JumpRanking`).
+ *  The ranked `/case-goto` variation (`jumpToSharedCases`) is the other producer, and the scorer
+ *  weighs it against the copies.
+ *
+ *  The first run's refusal stands if every rerun declines too, where the first run is the first
+ *  that asked the jumps when any did. Each run's observation hooks are held until it is known to
+ *  stand, so a site is reported once: by the structuring that is returned, or by the first run
+ *  where none is. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
@@ -3141,6 +3183,7 @@ export function structure(
     pastExit: PastExitRanking,
     outward: OutwardRanking,
     forRank: ForRanking,
+    jumps: JumpRanking,
   ): SFn | null => {
     const held: (() => void)[] = [];
     const hold =
@@ -3157,6 +3200,7 @@ export function structure(
           onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
           onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+          onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
         },
         memo,
@@ -3164,6 +3208,7 @@ export function structure(
         pastExit,
         outward,
         forRank,
+        jumps,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3175,31 +3220,46 @@ export function structure(
       return null;
     }
   };
-  const ranked = (outward: OutwardRanking, forRank: ForRanking): SFn | null => {
+  const ranked = (outward: OutwardRanking, forRank: ForRanking, jumps: JumpRanking): SFn | null => {
     const first: RetCopyRanking = { last: false, took: false };
     const inSpan: PastExitRanking = { first: false, could: false };
     const past: RetCopyRanking = { last: false, took: false };
     return (
-      attempt(first, inSpan, outward, forRank) ??
-      (first.took ? attempt({ last: true, took: false }, inSpan, outward, forRank) : null) ??
-      (inSpan.could ? attempt(past, { first: true, could: false }, outward, forRank) : null) ??
-      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward, forRank) : null)
+      attempt(first, inSpan, outward, forRank, jumps) ??
+      (first.took ? attempt({ last: true, took: false }, inSpan, outward, forRank, jumps) : null) ??
+      (inSpan.could ? attempt(past, { first: true, could: false }, outward, forRank, jumps) : null) ??
+      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward, forRank, jumps) : null)
     );
   };
-  const outwardRanked = (forRank: ForRanking): SFn | null => {
+  const outwardRanked = (forRank: ForRanking, jumps: JumpRanking): SFn | null => {
     const unasked: OutwardRanking = { asked: false, could: false };
-    return ranked(unasked, forRank) ?? (unasked.could ? ranked({ asked: true, could: false }, forRank) : null);
+    return (
+      ranked(unasked, forRank, jumps) ?? (unasked.could ? ranked({ asked: true, could: false }, forRank, jumps) : null)
+    );
   };
-  let forRank: ForRanking = { asked: new Set(), wanted: new Set() };
-  let sfn = outwardRanked(forRank);
-  // each rerun asks every loop the runs before it declined inside of; a nest needs one per level
-  for (let n = 0; sfn === null && n < 4; n++) {
-    const asked = new Set([...forRank.asked, ...forRank.wanted]);
-    if (asked.size === forRank.asked.size) {
-      break;
+  const forRanked = (jumps: JumpRanking): SFn | null => {
+    let forRank: ForRanking = { asked: new Set(), wanted: new Set() };
+    let sfn = outwardRanked(forRank, jumps);
+    // each rerun asks every loop the runs before it declined inside of; a nest needs one per level
+    for (let n = 0; sfn === null && n < 4; n++) {
+      const asked = new Set([...forRank.asked, ...forRank.wanted]);
+      if (asked.size === forRank.asked.size) {
+        break;
+      }
+      forRank = { asked, wanted: new Set() };
+      sfn = outwardRanked(forRank, jumps);
     }
-    forRank = { asked, wanted: new Set() };
-    sfn = outwardRanked(forRank);
+    return sfn;
+  };
+  const unaskedJumps: JumpRanking = { asked: false, could: false };
+  let sfn = forRanked(unaskedJumps);
+  if (sfn === null && unaskedJumps.could) {
+    // The runs that ask the jumps read every switch at least as far as the unasked ones, so where
+    // they decline too, theirs is the refusal that stands: the unasked one may be a switch the
+    // jumps spell, and a function declined for arms that do not linearize would then be declined
+    // for the wrong reason.
+    refused = undefined;
+    sfn = forRanked({ asked: true, could: false });
   }
   if (sfn !== null) {
     return sfn;
@@ -3217,6 +3277,7 @@ function structureRanked(
   pastExit: PastExitRanking,
   outwardRank: OutwardRanking,
   forRank: ForRanking,
+  jumpRank: JumpRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -3228,6 +3289,7 @@ function structureRanked(
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     copyEveryTailEntrant = false,
+    jumpToSharedCases = false,
     spellCountedLoopsFor = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
@@ -3359,11 +3421,17 @@ function structureRanked(
     anchorConstCopies ||
     followEarlyReturns ||
     copyEveryTailEntrant ||
+    jumpToSharedCases ||
     spellCountedLoopsFor
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
     // leaves it answerable from `memo`.
-    assertDefaultAccepts(fn, opts, { ...hooks, onTailFallerKept: undefined, onForOffered: undefined }, memo);
+    assertDefaultAccepts(
+      fn,
+      opts,
+      { ...hooks, onTailFallerKept: undefined, onCaseCopied: undefined, onForOffered: undefined },
+      memo,
+    );
   }
   const defs = defOpMap(fn);
   // The word evaluator's view of `fn`, built at the first `neg_s` (no other rule asks it).
@@ -6934,6 +7002,8 @@ function structureRanked(
     flags: Set<string> | null;
   };
   const switchFrames: SwitchFrame[] = [];
+  // every label a case-label `goto` (l3/ast.ts) names in this function, so no two arms share one
+  const caseLabelNames = new Set<string>();
   // the latches and exits of every `for` (`ForPlan`) whose body is being structured
   const forJumps = new Set<Block>();
   // AN OUTWARD EXIT HANDED OUT THROUGH A SWITCH (`emitForever`): in a case body `if (f != 0) break;`
@@ -7220,7 +7290,9 @@ function structureRanked(
       merge,
       loop: loopCtx,
       region,
-      fallsTo: exit?.kind === 'fallthrough' ? exit.to : null,
+      // A `goto` arm is structured as the falling arm it re-spells: its paths into the sibling run
+      // to the arm's end, where the jump is written.
+      fallsTo: exit?.kind === 'fallthrough' || exit?.kind === 'goto' ? exit.to : null,
       flags: switchFlagScopes[switchFlagScopes.length - 1] ?? null,
     });
     try {
@@ -7388,12 +7460,13 @@ function structureRanked(
       const preChain = arms.map((a) => a.entry);
       // Everything below that depends on WHERE THE SWITCH ENDS, read for one candidate merge: the
       // arms' exits, their linearization, and whether the emission below would decline them. Read
-      // five times at most — the CFG's merge (or `stop`), the retry's (no CFG merge), the copies once
-      // at either, and the loop clamp's own merge twice, as written and with the copies.
+      // at the CFG's merge (or `stop`), at the retry's (no CFG merge), and then once per rung of
+      // THE LADDER below — the copies, the loop clamp's own merge as written and with the copies,
+      // and the jumps at both — until one declines nothing.
       // A default edge the dispatch never takes: a frontend whose dispatch is entered only past a
       // bounds test that already sent every other value elsewhere says so with `exhaustive`.
       const deadDefaultEdge = term.attrs.exhaustive === true;
-      const readArms = (at: Block | null, copies = false) => {
+      const readArms = (at: Block | null, copies = false, gotos = false) => {
         // The blocks an arm could fall INTO. The default block counts only when it is a block of
         // its own: when it IS the merge, "the default" is just where the switch ends, and an arm
         // reaching it is a plain `break`.
@@ -7429,15 +7502,38 @@ function structureRanked(
         // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies:
         // all but the one the arm-order policy puts above it, or under `/tail-copies` all of them
         // (`copySharedFallTargets`, and THE COPIES below for when it is asked).
-        const exits = copies
-          ? copySharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, hooks.onTailFallerKept, (s) =>
-              forwardToMerge(s, b, at, siblings),
-            )
+        // Under `/case-goto` every case arm the copies write back into an entrant is spelled with
+        // the jumps instead (`jumpSharedFallTargets` over just those siblings), and the copies keep
+        // the rest (`default:` siblings), so the two settings differ exactly where `onCaseCopied`
+        // fires.
+        const copiedInto = new Set<Block>();
+        const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
+          copySharedFallTargets(
+            preChain,
+            dflt,
+            from,
+            !copyEveryTailEntrant,
+            hooks.onTailFallerKept,
+            (s) => forwardToMerge(s, b, at, siblings),
+            onCopied,
+          );
+        const copied = copies
+          ? copyOver(walked, (to) => {
+              copiedInto.add(to);
+              hooks.onCaseCopied?.();
+            })
           : walked;
-        const falls = [...exits.values()].some((e) => e.kind === 'fallthrough');
-        const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);
-        const refusal = chain === null ? null : armRefusal(exits, chain);
-        return { exits, falls, chain, refusal, declines: chain === null || refusal !== null };
+        const exits =
+          copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
+            ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, copiedInto))
+            : copied;
+        // …and, asked for, the arms still entering one case arm's body two or more at a time get
+        // the one fall-through and `goto`s to its label (`jumpSharedFallTargets`, THE JUMPS below).
+        const jumped = gotos && spellSwitchFallthrough ? jumpSharedFallTargets(preChain, dflt, exits) : exits;
+        const falls = [...jumped.values()].some((e) => e.kind === 'fallthrough');
+        const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, jumped);
+        const refusal = chain === null ? null : armRefusal(jumped, chain);
+        return { exits: jumped, falls, chain, refusal, declines: chain === null || refusal !== null };
       };
       // THE EMISSION'S PER-ARM REFUSALS, the one definition of them. Every refusal the emission
       // below throws is a null chain (which a fall-through in a language without one forces too —
@@ -7474,6 +7570,36 @@ function structureRanked(
                   throw new StructureError(`cannot structure '${fn.name}': ${why}`);
                 },
               };
+            }
+            // A `goto` lands where a fall-through into its sibling would — on the label printed above
+            // the sibling's body, which opens with its switch-edge copies — so it is refused where
+            // that fall-through is: below, on a sibling that opens with such copies, which the jump
+            // would re-run. It needs the sibling to be a case arm emitted in this switch, which
+            // `jumpSharedFallTargets` only ever names.
+            if (exit.kind === 'goto') {
+              const into = order.find((o) => o.entry === exit.to && o.values !== null);
+              if (into === undefined || into.entry === a.entry) {
+                return {
+                  at: i,
+                  raise: () => {
+                    throw new StructureError(
+                      `cannot structure '${fn.name}': a case body jumps to an arm that is no case of its switch`,
+                    );
+                  },
+                };
+              }
+              if (edgeCopyRecords(b, into.edge).length > 0) {
+                return {
+                  at: i,
+                  raise: () => {
+                    throw new StructureError(
+                      `cannot structure '${fn.name}': the case a goto lands on takes a value from the switch ` +
+                        `edge, which the goto would re-run`,
+                    );
+                  },
+                };
+              }
+              continue;
             }
             if (exit.kind !== 'fallthrough') {
               continue;
@@ -7615,16 +7741,6 @@ function structureRanked(
       // get it as copies (`copySharedFallTargets`, a `default:` sibling). The same program, where
       // the reading before it failed loud.
       const copyAt = joined !== null ? merge : over;
-      if (read.declines && copyAt !== null) {
-        const copied = readArms(copyAt, true);
-        if (!copied.declines) {
-          if (copyAt !== merge) {
-            hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(copyAt) });
-          }
-          merge = copyAt;
-          read = copied;
-        }
-      }
       // THE LOOP CLAMP: A SWITCH IN A LOOP BODY WHOSE CFG MERGE LIES PAST THE LOOP. Post-dominance
       // reads the whole function, and where an arm `return`s and every `return` shares one epilogue
       // (agbcc and IDO whenever the code after the loop returns early too, mwcc always), that
@@ -7659,17 +7775,53 @@ function structureRanked(
       // tells that reading from the published one whose arm spells an early `return` as `break;`
       // to that same `return;` (a `return` arm entered from the dispatch, or one Regime A walks
       // through rather than rendering in place).
-      if (loopCtx !== null) {
-        const at = read.declines ? inLoopJoin(b, joined, true) : undefined;
-        const clampAt = at === undefined ? undefined : (at ?? stop);
-        if (clampAt !== undefined && clampAt !== null) {
-          for (const copies of (clampAt !== merge ? [false] : []).concat(at !== null ? [true] : [])) {
-            const clamped = readArms(clampAt, copies);
-            if (!clamped.declines) {
-              merge = clampAt;
-              read = clamped;
-              break;
+      //
+      // THE JUMPS: TWO ARMS ENTERING ONE CASE'S BODY, ONE OF THEM BY `goto`. Where every reading above
+      // still declines, the arms that enter one case arm's body two or more at a time keep one
+      // fall-through and the rest end `goto` to that arm's label (`jumpSharedFallTargets`, over what
+      // the copies leave) — the one goto L3 holds (l3/ast.ts). Asked at the readings that may take
+      // the copies, in their order: the switch's own merge (or the retry's), then the loop clamp's.
+      // LAST, and adopted only where it declines nothing, for the reason the copies are: it turns a
+      // decline into a lift, never one lift into another. And asked only in the runs `structure`
+      // makes after every goto-free run of the whole function declined (`JumpRanking`), since a
+      // rerun this ladder cannot see — the `for` one above all — may spell the switch without it:
+      // so it never writes a goto where goto-free C already spells the switch. Only the ranked
+      // `/case-goto` variation does (`jumpToSharedCases` in `readArms`), as a candidate the scorer
+      // weighs against the copies. A language with no fall-through gets none (`readArms`), and its
+      // decline keeps the words it has.
+      //
+      // THE LADDER, AS DATA: each rung above is one reading — a merge, and whether the copies and
+      // the jumps are asked — and the first that declines nothing is adopted, so the order of this
+      // list IS the precedence the sections above argue for. `follows` marks the rungs at the
+      // switch's own merge (or the retry's), whose adoption the early-return hook reports.
+      if (read.declines) {
+        const inLoop = inLoopJoin(b, joined, true);
+        const clampAt = inLoop === undefined ? null : (inLoop ?? stop);
+        const rungs: { at: Block | null; copies: boolean; gotos: boolean; follows?: true }[] = [
+          { at: copyAt, copies: true, gotos: false, follows: true },
+          ...(clampAt !== null && clampAt !== merge ? [{ at: clampAt, copies: false, gotos: false }] : []),
+          ...(inLoop !== null ? [{ at: clampAt, copies: true, gotos: false }] : []),
+          { at: copyAt, copies: true, gotos: true, follows: true },
+          { at: inLoop ?? null, copies: true, gotos: true },
+        ];
+        for (const { at, copies, gotos, follows } of rungs) {
+          if (at === null) {
+            continue;
+          }
+          const reading = readArms(at, copies, gotos);
+          // unasked, a jump rung only notes whether it reads the switch (`JumpRanking`): every
+          // goto-free rung above it declined, so this run declines here either way
+          if (gotos && !jumpRank.asked) {
+            jumpRank.could ||= !reading.declines;
+            continue;
+          }
+          if (!reading.declines) {
+            if (follows === true && at !== merge) {
+              hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(at) });
             }
+            merge = at;
+            read = reading;
+            break;
           }
         }
       }
@@ -7727,6 +7879,22 @@ function structureRanked(
         deadDefaultEdge &&
         (armOf.has(defEdge.block) ||
           ![...exitOf.values()].some((e) => e.kind === 'fallthrough' && e.to === defEdge.block));
+      // The label each `goto` target carries, named after its first case value (`case_3`,
+      // `case_m1` for -1) and kept unique across the function (`caseLabelNames`).
+      const labels = new Map<Block, string>();
+      const labelOf = (to: Block): string => {
+        let name = labels.get(to);
+        if (name === undefined) {
+          const base = `case_${String(armOf.get(to)!.values[0]).replace('-', 'm')}`;
+          name = base;
+          for (let n = 2; caseLabelNames.has(name); n++) {
+            name = `${base}_${n}`;
+          }
+          caseLabelNames.add(name);
+          labels.set(to, name);
+        }
+        return name;
+      };
       const [bodies, flags] = withSwitchFlags(() =>
         emitOrder.map((a, i) => {
           // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
@@ -7741,6 +7909,19 @@ function structureRanked(
           }
           const exit = exitOf.get(a.entry)!;
           const ft = exit.kind === 'fallthrough';
+          // A `goto` arm is structured exactly as the falling arm it re-spells, and its end is the
+          // jump: every path that reaches it is a path into the sibling (`jumpSharedFallTargets`).
+          // Unless no path reaches it: the arm's structuring may already have written the sibling's
+          // body into it and left (a nested switch whose arms run into the sibling, spelled with
+          // the copies and a `break;`), and the jump after that is one no path takes — a goto
+          // where goto-free C already spells the arm, so none is written (`reachesEnd`).
+          if (exit.kind === 'goto') {
+            const body = [...edgeCopies[i], ...structureArm(a.entry, exit.to, merge, exit)];
+            return {
+              body: reachesEnd(body) ? [...body, { k: 'goto', label: labelOf(exit.to) } as Stmt] : body,
+              fallsThrough: false,
+            };
+          }
           return {
             // A falling-through arm stops AT its successor arm, which then emits that body once under
             // its own labels; a closed arm runs to the merge as before.
@@ -7749,7 +7930,10 @@ function structureRanked(
           };
         }),
       );
-      const outCases: SwitchCase[] = ordered.map((a, i) => ({ values: a.values, ...bodies[i] }));
+      const outCases: SwitchCase[] = ordered.map((a, i) => {
+        const label = labels.get(a.entry);
+        return { values: a.values, ...bodies[i], ...(label !== undefined ? { label } : {}) };
+      });
       // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
       // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
       // and is not even valid C89 (a label needs a statement).

@@ -106,6 +106,9 @@ function allAddrNamesInto(stmts: Stmt[], out: Set<string>): void {
 interface JumpLive {
   brk: ReadonlySet<string>;
   cont?: ReadonlySet<string>; // absent in a switch no loop encloses
+  /** live at a case label of the innermost switch: what its `goto` (l3/ast.ts) lands on — absent
+   *  where no switch encloses the statement, or a loop stands between it and the switch */
+  caseLabel?: ReadonlySet<string>;
 }
 
 /** Backward live-variable walk over one block. `liveOut` is the set of locals live on exit;
@@ -162,6 +165,16 @@ function dceBlock(
             live.add(r);
           }
         }
+        rev.push(s);
+        break;
+      }
+      case 'goto': {
+        // The jump lands on a case label of the switch it sits in (l3/ast.ts, contracts.ts
+        // `assertCaseGotosNarrow`), whose every read the switch below already counts live.
+        if (!jumps?.caseLabel) {
+          throw new Error('dce: a goto outside the switch whose case it names');
+        }
+        setLive(new Set(jumps.caseLabel));
         rev.push(s);
         break;
       }
@@ -235,7 +248,7 @@ function dceBlock(
         // read anywhere in the switch as live throughout — no case-body store is ever cut.
         const swLive = new Set(live);
         allReadsInto([s], swLive);
-        const inSwitch: JumpLive = { brk: swLive, cont: jumps?.cont };
+        const inSwitch: JumpLive = { brk: swLive, cont: jumps?.cont, caseLabel: swLive };
         const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals, volatiles, inSwitch).out }));
         const def = s.default ? dceBlock(s.default, swLive, locals, volatiles, inSwitch).out : s.default;
         const nlive = new Set(swLive);

@@ -118,6 +118,7 @@ function rewrite(s: Stmt): Stmt[] {
     case 'return':
     case 'break':
     case 'continue':
+    case 'goto':
       return [s];
   }
 }
