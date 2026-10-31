@@ -139,6 +139,20 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(ppc('lbz', 'extern s8 gN;')).toContain('return *(u8 *)&gN;');
   });
 
+  test('a read-modify-write stores the bytes it read whatever their extension, but a shift count reads them all', () => {
+    const lift = (body: string, decl: string) =>
+      decompile('g', `g:\n\tldr\tr1, .L4\n${body}\tbx\tlr\n.L4:\n\t.word\tgN\n`, ARMV4T_AGBCC, {
+        contextGlobals: ctx(decl),
+      }).source;
+    // `gN += x;`
+    const rmw = '\tldrh\tr2, [r1]\n\tadd\tr2, r2, r0\n\tstrh\tr2, [r1]\n';
+    expect(lift(rmw, 'extern s16 gN;')).toContain('gN = gN + a0;');
+    expect(lift(rmw, 'extern s32 gN;')).toContain('*(u16 *)&gN');
+    // `gN = x << gN;` reads the count's every bit
+    const count = '\tldrb\tr2, [r1]\n\tlsl\tr0, r2\n\tstrb\tr0, [r1]\n\tmov\tr0, #0\n';
+    expect(lift(count, 'extern s8 gN;')).toContain('*(u8 *)&gN');
+  });
+
   test('a narrow read handed across an edge compares the sign: the join may return the extended value', () => {
     // `u32 x = *(u8 *)&gN; gM = x; if (c) x = 7; return x;` — the store takes one byte, the join
     // returns all four, and over `extern s8 gN;` the bare name would return them sign-extended

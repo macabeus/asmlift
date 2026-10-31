@@ -10595,20 +10595,39 @@ function storageDisagrees(
 
 /** Whether no use of the narrow `load` (`width` bytes) reads the bits its extension fills: every use
  *  takes at most its own bytes — an extension of them (`zext`/`sext` at no more than its bits), or
- *  a store of no more than its bytes. A zero-extending `lbz` whose only use is an `extsb` then reads
- *  the byte a signed declaration names, and its bare name is the same program. A load nothing uses
- *  is not one: what reads it is out of sight. Nor is a use that hands it across an edge (a block
+ *  a store of no more than its bytes — directly or through arithmetic whose low bytes depend on its
+ *  operands' low bytes alone (`LOW_BYTES_ONLY`) and whose result is used the same way. A
+ *  zero-extending `lbz` whose only use is an `extsb` then reads the byte a signed declaration names,
+ *  and its bare name is the same program; so does the read-modify-write `gN += x`, whose `ldrh` /
+ *  `add` / `strh` stores the same halfword whichever way the read extended. A load nothing uses is
+ *  not one: what reads it is out of sight. Nor is a use that hands it across an edge (a block
  *  argument, which `useSitesOf` counts as its terminator's use): the join it reaches may return or
  *  compare the full extended value. */
 function extensionImmaterial(load: Op, width: number, useSitesOf: ReadonlyMap<Value, readonly UseSite[]>): boolean {
-  const uses = (useSitesOf.get(load.results[0]) ?? []).map((site) => site.op);
-  return (
-    width < 4 &&
-    uses.length > 0 &&
-    uses.every((u) =>
-      u.opcode === 'zext' || u.opcode === 'sext'
-        ? (u.attrs.width as number) <= width * 8
-        : u.opcode === 'store' && u.operands[0] !== load.results[0] && (u.attrs.width as number) <= width,
-    )
-  );
+  const seen = new Set<Value>();
+  const takesOwnBytes = (v: Value): boolean => {
+    if (seen.has(v)) {
+      return true; // a cycle adds no use the walk has not judged
+    }
+    seen.add(v);
+    const uses = (useSitesOf.get(v) ?? []).map((site) => site.op);
+    return (
+      uses.length > 0 &&
+      uses.every((u) =>
+        u.opcode === 'zext' || u.opcode === 'sext'
+          ? (u.attrs.width as number) <= width * 8
+          : u.opcode === 'store'
+            ? u.operands[0] !== v && (u.attrs.width as number) <= width
+            : LOW_BYTES_ONLY.has(u.opcode) &&
+              !(u.opcode === 'shl' && u.operands[1] === v) && // a shift count reads every bit
+              seen.size < 16 &&
+              takesOwnBytes(u.results[0]),
+      )
+    );
+  };
+  return width < 4 && takesOwnBytes(load.results[0]);
 }
+
+/** The integer ops whose result's low `n` bytes are a function of their operands' low `n` bytes —
+ *  `shl`'s of its shifted operand's, never of its count's. */
+const LOW_BYTES_ONLY: ReadonlySet<string> = new Set(['add', 'sub', 'mul', 'neg', 'not', 'and', 'or', 'xor', 'shl']);
