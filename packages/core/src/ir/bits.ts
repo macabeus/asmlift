@@ -825,7 +825,9 @@ const RANGE_BUDGET = 256;
  *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by what a shift or a mask
  *  leaves of its operand's range (`shiftMaskRange`), or, a block param, by the union of what its
  *  in-edges pass, each read under what its branch proves, or by a range every in-edge provably
- *  keeps it in (`integerRange`'s induction, for a loop counter whose latch bounds one side).
+ *  keeps it in (`integerRange`'s induction, for a loop counter whose latch bounds one side). A
+ *  signed remainder by a power of two, `x - (t >> k << k)` with `t` a biased `x`, is one bounded
+ *  term (`remainderPair`).
  *  Anything else — a function parameter, a whole word loaded from memory, a name nothing places, a
  *  param whose range depends on itself through a loop that no branch bounds — bounds nothing, and
  *  nothing is the answer. The form equals the word modulo 2^32, so the words are the sum's integer
@@ -1171,6 +1173,68 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
     }
     return out;
   };
+  /** A signed remainder by `2^k` the form holds as the pair `c * x - c * 2^k * (p >> k)`, `>>` the
+   *  sign-filling shift and `p` the operand `x + b` with a bias `0 <= b < 2^k`, or a block param
+   *  whose every in-edge passes `x + b` for its own `b`: agbcc's (and gcc's) `x % 8` is `if (x < 0)
+   *  t = x + 7; else t = x; x - (t >> 3 << 3)`. Where `x + b` stays inside the signed window, the
+   *  pair is `c` times `x - 2^k * floor((x + b) / 2^k)`, which is in [-b, 2^k - 1 - b] and exactly
+   *  `x - 2^k * q` where the floor `q` is one constant over `x`'s range; each in-edge is read under
+   *  what its branch proves, the parts hulled and an edge never taken passing nothing (`null` when
+   *  none is taken). One SSA `x` is the same word at the edge and at the use, so the edges relate.
+   *  Undefined, leaving the pair as two terms, where an edge passes something else, names another
+   *  `x`, has `b` out of range or an `x + b` that may wrap, or the coefficients are not `c` and
+   *  `-c * 2^k`; agbcc's `x % 2`, biased by `x >>> 31`, is no such pair. */
+  const remainderPair = (
+    s: Value,
+    cs: number,
+    form: ReadonlyMap<Value | 1, number>,
+  ): { readonly x: Value; readonly c: number; readonly r: StridedRange | null } | undefined => {
+    const d = ctx.defs.get(s);
+    if (d === undefined || d.opcode !== 'shr_s') {
+      return undefined;
+    }
+    const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : ctx.constOf(d.operands[1]);
+    if (k === undefined || !(k > 0 && k < 31)) {
+      return undefined;
+    }
+    const by = 2 ** k;
+    const p = d.operands[0];
+    const ins = ctx.defs.has(p) || ctx.entry.has(p) ? undefined : ctx.incoming.get(p);
+    let x: Value | undefined;
+    const parts: StridedRange[] = [];
+    for (const e of ins !== undefined && ins.length > 0 ? ins : [{ arg: p } as InEdge]) {
+      const terms = e.arg === undefined ? undefined : linearTerms(ctx, e.arg);
+      const vars = terms === undefined ? [] : [...terms].filter(([t, n]) => t !== 1 && n !== 0);
+      const b = terms?.get(1) ?? 0;
+      if (vars.length !== 1 || vars[0][1] !== 1 || (x !== undefined && vars[0][0] !== x) || !(b >= 0 && b < by)) {
+        return undefined;
+      }
+      x = vars[0][0] as Value;
+      if (!spend()) {
+        return undefined;
+      }
+      const read = rangeOf(x, e.holds === undefined ? NO_FACTS : factsOf(e.holds));
+      if (read === null) {
+        continue; // never taken
+      }
+      // an unbounded x is any signed word, which only a bias of 0 cannot wrap
+      const xs = read === undefined ? { lo: S_MIN, hi: S_MAX, stride: 1 } : intoSigned(read);
+      if (xs === undefined || xs.hi + b > S_MAX) {
+        return undefined;
+      }
+      const [q0, q1] = [Math.floor((xs.lo + b) / by), Math.floor((xs.hi + b) / by)];
+      parts.push(
+        q0 === q1
+          ? { lo: xs.lo - q0 * by, hi: xs.hi - q0 * by, stride: xs.stride }
+          : { lo: -b, hi: by - 1 - b, stride: 1 },
+      );
+    }
+    const c = x === undefined ? undefined : form.get(x);
+    if (x === undefined || c === undefined || c * by !== -cs) {
+      return undefined;
+    }
+    return { x, c, r: hullOf(parts) ?? null };
+  };
   const rangeOf = (x: Value, facts: Facts): StridedRange | undefined | null => {
     const form = linearTerms(ctx, x, 0, facts);
     if (form === undefined) {
@@ -1179,8 +1243,27 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
     let lo = 0;
     let hi = 0;
     let stride = 0;
+    // each remainder pair first, as one bounded term; the rest of the form after it
+    const paired = new Set<Value | 1>();
+    for (const [s, cs] of form) {
+      const pair = s === 1 || cs === 0 || paired.has(s) ? undefined : remainderPair(s, cs, form);
+      if (pair === undefined || paired.has(pair.x)) {
+        continue;
+      }
+      if (pair.r === null) {
+        return null;
+      }
+      paired.add(s).add(pair.x);
+      const parts = [pair.c * pair.r.lo, pair.c * pair.r.hi, pair.c * pair.r.stride];
+      lo += Math.min(parts[0], parts[1]);
+      hi += Math.max(parts[0], parts[1]);
+      if (![...parts, lo, hi].every(Number.isSafeInteger)) {
+        return undefined;
+      }
+      stride = gcdOf(stride, parts[2]);
+    }
     for (const [t, c] of form) {
-      if (c === 0) {
+      if (c === 0 || paired.has(t)) {
         continue;
       }
       const r = t === 1 ? { lo: 1, hi: 1, stride: 0 } : termRange(t, facts);

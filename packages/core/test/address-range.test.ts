@@ -676,3 +676,117 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn([e2, h2, side, x2], q2)).toBeUndefined();
   });
 });
+
+describe('addressRangeOf — a signed remainder by a power of two', () => {
+  const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
+  /** agbcc's (and gcc's) `x % 2^n` of a signed `x`: `t = x; if (x < 0) t = x + 2^n - 1; x - (t >> n
+   *  << n)`, the arm `bias` passes on the negative edge and `x` on the other; `x` is `of(entry)`. */
+  const srem = (
+    of: (entry: ReturnType<typeof block>, p: Value) => Value,
+    {
+      n = 3,
+      bias = 2 ** n - 1,
+      positiveBias = 0,
+      scale = 2 ** n,
+      test = 'icmp_slt',
+    }: { n?: number; bias?: number; positiveBias?: number; scale?: number; test?: string } = {},
+  ) => {
+    const p = v();
+    const entry = block([p]);
+    const x = of(entry, p);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    const zero = k(entry, 0);
+    condBr(
+      entry,
+      entry.op(test, {}, [x, zero]),
+      [neg, []],
+      [join, [positiveBias === 0 ? x : entry.op('add', {}, [x, k(entry, positiveBias)])]],
+    );
+    br(neg, join, [neg.op('add', {}, [x, k(neg, bias)])]);
+    const floor = join.op('mul', {}, [join.op('shr_s', { imm: n }, [t]), k(join, scale)]);
+    const r = join.op('sub', {}, [x, floor]);
+    return { blocks: [entry, neg, join], join, r, x };
+  };
+  const plus = (b: ReturnType<typeof block>, x: Value, c: number) => b.op('add', {}, [x, k(b, c)]);
+
+  test('of an unknown sign it is exactly [-7, 7]: one past it fits an array, a narrowing of it does not', () => {
+    const { blocks, join, r } = srem((_e, p) => p);
+    // [-7, 7] holds words on both sides of zero: no one interval names them
+    expect(rangeIn(blocks, r)).toBeUndefined();
+    expect(rangeIn(blocks, plus(join, r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    expect(rangeIn(blocks, plus(join, r, 7))).toEqual({ lo: 0, hi: 14, stride: 1 });
+    // `(u8)(x % 8)` of a negative x is 249..255, so the narrowing keeps its whole width
+    expect(rangeIn(blocks, u8Of(join, r))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    // the bias on the edge `x >= 0` proves is no remainder: x + 7 there may wrap past INT_MAX
+    const ge = srem((_e, p) => p, { test: 'icmp_sge' });
+    expect(rangeIn(ge.blocks, plus(ge.join, ge.r, 8))).toBeUndefined();
+  });
+
+  test('of a value known not negative it is [0, 7], exact where the floor is one constant', () => {
+    // a u8: the `x < 0` arm is never taken
+    const u8 = srem((e, p) => u8Of(e, p));
+    expect(rangeIn(u8.blocks, u8.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeIn(u8.blocks, u8Of(u8.join, u8.r))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // `(u8)(x % 8) * 2`, agbcc's `lsl #24; lsr #23`
+    const twice = u8.join.op('shr_u', { imm: 23 }, [u8.join.op('shl', { imm: 24 }, [u8.r])]);
+    expect(rangeIn(u8.blocks, twice)).toEqual({ lo: 0, hi: 14, stride: 2 });
+    // x in [0, 3] is its own remainder
+    const small = srem((e, p) => e.op('and', { imm: 3 }, [p]));
+    expect(rangeIn(small.blocks, small.r)).toEqual({ lo: 0, hi: 3, stride: 1 });
+    // a remainder by 32, scaled by 2 in the form: `2 * (x % 32)`
+    const scaled = srem((e, p) => u8Of(e, p), { n: 5 });
+    const by2 = scaled.join.op('shl', { imm: 1 }, [scaled.r]);
+    expect(rangeIn(scaled.blocks, by2)).toEqual({ lo: 0, hi: 62, stride: 2 });
+  });
+
+  test('a bias with no branch: `x - (x >> 3 << 3)` of any x, and `x + 7` of a u8', () => {
+    const p = v();
+    const b = block([p]);
+    const floorOf = (t: Value) => b.op('shl', { imm: 3 }, [b.op('shr_s', { imm: 3 }, [t])]);
+    expect(rangeIn([b], b.op('sub', {}, [p, floorOf(p)]))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    const x = u8Of(b, p);
+    // x - 8 * floor((x + 7) / 8) is 0 at x = 0 and -7 at x = 1: [-7, 0]
+    const r = b.op('sub', {}, [x, floorOf(plus(b, x, 7))]);
+    expect(rangeIn([b], plus(b, r, 8))).toEqual({ lo: 1, hi: 8, stride: 1 });
+    // of any x, `x + 7` may wrap past INT_MAX, where the floor is no longer `(x + 7) / 8`
+    expect(rangeIn([b], plus(b, b.op('sub', {}, [p, floorOf(plus(b, p, 7))]), 8))).toBeUndefined();
+  });
+
+  test('what is no remainder pair: a bias out of range, a wrap, another x, other coefficients, the `x % 2` bias', () => {
+    const plus8 = (s: ReturnType<typeof srem>) => rangeIn(s.blocks, plus(s.join, s.r, 8));
+    // a bias of 8 is not below 2^3
+    expect(plus8(srem((_e, p) => p, { bias: 8 }))).toBeUndefined();
+    // biasing the non-negative edge: x + 7 of an x up to INT_MAX may wrap
+    expect(plus8(srem((_e, p) => p, { positiveBias: 7, bias: 0 }))).toBeUndefined();
+    // 4 * (t >> 3) is not 2^3 times it
+    expect(plus8(srem((_e, p) => p, { scale: 4 }))).toBeUndefined();
+    // an edge that passes another value
+    const p = v();
+    const entry = block([p]);
+    const y = entry.op('load', { off: 0, width: 4 }, [v()]);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    condBr(entry, entry.op('icmp_slt', {}, [p, k(entry, 0)]), [neg, []], [join, [p]]);
+    br(neg, join, [neg.op('add', {}, [y, k(neg, 7)])]);
+    const r = join.op('sub', {}, [p, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
+    expect(rangeIn([entry, neg, join], plus(join, r, 8))).toBeUndefined();
+    // two arms no compare on x separates: `x + 7` on an edge that proves nothing of x may wrap
+    const q = v();
+    const e2 = block([q, p]);
+    const n2 = block();
+    const t2 = v();
+    const j2 = block([t2]);
+    condBr(e2, e2.op('load', { off: 0, width: 1 }, [v()]), [n2, []], [j2, [p]]);
+    br(n2, j2, [n2.op('add', {}, [p, k(n2, 7)])]);
+    const r2 = j2.op('sub', {}, [p, j2.op('shl', { imm: 3 }, [j2.op('shr_s', { imm: 3 }, [t2])])]);
+    expect(rangeIn([e2, n2, j2], plus(j2, r2, 8))).toBeUndefined();
+    // agbcc's `x % 2` is `x - ((x + (x >>> 31)) >> 1 << 1)`: its bias is a term, not a constant
+    const b = block([p]);
+    const t3 = b.op('add', {}, [p, b.op('shr_u', { imm: 31 }, [p])]);
+    const r3 = b.op('sub', {}, [p, b.op('shl', { imm: 1 }, [b.op('shr_s', { imm: 1 }, [t3])])]);
+    expect(rangeIn([b], plus(b, r3, 2))).toBeUndefined();
+  });
+});
