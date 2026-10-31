@@ -104,6 +104,7 @@ import {
   mapStmtExprs,
   mentionedName,
   negateCond,
+  reachesEnd,
   regainsHelperRel,
   splitHelperBreak,
   stmtChildren,
@@ -7873,10 +7874,14 @@ function structureRanked(
           const ft = exit.kind === 'fallthrough';
           // A `goto` arm is structured exactly as the falling arm it re-spells, and its end is the
           // jump: every path that reaches it is a path into the sibling (`jumpSharedFallTargets`).
+          // Unless no path reaches it: the arm's structuring may already have written the sibling's
+          // body into it and left (a nested switch whose arms run into the sibling, spelled with
+          // the copies and a `break;`), and the jump after that is one no path takes — a goto
+          // where goto-free C already spells the arm, so none is written (`reachesEnd`).
           if (exit.kind === 'goto') {
-            const label = labelOf(exit.to);
+            const body = [...edgeCopies[i], ...structureArm(a.entry, exit.to, merge, exit)];
             return {
-              body: [...edgeCopies[i], ...structureArm(a.entry, exit.to, merge, exit), { k: 'goto', label } as Stmt],
+              body: reachesEnd(body) ? [...body, { k: 'goto', label: labelOf(exit.to) } as Stmt] : body,
               fallsThrough: false,
             };
           }
