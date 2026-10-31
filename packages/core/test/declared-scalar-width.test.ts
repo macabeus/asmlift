@@ -5,12 +5,14 @@
 // Over `extern s32 gN;` a byte read spelled `gN` reads four bytes, a byte store spelled `gN = x`
 // writes four, and over `extern s8 gN;` the bare name sign-extends what `ldrb` zero-extends. Each
 // mismatch is spelled through the address instead, and each control (the same access under a
-// declaration that agrees) keeps the bare name.
+// declaration that agrees) keeps the bare name. A symbol map states the same facts (`size`,
+// `signed`, `shape: 'pointer'`), read the same way.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import { globalsFromContext } from '../src/proto-context';
+import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 const TYPES =
@@ -105,5 +107,31 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(ppc('lbz', 'extern u8 gN;')).toContain('return gN;');
     expect(ppc('lhz', 'extern u16 gN;')).toContain('return gN;');
     expect(ppc('stw', 'extern s32 gN;')).toContain('gN = a0;');
+  });
+});
+
+/** agbcc: `op` of the map-described global at 0x03001234, at offset 0 */
+const mapped = (op: string, info: Partial<SymbolInfo>) => {
+  const asm = thumb(op).replace('\t.word\tgN', '\t.word\t0x03001234');
+  const symbols: SymbolMap = new Map([[0x03001234, [{ name: 'gC', kind: 'data', ...info }]]]);
+  return decompile('f', asm, ARMV4T_AGBCC, { symbols }).source;
+};
+
+describe('a map-described scalar whose size or sign disagrees with its one access', () => {
+  test('a narrower read, a wider read, a store, a sign and a pointer take the address', () => {
+    expect(mapped('ldrb', { shape: 'scalar', size: 4, signed: true })).toContain('return *(u8 *)&gC;');
+    expect(mapped('ldrh', { shape: 'scalar', size: 4, signed: false })).toContain('return *(u16 *)&gC;');
+    expect(mapped('ldr', { shape: 'scalar', size: 1, signed: false })).toContain('*(s32 *)&gC;');
+    expect(mapped('ldrb', { shape: 'scalar', size: 1, signed: true })).toContain('return *(u8 *)&gC;');
+    expect(mapped('strb', { shape: 'scalar', size: 4, signed: true })).toContain('*(u8 *)&gC = a0;');
+    expect(mapped('ldrb', { shape: 'pointer', size: 4 })).toContain('return *(u8 *)&gC;');
+  });
+
+  test('an access the map agrees with, or a map that sizes nothing, keeps the bare name', () => {
+    expect(mapped('ldrb', { shape: 'scalar', size: 1, signed: false })).toContain('return gC;');
+    expect(mapped('ldr', { shape: 'scalar', size: 4, signed: true })).toContain('return gC;');
+    expect(mapped('strb', { shape: 'scalar', size: 1, signed: true })).toContain('gC = a0;');
+    expect(mapped('ldr', { shape: 'pointer', size: 4 })).toContain('return gC;');
+    expect(mapped('ldrb', {})).toContain('return gC;');
   });
 });

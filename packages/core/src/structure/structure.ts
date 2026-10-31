@@ -3759,7 +3759,8 @@ function structureRanked(
     // aggregate/array forms, never the bare scalar `tbl`.
     // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
-    // A declared SCALAR is overridden the same way where its storage disagrees with the one access
+    // A declared SCALAR is overridden the same way where its storage — the context's or the map's,
+    // either of which the candidate may be compiled against — disagrees with the one access
     // (`storageDisagrees`): a bare name reads and writes what the declaration says, so over
     // `extern s32 gN;` a byte read spelled `gN` reads four bytes, and over `extern s8 gN;` it
     // sign-extends what an `ldrb` zero-extends. The cast spelling `*(u8 *)&gN` states the access
@@ -3770,7 +3771,9 @@ function structureRanked(
         shape === 'array' ||
         shape === 'struct' ||
         contextGlobals?.aggregates.has(n) === true ||
-        storageDisagrees(contextGlobals?.storage.get(n), [...widths.get(n)!][0], [...(loadSigns.get(n) ?? [])][0])
+        [contextGlobals?.storage.get(n), mappedStorage(symbols?.get(n))].some((declared) =>
+          storageDisagrees(declared, [...widths.get(n)!][0], [...(loadSigns.get(n) ?? [])][0]),
+        )
       ) {
         scalarGlobals.delete(n);
       }
@@ -10498,6 +10501,16 @@ function setEq<X>(a: Set<X>, b: Set<X>): boolean {
     }
   }
   return true;
+}
+
+/** The storage a symbol map states for a scalar or pointer global ({@link DeclaredStorage}): its
+ *  `size`, and for a scalar its `signed`, which the map leaves out where the type is no base type
+ *  (an enum) and so states no sign. None for a name the map sizes not, or describes as no scalar. */
+function mappedStorage(info: SymbolInfo | undefined): DeclaredStorage | undefined {
+  if (info?.size === undefined || (info.shape !== 'scalar' && info.shape !== 'pointer')) {
+    return undefined;
+  }
+  return { bytes: info.size, signed: info.shape === 'scalar' ? info.signed : undefined };
 }
 
 /** Whether a global's declared storage disagrees with its one access, `width` bytes read or written
