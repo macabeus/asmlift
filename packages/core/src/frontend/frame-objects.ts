@@ -1566,7 +1566,7 @@ function classifyFrameUses({
             irBlocks,
             { indexed, accessOps },
             { off, through: v },
-            { sum: op.results[0], range: facts.addressRangeOf(other) },
+            { sum: op.results[0], range: facts.addressRangeOf(other, blk) },
             facts.constOf,
             fail,
           );
@@ -1894,7 +1894,7 @@ function readWindow(
         const base = facts.literalAddrOf(op.operands[0]);
         if (base === undefined) {
           if (!flow.frameOnEveryPath.has(op.operands[0])) {
-            if (!misses(op, facts, cnt)) {
+            if (!misses(op, facts, cnt, blk)) {
               return unbounded('a later store through an unresolved pointer may re-arm');
             }
             spared = true;
@@ -1961,8 +1961,8 @@ function displaced(r: StridedRange, off: number, width: number): StridedRange | 
  *  over": an immediate transfer is, but a later store that sets the enable bit again reloads the
  *  source register and reads the frame anew (GBATEK, DMA control bit 15), which is what this
  *  guards against. A store this cannot bound on every value stays an unresolved pointer. */
-function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
-  const r = facts.addressRangeOf(op.operands[0]);
+function misses(op: Op, facts: FrameAddressFacts, cnt: number, blk: Block): boolean {
+  const r = facts.addressRangeOf(op.operands[0], blk);
   if (r === undefined) {
     return false;
   }
