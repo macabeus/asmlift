@@ -1566,7 +1566,7 @@ function classifyFrameUses({
             irBlocks,
             { indexed, accessOps },
             { off, through: v },
-            { sum: op.results[0], range: facts.addressRangeOf(other) },
+            { sum: op.results[0], range: facts.addressRangeOf(other, blk) },
             facts.constOf,
             fail,
           );
@@ -1686,11 +1686,14 @@ function transferRead(
 // bytes with or without the `+ 0`.
 //
 // WHAT IT MAY REACH is the object's offset plus every value the index may hold (`range`, ir/bits.ts
-// `stridedRange`: a non-negative mask, a zero-fill shift, an unsigned narrow load, a `zext`, and
-// linear forms of them), widened by the access's width — the stride is dropped, so the bytes are
-// a superset of the ones reached. Every element is at displacement 0 from the sum (above), so the
-// address is exactly the capture plus the index. An index nothing bounds, or one whose sum could
-// wrap past the top of the address space back below the object, reaches every byte (`null`).
+// `stridedRange`, asked at the sum's block): a mask, a zero-fill shift, an unsigned narrow load or a
+// `zext` — by its width, or by its operand's range where that is narrower (`(u8)k` of a counter in
+// [0, 7]); a compare on the way to the access (`if (i < 8) a[i]`); a loop counter its latch bounds,
+// by induction where the latch bounds one side; and linear forms of them. The range is widened by
+// the access's width — the stride is dropped, so the bytes are a superset of the ones reached.
+// Every element is at displacement 0 from the sum (above), so the address is exactly the capture
+// plus the index. An index nothing bounds, or one whose sum could wrap past the top of the address
+// space back below the object, reaches every byte (`null`).
 function indexedAccess(
   irBlocks: readonly Block[],
   { indexed, accessOps }: { indexed: Map<number, IndexedAccess[]>; accessOps: Map<Op, FrameAccessOp> },
@@ -1893,7 +1896,7 @@ function readWindow(
         const base = facts.literalAddrOf(op.operands[0]);
         if (base === undefined) {
           if (!flow.frameOnEveryPath.has(op.operands[0])) {
-            if (!misses(op, facts, cnt)) {
+            if (!misses(op, facts, cnt, blk)) {
               return unbounded('a later store through an unresolved pointer may re-arm');
             }
             spared = true;
@@ -1960,8 +1963,8 @@ function displaced(r: StridedRange, off: number, width: number): StridedRange | 
  *  over": an immediate transfer is, but a later store that sets the enable bit again reloads the
  *  source register and reads the frame anew (GBATEK, DMA control bit 15), which is what this
  *  guards against. A store this cannot bound on every value stays an unresolved pointer. */
-function misses(op: Op, facts: FrameAddressFacts, cnt: number): boolean {
-  const r = facts.addressRangeOf(op.operands[0]);
+function misses(op: Op, facts: FrameAddressFacts, cnt: number, blk: Block): boolean {
+  const r = facts.addressRangeOf(op.operands[0], blk);
   if (r === undefined) {
     return false;
   }

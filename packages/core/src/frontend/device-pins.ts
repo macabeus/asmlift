@@ -54,7 +54,7 @@
  *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
  *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
  *  another instruction sequence. */
-import { type RangeCtx, type StridedRange, incomingArgs, stridedRange } from '../ir/bits';
+import { type RangeCtx, type StridedRange, edgeFacts, stridedRange } from '../ir/bits';
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -68,8 +68,9 @@ export interface LiteralAddresses {
   literalAddrOf(v: Value): number | undefined;
   /** every value the word `v` may hold, as a strided unsigned interval, or undefined when this
    *  cannot bound it: not only the addresses an address may denote — a runtime index into a frame
-   *  object is bounded here too (frame-objects.ts `indexedAccess`) */
-  addressRangeOf(v: Value): StridedRange | undefined;
+   *  object is bounded here too (frame-objects.ts `indexedAccess`); asked `at` the block that reads
+   *  `v`, also under what the branches above that block prove there */
+  addressRangeOf(v: Value, at?: Block): StridedRange | undefined;
 }
 
 /** `literalAddrOf`: `const` is the bare pool word, `gaddr` is the same word after the symbol map
@@ -137,10 +138,14 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
   // `addressRangeOf`: where `literalAddrOf` names one address, this names every value a word may
   // hold (ir/bits.ts `stridedRange`), an address or not, a placed name being the one leaf only this
   // module reads.
+  // A block param is read through what each in-edge's branch proves: a loop counter's latch test
+  // bounds the counter its back edge passes; a value asked at a block, through what holds there.
+  const edges = edgeFacts(irBlocks);
   const rangeCtx: RangeCtx = {
     defs: defOf,
     constOf,
-    incoming: incomingArgs(irBlocks),
+    incoming: edges.incoming,
+    holdsAt: edges.holdsAt,
     entry: new Set(irBlocks[0]?.params ?? []),
     pointOf: (v) => (defOf.get(v)?.opcode === 'gaddr' ? literalAddrOf(v) : undefined),
   };
@@ -148,7 +153,7 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     defOf,
     constOf,
     literalAddrOf: (v) => literalAddrOf(v),
-    addressRangeOf: (v) => stridedRange(rangeCtx, v),
+    addressRangeOf: (v, at) => stridedRange(rangeCtx, v, at),
   };
 }
 
