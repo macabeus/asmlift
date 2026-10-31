@@ -354,6 +354,18 @@ export type Stmt =
   // this one (l3/reindex.ts `hasLoopExit`).
   | { k: 'break'; ofSwitch?: true }
   | { k: 'continue' }
+  // `goto <label>;` — THE ONE GOTO L3 HOLDS, and a narrow one (docs/asmlift-101.md §2.7): a jump to
+  // a CASE LABEL OF THE SWITCH IT SITS IN, written where two or more arms enter one sibling arm's
+  // body and only one of them can reach it by falling through (`case 1: if (c) continue; goto L;
+  // case 2: … case 3: L: …`). `label` names the target arm's `SwitchCase.label`.
+  //
+  // Its contract (contracts.ts `assertCaseGotosNarrow`, which every structured and respelled tree
+  // passes): it is the LAST statement of a case or default body, at that body's top level, and its
+  // label is a case of THAT switch — so no loop or nested switch stands between the jump and its
+  // target, and the jump runs exactly what a fall-through into that arm would run. Any other goto
+  // is not representable. It ends its path like `break` and `continue`. SGI/IDO Pascal has no
+  // goto into a `case-of` arm, so its backend loud-fails it.
+  | { k: 'goto'; label: string }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
   // is emitted after `defaultAt` of them, or after all of them when that is absent.
@@ -398,6 +410,10 @@ export interface SwitchCase {
   values: number[];
   body: Stmt[];
   fallsThrough: boolean;
+  /** The C label printed after this arm's `case` labels, present only where a `goto` of this same
+   *  switch names it (see the `goto` statement). A pass that merges, drops or reorders arms keeps it
+   *  on the arm it labels. */
+  label?: string;
 }
 
 export interface SFn {
@@ -896,6 +912,7 @@ export function stmtExprs(s: Stmt): Expr[] {
       return [s.scrutinee];
     case 'break':
     case 'continue':
+    case 'goto':
       return [];
   }
 }
@@ -935,6 +952,7 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
       };
     case 'break':
     case 'continue':
+    case 'goto':
       return s;
   }
 }
@@ -1091,6 +1109,7 @@ export function stmtChildren(s: Stmt): Stmt[] {
     case 'return':
     case 'break':
     case 'continue':
+    case 'goto':
       return [];
     case 'if':
       return [...s.then, ...s.else];
@@ -1141,8 +1160,69 @@ export function isLoop(s: Stmt): s is Loop {
     case 'return':
     case 'break':
     case 'continue':
+    case 'goto':
       return false;
   }
+}
+
+/** Why `body` breaks the one form a `goto` may take in L3 (the `goto` statement's contract), or
+ *  null when every `goto` in it keeps it: the LAST statement of a case or default body, at that
+ *  body's top level, naming a label one case of THAT switch carries. Labels are unique across the
+ *  function. A `goto` under an `if`, in a loop body, in a nested switch's arm aimed at the outer
+ *  switch, or before another statement is refused, and so is a label two arms carry.
+ *
+ *  Shared by contracts.ts `assertCaseGotosNarrow`, which every structured and respelled tree
+ *  passes, and the C-family printer, which asks it of every function it prints: a pass that moves
+ *  a statement across an arm boundary is caught at the one place the program is spelled. */
+export function caseGotoViolation(body: readonly Stmt[]): string | null {
+  const seen = new Set<string>();
+  const walk = (list: readonly Stmt[], labels: ReadonlySet<string> | null, armTop: boolean): string | null => {
+    for (const [i, s] of list.entries()) {
+      if (s.k === 'goto') {
+        if (labels === null || !armTop || i !== list.length - 1) {
+          return `\`goto ${s.label};\` is not the last statement of a switch arm's own body`;
+        }
+        if (!labels.has(s.label)) {
+          return `\`goto ${s.label};\` names no case label of the switch it sits in`;
+        }
+        continue;
+      }
+      if (s.k === 'switch') {
+        const own = new Set<string>();
+        for (const c of s.cases) {
+          if (c.label !== undefined) {
+            if (seen.has(c.label)) {
+              return `the label \`${c.label}\` is carried by two switch arms`;
+            }
+            seen.add(c.label);
+            own.add(c.label);
+          }
+        }
+        for (const arm of [...s.cases.map((c) => c.body), s.default ?? []]) {
+          const why = walk(arm, own, true);
+          if (why !== null) {
+            return why;
+          }
+        }
+        continue;
+      }
+      // Inside a loop, the switch's labels are out of reach: a goto there would leave the loop.
+      for (const inner of stmtLists(s)) {
+        const why = walk(inner, isLoop(s) ? null : labels, false);
+        if (why !== null) {
+          return why;
+        }
+      }
+      if (s.k === 'for') {
+        const why = walk([s.init, s.inc], null, false);
+        if (why !== null) {
+          return why;
+        }
+      }
+    }
+    return null;
+  };
+  return walk(body, null, false);
 }
 
 /** The nested statement LISTS of a statement — the SCOPES it opens.
@@ -1172,6 +1252,7 @@ export function stmtLists(s: Stmt): Stmt[][] {
     case 'return':
     case 'break':
     case 'continue':
+    case 'goto':
       return [];
   }
 }
@@ -1201,6 +1282,7 @@ export function mapStmtLists(s: Stmt, f: (list: Stmt[]) => Stmt[]): Stmt {
     case 'return':
     case 'break':
     case 'continue':
+    case 'goto':
       return s;
   }
 }

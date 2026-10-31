@@ -855,6 +855,7 @@ export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound
         };
       case 'break':
       case 'continue':
+      case 'goto':
         return s;
     }
   };

@@ -208,6 +208,7 @@ export function materializeArgBases(sfn: SFn): SFn | null {
         break;
       case 'break':
       case 'continue':
+      case 'goto':
         out = s;
         break;
     }

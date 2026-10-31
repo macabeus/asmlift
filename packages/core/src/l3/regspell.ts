@@ -101,6 +101,7 @@ function renameInStmt(s: Stmt, from: string, to: string): Stmt {
       };
     case 'break':
     case 'continue':
+    case 'goto':
       return s;
   }
 }

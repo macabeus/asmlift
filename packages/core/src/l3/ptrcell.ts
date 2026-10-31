@@ -227,6 +227,7 @@ function mapIntegerSlots(sfn: SFn, cells: ReadonlySet<string>, rules: SlotRules)
         };
       case 'break':
       case 'continue':
+      case 'goto':
         return s;
     }
   };
