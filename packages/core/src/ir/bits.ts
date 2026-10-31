@@ -1021,6 +1021,9 @@ function integerRange(
         seeds.push(self || range === null ? undefined : range);
         return range === null ? [] : [range];
       });
+      if (direct.length === 0) {
+        return null; // no in-edge is ever taken: nor is any edge that reads the param
+      }
       let out = direct.every((r) => r !== undefined)
         ? hullOf(direct.map((r) => (wordFirst ? (intoWord(r) ?? r) : r)))
         : undefined;
@@ -1311,20 +1314,53 @@ function testBound(opcode: string, other: StridedRange): EdgeBound | undefined {
   }
 }
 
-/** A value's range where a branch also bounds it: the two met in the branch's window, or, where
- *  the range has words on both sides of that window's edge, the narrower of the two (each covers
- *  every word on its own). A meet that holds nothing is `null`: no word the value may hold takes
- *  the branch, so the edge is never taken — `if (k < 0) k += 7` on a counter from 0. */
+/** A value's range where a branch also bounds it: the two met in the branch's window. A range with
+ *  words on both sides of that window's edge is two pieces there, each met with the bound: `d =
+ *  k - 1` of a k in [0, 10] is [-1, 9], which `d <=u 10` meets as [0, 9], the piece at 2^32 - 1
+ *  taking no branch. Where both pieces stay, their hull or the range itself, whichever is
+ *  narrower, the hull on a tie (it is a range of the window). A meet that holds nothing is `null`:
+ *  no word the value may hold takes the branch, so the edge is never taken — `if (k < 0) k += 7`
+ *  on a counter from 0. */
 function meetBound(r: StridedRange | undefined, b: EdgeBound): StridedRange | null {
   if (r === undefined) {
     return b.r;
   }
   const m = b.window === 'u' ? intoWord(r) : intoSigned(r);
-  if (m === undefined) {
-    return r.hi - r.lo <= b.r.hi - b.r.lo ? r : b.r;
+  if (m !== undefined) {
+    return meetIn(m, b.r);
   }
-  const lo = Math.max(m.lo, b.r.lo);
-  const hi = Math.min(m.hi, b.r.hi);
+  if (r.hi - r.lo >= WORD || r.stride === 0) {
+    return b.r; // every word: only the bound is left (one point always fits a window)
+  }
+  // the integer where the window ends inside `r`: the pieces below it and from it, each moved
+  // into the window by its own multiple of 2^32
+  const floor = b.window === 'u' ? 0 : S_MIN;
+  const shift = Math.floor((r.lo - floor) / WORD) * WORD;
+  const [below, from] = splitAt(r, floor + shift + WORD);
+  const met = [
+    below && meetIn({ ...below, lo: below.lo - shift, hi: below.hi - shift }, b.r),
+    from && meetIn({ ...from, lo: from.lo - shift - WORD, hi: from.hi - shift - WORD }, b.r),
+  ].filter((x): x is StridedRange => x !== undefined && x !== null);
+  const hull = hullOf(met);
+  if (hull === undefined) {
+    return null;
+  }
+  return hull.hi - hull.lo <= r.hi - r.lo ? hull : r;
+}
+
+/** The points of a strided range (stride above 0) below `cut` and from it, each keeping the
+ *  stride; a side with no point is undefined. */
+function splitAt(r: StridedRange, cut: number): [StridedRange | undefined, StridedRange | undefined] {
+  const firstUp = r.lo + Math.ceil((cut - r.lo) / r.stride) * r.stride;
+  const piece = (lo: number, hi: number): StridedRange | undefined =>
+    lo > hi ? undefined : { lo, hi, stride: lo === hi ? 0 : r.stride };
+  return [piece(r.lo, Math.min(firstUp - r.stride, r.hi)), piece(Math.max(firstUp, r.lo), r.hi)];
+}
+
+/** A range inside one window met with a bound of that window; `null` when they share no point. */
+function meetIn(m: StridedRange, br: StridedRange): StridedRange | null {
+  const lo = Math.max(m.lo, br.lo);
+  const hi = Math.min(m.hi, br.hi);
   if (m.stride === 0) {
     return lo <= hi ? m : null;
   }

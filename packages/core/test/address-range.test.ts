@@ -558,6 +558,32 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn(w.blocks, w.q)).toBeUndefined();
   });
 
+  test('a down-counter through a join every edge passes it to: the latch meets its word-straddling step', () => {
+    // `k = 10; do { if (gx) {} else {} d = k - 1; } while (d <=u 10)` with both arms passing `k`:
+    // the join's own range [0, 10] makes `d` the integers [-1, 9], words on both sides of 0; the
+    // latch meets that as [0, 9], not [-1, 9] kept over it, or the hull with the start crosses a word
+    const build = (latch: 'icmp_ule' | 'icmp_sle') => {
+      const entry = block();
+      const q = v();
+      const head = block([q]);
+      const t = v();
+      const join = block([t]);
+      const exit = block();
+      br(entry, head, [k(entry, 10)]);
+      condBr(head, head.op('load', { off: 0, width: 4 }, [v()]), [join, [q]], [join, [q]]);
+      const d = join.op('add', {}, [t, k(join, -1)]);
+      condBr(join, join.op(latch, {}, [d, k(join, 10)]), [head, [d]], [exit, []]);
+      return { blocks: [entry, head, join, exit], q, t };
+    };
+    const g = build('icmp_ule');
+    expect(rangeIn(g.blocks, g.q)).toEqual({ lo: 0, hi: 10, stride: 1 });
+    expect(rangeIn(g.blocks, g.t)).toEqual({ lo: 0, hi: 10, stride: 1 });
+    // the control `d <=s 10` passes -1 back, and the counter runs down to INT_MIN: no word interval
+    const s = build('icmp_sle');
+    expect(rangeIn(s.blocks, s.q)).toBeUndefined();
+    expect(rangeIn(s.blocks, s.t)).toBeUndefined();
+  });
+
   test('asked at a block, a value is read under the tests on the way in', () => {
     // `void q(u32 i) { if (i < 8) a[i * 2 + 1]; }`: a parameter bounds nothing, but not in the arm
     const entry = block([v()]);
