@@ -5,7 +5,7 @@
 // flag, nesting) so a discovery regression is caught here, not diffused into a decompile mismatch.
 import { expect, test } from 'vitest';
 
-import { type Block, dominators } from '../src/ir/core';
+import { type Block, dominators, immediateDominators } from '../src/ir/core';
 import { analyzeLoops } from '../src/ir/loops';
 import { parse } from '../src/ir/parse';
 
@@ -134,4 +134,40 @@ test('no loop → empty forest', () => {
 }
 `);
   expect(forest.byHeader.size).toBe(0);
+});
+
+test('immediateDominators: the nearest strict dominator, past an if/else join and a loop; none for the entry or an unreachable block', () => {
+  // ^bb1 tests -> ^bb2 | ^bb3, both join at ^bb4, which loops to ^bb1 or leaves to ^bb5; ^bb6 is
+  // reached by nothing yet jumps into the join, and must not move the join's dominator.
+  const fn = parse(`fn f {
+^bb0(%0: s32):
+  br ^bb1()
+^bb1():
+  cond_br %0, ^bb2(), ^bb3()
+^bb2():
+  br ^bb4()
+^bb3():
+  br ^bb4()
+^bb4():
+  cond_br %0, ^bb1(), ^bb5()
+^bb5():
+  ret %0
+^bb6():
+  br ^bb4()
+}
+`);
+  const idx = (b: Block | undefined) => (b === undefined ? -1 : fn.blocks.indexOf(b));
+  const idom = immediateDominators(fn);
+  expect(fn.blocks.map((b) => idx(idom.get(b)))).toEqual([-1, 0, 1, 1, 1, 4, -1]);
+  // the tree is the sets' own, over the reachable blocks: each one's chain up the tree is its
+  // dominator set there (over every block, ^bb6's edge would leave ^bb4 dominated by itself alone)
+  const dom = dominators({ blocks: fn.blocks.slice(0, 6) });
+  expect([...dominators(fn).get(fn.blocks[4])!].map(idx)).toEqual([4]);
+  for (const b of fn.blocks.slice(0, 6)) {
+    const chain = new Set<Block>();
+    for (let x: Block | undefined = b; x !== undefined; x = idom.get(x)) {
+      chain.add(x);
+    }
+    expect([...chain].map(idx).sort()).toEqual([...dom.get(b)!].map(idx).sort());
+  }
 });

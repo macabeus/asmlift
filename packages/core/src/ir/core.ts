@@ -438,7 +438,7 @@ export function successorsOf(b: Block): Block[] {
  *  keeps a walk of its own rather than calling this one — it descends through EVERY op's successors,
  *  which is the same relation on verified IR and a wider one on the hand-built IR its own note is
  *  about. */
-export function reachableBlocks(fn: Fn): Set<Block> {
+export function reachableBlocks(fn: { readonly blocks: readonly Block[] }): Set<Block> {
   const seen = new Set<Block>();
   const entry = fn.blocks[0];
   if (entry === undefined) {
@@ -484,7 +484,7 @@ export function reachForward(
 }
 
 /** Predecessor map for the whole function's CFG. */
-export function predecessors(fn: Fn): Map<Block, Block[]> {
+export function predecessors(fn: { readonly blocks: readonly Block[] }): Map<Block, Block[]> {
   const preds = new Map<Block, Block[]>();
   for (const b of fn.blocks) {
     preds.set(b, []);
@@ -503,7 +503,7 @@ export function predecessors(fn: Fn): Map<Block, Block[]> {
  *  `verify` needs it to check def-dominates-use, `ir/loops.ts` to tell a back-edge from a
  *  forward one, and `raise/latch.ts` to tell a latch from a preheader. */
 
-export function dominators(fn: Fn): Map<Block, Set<Block>> {
+export function dominators(fn: { readonly blocks: readonly Block[] }): Map<Block, Set<Block>> {
   const preds = predecessors(fn);
   const all = new Set(fn.blocks);
   const dom = new Map<Block, Set<Block>>();
@@ -534,6 +534,33 @@ export function dominators(fn: Fn): Map<Block, Set<Block>> {
     }
   }
   return dom;
+}
+
+/** Each block's IMMEDIATE dominator: of its strict `dominators`, which form a chain, the nearest —
+ *  the one every other dominates, so the one with the most dominators of its own. Read off those
+ *  sets rather than computed again, so the tree and the sets cannot disagree; but off the sets of
+ *  the blocks the entry reaches (`reachableBlocks`) alone, because `dominators` counts an edge
+ *  out of an unreachable block as a way in, and one such edge into a loop's join leaves the join
+ *  dominated by nothing but itself. The entry, and every unreachable block, have none.
+ *  `ir/bits.ts`'s `edgeFacts` walks this tree up from a point to read what the branches above it
+ *  prove there. */
+export function immediateDominators(fn: { readonly blocks: readonly Block[] }): Map<Block, Block> {
+  const live = reachableBlocks(fn);
+  const blocks = fn.blocks.filter((b) => live.has(b));
+  const dom = dominators({ blocks });
+  const out = new Map<Block, Block>();
+  for (const b of blocks.slice(1)) {
+    let near: Block | undefined;
+    for (const d of dom.get(b)!) {
+      if (d !== b && (near === undefined || dom.get(d)!.size > dom.get(near)!.size)) {
+        near = d;
+      }
+    }
+    if (near !== undefined) {
+      out.set(b, near);
+    }
+  }
+  return out;
 }
 
 /** A block with NO BODY OF ITS OWN: it declares no parameters and holds a single op, which is
@@ -605,7 +632,7 @@ export function forwardingTarget(b: Block): Block {
  *  a CFG fact a parameter for one caller's extra edges — so it stays where it is, and what this
  *  paragraph buys is that the next reader looking for a fourth copy knows which of the two the
  *  third one is. */
-export function mergeClasses(fn: Pick<Fn, 'blocks'>): Map<Value, readonly Value[]> {
+export function mergeClasses(fn: { readonly blocks: readonly Block[] }): Map<Value, readonly Value[]> {
   const parent = new Map<Value, Value>();
   const find = (v: Value): Value => {
     let r = v;
