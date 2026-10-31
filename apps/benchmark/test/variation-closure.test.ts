@@ -8,24 +8,28 @@
 //   1. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
 //      candidate's — parses, part by part, in kind order. This runs wherever the suite runs, CI
 //      included, and it is the half that reads published data.
-//   2. every name the ENUMERATED synthetic tier mints parses the same way. The artifact stores the
-//      winner and the refused candidates only, which is a fraction of the variations enumeration
-//      mints, so only an enumeration closes the set. It needs agbcc to build the rows' targets, so
-//      it is SKIPPED where agbcc is absent — CI among them — and reports as skipped, never as
-//      passed.
+//   2. every name ENUMERATION mints parses the same way. The artifact stores the winner and the
+//      refused candidates only, a fraction of what enumeration mints, so only an enumeration closes
+//      the set — and the bench does that one: `tallyFanVariations` refuses every candidate of every
+//      fan it ranks to a verdict or refuses whole, on both tiers, by the same `variationsDefect` this
+//      file uses (`packages/core/test/variation-tokens.test.ts` proves the refusal fires); a rank a
+//      scorer dies in publishes `noncompile` with no fan, and is not tallied. What the bench
+//      never ranks is a row that carries a symbol map, enumerated WITHOUT it: it hands `c.symbols`
+//      to every such row (run/runner.ts). That configuration alone is enumerated here. It needs the
+//      rows' toolchains to build their targets, so it is SKIPPED where they are absent — CI among
+//      them — and reports as skipped, never as passed.
 //
 // A name that fails here is one the type gate cannot refuse: its parts out of kind order, or, in the
 // artifact, a name published before the registry changed.
 import { enumerateRanked } from '@asmlift/cli/rank';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {
-  VARIATION_KINDS,
   joinVariations,
   parseVariation,
   splitVariations,
   variationToken,
+  variationsDefect,
 } from '@asmlift/core/variation-tokens';
-import { agbccAvailable } from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -34,29 +38,8 @@ import { scrubObjectHeader } from '../src/asm-scrub';
 import { syntheticCases } from '../src/cases/synthetic';
 import { rankOptionsFor } from '../src/eval/asmlift';
 
-/** What is wrong with one candidate's name — its variations, `/`-joined as `name` — or `undefined`:
- *  an unregistered variation, a variation out of kind order, or a first variation that is not a
- *  signedness. */
-function nameDefect(name: string): string | undefined {
-  const variations = splitVariations(name);
-  let previous = -1;
-  for (const [i, part] of variations.entries()) {
-    let kind: number;
-    try {
-      kind = VARIATION_KINDS.indexOf(variationToken(parseVariation(part).name).variationKind);
-    } catch (e) {
-      return `${name}: ${e instanceof Error ? e.message : String(e)}`;
-    }
-    if (i === 0 && VARIATION_KINDS[kind] !== 'signedness') {
-      return `${name}: the first variation is '${part}', not a signedness`;
-    }
-    if (kind < previous) {
-      return `${name}: '${part}' (${VARIATION_KINDS[kind]}) after a ${VARIATION_KINDS[previous]} variation`;
-    }
-    previous = kind;
-  }
-  return undefined;
-}
+/** What is wrong with one `/`-joined name, or `undefined` (core `variationsDefect`). */
+const nameDefect = (name: string): string | undefined => variationsDefect(splitVariations(name));
 
 describe('closure over the names the committed artifact publishes', () => {
   const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
@@ -135,64 +118,55 @@ describe('closure over the names the committed artifact publishes', () => {
   });
 });
 
-describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthetic tier mints', () => {
-  const names = new Set<string>();
-  let fans = 0;
-  // One test per toolchain: the tier's enumeration is minutes of work on a loaded machine, and a
-  // test's timeout bounds one test, not the file. A toolchain this machine lacks is skipped.
-  const toolchains = new Map(syntheticCases().map((c) => [c.toolchain.id, c.toolchain]));
-  const present = [...toolchains.values()].filter((tc) => tc.available()).map((tc) => tc.id);
-  const enumerated = new Set<string>();
+describe('closure over the names a symbol-map row mints without its map', () => {
+  // Every other enumeration is the bench's own (see the header); a toolchain this machine lacks is
+  // skipped.
+  const rows = syntheticCases().filter((c) => c.symbols !== undefined);
+  const toolchains = [...new Set(rows.map((c) => c.toolchain))];
+  const absent = toolchains.filter((tc) => !tc.available()).map((tc) => tc.id);
 
-  for (const id of toolchains.keys()) {
-    test.skipIf(!present.includes(id))(
-      `the ${id} rows enumerate`,
-      async () => {
-        for (const c of syntheticCases({ toolchain: id })) {
-          // vitest's worker answers its runner over an RPC with a fixed 60 s timeout that the poll
-          // phase cannot serve while this loop holds the thread. Yielding once per row lets the reply
-          // be read (`setImmediate` runs after poll).
-          await new Promise<void>((resolve) => setImmediate(resolve));
-          const built = c.build();
-          const asm = scrubObjectHeader(built.asm);
-          for (const symbols of c.symbols === undefined ? [undefined] : [undefined, c.symbols]) {
-            const opts = rankOptionsFor(
-              c.toolchain,
-              c.codegen,
-              built.obj,
-              c.sym,
-              c.proto,
-              c.compile,
-              symbols,
-              c.contextGlobals,
-            );
-            let cands: { variations: readonly string[] }[];
-            try {
-              cands = enumerateRanked(c.sym, asm, c.codegen.target, { ...opts, onEnumerationError: () => {} });
-            } catch {
-              continue; // a row that declines mints nothing to check
-            }
-            fans++;
-            for (const x of cands) {
-              names.add(joinVariations(x.variations));
-            }
-          }
+  test.skipIf(absent.length > 0)(
+    `the ${rows.length} rows that carry a map enumerate without it, every name well-formed`,
+    async () => {
+      const names = new Set<string>();
+      let fans = 0;
+      for (const c of rows) {
+        // vitest's worker answers its runner over an RPC with a fixed 60 s timeout that the poll
+        // phase cannot serve while this loop holds the thread. Yielding once per row lets the reply
+        // be read (`setImmediate` runs after poll).
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const built = c.build();
+        const opts = rankOptionsFor(
+          c.toolchain,
+          c.codegen,
+          built.obj,
+          c.sym,
+          c.proto,
+          c.compile,
+          undefined,
+          c.contextGlobals,
+        );
+        let cands: { variations: readonly string[] }[];
+        try {
+          cands = enumerateRanked(c.sym, scrubObjectHeader(built.asm), c.codegen.target, {
+            ...opts,
+            onEnumerationError: () => {},
+          });
+        } catch {
+          continue; // a row that declines mints nothing to check
         }
-        enumerated.add(id);
-      },
-      600_000,
-    );
-  }
-
-  test('every enumerated name parses into registered variations, signedness first, in kind order', () => {
-    // the names are the toolchain tests' output: a filter that selects this test alone reads none
-    expect([...enumerated].sort(), 'the toolchain tests did not run; filter on the describe').toEqual(present.sort());
-    // At b1be5321: 707 fans and 3,037 distinct names with every synthetic toolchain present, 334 and
-    // 2,915 of them agbcc's. The floor sits under the agbcc-only figures, so a shell with agbcc and
-    // nothing else still passes, and a selection that silently shrank to a handful of rows does not.
-    expect(fans).toBeGreaterThan(200);
-    expect(names.size).toBeGreaterThan(2000);
-    expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
-    expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
-  });
+        fans++;
+        for (const x of cands) {
+          names.add(joinVariations(x.variations));
+        }
+      }
+      // At f9389ba4: 33 rows, 32 fans and 327 distinct names. The floors sit under those, so a
+      // selection that silently shrank to a handful of rows does not pass.
+      expect(rows.length).toBeGreaterThanOrEqual(30);
+      expect(fans).toBeGreaterThan(25);
+      expect(names.size).toBeGreaterThan(250);
+      expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
+    },
+    600_000,
+  );
 });

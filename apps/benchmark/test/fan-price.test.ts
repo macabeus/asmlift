@@ -182,8 +182,8 @@ describe('the ranked row records its own price', () => {
         ['unsigned', 'signed'].flatMap((sign) => probed.map((v) => ({ variations: [sign, ...v], error: ARITY }))),
         [],
         [
-          { variations: ['unsigned', 'raw-globals', 'unreduce'], source: 'void f(u32 a0) { g(a0, 1); }' },
-          { variations: ['signed', 'raw-globals', 'unreduce'], source: 'void f(s32 a0) { g(a0, 1); }' },
+          { variations: ['unsigned', 'unreduce', 'raw-globals'], source: 'void f(u32 a0) { g(a0, 1); }' },
+          { variations: ['signed', 'unreduce', 'raw-globals'], source: 'void f(s32 a0) { g(a0, 1); }' },
         ],
         { cause: new CompilerRejection(ARITY) },
       );
