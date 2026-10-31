@@ -581,5 +581,13 @@ test('two table arms entering one case body: the arm the CASE ORDER puts above i
   }
   expect(cands.some((c) => !hasVariation(c.variations, 'tail-copies') && /g\(a1\);\s+case 2:/.test(c.source))).toBe(
     true,
-  );
+  ); // `/case-goto`: the arm the default copies case 2 into (case 3) jumps to its label instead
+  expect(
+    cands.some(
+      (c) =>
+        hasVariation(c.variations, 'case-goto') &&
+        !hasVariation(c.variations, 'tail-copies') &&
+        /g\(a1\);\s+case 2:\s+case_2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+goto case_2;/.test(c.source),
+    ),
+  ).toBe(true);
 });

@@ -84,6 +84,10 @@ export interface SwitchRecoverDeps {
  *                    l3/ast.ts non-neutrality note). With `breaks`, some paths out reach the
  *                    switch's merge instead: `case 1: if (c) break; case 2: …`, the arm's own
  *                    `break;` on those paths.
+ *   - `goto`         a `fallthrough` exit whose sibling another arm already falls into: the same
+ *                    paths, ending in `goto` to that sibling's case label (l3/ast.ts) instead of
+ *                    running on into it. Only `jumpSharedFallTargets` below makes one, and only
+ *                    Regime B asks it.
  *   - `unstructurable`  anything else: two different siblings, or a sibling beside a block the
  *                    switch does not dominate. C needs a `goto` for those. Regime A declines to
  *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD.
@@ -101,6 +105,7 @@ export interface SwitchRecoverDeps {
 export type ArmExit =
   | { kind: 'break'; region?: ReadonlySet<Block>; escapedTo?: ReadonlySet<Block> }
   | { kind: 'fallthrough'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
+  | { kind: 'goto'; to: Block; breaks: boolean; region: ReadonlySet<Block> }
   | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
@@ -349,7 +354,10 @@ function singleton(r: Ranges): number | null {
  *
  *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
  *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
- *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`. */
+ *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`.
+ *  `onCopied` fires with the sibling each time an entrant takes a copy of a CASE arm (not the
+ *  `default:` arm's), which is where `jumpSharedFallTargets` can read a `goto` instead: rank.ts's
+ *  witness for `/case-goto`, and the siblings that variation hands it. */
 export function copySharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,
@@ -357,18 +365,12 @@ export function copySharedFallTargets(
   faller: boolean,
   onFallerKept?: () => void,
   sidewaysEnds?: (s: Block) => boolean,
+  onCopied?: (to: Block) => void,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
-  const entrants = new Map<Block, Block[]>();
-  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
-    const x = exitOf.get(e);
-    if (x?.kind === 'fallthrough') {
-      entrants.set(x.to, [...(entrants.get(x.to) ?? []), e]);
-    }
-  }
-  for (const [to, from] of entrants) {
+  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
     const own = exitOf.get(to);
-    if (from.length < 2 || own?.kind !== 'break') {
+    if (own?.kind !== 'break') {
       continue;
     }
     const { region, escapedTo } = own;
@@ -378,24 +380,105 @@ export function copySharedFallTargets(
     ) {
       continue;
     }
-    const at = to === dflt ? order.length : order.indexOf(to);
-    const above = faller && at > 0 ? order[at - 1] : undefined;
-    if (above !== undefined && from.includes(above)) {
-      onFallerKept?.();
-    }
-    for (const e of from) {
-      const x = exitOf.get(e)!;
-      if (e !== above && x.kind === 'fallthrough') {
-        out.set(
-          e,
-          region === undefined
-            ? { kind: 'break', escapedTo: escapedTo! }
-            : { kind: 'break', region: new Set([...x.region, ...region]) },
-        );
+    for (const [e, x] of movers(onFallerKept)) {
+      if (to !== dflt) {
+        onCopied?.(to);
       }
+      out.set(
+        e,
+        region === undefined
+          ? { kind: 'break', escapedTo: escapedTo! }
+          : { kind: 'break', region: new Set([...x.region, ...region]) },
+      );
     }
   }
   return out;
+}
+
+/** TWO OR MORE ARMS ENTERING ONE SIBLING'S BODY, put back as one fall-through and `goto`s to the
+ *  sibling's case label — where the copies above do not take them (they are read first, and this
+ *  is read over what they leave). It is the source's own spelling of the shape: `case 1: if (c)
+ *  continue; goto L; case 2: if (d) continue; goto L; case 3: case 4: L: …` (kleod sub_0800D188's
+ *  `goto block_1643;`), which every compiler that does not cross-jump a copy into it compiles with
+ *  the sibling's code once. Unlike the copies it needs nothing of the sibling: the sibling's own exit
+ *  is read for itself and may fall on, break, or leave sideways, since the jump does not write it
+ *  out again.
+ *
+ *  WHO FALLS is read from the one place the copies ask it too (`sharedFallTargets`), but with no
+ *  choice in it: the entrant the caller's arm-order policy puts directly above the sibling always
+ *  keeps its fall-through, and every other entrant jumps. A `goto` from that arm would land on the
+ *  label directly below it, a path its plain fall-through already spells, so it is a jump goto-free
+ *  C does not need (asmlift-101 §2.7). `/tail-copies`' setting of `faller` asks which entrant the
+ *  SOURCE wrote the body under, a question a jump does not have: it writes no body.
+ *
+ *  ONLY INTO A CASE ARM: the sibling is in `order`, never `dflt`, since only a case arm carries a
+ *  label (l3/ast.ts `SwitchCase.label`) — and, given `only`, only into those siblings (`/case-goto`
+ *  hands it the case arms the copies wrote back).
+ *
+ *  WHAT MAKES THE JUMP THE SAME PROGRAM is the exit it replaces. A `goto` exit is a `fallthrough`
+ *  exit with its last edge spelled as a jump: the arm is structured to stop at the sibling's entry
+ *  exactly as a falling arm is (structure.ts `structureArm`), so every path that leaves the arm's
+ *  body at its end is a path into the sibling, with the edge's own copies already run, and the
+ *  `goto` is the arm's last top-level statement. The jump lands right after the sibling's case
+ *  labels, which is where a fall-through lands; the emission refuses a sibling that opens with
+ *  switch-edge copies, as it does for a fall-through: entering it by its own case value runs those,
+ *  and the jump, landing above them, would run them again. No loop stands between the jump and the
+ *  label: both are the switch's, in the loop the switch is in. */
+export function jumpSharedFallTargets(
+  order: readonly Block[],
+  dflt: Block | null,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  only?: ReadonlySet<Block>,
+): Map<Block, ArmExit> {
+  const out = new Map(exitOf);
+  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, true)) {
+    if (to === dflt || !order.includes(to) || (only !== undefined && !only.has(to))) {
+      continue;
+    }
+    for (const [e, x] of movers()) {
+      out.set(e, { kind: 'goto', to, breaks: x.breaks, region: x.region });
+    }
+  }
+  return out;
+}
+
+type Entrant = [Block, Extract<ArmExit, { kind: 'fallthrough' }>];
+
+/** WHO FALLS, the one answer both rewrites above read: each arm two or more arms fall into (`to`,
+ *  in the order its first entrant comes in `order` and then `dflt`), and `movers` — its entrants
+ *  other than the one that keeps its fall-through, with their exits, which each rewrite spells its
+ *  own way (a copy, a jump). The keeper is the arm the caller's arm-order policy puts directly
+ *  above `to`, where `faller` is set (`dflt` sits below the last of `order`); `movers` fires
+ *  `onFallerKept` when that arm is an entrant, which is where the two settings of `faller` differ.
+ *  It fires on the call, so a rewrite that refuses `to` before asking reports nothing. */
+function sharedFallTargets(
+  order: readonly Block[],
+  dflt: Block | null,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  faller: boolean,
+): { to: Block; movers: (onFallerKept?: () => void) => Entrant[] }[] {
+  const entrants = new Map<Block, Entrant[]>();
+  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+    const x = exitOf.get(e);
+    if (x?.kind === 'fallthrough') {
+      entrants.set(x.to, [...(entrants.get(x.to) ?? []), [e, x]]);
+    }
+  }
+  return [...entrants]
+    .filter(([, from]) => from.length >= 2)
+    .map(([to, from]) => {
+      const at = to === dflt ? order.length : order.indexOf(to);
+      const above = faller && at > 0 ? order[at - 1] : undefined;
+      return {
+        to,
+        movers: (onFallerKept?: () => void) => {
+          if (above !== undefined && from.some(([e]) => e === above)) {
+            onFallerKept?.();
+          }
+          return from.filter(([e]) => e !== above);
+        },
+      };
+    });
 }
 
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each

@@ -20,6 +20,7 @@
 //                  names, and which of those names a declaration must refuse to claim.
 import { cBackend } from './backend/c';
 import {
+  assertCaseGotosNarrow,
   assertDerefsTyped,
   assertFrameUnionsViewed,
   assertLocalStorageStaysInteger,
@@ -1187,6 +1188,7 @@ export function enumerateCandidates(
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
         assertFrameUnionsViewed(alt);
+        assertCaseGotosNarrow(alt);
         sources.push({
           variations,
           source: backend.emit(alt),
@@ -1239,6 +1241,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertLocalStorageStaysInteger(alt, shaped.out);
                 assertFrameUnionsViewed(shaped.out);
+                assertCaseGotosNarrow(shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
@@ -2785,10 +2788,20 @@ export function compareScored<S extends { score: number }>(
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     (a.farStoreCast ? 1 : 0) - (b.farStoreCast ? 1 : 0) ||
+    gotoCount(a.source) - gotoCount(b.source) ||
     castCount(a.source) - castCount(b.source) ||
     lineCount(a.source) - lineCount(b.source) ||
     a.order - b.order
   );
+}
+
+/** `goto` statements in a candidate's rendered source — the readability tie-break above, asked
+ *  before the casts. The one goto asmlift writes (l3/ast.ts, a jump to a case label of the switch it
+ *  sits in) is a ranked spelling against goto-free copies (`/case-goto`), and where the two score
+ *  alike the goto-free one is published: the goto is the narrow exception the differ has to earn,
+ *  never a tie's winner. Deterministic, and total on any string. */
+export function gotoCount(source: string): number {
+  return source.match(/\bgoto [A-Za-z_]\w*;/g)?.length ?? 0;
 }
 
 /** Non-blank lines in a candidate's rendered source — the compactness tie-break above, counted

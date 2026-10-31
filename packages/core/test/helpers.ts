@@ -348,7 +348,10 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   // return, so two trees that differ only in whether an `else` arm exists observe different
   // events after it and the comparison reports a clobber that no execution has. The `while` and
   // `for` forms let a `continue` fall through to the update, which is what C does.
-  const exec = (list: Stmt[]): 'none' | 'break' | 'continue' | 'return' => {
+  // A `goto` (l3/ast.ts: the last statement of an arm, naming a case label of that switch) leaves
+  // its arm as `goto:<label>`, and the switch below resumes at the arm that label names.
+  type Sig = 'none' | 'break' | 'continue' | 'return' | `goto:${string}`;
+  const exec = (list: Stmt[]): Sig => {
     for (const s of list) {
       if (++steps > 4000) throw new Error('step cap');
       switch (s.k) {
@@ -407,6 +410,8 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           return 'break';
         case 'continue':
           return 'continue';
+        case 'goto':
+          return `goto:${s.label}`;
         // A `switch` runs the arm its scrutinee selects, then the arms it falls into
         // (`fallsThrough`), in printed order, the default at `defaultAt`, until one leaves: a
         // `break` leaves the switch, a `continue` or `return` what encloses it. A case that falls
@@ -417,7 +422,12 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           if (v === UNDEF) {
             throw new Error('switch on an undefined value');
           }
-          const arms = s.cases.map((c) => ({ body: c.body, falls: c.fallsThrough, values: c.values }));
+          const arms: { body: Stmt[]; falls: boolean; values: number[]; label?: string }[] = s.cases.map((c) => ({
+            body: c.body,
+            falls: c.fallsThrough,
+            values: c.values,
+            label: c.label,
+          }));
           if (s.default !== undefined) {
             arms.splice(s.defaultAt ?? arms.length, 0, { body: s.default, falls: false, values: [] });
           }
@@ -425,9 +435,19 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           if (at < 0 && s.default !== undefined) {
             at = s.defaultAt ?? s.cases.length;
           }
-          let sig: 'none' | 'break' | 'continue' | 'return' = 'none';
+          let sig: Sig = 'none';
           for (; at >= 0 && at < arms.length; at++) {
+            if (++steps > 4000) throw new Error('step cap');
             sig = exec(arms[at].body);
+            if (sig.startsWith('goto:')) {
+              const to = arms.findIndex((c) => c.label !== undefined && `goto:${c.label}` === sig);
+              if (to < 0) {
+                throw new Error(`a ${sig} that names no arm of its switch`);
+              }
+              at = to - 1;
+              sig = 'none';
+              continue;
+            }
             if (sig !== 'none' || !arms[at].falls) {
               break;
             }

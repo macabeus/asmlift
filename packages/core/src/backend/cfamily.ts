@@ -12,7 +12,7 @@
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
-import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
+import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -571,6 +571,10 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return [`${indent}break;`];
     case 'continue':
       return [`${indent}continue;`];
+    // Where it may sit is the tree's contract (l3/ast.ts `caseGotoViolation`), which `emitCFamily`
+    // asks of the whole function before printing any of it.
+    case 'goto':
+      return [`${indent}goto ${s.label};`];
     case 'switch':
       return printSwitchStmt(s, indent, vt, leaf);
   }
@@ -639,6 +643,11 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
     for (const v of c.values) {
       out.push(`${ci}case ${v}:`);
     }
+    // The label a `goto` of this switch lands on, after the arm's case labels: entering it there
+    // runs exactly what falling into the arm runs.
+    if (c.label !== undefined) {
+      out.push(`${ci}${c.label}:`);
+    }
     for (const t of c.body) {
       out.push(...printStmt(t, bi, vt, leaf));
     }
@@ -685,6 +694,7 @@ function endsTerminated(body: Stmt[]): boolean {
     (last.k === 'return' ||
       last.k === 'break' ||
       last.k === 'continue' ||
+      last.k === 'goto' ||
       (last.k === 'if' && endsTerminated(last.then) && last.else.length > 0 && endsTerminated(last.else)))
   );
 }
@@ -901,6 +911,10 @@ export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, design
   // …and the compiler's anonymous constant images folded into the initializers of the locals
   // their copies fill (l3/constinit.ts), which the tree keeps as copies until here.
   const fn = orderSlotLocals(legalizePointerCells(foldConstantImages(fn0)));
+  const stray = caseGotoViolation(fn.body);
+  if (stray !== null) {
+    throw new Error(`c backend: ${stray}`);
+  }
   const decls = structDecls(fn);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
   return (
