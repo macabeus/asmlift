@@ -286,7 +286,8 @@ another arm of that switch (`goto` in `l3/ast.ts`, contract `caseGotoViolation`)
 source's own spelling where two arms run on into one case's body and C fall-through reaches only
 one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`, kleod `sub_0800D188`). It
 has two producers, both over `jumpSharedFallTargets` in `structure/switch-recover.ts`: the
-structurer's default writes it only where every goto-free reading of the jump table declines; and
+structurer's default writes it only where every goto-free structuring of the whole function
+declines, its `for`, outward and ret-copy reruns included (`JumpRanking` in `structure.ts`); and
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies, where the goto is kept only
 if it scores better (a tie goes to the candidate without one, `gotoCount` in `rank.ts`). An arm
