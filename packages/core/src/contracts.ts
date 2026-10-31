@@ -9,7 +9,7 @@ import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import { type BinOp, type Expr, type SFn, type Stmt, calleeOf, caseGotoViolation } from './l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, calleeOf, caseGotoViolation, switchArmSuccessors } from './l3/ast';
 import {
   assignsIn,
   exprChildren,
@@ -355,16 +355,14 @@ function countEffects(
       // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
       // path through arm i runs the chain starting at i — the shape the fall-through round's
       // CRITICAL took. `chain[i]` is that arm's paths. An arm that ends `goto L;` continues into
-      // the arm labelled L instead: the goto is its body's last top-level statement
-      // (`assertCaseGotosNarrow`), so the paths that fall off its end are the goto's, counted here
-      // as `through`. Memoised, since a goto may name an arm above it; a chain that comes back to
-      // an arm it already runs is no tree the structurer builds.
-      const labelled = new Map(s.cases.flatMap((c, i) => (c.label === undefined ? [] : [[c.label, i] as const])));
-      const jumpOf = (body: Stmt[]): number | undefined => {
-        const last = body[body.length - 1];
-        return last?.k === 'goto' ? labelled.get(last.label) : undefined;
-      };
-      const chain: (PathCounts | undefined)[] = new Array(arms.length);
+      // the arm labelled L instead (`switchArmSuccessors`): the goto is its body's last top-level
+      // statement (`assertCaseGotosNarrow`), so the paths that fall off its end are the goto's,
+      // counted below as `through` (a `goto` ends nothing of its own). Memoised, since a goto may
+      // name an arm above it; a chain that comes back to an arm it already runs is no tree the
+      // structurer builds. The `default` is node `cases.length`.
+      const next = switchArmSuccessors(s);
+      const bodies = [...arms, dflt];
+      const chain: (PathCounts | undefined)[] = new Array(bodies.length);
       const onChain = new Set<number>();
       const chainAt = (i: number): PathCounts => {
         const known = chain[i];
@@ -375,13 +373,12 @@ function countEffects(
           throw new ContractError('a switch whose arms fall or jump round in a cycle');
         }
         onChain.add(i);
-        const to = jumpOf(s.cases[i].body) ?? (s.cases[i].fallsThrough ? i + 1 : undefined);
-        const next = to === undefined ? undefined : to < arms.length ? chainAt(to) : dflt.paths;
+        const to = next[i];
+        const then = to === undefined ? undefined : chainAt(to);
         onChain.delete(i);
-        return (chain[i] = next === undefined ? arms[i].paths : seq(arms[i].paths, next));
+        return (chain[i] = then === undefined ? bodies[i].paths : seq(bodies[i].paths, then));
       };
-      const dfltTo = s.default ? jumpOf(s.default) : undefined;
-      const dfltChain = dfltTo === undefined ? dflt.paths : seq(dflt.paths, chainAt(dfltTo));
+      const dfltChain = chainAt(arms.length);
       // No `default` is one more alternative: no arm runs. A `break` leaves the switch, so it
       // continues after it as a fall-off-the-end does.
       const inner = either(...arms.map((_, i) => chainAt(i)), s.default ? dfltChain : falls(new Map()));
@@ -401,9 +398,6 @@ function countEffects(
       here = { through: null, ret: null, brk: own, cont: null };
     } else if (s.k === 'continue') {
       here = { through: null, ret: null, brk: null, cont: own };
-    } else if (s.k === 'goto') {
-      // the paths through the arm it ends, carried on into the arm it names (the switch above)
-      here = falls(own);
     } else {
       here = falls(own);
     }
