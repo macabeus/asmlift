@@ -267,6 +267,7 @@ const INFO: ContextGlobals = {
   declared: new Set(['gInfo']),
   objectTypes: new Map(),
   structTypes: new Map(),
+  storage: new Map(),
 };
 
 describe('a context-declared aggregate the map does not describe', () => {

@@ -69,9 +69,19 @@ export interface SynthSpec {
    *  exception is an array's OUTERMOST extent, left unsized by `declare.ts`'s own rule and measured
    *  on `sbscope` to change m2c's output not at all. */
   symbols?: SymbolMap;
+  /** THE DECLARATIONS EVERY CANDIDATE COMPILES AGAINST, in place of the block each candidate
+   *  synthesizes for itself — as a real row's candidates compile against its project's context. A
+   *  synthesized block declares each global as the candidate's own accesses use it, so a bare `gN`
+   *  that reads one byte compiles to that byte read whatever the row's `ctx` declares. A row whose
+   *  question is whether the lift's spelling is right AGAINST A DECLARATION states that
+   *  declaration here, or it scores a wrong spelling MATCH. The row's own function stays out: the
+   *  lift spells its signature from `proto`, which states no integer type. Absent on every other
+   *  row, so the tier is unchanged by this field existing. */
+  candidateContext?: string;
 }
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
+const FIVE: ToolchainId[] = [...ALL, 'gcc2.7.2'];
 // The CodeWarrior -O0,p set `framelist`, `deadloc` and `homecall` build at, and the dead-read rows
 // on all three CodeWarrior builds.
 const MWCC_O0P = [
@@ -16403,6 +16413,68 @@ export const SYNTHETIC: SynthSpec[] = [
       memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
     },
   },
+  // A SCALAR GLOBAL THE CONTEXT DECLARES AT ANOTHER WIDTH OR SIGNEDNESS THAN ITS ONE ACCESS. The
+  // usage inference reads a global accessed only at offset 0 at one width as a scalar of that
+  // width, and the bare name is that scalar only where the declaration agrees: `return gN;` over
+  // `extern s32 gN;` reads four bytes where the assembly reads one, `gN = x;` writes four, and
+  // `return gN;` over `extern s8 gN;` sign-extends what `ldrb`/`lbu`/`lbz` zero-extends. Each
+  // `gnarrow_*` row is such a mismatch and each `gnarrowc_*` row its control, the same access
+  // under a declaration that agrees. On MIPS and PowerPC a `(u8)` of a word reads offset 3 (or
+  // the whole word, masked), which is no offset-0 access, so there the mismatch is reached through
+  // the offset-0 cast `*(u8 *)&gN`, a store, or a sign. The `_map` pair states the declaration
+  // through a symbol map instead of the context.
+  ...(
+    [
+      ['gnarrow_u8', 'extern s32 gN;', 'u32', 'void', 'return (u8)gN;', ['agbcc']],
+      ['gnarrow_u16', 'extern s32 gN;', 'u32', 'void', 'return (u16)gN;', ['agbcc']],
+      ['gnarrow_st', 'extern s32 gN;', 'void', 'u8 x', '*(u8 *)&gN = x;', FIVE],
+      ['gnarrow_sgn', 'extern s8 gN;', 'u32', 'void', 'return (u8)gN;', FIVE],
+      [
+        'gnarrow_p8',
+        'extern s32 gN;',
+        'u32',
+        'void',
+        'return *(u8 *)&gN;',
+        ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
+      ],
+      ['gnarrow_lb', 'extern u8 gN;', 's32', 'void', 'return (s8)gN;', ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2']],
+      ['gnarrow_w32', 'extern u8 gN;', 'u32', 'void', 'return *(u32 *)&gN;', ['agbcc']],
+      ['gnarrow_ptr', 'extern u8 *gP;', 'u32', 'void', 'return *(u8 *)&gP;', ['agbcc']],
+      ['gnarrowc_u8', 'extern u8 gN;', 'u32', 'void', 'return gN;', FIVE],
+      ['gnarrowc_u16', 'extern u16 gN;', 'u32', 'void', 'return gN;', ['agbcc']],
+      ['gnarrowc_st', 'extern u8 gN;', 'void', 'u8 x', 'gN = x;', FIVE],
+      ['gnarrowc_s8', 'extern s8 gN;', 's32', 'void', 'return gN;', ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2']],
+      ['gnarrowc_w32', 'extern u32 gN;', 'u32', 'void', 'return gN;', ['agbcc']],
+      ['gnarrowc_ptr', 'extern u8 *gP;', 'u8 *', 'void', 'return gP;', ['agbcc']],
+    ] as const
+  ).map(([sym, decl, ret, params, body, toolchains]): SynthSpec => ({
+    sym,
+    src: `${decl}\n${ret} ${sym}(${params}){ ${body} }`,
+    features: sym.startsWith('gnarrowc_') ? ['global'] : ['global', 'cast'],
+    toolchains: [...toolchains],
+    ctx: `${decl}\n${ret} ${sym}(${params});`,
+    candidateContext: decl,
+    proto: {
+      [sym]: {
+        params: params === 'void' ? [] : [params.split(' ')[0]],
+        ...(ret === 'void' ? { returnsVoid: true } : { returns: ret }),
+      },
+    },
+  })),
+  ...(
+    [
+      ['gnarrow_map', 4, true, 's32', 'return (u8)gC + 1;'],
+      ['gnarrowc_map', 1, false, 'u8', 'return gC + 1;'],
+    ] as const
+  ).map(([sym, size, signed, type, body]): SynthSpec => ({
+    sym,
+    src: `extern ${type} gC;\nu32 ${sym}(void){ ${body} }`,
+    features: sym === 'gnarrowc_map' ? ['global'] : ['global', 'cast'],
+    toolchains: ['agbcc'],
+    ctx: `u32 ${sym}(void);`,
+    proto: { [sym]: { params: [], returns: 'u32' } },
+    symbols: new Map([[0x03001234, [{ name: 'gC', kind: 'data' as const, shape: 'scalar' as const, size, signed }]]]),
+  })),
   // FILE-SCOPE GLOBAL REGISTER VARIABLES. gcc's `globalize_reg` (agbcc regclass.c:587-611) makes the
   // register fixed and call-used, so no prologue saves it: `return g;` is `mov r0, r8` / `move v0,s0`
   // / `mr r3,r14` — a callee-saved register read before any write, which is no parameter, and a

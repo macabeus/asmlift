@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import { declaredCallArgs, declaredWidth } from '../src/proto';
 import {
+  globalsFromContext,
   ownContextEntry,
   prototypesFromContext,
   splitOwnContext,
@@ -1066,6 +1067,72 @@ describe('declaredWidth', () => {
   test('a function pointer is register-wide', () => {
     expect(declaredWidth('void (*)(s32 channel, s32 result)')).toBe(32);
     expect(declaredWidth('int (*)(void)')).toBe(32);
+  });
+});
+
+// The storage each declared object that is no aggregate and no function occupies
+// (`ContextGlobals.storage`): read through its typedef chain, a type the context cannot read kept
+// as `unread`.
+describe('the declared storage of a context object', () => {
+  const storage = (src: string) => Object.fromEntries(globalsFromContext(src, 'c').storage);
+  const int = (bytes: number, signed: boolean | 'char' | undefined) => ({ kind: 'integer', bytes, signed });
+  test('integers, through their typedefs', () => {
+    expect(
+      storage(
+        'typedef signed char s8; typedef unsigned short u16; typedef int BOOL; typedef BOOL Flag;\n' +
+          'extern s8 gA; extern u16 gB; extern s32 gC; extern Flag gD; extern volatile unsigned char gE;',
+      ),
+    ).toEqual({ gA: int(1, true), gB: int(2, false), gC: int(4, true), gD: int(4, true), gE: int(1, false) });
+  });
+  test("a pointer is four bytes whose sign nothing reads, and a plain char's sign is the compiler's", () => {
+    expect(storage('extern u8 *gP; extern void (*gF)(void); extern char gK;')).toEqual({
+      gP: int(4, undefined),
+      gF: int(4, undefined),
+      gK: int(1, 'char'),
+    });
+  });
+  test("C89's implicit int: a storage class and no type", () => {
+    expect(storage('extern gN; static volatile gV; typedef int T; extern T;')).toEqual({
+      gN: int(4, true),
+      gV: int(4, true),
+    });
+    expect(globalsFromContext('extern volatile gV;', 'c').volatiles).toEqual(new Set(['gV']));
+  });
+  test('an enum is sized by the target unless packed or wider than an int; a float is a float', () => {
+    expect(
+      storage(
+        'enum E { A, B }; typedef enum E Et; typedef enum { C } F; enum __attribute__((packed)) P { D };\n' +
+          'typedef float f32;\nextern enum E gE; extern Et gT; extern F gF; extern enum P gP; extern f32 gG; extern double gD;',
+      ),
+    ).toEqual({
+      gE: { kind: 'enum', unsized: false },
+      gT: { kind: 'enum', unsized: false },
+      gF: { kind: 'enum', unsized: false },
+      gP: { kind: 'enum', unsized: true },
+      gG: { kind: 'float', bytes: 4 },
+      gD: { kind: 'float', bytes: 8 },
+    });
+  });
+  test('a type the context cannot read is unread; an aggregate and a function have no entry', () => {
+    expect(
+      storage(
+        'struct S { int a; }; typedef int W __attribute__((mode(HI)));\n' +
+          'extern struct S gS; extern W gW; extern int gArr[4]; extern Unknown gU; extern long double gL; int fn(int);',
+      ),
+    ).toEqual({ gW: { kind: 'unread' }, gU: { kind: 'unread' }, gL: { kind: 'unread' } });
+  });
+  test('a pointer behind an attributed typedef is a pointer; a C++ reference is a reference', () => {
+    expect(
+      storage(
+        'typedef unsigned char *P8 __attribute__((aligned(4))); typedef P8 P8b;\n' +
+          'typedef int A32 __attribute__((aligned(4)));\nextern P8 gP; extern P8b gQ; extern A32 gA;',
+      ),
+    ).toEqual({ gP: int(4, undefined), gQ: int(4, undefined), gA: { kind: 'unread' } });
+    const cxx = Object.fromEntries(
+      globalsFromContext('struct S { int a; }; typedef int &IR;\nextern int &gR; extern S &gS; extern IR gT;', 'c++')
+        .storage,
+    );
+    expect(cxx).toEqual({ gR: { kind: 'reference' }, gS: { kind: 'reference' }, gT: { kind: 'reference' } });
   });
 });
 

@@ -52,7 +52,7 @@
 // into all of them but one, or into all of them under the `/tail-copies` variation. Regime A keeps
 // the refusal, since its if-recovery already lifts.
 import { globalBaseOf } from '../ir/alias';
-import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
+import { type WordCtx, demandedBits, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
   Block,
   CALL_RETURN_OBJECT,
@@ -123,7 +123,7 @@ import {
   spelledNonNegative,
 } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
-import type { ContextGlobals } from '../proto-context';
+import type { ContextGlobals, DeclaredStorage } from '../proto-context';
 import { evalIntPair, foldConstPair, isConstFoldOpcode, isIntPairOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
@@ -138,7 +138,7 @@ import {
   pointeeFields,
   structFieldInnerExtents,
 } from '../symbols';
-import { analyze, shortCircuitGuardedValues } from './analysis';
+import { type UseSite, analyze, shortCircuitGuardedValues } from './analysis';
 import { ARITH_TO_BIN } from './arith-ops';
 import { makeBitfieldSpelling } from './bitfields';
 import {
@@ -1982,6 +1982,13 @@ export interface StructureOptions extends ArithCompilerFacts {
   // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
   // same boundary enforced on core's side, against a hand-built map that never went through it.
   littleEndian?: boolean;
+  // COMPILER facts about how a declared scalar is stored (TargetDescription.compilerBehaviors), read
+  // by the declaration-shape override of `scalarGlobals` (`storageDisagrees`): the bytes an enum
+  // takes, and whether a plain `char` is signed. ABSENT ⇒ unmeasured, and a global declared with
+  // that type agrees with no access the override is asked about, so it is spelled through its
+  // address.
+  enumBytes?: number;
+  plainCharSigned?: boolean;
   // Does the compiler extend a `volatile` narrow signed read in a register, never in the load? The
   // `declared` stamp structuring re-derives reads it (TargetDescription.compilerBehaviors'
   // `volatileReadsExtendInRegister`), so it leaves unplaced the read the lift's stamp did.
@@ -3350,6 +3357,8 @@ function structureRanked(
     orderLicensedGlobals,
     pointerGlobals,
     contextGlobals,
+    enumBytes,
+    plainCharSigned,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -3686,9 +3695,19 @@ function structureRanked(
     const widths = new Map<string, Set<number>>();
     const loadSigns = new Map<string, Set<boolean>>();
     const loadsPointer = new Map<string, boolean>();
+    /** the sign of a symbol's loads whose extension some use reads (`extensionImmaterial`) */
+    const signedLoads = new Map<string, boolean>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
+        // A C++ reference global is a cell holding its referent's address, and the assembly reads
+        // or writes that cell; `gRef` and `&gRef` both name the referent, one dereference past it,
+        // so every spelling here would add a load (`*(s32 *)*(s32 *)&gRef` for `return gRef;`).
+        if (op.opcode === 'gaddr' && contextGlobals?.storage.get(op.attrs.sym as string)?.kind === 'reference') {
+          throw new StructureError(
+            `'${op.attrs.sym as string}' is declared a C++ reference, and no spelling names the cell the assembly accesses`,
+          );
+        }
         // A frame object declared as an aggregate (`laddrType`) is one whatever its accesses agree
         // on — the frame-side twin of the symbol map's declaration-shape override. Spelled
         // scalar, a store assigns to the array and a load reads its address.
@@ -3712,6 +3731,9 @@ function structureRanked(
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
+              if (!extensionImmaterial(fn, op, op.attrs.width as number, useSitesOf)) {
+                signedLoads.set(s, op.attrs.signed as boolean);
+              }
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
               if (defs.get(op.operands[0])?.opcode === 'gaddr') {
                 loadsPointer.set(s, loadsPointer.get(s) === true || op.results[0].type.kind === 'ptr');
@@ -3759,9 +3781,29 @@ function structureRanked(
     // aggregate/array forms, never the bare scalar `tbl`.
     // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
+    // A declared SCALAR is overridden the same way where its storage — the context's or the map's,
+    // either of which the candidate may be compiled against — disagrees with the one access
+    // (`storageDisagrees`): a bare name reads and writes what the declaration says, so over
+    // `extern s32 gN;` a byte read spelled `gN` reads four bytes, and over `extern s8 gN;` it
+    // sign-extends what an `ldrb` zero-extends. The cast spelling `*(u8 *)&gN` states the access
+    // itself whatever the declaration, on either byte order.
     for (const n of [...scalarGlobals]) {
       const shape = symbols?.get(n)?.shape;
-      if (shape === 'array' || shape === 'struct' || contextGlobals?.aggregates.has(n) === true) {
+      if (
+        shape === 'array' ||
+        shape === 'struct' ||
+        contextGlobals?.aggregates.has(n) === true ||
+        [contextGlobals?.storage.get(n), mappedStorage(symbols?.get(n))].some((declared) =>
+          storageDisagrees(
+            declared,
+            {
+              width: [...widths.get(n)!][0],
+              signed: signedLoads.get(n),
+            },
+            { enumBytes, plainCharSigned },
+          ),
+        )
+      ) {
         scalarGlobals.delete(n);
       }
     }
@@ -10488,4 +10530,96 @@ function setEq<X>(a: Set<X>, b: Set<X>): boolean {
     }
   }
   return true;
+}
+
+/** The storage a symbol map states for a scalar or pointer global ({@link DeclaredStorage}): its
+ *  `size`, and for a scalar its `signed`, which the map leaves out where the type is no base type
+ *  (an enum, a float) and so states no sign. A map does not say whether a scalar is an integer or a
+ *  float, so it is `sized`, compared by width and sign alone. None for a name the map sizes not, or
+ *  describes as no scalar. */
+function mappedStorage(info: SymbolInfo | undefined): DeclaredStorage | MappedStorage | undefined {
+  if (info?.size === undefined || (info.shape !== 'scalar' && info.shape !== 'pointer')) {
+    return undefined;
+  }
+  return { kind: 'sized', bytes: info.size, signed: info.shape === 'scalar' ? info.signed : undefined };
+}
+
+/** A symbol map's scalar ({@link mappedStorage}): an integer, a float or an enum it does not tell
+ *  apart, of `bytes` bytes and the sign it states, if any. */
+interface MappedStorage {
+  kind: 'sized';
+  bytes: number;
+  signed: boolean | undefined;
+}
+
+/** One global's one access, as the declaration-shape override compares it with a declaration:
+ *  `width` bytes at offset 0, and `signed` the extension of a read whose extension some use reads
+ *  (undefined for a write, or a read every use of which takes only its own bytes:
+ *  `extensionImmaterial`). It moves integer bits: no frontend models a float load or store of a
+ *  global's relocated address (`lwc1`/`swc1` against a `%lo`, `lfs`/`stfs` against a small-data
+ *  relocation decline loudly, and agbcc's soft-float helpers refuse an operand loaded from memory:
+ *  raise/floathelpers.ts). */
+interface GlobalAccess {
+  width: number;
+  signed: boolean | undefined;
+}
+
+/** Whether a global's declared storage disagrees with its one access: a bare name then reads or
+ *  writes what the declaration says rather than what the assembly does. An integer agrees with an
+ *  access of its own width, and a read narrower than a register with its sign too, a plain `char`
+ *  by the target's `plainCharSigned`; a write stores the same bytes either way. A float agrees with
+ *  no access, every one of which moves integer bits (`GlobalAccess`): `*(u16 *)&gF` reinterprets
+ *  the bytes the bare name would convert. An enum is an integer of the target's `enumBytes`, with
+ *  no sign this knows. What the target does not measure, or the context cannot read, agrees with
+ *  nothing, which costs a spelling and never the C. No storage (no declaration) never disagrees. */
+function storageDisagrees(
+  declared: DeclaredStorage | MappedStorage | undefined,
+  access: GlobalAccess,
+  facts: { enumBytes: number | undefined; plainCharSigned: boolean | undefined },
+): boolean {
+  switch (declared?.kind) {
+    case undefined:
+      return false;
+    case 'unread':
+    case 'reference':
+      return true;
+    case 'float':
+      return true;
+    case 'enum':
+      return (
+        declared.unsized ||
+        facts.enumBytes === undefined ||
+        storageDisagrees({ kind: 'integer', bytes: facts.enumBytes, signed: undefined }, access, facts)
+      );
+    case 'integer':
+    case 'sized': {
+      if (declared.bytes !== access.width) {
+        return true;
+      }
+      const signed = declared.signed === 'char' ? facts.plainCharSigned : declared.signed;
+      return access.width < 4 && access.signed !== undefined && signed !== access.signed;
+    }
+  }
+}
+
+/** Whether no use of the narrow `load` (`width` bytes) reads the bits its extension fills: no reader
+ *  of its value needs a bit past its own bytes (`demandedBits`, which follows it through
+ *  arithmetic, masks, shifts and extensions, and across an edge into the join it reaches). A
+ *  zero-extending `lbz` whose only use is an `extsb` then reads the byte a signed declaration names,
+ *  and its bare name is the same program; so does the read-modify-write `gN += x`, whose `ldrh` /
+ *  `add` / `strh` stores the same halfword whichever way the read extended, and `gN & 0x7f`. A load
+ *  nothing uses is not one: what reads it is out of sight. A `ret` reads every bit, whatever the
+ *  function returns. */
+function extensionImmaterial(
+  fn: Fn,
+  load: Op,
+  width: number,
+  useSitesOf: ReadonlyMap<Value, readonly UseSite[]>,
+): boolean {
+  const v = load.results[0];
+  return (
+    width < 4 &&
+    (useSitesOf.get(v)?.length ?? 0) > 0 &&
+    (demandedBits(fn, v, false) & ~(2 ** (8 * width) - 1)) >>> 0 === 0
+  );
 }

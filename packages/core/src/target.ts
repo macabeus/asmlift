@@ -47,7 +47,7 @@
 //     `aggregateReturn`, `largestAlignment`, `enumBytes`, `bitfieldPacking` and
 //     `byValueAggregateArgWords` (aggregate.ts, for frontend/call-plan.ts — which the Thumb, MIPS
 //     and PowerPC lowerings share — frontend/thumb.ts, frontend/mips.ts, frontend/ppc.ts and
-//     frontend/frame-objects.ts),
+//     frontend/frame-objects.ts; `enumBytes` is the structurer's too, through StructureOptions),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
@@ -1123,6 +1123,16 @@ export interface TargetDescription {
     // (proto-context.ts). ABSENT ⇒ unmeasured,
     // and an aggregate with an enum member is not sized.
     enumBytes?: number;
+    // Whether a plain `char` is signed, read where a context declares a global `char` and the lift
+    // asks whether a narrow read of it agrees with that declaration (structure.ts
+    // `storageDisagrees`). The compiler's default, with no flag; `targetFor` applies the flags that
+    // change it (`-funsigned-char`/`-fsigned-char`, IDO's `-signed`, mwcc's `-char`). MEASURED,
+    // `s32 g(void){ return gC; }` over `extern char gC;` at each toolchain's canonical flags: agbcc
+    // `ldrb` and ido7.1 `lbu` (unsigned), gcc2.7.2 `lb` (signed; gcc2.7.2kmc's canonical
+    // `-funsigned-char` makes it `lbu`), mwcc_242_81 `lbz` + `extsb` (signed). ABSENT ⇒ unmeasured,
+    // and a narrow read of a declared plain `char` agrees with neither sign, so it is spelled
+    // through its address.
+    plainCharSigned?: boolean;
     // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
     // one before, straddling a byte or a word of its declared type, with the next member that is not
     // a bitfield at the first byte past it that its alignment allows. agbcc: thumb.h defines no
@@ -1396,6 +1406,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     discardedReadMayFillArgRegister: true,
     byValueAggregateArgWords: true,
     enumBytes: 4,
+    plainCharSigned: false,
     bitfieldPacking: 'contiguous',
     roundTripsDoubleLiterals: true,
     // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
@@ -1553,6 +1564,7 @@ export const MIPS_IDO: TargetDescription = {
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
   compilerBehaviors: {
+    plainCharSigned: false,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
@@ -1686,6 +1698,7 @@ export const MIPS_GCC: TargetDescription = {
   fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
+    plainCharSigned: true,
     contractsFloatProducts: false,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
@@ -1821,6 +1834,7 @@ export const PPC_MWCC: TargetDescription = {
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
+    plainCharSigned: true,
     contractsFloatProducts: true,
     // MEASURED on all three builds in C: an integer, a pointer and a `u16 *` passed to an `s32 *`,
     // `u32` and `s32 *` parameter each fail to compile, and each compiles once cast (see the field).
@@ -2081,7 +2095,38 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     const { enumBytes: _flagged, ...behaviors } = target.compilerBehaviors;
     target = { ...target, compilerBehaviors: behaviors };
   }
+  const charSigned = plainCharSignedUnder(t.family, profile.slots);
+  if (charSigned !== 'default' && charSigned !== target.compilerBehaviors.plainCharSigned) {
+    const { plainCharSigned: _default, ...behaviors } = target.compilerBehaviors;
+    target = {
+      ...target,
+      compilerBehaviors: charSigned === undefined ? behaviors : { ...behaviors, plainCharSigned: charSigned },
+    };
+  }
   return { toolchain, cflags, target, profile };
+}
+
+/** What the flags say a plain `char` is (`compilerBehaviors.plainCharSigned`): `default` where they
+ *  leave it to the compiler. gcc keeps one flag, `flag_signed_char`, that `-fsigned-char` and
+ *  `-fno-unsigned-char` set and `-funsigned-char` and `-fno-signed-char` clear, the last one given
+ *  winning; the profile keeps the two switches apart, so where both are given and they disagree the
+ *  order is lost and the answer is undefined. IDO's `-signed` makes it signed, and mwcc's `-char`
+ *  takes `signed` or `unsigned`. */
+function plainCharSignedUnder(
+  family: FlagFamily,
+  slots: Readonly<Record<string, string>>,
+): boolean | undefined | 'default' {
+  if (family === 'ido') {
+    return slots.char === 'signed' ? true : 'default';
+  }
+  if (family === 'mwcc') {
+    return slots.char === 'signed' ? true : slots.char === 'unsigned' ? false : 'default';
+  }
+  const said = [
+    slots['-fsigned-char'] === undefined ? undefined : slots['-fsigned-char'] === 'on',
+    slots['-funsigned-char'] === undefined ? undefined : slots['-funsigned-char'] === 'off',
+  ].filter((x) => x !== undefined);
+  return said.length === 0 ? 'default' : said.every((x) => x === said[0]) ? said[0] : undefined;
 }
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

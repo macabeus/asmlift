@@ -57,10 +57,12 @@ export function rowPrototypes(
 const globals = new Map<string, ContextGlobals | undefined>();
 
 /** What a declaration context states about its globals — which are structs, unions or arrays, which
- *  are volatile and which point at a volatile (`globalsFromContext`) — or undefined where it states
- *  none of that. One reading per `name`, which stands for the text and is shared by every row that
- *  reads it: the real tier names a vendored context by its file, the synthetic tier a row's ctx by
- *  its text. */
+ *  are volatile, which point at a volatile, and the storage each other object is declared with
+ *  (`globalsFromContext`) — or undefined where it states none of that. One reading per `name`, which
+ *  stands for the text and is shared by every row that reads it: the real tier names a vendored
+ *  context by its file, the synthetic tier a row's ctx by its text. A context that declares only
+ *  scalars states their storage, which the CLI's `--context` lift reads too: without it a row
+ *  whose ctx is `extern s32 gN;` would be lifted as if `gN` were undeclared. */
 export function contextGlobalsNamed(name: string, text: string, language: 'c' | 'c++'): ContextGlobals | undefined {
   if (text === '') {
     return undefined;
@@ -68,7 +70,11 @@ export function contextGlobalsNamed(name: string, text: string, language: 'c' | 
   const key = `${language} ${name}`;
   if (!globals.has(key)) {
     const found = globalsFromContext(text, language);
-    const states = found.aggregates.size > 0 || found.volatiles.size > 0 || found.pointeeVolatiles.size > 0;
+    const states =
+      found.aggregates.size > 0 ||
+      found.volatiles.size > 0 ||
+      found.pointeeVolatiles.size > 0 ||
+      found.storage.size > 0;
     globals.set(key, states ? found : undefined);
   }
   return globals.get(key);
