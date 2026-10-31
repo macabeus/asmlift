@@ -440,7 +440,9 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // goto's bytes when the whole copy matches, and on agbcc it stops short where CSE has the arm
   // re-use an address the copy re-forms, so the copy compiles to more code than the goto
   // (`synthetic:sw_gotocase2`, case 1's copy re-reading `gE[i]`). The differ referees it per row,
-  // like `/tail-copies`, whose faller choice it shares.
+  // like `/tail-copies`. It does not take `/tail-copies`' faller choice: the entrant directly above
+  // the case always falls, since a jump from it would land on the label right below it, a path its
+  // fall-through already spells — so `/tail-copies/case-goto` is no candidate of its own.
   //
   // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): the two settings read different
   // exits only where the copies write a case arm's body into an entrant (`onCaseCopied`). In the strip

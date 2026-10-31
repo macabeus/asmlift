@@ -222,9 +222,11 @@ describe('two arms entering one case: one falls, the other jumps', () => {
     expect(irAgreement(twoIntoOne(), sfn, SEEDS).disagree).toBeGreaterThan(0);
   });
 
-  test('under `/tail-copies` every entrant jumps, the same program', () => {
+  test('under `/tail-copies` the arm above still falls: no `goto` to the label directly below it', () => {
     const { src, agreement, shipped } = lifted(twoIntoOne(), { copyEveryTailEntrant: true });
-    expect(src.match(/goto case_3;/g)?.length).toBe(2);
+    expect(src.match(/goto case_3;/g)?.length).toBe(1);
+    expect(src).not.toMatch(/goto case_3;\n\s*case 3:/);
+    expect(src).toBe(lifted(twoIntoOne()).src);
     judgedAlike(agreement);
     judgedAlike(shipped);
   });

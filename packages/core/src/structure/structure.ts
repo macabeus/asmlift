@@ -7487,14 +7487,11 @@ function structureRanked(
           : walked;
         const exits =
           copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
-            ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, undefined, copiedInto))
+            ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, copiedInto))
             : copied;
         // …and, asked for, the arms still entering one case arm's body two or more at a time get
         // the one fall-through and `goto`s to its label (`jumpSharedFallTargets`, THE JUMPS below).
-        const jumped =
-          gotos && spellSwitchFallthrough
-            ? jumpSharedFallTargets(preChain, dflt, exits, !copyEveryTailEntrant, hooks.onTailFallerKept)
-            : exits;
+        const jumped = gotos && spellSwitchFallthrough ? jumpSharedFallTargets(preChain, dflt, exits) : exits;
         const falls = [...jumped.values()].some((e) => e.kind === 'fallthrough');
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, jumped);
         const refusal = chain === null ? null : armRefusal(jumped, chain);

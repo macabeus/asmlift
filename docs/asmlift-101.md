@@ -290,7 +290,8 @@ structurer's default writes it only where every goto-free reading of the jump ta
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies, where the goto is kept only
 if it scores better (a tie goes to the candidate without one, `gotoCount` in `rank.ts`). An arm
-whose own structuring already leaves gets no jump. The Pascal backend refuses it. No other goto is
+whose own structuring already leaves gets no jump, and neither does the arm laid out directly above
+the target case, whose fall-through already lands there. The Pascal backend refuses it. No other goto is
 representable. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
