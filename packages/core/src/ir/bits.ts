@@ -815,7 +815,8 @@ export interface RangeCtx extends LinearCtx {
 }
 
 const WORD = 2 ** 32;
-/** The most terms one `stridedRange` question bounds before it answers nothing. */
+/** The most terms one range question bounds, across every own question it opens (`question`), before
+ *  what is left answers nothing. */
 const RANGE_BUDGET = 256;
 
 /** Every word `v` may hold, or undefined when this cannot bound it. The form is `linearTerms`; a
@@ -957,8 +958,24 @@ function integerRange(
   wordFirst: boolean,
   holds?: readonly EdgeTest[],
 ): StridedRange | undefined {
+  if (question?.ctx === ctx) {
+    return rangeIn(ctx, v, wordFirst, holds);
+  }
+  const outer = question; // a question of another context asked from inside one: its own
+  question = { ctx, own: [new Map(), new Map()], left: RANGE_BUDGET, depth: 0 };
+  try {
+    return rangeIn(ctx, v, wordFirst, holds);
+  } finally {
+    question = outer;
+  }
+}
+
+/** `integerRange` inside the outermost question under way (`question`), whose budget it spends. */
+function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly EdgeTest[]): StridedRange | undefined {
+  const q = question!;
   const open = new Set<Value>();
-  let left = RANGE_BUDGET;
+  /** one more term bounded: false once its question's budget is spent */
+  const spend = (): boolean => --q.left >= 0;
   /** params met again while their own in-edges were being read */
   const cyclic = new Set<Value>();
   /** the induction hypotheses under test: each param holds only this range */
@@ -989,7 +1006,7 @@ function integerRange(
       // what a shift or a mask leaves of its operand's range: agbcc's `(u8)k` of a counter that
       // stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
       const moved = shiftMaskRange(ctx, d, (x) => {
-        const r = --left < 0 ? undefined : rangeOf(x, facts);
+        const r = spend() ? rangeOf(x, facts) : undefined;
         return r === undefined || r === null ? undefined : intoWord(r);
       });
       const n = provableBits(bits, t);
@@ -1005,7 +1022,7 @@ function integerRange(
       cyclic.add(t);
       return undefined;
     }
-    if (ins === undefined || ins.length === 0 || --left < 0) {
+    if (ins === undefined || ins.length === 0 || !spend()) {
       return undefined;
     }
     open.add(t);
@@ -1186,40 +1203,47 @@ function integerRange(
   return rangeOf(v, holds === undefined || holds.length === 0 ? NO_FACTS : factsOf(holds)) ?? undefined;
 }
 
-/** Each block param's range as its own question, asked from it with nothing open, holding nothing
- *  assumed and read under no fact (`integerRange`), kept per range context and reading (index 1:
- *  `wordFirst`). A param's range does not depend on where it is asked — it covers every value the
- *  param takes — so the answer serves every question that meets the param, and one met inside a
- *  question that opened another param of the same loop reads it here (`integerRange`). A question
- *  already under way answers nothing to a question it meets again, which only proves less. */
-const ownRanges = new WeakMap<RangeCtx, [Map<Value, StridedRange | undefined>, Map<Value, StridedRange | undefined>]>();
+/** The outermost range question under way, which every question it opens shares: each block
+ *  param's range as its own question (`ownRange`), by reading (index 1: `wordFirst`), the terms
+ *  all its readings may still bound between them, and how many own questions are under way, one
+ *  inside another. Nothing outlives the question, so what it answers never depends on what was
+ *  asked before it. */
+let question:
+  | {
+      readonly ctx: RangeCtx;
+      readonly own: [Map<Value, StridedRange | undefined>, Map<Value, StridedRange | undefined>];
+      left: number;
+      depth: number;
+    }
+  | undefined;
+/** The most `ownRange` questions under way at once, one inside another. */
+const OWN_DEPTH = 8;
+
+/** A block param's range as its own question, asked from it with nothing open, holding nothing
+ *  assumed and read under no fact (`integerRange`), kept for the rest of the outermost question.
+ *  It covers every value the param takes, so the answer serves every reading that meets the
+ *  param, and one met inside a reading that opened another param of the same loop reads it here.
+ *  A param whose own question is already under way answers nothing to it, which only proves less. */
 function ownRange(ctx: RangeCtx, p: Value, wordFirst: boolean): StridedRange | undefined {
-  let byReading = ownRanges.get(ctx);
-  if (byReading === undefined) {
-    byReading = [new Map(), new Map()];
-    ownRanges.set(ctx, byReading);
-  }
-  const known = byReading[wordFirst ? 1 : 0];
+  const q = question!;
+  const known = q.own[wordFirst ? 1 : 0];
   if (known.has(p)) {
     return known.get(p);
   }
-  if (ownDepth >= OWN_DEPTH) {
-    return undefined; // past the nesting it may run to: nothing, and nothing is kept
+  if (q.depth >= OWN_DEPTH) {
+    known.set(p, undefined); // past the nesting it may run to: nothing, kept as any answer is
+    return undefined;
   }
   known.set(p, undefined); // under way: met again, it answers nothing
-  ownDepth++;
+  q.depth++;
   try {
-    const r = integerRange(ctx, p, wordFirst);
+    const r = rangeIn(ctx, p, wordFirst);
     known.set(p, r);
     return r;
   } finally {
-    ownDepth--;
+    q.depth--;
   }
 }
-/** The most `ownRange` questions under way at once, one inside another: each is a whole
- *  `integerRange` with a budget of its own. */
-const OWN_DEPTH = 8;
-let ownDepth = 0;
 
 /** The integers every range in a list holds, and the stride all of them sit on. */
 function hullOf(rs: readonly StridedRange[]): StridedRange | undefined {

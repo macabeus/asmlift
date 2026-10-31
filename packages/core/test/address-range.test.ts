@@ -584,6 +584,30 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn(s.blocks, s.t)).toBeUndefined();
   });
 
+  test('one context answers the same whatever was asked in it first', () => {
+    // `k = 2; j = -2; do { k2 = k + 1; j2 = j + 2; } while (k2 >s -2)`: `k` runs up to INT_MAX and
+    // `k2` to 2^31. Asked after `k` in one context, `k2` read the own range `k`'s question kept
+    // while `k2`'s was under way (and answered nothing to it): [0, 2^31] where asked alone it is
+    // [1, 2^31]. Every answer was sound; which one came back depended on what was asked first
+    const entry = block();
+    const [q, j] = [v(), v()];
+    const head = block([q, j]);
+    const [t, j2] = [v(), v()];
+    const latch = block([t, j2]);
+    const exit = block();
+    br(entry, head, [k(entry, 2), k(entry, -2)]);
+    br(head, latch, [head.op('add', {}, [q, k(head, 1)]), head.op('add', {}, [j, k(head, 2)])]);
+    condBr(latch, latch.op('icmp_sle', {}, [t, k(latch, -2)]), [exit, []], [head, [t, j2]]);
+    const blocks = [entry, head, latch, exit];
+    const params = [q, j, t, j2];
+    const fresh = params.map((x) => rangeIn(blocks, x));
+    expect(fresh[2]).toEqual({ lo: 1, hi: 2 ** 31, stride: 1 });
+    const shared = literalAddresses(blocks, undefined);
+    expect(params.map((x) => shared.addressRangeOf(x))).toEqual(fresh);
+    const reversed = literalAddresses(blocks, undefined);
+    expect([...params].reverse().map((x) => reversed.addressRangeOf(x)).reverse()).toEqual(fresh);
+  });
+
   test('asked at a block, a value is read under the tests on the way in', () => {
     // `void q(u32 i) { if (i < 8) a[i * 2 + 1]; }`: a parameter bounds nothing, but not in the arm
     const entry = block([v()]);
