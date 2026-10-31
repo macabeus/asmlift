@@ -1050,9 +1050,9 @@ function integerRange(
    *  of the loop can leave it. A signed latch bounds its counter on one side only (`k + 1 <= 7`
    *  holds of every negative k), and only the counter's start bounds the other. The hypothesis
    *  starts at the in-edges that read without the param, takes in what they pass, and once the
-   *  bounds the branches name; every sum is exact and a bound read outside its window holds alone,
-   *  so a counter that can wrap, an update on some paths only or an unbounded start never settles
-   *  and proves nothing. */
+   *  bounds the branches name on values computed from the param; every sum is exact and a bound
+   *  read outside its window holds alone, so a counter that can wrap, an update on some paths only
+   *  or an unbounded start never settles and proves nothing. */
   const inductive = (
     t: Value,
     ins: readonly InEdge[],

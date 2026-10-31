@@ -261,7 +261,7 @@ describe('addressRangeOf — what a shift or a mask leaves of its operand', () =
       hi: 2 ** 31 - 1,
       stride: 1,
     });
-    // a mask that is not 2^n - 1 keeps no range: 0x0e & {0, 0x10} is {0}, under both 0x0e and 0x10
+    // a mask that is not 2^n - 1 is bounded by the mask alone: 0x0e & {0, 0x10} is {0}, under 0x0e
     const gap = merged(0, 0x10);
     expect(rangeIn(gap.blocks, gap.join.op('and', { imm: 0x0e }, [gap.q]))).toEqual({ lo: 0, hi: 0x0e, stride: 1 });
   });
@@ -344,7 +344,7 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn([entry, head, exit], kk)).toEqual({ lo: 0, hi: 63, stride: 1 });
   });
 
-  test('what bounds nothing: a test on another value, a not-equal, a back edge left untested', () => {
+  test('what bounds nothing: a test on another value, a not-equal, a back edge left untested; and a test on the counter itself', () => {
     const other = loop(0, (h) => h.op('icmp_ule', {}, [h.op('load', { off: 0, width: 4 }, [v()]), k(h, 7)]));
     expect(rangeIn(other.blocks, other.q)).toBeUndefined();
     expect(rangeIn(other.blocks, u8Of(other.head, other.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
