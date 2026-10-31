@@ -7748,8 +7748,10 @@ function structureRanked(
       // the copies, in their order: the switch's own merge (or the retry's), then the loop clamp's.
       // LAST, and adopted only where it declines nothing, for the reason the copies are: it turns a
       // decline into a lift, never one lift into another, and so it never writes a goto where
-      // goto-free C already spells the switch. A language with no fall-through gets none
-      // (`readArms`), and its decline keeps the words it has.
+      // goto-free C already spells the switch — which only the ranked `/case-goto` variation does
+      // (`jumpToSharedCases` in `readArms`), as a candidate the scorer weighs against the copies.
+      // A language with no fall-through gets none (`readArms`), and its decline keeps the words it
+      // has.
       //
       // THE LADDER, AS DATA: each rung above is one reading — a merge, and whether the copies and
       // the jumps are asked — and the first that declines nothing is adopted, so the order of this

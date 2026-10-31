@@ -284,10 +284,14 @@ all five toolchains.
 **The one goto L3 holds** is a jump to a case label of the switch it sits in, from the end of
 another arm of that switch (`goto` in `l3/ast.ts`, contract `caseGotoViolation`). It is the
 source's own spelling where two arms run on into one case's body and C fall-through reaches only
-one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`, kleod `sub_0800D188`); the
-structurer writes it only where every goto-free reading of the jump table declines
-(`jumpSharedFallTargets` in `structure/switch-recover.ts`), and the Pascal backend refuses it. No
-other goto is representable. The structurer lives in
+one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`, kleod `sub_0800D188`). It
+has two producers, both over `jumpSharedFallTargets` in `structure/switch-recover.ts`: the
+structurer's default writes it only where every goto-free reading of the jump table declines; and
+the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
+into an entrant, as a candidate the scorer weighs against those copies, where the goto is kept only
+if it scores better (a tie goes to the candidate without one, `gotoCount` in `rank.ts`). An arm
+whose own structuring already leaves gets no jump. The Pascal backend refuses it. No other goto is
+representable. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.
