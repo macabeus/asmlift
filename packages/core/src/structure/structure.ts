@@ -1982,6 +1982,13 @@ export interface StructureOptions extends ArithCompilerFacts {
   // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
   // same boundary enforced on core's side, against a hand-built map that never went through it.
   littleEndian?: boolean;
+  // COMPILER facts about how a declared scalar is stored (TargetDescription.compilerBehaviors), read
+  // by the declaration-shape override of `scalarGlobals` (`storageDisagrees`): the bytes an enum
+  // takes, and whether a plain `char` is signed. ABSENT ⇒ unmeasured, and a global declared with
+  // that type agrees with no access the override is asked about, so it is spelled through its
+  // address.
+  enumBytes?: number;
+  plainCharSigned?: boolean;
   // Does the compiler extend a `volatile` narrow signed read in a register, never in the load? The
   // `declared` stamp structuring re-derives reads it (TargetDescription.compilerBehaviors'
   // `volatileReadsExtendInRegister`), so it leaves unplaced the read the lift's stamp did.
@@ -3350,6 +3357,8 @@ function structureRanked(
     orderLicensedGlobals,
     pointerGlobals,
     contextGlobals,
+    enumBytes,
+    plainCharSigned,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -3772,7 +3781,14 @@ function structureRanked(
         shape === 'struct' ||
         contextGlobals?.aggregates.has(n) === true ||
         [contextGlobals?.storage.get(n), mappedStorage(symbols?.get(n))].some((declared) =>
-          storageDisagrees(declared, [...widths.get(n)!][0], [...(loadSigns.get(n) ?? [])][0]),
+          storageDisagrees(
+            declared,
+            {
+              width: [...widths.get(n)!][0],
+              signed: [...(loadSigns.get(n) ?? [])][0],
+            },
+            { enumBytes, plainCharSigned },
+          ),
         )
       ) {
         scalarGlobals.delete(n);
@@ -10505,27 +10521,67 @@ function setEq<X>(a: Set<X>, b: Set<X>): boolean {
 
 /** The storage a symbol map states for a scalar or pointer global ({@link DeclaredStorage}): its
  *  `size`, and for a scalar its `signed`, which the map leaves out where the type is no base type
- *  (an enum) and so states no sign. None for a name the map sizes not, or describes as no scalar. */
-function mappedStorage(info: SymbolInfo | undefined): DeclaredStorage | undefined {
+ *  (an enum, a float) and so states no sign. A map does not say whether a scalar is an integer or a
+ *  float, so it is `sized`, compared by width and sign alone. None for a name the map sizes not, or
+ *  describes as no scalar. */
+function mappedStorage(info: SymbolInfo | undefined): DeclaredStorage | MappedStorage | undefined {
   if (info?.size === undefined || (info.shape !== 'scalar' && info.shape !== 'pointer')) {
     return undefined;
   }
-  return { bytes: info.size, signed: info.shape === 'scalar' ? info.signed : undefined };
+  return { kind: 'sized', bytes: info.size, signed: info.shape === 'scalar' ? info.signed : undefined };
 }
 
-/** Whether a global's declared storage disagrees with its one access, `width` bytes read or written
- *  at offset 0 (`signed` for a read, undefined for a write): a bare name then reads or writes what
- *  the declaration says rather than what the assembly does. An enum, whose size is the compiler's,
- *  agrees with no access this can prove. A read narrower than a register is compared by sign as
- *  well, and a declaration that states none (a plain `char`) agrees with neither: its sign is the
- *  compiler's too. A write stores the same bytes either way. No storage (no declaration, or one
- *  that is no integer this can read) never disagrees. */
-function storageDisagrees(declared: DeclaredStorage | undefined, width: number, signed: boolean | undefined): boolean {
-  if (declared === undefined) {
-    return false;
+/** A symbol map's scalar ({@link mappedStorage}): an integer, a float or an enum it does not tell
+ *  apart, of `bytes` bytes and the sign it states, if any. */
+interface MappedStorage {
+  kind: 'sized';
+  bytes: number;
+  signed: boolean | undefined;
+}
+
+/** One global's one access, as the declaration-shape override compares it with a declaration:
+ *  `width` bytes at offset 0, and `signed` the extension of a read (undefined for a write). It moves integer bits: no frontend models a float load or store of a
+ *  global's relocated address (`lwc1`/`swc1` against a `%lo`, `lfs`/`stfs` against a small-data
+ *  relocation decline loudly, and agbcc's soft-float helpers refuse an operand loaded from memory:
+ *  raise/floathelpers.ts). */
+interface GlobalAccess {
+  width: number;
+  signed: boolean | undefined;
+}
+
+/** Whether a global's declared storage disagrees with its one access: a bare name then reads or
+ *  writes what the declaration says rather than what the assembly does. An integer agrees with an
+ *  access of its own width, and a read narrower than a register with its sign too, a plain `char`
+ *  by the target's `plainCharSigned`; a write stores the same bytes either way. A float agrees with
+ *  no access, every one of which moves integer bits (`GlobalAccess`): `*(u16 *)&gF` reinterprets
+ *  the bytes the bare name would convert. An enum is an integer of the target's `enumBytes`, with no sign this knows. What
+ *  the target does not measure, or the context cannot read, agrees with nothing, which costs a
+ *  spelling and never the C. No storage (no declaration) never disagrees. */
+function storageDisagrees(
+  declared: DeclaredStorage | MappedStorage | undefined,
+  access: GlobalAccess,
+  facts: { enumBytes: number | undefined; plainCharSigned: boolean | undefined },
+): boolean {
+  switch (declared?.kind) {
+    case undefined:
+      return false;
+    case 'unread':
+      return true;
+    case 'float':
+      return true;
+    case 'enum':
+      return (
+        declared.unsized ||
+        facts.enumBytes === undefined ||
+        storageDisagrees({ kind: 'integer', bytes: facts.enumBytes, signed: undefined }, access, facts)
+      );
+    case 'integer':
+    case 'sized': {
+      if (declared.bytes !== access.width) {
+        return true;
+      }
+      const signed = declared.signed === 'char' ? facts.plainCharSigned : declared.signed;
+      return access.width < 4 && access.signed !== undefined && signed !== access.signed;
+    }
   }
-  if (declared.bytes !== width) {
-    return true;
-  }
-  return width < 4 && signed !== undefined && declared.signed !== signed;
 }

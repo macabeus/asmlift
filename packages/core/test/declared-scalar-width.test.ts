@@ -78,16 +78,43 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(agbcc('strb', 'extern s8 gN;')).toContain('gN = a0;');
   });
 
-  test("a plain char and an enum agree with no read: their sign and size are the compiler's", () => {
-    expect(agbcc('ldrb', 'extern char gN;')).toContain('return *(u8 *)&gN;');
-    expect(agbcc('ldr', 'enum E { EA, EB }; extern enum E gN;')).toContain('*(s32 *)&gN;');
+  test("a plain char and an enum are what the target makes them: agbcc's char is unsigned, its enum a word", () => {
+    expect(agbcc('ldrb', 'extern char gN;')).toContain('return gN;');
+    expect(agbcc('ldr', 'enum E { EA, EB }; extern enum E gN;')).toContain('return gN;');
+    expect(agbcc('str', 'enum E { EA, EB }; extern enum E gN;')).toContain('gN = a0;');
+    expect(agbcc('ldr', 'typedef enum { TA, TB } T; extern T gN;')).toContain('return gN;');
+    expect(agbcc('ldrb', 'enum E { EA, EB }; extern enum E gN;')).toContain('return *(u8 *)&gN;');
+    // a packed enum is no size the target states
+    expect(agbcc('ldr', 'enum __attribute__((packed)) P { PA }; extern enum P gN;')).toContain('*(s32 *)&gN;');
     expect(agbcc('ldrb', 'extern signed char gN;')).toContain('return *(u8 *)&gN;');
     expect(agbcc('ldrb', 'extern unsigned char gN;')).toContain('return gN;');
   });
 
-  test('a declaration that names no integer keeps the usage-inferred spelling', () => {
-    expect(agbcc('ldr', 'extern float gN;')).toContain('return gN;');
-    expect(agbcc('ldrb', 'extern Unknown gN;')).toContain('return gN;');
+  test('where the target states no enum size or char sign, the read is spelled through the address', () => {
+    expect(ppc('lwz', 'enum E { EA, EB }; extern enum E gN;')).toContain('*(s32 *)&gN;');
+    const unmeasured = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+    delete unmeasured.compilerBehaviors.plainCharSigned;
+    expect(decompile('f', thumb('ldrb'), unmeasured, { contextGlobals: ctx('extern char gN;') }).source).toContain(
+      'return *(u8 *)&gN;',
+    );
+  });
+
+  test('a float agrees with no integer access, which reinterprets the bytes the bare name would convert', () => {
+    expect(agbcc('ldrh', 'extern float gN;')).toContain('return *(u16 *)&gN;');
+    expect(agbcc('ldr', 'extern float gN;')).toContain('*(s32 *)&gN;');
+    expect(agbcc('strb', 'extern float gN;')).toContain('*(u8 *)&gN = a0;');
+    expect(agbcc('ldr', 'extern double gN;')).toContain('*(s32 *)&gN;');
+  });
+
+  test("a type the context cannot read agrees with no access; C89's implicit int is an int", () => {
+    expect(agbcc('ldrb', 'extern Unknown gN;')).toContain('return *(u8 *)&gN;');
+    expect(agbcc('ldrb', 'typedef int A32 __attribute__((aligned(4))); extern A32 gN;')).toContain(
+      'return *(u8 *)&gN;',
+    );
+    expect(agbcc('strb', 'typedef int A32 __attribute__((aligned(4))); extern A32 gN;')).toContain('*(u8 *)&gN = a0;');
+    expect(agbcc('ldrb', 'extern gN;')).toContain('return *(u8 *)&gN;');
+    expect(agbcc('ldr', 'extern gN;')).toContain('return gN;');
+    // a global the context does not declare keeps the usage-inferred spelling
     expect(agbcc('ldrb', 'extern s32 gOther;')).toContain('return gN;');
   });
 

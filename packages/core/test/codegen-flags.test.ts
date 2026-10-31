@@ -42,8 +42,19 @@ const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
 const CANONICAL_IDS = IDS.filter(isCanonicalToolchainId);
 
 describe('targetFor', () => {
+  // save the sign of a plain `char` where they state one the compiler's default is not: KMC's
+  // `-funsigned-char` on gcc 2.7.2, whose description is the compiler's
   test.each(CANONICAL_IDS)('%s at its canonical flags is its description', (id) => {
-    expect(targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags).target).toBe(DESCRIPTIONS[id]);
+    const { target } = targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
+    if (id !== 'gcc2.7.2kmc') {
+      expect(target).toBe(DESCRIPTIONS[id]);
+      return;
+    }
+    const { plainCharSigned, ...behaviors } = target.compilerBehaviors;
+    const { plainCharSigned: _default, ...described } = DESCRIPTIONS[id].compilerBehaviors;
+    expect(plainCharSigned).toBe(false);
+    expect(behaviors).toEqual(described);
+    expect({ ...target, compilerBehaviors: undefined }).toEqual({ ...DESCRIPTIONS[id], compilerBehaviors: undefined });
   });
 
   // A toolchain with no synthetic tier has no canonical flags, and every flag set still resolves to
@@ -60,7 +71,15 @@ describe('targetFor', () => {
     ['agbcc', ['-O1', '-mthumb-interwork']],
     ['agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm', '-g', '-ansi']],
     ['ido7.1', ['-mips2', '-O2', '-g3', '-32', '-non_shared', '-G', '0']],
-    ['gcc2.7.2kmc', [...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags, '-Wa,-force-n64align', '-x', 'c']],
+    [
+      'gcc2.7.2kmc',
+      [
+        ...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags.filter((f) => f !== '-funsigned-char'),
+        '-Wa,-force-n64align',
+        '-x',
+        'c',
+      ],
+    ],
     ['mwcc_242_81', ['-O4,p', '-inline', 'auto', '-sdata', '8']],
   ] as const)('%s at %j keeps every declared behavior', (id, flags) => {
     const r = targetFor(id, flags);
@@ -89,6 +108,25 @@ describe('targetFor', () => {
     expect(short.compilerBehaviors.enumBytes).toBeUndefined();
     expect(short.compilerBehaviors.largestAlignment).toBe(DESCRIPTIONS.agbcc.compilerBehaviors.largestAlignment);
     expect(targetFor('agbcc', [...base, '-fshort-enums', '-fno-short-enums']).target).toBe(DESCRIPTIONS.agbcc);
+  });
+
+  // …and the sign of a plain `char`, which each family's flags name its own way: gcc keeps one
+  // variable that both switches and their no- forms set, IDO has `-signed`, mwcc `-char`
+  test('the char-sign flags decide plainCharSigned, and two that disagree in an unknown order withdraw it', () => {
+    const sign = (id: Parameters<typeof targetFor>[0], flags: readonly string[]) =>
+      targetFor(id, flags).target.compilerBehaviors.plainCharSigned;
+    expect(sign('agbcc', ['-O2'])).toBe(false);
+    expect(sign('agbcc', ['-O2', '-fsigned-char'])).toBe(true);
+    expect(sign('agbcc', ['-O2', '-fno-unsigned-char'])).toBe(true);
+    expect(sign('gcc2.7.2', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags)).toBe(true);
+    expect(sign('gcc2.7.2kmc', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags)).toBe(false);
+    expect(sign('gcc2.7.2', ['-O1', '-fno-signed-char'])).toBe(false);
+    expect(sign('gcc2.7.2', ['-O1', '-fsigned-char', '-funsigned-char'])).toBeUndefined();
+    expect(sign('gcc2.7.2', ['-O1', '-fsigned-char', '-fno-unsigned-char'])).toBe(true);
+    expect(sign('ido7.1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags)).toBe(false);
+    expect(sign('ido7.1', ['-O2', '-signed'])).toBe(true);
+    expect(sign('mwcc_242_81', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags)).toBe(true);
+    expect(sign('mwcc_247_107', ['-O4,p', '-char', 'unsigned'])).toBe(false);
   });
 
   test.each(CANONICAL_IDS)('%s’s canonical flags are in normal form and every word is in its family’s table', (id) => {

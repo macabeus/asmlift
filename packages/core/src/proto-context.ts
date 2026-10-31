@@ -116,26 +116,32 @@ export interface ContextGlobals {
    *  it. Read through `structNamed`, which is how two spellings of one struct are told to be one:
    *  `typedef struct Q {…} Q;` spells the struct `Q`, `struct Q` and every other alias of it. */
   structTypes: ReadonlyMap<string, string>;
-  /** The storage each object of `declared` that is an integer or a pointer is declared with, its
-   *  typedefs resolved (`declaredWidth`, `declaredSigned`): `extern s32 gN;` is four bytes, signed,
-   *  and `extern u8 *gP;` four bytes whose signedness nothing reads. A bare name reads and writes
-   *  exactly this, so the structurer spells a global bare only where its one access agrees
-   *  (structure.ts, the declaration-shape override): a byte read of `gN` is `*(u8 *)&gN`, never
-   *  `gN`. An enum is an integer whose size the compiler picks (`-fshort-enums`, mwcc's `-enum`),
-   *  so it is here with none. A type this cannot read as an integer — a float, a struct, a typedef
-   *  carrying an attribute, an unexpanded macro — is left out, which keeps the usage-inferred
-   *  spelling: a float read through an integer cast would convert. */
+  /** The storage each object of `declared` that is no aggregate and no function is declared with,
+   *  its typedefs resolved (`declaredWidth`, `declaredSigned`): `extern s32 gN;` is a four-byte
+   *  signed integer, `extern u8 *gP;` a four-byte one whose sign nothing reads, `extern float gF;`
+   *  a four-byte float. A bare name reads and writes exactly this, so the structurer spells a
+   *  global bare only where its one access agrees (structure.ts, the declaration-shape override): a
+   *  byte read of `gN` is `*(u8 *)&gN`, never `gN`, and so is a halfword read of `gF`, which
+   *  reinterprets the bytes where the bare name would convert them. A type this cannot read — a
+   *  typedef carrying an attribute, an unexpanded macro, a name it never saw — is `unread`, which
+   *  agrees with no access: the cast states the access whatever the declaration is. */
   storage: ReadonlyMap<string, DeclaredStorage>;
 }
 
-/** What one declared integer or pointer object occupies ({@link ContextGlobals.storage}). */
-export interface DeclaredStorage {
-  /** its size in bytes; undefined for an enum, whose size is the compiler's */
-  bytes: number | undefined;
-  /** whether a read sign-extends it; undefined where the type does not say (a pointer, an enum, a
-   *  plain `char`, whose signedness is the compiler's) */
-  signed: boolean | undefined;
-}
+/** What one declared object that is no aggregate occupies ({@link ContextGlobals.storage}). */
+export type DeclaredStorage =
+  /** an integer or a pointer of `bytes` bytes; `signed` says whether a read sign-extends it, `char`
+   *  for a plain `char`, whose sign is the compiler's (`compilerBehaviors.plainCharSigned`), and
+   *  undefined where nothing reads it (a pointer). A declaration with no type specifier at all
+   *  (`extern gN;`, C89's implicit `int`) is an `int`. */
+  | { kind: 'integer'; bytes: number; signed: boolean | 'char' | undefined }
+  /** an enum, whose size is the compiler's (`compilerBehaviors.enumBytes`), unless `unsized`: one
+   *  `packed` or holding a value an int cannot (`TypeTable.unsizedEnums`) is no size this knows */
+  | { kind: 'enum'; unsized: boolean }
+  /** a `float` (4 bytes) or a `double` (8) */
+  | { kind: 'float'; bytes: number }
+  /** a type this cannot read */
+  | { kind: 'unread' };
 
 /** The struct or union `spelling` names, qualifiers aside, by the identity `structTypes` keys it
  *  under: `struct Tag` as written, or what a typedef name stands for. Undefined for any other
@@ -167,6 +173,15 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
     }
+    const implicit = language === 'c' ? implicitIntObject(d, table) : undefined;
+    if (implicit !== undefined) {
+      declared.add(implicit);
+      objectTypes.set(implicit, 'int');
+      storage.set(implicit, { kind: 'integer', bytes: 4, signed: true });
+      if (d.specifiers.qualifiers.includes('volatile')) {
+        volatiles.add(implicit);
+      }
+    }
     for (const x of d.declarators) {
       if (x.name === undefined || !WORD.test(x.name)) {
         continue;
@@ -180,18 +195,8 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
-      } else if (t.derivations.length === 0 || isPointer(t.derivations[0])) {
-        const r = resolve(t, table.typedefs, ctx.tokens);
-        const spelled = spellType(r, ctx.tokens);
-        const bits = declaredWidth(spelled);
-        if (bits !== undefined) {
-          storage.set(x.name, { bytes: bits / 8, signed: declaredSigned(spelled) });
-        } else if (
-          r.derivations.length === 0 &&
-          (table.enums.has(spelled) || (r.type.kind === 'tag' && r.type.keyword === 'enum'))
-        ) {
-          storage.set(x.name, { bytes: undefined, signed: undefined });
-        }
+      } else if (t.derivations[0]?.kind !== 'function') {
+        storage.set(x.name, declaredStorage(t, table, ctx.tokens));
       }
       if (hasVolatileStorage(t, scope, 0)) {
         volatiles.add(x.name);
@@ -213,6 +218,56 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
     }
   }
   return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes, storage };
+}
+
+/** The object a C declaration with a storage class and no type specifier declares, C89's implicit
+ *  `int`: `extern gN;` reads as the type name `gN` with no declarator, since the parser cannot tell
+ *  a name from an unknown type with nothing after it. Only a lone word that names no type the
+ *  context declares and no base type is one. */
+function implicitIntObject(d: Declaration, table: TypeTable): string | undefined {
+  const { storage, type, unknownWords } = d.specifiers;
+  if (d.declarators.length > 0 || unknownWords.length > 0 || type.kind !== 'words' || type.words.length !== 1) {
+    return undefined;
+  }
+  const [w] = type.words;
+  const named =
+    !WORD.test(w) ||
+    table.typedefs.has(w) ||
+    table.enums.has(w) ||
+    table.named.has(w) ||
+    declaredWidth(w) !== undefined ||
+    ['void', 'float', 'double', '_Bool'].includes(w);
+  return !named && (storage.includes('extern') || storage.includes('static')) ? w : undefined;
+}
+
+/** The storage an object of type `t`, no aggregate and no function, is declared with
+ *  ({@link DeclaredStorage}). */
+function declaredStorage(t: DeclaredType, table: TypeTable, tokens: Tokens): DeclaredStorage {
+  const [first] = t.derivations;
+  if (first !== undefined && !isPointer(first)) {
+    return { kind: 'unread' };
+  }
+  const r = resolve(t, table.typedefs, tokens);
+  const spelled = spellType(r, tokens);
+  const bare = spelled
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const bits = declaredWidth(bare === '' ? 'int' : spelled);
+  if (bits !== undefined) {
+    const signed = bare === 'char' ? 'char' : declaredSigned(bare === '' ? 'int' : spelled);
+    return { kind: 'integer', bytes: bits / 8, signed };
+  }
+  if (r.derivations.length > 0) {
+    return { kind: 'unread' };
+  }
+  if (bare === 'float' || bare === 'double') {
+    return { kind: 'float', bytes: bare === 'float' ? 4 : 8 };
+  }
+  if (table.enums.has(bare) || (r.type.kind === 'tag' && r.type.keyword === 'enum')) {
+    return { kind: 'enum', unsized: table.unsizedEnums.has(bare) };
+  }
+  return { kind: 'unread' };
 }
 
 /** The struct or union the typedef `name` stands for (`ContextGlobals.structTypes`): its tag where

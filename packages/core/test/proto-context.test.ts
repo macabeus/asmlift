@@ -1074,46 +1074,51 @@ describe('declaredWidth', () => {
 // through its typedef chain, with what the context cannot size left out.
 describe('the declared storage of a context object', () => {
   const storage = (src: string) => Object.fromEntries(globalsFromContext(src, 'c').storage);
+  const int = (bytes: number, signed: boolean | 'char' | undefined) => ({ kind: 'integer', bytes, signed });
   test('integers, through their typedefs', () => {
     expect(
       storage(
         'typedef signed char s8; typedef unsigned short u16; typedef int BOOL; typedef BOOL Flag;\n' +
           'extern s8 gA; extern u16 gB; extern s32 gC; extern Flag gD; extern volatile unsigned char gE;',
       ),
-    ).toEqual({
-      gA: { bytes: 1, signed: true },
-      gB: { bytes: 2, signed: false },
-      gC: { bytes: 4, signed: true },
-      gD: { bytes: 4, signed: true },
-      gE: { bytes: 1, signed: false },
-    });
+    ).toEqual({ gA: int(1, true), gB: int(2, false), gC: int(4, true), gD: int(4, true), gE: int(1, false) });
   });
-  test('a pointer is four bytes whose sign nothing reads, and a plain char says no sign', () => {
+  test("a pointer is four bytes whose sign nothing reads, and a plain char's sign is the compiler's", () => {
     expect(storage('extern u8 *gP; extern void (*gF)(void); extern char gK;')).toEqual({
-      gP: { bytes: 4, signed: undefined },
-      gF: { bytes: 4, signed: undefined },
-      gK: { bytes: 1, signed: undefined },
+      gP: int(4, undefined),
+      gF: int(4, undefined),
+      gK: int(1, 'char'),
     });
   });
-  test('an enum is an integer of no size this knows', () => {
+  test("C89's implicit int: a storage class and no type", () => {
+    expect(storage('extern gN; static volatile gV; typedef int T; extern T;')).toEqual({
+      gN: int(4, true),
+      gV: int(4, true),
+    });
+    expect(globalsFromContext('extern volatile gV;', 'c').volatiles).toEqual(new Set(['gV']));
+  });
+  test('an enum is sized by the target unless packed or wider than an int; a float is a float', () => {
     expect(
       storage(
-        'enum E { A, B }; typedef enum E Et; typedef enum { C } F;\nextern enum E gE; extern Et gT; extern F gF;',
+        'enum E { A, B }; typedef enum E Et; typedef enum { C } F; enum __attribute__((packed)) P { D };\n' +
+          'typedef float f32;\nextern enum E gE; extern Et gT; extern F gF; extern enum P gP; extern f32 gG; extern double gD;',
       ),
     ).toEqual({
-      gE: { bytes: undefined, signed: undefined },
-      gT: { bytes: undefined, signed: undefined },
-      gF: { bytes: undefined, signed: undefined },
+      gE: { kind: 'enum', unsized: false },
+      gT: { kind: 'enum', unsized: false },
+      gF: { kind: 'enum', unsized: false },
+      gP: { kind: 'enum', unsized: true },
+      gG: { kind: 'float', bytes: 4 },
+      gD: { kind: 'float', bytes: 8 },
     });
   });
-  test('what the context cannot read as an integer is left out', () => {
+  test('a type the context cannot read is unread; an aggregate and a function have no entry', () => {
     expect(
       storage(
-        'struct S { int a; }; typedef int W __attribute__((mode(HI))); typedef float f32;\n' +
-          'extern struct S gS; extern float gF; extern f32 gG; extern W gW; extern int gArr[4]; extern Unknown gU;' +
-          ' int fn(int);',
+        'struct S { int a; }; typedef int W __attribute__((mode(HI)));\n' +
+          'extern struct S gS; extern W gW; extern int gArr[4]; extern Unknown gU; extern long double gL; int fn(int);',
       ),
-    ).toEqual({});
+    ).toEqual({ gW: { kind: 'unread' }, gU: { kind: 'unread' }, gL: { kind: 'unread' } });
   });
 });
 
