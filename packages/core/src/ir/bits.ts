@@ -10,7 +10,7 @@
 // It is a function over `Fn` rather than a closure inside a rendering pass so that a test can ask
 // it directly: reachable only through emitted C, a wrong answer for one opcode reads as a silent
 // wrong address in a row nobody is looking at.
-import type { Block, Op, Value } from './core';
+import { type Block, type Op, type Value, immediateDominators } from './core';
 import { NEGATED_ICMP, OPCODES, type OpSig, SWAPPED_ICMP } from './opcodes';
 
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
@@ -631,7 +631,7 @@ export function edgeFacts(blocks: readonly Block[]): EdgeFacts {
       op.successors.forEach((s, si) => only.set(s.block, only.has(s.block) ? null : { from: b, op, si }));
     }
   }
-  const idom = immediateDominators(blocks);
+  const idom = immediateDominators({ blocks });
   const tested = (op: Op, si: number): EdgeTest | undefined => {
     const c = op.opcode === 'cond_br' ? defs.get(op.operands[0]) : undefined;
     return c !== undefined &&
@@ -684,71 +684,6 @@ export function edgeFacts(blocks: readonly Block[]): EdgeFacts {
  *  (`edgeFacts`). */
 export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
   return edgeFacts(blocks).incoming;
-}
-
-/** Each block's immediate dominator over the blocks reachable from `blocks[0]` (the entry and an
- *  unreachable block have none), by the iterative intersection over reverse postorder (Cooper,
- *  Harvey and Kennedy). */
-function immediateDominators(blocks: readonly Block[]): Map<Block, Block> {
-  const succs = (b: Block): Block[] => b.ops.flatMap((op) => op.successors.map((s) => s.block));
-  const order: Block[] = [];
-  const seen = new Set<Block>();
-  const stack: [Block, number][] = blocks[0] === undefined ? [] : [[blocks[0], 0]];
-  if (blocks[0] !== undefined) {
-    seen.add(blocks[0]);
-  }
-  while (stack.length > 0) {
-    const top = stack[stack.length - 1];
-    const next = succs(top[0])[top[1]++];
-    if (next === undefined) {
-      order.push(stack.pop()![0]);
-    } else if (!seen.has(next)) {
-      seen.add(next);
-      stack.push([next, 0]);
-    }
-  }
-  order.reverse();
-  const rpo = new Map(order.map((b, i) => [b, i]));
-  const preds = new Map<Block, Block[]>(order.map((b) => [b, []]));
-  for (const b of order) {
-    for (const s of succs(b)) {
-      preds.get(s)?.push(b);
-    }
-  }
-  const dom = new Map<Block, Block>();
-  if (order[0] !== undefined) {
-    dom.set(order[0], order[0]);
-  }
-  const meet = (a: Block, b: Block): Block => {
-    while (a !== b) {
-      while (rpo.get(a)! > rpo.get(b)!) {
-        a = dom.get(a)!;
-      }
-      while (rpo.get(b)! > rpo.get(a)!) {
-        b = dom.get(b)!;
-      }
-    }
-    return a;
-  };
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const b of order.slice(1)) {
-      let d: Block | undefined;
-      for (const p of preds.get(b)!) {
-        if (dom.has(p)) {
-          d = d === undefined ? p : meet(p, d);
-        }
-      }
-      if (d !== undefined && dom.get(b) !== d) {
-        dom.set(b, d);
-        changed = true;
-      }
-    }
-  }
-  if (order[0] !== undefined) {
-    dom.delete(order[0]);
-  }
-  return dom;
 }
 
 /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every answer
