@@ -17,6 +17,7 @@ import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseGotoViolation } from '../src/l3/ast';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { compareScored, gotoCount } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -295,5 +296,17 @@ describe('/case-goto', () => {
     const falling = withOption(twoIntoOne(), false);
     expect(falling.copied).toBe(0);
     expect(withOption(twoIntoOne(), true).src).toBe(falling.src);
+  });
+});
+
+describe('the ranking tie-break', () => {
+  test('of two candidates that score alike, the one without a goto wins', () => {
+    const base = { score: { score: 0 }, preference: 0, variations: [] };
+    const withGoto = { ...base, order: 0, source: 'case 1: goto case_3;\ncase 3: case_3: f();' };
+    const copies = { ...base, order: 1, source: 'case 1: f();\nbreak;\ncase 3: f();\nbreak;' };
+    expect(gotoCount(withGoto.source)).toBe(1);
+    expect(gotoCount(copies.source)).toBe(0);
+    type C = Parameters<typeof compareScored>[0];
+    expect(compareScored(withGoto as unknown as C, copies as unknown as C)).toBeGreaterThan(0);
   });
 });
