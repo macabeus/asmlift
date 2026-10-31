@@ -123,6 +123,10 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(agbcc('strb', 'typedef int A32 __attribute__((aligned(4))); extern A32 gN;')).toContain('*(u8 *)&gN = a0;');
     expect(agbcc('ldrb', 'extern gN;')).toContain('return *(u8 *)&gN;');
     expect(agbcc('ldr', 'extern gN;')).toContain('return gN;');
+    // and so is every name of a declarator list the implicit int heads
+    expect(agbcc('ldrb', 'extern gN, gM;')).toContain('return *(u8 *)&gN;');
+    expect(agbcc('ldrb', 'static gM, gN;')).toContain('return *(u8 *)&gN;');
+    expect(agbcc('ldr', 'extern gN, gM;')).toContain('return gN;');
     // a global the context does not declare keeps the usage-inferred spelling
     expect(agbcc('ldrb', 'extern s32 gOther;')).toContain('return gN;');
   });

@@ -259,6 +259,16 @@ describe('a declaration', () => {
     ).toEqual(['x: int; y: int', 'REG: volatile u16', 'sym: int']);
   });
 
+  test("C89's implicit int ahead of a declarator list declares its first name too", () => {
+    expect(declarations('extern gN, *gP; static gA[4], gZ = 2; extern gI = 1;', 'c')).toEqual([
+      'gN: int; gP: * → int',
+      'gA: [4] → int; gZ: int',
+      'gI: int',
+    ]);
+    // a lone word is the type: which one it is, a name or an unknown type, is the context's call
+    expect(declarations('extern gN;', 'c')).toEqual(['gN']);
+  });
+
   // C89 has no `bool` or `wchar_t`: marioparty4's MusyX headers declare `typedef unsigned long bool;`
   test('a word C++ reserves for a type is the name it declares after another type word', () => {
     expect(declarations('typedef unsigned long bool; typedef unsigned short wchar_t; bool f(bool b);', 'c')).toEqual([

@@ -369,6 +369,27 @@ class Parser {
     if (specifiers === null) {
       return null;
     }
+    // C89's implicit `int` ahead of a declarator list: `extern gN, gM;` and `static gA[4];` read the
+    // first name as a type word, and in valid C no type is followed by `,`, `=` or `[`. The word goes
+    // back to being the first declarator. A lone `extern gN;` is a statement this cannot tell from
+    // an unknown type declaring nothing; `proto-context.ts` reads that one against the types the
+    // context declares.
+    const { storage, type, unknownWords } = specifiers;
+    const next = this.t.char(this.i);
+    if (
+      !this.cxx &&
+      (storage.includes('extern') || storage.includes('static')) &&
+      type.kind === 'words' &&
+      type.words.length === 1 &&
+      !BASIC.has(type.words[0]) &&
+      unknownWords.length === 0 &&
+      (next === COMMA || next === EQUALS || next === OPEN_BRACKET) &&
+      this.t.text(this.i - 1) === type.words[0]
+    ) {
+      this.i--;
+      specifiers.type = { kind: 'words', words: ['int'] };
+      specifiers.spelling = 'int';
+    }
     const declarators: Declarator[] = [];
     if (this.t.char(this.i) === SEMICOLON) {
       this.i++;
