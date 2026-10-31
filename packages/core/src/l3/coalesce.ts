@@ -20,6 +20,7 @@ import {
   stmtChildren,
   stmtExprs,
   switchArmSuccessors,
+  switchJumpsBack,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
 
@@ -130,8 +131,12 @@ function spans(body: Stmt[]): Map<string, Span> {
   };
   /** the loop set a while/do-while's own condition and children run under — its own. A `for` is
    *  routed separately: `stmtChildren` hands back its init too, and the init is the one child its
-   *  loop does not re-run. */
-  const under = (s: Stmt, loops: readonly Stmt[]): readonly Stmt[] => (isLoop(s) ? [...loops, s] : loops);
+   *  loop does not re-run. A switch whose case-label `goto` lands on an arm laid out above it
+   *  (`switchJumpsBack`) counts too: that jump is a back edge with no loop statement, and the arm
+   *  it lands on runs after the one that jumps, so a local the lower arm writes can clobber one the
+   *  upper arm still reads. */
+  const under = (s: Stmt, loops: readonly Stmt[]): readonly Stmt[] =>
+    isLoop(s) || (s.k === 'switch' && switchJumpsBack(s)) ? [...loops, s] : loops;
   const walk = (list: Stmt[], loops: readonly Stmt[]): void => {
     for (const s of list) {
       // A `for`'s INIT runs ONCE, ahead of the condition and outside the loop; its cond, inc and
@@ -216,7 +221,9 @@ export interface MergePair {
  *  earlier one — and a back edge returns only to the head of its OWN loop, whose body is one
  *  contiguous preorder range. So the reordering can reach a PAIR only when some loop holds a
  *  mention of both locals: there the survivor's write can be followed, on the next iteration, by
- *  the absorbed local's read. Where no loop holds both — two sibling loops, or one local living
+ *  the absorbed local's read. The one other back edge L3 holds is a case-label `goto` aimed at an
+ *  arm laid out above it, which returns into its own switch's range the same way, so `spans`
+ *  records such a switch as a loop and this rule covers it. Where no loop holds both — two sibling loops, or one local living
  *  before the loop the other lives in — no back edge connects the two ranges and preorder IS
  *  execution order. The ancestor chain is what the span records, not the innermost loop: an outer
  *  loop re-runs an inner one's statements, so it can reorder a pair that no inner loop shares.
