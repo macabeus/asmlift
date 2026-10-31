@@ -369,6 +369,108 @@ describe('/case-goto', () => {
   });
 });
 
+// A `while (1)` loop around a jump table whose arms 1, 3 and 7 each end by entering case 0's body,
+// which runs `if (x(i) < 0) continue;` first; case 6 and the default `continue` too. Every
+// goto-free reading of the first run declines, and its jumps would spell the switch with five
+// gotos, two of them to case 4's lone `continue;` — but the rerun that asks the loop
+// (`ForRanking`) reads an edge into the header as `continue;` and lifts the copies goto-free.
+// Fuzz seed 271's shape with its loads as calls.
+const forBeforeJumps = `fn wj {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0)
+^bb1(%4: s32):
+  %5: u32 = icmp_sge %4, %1
+  cond_br %5, ^bb18(), ^bb2()
+^bb2():
+  %6: s32 = call %4 {target="f"}
+  %7: s32 = const {value=26}
+  %8: u32 = icmp_sgt %6, %7
+  cond_br %8, ^bb17(), ^bb3()
+^bb3():
+  %9: s32 = call %4 {target="id"}
+  %10: s32 = const {value=3}
+  %11: s32 = sub %9, %10
+  switch_br %11, ^bb4(), ^bb6(), ^bb8(), ^bb9(), ^bb1(%4), ^bb11(), ^bb13(), ^bb15(), ^bb1(%4) {cases=[0;1;2;3;4;5;6;7]}
+^bb4():
+  %12: s32 = call %4 {target="x"}
+  %13: s32 = const {value=0}
+  %14: u32 = icmp_slt %12, %13
+  cond_br %14, ^bb1(%4), ^bb5()
+^bb5():
+  %16: s32 = const {value=3}
+  %90: s32 = call %16 {target="out"}
+  %17: s32 = call %4 {target="k"}
+  br ^bb18()
+^bb6():
+  %18: s32 = call %4 {target="u"}
+  %19: s32 = const {value=1}
+  %20: u32 = icmp_eq %18, %19
+  cond_br %20, ^bb18(), ^bb7()
+^bb7():
+  %21: s32 = const {value=40}
+  %22: s32 = call %21 {target="k"}
+  br ^bb4()
+^bb8():
+  %23: s32 = const {value=5}
+  %24: s32 = call %23 {target="k"}
+  br ^bb18()
+^bb9():
+  %25: s32 = const {value=1}
+  %26: s32 = add %4, %25
+  %27: s32 = call %26 {target="v"}
+  %28: s32 = const {value=0}
+  %29: u32 = icmp_ne %27, %28
+  cond_br %29, ^bb18(), ^bb10()
+^bb10():
+  %30: s32 = const {value=60}
+  %31: s32 = call %30 {target="k"}
+  br ^bb4()
+^bb11():
+  %32: s32 = call %4 {target="v"}
+  %33: s32 = const {value=4}
+  %34: u32 = icmp_sgt %32, %33
+  cond_br %34, ^bb18(), ^bb12()
+^bb12():
+  %35: s32 = call %4 {target="a"}
+  %36: s32 = call %35 {target="k"}
+  br ^bb18()
+^bb13():
+  %37: s32 = call %4 {target="a"}
+  %38: s32 = const {value=3}
+  %39: u32 = icmp_eq %37, %38
+  cond_br %39, ^bb1(%4), ^bb14()
+^bb14():
+  %40: s32 = call %37 {target="k"}
+  br ^bb18()
+^bb15():
+  %41: s32 = const {value=1}
+  %42: s32 = add %4, %41
+  %43: s32 = call %42 {target="v"}
+  %44: s32 = const {value=0}
+  %45: u32 = icmp_ne %43, %44
+  cond_br %45, ^bb18(), ^bb16()
+^bb16():
+  %46: s32 = const {value=100}
+  %47: s32 = call %46 {target="k"}
+  br ^bb4()
+^bb17():
+  %48: s32 = const {value=2}
+  %49: s32 = add %4, %48
+  br ^bb1(%49)
+^bb18():
+  ret
+}`;
+
+describe('the jumps wait for every goto-free run of the function', () => {
+  test('a jump table the `while (1)` rerun spells with copies gets no goto', () => {
+    const { src, agreement, shipped } = lifted(forBeforeJumps);
+    expect(src).not.toContain('goto ');
+    expect(src).toMatch(/case 4:\n\s*continue;/);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+});
+
 describe('the ranking tie-break', () => {
   test('of two candidates that score alike, the one without a goto wins', () => {
     const base = { score: { score: 0 }, preference: 0, variations: [] };
