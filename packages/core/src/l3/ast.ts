@@ -1225,6 +1225,84 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
   return walk(body, null, false);
 }
 
+/** Can control fall off the END of `list`? False only where every path through it is provably
+ *  left first — by `return`, `continue`, a loop's `break`, a `goto`, a switch-scoped `break` (which
+ *  leaves the arm it sits in), or an `if` or `switch` none of whose paths reaches its own end. A
+ *  loop is read as reaching its end (a decided exit is not looked for), so the answer errs toward
+ *  "reaches", which is the side a caller appending a jump after the list can afford: the jump it
+ *  then writes is one no path runs, which the reachability contract declines, never a path cut. */
+export function reachesEnd(list: readonly Stmt[]): boolean {
+  // `end`: some path falls off the list's last statement; `leaves`: some path takes a
+  // switch-scoped `break` out of it, which ends the innermost switch around it.
+  const flow = (ss: readonly Stmt[]): { end: boolean; leaves: boolean } => {
+    let leaves = false;
+    for (const s of ss) {
+      switch (s.k) {
+        case 'return':
+        case 'continue':
+        case 'goto':
+          return { end: false, leaves };
+        case 'break':
+          return { end: false, leaves: leaves || s.ofSwitch === true };
+        case 'if': {
+          const t = flow(s.then);
+          const e = flow(s.else);
+          leaves ||= t.leaves || e.leaves;
+          if (!t.end && !e.end) {
+            return { end: false, leaves };
+          }
+          break;
+        }
+        case 'switch': {
+          // Its end is reached by a `break` out of an arm, by an arm that neither falls nor jumps
+          // on and reaches its own end, or — with no `default` — by a value no case names.
+          const next = switchArmSuccessors(s);
+          const ends =
+            s.default === undefined ||
+            [...s.cases.map((c) => c.body), s.default].some((body, i) => {
+              const f = flow(body);
+              return f.leaves || (f.end && next[i] === undefined);
+            });
+          if (!ends) {
+            return { end: false, leaves };
+          }
+          break;
+        }
+        case 'while':
+        case 'dowhile':
+        case 'for':
+        case 'assign':
+        case 'store':
+        case 'exprstmt':
+          break;
+      }
+    }
+    return { end: true, leaves };
+  };
+  return flow(list).end;
+}
+
+/** For each arm of a `switch` — its cases in order, then its `default` at index `cases.length` —
+ *  the arm control runs on into from that arm's end, or undefined where it leaves the switch: the
+ *  arm a trailing `goto` names (its last top-level statement, `caseGotoViolation`), else the next
+ *  arm where the case falls through (the last case into the `default`, or out where there is
+ *  none). The one reading of "arm `i` runs on into arm `j`" that contracts.ts's effect count and
+ *  l3/coalesce.ts's arm-disjointness both follow, transitively. */
+export function switchArmSuccessors(sw: Extract<Stmt, { k: 'switch' }>): (number | undefined)[] {
+  const labelled = new Map(sw.cases.flatMap((c, i) => (c.label === undefined ? [] : [[c.label, i] as const])));
+  const jumpOf = (body: readonly Stmt[]): number | undefined => {
+    const last = body[body.length - 1];
+    return last?.k === 'goto' ? labelled.get(last.label) : undefined;
+  };
+  const last = sw.cases.length;
+  return [
+    ...sw.cases.map(
+      (c, i) => jumpOf(c.body) ?? (c.fallsThrough && (i + 1 < last || sw.default !== undefined) ? i + 1 : undefined),
+    ),
+    sw.default === undefined ? undefined : jumpOf(sw.default),
+  ];
+}
+
 /** The nested statement LISTS of a statement — the SCOPES it opens.
  *
  *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those

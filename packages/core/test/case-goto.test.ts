@@ -14,7 +14,7 @@ import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import { type SFn, type Stmt, type SwitchCase, caseGotoViolation } from '../src/l3/ast';
+import { type SFn, type Stmt, type SwitchCase, caseGotoViolation, reachesEnd } from '../src/l3/ast';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { compareScored, gotoCount } from '../src/rank';
@@ -244,6 +244,74 @@ describe('two arms entering one case: one falls, the other jumps', () => {
     verify(fn);
     recoverTypes(fn);
     expect(() => structure(fn, { spellSwitchFallthrough: false })).toThrow(/no fall-through in its case statement/);
+  });
+});
+
+// Case 0's nested switch sends its case 1 into case 2's body, which runs on into case 3: the
+// nested structuring writes that body into its own arm and leaves with `break;`, so the arm the
+// outer reading spells as a jump to `case_2` already ends — and the jump after that `break;` is one
+// no path takes. Case 5 is the entrant that does need it.
+const nestedEntrant = `fn gn {
+^bb0(%0: s32, %1: s32):
+  switch_br %0, ^bb10(), ^bb1(), ^bbL(), ^bb3(), ^bb2(), ^bb7() {cases=[0;1;2;3;5]}
+^bb10():
+  %r0: s32 = call %0 {target="a"}
+  switch_br %1, ^bb11(), ^bb12(), ^bb13() {cases=[0;1]}
+^bb11():
+  %r11: s32 = call %0 {target="p"}
+  br ^bb14()
+^bb12():
+  %r12: s32 = call %0 {target="q"}
+  br ^bbL()
+^bb13():
+  %r13: s32 = call %0 {target="r"}
+  br ^bb14()
+^bb14():
+  %r14: s32 = call %0 {target="w"}
+  br ^bb7()
+^bb1():
+  %r1: s32 = call %0 {target="b"}
+  %z1: s32 = const {value=0}
+  %c1: u32 = icmp_slt %1, %z1
+  cond_br %c1, ^bb7(), ^bbL()
+^bb2():
+  %r2: s32 = call %0 {target="c"}
+  br ^bbL()
+^bbL():
+  %rL: s32 = call %0 {target="s"}
+  br ^bb3()
+^bb3():
+  %r3: s32 = call %0 {target="t"}
+  br ^bb7()
+^bb7():
+  ret
+}`;
+
+describe('a jump no path reaches is not written', () => {
+  test('an entrant whose own structuring already ends gets no `goto`; the one that runs on does', () => {
+    const { src, agreement, shipped } = lifted(nestedEntrant);
+    expect(src).not.toMatch(/break;\n\s*goto/);
+    expect(src.match(/goto case_2;/g)?.length).toBe(1);
+    expect(src).toMatch(/case 5:\n\s*c\(a0\);\n\s*goto case_2;/);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('reachesEnd: left by every path only where each one provably leaves', () => {
+    const brk: Stmt = { k: 'break', ofSwitch: true };
+    expect(reachesEnd([call('f')])).toBe(true);
+    expect(reachesEnd([call('f'), brk])).toBe(false);
+    expect(reachesEnd([{ k: 'if', cond: v('c'), then: [brk], else: [] }])).toBe(true);
+    expect(reachesEnd([{ k: 'if', cond: v('c'), then: [brk], else: [{ k: 'return' }] }])).toBe(false);
+    // a nested switch ends where an arm breaks out of it, runs off its end, or no `default` exists
+    expect(reachesEnd([sw([arm([1], [{ k: 'return' }])])])).toBe(true);
+    expect(reachesEnd([sw([arm([1], [{ k: 'return' }])], [{ k: 'return' }])])).toBe(false);
+    expect(reachesEnd([sw([arm([1], [call('f'), brk])], [{ k: 'return' }])])).toBe(true);
+    expect(reachesEnd([sw([arm([1], [call('f')])], [{ k: 'return' }])])).toBe(true);
+    // …but not where that arm falls or jumps on into one that leaves
+    expect(reachesEnd([sw([arm([1], [call('f')], { fallsThrough: true })], [{ k: 'return' }])])).toBe(false);
+    // a loop is read as reaching its end, the side a caller appending a jump can afford
+    expect(reachesEnd([{ k: 'while', cond: { k: 'const', value: 1 }, body: [{ k: 'return' }] }])).toBe(true);
   });
 });
 
