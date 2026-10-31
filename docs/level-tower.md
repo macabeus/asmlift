@@ -85,8 +85,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 - **L3 — the neutral AST.** A genuinely different structure
   ([`l3/ast.ts`](../packages/core/src/l3/ast.ts)): `if`/`while`/`switch`/expressions, no
   registers, and no `goto` but a jump to a case label of the enclosing switch from the end of one
-  of its arms (the `goto` statement, docs/asmlift-101.md §2.7). Expressions are pure but for `call`, `marker` and `postincr` — the last is
-  an expression that WRITES, and the `l3/` passes that count a name's mentions have to know it
+  of its arms (the `goto` statement, docs/asmlift-101.md §2.7). Expressions are pure but for
+  `call`, `marker` and `postincr` — the last is an expression that WRITES, and the `l3/` passes
+  that count a name's mentions have to know it
   (`mentionedName`, and the source scan in `test/postincr.test.ts` that holds them to it).
   Structuring ([`structure/`](../packages/core/src/structure)) recovers it from the L2 CFG and
   destroys SSA (assigning merge values back to named variables).

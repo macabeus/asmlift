@@ -223,9 +223,9 @@ export interface MergePair {
  *  mention of both locals: there the survivor's write can be followed, on the next iteration, by
  *  the absorbed local's read. The one other back edge L3 holds is a case-label `goto` aimed at an
  *  arm laid out above it, which returns into its own switch's range the same way, so `spans`
- *  records such a switch as a loop and this rule covers it. Where no loop holds both — two sibling loops, or one local living
- *  before the loop the other lives in — no back edge connects the two ranges and preorder IS
- *  execution order. The ancestor chain is what the span records, not the innermost loop: an outer
+ *  records such a switch as a loop and this rule covers it. Where no loop holds both — two sibling
+ *  loops, or one local living before the loop the other lives in — no back edge connects the two
+ *  ranges and preorder IS execution order. The ancestor chain is what the span records, not the innermost loop: an outer
  *  loop re-runs an inner one's statements, so it can reorder a pair that no inner loop shares.
  *
  *  `first-is-write` AND `const-fed` ARE INDEPENDENT, and neither masks the other: a survivor whose

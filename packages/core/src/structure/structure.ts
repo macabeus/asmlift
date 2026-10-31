@@ -3157,8 +3157,8 @@ interface ForRanking {
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
- *  `jumpSharedFallTargets`) write the one goto L3 holds, and the user's rule for it is that the
- *  default writes one only where every goto-free reading declines. One switch's ladder sees only
+ *  `jumpSharedFallTargets`) write the one goto L3 holds, and the default writes one only where
+ *  every goto-free reading declines. One switch's ladder sees only
  *  its own rungs, not the whole-function reruns above: a `while (1)` jump table whose copies decline
  *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
  *  the first run adopts them there and never makes that rerun. So every run above is made with the
@@ -3168,9 +3168,9 @@ interface ForRanking {
  *  weighs it against the copies.
  *
  *  The first run's refusal stands if every rerun declines too, where the first run is the first
- *  that asked the jumps when any did. Each run's observation hooks are held
- *  until it is known to stand, so a site is reported once: by the structuring that is returned, or
- *  by the first run where none is. */
+ *  that asked the jumps when any did. Each run's observation hooks are held until it is known to
+ *  stand, so a site is reported once: by the structuring that is returned, or by the first run
+ *  where none is. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
@@ -7502,9 +7502,10 @@ function structureRanked(
         // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies:
         // all but the one the arm-order policy puts above it, or under `/tail-copies` all of them
         // (`copySharedFallTargets`, and THE COPIES below for when it is asked).
-        // Under `/case-goto` every case arm the copies write back into an entrant is spelled with the
-        // jumps instead (`jumpSharedFallTargets` over just those siblings), and the copies keep the
-        // rest — `default:` siblings — so the two settings differ exactly where `onCaseCopied` fires.
+        // Under `/case-goto` every case arm the copies write back into an entrant is spelled with
+        // the jumps instead (`jumpSharedFallTargets` over just those siblings), and the copies keep
+        // the rest (`default:` siblings), so the two settings differ exactly where `onCaseCopied`
+        // fires.
         const copiedInto = new Set<Block>();
         const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
           copySharedFallTargets(
@@ -7784,11 +7785,10 @@ function structureRanked(
       // decline into a lift, never one lift into another. And asked only in the runs `structure`
       // makes after every goto-free run of the whole function declined (`JumpRanking`), since a
       // rerun this ladder cannot see — the `for` one above all — may spell the switch without it:
-      // so it never writes a goto where goto-free C already spells the switch — which only the
-      // ranked `/case-goto` variation does
-      // (`jumpToSharedCases` in `readArms`), as a candidate the scorer weighs against the copies.
-      // A language with no fall-through gets none (`readArms`), and its decline keeps the words it
-      // has.
+      // so it never writes a goto where goto-free C already spells the switch. Only the ranked
+      // `/case-goto` variation does (`jumpToSharedCases` in `readArms`), as a candidate the scorer
+      // weighs against the copies. A language with no fall-through gets none (`readArms`), and its
+      // decline keeps the words it has.
       //
       // THE LADDER, AS DATA: each rung above is one reading — a merge, and whether the copies and
       // the jumps are asked — and the first that declines nothing is adopted, so the order of this

@@ -422,8 +422,8 @@ export function copySharedFallTargets(
  *  `goto` is the arm's last top-level statement. The jump lands right after the sibling's case
  *  labels, which is where a fall-through lands; the emission refuses a sibling that opens with
  *  switch-edge copies, as it does for a fall-through: entering it by its own case value runs those,
- *  and the jump, landing above them, would run them again. No loop stands between the jump and the label: both are the
- *  switch's, in the loop the switch is in. */
+ *  and the jump, landing above them, would run them again. No loop stands between the jump and the
+ *  label: both are the switch's, in the loop the switch is in. */
 export function jumpSharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,

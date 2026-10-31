@@ -1230,7 +1230,7 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
  *  leaves the arm it sits in), or an `if` or `switch` none of whose paths reaches its own end. A
  *  loop is read as reaching its end (a decided exit is not looked for), so the answer errs toward
  *  "reaches", which is the side a caller appending a jump after the list can afford: the jump it
- *  then writes is one no path runs, which the reachability contract declines, never a path cut. */
+ *  then writes is one no path runs, dead code and never a path cut. */
 export function reachesEnd(list: readonly Stmt[]): boolean {
   // `end`: some path falls off the list's last statement; `leaves`: some path takes a
   // switch-scoped `break` out of it, which ends the innermost switch around it.

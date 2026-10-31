@@ -1,10 +1,12 @@
-// THE CASE-LABEL GOTO (l3/ast.ts `goto`): the one goto L3 holds, a jump from the end of a switch arm to
-// a case label of THAT switch. The first half pins its contract (`caseGotoViolation`, which
+// THE CASE-LABEL GOTO (l3/ast.ts `goto`): the one goto L3 holds, a jump from the end of a switch arm
+// to a case label of THAT switch. On hand-built trees: its contract (`caseGotoViolation`, which
 // contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask), how the C family prints it
-// and that Pascal refuses it, and how the effect contract counts a path that takes it, on hand-built
-// trees. The second half is its producer (switch-recover.ts `jumpSharedFallTargets`, structure.ts THE
-// JUMPS): jump tables where two arms enter one case's body and the copies refuse, each judged
-// against its own IR by the trace oracle (`irAgreement`), and the shapes that must stay declined.
+// and that Pascal refuses it, and how the effect contract counts a path that takes it. Then its
+// producer (switch-recover.ts `jumpSharedFallTargets`, structure.ts THE JUMPS): jump tables where two
+// arms enter one case's body and the copies refuse, each judged against its own IR by the trace
+// oracle (`irAgreement`), and the shapes that must stay declined; an arm whose own structuring
+// already leaves (`reachesEnd`); the ranked `/case-goto` variation and its witness; a function a
+// goto-free rerun lifts (`JumpRanking`); and the ranking tie-break (`gotoCount`).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -145,9 +147,9 @@ describe('assertEffectsPreserved over a goto', () => {
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
 
-/** Cases 1 and 2 each call, then `break` on a test of the second parameter or else run on into case 3's body, which itself
- *  falls into case 4: `case 3: s(); case 4: t(); break;`. The copies refuse a sibling that falls on,
- *  so only the jump spells the two entrants. `into3` is the block both enter; `case3Edge` the
+/** Cases 1 and 2 each call, then `break` on a test of the second parameter or else run on into
+ *  case 3's body, which itself falls into case 4: `case 3: s(); case 4: t(); break;`. The copies
+ *  refuse a sibling that falls on, so only the jump spells the two entrants. `into3` is the block both enter; `case3Edge` the
  *  dispatch's own edge into it. */
 const twoIntoOne = ({ into3 = '^bb3()', into3b = '^bb3()', bb3 = '^bb3():', case3Edge = '^bb3()' } = {}) => `fn gj {
 ^bb0(%0: s32, %1: s32):

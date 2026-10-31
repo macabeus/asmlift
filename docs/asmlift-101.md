@@ -202,8 +202,8 @@ reverse — each level is closer to _source_:
   `u32`/pointer types. The _boundary contract_ `assertTypesRecovered` refuses to pass any
   lingering `unknown` downward.
 - **L3** — a language-**neutral** structured AST: `if`/`while`/`switch`/expressions, no
-  registers, and no goto but one narrow kind (§2.7). The contract into L3 is the structurer refusing any CFG shape it cannot
-  prove structured.
+  registers, and no goto but one narrow kind (§2.7). The contract into L3 is the structurer
+  refusing any CFG shape it cannot prove structured.
 
 The levels are **enforced contracts, not folders** — a verifier (`ir/verify.ts`) runs after
 every mutating pass, and typed boundary assertions gate each transition (the deeper design
@@ -279,7 +279,10 @@ and a `goto` is almost never that shape. The one it spells without a `goto` is a
 exit past the code after it (`for (j…) { if (hit) goto next; } k(i); next:;`): a flag set before a
 `break` and tested after the loop (`TwoLevelExit` in `structure.ts`). That lift is exact but not
 byte-matching — the `synthetic:brk2lvl` rows' own `goto` source is what reproduces their bytes, on
-all five toolchains.
+all five toolchains. The structurer lives in
+[`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
+project, because destroying SSA (assigning merge values back to named C variables without
+changing meaning) is where several audit rounds found the subtlest bugs.
 
 **The one goto L3 holds** is a jump to a case label of the switch it sits in, from the end of
 another arm of that switch (`goto` in `l3/ast.ts`, contract `caseGotoViolation`). It is the
@@ -292,11 +295,8 @@ the ranked `/case-goto` variation spells with it the case bodies the goto-free c
 into an entrant, as a candidate the scorer weighs against those copies, where the goto is kept only
 if it scores better (a tie goes to the candidate without one, `gotoCount` in `rank.ts`). An arm
 whose own structuring already leaves gets no jump, and neither does the arm laid out directly above
-the target case, whose fall-through already lands there. The Pascal backend refuses it. No other goto is
-representable. The structurer lives in
-[`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
-project, because destroying SSA (assigning merge values back to named C variables without
-changing meaning) is where several audit rounds found the subtlest bugs.
+the target case, whose fall-through already lands there. The Pascal backend refuses it. No other
+goto is representable.
 
 Historical grounding, if you want it: the founding academic treatment of decompilation is
 Cristina Cifuentes' 1994 thesis _Reverse Compilation Techniques_

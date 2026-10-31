@@ -572,11 +572,7 @@ test('two table arms entering one case body: the arm the CASE ORDER puts above i
   // the source wrote is not in the asm (an out-of-case-order source on the same compiler wants this
   // one), so the fan carries both and the differ referees.
   const cands = enumerateCandidates('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS });
-  // (`/case-goto` crossed with it spells the same choice with both entrants jumping to case 2's label
-  // instead, so it is left out here.)
-  const copied = cands.filter(
-    (c) => hasVariation(c.variations, 'tail-copies') && !hasVariation(c.variations, 'case-goto'),
-  );
+  const copied = cands.filter((c) => hasVariation(c.variations, 'tail-copies'));
   expect(copied.length).toBeGreaterThan(0);
   for (const c of copied) {
     expect(c.source).toMatch(
