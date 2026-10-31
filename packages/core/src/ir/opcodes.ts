@@ -414,6 +414,28 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
   ]),
 );
 
+/** The comparison each `icmp_*` is with its operands SWAPPED — `a < b` is `b > a`; `==` and `!=`
+ *  are their own. Not a negation: `NEGATED_ICMP` keeps the operands and flips the answer, this
+ *  keeps the answer and flips the operands. Seated here for the reason `NEGATED_ICMP` is, and
+ *  expanded both ways from its pairs the same way, so `swap(swap(c)) === c` by construction; a test
+ *  asserts it covers the icmp family (test/pattern.test.ts). */
+const ICMP_SWAP_PAIRS: readonly (readonly [Opcode, Opcode])[] = [
+  ['icmp_slt', 'icmp_sgt'],
+  ['icmp_sle', 'icmp_sge'],
+  ['icmp_ult', 'icmp_ugt'],
+  ['icmp_ule', 'icmp_uge'],
+];
+export const SWAPPED_ICMP: Readonly<Record<string, Opcode>> = {
+  icmp_eq: 'icmp_eq',
+  icmp_ne: 'icmp_ne',
+  ...Object.fromEntries(
+    ICMP_SWAP_PAIRS.flatMap(([a, b]) => [
+      [a, b],
+      [b, a],
+    ]),
+  ),
+};
+
 /** The ops whose `operands[0]` is a memory-access BASE: `load base`, `store base, value`,
  *  `aload base, index`, `astore base, index, value` (the operand roles are in the registry above).
  *  Authored rather than derived — no registry field records the operand ROLE, and the only other

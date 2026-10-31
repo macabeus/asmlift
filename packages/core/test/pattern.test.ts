@@ -3,7 +3,7 @@
 // testable, AI-addable datum.
 import { expect, test } from 'vitest';
 
-import { NEGATED_FCMP, NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
+import { NEGATED_FCMP, NEGATED_ICMP, OPCODES, SWAPPED_ICMP } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
@@ -158,6 +158,19 @@ test('the table covers the WHOLE icmp family — a new comparison cannot be sile
       .filter((k) => k.startsWith('icmp_'))
       .sort(),
   );
+});
+
+test('the operand swap covers the icmp family, is an involution and is never the negation', () => {
+  // ir/bits.ts reads an edge test from its other side and structure/switch-recover.ts a dispatch
+  // compare whose scrutinee is on the right: one table, so the two cannot drift apart
+  const icmps = Object.keys(OPCODES).filter((k) => k.startsWith('icmp_'));
+  expect(Object.keys(SWAPPED_ICMP).sort()).toEqual([...icmps].sort());
+  for (const c of icmps) {
+    expect(SWAPPED_ICMP[SWAPPED_ICMP[c]]).toBe(c);
+    expect(SWAPPED_ICMP[c]).not.toBe(NEGATED_ICMP[c]);
+  }
+  expect(SWAPPED_ICMP.icmp_ult).toBe('icmp_ugt');
+  expect(SWAPPED_ICMP.icmp_sge).toBe('icmp_sle');
 });
 
 test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x != 0`', () => {
