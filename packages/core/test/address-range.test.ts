@@ -750,8 +750,52 @@ describe('addressRangeOf — a signed remainder by a power of two', () => {
     // x - 8 * floor((x + 7) / 8) is 0 at x = 0 and -7 at x = 1: [-7, 0]
     const r = b.op('sub', {}, [x, floorOf(plus(b, x, 7))]);
     expect(rangeIn([b], plus(b, r, 8))).toEqual({ lo: 1, hi: 8, stride: 1 });
-    // of any x, `x + 7` may wrap past INT_MAX, where the floor is no longer `(x + 7) / 8`
-    expect(rangeIn([b], plus(b, b.op('sub', {}, [p, floorOf(plus(b, p, 7))]), 8))).toBeUndefined();
+    // of any x, `x + 7` may wrap past INT_MAX, but the shift reads the word it wrapped to: the pair
+    // is `X - 8 * (X >> 3)` of X = x + 7, less the 7, [-7, 0] whatever x holds
+    expect(rangeIn([b], plus(b, b.op('sub', {}, [p, floorOf(plus(b, p, 7))]), 8))).toEqual({ lo: 1, hi: 8, stride: 1 });
+  });
+
+  test('a dividend that is a sum or a multiple: the pair is X % 8 whatever form X takes', () => {
+    // agbcc's `(i + 1) % 8` passes `i + 1` and `i + 8`: biases 0 and 7 off X = i + 1, not 1 and 8 off i
+    const next = srem((e, p) => plus(e, u8Of(e, p), 1));
+    expect(rangeIn(next.blocks, next.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // `(i - 3) % 8` of a u8 i: X in [-3, 252], of either sign, its negative part its own remainder
+    const back = srem((e, p) => plus(e, u8Of(e, p), -3));
+    expect(rangeIn(back.blocks, back.r)).toBeUndefined();
+    expect(rangeIn(back.blocks, plus(back.join, back.r, 8))).toEqual({ lo: 5, hi: 15, stride: 1 });
+    // `(i * 2) % 8`, X = 2 * i of any sign, and `(i + j) % 8` of two u8s
+    const twice = srem((e, p) => e.op('shl', { imm: 1 }, [p]));
+    expect(rangeIn(twice.blocks, plus(twice.join, twice.r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    const sum = srem((e, p) => e.op('add', {}, [u8Of(e, p), u8Of(e, e.op('load', { off: 0, width: 4 }, [p]))]));
+    expect(rangeIn(sum.blocks, sum.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // the dividend's constant is moved out of the pair, whatever constant the outer form adds
+    expect(rangeIn(next.blocks, plus(next.join, next.r, 5))).toEqual({ lo: 5, hi: 12, stride: 1 });
+  });
+
+  test('a dividend form the outer form does not hold c times is no pair', () => {
+    // X = 2 * i on both edges, but the outer form subtracts the floor from i alone
+    const p = v();
+    const entry = block([p]);
+    const i = u8Of(entry, p);
+    const x = entry.op('shl', { imm: 1 }, [i]);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    condBr(entry, entry.op('icmp_slt', {}, [x, k(entry, 0)]), [neg, []], [join, [x]]);
+    br(neg, join, [plus(neg, x, 7)]);
+    const r = join.op('sub', {}, [i, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
+    expect(rangeIn([entry, neg, join], plus(join, r, 8))).toBeUndefined();
+    // edges whose forms differ beyond a constant: `i + 1` and `2 * i + 8`
+    const e2 = block([p]);
+    const i2 = u8Of(e2, p);
+    const n2 = block();
+    const t2 = v();
+    const j2 = block([t2]);
+    const x2 = plus(e2, i2, 1);
+    condBr(e2, e2.op('icmp_slt', {}, [x2, k(e2, 0)]), [n2, []], [j2, [x2]]);
+    br(n2, j2, [plus(n2, n2.op('shl', { imm: 1 }, [i2]), 8)]);
+    const r2 = j2.op('sub', {}, [x2, j2.op('shl', { imm: 3 }, [j2.op('shr_s', { imm: 3 }, [t2])])]);
+    expect(rangeIn([e2, n2, j2], plus(j2, r2, 8))).toBeUndefined();
   });
 
   test('what is no remainder pair: a bias out of range, a wrap, another x, other coefficients, the `x % 2` bias', () => {
