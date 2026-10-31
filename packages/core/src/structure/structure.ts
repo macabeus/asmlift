@@ -7423,8 +7423,9 @@ function structureRanked(
       const preChain = arms.map((a) => a.entry);
       // Everything below that depends on WHERE THE SWITCH ENDS, read for one candidate merge: the
       // arms' exits, their linearization, and whether the emission below would decline them. Read
-      // five times at most — the CFG's merge (or `stop`), the retry's (no CFG merge), the copies once
-      // at either, and the loop clamp's own merge twice, as written and with the copies.
+      // at the CFG's merge (or `stop`), at the retry's (no CFG merge), and then once per rung of
+      // THE LADDER below — the copies, the loop clamp's own merge as written and with the copies,
+      // and the jumps at both — until one declines nothing.
       // A default edge the dispatch never takes: a frontend whose dispatch is entered only past a
       // bounds test that already sent every other value elsewhere says so with `exhaustive`.
       const deadDefaultEdge = term.attrs.exhaustive === true;
@@ -7704,16 +7705,6 @@ function structureRanked(
       // get it as copies (`copySharedFallTargets`, a `default:` sibling). The same program, where
       // the reading before it failed loud.
       const copyAt = joined !== null ? merge : over;
-      if (read.declines && copyAt !== null) {
-        const copied = readArms(copyAt, true);
-        if (!copied.declines) {
-          if (copyAt !== merge) {
-            hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(copyAt) });
-          }
-          merge = copyAt;
-          read = copied;
-        }
-      }
       // THE LOOP CLAMP: A SWITCH IN A LOOP BODY WHOSE CFG MERGE LIES PAST THE LOOP. Post-dominance
       // reads the whole function, and where an arm `return`s and every `return` shares one epilogue
       // (agbcc and IDO whenever the code after the loop returns early too, mwcc always), that
@@ -7748,20 +7739,7 @@ function structureRanked(
       // tells that reading from the published one whose arm spells an early `return` as `break;`
       // to that same `return;` (a `return` arm entered from the dispatch, or one Regime A walks
       // through rather than rendering in place).
-      if (loopCtx !== null) {
-        const at = read.declines ? inLoopJoin(b, joined, true) : undefined;
-        const clampAt = at === undefined ? undefined : (at ?? stop);
-        if (clampAt !== undefined && clampAt !== null) {
-          for (const copies of (clampAt !== merge ? [false] : []).concat(at !== null ? [true] : [])) {
-            const clamped = readArms(clampAt, copies);
-            if (!clamped.declines) {
-              merge = clampAt;
-              read = clamped;
-              break;
-            }
-          }
-        }
-      }
+      //
       // THE JUMPS: TWO ARMS ENTERING ONE CASE'S BODY, ONE OF THEM BY `goto`. Where every reading above
       // still declines, the arms that enter one case arm's body two or more at a time keep one
       // fall-through and the rest end `goto` to that arm's label (`jumpSharedFallTargets`, over what
@@ -7771,19 +7749,32 @@ function structureRanked(
       // decline into a lift, never one lift into another, and so it never writes a goto where
       // goto-free C already spells the switch. A language with no fall-through gets none
       // (`readArms`), and its decline keeps the words it has.
+      //
+      // THE LADDER, AS DATA: each rung above is one reading — a merge, and whether the copies and
+      // the jumps are asked — and the first that declines nothing is adopted, so the order of this
+      // list IS the precedence the sections above argue for. `follows` marks the rungs at the
+      // switch's own merge (or the retry's), whose adoption the early-return hook reports.
       if (read.declines) {
-        const clampAt = loopCtx !== null ? inLoopJoin(b, joined, true) : undefined;
-        for (const at of [copyAt, ...(clampAt !== undefined && clampAt !== null ? [clampAt] : [])]) {
+        const inLoop = inLoopJoin(b, joined, true);
+        const clampAt = inLoop === undefined ? null : (inLoop ?? stop);
+        const rungs: { at: Block | null; copies: boolean; gotos: boolean; follows?: true }[] = [
+          { at: copyAt, copies: true, gotos: false, follows: true },
+          ...(clampAt !== null && clampAt !== merge ? [{ at: clampAt, copies: false, gotos: false }] : []),
+          ...(inLoop !== null ? [{ at: clampAt, copies: true, gotos: false }] : []),
+          { at: copyAt, copies: true, gotos: true, follows: true },
+          { at: inLoop ?? null, copies: true, gotos: true },
+        ];
+        for (const { at, copies, gotos, follows } of rungs) {
           if (at === null) {
             continue;
           }
-          const jumped = readArms(at, true, true);
-          if (!jumped.declines) {
-            if (at !== merge && at === copyAt) {
+          const reading = readArms(at, copies, gotos);
+          if (!reading.declines) {
+            if (follows === true && at !== merge) {
               hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(at) });
             }
             merge = at;
-            read = jumped;
+            read = reading;
             break;
           }
         }
