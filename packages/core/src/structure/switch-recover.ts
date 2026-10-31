@@ -368,16 +368,9 @@ export function copySharedFallTargets(
   onCopied?: (to: Block) => void,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
-  const entrants = new Map<Block, Block[]>();
-  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
-    const x = exitOf.get(e);
-    if (x?.kind === 'fallthrough') {
-      entrants.set(x.to, [...(entrants.get(x.to) ?? []), e]);
-    }
-  }
-  for (const [to, from] of entrants) {
+  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
     const own = exitOf.get(to);
-    if (from.length < 2 || own?.kind !== 'break') {
+    if (own?.kind !== 'break') {
       continue;
     }
     const { region, escapedTo } = own;
@@ -387,24 +380,16 @@ export function copySharedFallTargets(
     ) {
       continue;
     }
-    const at = to === dflt ? order.length : order.indexOf(to);
-    const above = faller && at > 0 ? order[at - 1] : undefined;
-    if (above !== undefined && from.includes(above)) {
-      onFallerKept?.();
-    }
-    for (const e of from) {
-      const x = exitOf.get(e)!;
-      if (e !== above && x.kind === 'fallthrough') {
-        if (to !== dflt) {
-          onCopied?.(to);
-        }
-        out.set(
-          e,
-          region === undefined
-            ? { kind: 'break', escapedTo: escapedTo! }
-            : { kind: 'break', region: new Set([...x.region, ...region]) },
-        );
+    for (const [e, x] of movers(onFallerKept)) {
+      if (to !== dflt) {
+        onCopied?.(to);
       }
+      out.set(
+        e,
+        region === undefined
+          ? { kind: 'break', escapedTo: escapedTo! }
+          : { kind: 'break', region: new Set([...x.region, ...region]) },
+      );
     }
   }
   return out;
@@ -419,9 +404,10 @@ export function copySharedFallTargets(
  *  is read for itself and may fall on, break, or leave sideways, since the jump does not write it
  *  out again.
  *
- *  WHO FALLS is the copies' question and has the copies' answer (`copySharedFallTargets`): the
- *  entrant the caller's arm-order policy puts directly above the sibling keeps its fall-through
- *  where `faller` is set, and `onFallerKept` fires when it does; every other entrant jumps.
+ *  WHO FALLS is the copies' question and has the copies' answer, read from the one place both
+ *  ask it (`sharedFallTargets`): the entrant the caller's arm-order policy puts directly above the
+ *  sibling keeps its fall-through where `faller` is set, and `onFallerKept` fires when it does;
+ *  every other entrant jumps.
  *
  *  ONLY INTO A CASE ARM: the sibling is in `order`, never `dflt`, since only a case arm carries a
  *  label (l3/ast.ts `SwitchCase.label`) — and, given `only`, only into those siblings (`/case-goto`
@@ -445,30 +431,54 @@ export function jumpSharedFallTargets(
   only?: ReadonlySet<Block>,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
-  const entrants = new Map<Block, Block[]>();
-  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
-    const x = exitOf.get(e);
-    if (x?.kind === 'fallthrough') {
-      entrants.set(x.to, [...(entrants.get(x.to) ?? []), e]);
-    }
-  }
-  for (const [to, from] of entrants) {
-    const at = order.indexOf(to);
-    if (from.length < 2 || at < 0 || to === dflt || (only !== undefined && !only.has(to))) {
+  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
+    if (to === dflt || !order.includes(to) || (only !== undefined && !only.has(to))) {
       continue;
     }
-    const above = faller && at > 0 ? order[at - 1] : undefined;
-    if (above !== undefined && from.includes(above)) {
-      onFallerKept?.();
-    }
-    for (const e of from) {
-      const x = exitOf.get(e)!;
-      if (e !== above && x.kind === 'fallthrough') {
-        out.set(e, { kind: 'goto', to, breaks: x.breaks, region: x.region });
-      }
+    for (const [e, x] of movers(onFallerKept)) {
+      out.set(e, { kind: 'goto', to, breaks: x.breaks, region: x.region });
     }
   }
   return out;
+}
+
+type Entrant = [Block, Extract<ArmExit, { kind: 'fallthrough' }>];
+
+/** WHO FALLS, the one answer both rewrites above read: each arm two or more arms fall into (`to`,
+ *  in the order its first entrant comes in `order` and then `dflt`), and `movers` — its entrants
+ *  other than the one that keeps its fall-through, with their exits, which each rewrite spells its
+ *  own way (a copy, a jump). The keeper is the arm the caller's arm-order policy puts directly
+ *  above `to`, where `faller` is set (`dflt` sits below the last of `order`); `movers` fires
+ *  `onFallerKept` when that arm is an entrant, which is where the two settings of `faller` differ.
+ *  It fires on the call, so a rewrite that refuses `to` before asking reports nothing. */
+function sharedFallTargets(
+  order: readonly Block[],
+  dflt: Block | null,
+  exitOf: ReadonlyMap<Block, ArmExit>,
+  faller: boolean,
+): { to: Block; movers: (onFallerKept?: () => void) => Entrant[] }[] {
+  const entrants = new Map<Block, Entrant[]>();
+  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+    const x = exitOf.get(e);
+    if (x?.kind === 'fallthrough') {
+      entrants.set(x.to, [...(entrants.get(x.to) ?? []), [e, x]]);
+    }
+  }
+  return [...entrants]
+    .filter(([, from]) => from.length >= 2)
+    .map(([to, from]) => {
+      const at = to === dflt ? order.length : order.indexOf(to);
+      const above = faller && at > 0 ? order[at - 1] : undefined;
+      return {
+        to,
+        movers: (onFallerKept?: () => void) => {
+          if (above !== undefined && from.some(([e]) => e === above)) {
+            onFallerKept?.();
+          }
+          return from.filter(([e]) => e !== above);
+        },
+      };
+    });
 }
 
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
