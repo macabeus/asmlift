@@ -57,7 +57,7 @@ export function rowPrototypes(
 const globals = new Map<string, ContextGlobals | undefined>();
 
 /** What a declaration context states about its globals — which are structs, unions or arrays, which
- *  are volatile, which point at a volatile, and the storage each integer or pointer is declared with
+ *  are volatile, which point at a volatile, and the storage each other object is declared with
  *  (`globalsFromContext`) — or undefined where it states none of that. One reading per `name`, which
  *  stands for the text and is shared by every row that reads it: the real tier names a vendored
  *  context by its file, the synthetic tier a row's ctx by its text. A context that declares only

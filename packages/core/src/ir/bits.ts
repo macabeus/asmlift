@@ -1412,9 +1412,9 @@ const lowBits = (bits: number): number => (bits >= 32 ? FULL : 2 ** bits - 1);
  *  parameter's readers need. Every other reader — a compare, a call, an address, a shift's count —
  *  needs all 32, and so does a join that reaches itself again. A `ret` needs none where the
  *  function's own declaration returns nothing (`voidOwn`), all 32 otherwise. A value nothing reads
- *  needs none, so a caller that reads no reader out of sight as one asks that apart.
+ *  needs none: a caller for which an unseen reader may exist checks for a use itself.
  *
- *  Two questions ask it: whether a caller reads a register-returned struct's word past the struct
+ *  Asked whether a caller reads a register-returned struct's word past the struct
  *  (frontend/register-struct-call.ts), and whether any use of a narrow load reads the bits its
  *  extension fills (structure.ts `extensionImmaterial`). */
 export function demandedBits(fn: Fn, root: Value, voidOwn: boolean): number {

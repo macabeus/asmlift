@@ -10569,9 +10569,9 @@ interface GlobalAccess {
  *  access of its own width, and a read narrower than a register with its sign too, a plain `char`
  *  by the target's `plainCharSigned`; a write stores the same bytes either way. A float agrees with
  *  no access, every one of which moves integer bits (`GlobalAccess`): `*(u16 *)&gF` reinterprets
- *  the bytes the bare name would convert. An enum is an integer of the target's `enumBytes`, with no sign this knows. What
- *  the target does not measure, or the context cannot read, agrees with nothing, which costs a
- *  spelling and never the C. No storage (no declaration) never disagrees. */
+ *  the bytes the bare name would convert. An enum is an integer of the target's `enumBytes`, with
+ *  no sign this knows. What the target does not measure, or the context cannot read, agrees with
+ *  nothing, which costs a spelling and never the C. No storage (no declaration) never disagrees. */
 function storageDisagrees(
   declared: DeclaredStorage | MappedStorage | undefined,
   access: GlobalAccess,

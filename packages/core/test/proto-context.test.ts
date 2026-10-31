@@ -1070,8 +1070,9 @@ describe('declaredWidth', () => {
   });
 });
 
-// The storage each declared integer or pointer object occupies (`ContextGlobals.storage`): read
-// through its typedef chain, with what the context cannot size left out.
+// The storage each declared object that is no aggregate and no function occupies
+// (`ContextGlobals.storage`): read through its typedef chain, a type the context cannot read kept
+// as `unread`.
 describe('the declared storage of a context object', () => {
   const storage = (src: string) => Object.fromEntries(globalsFromContext(src, 'c').storage);
   const int = (bytes: number, signed: boolean | 'char' | undefined) => ({ kind: 'integer', bytes, signed });

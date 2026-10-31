@@ -42,8 +42,8 @@ const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
 const CANONICAL_IDS = IDS.filter(isCanonicalToolchainId);
 
 describe('targetFor', () => {
-  // save the sign of a plain `char` where they state one the compiler's default is not: KMC's
-  // `-funsigned-char` on gcc 2.7.2, whose description is the compiler's
+  // save a plain `char` sign the flags state against the compiler's default: KMC's `-funsigned-char`
+  // on gcc 2.7.2, whose description is gcc's
   test.each(CANONICAL_IDS)('%s at its canonical flags is its description', (id) => {
     const { target } = targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
     if (id !== 'gcc2.7.2kmc') {
