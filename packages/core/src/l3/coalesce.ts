@@ -390,7 +390,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
     id: 'fall-through',
     why: 'a case that runs on into the other arm puts both locals on one path, so they coexist',
     sound: true,
-    guardedBy: 'coalesce.test.ts: two arms joined by fall-through never merge; a case-label `goto` joins two arms',
+    guardedBy: 'coalesce.test.ts: two arms joined by fall-through never merge',
     rejects: (c) => c.armsJoined,
   },
   {
