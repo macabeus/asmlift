@@ -605,7 +605,12 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     const shared = literalAddresses(blocks, undefined);
     expect(params.map((x) => shared.addressRangeOf(x))).toEqual(fresh);
     const reversed = literalAddresses(blocks, undefined);
-    expect([...params].reverse().map((x) => reversed.addressRangeOf(x)).reverse()).toEqual(fresh);
+    expect(
+      [...params]
+        .reverse()
+        .map((x) => reversed.addressRangeOf(x))
+        .reverse(),
+    ).toEqual(fresh);
   });
 
   test('asked at a block, a value is read under the tests on the way in', () => {
