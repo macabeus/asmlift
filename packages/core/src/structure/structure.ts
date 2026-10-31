@@ -3700,6 +3700,14 @@ function structureRanked(
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
+        // A C++ reference global is a cell holding its referent's address, and the assembly reads
+        // or writes that cell; `gRef` and `&gRef` both name the referent, one dereference past it,
+        // so every spelling here would add a load (`*(s32 *)*(s32 *)&gRef` for `return gRef;`).
+        if (op.opcode === 'gaddr' && contextGlobals?.storage.get(op.attrs.sym as string)?.kind === 'reference') {
+          throw new StructureError(
+            `'${op.attrs.sym as string}' is declared a C++ reference, and no spelling names the cell the assembly accesses`,
+          );
+        }
         // A frame object declared as an aggregate (`laddrType`) is one whatever its accesses agree
         // on — the frame-side twin of the symbol map's declaration-shape override. Spelled
         // scalar, a store assigns to the array and a load reads its address.
@@ -10573,6 +10581,7 @@ function storageDisagrees(
     case undefined:
       return false;
     case 'unread':
+    case 'reference':
       return true;
     case 'float':
       return true;

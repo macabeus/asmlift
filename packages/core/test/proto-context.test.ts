@@ -1120,6 +1120,19 @@ describe('the declared storage of a context object', () => {
       ),
     ).toEqual({ gW: { kind: 'unread' }, gU: { kind: 'unread' }, gL: { kind: 'unread' } });
   });
+  test('a pointer behind an attributed typedef is a pointer; a C++ reference is a reference', () => {
+    expect(
+      storage(
+        'typedef unsigned char *P8 __attribute__((aligned(4))); typedef P8 P8b;\n' +
+          'typedef int A32 __attribute__((aligned(4)));\nextern P8 gP; extern P8b gQ; extern A32 gA;',
+      ),
+    ).toEqual({ gP: int(4, undefined), gQ: int(4, undefined), gA: { kind: 'unread' } });
+    const cxx = Object.fromEntries(
+      globalsFromContext('struct S { int a; }; typedef int &IR;\nextern int &gR; extern S &gS; extern IR gT;', 'c++')
+        .storage,
+    );
+    expect(cxx).toEqual({ gR: { kind: 'reference' }, gS: { kind: 'reference' }, gT: { kind: 'reference' } });
+  });
 });
 
 // The context's own entry for the function being lifted (`ownContextEntry`): handed over where it is

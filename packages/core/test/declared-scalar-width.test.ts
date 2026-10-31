@@ -131,6 +131,32 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(agbcc('ldrb', 'extern s32 gOther;')).toContain('return gN;');
   });
 
+  test('a pointer behind an attributed typedef is still a four-byte pointer, read and written bare', () => {
+    // mwcc refuses the integer cast an unread declaration would spell where the word is a pointer:
+    // `gQ = *(s32 *)&gP;` over `extern u8 *gQ;` is an illegal implicit conversion
+    const p8 = 'typedef u8 *P8 __attribute__((aligned(4)));';
+    expect(ppc('lwz', `${p8} extern P8 gN;`)).toContain('return gN;');
+    expect(ppc('stw', `${p8} extern P8 gN;`)).toContain('gN = a0;');
+    expect(ppc('lwz', `${p8} typedef P8 P8b; extern P8b gN;`)).toContain('return gN;');
+    expect(agbcc('ldr', 'typedef u8 *PP; typedef PP PA __attribute__((aligned(8))); extern PA gN;')).toContain(
+      'return gN;',
+    );
+    // and its one byte is still not the pointer
+    expect(ppc('lbz', `${p8} extern P8 gN;`)).toContain('return *(u8 *)&gN;');
+    // an attributed scalar is no pointer, and stays unread
+    expect(ppc('lwz', 'typedef s32 A32 __attribute__((aligned(4))); extern A32 gN;')).toContain('*(s32 *)&gN;');
+  });
+
+  test('a C++ reference global declines: no spelling names the cell the assembly reads', () => {
+    const cxx = (op: string, decl: string) =>
+      decompile('f', `0 <f>:\n   0:\t${op}     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgN\n   4:\tblr\n`, PPC_MWCC, {
+        contextGlobals: globalsFromContext(`${TYPES}${decl}`, 'c++'),
+      });
+    expect(() => cxx('lwz', 'extern int &gN;')).toThrow(/C\+\+ reference/);
+    expect(() => cxx('stw', 'typedef int &IR; extern IR gN;')).toThrow(/C\+\+ reference/);
+    expect(cxx('lwz', 'extern int *gN;').source).toContain('return gN;');
+  });
+
   test('a narrow read every use of which takes only its own bytes agrees with either sign', () => {
     // mwcc has no sign-extending byte load: `extern s8 gN; return gN;` is lbz + extsb
     expect(ppcExt('lbz', 'extsb', 'extern s8 gN;')).toContain('return (s8)gN;');

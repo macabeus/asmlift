@@ -124,7 +124,10 @@ export interface ContextGlobals {
    *  byte read of `gN` is `*(u8 *)&gN`, never `gN`, and so is a halfword read of `gF`, which
    *  reinterprets the bytes where the bare name would convert them. A type this cannot read — a
    *  typedef carrying an attribute, an unexpanded macro, a name it never saw — is `unread`, which
-   *  agrees with no access: the cast states the access whatever the declaration is. */
+   *  agrees with no access: the cast states the access whatever the declaration is. A pointer
+   *  behind an attributed typedef is still read as one (`writtenDerivation`). A C++ reference is
+   *  a `reference`, whose cell no spelling names, so the structurer declines a function that
+   *  touches it. */
   storage: ReadonlyMap<string, DeclaredStorage>;
 }
 
@@ -140,6 +143,9 @@ export type DeclaredStorage =
   | { kind: 'enum'; unsized: boolean }
   /** a `float` (4 bytes) or a `double` (8) */
   | { kind: 'float'; bytes: number }
+  /** a C++ reference (`extern int &gRef;`): the symbol is a cell holding the referent's address,
+   *  which no C++ spelling names — `gRef` and `&gRef` both name the referent */
+  | { kind: 'reference' }
   /** a type this cannot read */
   | { kind: 'unread' };
 
@@ -196,7 +202,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
       } else if (t.derivations[0]?.kind !== 'function') {
-        storage.set(x.name, declaredStorage(t, table, ctx.tokens));
+        storage.set(x.name, declaredStorage(t, table, scope.typedefs, ctx.tokens));
       }
       if (hasVolatileStorage(t, scope, 0)) {
         volatiles.add(x.name);
@@ -241,13 +247,27 @@ function implicitIntObject(d: Declaration, table: TypeTable): string | undefined
 }
 
 /** The storage an object of type `t`, no aggregate and no function, is declared with
- *  ({@link DeclaredStorage}). */
-function declaredStorage(t: DeclaredType, table: TypeTable, tokens: Tokens): DeclaredStorage {
+ *  ({@link DeclaredStorage}). `written` is every typedef as written, an attributed one included
+ *  (`typedefTypes`), which `writtenDerivation` reads past. */
+function declaredStorage(
+  t: DeclaredType,
+  table: TypeTable,
+  written: ReadonlyMap<string, DeclaredType>,
+  tokens: Tokens,
+): DeclaredStorage {
   const [first] = t.derivations;
+  if (first?.kind === 'reference') {
+    return { kind: 'reference' };
+  }
   if (first !== undefined && !isPointer(first)) {
     return { kind: 'unread' };
   }
   const r = resolve(t, table.typedefs, tokens);
+  // the derivation the type reaches, through a typedef the table does not read too
+  const behind = r.derivations[0] ?? writtenDerivation(r, written);
+  if (behind?.kind === 'reference') {
+    return { kind: 'reference' };
+  }
   const spelled = spellType(r, tokens);
   const bare = spelled
     .replace(/\b(?:const|volatile)\b/g, ' ')
@@ -267,7 +287,33 @@ function declaredStorage(t: DeclaredType, table: TypeTable, tokens: Tokens): Dec
   if (table.enums.has(bare) || (r.type.kind === 'tag' && r.type.keyword === 'enum')) {
     return { kind: 'enum', unsized: table.unsizedEnums.has(bare) };
   }
-  return { kind: 'unread' };
+  // A pointer behind a typedef that carries an attribute (`typedef u8 *P8
+  // __attribute__((aligned(4)));`), which the table leaves unread because the attribute may retype
+  // it (`realigns`). No attribute changes a pointer's width on these 32-bit targets — `aligned` and
+  // `__declspec(align)` move its alignment alone, and `mode` takes no pointer mode but the 4-byte
+  // one — so it is a 4-byte pointer, read and written bare as a word. Read `unread`, that word is
+  // cast to an integer, which mwcc refuses wherever it flows into a pointer (`gQ = *(s32 *)&gP;`).
+  return behind !== undefined && isPointer(behind)
+    ? { kind: 'integer', bytes: 4, signed: undefined }
+    : { kind: 'unread' };
+}
+
+/** The first derivation a type with none of its own reaches through the typedefs as written
+ *  (`typedefTypes`), an attributed one and a reference the type table does not read included:
+ *  `P8` over `typedef u8 *P8 __attribute__((aligned(4)));` is a pointer, `IR` over
+ *  `typedef int &IR;` a reference. Undefined where the chain ends at a base type or a name it
+ *  never saw. */
+function writtenDerivation(t: DeclaredType, written: ReadonlyMap<string, DeclaredType>): Derivation | undefined {
+  let cur = t;
+  for (let hops = 0; hops < 16 && cur.derivations.length === 0; hops++) {
+    const name = nameOf(cur);
+    const next = name === undefined ? undefined : written.get(name);
+    if (next === undefined || nameOf(next) === name) {
+      return undefined;
+    }
+    cur = next;
+  }
+  return cur.derivations[0];
 }
 
 /** The struct or union the typedef `name` stands for (`ContextGlobals.structTypes`): its tag where
