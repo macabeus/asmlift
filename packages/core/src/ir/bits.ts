@@ -569,9 +569,23 @@ export function overwrittenReads(blocks: readonly Block[]): Set<Op> {
   return out;
 }
 
-/** Block param -> the values its in-edges pass, for `WordCtx.incoming`. */
+/** Block param -> the values its in-edges pass, for `WordCtx.incoming`: the edges alone, without
+ *  what their branches prove (`edgeFacts`), which a word context does not read. */
 export function incomingArgs(blocks: readonly Block[]): Map<Value, (Value | undefined)[]> {
-  return new Map([...incomingEdges(blocks)].map(([p, es]) => [p, es.map((e) => e.arg)]));
+  const out = new Map<Value, (Value | undefined)[]>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        s.block.params.forEach((p, i) => {
+          if (!out.has(p)) {
+            out.set(p, []);
+          }
+          out.get(p)!.push(s.args[i]);
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /** A comparison an edge proves: `lhs <opcode> rhs` holds whenever control takes it. */
@@ -678,12 +692,6 @@ export function edgeFacts(blocks: readonly Block[]): EdgeFacts {
     }
   }
   return { incoming, holdsAt };
-}
-
-/** Block param -> its in-edges, each with the comparisons that hold whenever it is taken
- *  (`edgeFacts`). */
-export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
-  return edgeFacts(blocks).incoming;
 }
 
 /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every answer
@@ -796,7 +804,7 @@ export interface StridedRange {
 /** What a strided range may read beyond a linear form. */
 export interface RangeCtx extends LinearCtx {
   /** block param -> its in-edges, each with what its branch proves where that is known
-   *  (`incomingEdges`) */
+   *  (`edgeFacts`) */
   readonly incoming: ReadonlyMap<Value, readonly InEdge[]>;
   /** the function's own parameters, which arrive from a caller and hold anything */
   readonly entry: ReadonlySet<Value>;
