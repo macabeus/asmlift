@@ -7,7 +7,8 @@
 // `while (1)` reading declines. Each is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The `for`
 // refuses a derived param whose two edges apply different ops or different constants, a preheader that
-// reads memory, and a test that reads the derived param; each of those declines.
+// reads memory, and a test that reads the derived param or its back-edge value; each of those
+// declines.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -44,6 +45,7 @@ const agrees = (r: ReturnType<typeof judged>): void => {
  *  latch #11) or call and leave the loop (#12), and the latch hands back `(i + 1, (i + 1) + 3)`. A
  *  loop follows, so no arm can copy the code after the loop as an early `return`. */
 const srFor = ({
+  guard = '%4: u32 = icmp_slt %1, %0',
   entryDerived = '%2: s32 = add %0, %3',
   backDerived = '%38: s32 = add %36, %3',
   test = '%37: u32 = icmp_slt %1, %36',
@@ -51,8 +53,8 @@ const srFor = ({
 } = {}) => `fn srfor {
 ^bb0(%0: s32, %1: s32):
   %3: s32 = const {value=3}
-  %4: u32 = icmp_slt %1, %0
   ${entryDerived}
+  ${guard}
   cond_br %4, ^bb12(), ^bb16()
 ^bb16():
   ${pre}
@@ -170,7 +172,16 @@ test('a preheader that reads memory refuses the `for`', () => {
 });
 
 test('a latch test that reads the derived param refuses the `for`', () => {
-  // `hi < (i + 1) + 3`: the test would read the derived name, which the update no longer writes
-  const ir = srFor({ test: '%37: u32 = icmp_slt %1, %38' });
+  // `hi < p` behind the guard `hi < lo + 3`: the test would read the derived name, which the update
+  // no longer writes
+  const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %6' });
+  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+});
+
+test("a latch test that reads the derived param's back-edge value refuses the `for`", () => {
+  // `hi < (i + 1) + 3` behind the guard `hi < lo + 3`, which is that test on the entry values: the
+  // `for` writes the derived name only at the body's head, so its test would read it stale (unset on
+  // the first test, the last trip's value after)
+  const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %38' });
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
 });

@@ -9196,7 +9196,7 @@ function structureRanked(
   //     own two args, every other operand one value from outside the loop (`i << 3` beside `i`). By
   //     induction over the two edges it holds F(iv) at every entry to the header, so the body opens
   //     with `p = F(iv);` and the update copies only the IV. The test and the IV's update read no
-  //     derived param.
+  //     derived param and no derived back-edge value.
   type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt; heads: Stmt[] };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
     const h = fl.header;
@@ -9371,8 +9371,9 @@ function structureRanked(
     ) {
       return null;
     }
-    // neither the test nor the IV's update reads a derived param
-    const derivedVals = new Set([...derived.keys()].map((j) => h.params[j]));
+    // neither the test nor the IV's update reads a derived param, nor its back-edge value: the `for`
+    // writes the derived name only at the body's head, so either read would see a stale value
+    const derivedVals = new Set([...derived.keys()].flatMap((j) => [h.params[j], back.args[j] as Value]));
     const readsDerived = (v: Value, seen = new Set<Value>()): boolean => {
       if (derivedVals.has(v)) {
         return true;
