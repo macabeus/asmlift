@@ -42,7 +42,7 @@ const condBr = (from: Block, cond: Value, t: [Block, Value[]], f: [Block, Value[
 const u8Of = (b: ReturnType<typeof block>, x: Value) => b.op('shr_u', { imm: 24 }, [b.op('shl', { imm: 24 }, [x])]);
 
 const rangeIn = (blocks: Block[], x: Value, symbols?: SymbolMap) => literalAddresses(blocks, symbols).addressRangeOf(x);
-const rangeAt = (blocks: Block[], x: Value, at: Block) => literalAddresses(blocks).addressRangeOf(x, at);
+const rangeAt = (blocks: Block[], x: Value, at: Block) => literalAddresses(blocks, undefined).addressRangeOf(x, at);
 
 describe('addressRangeOf — what a computed address may be', () => {
   test('a literal base plus a u8 index scaled by 8, merged by a block param over both arms', () => {
