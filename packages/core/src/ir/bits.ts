@@ -848,6 +848,21 @@ export function stridedRange(ctx: RangeCtx, v: Value, at?: Block): StridedRange 
   return moved === undefined ? undefined : intoWord(moved);
 }
 
+/** `stridedRange` as signed words: every value `v` may hold read as an integer in the signed window,
+ *  or undefined when this cannot bound it there. Where the words straddle zero (IDO's `i % 32`,
+ *  [-32, 31]) no unsigned interval names them, and this one does. */
+export function signedRange(ctx: RangeCtx, v: Value, at?: Block): StridedRange | undefined {
+  const holds = at === undefined ? undefined : ctx.holdsAt?.(at);
+  for (const wordFirst of [false, true]) {
+    const r = integerRange(ctx, v, wordFirst, holds);
+    const s = r === undefined ? undefined : intoSigned(r);
+    if (s !== undefined || r === undefined) {
+      return s;
+    }
+  }
+  return undefined;
+}
+
 /** An integer range moved into one unsigned word, or undefined when it crosses a multiple of
  *  2^32. Every integer in the answer is congruent modulo 2^32 to the one it moved. */
 function intoWord(r: StridedRange): StridedRange | undefined {
