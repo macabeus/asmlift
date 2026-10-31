@@ -159,8 +159,7 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     const stored =
       'g:\n\tldr\tr1, .L4\n\tldrb\tr2, [r1]\n\tldr\tr1, .L4+0x4\n\tstrb\tr2, [r1]\n\tcmp\tr0, #0\n' +
       '\tbeq\t.L3\n\tmov\tr2, #0x7\n.L3:\n\tadd\tr0, r2, #0\n\tbx\tlr\n.L4:\n\t.word\tgN\n\t.word\tgM\n';
-    const lift = (asm: string, decl: string) =>
-      decompile('g', asm, ARMV4T_AGBCC, { contextGlobals: ctx(decl) }).source;
+    const lift = (asm: string, decl: string) => decompile('g', asm, ARMV4T_AGBCC, { contextGlobals: ctx(decl) }).source;
     expect(lift(stored, 'extern s8 gN; extern u8 gM;')).toContain('*(u8 *)&gN');
     expect(lift(stored, 'extern u8 gN; extern u8 gM;')).not.toContain('&gN');
     // `u8 v = *(u8 *)&gN; s32 r = v; if (c) r = (s8)v; return r;` — the sext is one use, the
