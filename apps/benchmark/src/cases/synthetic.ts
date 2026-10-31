@@ -1,12 +1,14 @@
 // Synthetic (Tier A) case provider: flatten (authored spec × assigned toolchains) → Case[].
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
-import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
+import type { CandidateCompiler } from '@asmlift/cli/compile-command';
+import { declarationsKeptWithHeaders, renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
 import { prototypesFromContext, withOwnContextMark } from '@asmlift/core/proto-context';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
+import { benchCompilerFor } from '../decomp-config';
 import { TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
 import { contextGlobalsNamed } from './context-proto';
 import type { Case } from './types';
@@ -47,8 +49,9 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
 
 /** WHAT THE ROW'S CONTEXT STATES ABOUT ITS GLOBALS, read by the real tier's reader
  *  (`context-proto.ts` `contextGlobalsNamed`): which are structs, unions or arrays, which are
- *  volatile and which point at a volatile. Every candidate compiles against the ctx, so the lift is
- *  told it too. Read from the ctx as m2c is handed it, map declarations included; a name the map
+ *  volatile and which point at a volatile. A project's candidates compile against its context, so
+ *  the lift is told it too (a synthetic row's against its `candidateContext` only where it states
+ *  one). Read from the ctx as m2c is handed it, map declarations included; a name the map
  *  describes answers from the map first (structure.ts, the stamp). */
 const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] =>
   ctx === undefined ? undefined : contextGlobalsNamed(`text ${ctx}`, ctx, language);
@@ -57,6 +60,14 @@ export interface SyntheticFilter {
   only?: string; // substring match on the symbol
   toolchain?: ToolchainId;
 }
+
+/** `compile` with the row's `candidateContext` in place of the candidate's own declaration block.
+ *  The block's address-cast macros and global register variables stay, as on the real tier
+ *  (`declarationsKeptWithHeaders`): no context can declare a name the lift made up. */
+const compiledInContext =
+  (compile: CandidateCompiler, ctx: string): CandidateCompiler =>
+  (source, symbol, backendId, declarations, options) =>
+    compile(source, symbol, backendId, `${declarationsKeptWithHeaders(declarations)}${ctx}\n`, options);
 
 export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
   const specs = [...SYNTHETIC, ...SYNTHETIC_CPP].filter((s) => onlySelects(filter.only, s.sym));
@@ -102,6 +113,9 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         proto,
         ...(contextGlobals ? { contextGlobals } : {}),
         ...(spec.symbols ? { symbols: spec.symbols } : {}),
+        ...(spec.candidateContext === undefined
+          ? {}
+          : { compile: compiledInContext(benchCompilerFor(tcId, codegen.cflags), spec.candidateContext) }),
         note: spec.note,
         toolchain: tc,
         codegen,

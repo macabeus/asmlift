@@ -69,6 +69,15 @@ export interface SynthSpec {
    *  exception is an array's OUTERMOST extent, left unsized by `declare.ts`'s own rule and measured
    *  on `sbscope` to change m2c's output not at all. */
   symbols?: SymbolMap;
+  /** THE DECLARATIONS EVERY CANDIDATE COMPILES AGAINST, in place of the block each candidate
+   *  synthesizes for itself — as a real row's candidates compile against its project's context. A
+   *  synthesized block declares each global as the candidate's own accesses use it, so a bare `gN`
+   *  that reads one byte compiles to that byte read whatever the row's `ctx` declares. A row whose
+   *  question is whether the lift's spelling is right AGAINST A DECLARATION states that
+   *  declaration here, or it scores a wrong spelling MATCH. The row's own function stays out: the
+   *  lift spells its signature from `proto`, which states no integer type. Absent on every other
+   *  row, so the tier is unchanged by this field existing. */
+  candidateContext?: string;
 }
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
@@ -16444,6 +16453,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: sym.startsWith('gnarrowc_') ? ['global'] : ['global', 'cast'],
     toolchains: [...toolchains],
     ctx: `${decl}\n${ret} ${sym}(${params});`,
+    candidateContext: decl,
     proto: {
       [sym]: {
         params: params === 'void' ? [] : [params.split(' ')[0]],
