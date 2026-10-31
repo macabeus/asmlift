@@ -6,7 +6,8 @@
 // arms enter one case's body and the copies refuse, each judged against its own IR by the trace
 // oracle (`irAgreement`), and the shapes that must stay declined; an arm whose own structuring
 // already leaves (`reachesEnd`); the ranked `/case-goto` variation and its witness; a function a
-// goto-free rerun lifts (`JumpRanking`); and the ranking tie-break (`gotoCount`).
+// goto-free rerun lifts, and one where only another switch needs the jump (`JumpRanking`); and
+// the ranking tie-break (`gotoCount`).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -467,6 +468,27 @@ describe('the jumps wait for every goto-free run of the function', () => {
   test('a jump table the `while (1)` rerun spells with copies gets no goto', () => {
     const { src, agreement, shipped } = lifted(forBeforeJumps);
     expect(src).not.toContain('goto ');
+    expect(src).toMatch(/case 4:\n\s*continue;/);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  // The jump is asked per switch: `twoIntoOne`'s switch, which only the jump spells, followed by
+  // that loop. Asked for the whole function, the pass that asks the first switch's jump made its
+  // first run with the loop's asked too, adopted them there, and never made the `for` rerun.
+  const thenLoop = (() => {
+    const loop = forBeforeJumps
+      .slice(forBeforeJumps.indexOf('^bb1(%4: s32):'), forBeforeJumps.lastIndexOf('}'))
+      .replace(/\^bb(\d+)/g, '^wb$1')
+      .replace(/%(\d+)/g, (m, n: string) => (n === '0' || n === '1' ? m : `%w${n}`));
+    const first = twoIntoOne().replace('fn gj', 'fn gw');
+    return `${first.slice(0, first.indexOf('^bb6():'))}^bb6():\n  br ^wb1(%0)\n${loop}}`;
+  })();
+
+  test('a second switch the `for` rerun spells keeps no goto where the first one needs its jump', () => {
+    const { src, agreement, shipped } = lifted(thenLoop);
+    expect(src.match(/goto /g)?.length).toBe(1);
+    expect(src).toMatch(/goto case_3;/);
     expect(src).toMatch(/case 4:\n\s*continue;/);
     judgedAlike(agreement);
     judgedAlike(shipped);

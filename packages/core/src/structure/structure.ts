@@ -3104,11 +3104,13 @@ interface OutwardRanking {
   could: boolean;
 }
 
-/** Whether a jump table asks its jump rungs (THE JUMPS, in the per-switch ladder), and whether a
- *  structuring met a switch where every goto-free rung declined and a jump rung read it. */
+/** The jump tables, by dispatch block, that ask their jump rungs (THE JUMPS, in the per-switch
+ *  ladder), or every one of them; the ones a structuring met where every goto-free rung declined
+ *  and an unasked jump rung read the switch; and the ones any structuring spelled with no goto. */
 interface JumpRanking {
-  readonly asked: boolean;
-  could: boolean;
+  readonly asked: ReadonlySet<Block> | 'every';
+  readonly wanted: Set<Block>;
+  readonly free: Set<Block>;
 }
 
 /** The `while (1)` loops spelled `for (init; cond; inc)` with `continue;` into their latch (THE LOOP
@@ -3163,14 +3165,20 @@ interface ForRanking {
  *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
  *  the first run adopts them there and never makes that rerun. So every run above is made with the
  *  jump rungs unasked, and only where all of them decline, the `for` reruns included, and some
- *  switch's jump rung would have read it, are they all made again with it asked (`JumpRanking`).
+ *  switch's jump rung would have read it, are they all made again with rungs asked (`JumpRanking`)
+ *  — PER SWITCH: only at the switches whose jump rung read them and that no run spelled goto-free.
+ *  Asked for every switch, a function whose first switch needs the jump and whose second is a
+ *  `while (1)` jump table the `for` rerun spells would take gotos in both. A switch first reached
+ *  in an asked pass is asked by the next pass, as `ForRanking` adds loops; and where the last pass
+ *  declines while a switch it left unasked would have read, one pass asks every switch, so no
+ *  function the per-switch passes decline is one asking every switch lifts.
  *  The ranked `/case-goto` variation (`jumpToSharedCases`) is the other producer, and the scorer
  *  weighs it against the copies.
  *
- *  The first run's refusal stands if every rerun declines too, where the first run is the first
- *  that asked the jumps when any did. Each run's observation hooks are held until it is known to
- *  stand, so a site is reported once: by the structuring that is returned, or by the first run
- *  where none is. */
+ *  The first run's refusal stands if every rerun declines too, where the first run is the last
+ *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
+ *  known to stand, so a site is reported once: by the structuring that is returned, or by the
+ *  first run where none is. */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
@@ -3251,15 +3259,26 @@ export function structure(
     }
     return sfn;
   };
-  const unaskedJumps: JumpRanking = { asked: false, could: false };
-  let sfn = forRanked(unaskedJumps);
-  if (sfn === null && unaskedJumps.could) {
+  const free = new Set<Block>();
+  let jumps: JumpRanking = { asked: new Set(), wanted: new Set(), free };
+  let sfn = forRanked(jumps);
+  // each pass asks the switches the passes before it wanted and none spelled goto-free; a switch
+  // only an asked pass reaches needs one more
+  for (let n = 0; sfn === null && jumps.asked !== 'every' && n < 8; n++) {
+    const asked: ReadonlySet<Block> = jumps.asked;
+    const next = new Set([...asked, ...[...jumps.wanted].filter((b) => !free.has(b))]);
+    // where no switch the last pass left unasked would have read, it made exactly the runs asking
+    // every switch makes, so its decline is that one's
+    if (next.size === asked.size && [...jumps.wanted].every((b) => asked.has(b))) {
+      break;
+    }
     // The runs that ask the jumps read every switch at least as far as the unasked ones, so where
     // they decline too, theirs is the refusal that stands: the unasked one may be a switch the
     // jumps spell, and a function declined for arms that do not linearize would then be declined
     // for the wrong reason.
     refused = undefined;
-    sfn = forRanked({ asked: true, could: false });
+    jumps = { asked: next.size === asked.size || n === 7 ? 'every' : next, wanted: new Set(), free };
+    sfn = forRanked(jumps);
   }
   if (sfn !== null) {
     return sfn;
@@ -7783,17 +7802,18 @@ function structureRanked(
       // the copies, in their order: the switch's own merge (or the retry's), then the loop clamp's.
       // LAST, and adopted only where it declines nothing, for the reason the copies are: it turns a
       // decline into a lift, never one lift into another. And asked only in the runs `structure`
-      // makes after every goto-free run of the whole function declined (`JumpRanking`), since a
-      // rerun this ladder cannot see — the `for` one above all — may spell the switch without it:
-      // so it never writes a goto where goto-free C already spells the switch. Only the ranked
-      // `/case-goto` variation does (`jumpToSharedCases` in `readArms`), as a candidate the scorer
-      // weighs against the copies. A language with no fall-through gets none (`readArms`), and its
-      // decline keeps the words it has.
+      // makes after every goto-free run of the whole function declined, and only at a switch no run
+      // spelled goto-free (`JumpRanking`), since a rerun this ladder cannot see — the `for` one
+      // above all — may spell the switch without it: so it never writes a goto where goto-free C
+      // already spells the switch. Only the ranked `/case-goto` variation does (`jumpToSharedCases`
+      // in `readArms`), as a candidate the scorer weighs against the copies. A language with no
+      // fall-through gets none (`readArms`), and its decline keeps the words it has.
       //
       // THE LADDER, AS DATA: each rung above is one reading — a merge, and whether the copies and
       // the jumps are asked — and the first that declines nothing is adopted, so the order of this
       // list IS the precedence the sections above argue for. `follows` marks the rungs at the
       // switch's own merge (or the retry's), whose adoption the early-return hook reports.
+      let jumped = false;
       if (read.declines) {
         const inLoop = inLoopJoin(b, joined, true);
         const clampAt = inLoop === undefined ? null : (inLoop ?? stop);
@@ -7811,11 +7831,14 @@ function structureRanked(
           const reading = readArms(at, copies, gotos);
           // unasked, a jump rung only notes whether it reads the switch (`JumpRanking`): every
           // goto-free rung above it declined, so this run declines here either way
-          if (gotos && !jumpRank.asked) {
-            jumpRank.could ||= !reading.declines;
+          if (gotos && jumpRank.asked !== 'every' && !jumpRank.asked.has(b)) {
+            if (!reading.declines) {
+              jumpRank.wanted.add(b);
+            }
             continue;
           }
           if (!reading.declines) {
+            jumped = gotos;
             if (follows === true && at !== merge) {
               hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(at) });
             }
@@ -7824,6 +7847,9 @@ function structureRanked(
             break;
           }
         }
+      }
+      if (!read.declines && !jumped) {
+        jumpRank.free.add(b);
       }
       const exitOf = read.exits;
       // A language whose `case` cannot fall through (Pascal) has no spelling for this shape, and
