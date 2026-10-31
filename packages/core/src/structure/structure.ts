@@ -7536,10 +7536,11 @@ function structureRanked(
                 },
               };
             }
-            // A `goto` lands where a fall-through into its sibling would, so it is refused where that
-            // fall-through is: below, on a sibling that opens with switch-edge copies. It needs the
-            // sibling to be a case arm emitted in this switch, which `jumpSharedFallTargets` only
-            // ever names.
+            // A `goto` lands where a fall-through into its sibling would — on the label printed above
+            // the sibling's body, which opens with its switch-edge copies — so it is refused where
+            // that fall-through is: below, on a sibling that opens with such copies, which the jump
+            // would re-run. It needs the sibling to be a case arm emitted in this switch, which
+            // `jumpSharedFallTargets` only ever names.
             if (exit.kind === 'goto') {
               const into = order.find((o) => o.entry === exit.to && o.values !== null);
               if (into === undefined || into.entry === a.entry) {
@@ -7558,7 +7559,7 @@ function structureRanked(
                   raise: () => {
                     throw new StructureError(
                       `cannot structure '${fn.name}': the case a goto lands on takes a value from the switch ` +
-                        `edge, which the goto would skip`,
+                        `edge, which the goto would re-run`,
                     );
                   },
                 };

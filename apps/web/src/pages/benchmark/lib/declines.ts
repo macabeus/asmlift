@@ -536,7 +536,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // is the switch-scoped `break;` it refuses where a nested loop or switch would capture it, and
     // a seventh a case body that leaves its loop for an exit that is not the switch's own end. The
     // case-label `goto` adds two more: a case body jumping to an arm that is no case of its switch,
-    // and the case a goto lands on taking a value from the switch edge, which the goto would skip.
+    // and the case a goto lands on taking a value from the switch edge, which the goto would re-run.
     //
     // The fall-through-POSITION one is keyed on the clause that opens its sentence, not on the one
     // that ends it. This file opens with the rule that a class is decided inside the first 200
