@@ -1855,6 +1855,15 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  variation: which arm the source wrote the tail under is not in the asm, and one compiler answers
    *  both ways, so the differ referees it. Inert where no switch has such a sibling. */
   copyEveryTailEntrant?: boolean;
+  /** In a jump table where two or more arms enter one sibling CASE arm's body and the copies would
+   *  write that body back into the entrants (`copySharedFallTargets`), spell them with the one
+   *  fall-through and `goto`s to that case's label instead (`jumpSharedFallTargets`), the source's
+   *  own spelling of the shape. rank.ts's `/case-goto` variation: a cross-jump of copies and a goto
+   *  are one asm where the cross-jump merges the whole copy, and the copies are a goto-free reading
+   *  that compiles elsewhere (agbcc's CSE stops the cross-jump short of a copy that re-reads an
+   *  address the arm already formed), so the differ referees it. Inert where no switch has such a
+   *  sibling. */
+  jumpToSharedCases?: boolean;
   /** Spell EVERY `while (1)` loop `forPlanAt` accepts as `for (init; cond; inc)` on the first
    *  structuring, not only one a declined run asked for (`ForRanking`). rank.ts's `/for-continue`
    *  variation: a counted loop whose latch holds the update and the test is the same asm as
@@ -2234,6 +2243,12 @@ export interface StructureHooks {
    *  cross-jumped block. Not fired by `assertDefaultAccepts`' structuring, which is not the
    *  setting being observed. */
   onTailFallerKept?: () => void;
+  /** Fired each time the copies write a CASE arm's body back into an entrant
+   *  (`copySharedFallTargets`' `onCopied`, a sibling that is not the `default:` arm) — the one
+   *  place `jumpToSharedCases` changes what the structurer reads. A structuring with that option off
+   *  that never fires it builds the same tree as the same options with it on, so rank.ts skips
+   *  `/case-goto` on its sibling. Not fired by `assertDefaultAccepts`' structuring. */
+  onCaseCopied?: () => void;
   /** Fired each time a `while (1)` loop no run asked for (`ForRanking`) passes every check of
    *  `forPlanAt` — a single pure latch, a guard or plain entry, a test and update read only from the
    *  latch, the header's params and values from outside the loop, one update copy, and the guard
@@ -2278,6 +2293,7 @@ function assertDefaultAccepts(
     anchorLoopEntryConsts: false,
     followEarlyReturns: false,
     copyEveryTailEntrant: false,
+    jumpToSharedCases: false,
     spellCountedLoopsFor: false,
   };
   if (memo === undefined) {
@@ -3163,6 +3179,7 @@ export function structure(
           onBranchSenseSite: hooks.onBranchSenseSite && hold(hooks.onBranchSenseSite),
           onEarlyReturnFollow: hooks.onEarlyReturnFollow && hold(hooks.onEarlyReturnFollow),
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
+          onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
         },
         memo,
@@ -3234,6 +3251,7 @@ function structureRanked(
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     copyEveryTailEntrant = false,
+    jumpToSharedCases = false,
     spellCountedLoopsFor = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
@@ -3365,11 +3383,17 @@ function structureRanked(
     anchorConstCopies ||
     followEarlyReturns ||
     copyEveryTailEntrant ||
+    jumpToSharedCases ||
     spellCountedLoopsFor
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
     // leaves it answerable from `memo`.
-    assertDefaultAccepts(fn, opts, { ...hooks, onTailFallerKept: undefined, onForOffered: undefined }, memo);
+    assertDefaultAccepts(
+      fn,
+      opts,
+      { ...hooks, onTailFallerKept: undefined, onCaseCopied: undefined, onForOffered: undefined },
+      memo,
+    );
   }
   const defs = defOpMap(fn);
   // The word evaluator's view of `fn`, built at the first `neg_s` (no other rule asks it).
@@ -7439,11 +7463,30 @@ function structureRanked(
         // Asked for, arms a cross-jump sent into one sibling's body get that body back as copies:
         // all but the one the arm-order policy puts above it, or under `/tail-copies` all of them
         // (`copySharedFallTargets`, and THE COPIES below for when it is asked).
-        const exits = copies
-          ? copySharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, hooks.onTailFallerKept, (s) =>
-              forwardToMerge(s, b, at, siblings),
-            )
+        // Under `/case-goto` every case arm the copies write back into an entrant is spelled with the
+        // jumps instead (`jumpSharedFallTargets` over just those siblings), and the copies keep the
+        // rest — `default:` siblings — so the two settings differ exactly where `onCaseCopied` fires.
+        const copiedInto = new Set<Block>();
+        const copyOver = (from: ReadonlyMap<Block, ArmExit>, onCopied?: (to: Block) => void) =>
+          copySharedFallTargets(
+            preChain,
+            dflt,
+            from,
+            !copyEveryTailEntrant,
+            hooks.onTailFallerKept,
+            (s) => forwardToMerge(s, b, at, siblings),
+            onCopied,
+          );
+        const copied = copies
+          ? copyOver(walked, (to) => {
+              copiedInto.add(to);
+              hooks.onCaseCopied?.();
+            })
           : walked;
+        const exits =
+          copiedInto.size > 0 && jumpToSharedCases && spellSwitchFallthrough
+            ? copyOver(jumpSharedFallTargets(preChain, dflt, walked, !copyEveryTailEntrant, undefined, copiedInto))
+            : copied;
         // …and, asked for, the arms still entering one case arm's body two or more at a time get
         // the one fall-through and `goto`s to its label (`jumpSharedFallTargets`, THE JUMPS below).
         const jumped =

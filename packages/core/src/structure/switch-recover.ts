@@ -365,7 +365,10 @@ function singleton(r: Ranges): number | null {
  *
  *  `onFallerKept` fires each time `faller` leaves an entrant its fall-through — exactly where the
  *  two settings of `faller` return different exits. Where it never fires over a whole structuring,
- *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`. */
+ *  the other setting builds the same tree, which is what rank.ts reads to skip `/tail-copies`.
+ *  `onCopied` fires with the sibling each time an entrant takes a copy of a CASE arm (not the
+ *  `default:` arm's), which is where `jumpSharedFallTargets` can read a `goto` instead: rank.ts's
+ *  witness for `/case-goto`, and the siblings that variation hands it. */
 export function copySharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,
@@ -373,6 +376,7 @@ export function copySharedFallTargets(
   faller: boolean,
   onFallerKept?: () => void,
   sidewaysEnds?: (s: Block) => boolean,
+  onCopied?: (to: Block) => void,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   const entrants = new Map<Block, Block[]>();
@@ -402,6 +406,9 @@ export function copySharedFallTargets(
     for (const e of from) {
       const x = exitOf.get(e)!;
       if (e !== above && x.kind === 'fallthrough') {
+        if (to !== dflt) {
+          onCopied?.(to);
+        }
         out.set(
           e,
           region === undefined
@@ -428,7 +435,8 @@ export function copySharedFallTargets(
  *  where `faller` is set, and `onFallerKept` fires when it does; every other entrant jumps.
  *
  *  ONLY INTO A CASE ARM: the sibling is in `order`, never `dflt`, since only a case arm carries a
- *  label (l3/ast.ts `SwitchCase.label`).
+ *  label (l3/ast.ts `SwitchCase.label`) — and, given `only`, only into those siblings (`/case-goto`
+ *  hands it the case arms the copies wrote back).
  *
  *  WHAT MAKES THE JUMP THE SAME PROGRAM is the exit it replaces. A `goto` exit is a `fallthrough`
  *  exit with its last edge spelled as a jump: the arm is structured to stop at the sibling's entry
@@ -445,6 +453,7 @@ export function jumpSharedFallTargets(
   exitOf: ReadonlyMap<Block, ArmExit>,
   faller: boolean,
   onFallerKept?: () => void,
+  only?: ReadonlySet<Block>,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
   const entrants = new Map<Block, Block[]>();
@@ -456,7 +465,7 @@ export function jumpSharedFallTargets(
   }
   for (const [to, from] of entrants) {
     const at = order.indexOf(to);
-    if (from.length < 2 || at < 0 || to === dflt) {
+    if (from.length < 2 || at < 0 || to === dflt || (only !== undefined && !only.has(to))) {
       continue;
     }
     const above = faller && at > 0 ? order[at - 1] : undefined;
