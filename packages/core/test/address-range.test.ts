@@ -349,9 +349,10 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn(other.blocks, u8Of(other.head, other.q))).toEqual({ lo: 0, hi: 255, stride: 1 });
     const ne = loop(0, (h, next) => h.op('icmp_ne', {}, [next, k(h, 8)]));
     expect(rangeIn(ne.blocks, ne.q)).toBeUndefined();
-    // a test against a value the loop carries unbounded proves nothing of the counter
+    // a test against the counter itself, `k + 1 < k`, holds only where `k + 1` wraps: from 0 it
+    // never does, so the back edge is never taken and the counter is its start alone
     const carried = loop(0, (h, next, q) => h.op('icmp_ult', {}, [next, q]));
-    expect(rangeIn(carried.blocks, carried.q)).toBeUndefined();
+    expect(rangeIn(carried.blocks, carried.q)).toEqual({ lo: 0, hi: 0, stride: 0 });
     // a second back edge, from the block the latch's false edge enters, passes `q + 1` past it:
     // `next > 7` is all that edge proves, so the counter may be every word
     const entry = block();
@@ -422,6 +423,58 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     // a step of two keeps it in [0, 7] too
     const two = loop(0, (h, next) => h.op('icmp_sle', {}, [next, k(h, 7)]), { step: 2 });
     expect(rangeIn(two.blocks, two.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+  });
+
+  test('an arm whose test no value of the counter meets is never taken, and the join is the other arm', () => {
+    // `for (k = 0; k < 16; k++) { t = k; if (t < 0) t += 7; use(t); }`: signed rounding on a counter
+    // that never goes negative; the `+ 7` arm's edge carries `k < 0`, which [0, 15] cannot meet
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const arm = block();
+    const t = v();
+    const join = block([t]);
+    const exit = block();
+    br(entry, head, [k(entry, 0)]);
+    condBr(head, head.op('icmp_slt', {}, [q, k(head, 0)]), [arm, []], [join, [q]]);
+    br(arm, join, [arm.op('add', {}, [q, k(arm, 7)])]);
+    const next = join.op('add', {}, [q, k(join, 1)]);
+    condBr(join, join.op('icmp_sle', {}, [next, k(join, 15)]), [head, [next]], [exit, []]);
+    const blocks = [entry, head, arm, join, exit];
+    expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 15, stride: 1 });
+    expect(rangeIn(blocks, t)).toEqual({ lo: 0, hi: 15, stride: 1 });
+    // the arm a counter from -4 does take is in the join: [-4, 15] with the `+ 7` arm's [3, 6]
+    const e2 = block();
+    const q2 = v();
+    const h2 = block([q2]);
+    const a2 = block();
+    const t2 = v();
+    const j2 = block([t2]);
+    const x2 = block();
+    br(e2, h2, [k(e2, -4)]);
+    condBr(h2, h2.op('icmp_slt', {}, [q2, k(h2, 0)]), [a2, []], [j2, [q2]]);
+    br(a2, j2, [a2.op('add', {}, [q2, k(a2, 7)])]);
+    const n2 = j2.op('add', {}, [q2, k(j2, 1)]);
+    condBr(j2, j2.op('icmp_sle', {}, [n2, k(j2, 15)]), [h2, [n2]], [x2, []]);
+    expect(rangeIn([e2, h2, a2, j2, x2], t2)).toEqual({ lo: 0, hi: 15, stride: 1 });
+  });
+
+  test('a test above the latch on another value does not widen the counter it carries', () => {
+    // `for (k = 0; k < 8; k++) { use(k); if (gG > 1000) break; }`, k an s32: the back edge carries
+    // `gG <= 1000` beside `k + 1 <= 7`, and only the second bounds where the counter settles
+    const entry = block();
+    const q = v();
+    const head = block([q]);
+    const latch = block();
+    const exit = block();
+    br(entry, head, [k(entry, 0)]);
+    const g = head.op('load', { off: 0, width: 4, signed: true }, [v()]);
+    condBr(head, head.op('icmp_sgt', {}, [g, k(head, 1000)]), [exit, []], [latch, []]);
+    const next = latch.op('add', {}, [q, k(latch, 1)]);
+    condBr(latch, latch.op('icmp_sle', {}, [next, k(latch, 7)]), [head, [next]], [exit, []]);
+    const blocks = [entry, head, latch, exit];
+    expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 7, stride: 1 });
   });
 
   test("kleod's sub_0804D0B0 loop: from 13 while `k + 1 < n`, n a u8 reload, is [13, 254]", () => {

@@ -927,11 +927,14 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     defs: ctx.defs,
     bound: (d) => (d.opcode === 'zext' ? (d.attrs.width as number) : null),
   };
-  /** `facts`: what the in-edge being read proves, by the value it bounds; each is read as a term */
-  const termRange = (t: Value, facts: Facts): StridedRange | undefined => {
+  /** `facts`: what the in-edge being read proves, by the value it bounds; each is read as a term.
+   *  `null` (here and from `rangeOf`) is NEVER: a fact no value of its term can meet, so the edge
+   *  that proves it is never taken and passes nothing. */
+  const termRange = (t: Value, facts: Facts): StridedRange | undefined | null => {
     const fact = facts.get(t);
     if (fact !== undefined) {
-      return meetBound(rangeOf(t, new Map([...facts].filter(([x]) => x !== t))), fact);
+      const own = rangeOf(t, new Map([...facts].filter(([x]) => x !== t)));
+      return own === null ? null : meetBound(own, fact);
     }
     const at = ctx.pointOf?.(t);
     if (at !== undefined) {
@@ -947,7 +950,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       // stays in [0, 7] is [0, 7], not the [0, 255] the width alone leaves
       const moved = shiftMaskRange(ctx, d, (x) => {
         const r = --left < 0 ? undefined : rangeOf(x, facts);
-        return r === undefined ? undefined : intoWord(r);
+        return r === undefined || r === null ? undefined : intoWord(r);
       });
       const n = provableBits(bits, t);
       const width = n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
@@ -967,15 +970,16 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     open.add(t);
     try {
-      // each in-edge as it reads, and apart those that read without the param: an induction's start
+      // each in-edge as it reads, and apart those that read without the param: an induction's start;
+      // an edge that is never taken (`null`) passes nothing, and the param is what the others pass
       let readsItself = false;
       const seeds: (StridedRange | undefined)[] = [];
-      const direct = ins.map((e) => {
+      const direct = ins.flatMap((e) => {
         const { range } = edgeRange(e);
         const self = cyclic.delete(t);
         readsItself ||= self;
-        seeds.push(self ? undefined : range);
-        return range;
+        seeds.push(self || range === null ? undefined : range);
+        return range === null ? [] : [range];
       });
       let out = direct.every((r) => r !== undefined)
         ? hullOf(direct.map((r) => (wordFirst ? (intoWord(r) ?? r) : r)))
@@ -1011,11 +1015,20 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
       try {
         for (const e of ins) {
           const { range, facts } = edgeRange(e);
+          if (range === null) {
+            continue; // never taken while the param is in `r`: it passes nothing
+          }
           if (range === undefined) {
             return undefined;
           }
           passed.push(range);
-          facts.forEach((b) => named.push(...boundSides(b)));
+          // only a bound on the param's own form can be where it settles: an edge also carries what
+          // the tests above it prove of a loaded global or a dispatch value, which bound other words
+          facts.forEach((b, x) => {
+            if (linearTerms(ctx, x)?.get(t)) {
+              named.push(...boundSides(b));
+            }
+          });
         }
       } finally {
         assumed.delete(t);
@@ -1032,7 +1045,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
    *  Every value the argument reads is the instance the branch tested, so a bound on it holds
    *  wherever the argument reads it; a param read on the way is read under its own in-edges'
    *  facts, never these. */
-  const edgeRange = (e: InEdge): { readonly range: StridedRange | undefined; readonly facts: Facts } => {
+  const edgeRange = (e: InEdge): { readonly range: StridedRange | undefined | null; readonly facts: Facts } => {
     const facts = e.holds === undefined ? NO_FACTS : factsOf(e.holds);
     return { range: e.arg === undefined ? undefined : rangeOf(e.arg, facts), facts };
   };
@@ -1052,7 +1065,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
           continue;
         }
         const other = rangeOf(y, NO_FACTS);
-        const b = other === undefined ? undefined : testBound(opcode, other);
+        const b = other === undefined || other === null ? undefined : testBound(opcode, other);
         const had = out.get(x);
         if (b !== undefined && (had === undefined || b.r.hi - b.r.lo < had.r.hi - had.r.lo)) {
           out.set(x, b);
@@ -1061,7 +1074,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return out;
   };
-  const rangeOf = (x: Value, facts: Facts): StridedRange | undefined => {
+  const rangeOf = (x: Value, facts: Facts): StridedRange | undefined | null => {
     const form = linearTerms(ctx, x, 0, facts);
     if (form === undefined) {
       return undefined;
@@ -1074,8 +1087,8 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
         continue;
       }
       const r = t === 1 ? { lo: 1, hi: 1, stride: 0 } : termRange(t, facts);
-      if (r === undefined) {
-        return undefined;
+      if (r === undefined || r === null) {
+        return r;
       }
       const parts = [c * r.lo, c * r.hi, c * r.stride];
       lo += c > 0 ? parts[0] : parts[1];
@@ -1088,7 +1101,7 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };
-  return rangeOf(v, NO_FACTS);
+  return rangeOf(v, NO_FACTS) ?? undefined;
 }
 
 /** The integers every range in a list holds, and the stride all of them sit on. */
@@ -1177,8 +1190,9 @@ function testBound(opcode: string, other: StridedRange): EdgeBound | undefined {
 
 /** A value's range where a branch also bounds it: the two met in the branch's window, or, where
  *  the range has words on both sides of that window's edge, the narrower of the two (each covers
- *  every word on its own). A meet that holds nothing bounds nothing. */
-function meetBound(r: StridedRange | undefined, b: EdgeBound): StridedRange | undefined {
+ *  every word on its own). A meet that holds nothing is `null`: no word the value may hold takes
+ *  the branch, so the edge is never taken — `if (k < 0) k += 7` on a counter from 0. */
+function meetBound(r: StridedRange | undefined, b: EdgeBound): StridedRange | null {
   if (r === undefined) {
     return b.r;
   }
@@ -1189,11 +1203,11 @@ function meetBound(r: StridedRange | undefined, b: EdgeBound): StridedRange | un
   const lo = Math.max(m.lo, b.r.lo);
   const hi = Math.min(m.hi, b.r.hi);
   if (m.stride === 0) {
-    return lo <= hi ? m : undefined;
+    return lo <= hi ? m : null;
   }
   const first = m.lo + Math.ceil((lo - m.lo) / m.stride) * m.stride;
   const last = m.lo + Math.floor((hi - m.lo) / m.stride) * m.stride;
-  return first > last ? undefined : { lo: first, hi: last, stride: first === last ? 0 : m.stride };
+  return first > last ? null : { lo: first, hi: last, stride: first === last ? 0 : m.stride };
 }
 
 const mod = (w: number): number => ((w % WORD) + WORD) % WORD;
