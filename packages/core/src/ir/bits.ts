@@ -594,18 +594,31 @@ interface EdgeOut {
   readonly si: number;
 }
 
-/** The most compares one edge carries, the nearest first; an older one is dropped. */
+/** The most compares one edge or one block carries, the nearest first; an older one is dropped. */
 const EDGE_TESTS = 8;
 
-/** Block param -> its in-edges, each with the comparisons that hold whenever it is taken. A
- *  `cond_br` on an `icmp_*` proves the compare on its first successor and the negation
- *  (`NEGATED_ICMP`) on its second; an edge out of a `cond_br` whose two successors are one block
- *  proves nothing — the same edge is taken either way — and nor does any other branch. What an
- *  edge proves also holds on every edge out of a block that edge is the only way into, and so on
- *  down such a chain: agbcc's far latch `bhi .LCB; b .Lhead @long jump` tests in one block and
- *  jumps back from the next. The chain reads no block twice, and a compare's operands are values,
- *  so the one each edge reads is the instance its test read. */
-export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
+/** What the branches above a point prove there: for each block, the compares that hold whenever
+ *  control is in it, and for each edge, the compares that hold whenever it is taken. A `cond_br` on
+ *  an `icmp_*` proves the compare on its first successor and the negation (`NEGATED_ICMP`) on its
+ *  second; an edge out of a `cond_br` whose two successors are one block proves nothing — the same
+ *  edge is taken either way — and nor does any other branch. A block holds what the one edge into
+ *  each block that DOMINATES it proves (itself included; a block entered by more than one edge, or
+ *  the entry, proves nothing of its way in), so a test at the top of a loop body still holds past
+ *  an if/else that joins below it, and agbcc's far latch `bhi .LCB; b .Lhead @long jump` carries
+ *  the test it made in one block to the jump back from the next. An edge holds its own compare and
+ *  what its source block holds. Sound because a compare's operands are values: each was defined in
+ *  a block that dominates the test, and control that passes a dominating edge and reaches the point
+ *  without passing it again cannot have redefined one (that block would be reachable around the
+ *  edge), so the instance each test read is the one the point reads. */
+export interface EdgeFacts {
+  /** block param -> its in-edges, each with what holds whenever it is taken */
+  readonly incoming: Map<Value, InEdge[]>;
+  /** the compares that hold in a block, the nearest first */
+  holdsAt(b: Block): readonly EdgeTest[];
+}
+
+/** `EdgeFacts` over a function's blocks, `blocks[0]` the entry. */
+export function edgeFacts(blocks: readonly Block[]): EdgeFacts {
   const defs = new Map<Value, Op>();
   /** a block -> the one edge into it, or null where there are more, or the caller enters it */
   const only = new Map<Block, EdgeOut | null>();
@@ -618,6 +631,7 @@ export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
       op.successors.forEach((s, si) => only.set(s.block, only.has(s.block) ? null : { from: b, op, si }));
     }
   }
+  const idom = immediateDominators(blocks);
   const tested = (op: Op, si: number): EdgeTest | undefined => {
     const c = op.opcode === 'cond_br' ? defs.get(op.operands[0]) : undefined;
     return c !== undefined &&
@@ -628,40 +642,113 @@ export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
       ? { opcode: si === 0 ? c.opcode : NEGATED_ICMP[c.opcode], lhs: c.operands[0], rhs: c.operands[1] }
       : undefined;
   };
-  const holdsOn = (from: Block, op: Op, si: number): EdgeTest[] => {
+  const at = new Map<Block, readonly EdgeTest[]>();
+  const holdsAt = (b: Block): readonly EdgeTest[] => {
+    const had = at.get(b);
+    if (had !== undefined) {
+      return had;
+    }
     const out: EdgeTest[] = [];
-    const seen = new Set<Block>();
-    for (
-      let e: EdgeOut | null = { from, op, si };
-      e !== null && out.length < EDGE_TESTS && !seen.has(e.from);
-      e = only.get(e.from) ?? null
-    ) {
-      const t = tested(e.op, e.si);
+    for (let x: Block | undefined = b; x !== undefined && out.length < EDGE_TESTS; x = idom.get(x)) {
+      const e = only.get(x);
+      const t = e === null || e === undefined ? undefined : tested(e.op, e.si);
       if (t !== undefined) {
         out.push(t);
       }
-      seen.add(e.from);
     }
+    at.set(b, out);
     return out;
   };
-  const out = new Map<Value, InEdge[]>();
+  const incoming = new Map<Value, InEdge[]>();
   for (const b of blocks) {
     for (const op of b.ops) {
       op.successors.forEach((s, si) => {
         if (s.block.params.length === 0) {
           return;
         }
-        const holds = holdsOn(b, op, si);
+        const own = tested(op, si);
+        const holds = [...(own === undefined ? [] : [own]), ...holdsAt(b)].slice(0, EDGE_TESTS);
         s.block.params.forEach((p, i) => {
-          if (!out.has(p)) {
-            out.set(p, []);
+          if (!incoming.has(p)) {
+            incoming.set(p, []);
           }
-          out.get(p)!.push(holds.length === 0 ? { arg: s.args[i] } : { arg: s.args[i], holds });
+          incoming.get(p)!.push(holds.length === 0 ? { arg: s.args[i] } : { arg: s.args[i], holds });
         });
       });
     }
   }
-  return out;
+  return { incoming, holdsAt };
+}
+
+/** Block param -> its in-edges, each with the comparisons that hold whenever it is taken
+ *  (`edgeFacts`). */
+export function incomingEdges(blocks: readonly Block[]): Map<Value, InEdge[]> {
+  return edgeFacts(blocks).incoming;
+}
+
+/** Each block's immediate dominator over the blocks reachable from `blocks[0]` (the entry and an
+ *  unreachable block have none), by the iterative intersection over reverse postorder (Cooper,
+ *  Harvey and Kennedy). */
+function immediateDominators(blocks: readonly Block[]): Map<Block, Block> {
+  const succs = (b: Block): Block[] => b.ops.flatMap((op) => op.successors.map((s) => s.block));
+  const order: Block[] = [];
+  const seen = new Set<Block>();
+  const stack: [Block, number][] = blocks[0] === undefined ? [] : [[blocks[0], 0]];
+  if (blocks[0] !== undefined) {
+    seen.add(blocks[0]);
+  }
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    const next = succs(top[0])[top[1]++];
+    if (next === undefined) {
+      order.push(stack.pop()![0]);
+    } else if (!seen.has(next)) {
+      seen.add(next);
+      stack.push([next, 0]);
+    }
+  }
+  order.reverse();
+  const rpo = new Map(order.map((b, i) => [b, i]));
+  const preds = new Map<Block, Block[]>(order.map((b) => [b, []]));
+  for (const b of order) {
+    for (const s of succs(b)) {
+      preds.get(s)?.push(b);
+    }
+  }
+  const dom = new Map<Block, Block>();
+  if (order[0] !== undefined) {
+    dom.set(order[0], order[0]);
+  }
+  const meet = (a: Block, b: Block): Block => {
+    while (a !== b) {
+      while (rpo.get(a)! > rpo.get(b)!) {
+        a = dom.get(a)!;
+      }
+      while (rpo.get(b)! > rpo.get(a)!) {
+        b = dom.get(b)!;
+      }
+    }
+    return a;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const b of order.slice(1)) {
+      let d: Block | undefined;
+      for (const p of preds.get(b)!) {
+        if (dom.has(p)) {
+          d = d === undefined ? p : meet(p, d);
+        }
+      }
+      if (d !== undefined && dom.get(b) !== d) {
+        dom.set(b, d);
+        changed = true;
+      }
+    }
+  }
+  if (order[0] !== undefined) {
+    dom.delete(order[0]);
+  }
+  return dom;
 }
 
 /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every answer
@@ -780,6 +867,8 @@ export interface RangeCtx extends LinearCtx {
   readonly entry: ReadonlySet<Value>;
   /** the one word a term the form cannot read is known to be — a name a symbol map places */
   pointOf?(v: Value): number | undefined;
+  /** the compares that hold in a block (`edgeFacts`), for a question asked at one */
+  holdsAt?(b: Block): readonly EdgeTest[];
 }
 
 const WORD = 2 ** 32;
@@ -799,14 +888,17 @@ const RANGE_BUDGET = 256;
  *  range moved into one word, when it fits one; a sum whose range crosses a multiple of 2^32 holds
  *  words on both sides of zero, which no interval names (a lone signed narrow value among them:
  *  `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold every word the machine can
- *  compute there, and a wider one only proves less. */
-export function stridedRange(ctx: RangeCtx, v: Value): StridedRange | undefined {
-  const r = integerRange(ctx, v, false);
+ *  compute there, and a wider one only proves less. Asked `at` a block (where `v` is read, or any
+ *  block its definition dominates), what the branches above it prove there (`holdsAt`) bounds the
+ *  terms they test too: `if (i < 8) a[i]` reads `i` in [0, 7] though `i` is a parameter. */
+export function stridedRange(ctx: RangeCtx, v: Value, at?: Block): StridedRange | undefined {
+  const holds = at === undefined ? undefined : ctx.holdsAt?.(at);
+  const r = integerRange(ctx, v, false, holds);
   const one = r === undefined ? undefined : intoWord(r);
   if (one !== undefined || r === undefined) {
     return one;
   }
-  const moved = integerRange(ctx, v, true);
+  const moved = integerRange(ctx, v, true, holds);
   return moved === undefined ? undefined : intoWord(moved);
 }
 
@@ -916,7 +1008,12 @@ function shiftMaskRange(
  *  and a word either excludes cannot be held. Where an in-edge names what its branch proves,
  *  that edge's argument is read under it (`edgeRange`): a loop's latch `k + 1 <= 7` bounds the
  *  `k + 1` its back edge passes, which no reading of `k` alone could, `k` depending on itself. */
-function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange | undefined {
+function integerRange(
+  ctx: RangeCtx,
+  v: Value,
+  wordFirst: boolean,
+  holds?: readonly EdgeTest[],
+): StridedRange | undefined {
   const open = new Set<Value>();
   let left = RANGE_BUDGET;
   /** params met again while their own in-edges were being read */
@@ -1101,7 +1198,9 @@ function integerRange(ctx: RangeCtx, v: Value, wordFirst: boolean): StridedRange
     }
     return Number.isSafeInteger(lo) && Number.isSafeInteger(hi) ? { lo, hi, stride } : undefined;
   };
-  return rangeOf(v, NO_FACTS) ?? undefined;
+  // asked at a block, `v` is read under what holds there, as an in-edge's argument is under what
+  // its edge proves; a point no value can reach (`null`) is answered as nothing proven
+  return rangeOf(v, holds === undefined || holds.length === 0 ? NO_FACTS : factsOf(holds)) ?? undefined;
 }
 
 /** The integers every range in a list holds, and the stride all of them sit on. */

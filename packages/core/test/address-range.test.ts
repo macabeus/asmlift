@@ -42,6 +42,7 @@ const condBr = (from: Block, cond: Value, t: [Block, Value[]], f: [Block, Value[
 const u8Of = (b: ReturnType<typeof block>, x: Value) => b.op('shr_u', { imm: 24 }, [b.op('shl', { imm: 24 }, [x])]);
 
 const rangeIn = (blocks: Block[], x: Value, symbols?: SymbolMap) => literalAddresses(blocks, symbols).addressRangeOf(x);
+const rangeAt = (blocks: Block[], x: Value, at: Block) => literalAddresses(blocks).addressRangeOf(x, at);
 
 describe('addressRangeOf — what a computed address may be', () => {
   test('a literal base plus a u8 index scaled by 8, merged by a block param over both arms', () => {
@@ -475,6 +476,58 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     const blocks = [entry, head, latch, exit];
     expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
     expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 7, stride: 1 });
+  });
+
+  test('a test at the top of the body still holds past an if/else that joins before the latch', () => {
+    // `for (k = 0; k < n; k++) { if (k >= 7) return; if (gF) x(); else y(); z(k); }`: the latch tests
+    // a parameter, and only `k <= 6` on the way into the body bounds what the back edge passes
+    const entry = block([v()]);
+    const n = entry.params[0];
+    const q = v();
+    const head = block([q]);
+    const body = block();
+    const [arm, other] = [block(), block()];
+    const join = block();
+    const exit = block();
+    br(entry, head, [k(entry, 0)]);
+    condBr(head, head.op('icmp_ule', {}, [q, k(head, 6)]), [body, []], [exit, []]);
+    condBr(body, body.op('load', { off: 0, width: 4 }, [v()]), [arm, []], [other, []]);
+    br(arm, join);
+    br(other, join);
+    const next = join.op('add', {}, [q, k(join, 1)]);
+    condBr(join, join.op('icmp_ult', {}, [next, n]), [head, [next]], [exit, []]);
+    const blocks = [entry, head, body, arm, other, join, exit];
+    expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // and asked in the join, the counter is what holds there
+    expect(rangeAt(blocks, q, join)).toEqual({ lo: 0, hi: 6, stride: 1 });
+  });
+
+  test('asked at a block, a value is read under the tests on the way in', () => {
+    // `void q(u32 i) { if (i < 8) a[i * 2 + 1]; }`: a parameter bounds nothing, but not in the arm
+    const entry = block([v()]);
+    const i = entry.params[0];
+    const arm = block();
+    const out = block();
+    condBr(entry, entry.op('icmp_ult', {}, [i, k(entry, 8)]), [arm, []], [out, []]);
+    br(arm, out);
+    const at = arm.op('add', {}, [arm.op('shl', { imm: 1 }, [i]), k(arm, 1)]);
+    const blocks = [entry, arm, out];
+    expect(rangeIn(blocks, at)).toBeUndefined();
+    expect(rangeAt(blocks, at, arm)).toEqual({ lo: 1, hi: 15, stride: 2 });
+    // the join below both ways in proves nothing of `i`, and nor does the entry itself
+    expect(rangeAt(blocks, at, out)).toBeUndefined();
+    expect(rangeAt(blocks, i, entry)).toBeUndefined();
+    // `if (i >= 8) return;` is the false edge, negated, and the control `i < 9` reaches 17
+    const e2 = block([v()]);
+    const [ret, rest] = [block(), block()];
+    condBr(e2, e2.op('icmp_uge', {}, [e2.params[0], k(e2, 8)]), [ret, []], [rest, []]);
+    expect(rangeAt([e2, ret, rest], e2.params[0], rest)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeAt([e2, ret, rest], e2.params[0], ret)).toEqual({ lo: 8, hi: 2 ** 32 - 1, stride: 1 });
+    const e3 = block([v()]);
+    const [in3, out3] = [block(), block()];
+    condBr(e3, e3.op('icmp_ult', {}, [e3.params[0], k(e3, 9)]), [in3, []], [out3, []]);
+    const at3 = in3.op('add', {}, [in3.op('shl', { imm: 1 }, [e3.params[0]]), k(in3, 1)]);
+    expect(rangeAt([e3, in3, out3], at3, in3)).toEqual({ lo: 1, hi: 17, stride: 2 });
   });
 
   test("kleod's sub_0804D0B0 loop: from 13 while `k + 1 < n`, n a u8 reload, is [13, 254]", () => {
