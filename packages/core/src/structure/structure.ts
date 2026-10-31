@@ -123,7 +123,7 @@ import {
   spelledNonNegative,
 } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
-import type { ContextGlobals } from '../proto-context';
+import type { ContextGlobals, DeclaredStorage } from '../proto-context';
 import { evalIntPair, foldConstPair, isConstFoldOpcode, isIntPairOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
@@ -3759,9 +3759,19 @@ function structureRanked(
     // aggregate/array forms, never the bare scalar `tbl`.
     // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
+    // A declared SCALAR is overridden the same way where its storage disagrees with the one access
+    // (`storageDisagrees`): a bare name reads and writes what the declaration says, so over
+    // `extern s32 gN;` a byte read spelled `gN` reads four bytes, and over `extern s8 gN;` it
+    // sign-extends what an `ldrb` zero-extends. The cast spelling `*(u8 *)&gN` states the access
+    // itself whatever the declaration, on either byte order.
     for (const n of [...scalarGlobals]) {
       const shape = symbols?.get(n)?.shape;
-      if (shape === 'array' || shape === 'struct' || contextGlobals?.aggregates.has(n) === true) {
+      if (
+        shape === 'array' ||
+        shape === 'struct' ||
+        contextGlobals?.aggregates.has(n) === true ||
+        storageDisagrees(contextGlobals?.storage.get(n), [...widths.get(n)!][0], [...(loadSigns.get(n) ?? [])][0])
+      ) {
         scalarGlobals.delete(n);
       }
     }
@@ -10488,4 +10498,21 @@ function setEq<X>(a: Set<X>, b: Set<X>): boolean {
     }
   }
   return true;
+}
+
+/** Whether a global's declared storage disagrees with its one access, `width` bytes read or written
+ *  at offset 0 (`signed` for a read, undefined for a write): a bare name then reads or writes what
+ *  the declaration says rather than what the assembly does. An enum, whose size is the compiler's,
+ *  agrees with no access this can prove. A read narrower than a register is compared by sign as
+ *  well, and a declaration that states none (a plain `char`) agrees with neither: its sign is the
+ *  compiler's too. A write stores the same bytes either way. No storage (no declaration, or one
+ *  that is no integer this can read) never disagrees. */
+function storageDisagrees(declared: DeclaredStorage | undefined, width: number, signed: boolean | undefined): boolean {
+  if (declared === undefined) {
+    return false;
+  }
+  if (declared.bytes !== width) {
+    return true;
+  }
+  return width < 4 && signed !== undefined && declared.signed !== signed;
 }
