@@ -25,6 +25,7 @@
 // drops the rest, a mask. A function that reads past them — stores the whole word, compares it,
 // returns it where its own declaration says it returns a value — declines; one whose return
 // nothing declares returns no value instead, where that guessed return is the only such reader.
+import { demandedBits } from '../ir/bits';
 import {
   type Block,
   CALL_RETURN_OBJECT,
@@ -396,89 +397,3 @@ function foldFrameHome(fn: Fn, { block, local, size, word, loaded }: Image): voi
 }
 
 const FULL = 0xffffffff;
-
-/** THE BITS OF `v` ANY READER NEEDS, as a mask: a store of W bytes needs the low 8W bits of the
- *  value it stores, a constant mask and the bitwise ops pass their readers' bits through, a shift
- *  by a constant moves them, an add, a subtract or a multiply needs every bit up to its readers'
- *  highest, since a carry only travels up, and a join needs what its parameter's readers need.
- *  Every other reader — a compare, a call, an address — needs all 32, and so does a join that
- *  reaches itself again. A `ret` needs none where the function's own declaration returns nothing. */
-function demandedBits(fn: Fn, root: Value, voidOwn: boolean): number {
-  const defs = defOpMap(fn);
-  const memo = new Map<Value, number>();
-  const constOf = (x: Value): number | undefined => {
-    const d = defs.get(x);
-    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value >>> 0 : undefined;
-  };
-  const upTo = (d: number): number => (d === 0 ? 0 : d >= 0x80000000 ? FULL : (2 ** (32 - Math.clz32(d)) - 1) >>> 0);
-  const of = (v: Value): number => {
-    const known = memo.get(v);
-    if (known !== undefined) {
-      return known;
-    }
-    memo.set(v, FULL); // a reader reached again through a join needs everything
-    let need = 0;
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        for (const e of op.successors) {
-          e.args.forEach((a, i) => {
-            if (a === v) {
-              need |= of(e.block.params[i]);
-            }
-          });
-        }
-        if (!op.operands.includes(v)) {
-          continue;
-        }
-        const out = () => (op.results.length === 1 ? of(op.results[0]) : FULL);
-        const imm = typeof op.attrs.imm === 'number' && op.operands.length === 1 ? op.attrs.imm : undefined;
-        const other = op.operands.length === 2 ? op.operands[op.operands[0] === v ? 1 : 0] : undefined;
-        switch (op.opcode) {
-          case 'store':
-            need |=
-              op.operands[0] === v || typeof op.attrs.width !== 'number' || op.attrs.width >= 4
-                ? FULL
-                : (1 << (8 * op.attrs.width)) - 1;
-            break;
-          case 'ret':
-            need |= voidOwn ? 0 : FULL;
-            break;
-          case 'and': {
-            const c = other === undefined || other === v ? undefined : constOf(other);
-            need |= c === undefined ? out() : out() & c;
-            break;
-          }
-          case 'or':
-          case 'xor':
-          case 'not':
-            need |= other === v ? FULL : out();
-            break;
-          case 'add':
-          case 'sub':
-          case 'mul':
-          case 'neg':
-            need |= other === v ? FULL : upTo(out());
-            break;
-          case 'shl':
-            need |= imm === undefined ? FULL : out() >>> imm;
-            break;
-          case 'shr_u':
-            need |= imm === undefined ? FULL : (out() << imm) >>> 0;
-            break;
-          case 'shr_s': {
-            const d = out();
-            need |=
-              imm === undefined ? FULL : ((d << imm) | (imm > 0 && d >>> (32 - imm) !== 0 ? 0x80000000 : 0)) >>> 0;
-            break;
-          }
-          default:
-            need |= FULL;
-        }
-        need >>>= 0;
-      }
-    }
-    memo.set(v, need);
-    return need;
-  };
-  return of(root);
-}

@@ -157,6 +157,23 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(cxx('lwz', 'extern int *gN;').source).toContain('return gN;');
   });
 
+  test('a narrow read whose readers need only its own bits agrees with either sign', () => {
+    const lift = (body: string, decl: string) =>
+      decompile('g', `g:\n\tldr\tr1, .L4\n${body}\tbx\tlr\n.L4:\n\t.word\tgN\n`, ARMV4T_AGBCC, {
+        contextGlobals: ctx(decl),
+      }).source;
+    // `return gN & 0x7f;` reads seven bits; `& 0x80` reads the eighth, which a sign does not change
+    expect(lift('\tldrb\tr0, [r1]\n\tmov\tr1, #0x7f\n\tand\tr0, r1\n', 'extern s8 gN;')).not.toContain('&gN');
+    // `& 0x180` reads past the byte, into what the extension fills
+    expect(lift('\tldrb\tr0, [r1]\n\tmov\tr1, #0xc0\n\tlsl\tr1, r1, #0x1\n\tand\tr0, r1\n', 'extern s8 gN;')).toContain(
+      '*(u8 *)&gN',
+    );
+    // a constant shift left moves what its readers need down: `(gN << 4) & 0xff0` needs the byte
+    expect(
+      lift('\tldrb\tr0, [r1]\n\tlsl\tr0, r0, #0x4\n\tlsl\tr0, r0, #0x14\n\tlsr\tr0, r0, #0x14\n', 'extern s8 gN;'),
+    ).not.toContain('&gN');
+  });
+
   test('a narrow read every use of which takes only its own bytes agrees with either sign', () => {
     // mwcc has no sign-extending byte load: `extern s8 gN; return gN;` is lbz + extsb
     expect(ppcExt('lbz', 'extsb', 'extern s8 gN;')).toContain('return (s8)gN;');

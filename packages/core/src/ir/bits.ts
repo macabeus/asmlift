@@ -10,7 +10,7 @@
 // It is a function over `Fn` rather than a closure inside a rendering pass so that a test can ask
 // it directly: reachable only through emitted C, a wrong answer for one opcode reads as a silent
 // wrong address in a row nobody is looking at.
-import { type Block, type Op, type Value, immediateDominators } from './core';
+import { type Block, type Fn, type Op, type Value, defOpMap, immediateDominators } from './core';
 import { NEGATED_ICMP, OPCODES, type OpSig, SWAPPED_ICMP } from './opcodes';
 
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a
@@ -1397,4 +1397,120 @@ const mod = (w: number): number => ((w % WORD) + WORD) % WORD;
 
 function gcdOf(a: number, b: number): number {
   return b === 0 ? Math.abs(a) : gcdOf(b, a % b);
+}
+
+const FULL = 0xffffffff;
+
+/** The low `bits` bits, as a mask. */
+const lowBits = (bits: number): number => (bits >= 32 ? FULL : 2 ** bits - 1);
+
+/** THE BITS OF `root` ANY READER NEEDS, as a mask: a store of W bytes needs the low 8W bits of the
+ *  value it stores, a `zext` of W bits its operand's low W bits its own readers need, a `sext` those
+ *  and its sign bit where they need any bit above, a constant mask and the bitwise ops pass their
+ *  readers' bits through, a shift by a constant moves them, an add, a subtract or a multiply needs
+ *  every bit up to its readers' highest, since a carry only travels up, and a join needs what its
+ *  parameter's readers need. Every other reader — a compare, a call, an address, a shift's count —
+ *  needs all 32, and so does a join that reaches itself again. A `ret` needs none where the
+ *  function's own declaration returns nothing (`voidOwn`), all 32 otherwise. A value nothing reads
+ *  needs none, so a caller that reads no reader out of sight as one asks that apart.
+ *
+ *  Two questions ask it: whether a caller reads a register-returned struct's word past the struct
+ *  (frontend/register-struct-call.ts), and whether any use of a narrow load reads the bits its
+ *  extension fills (structure.ts `extensionImmaterial`). */
+export function demandedBits(fn: Fn, root: Value, voidOwn: boolean): number {
+  const defs = defOpMap(fn);
+  const readers = new Map<Value, Op[]>();
+  const params = new Map<Value, Value[]>();
+  const add = <T>(m: Map<Value, T[]>, v: Value, x: T) => (m.get(v) ?? m.set(v, []).get(v)!).push(x);
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of new Set(op.operands)) {
+        add(readers, v, op);
+      }
+      for (const e of op.successors) {
+        e.args.forEach((a, i) => add(params, a, e.block.params[i]));
+      }
+    }
+  }
+  const memo = new Map<Value, number>();
+  const constOf = (x: Value | undefined): number | undefined => {
+    const d = x === undefined ? undefined : defs.get(x);
+    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value >>> 0 : undefined;
+  };
+  const upTo = (d: number): number => (d === 0 ? 0 : d >= 0x80000000 ? FULL : lowBits(32 - Math.clz32(d)));
+  const of = (v: Value): number => {
+    const known = memo.get(v);
+    if (known !== undefined) {
+      return known;
+    }
+    memo.set(v, FULL); // a reader reached again through a join needs everything
+    let need = 0;
+    for (const p of params.get(v) ?? []) {
+      need |= of(p);
+    }
+    for (const op of readers.get(v) ?? []) {
+      const out = () => (op.results.length === 1 ? of(op.results[0]) : FULL);
+      const imm = typeof op.attrs.imm === 'number' && op.operands.length === 1 ? op.attrs.imm : undefined;
+      const other = op.operands.length === 2 ? op.operands[op.operands[0] === v ? 1 : 0] : undefined;
+      // a shift's constant count, where `v` is only what it shifts
+      const count =
+        other === v || (op.operands.length === 2 && op.operands[1] === v) ? undefined : (imm ?? constOf(other));
+      const width = typeof op.attrs.width === 'number' ? op.attrs.width : undefined;
+      switch (op.opcode) {
+        case 'store':
+          need |= op.operands[0] === v || width === undefined || width >= 4 ? FULL : lowBits(8 * width);
+          break;
+        case 'ret':
+          need |= voidOwn ? 0 : FULL;
+          break;
+        case 'zext':
+          need |= width === undefined ? FULL : out() & lowBits(width);
+          break;
+        case 'sext': {
+          const d = out();
+          need |=
+            width === undefined || width < 1
+              ? FULL
+              : (d & lowBits(width)) | ((d & ~lowBits(width)) >>> 0 !== 0 ? 2 ** (width - 1) : 0);
+          break;
+        }
+        case 'and': {
+          const c = other === v ? undefined : (imm ?? constOf(other));
+          need |= c === undefined ? out() : out() & c;
+          break;
+        }
+        case 'or':
+        case 'xor':
+        case 'not':
+          need |= other === v ? FULL : out();
+          break;
+        case 'add':
+        case 'sub':
+        case 'mul':
+        case 'neg':
+          need |= other === v ? FULL : upTo(out());
+          break;
+        case 'shl':
+          need |= count === undefined || count >= 32 ? FULL : out() >>> count;
+          break;
+        case 'shr_u':
+          need |= count === undefined || count >= 32 ? FULL : (out() << count) >>> 0;
+          break;
+        case 'shr_s': {
+          const d = out();
+          need |=
+            count === undefined || count >= 32
+              ? FULL
+              : ((d << count) | (count > 0 && d >>> (32 - count) !== 0 ? 0x80000000 : 0)) >>> 0;
+          break;
+        }
+        default:
+          need |= FULL;
+      }
+      need >>>= 0;
+    }
+    memo.set(v, need);
+    return need;
+  };
+  return of(root);
 }

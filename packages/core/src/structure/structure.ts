@@ -52,7 +52,7 @@
 // into all of them but one, or into all of them under the `/tail-copies` variation. Regime A keeps
 // the refusal, since its if-recovery already lifts.
 import { globalBaseOf } from '../ir/alias';
-import { type WordCtx, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
+import { type WordCtx, demandedBits, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
 import {
   Block,
   CALL_RETURN_OBJECT,
@@ -3731,7 +3731,7 @@ function structureRanked(
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
-              if (!extensionImmaterial(op, op.attrs.width as number, useSitesOf)) {
+              if (!extensionImmaterial(fn, op, op.attrs.width as number, useSitesOf)) {
                 signedLoads.set(s, op.attrs.signed as boolean);
               }
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
@@ -10602,41 +10602,24 @@ function storageDisagrees(
   }
 }
 
-/** Whether no use of the narrow `load` (`width` bytes) reads the bits its extension fills: every use
- *  takes at most its own bytes — an extension of them (`zext`/`sext` at no more than its bits), or
- *  a store of no more than its bytes — directly or through arithmetic whose low bytes depend on its
- *  operands' low bytes alone (`LOW_BYTES_ONLY`) and whose result is used the same way. A
+/** Whether no use of the narrow `load` (`width` bytes) reads the bits its extension fills: no reader
+ *  of its value needs a bit past its own bytes (`demandedBits`, which follows it through
+ *  arithmetic, masks, shifts and extensions, and across an edge into the join it reaches). A
  *  zero-extending `lbz` whose only use is an `extsb` then reads the byte a signed declaration names,
  *  and its bare name is the same program; so does the read-modify-write `gN += x`, whose `ldrh` /
- *  `add` / `strh` stores the same halfword whichever way the read extended. A load nothing uses is
- *  not one: what reads it is out of sight. Nor is a use that hands it across an edge (a block
- *  argument, which `useSitesOf` counts as its terminator's use): the join it reaches may return or
- *  compare the full extended value. */
-function extensionImmaterial(load: Op, width: number, useSitesOf: ReadonlyMap<Value, readonly UseSite[]>): boolean {
-  const seen = new Set<Value>();
-  const takesOwnBytes = (v: Value): boolean => {
-    if (seen.has(v)) {
-      return true; // a cycle adds no use the walk has not judged
-    }
-    seen.add(v);
-    const uses = (useSitesOf.get(v) ?? []).map((site) => site.op);
-    return (
-      uses.length > 0 &&
-      uses.every((u) =>
-        u.opcode === 'zext' || u.opcode === 'sext'
-          ? (u.attrs.width as number) <= width * 8
-          : u.opcode === 'store'
-            ? u.operands[0] !== v && (u.attrs.width as number) <= width
-            : LOW_BYTES_ONLY.has(u.opcode) &&
-              !(u.opcode === 'shl' && u.operands[1] === v) && // a shift count reads every bit
-              seen.size < 16 &&
-              takesOwnBytes(u.results[0]),
-      )
-    );
-  };
-  return width < 4 && takesOwnBytes(load.results[0]);
+ *  `add` / `strh` stores the same halfword whichever way the read extended, and `gN & 0x7f`. A load
+ *  nothing uses is not one: what reads it is out of sight. A `ret` reads every bit, whatever the
+ *  function returns. */
+function extensionImmaterial(
+  fn: Fn,
+  load: Op,
+  width: number,
+  useSitesOf: ReadonlyMap<Value, readonly UseSite[]>,
+): boolean {
+  const v = load.results[0];
+  return (
+    width < 4 &&
+    (useSitesOf.get(v)?.length ?? 0) > 0 &&
+    (demandedBits(fn, v, false) & ~(2 ** (8 * width) - 1)) >>> 0 === 0
+  );
 }
-
-/** The integer ops whose result's low `n` bytes are a function of their operands' low `n` bytes —
- *  `shl`'s of its shifted operand's, never of its count's. */
-const LOW_BYTES_ONLY: ReadonlySet<string> = new Set(['add', 'sub', 'mul', 'neg', 'not', 'and', 'or', 'xor', 'shl']);
