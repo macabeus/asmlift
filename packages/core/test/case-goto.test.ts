@@ -229,7 +229,7 @@ describe('two arms entering one case: one falls, the other jumps', () => {
     judgedAlike(shipped);
   });
 
-  test('CONTROL: a shared case the dispatch hands a value declines — the jump would skip that copy', () => {
+  test('CONTROL: a shared case the dispatch hands a value declines — the jump would re-run that copy', () => {
     const ir = twoIntoOne({
       into3: '^bb3(%r1)',
       into3b: '^bb3(%r2)',
