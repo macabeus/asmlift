@@ -1566,7 +1566,7 @@ function classifyFrameUses({
             irBlocks,
             { indexed, accessOps },
             { off, through: v },
-            { sum: op.results[0], range: facts.indexRangeOf(other, blk) },
+            { sum: op.results[0], range: facts.addressRangeOf(other, blk, 'narrowest') },
             facts.constOf,
             fail,
           );

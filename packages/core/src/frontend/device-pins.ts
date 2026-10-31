@@ -54,7 +54,7 @@
  *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
  *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
  *  another instruction sequence. */
-import { type RangeCtx, type StridedRange, edgeFacts, signedRange, stridedRange } from '../ir/bits';
+import { type RangeCtx, type StridedRange, edgeFacts, stridedRange } from '../ir/bits';
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -69,13 +69,11 @@ export interface LiteralAddresses {
   /** every value the word `v` may hold, as a strided unsigned interval, or undefined when this
    *  cannot bound it: not only the addresses an address may denote — a runtime index into a frame
    *  object is bounded here too (frame-objects.ts `indexedAccess`); asked `at` the block that reads
-   *  `v`, also under what the branches above that block prove there */
-  addressRangeOf(v: Value, at?: Block): StridedRange | undefined;
-  /** what a runtime index added to a base may hold, as a displacement from that base: the words
-   *  `addressRangeOf` names, or the signed integers they are where that interval is narrower (`lo`
-   *  then below 0: IDO folds `+ 32` into the frame base, and its `i % 32` index is [-32, 31] from
-   *  there, where the words are every word), or undefined where neither bounds it */
-  indexRangeOf(v: Value, at?: Block): StridedRange | undefined;
+   *  `v`, also under what the branches above that block prove there. In the `narrowest` window,
+   *  for an index added to a base: the signed integers those words are where that interval is
+   *  narrower (`lo` then below 0: IDO folds `+ 32` into the frame base, and its `i % 32` index is
+   *  [-32, 31] from there, where the words are every word) */
+  addressRangeOf(v: Value, at?: Block, window?: 'word' | 'narrowest'): StridedRange | undefined;
 }
 
 /** `literalAddrOf`: `const` is the bare pool word, `gaddr` is the same word after the symbol map
@@ -158,14 +156,7 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     defOf,
     constOf,
     literalAddrOf: (v) => literalAddrOf(v),
-    addressRangeOf: (v, at) => stridedRange(rangeCtx, v, at),
-    indexRangeOf: (v, at) => {
-      const words = stridedRange(rangeCtx, v, at);
-      const signed = signedRange(rangeCtx, v, at);
-      return signed !== undefined && (words === undefined || signed.hi - signed.lo < words.hi - words.lo)
-        ? signed
-        : words;
-    },
+    addressRangeOf: (v, at, window) => stridedRange(rangeCtx, v, at, window),
   };
 }
 

@@ -836,31 +836,27 @@ const RANGE_BUDGET = 256;
  *  `(s8)i` is [-128, 127]). Exact is not the point: an answer must hold every word the machine can
  *  compute there, and a wider one only proves less. Asked `at` a block (where `v` is read, or any
  *  block its definition dominates), what the branches above it prove there (`holdsAt`) bounds the
- *  terms they test too: `if (i < 8) a[i]` reads `i` in [0, 7] though `i` is a parameter. */
-export function stridedRange(ctx: RangeCtx, v: Value, at?: Block): StridedRange | undefined {
+ *  terms they test too: `if (i < 8) a[i]` reads `i` in [0, 7] though `i` is a parameter. The
+ *  `narrowest` window answers the signed integers those words are where that interval is narrower,
+ *  `lo` then below 0 — an index straddling zero, IDO's `i % 32` in [-32, 31], that no unsigned
+ *  interval names — for a reader that adds it to a base and moves the sum into words itself. */
+export function stridedRange(
+  ctx: RangeCtx,
+  v: Value,
+  at?: Block,
+  window: 'word' | 'narrowest' = 'word',
+): StridedRange | undefined {
   const holds = at === undefined ? undefined : ctx.holdsAt?.(at);
   const r = integerRange(ctx, v, false, holds);
-  const one = r === undefined ? undefined : intoWord(r);
-  if (one !== undefined || r === undefined) {
-    return one;
+  let words = r === undefined ? undefined : intoWord(r);
+  let signed = r === undefined || window === 'word' ? undefined : intoSigned(r);
+  // the reading that moves each join into one word first, only for a window the first one missed
+  if (r !== undefined && (words === undefined || (window === 'narrowest' && signed === undefined))) {
+    const moved = integerRange(ctx, v, true, holds);
+    words ??= moved === undefined ? undefined : intoWord(moved);
+    signed ??= moved === undefined || window === 'word' ? undefined : intoSigned(moved);
   }
-  const moved = integerRange(ctx, v, true, holds);
-  return moved === undefined ? undefined : intoWord(moved);
-}
-
-/** `stridedRange` as signed words: every value `v` may hold read as an integer in the signed window,
- *  or undefined when this cannot bound it there. Where the words straddle zero (IDO's `i % 32`,
- *  [-32, 31]) no unsigned interval names them, and this one does. */
-export function signedRange(ctx: RangeCtx, v: Value, at?: Block): StridedRange | undefined {
-  const holds = at === undefined ? undefined : ctx.holdsAt?.(at);
-  for (const wordFirst of [false, true]) {
-    const r = integerRange(ctx, v, wordFirst, holds);
-    const s = r === undefined ? undefined : intoSigned(r);
-    if (s !== undefined || r === undefined) {
-      return s;
-    }
-  }
-  return undefined;
+  return signed !== undefined && (words === undefined || signed.hi - signed.lo < words.hi - words.lo) ? signed : words;
 }
 
 /** An integer range moved into one unsigned word, or undefined when it crosses a multiple of
