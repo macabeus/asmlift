@@ -515,6 +515,49 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeAt(blocks, q, join)).toEqual({ lo: 0, hi: 6, stride: 1 });
   });
 
+  test('a join of two updates that a signed latch tests is bounded, whichever param is asked first', () => {
+    // `k = 0; do { if (gx) k += 1; else k += 2; m = (u8)k; a[m]; } while (k < 8)`: the latch and the
+    // index read the join `k2 = phi(k + 1, k + 2)`, not the header's `k`. Asked first, `k2` opens
+    // the cycle, and `k` read inside it must still be proven from its own start
+    const build = (n: number, second: 'add' | 'load') => {
+      const entry = block();
+      const q = v();
+      const head = block([q]);
+      const [one, two] = [block(), block()];
+      const t = v();
+      const join = block([t]);
+      const exit = block();
+      br(entry, head, [k(entry, 0)]);
+      condBr(head, head.op('load', { off: 0, width: 4 }, [v()]), [one, []], [two, []]);
+      br(one, join, [one.op('add', {}, [q, k(one, 1)])]);
+      br(two, join, [
+        second === 'add'
+          ? two.op('add', {}, [q, k(two, 2)])
+          : two.op('load', { off: 0, width: 4, signed: true }, [v()]),
+      ]);
+      condBr(join, join.op('icmp_slt', {}, [t, k(join, n)]), [head, [t]], [exit, []]);
+      return { blocks: [entry, head, one, two, join, exit], q, t, m: u8Of(join, t) };
+    };
+    const g = build(8, 'add');
+    expect(rangeIn(g.blocks, g.t)).toEqual({ lo: 1, hi: 9, stride: 1 });
+    expect(rangeIn(g.blocks, g.m)).toEqual({ lo: 1, hi: 9, stride: 1 });
+    expect(rangeIn(g.blocks, g.q)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // one context asked in either order answers the same
+    const both = literalAddresses(g.blocks, undefined);
+    expect([both.addressRangeOf(g.t), both.addressRangeOf(g.q)]).toEqual([
+      { lo: 1, hi: 9, stride: 1 },
+      { lo: 0, hi: 7, stride: 1 },
+    ]);
+    // the control `k < 15` reaches 16, past a 16-byte array
+    const x = build(15, 'add');
+    expect(rangeIn(x.blocks, x.t)).toEqual({ lo: 1, hi: 16, stride: 1 });
+    // an arm that passes a loaded word: the latch bounds the join on one side only, and nothing
+    // bounds the other, so neither param is proven
+    const w = build(8, 'load');
+    expect(rangeIn(w.blocks, w.t)).toBeUndefined();
+    expect(rangeIn(w.blocks, w.q)).toBeUndefined();
+  });
+
   test('asked at a block, a value is read under the tests on the way in', () => {
     // `void q(u32 i) { if (i < 8) a[i * 2 + 1]; }`: a parameter bounds nothing, but not in the arm
     const entry = block([v()]);

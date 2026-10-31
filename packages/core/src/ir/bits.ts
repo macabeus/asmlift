@@ -1021,6 +1021,17 @@ function integerRange(
       if (proven !== undefined && (out === undefined || proven.hi - proven.lo < out.hi - out.lo)) {
         out = wordFirst ? (intoWord(proven) ?? proven) : proven;
       }
+      // met inside a loop through a param of its cycle that was asked first, the reading above saw
+      // that param as nothing, and the induction that bounds the loop never ran: `k` read from
+      // `k2 = phi(k + 1, k + 2)`, the value a signed latch tests, is only the latch's one side.
+      // Its own question runs it from its own in-edges (`ownRange`); each answer covers every
+      // value, and the narrower is kept.
+      if ([...cyclic].some((x) => x !== t)) {
+        const own = ownRange(ctx, t, wordFirst);
+        if (own !== undefined && (out === undefined || own.hi - own.lo < out.hi - out.lo)) {
+          out = own;
+        }
+      }
       return out;
     } finally {
       open.delete(t);
@@ -1163,6 +1174,41 @@ function integerRange(
   // its edge proves; a point no value can reach (`null`) is answered as nothing proven
   return rangeOf(v, holds === undefined || holds.length === 0 ? NO_FACTS : factsOf(holds)) ?? undefined;
 }
+
+/** Each block param's range as its own question, asked from it with nothing open, holding nothing
+ *  assumed and read under no fact (`integerRange`), kept per range context and reading (index 1:
+ *  `wordFirst`). A param's range does not depend on where it is asked — it covers every value the
+ *  param takes — so the answer serves every question that meets the param, and one met inside a
+ *  question that opened another param of the same loop reads it here (`integerRange`). A question
+ *  already under way answers nothing to a question it meets again, which only proves less. */
+const ownRanges = new WeakMap<RangeCtx, [Map<Value, StridedRange | undefined>, Map<Value, StridedRange | undefined>]>();
+function ownRange(ctx: RangeCtx, p: Value, wordFirst: boolean): StridedRange | undefined {
+  let byReading = ownRanges.get(ctx);
+  if (byReading === undefined) {
+    byReading = [new Map(), new Map()];
+    ownRanges.set(ctx, byReading);
+  }
+  const known = byReading[wordFirst ? 1 : 0];
+  if (known.has(p)) {
+    return known.get(p);
+  }
+  if (ownDepth >= OWN_DEPTH) {
+    return undefined; // past the nesting it may run to: nothing, and nothing is kept
+  }
+  known.set(p, undefined); // under way: met again, it answers nothing
+  ownDepth++;
+  try {
+    const r = integerRange(ctx, p, wordFirst);
+    known.set(p, r);
+    return r;
+  } finally {
+    ownDepth--;
+  }
+}
+/** The most `ownRange` questions under way at once, one inside another: each is a whole
+ *  `integerRange` with a budget of its own. */
+const OWN_DEPTH = 8;
+let ownDepth = 0;
 
 /** The integers every range in a list holds, and the stride all of them sit on. */
 function hullOf(rs: readonly StridedRange[]): StridedRange | undefined {
