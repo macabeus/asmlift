@@ -20,6 +20,7 @@
 //                  names, and which of those names a declaration must refuse to claim.
 import { cBackend } from './backend/c';
 import {
+  assertCaseGotosNarrow,
   assertDerefsTyped,
   assertFrameUnionsViewed,
   assertLocalStorageStaysInteger,
@@ -1187,6 +1188,7 @@ export function enumerateCandidates(
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
         assertFrameUnionsViewed(alt);
+        assertCaseGotosNarrow(alt);
         sources.push({
           variations,
           source: backend.emit(alt),
@@ -1239,6 +1241,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertLocalStorageStaysInteger(alt, shaped.out);
                 assertFrameUnionsViewed(shaped.out);
+                assertCaseGotosNarrow(shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],

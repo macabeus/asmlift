@@ -9,7 +9,7 @@ import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import { type BinOp, type Expr, type SFn, type Stmt, calleeOf } from './l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, calleeOf, caseGotoViolation } from './l3/ast';
 import {
   assignsIn,
   exprChildren,
@@ -354,15 +354,37 @@ function countEffects(
       total = arms.reduce((acc, a) => sum(acc, a.total), sum(total, dflt.total));
       // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
       // path through arm i runs the chain starting at i — the shape the fall-through round's
-      // CRITICAL took. Built from the end; `chain[i]` is that arm's paths.
-      const chain: PathCounts[] = new Array(arms.length);
-      for (let i = arms.length - 1; i >= 0; i--) {
-        const next = i + 1 < arms.length ? chain[i + 1] : dflt.paths;
-        chain[i] = s.cases[i].fallsThrough ? seq(arms[i].paths, next) : arms[i].paths;
-      }
+      // CRITICAL took. `chain[i]` is that arm's paths. An arm that ends `goto L;` continues into
+      // the arm labelled L instead: the goto is its body's last top-level statement
+      // (`assertCaseGotosNarrow`), so the paths that fall off its end are the goto's, counted here
+      // as `through`. Memoised, since a goto may name an arm above it; a chain that comes back to
+      // an arm it already runs is no tree the structurer builds.
+      const labelled = new Map(s.cases.flatMap((c, i) => (c.label === undefined ? [] : [[c.label, i] as const])));
+      const jumpOf = (body: Stmt[]): number | undefined => {
+        const last = body[body.length - 1];
+        return last?.k === 'goto' ? labelled.get(last.label) : undefined;
+      };
+      const chain: (PathCounts | undefined)[] = new Array(arms.length);
+      const onChain = new Set<number>();
+      const chainAt = (i: number): PathCounts => {
+        const known = chain[i];
+        if (known !== undefined) {
+          return known;
+        }
+        if (onChain.has(i)) {
+          throw new ContractError('a switch whose arms fall or jump round in a cycle');
+        }
+        onChain.add(i);
+        const to = jumpOf(s.cases[i].body) ?? (s.cases[i].fallsThrough ? i + 1 : undefined);
+        const next = to === undefined ? undefined : to < arms.length ? chainAt(to) : dflt.paths;
+        onChain.delete(i);
+        return (chain[i] = next === undefined ? arms[i].paths : seq(arms[i].paths, next));
+      };
+      const dfltTo = s.default ? jumpOf(s.default) : undefined;
+      const dfltChain = dfltTo === undefined ? dflt.paths : seq(dflt.paths, chainAt(dfltTo));
       // No `default` is one more alternative: no arm runs. A `break` leaves the switch, so it
       // continues after it as a fall-off-the-end does.
-      const inner = either(...chain, s.default ? dflt.paths : falls(new Map()));
+      const inner = either(...arms.map((_, i) => chainAt(i)), s.default ? dfltChain : falls(new Map()));
       here = after(own, { through: most(inner.through, inner.brk), ret: inner.ret, brk: null, cont: inner.cont });
     } else if (stmtChildren(s).length > 0) {
       // A loop: its sequenced children (a body, a `for`'s init/inc) counted ONCE — a loop's dynamic
@@ -379,6 +401,9 @@ function countEffects(
       here = { through: null, ret: null, brk: own, cont: null };
     } else if (s.k === 'continue') {
       here = { through: null, ret: null, brk: null, cont: own };
+    } else if (s.k === 'goto') {
+      // the paths through the arm it ends, carried on into the arm it names (the switch above)
+      here = falls(own);
     } else {
       here = falls(own);
     }
@@ -387,12 +412,23 @@ function countEffects(
   return { total, paths };
 }
 
+/** Every `goto` keeps the one form L3 allows it (l3/ast.ts `caseGotoViolation`): the last
+ *  statement of a switch arm's own body, naming a case label of that switch. The effect count
+ *  below reads a goto that way, so a tree outside it is refused before it is counted. */
+export function assertCaseGotosNarrow(sfn: SFn): void {
+  const why = caseGotoViolation(sfn.body);
+  if (why !== null) {
+    throw new ContractError(`'${sfn.name}': ${why}`);
+  }
+}
+
 /**
  * Post structuring: every call and pinned access the asm makes is emitted, and none of those or of
  * its declared volatile reads is emitted more times than the asm makes it on any one path. See the
  * note above for what this deliberately does not cover.
  */
 export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
+  assertCaseGotosNarrow(sfn);
   // Reachable blocks only: an unreachable block's call is legitimately never emitted.
   const seen = reachableBlocks(fn);
   const irCalls: EffectCounts = new Map();
