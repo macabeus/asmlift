@@ -20,6 +20,7 @@ import { demangledName, implicitArgumentWords } from './mangle';
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
   declaredCallArgs,
+  declaredSigned,
   declaredWidth,
   declaresAggregateReturn,
   declaresVoidReturn,
@@ -115,6 +116,25 @@ export interface ContextGlobals {
    *  it. Read through `structNamed`, which is how two spellings of one struct are told to be one:
    *  `typedef struct Q {…} Q;` spells the struct `Q`, `struct Q` and every other alias of it. */
   structTypes: ReadonlyMap<string, string>;
+  /** The storage each object of `declared` that is an integer or a pointer is declared with, its
+   *  typedefs resolved (`declaredWidth`, `declaredSigned`): `extern s32 gN;` is four bytes, signed,
+   *  and `extern u8 *gP;` four bytes whose signedness nothing reads. A bare name reads and writes
+   *  exactly this, so the structurer spells a global bare only where its one access agrees
+   *  (structure.ts, the declaration-shape override): a byte read of `gN` is `*(u8 *)&gN`, never
+   *  `gN`. An enum is an integer whose size the compiler picks (`-fshort-enums`, mwcc's `-enum`),
+   *  so it is here with none. A type this cannot read as an integer — a float, a struct, a typedef
+   *  carrying an attribute, an unexpanded macro — is left out, which keeps the usage-inferred
+   *  spelling: a float read through an integer cast would convert. */
+  storage: ReadonlyMap<string, DeclaredStorage>;
+}
+
+/** What one declared integer or pointer object occupies ({@link ContextGlobals.storage}). */
+export interface DeclaredStorage {
+  /** its size in bytes; undefined for an enum, whose size is the compiler's */
+  bytes: number | undefined;
+  /** whether a read sign-extends it; undefined where the type does not say (a pointer, an enum, a
+   *  plain `char`, whose signedness is the compiler's) */
+  signed: boolean | undefined;
 }
 
 /** The struct or union `spelling` names, qualifiers aside, by the identity `structTypes` keys it
@@ -142,6 +162,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const pointeeVolatiles = new Set<string>();
   const declared = new Set<string>();
   const objectTypes = new Map<string, string>();
+  const storage = new Map<string, DeclaredStorage>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
@@ -159,6 +180,18 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
+      } else if (t.derivations.length === 0 || isPointer(t.derivations[0])) {
+        const r = resolve(t, table.typedefs, ctx.tokens);
+        const spelled = spellType(r, ctx.tokens);
+        const bits = declaredWidth(spelled);
+        if (bits !== undefined) {
+          storage.set(x.name, { bytes: bits / 8, signed: declaredSigned(spelled) });
+        } else if (
+          r.derivations.length === 0 &&
+          (table.enums.has(spelled) || (r.type.kind === 'tag' && r.type.keyword === 'enum'))
+        ) {
+          storage.set(x.name, { bytes: undefined, signed: undefined });
+        }
       }
       if (hasVolatileStorage(t, scope, 0)) {
         volatiles.add(x.name);
@@ -179,7 +212,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       structTypes.set(name, named);
     }
   }
-  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes };
+  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes, storage };
 }
 
 /** The struct or union the typedef `name` stands for (`ContextGlobals.structTypes`): its tag where

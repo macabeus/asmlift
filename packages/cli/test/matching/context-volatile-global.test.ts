@@ -120,6 +120,7 @@ describe.each(BUILDS)('a context-declared volatile aggregate — $name', ({ have
         declared: new Set(),
         objectTypes: new Map(),
         structTypes: new Map(),
+        storage: new Map(),
       });
       expect(source).not.toContain('volatile');
       expect(loads(cand.asm, load), source).toBeLessThan(loads(t.asm, load));

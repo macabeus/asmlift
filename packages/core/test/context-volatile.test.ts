@@ -23,6 +23,7 @@ const AGGREGATES_ONLY: ContextGlobals = {
   declared: new Set(),
   objectTypes: new Map(),
   structTypes: new Map(),
+  storage: new Map(),
 };
 
 /** agbcc -O2 of `void vpoll(void){ while (gV.a == 0); }` */

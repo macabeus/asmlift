@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import { declaredCallArgs, declaredWidth } from '../src/proto';
 import {
+  globalsFromContext,
   ownContextEntry,
   prototypesFromContext,
   splitOwnContext,
@@ -1066,6 +1067,53 @@ describe('declaredWidth', () => {
   test('a function pointer is register-wide', () => {
     expect(declaredWidth('void (*)(s32 channel, s32 result)')).toBe(32);
     expect(declaredWidth('int (*)(void)')).toBe(32);
+  });
+});
+
+// The storage each declared integer or pointer object occupies (`ContextGlobals.storage`): read
+// through its typedef chain, with what the context cannot size left out.
+describe('the declared storage of a context object', () => {
+  const storage = (src: string) => Object.fromEntries(globalsFromContext(src, 'c').storage);
+  test('integers, through their typedefs', () => {
+    expect(
+      storage(
+        'typedef signed char s8; typedef unsigned short u16; typedef int BOOL; typedef BOOL Flag;\n' +
+          'extern s8 gA; extern u16 gB; extern s32 gC; extern Flag gD; extern volatile unsigned char gE;',
+      ),
+    ).toEqual({
+      gA: { bytes: 1, signed: true },
+      gB: { bytes: 2, signed: false },
+      gC: { bytes: 4, signed: true },
+      gD: { bytes: 4, signed: true },
+      gE: { bytes: 1, signed: false },
+    });
+  });
+  test('a pointer is four bytes whose sign nothing reads, and a plain char says no sign', () => {
+    expect(storage('extern u8 *gP; extern void (*gF)(void); extern char gK;')).toEqual({
+      gP: { bytes: 4, signed: undefined },
+      gF: { bytes: 4, signed: undefined },
+      gK: { bytes: 1, signed: undefined },
+    });
+  });
+  test('an enum is an integer of no size this knows', () => {
+    expect(
+      storage(
+        'enum E { A, B }; typedef enum E Et; typedef enum { C } F;\nextern enum E gE; extern Et gT; extern F gF;',
+      ),
+    ).toEqual({
+      gE: { bytes: undefined, signed: undefined },
+      gT: { bytes: undefined, signed: undefined },
+      gF: { bytes: undefined, signed: undefined },
+    });
+  });
+  test('what the context cannot read as an integer is left out', () => {
+    expect(
+      storage(
+        'struct S { int a; }; typedef int W __attribute__((mode(HI))); typedef float f32;\n' +
+          'extern struct S gS; extern float gF; extern f32 gG; extern W gW; extern int gArr[4]; extern Unknown gU;' +
+          ' int fn(int);',
+      ),
+    ).toEqual({});
   });
 });
 
