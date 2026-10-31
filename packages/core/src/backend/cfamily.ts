@@ -559,8 +559,11 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       // and strips its trailing `;` so it sits inside the header (`i = 0; c; i = i + 1`). A multi-line
       // statement (an `if`/nested loop) would render mangled — but the recognizer never builds one here.
       refuseMisboundBreak(s.body, 'loop');
+      // An identity init (`i = i`, structure.ts `forPlanAt`: the name already holds the entry value)
+      // is the empty clause.
       const clause = (st: Stmt) => printStmt(st, '', vt, leaf).join(' ').replace(/;\s*$/, '').trim();
-      const out = [`${indent}for (${clause(s.init)}; ${pe(s.cond, 99)}; ${clause(s.inc)}) {`];
+      const identity = s.init.k === 'assign' && s.init.value.k === 'var' && s.init.value.name === s.init.name;
+      const out = [`${indent}for (${identity ? '' : clause(s.init)}; ${pe(s.cond, 99)}; ${clause(s.inc)}) {`];
       for (const t of s.body) {
         out.push(...printStmt(t, indent + '    ', vt, leaf));
       }
