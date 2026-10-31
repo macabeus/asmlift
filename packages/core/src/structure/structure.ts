@@ -138,7 +138,7 @@ import {
   pointeeFields,
   structFieldInnerExtents,
 } from '../symbols';
-import { analyze, shortCircuitGuardedValues } from './analysis';
+import { type UseSite, analyze, shortCircuitGuardedValues } from './analysis';
 import { ARITH_TO_BIN } from './arith-ops';
 import { makeBitfieldSpelling } from './bitfields';
 import {
@@ -3697,14 +3697,6 @@ function structureRanked(
     const loadsPointer = new Map<string, boolean>();
     /** the sign of a symbol's loads whose extension some use reads (`extensionImmaterial`) */
     const signedLoads = new Map<string, boolean>();
-    const useSites = new Map<Value, Op[]>();
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        for (const o of op.operands) {
-          (useSites.get(o) ?? useSites.set(o, []).get(o)!).push(op);
-        }
-      }
-    }
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -3731,7 +3723,7 @@ function structureRanked(
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
-              if (!extensionImmaterial(op, op.attrs.width as number, useSites)) {
+              if (!extensionImmaterial(op, op.attrs.width as number, useSitesOf)) {
                 signedLoads.set(s, op.attrs.signed as boolean);
               }
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
@@ -10605,9 +10597,11 @@ function storageDisagrees(
  *  takes at most its own bytes — an extension of them (`zext`/`sext` at no more than its bits), or
  *  a store of no more than its bytes. A zero-extending `lbz` whose only use is an `extsb` then reads
  *  the byte a signed declaration names, and its bare name is the same program. A load nothing uses
- *  is not one: what reads it is out of sight. */
-function extensionImmaterial(load: Op, width: number, useSites: ReadonlyMap<Value, readonly Op[]>): boolean {
-  const uses = useSites.get(load.results[0]) ?? [];
+ *  is not one: what reads it is out of sight. Nor is a use that hands it across an edge (a block
+ *  argument, which `useSitesOf` counts as its terminator's use): the join it reaches may return or
+ *  compare the full extended value. */
+function extensionImmaterial(load: Op, width: number, useSitesOf: ReadonlyMap<Value, readonly UseSite[]>): boolean {
+  const uses = (useSitesOf.get(load.results[0]) ?? []).map((site) => site.op);
   return (
     width < 4 &&
     uses.length > 0 &&

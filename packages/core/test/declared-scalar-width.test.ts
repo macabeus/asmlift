@@ -135,6 +135,25 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(ppc('lbz', 'extern s8 gN;')).toContain('return *(u8 *)&gN;');
   });
 
+  test('a narrow read handed across an edge compares the sign: the join may return the extended value', () => {
+    // `u32 x = *(u8 *)&gN; gM = x; if (c) x = 7; return x;` — the store takes one byte, the join
+    // returns all four, and over `extern s8 gN;` the bare name would return them sign-extended
+    const stored =
+      'g:\n\tldr\tr1, .L4\n\tldrb\tr2, [r1]\n\tldr\tr1, .L4+0x4\n\tstrb\tr2, [r1]\n\tcmp\tr0, #0\n' +
+      '\tbeq\t.L3\n\tmov\tr2, #0x7\n.L3:\n\tadd\tr0, r2, #0\n\tbx\tlr\n.L4:\n\t.word\tgN\n\t.word\tgM\n';
+    const lift = (asm: string, decl: string) =>
+      decompile('g', asm, ARMV4T_AGBCC, { contextGlobals: ctx(decl) }).source;
+    expect(lift(stored, 'extern s8 gN; extern u8 gM;')).toContain('*(u8 *)&gN');
+    expect(lift(stored, 'extern u8 gN; extern u8 gM;')).not.toContain('&gN');
+    // `u8 v = *(u8 *)&gN; s32 r = v; if (c) r = (s8)v; return r;` — the sext is one use, the
+    // unextended value reaching the join the other
+    const extended =
+      'g:\n\tldr\tr1, .L4\n\tldrb\tr1, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tlsl\tr0, r1, #0x18\n' +
+      '\tasr\tr1, r0, #0x18\n.L3:\n\tadd\tr0, r1, #0\n\tbx\tlr\n.L4:\n\t.word\tgN\n';
+    expect(lift(extended, 'extern s8 gN;')).toContain('*(u8 *)&gN');
+    expect(lift(extended, 'extern u8 gN;')).not.toContain('&gN');
+  });
+
   test('ido: an offset-0 narrow read, a store and a signed read of a u8 take the address', () => {
     expect(mips('lbu', 'extern s32 gN;')).toContain('return *(u8 *)&gN;');
     expect(mips('lb', 'extern u8 gN;')).toContain('return *(s8 *)&gN;');
