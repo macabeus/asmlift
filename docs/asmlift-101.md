@@ -202,7 +202,7 @@ reverse — each level is closer to _source_:
   `u32`/pointer types. The _boundary contract_ `assertTypesRecovered` refuses to pass any
   lingering `unknown` downward.
 - **L3** — a language-**neutral** structured AST: `if`/`while`/`switch`/expressions, no
-  registers, no goto. The contract into L3 is the structurer refusing any CFG shape it cannot
+  registers, and no goto but one narrow kind (§2.7). The contract into L3 is the structurer refusing any CFG shape it cannot
   prove structured.
 
 The levels are **enforced contracts, not folders** — a verifier (`ir/verify.ts`) runs after
@@ -279,7 +279,15 @@ and a `goto` is almost never that shape. The one it spells without a `goto` is a
 exit past the code after it (`for (j…) { if (hit) goto next; } k(i); next:;`): a flag set before a
 `break` and tested after the loop (`TwoLevelExit` in `structure.ts`). That lift is exact but not
 byte-matching — the `synthetic:brk2lvl` rows' own `goto` source is what reproduces their bytes, on
-all five toolchains. The structurer lives in
+all five toolchains.
+
+**The one goto L3 holds** is a jump to a case label of the switch it sits in, from the end of
+another arm of that switch (`goto` in `l3/ast.ts`, contract `caseGotoViolation`). It is the
+source's own spelling where two arms run on into one case's body and C fall-through reaches only
+one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`, kleod `sub_0800D188`); the
+structurer writes it only where every goto-free reading of the jump table declines
+(`jumpSharedFallTargets` in `structure/switch-recover.ts`), and the Pascal backend refuses it. No
+other goto is representable. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.
