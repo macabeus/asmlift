@@ -1303,6 +1303,25 @@ export function switchArmSuccessors(sw: Extract<Stmt, { k: 'switch' }>): (number
   ];
 }
 
+/** Does a case-label `goto` of this switch land on an arm LAID OUT AT OR ABOVE the arm it ends —
+ *  a BACK EDGE with no loop statement around it? Then the arm it lands on runs AFTER the jumping
+ *  arm, so preorder stops being execution order inside the switch's own range, exactly as it does
+ *  inside a loop body; a pass that reads preorder as liveness must count such a switch with the
+ *  loops (l3/coalesce.ts `spans`). Positions are the layout {@link stmtChildren} walks: the
+ *  `default` sits at `defaultAt`. A fall-through only ever runs on DOWNWARD, so only the jumps are
+ *  asked. */
+export function switchJumpsBack(sw: Extract<Stmt, { k: 'switch' }>): boolean {
+  const at = sw.defaultAt ?? sw.cases.length;
+  const laidOut = (arm: number): number => (arm === sw.cases.length ? at : arm < at ? arm : arm + 1);
+  const labelled = new Map(sw.cases.flatMap((c, i) => (c.label === undefined ? [] : [[c.label, i] as const])));
+  const bodies = [...sw.cases.map((c) => c.body), sw.default ?? []];
+  return bodies.some((body, i) => {
+    const last = body[body.length - 1];
+    const to = last?.k === 'goto' ? labelled.get(last.label) : undefined;
+    return to !== undefined && laidOut(to) <= laidOut(i);
+  });
+}
+
 /** The nested statement LISTS of a statement — the SCOPES it opens.
  *
  *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those

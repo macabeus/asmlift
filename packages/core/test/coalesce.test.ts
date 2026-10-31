@@ -443,6 +443,36 @@ describe('the loop rule', () => {
     expect(r.candidates).toHaveLength(0);
     expect(r.refusals.get('shared-loop')).toBeGreaterThan(0);
   });
+
+  // A case-label `goto` aimed at an arm laid out ABOVE it is a back edge with no loop statement:
+  // case 4 writes `b` and jumps to case 2, which reads `a`, after the write. Preorder puts the read
+  // first, so `overlap` alone admits the pair, and the merge makes case 2 read case 4's value.
+  const caseArm = (values: number[], body: Stmt[], label?: string) => ({
+    values,
+    body,
+    fallsThrough: false,
+    ...(label !== undefined ? { label } : {}),
+  });
+  const jumpTo2: Stmt = { k: 'goto', label: 'case_2' };
+  const gotoSwitch = (jumpUp: boolean): Stmt => ({
+    k: 'switch',
+    scrutinee: rd('s'),
+    cases: jumpUp
+      ? [caseArm([2], [use('a')], 'case_2'), caseArm([4], [asg('b', 2), use('b'), jumpTo2])]
+      : [caseArm([4], [use('a'), jumpTo2]), caseArm([2], [asg('b', 2), use('b')], 'case_2')],
+  });
+
+  test('a case-label `goto` UP to an arm above it runs that arm after the jumping one: no merge', () => {
+    const r = run([asg('a', 7), gotoSwitch(true)]);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('shared-loop')).toBeGreaterThan(0);
+  });
+
+  test('a case-label `goto` DOWN to an arm below it keeps preorder as execution order: the pair merges', () => {
+    const out = run([asg('a', 7), gotoSwitch(false)]).candidates;
+    expect(out).toHaveLength(1);
+    expect(names(out[0].sfn)).toEqual(['b']);
+  });
 });
 
 // ── the induction-variable model ───────────────────────────────────────────────────────────
