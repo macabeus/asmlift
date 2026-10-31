@@ -404,10 +404,12 @@ export function copySharedFallTargets(
  *  is read for itself and may fall on, break, or leave sideways, since the jump does not write it
  *  out again.
  *
- *  WHO FALLS is the copies' question and has the copies' answer, read from the one place both
- *  ask it (`sharedFallTargets`): the entrant the caller's arm-order policy puts directly above the
- *  sibling keeps its fall-through where `faller` is set, and `onFallerKept` fires when it does;
- *  every other entrant jumps.
+ *  WHO FALLS is read from the one place the copies ask it too (`sharedFallTargets`), but with no
+ *  choice in it: the entrant the caller's arm-order policy puts directly above the sibling always
+ *  keeps its fall-through, and every other entrant jumps. A `goto` from that arm would land on the
+ *  label directly below it, a path its plain fall-through already spells, so it is a jump goto-free
+ *  C does not need (asmlift-101 §2.7). `/tail-copies`' setting of `faller` asks which entrant the
+ *  SOURCE wrote the body under, a question a jump does not have: it writes no body.
  *
  *  ONLY INTO A CASE ARM: the sibling is in `order`, never `dflt`, since only a case arm carries a
  *  label (l3/ast.ts `SwitchCase.label`) — and, given `only`, only into those siblings (`/case-goto`
@@ -426,16 +428,14 @@ export function jumpSharedFallTargets(
   order: readonly Block[],
   dflt: Block | null,
   exitOf: ReadonlyMap<Block, ArmExit>,
-  faller: boolean,
-  onFallerKept?: () => void,
   only?: ReadonlySet<Block>,
 ): Map<Block, ArmExit> {
   const out = new Map(exitOf);
-  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, faller)) {
+  for (const { to, movers } of sharedFallTargets(order, dflt, exitOf, true)) {
     if (to === dflt || !order.includes(to) || (only !== undefined && !only.has(to))) {
       continue;
     }
-    for (const [e, x] of movers(onFallerKept)) {
+    for (const [e, x] of movers()) {
       out.set(e, { kind: 'goto', to, breaks: x.breaks, region: x.region });
     }
   }
