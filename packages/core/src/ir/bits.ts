@@ -1119,10 +1119,10 @@ function integerRange(
             return undefined;
           }
           passed.push(range);
-          // only a bound on the param's own form can be where it settles: an edge also carries what
-          // the tests above it prove of a loaded global or a dispatch value, which bound other words
+          // only a bound on a value computed from the param can be where it settles: an edge also
+          // carries what the tests above it prove of a loaded global or a dispatch value
           facts.forEach((b, x) => {
-            if (linearTerms(ctx, x)?.get(t)) {
+            if (computedFrom(x, t)) {
               named.push(...boundSides(b));
             }
           });
@@ -1137,6 +1137,32 @@ function integerRange(
       r = round === 0 ? hullOf([next, ...named]) : next;
     }
     return undefined;
+  };
+  /** Whether `x` is computed from the param `t` by arithmetic: through the operands of what defines
+   *  it, and through what a block param's in-edges pass (a join of `k + 1` and `k + 2` is computed
+   *  from `k`), but never through memory, whose word a load reads whatever address it took. */
+  const computedFrom = (x: Value, t: Value): boolean => {
+    const seen = new Set<Value>();
+    const work = [x];
+    while (work.length > 0 && seen.size < RANGE_BUDGET) {
+      const y = work.pop()!;
+      if (y === t) {
+        return true;
+      }
+      if (seen.has(y)) {
+        continue;
+      }
+      seen.add(y);
+      const d = ctx.defs.get(y);
+      if (d !== undefined) {
+        if (!READS_MEMORY.has(d.opcode)) {
+          work.push(...d.operands);
+        }
+      } else {
+        ctx.incoming.get(y)?.forEach((e) => e.arg !== undefined && work.push(e.arg));
+      }
+    }
+    return false;
   };
   /** What one in-edge passes, read under what its branch proves (`facts`, returned beside it).
    *  Every value the argument reads is the instance the branch tested, so a bound on it holds
@@ -1232,6 +1258,15 @@ const NO_FACTS: Facts = new Map();
 
 const S_MIN = -(2 ** 31);
 const S_MAX = 2 ** 31 - 1;
+
+/** The ops whose result is a word read from memory or handed back by a callee (the registry's
+ *  `reads` and `effects`), not computed from their operands: `integerRange`'s `computedFrom` reads
+ *  no further. */
+const READS_MEMORY: ReadonlySet<string> = new Set(
+  Object.entries(OPCODES as Record<string, OpSig>)
+    .filter(([, sig]) => sig.reads === true || sig.effects === true)
+    .map(([op]) => op),
+);
 
 /** The rounds an induction hypothesis may grow before it proves nothing. */
 const INDUCTION_ROUNDS = 4;

@@ -476,6 +476,19 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     const blocks = [entry, head, latch, exit];
     expect(rangeIn(blocks, q)).toEqual({ lo: 0, hi: 7, stride: 1 });
     expect(rangeIn(blocks, u8Of(head, q))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // the latch tests a join of `k + 2` and `k + 1`, which is computed from the counter though its
+    // own form names only itself: `for (k = 0; k < 27; ) { if (gA[k & 15] & 1) { k += 2; continue; } k++; }`
+    const e2 = block();
+    const q2 = v();
+    const h2 = block([q2]);
+    const t2 = v();
+    const j2 = block([t2]);
+    const x2 = block();
+    br(e2, h2, [k(e2, 0)]);
+    const odd = h2.op('load', { off: 0, width: 4 }, [h2.op('and', { imm: 15 }, [q2])]);
+    condBr(h2, odd, [j2, [h2.op('add', {}, [q2, k(h2, 2)])]], [j2, [h2.op('add', {}, [q2, k(h2, 1)])]]);
+    condBr(j2, j2.op('icmp_sle', {}, [t2, k(j2, 26)]), [h2, [t2]], [x2, []]);
+    expect(rangeIn([e2, h2, j2, x2], q2)).toEqual({ lo: 0, hi: 26, stride: 1 });
   });
 
   test('a test at the top of the body still holds past an if/else that joins before the latch', () => {
