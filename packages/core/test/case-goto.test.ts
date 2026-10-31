@@ -1,16 +1,24 @@
 // THE CASE-LABEL GOTO (l3/ast.ts `goto`): the one goto L3 holds, a jump from the end of a switch arm to
-// a case label of THAT switch. These pin its contract (`caseGotoViolation`, which contracts.ts
-// `assertCaseGotosNarrow` and the C-family printer both ask), how the C family prints it and that
-// Pascal refuses it, and how the effect contract counts a path that takes it. Hand-built trees: the
-// point is the rule itself, whatever the structurer produces.
+// a case label of THAT switch. The first half pins its contract (`caseGotoViolation`, which
+// contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask), how the C family prints it
+// and that Pascal refuses it, and how the effect contract counts a path that takes it, on hand-built
+// trees. The second half is its producer (switch-recover.ts `jumpSharedFallTargets`, structure.ts THE
+// JUMPS): jump tables where two arms enter one case's body and the copies refuse, each judged
+// against its own IR by the trace oracle (`irAgreement`), and the shapes that must stay declined.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved } from '../src/contracts';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseGotoViolation } from '../src/l3/ast';
+import { readabilityRewrites } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const call = (fn: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn, args: [] } });
 const v = (name: string) => ({ k: 'var', name }) as const;
@@ -129,5 +137,111 @@ describe('assertEffectsPreserved over a goto', () => {
   test('a call the jumping arm and the target arm both run is two on that path', () => {
     const s = sw([arm([1], [call('h'), { k: 'goto', label: 'L3' }]), arm([3], [call('h')], { label: 'L3' })]);
     expect(() => assertEffectsPreserved(irCalling(['h']), sfnWith([s]))).toThrow(/emitted 2 calls to 'h' on one path/);
+  });
+});
+
+// ── the producer ──────────────────────────────────────────────────────────────────────────────────
+
+const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
+
+/** Cases 1 and 2 each call, then `break` on a test of the second parameter or else run on into case 3's body, which itself
+ *  falls into case 4: `case 3: s(); case 4: t(); break;`. The copies refuse a sibling that falls on,
+ *  so only the jump spells the two entrants. `into3` is the block both enter; `case3Edge` the
+ *  dispatch's own edge into it. */
+const twoIntoOne = ({ into3 = '^bb3()', into3b = '^bb3()', bb3 = '^bb3():', case3Edge = '^bb3()' } = {}) => `fn gj {
+^bb0(%0: s32, %1: s32):
+  %9: s32 = const {value=7}
+  switch_br %0, ^bb1(), ^bb2(), ${case3Edge}, ^bb4(), ^bb5() {cases=[1;2;3;4]}
+^bb1():
+  %r1: s32 = call %0 {target="a"}
+  %z1: s32 = const {value=0}
+  %c1: u32 = icmp_slt %1, %z1
+  cond_br %c1, ^bb6(), ${into3}
+^bb2():
+  %r2: s32 = call %0 {target="b"}
+  %z2: s32 = const {value=2}
+  %c2: u32 = icmp_slt %1, %z2
+  cond_br %c2, ^bb6(), ${into3b}
+${bb3}
+  %3: s32 = call %0 {target="s"}
+  br ^bb4()
+^bb4():
+  %4: s32 = call %0 {target="t"}
+  br ^bb6()
+^bb5():
+  %5: s32 = call %0 {target="d"}
+  br ^bb6()
+^bb6():
+  ret
+}`;
+
+/** No seed the oracle could run disagrees, and it could run most of them (a seed whose IR trace
+ *  reads an undefined value is skipped on both sides). */
+const judgedAlike = (r: { judged: number; disagree: number }): void => {
+  expect(r.disagree).toBe(0);
+  expect(r.judged).toBeGreaterThan(SEEDS.length / 2);
+};
+
+const lifted = (ir: string, opts: Parameters<typeof structure>[1] = {}) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn, opts);
+  const shipped = readabilityRewrites(sfn);
+  return {
+    src: cBackend.emit(shipped),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, shipped, SEEDS),
+  };
+};
+
+describe('two arms entering one case: one falls, the other jumps', () => {
+  test('the arm above the shared case falls, the other ends `goto`, and the program is the IR', () => {
+    const { src, agreement, shipped } = lifted(twoIntoOne());
+    expect(src).toMatch(/case 1:\n\s*a\(a0\);\n\s*if \(a1 < 0\) break;\n\s*goto case_3;\n\s*case 2:/);
+    expect(src).toMatch(
+      /case 2:\n\s*b\(a0\);\n\s*if \(a1 < 2\) break;\n\s*case 3:\n\s*case_3:\n\s*s\(a0\);\n\s*case 4:/,
+    );
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('the oracle sees the jump: the label moved one arm down disagrees', () => {
+    const fn = parse(twoIntoOne());
+    verify(fn);
+    recoverTypes(fn);
+    const sfn = structure(fn, {});
+    const sw = sfn.body.find((x) => x.k === 'switch');
+    expect(sw?.k).toBe('switch');
+    const cases = (sw as Extract<Stmt, { k: 'switch' }>).cases;
+    const label = cases[2].label;
+    expect(label).toBe('case_3');
+    cases[3].label = label;
+    delete cases[2].label;
+    expect(irAgreement(twoIntoOne(), sfn, SEEDS).disagree).toBeGreaterThan(0);
+  });
+
+  test('under `/tail-copies` every entrant jumps, the same program', () => {
+    const { src, agreement, shipped } = lifted(twoIntoOne(), { copyEveryTailEntrant: true });
+    expect(src.match(/goto case_3;/g)?.length).toBe(2);
+    judgedAlike(agreement);
+    judgedAlike(shipped);
+  });
+
+  test('CONTROL: a shared case the dispatch hands a value declines — the jump would skip that copy', () => {
+    const ir = twoIntoOne({
+      into3: '^bb3(%r1)',
+      into3b: '^bb3(%r2)',
+      bb3: '^bb3(%p: s32):\n  %q: s32 = call %p {target="k"}',
+      case3Edge: '^bb3(%9)',
+    });
+    expect(() => lifted(ir)).toThrow(/case arms do not linearize/);
+  });
+
+  test('CONTROL: a target language with no fall-through gets no jump, and declines as it did', () => {
+    const fn = parse(twoIntoOne());
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, { spellSwitchFallthrough: false })).toThrow(/no fall-through in its case statement/);
   });
 });

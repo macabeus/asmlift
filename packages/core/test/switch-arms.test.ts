@@ -716,12 +716,20 @@ test('…and on a compiler with no layout rule the arm above is the TABLE order�
   expect(out).not.toMatch(/case 3:[^}]*?\n\s*case 0:/);
 });
 
-test('TWO jump-table arms falling into an arm that itself FALLS ON still fail LOUD', () => {
+test('TWO jump-table arms falling into an arm that itself FALLS ON: the arm above falls, the other jumps to its label', () => {
   // The copy is the shared arm's region walked inside each entrant, which spells only where that
-  // region ends the switch. Case 0 running on into case 1 does not, so this stays two-into-one,
-  // and Regime B, which has no second recovery, refuses it as `chainArms` does.
+  // region ends the switch. Case 0 running on into case 1 does not, so the copies leave it
+  // two-into-one, and `chainArms` refuses that. The jump (switch-recover.ts `jumpSharedFallTargets`)
+  // needs nothing of the shared arm: case 3, directly above case 0, keeps its fall-through and case 4
+  // ends `goto` to case 0's label. (Case 0's own `add` is dead — case 1 overwrites r1 — so its body
+  // is empty and the label sits between its `case` label and case 1's.)
   const fallsOn = twoIntoOne.replace('.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L7\n');
-  expect(() => of(fallsOn)).toThrow(/do not linearize/);
+  const out = of(fallsOn);
+  expect(armOrder(out)).toEqual([3, 0, 1, 4, 2]);
+  expect(out).toMatch(
+    /case 3:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+case 0:\s+case_0:\s+case 1:\s+v0 = a1 \+ 2;\s+break;/,
+  );
+  expect(out).toMatch(/case 4:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+goto case_0;\s+case 2:/);
 });
 
 // ── a sibling that LEAVES SIDEWAYS, copied all the same (switch-recover.ts `copySharedFallTargets`) ──
