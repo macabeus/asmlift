@@ -572,7 +572,11 @@ test('two table arms entering one case body: the arm the CASE ORDER puts above i
   // the source wrote is not in the asm (an out-of-case-order source on the same compiler wants this
   // one), so the fan carries both and the differ referees.
   const cands = enumerateCandidates('jt_xjcase', asm, MIPS_GCC, { asmData, prototypes: XJ_MIPS_PROTOS });
-  const copied = cands.filter((c) => hasVariation(c.variations, 'tail-copies'));
+  // (`/case-goto` crossed with it spells the same choice with both entrants jumping to case 2's label
+  // instead, so it is left out here.)
+  const copied = cands.filter(
+    (c) => hasVariation(c.variations, 'tail-copies') && !hasVariation(c.variations, 'case-goto'),
+  );
   expect(copied.length).toBeGreaterThan(0);
   for (const c of copied) {
     expect(c.source).toMatch(
@@ -581,5 +585,13 @@ test('two table arms entering one case body: the arm the CASE ORDER puts above i
   }
   expect(cands.some((c) => !hasVariation(c.variations, 'tail-copies') && /g\(a1\);\s+case 2:/.test(c.source))).toBe(
     true,
-  );
+  ); // `/case-goto`: the arm the default copies case 2 into (case 3) jumps to its label instead
+  expect(
+    cands.some(
+      (c) =>
+        hasVariation(c.variations, 'case-goto') &&
+        !hasVariation(c.variations, 'tail-copies') &&
+        /g\(a1\);\s+case 2:\s+case_2:\s+gOut = a1;\s+break;\s+case 3:\s+h\(a1\);\s+goto case_2;/.test(c.source),
+    ),
+  ).toBe(true);
 });

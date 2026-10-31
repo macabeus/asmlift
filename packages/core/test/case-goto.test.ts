@@ -245,3 +245,55 @@ describe('two arms entering one case: one falls, the other jumps', () => {
     expect(() => structure(fn, { spellSwitchFallthrough: false })).toThrow(/no fall-through in its case statement/);
   });
 });
+
+// `/case-goto` (rank-variations.ts, `jumpToSharedCases`): where the copies fire — case 3 closed, so
+// its body can be copied — the default copies it into case 1 and the option spells case 1's entry as
+// the jump instead; the OFF structuring reports that it copied a case arm (`onCaseCopied`).
+const closedShared = twoIntoOne().replace(
+  '  %3: s32 = call %0 {target="s"}\n  br ^bb4()',
+  '  %3: s32 = call %0 {target="s"}\n  br ^bb6()',
+);
+
+const withOption = (ir: string, jumpToSharedCases: boolean) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  let copied = 0;
+  const sfn = structure(fn, { jumpToSharedCases }, { onCaseCopied: () => copied++ });
+  return {
+    src: cBackend.emit(sfn),
+    copied,
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+describe('/case-goto', () => {
+  test('spells the entrant the default gives a copy as a jump, and the OFF structuring witnesses it', () => {
+    const off = withOption(closedShared, false);
+    expect(off.src).not.toContain('goto');
+    expect(off.src.match(/s\(a0\);/g)?.length).toBe(2);
+    expect(off.copied).toBeGreaterThan(0);
+    const on = withOption(closedShared, true);
+    expect(on.src).toContain('goto case_3;');
+    expect(on.src.match(/s\(a0\);/g)?.length).toBe(1);
+    for (const r of [off, on]) {
+      judgedAlike(r.agreement);
+      judgedAlike(r.shipped);
+    }
+  });
+
+  test('is not witnessed where no case arm is copied, and builds the same tree there', () => {
+    // a plain table: every arm breaks to the code after it
+    const plain = closedShared
+      .replace('cond_br %c1, ^bb6(), ^bb3()', 'cond_br %c1, ^bb6(), ^bb6()')
+      .replace('cond_br %c2, ^bb6(), ^bb3()', 'cond_br %c2, ^bb6(), ^bb6()');
+    const off = withOption(plain, false);
+    expect(off.copied).toBe(0);
+    expect(withOption(plain, true).src).toBe(off.src);
+    // the two-into-one shape the copies refuse: the default already jumps, and nothing was copied
+    const falling = withOption(twoIntoOne(), false);
+    expect(falling.copied).toBe(0);
+    expect(withOption(twoIntoOne(), true).src).toBe(falling.src);
+  });
+});

@@ -1024,6 +1024,40 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: STRUCTURE,
     seeAlso: ['tail-copies'],
   },
+  'case-goto': {
+    title: 'Shared case body entered by `goto`',
+    summary:
+      "every `case` that runs into another case's body the default copies it into ends `goto` to that case instead",
+    detail:
+      "When several `case` arms run on into one other arm's body, by default the arm placed directly above " +
+      'that body keeps falling into it and the others get a copy of it. This leaves the copies out: those ' +
+      'arms end in `goto` to a label on that arm, after its `case` labels. It is the only `goto` asmlift writes.',
+    compilerBehavior:
+      'A compiler that cross-jumps keeps one copy of code that several arms end in, so a copy and a `goto` can ' +
+      'build the same object. agbcc stops that merge short where an arm already formed an address the copy ' +
+      'forms again, and the copy then compiles to more code than the `goto`.',
+    offeredWhen: {
+      when: "Structuring this lift without it copied a case arm's body into another jump-table arm that runs on into it.",
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit:
+        'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; }; extern struct E gE[]; extern s32 gOut; void k(s32);\n' +
+        'void example(s32 lo, s32 hi) { s32 i; for (i = lo; i <= hi; i++) { switch (gE[i].id) { @ default: continue; } break; } }',
+      before:
+        'case 1: if (gE[i].u == 1) continue; if (gE[i].x > 20) continue; gOut = 1; k(i); break; ' +
+        'case 2: if (gE[i + 1].v != 0) continue; case 3: case 4: if (gE[i].x > 20) continue; gOut = 1; k(i); break; ' +
+        'case 7: k(7); break;',
+      after:
+        'case 1: if (gE[i].u == 1) continue; goto case_3; ' +
+        'case 2: if (gE[i + 1].v != 0) continue; case 3: case 4: case_3: if (gE[i].x > 20) continue; gOut = 1; k(i); ' +
+        'break; case 7: k(7); break;',
+      note: 'cases 1 and 2 both run on into the body of cases 3 and 4',
+    },
+    implementedIn: STRUCTURE,
+    seeAlso: ['tail-copies'],
+  },
 
   // ── respell ─────────────────────────────────────────────────────────────────────────────────
   unmerge: {
