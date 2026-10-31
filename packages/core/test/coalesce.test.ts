@@ -238,10 +238,15 @@ describe('arm-disjoint admission', () => {
   // Two locals confined to two different `case` bodies never coexist for the same reason the
   // then/else pair never does, so the same admission applies — UNLESS fall-through joins the two
   // arms onto one path, which is what the `fall-through` gate refuses.
-  const sw = (cases: { values: number[]; body: Stmt[]; fallsThrough?: boolean }[]): Stmt => ({
+  const sw = (cases: { values: number[]; body: Stmt[]; fallsThrough?: boolean; label?: string }[]): Stmt => ({
     k: 'switch',
     scrutinee: { k: 'var', name: 'a' },
-    cases: cases.map((c) => ({ values: c.values, body: c.body, fallsThrough: c.fallsThrough === true })),
+    cases: cases.map((c) => ({
+      values: c.values,
+      body: c.body,
+      fallsThrough: c.fallsThrough === true,
+      ...(c.label !== undefined ? { label: c.label } : {}),
+    })),
   });
 
   test('counters confined to two different case bodies merge', () => {
@@ -296,6 +301,27 @@ describe('arm-disjoint admission', () => {
       ),
     );
     expect(candidates.map((c) => c.merged)).toEqual([]);
+  });
+
+  test('a case-label `goto` joins two arms as a fall-through does, transitively and from above', () => {
+    // case 2 ends `goto case_1;`, and case 1 falls into case 3: z shares a path with x (the
+    // jump's target, laid out ABOVE it) and with y (past the target's own fall-through), and x
+    // falls into y: every pair shares a path, so none merges.
+    const { candidates, refusals } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn(
+        [
+          sw([
+            { values: [1], body: arm('x'), fallsThrough: true, label: 'case_1' },
+            { values: [3], body: arm('y') },
+            { values: [2], body: [...arm('z'), { k: 'goto', label: 'case_1' }] },
+          ]),
+        ],
+        L('x', 'y', 'z'),
+      ),
+    );
+    expect(candidates.map((c) => c.merged)).toEqual([]);
+    expect(refusals.get('fall-through')).toBe(3);
   });
 
   test('a closed arm BREAKS the chain — the pair after it still merges', () => {
