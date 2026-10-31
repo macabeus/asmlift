@@ -8042,9 +8042,13 @@ function structureRanked(
 
     // The guard of a `while (1)` spelled `for` (THE LOOP AS A `for`, at `forPlanAt`): the `for`'s
     // own first test, so it is dropped rather than kept as an `if`.
-    for (const h of [takenB, fallB]) {
+    for (const to of [takenB, fallB]) {
+      // the header, or a pure preheader's `br` into it (A STRENGTH-REDUCED COUNTED LOOP)
+      const into = to.ops[to.ops.length - 1];
+      const pre = !foreverLoops.has(to) && into.opcode === 'br' ? to : undefined;
+      const h = pre === undefined ? to : into.successors[0].block;
       const fl = foreverLoops.get(h);
-      const plan = fl !== undefined && !onStack.has(h) ? forPlanAt(b, fl) : null;
+      const plan = fl !== undefined && !onStack.has(h) ? forPlanAt(b, fl, pre) : null;
       if (plan !== null) {
         onStack.add(h);
         try {
@@ -9176,11 +9180,30 @@ function structureRanked(
   //   • a guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load on
   //     either side read through only where it is evaluated at the test; with no guard, that test
   //     folds to a constant that stays in the loop.
-  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
-  const forPlanAt = (g: Block, fl: ForeverLoopInfo): ForPlan | null => {
+  //
+  // A STRENGTH-REDUCED COUNTED LOOP (gcc 2.7.2's `for (i = lo; i <= hi; i++) … gE[i] …`) needs four
+  // more readings, each taken only for a loop the rerun asks (`ForRanking`), never offered:
+  //   • `pre`, a PURE PREHEADER between the guard and the header: a `br` into the header that only
+  //     the guard enters, whose ops neither touch memory nor trap. Its statements run ahead of the
+  //     `for`, so on the zero-trip path too, which is safe because the exit takes no params: every
+  //     value read past the loop is live across the preheader and holds a name of its own;
+  //   • an IV whose init edge carries no copy, the name already holding the entry value (`a0`,
+  //     the parameter itself): the `for` writes the identity `a0 = a0`, which C prints `for (;`;
+  //   • a materialized latch op whose every use is in the latch (`i + 1`, named because the back
+  //     edge's copies read it twice): the `for` never renders the latch, so the test and the update
+  //     spell it inline;
+  //   • a DERIVED IV: a header param whose init and back-edge args are one pure op F over the IV's
+  //     own two args, every other operand one value from outside the loop (`i << 3` beside `i`). By
+  //     induction over the two edges it holds F(iv) at every entry to the header, so the body opens
+  //     with `p = F(iv);` and the update copies only the IV. The test and the IV's update read no
+  //     derived param.
+  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt; heads: Stmt[] };
+  const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
     const h = fl.header;
     const exit = fl.exit;
     const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
+    const asked = forRank.asked.has(h);
+    const entry = pre ?? g;
     const gterm = g.ops[g.ops.length - 1];
     const lterm = latch?.ops[latch.ops.length - 1];
     // `b`, or the exit where `b` is a relay into it that only `g` enters
@@ -9199,24 +9222,84 @@ function structureRanked(
         ? exit
         : b;
     };
-    const onlyTo = (t: Op | undefined, via: (b: Block) => Block = (b) => b): boolean =>
+    const onlyTo = (t: Op | undefined, via: (b: Block) => Block = (b) => b, into: Block = h): boolean =>
       t?.opcode === 'cond_br' &&
       t.successors.length === 2 &&
-      t.successors.some((sc) => sc.block === h) &&
+      t.successors.some((sc) => sc.block === into) &&
       t.successors.some((sc) => via(sc.block) === exit);
     const guarded = gterm.opcode === 'cond_br';
+    const pureOp = (o: Op): boolean =>
+      !effectful(o) && !orderSensitive(o) && !qualified(o) && opSig(o.opcode)?.traps !== true;
+    // every use of a latch op is in the latch, the back edge's args included
+    const latchLocal = (o: Op): boolean =>
+      o.results.every((r) => (useSitesOf.get(r) ?? []).every((s) => s.blk === latch));
+    // THE DERIVED IV: param j whose init and back-edge args are one pure op over param i's two args,
+    // slot for slot, each other operand one value from outside the loop. By j, with i and the
+    // back-edge instance; an i itself derived is not read.
+    const derivedParams = (initArgs: Value[], backArgs: Value[]): Map<number, { from: number; op: Op }> => {
+      const outside = (v: Value): boolean => {
+        const d = defs.get(v);
+        const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
+        return at === undefined || !fl.body.has(at);
+      };
+      const sameShape = (x: Op, y: Op): boolean =>
+        x.opcode === y.opcode &&
+        x.operands.length === y.operands.length &&
+        x.results.length === 1 &&
+        y.results.length === 1 &&
+        typeEquals(x.results[0].type, y.results[0].type) &&
+        JSON.stringify(Object.entries(x.attrs).sort(([a], [b]) => a.localeCompare(b))) ===
+          JSON.stringify(Object.entries(y.attrs).sort(([a], [b]) => a.localeCompare(b)));
+      const found = new Map<number, { from: number; op: Op }>();
+      h.params.forEach((_, j) => {
+        const dE = defs.get(initArgs[j]);
+        const dB = defs.get(backArgs[j]);
+        if (dE === undefined || dB === undefined || !pureOp(dE) || !pureOp(dB) || !sameShape(dE, dB)) {
+          return;
+        }
+        const ivSlot = (i: number, k: number) => dE.operands[k] === initArgs[i] && dB.operands[k] === backArgs[i];
+        // one value from outside the loop, or two constants of one value
+        const invariant = (x: Value, y: Value): boolean => {
+          const [cx, cy] = [defs.get(x), defs.get(y)];
+          return (x === y && outside(x)) || (cx?.opcode === 'const' && cy?.opcode === 'const' && sameShape(cx, cy));
+        };
+        const from = h.params.findIndex(
+          (_p, i) =>
+            i !== j &&
+            dE.operands.some((_o, k) => ivSlot(i, k)) &&
+            dE.operands.every((o, k) => ivSlot(i, k) || invariant(o, dB.operands[k])),
+        );
+        if (from >= 0) {
+          found.set(j, { from, op: dB });
+        }
+      });
+      return new Map([...found].filter(([, d]) => !found.has(d.from)));
+    };
     if (
       exit === null ||
       latch === undefined ||
       latch === h ||
       fl.body.has(g) ||
-      !(guarded ? onlyTo(gterm, relayed) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
+      (pre !== undefined &&
+        (!asked ||
+          !guarded ||
+          fl.body.has(pre) ||
+          pre.params.length > 0 ||
+          pre.ops[pre.ops.length - 1].opcode !== 'br' ||
+          pre.ops[pre.ops.length - 1].successors[0]?.block !== h ||
+          !(preds.get(pre) ?? []).every((p) => p === g) ||
+          pre.ops.slice(0, -1).some((o) => !pureOp(o) || anchoredAt.has(o)))) ||
+      !(guarded ? onlyTo(gterm, relayed, pre ?? h) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
       !onlyTo(lterm) ||
       exit.params.length > 0 ||
       latch.params.length > 0 ||
       new Set(preds.get(h) ?? []).size !== 2 ||
-      !(preds.get(h) ?? []).every((p) => p === g || p === latch) ||
-      latch.ops.slice(0, -1).some((o) => effectful(o) || qualified(o) || materialize.has(o) || anchoredAt.has(o))
+      !(preds.get(h) ?? []).every((p) => p === entry || p === latch) ||
+      latch.ops
+        .slice(0, -1)
+        .some(
+          (o) => effectful(o) || qualified(o) || (materialize.has(o) && !(asked && latchLocal(o))) || anchoredAt.has(o),
+        )
     ) {
       return null;
     }
@@ -9239,7 +9322,7 @@ function structureRanked(
       const inHeader = at === h && (pure || backArgs.has(v)) && !effectful(d) && !orderSensitive(d);
       return (at === latch || inHeader) && d.operands.every((o) => closed(o, pure || inHeader, seen));
     };
-    const initEdge = successorTo(g, h)!;
+    const initEdge = successorTo(entry, h)!;
     const cond = lterm!.operands[0];
     if (!closed(cond) || !back.args.every((a) => closed(a))) {
       return null;
@@ -9257,7 +9340,7 @@ function structureRanked(
     let initRecs: ReturnType<typeof edgeCopyRecords>;
     try {
       updateRecs = edgeCopyRecords(latch, back);
-      initRecs = edgeCopyRecords(g, initEdge);
+      initRecs = edgeCopyRecords(entry, initEdge);
     } catch (e) {
       if (offered && e instanceof StructureError) {
         return null;
@@ -9269,19 +9352,60 @@ function structureRanked(
         strictGaps.length = gapMark;
       }
     }
-    const iv = updateRecs.length === 1 ? updateRecs[0].name : undefined;
+    // the header params that hold F(iv) (A STRENGTH-REDUCED COUNTED LOOP), by index, each with the
+    // op whose back-edge instance computes it
+    const derived = asked
+      ? derivedParams(initEdge.args as Value[], back.args as Value[])
+      : new Map<number, { from: number; op: Op }>();
+    const derivedNames = new Set([...derived.keys()].map((j) => varName.get(h.params[j])!));
+    const ivRecs = updateRecs.filter((r) => !derivedNames.has(r.name));
+    const iv = ivRecs.length === 1 ? ivRecs[0].name : undefined;
+    const ivAt = h.params.findIndex((p) => varName.get(p) === iv);
     const ivInit = initRecs.find((r) => r.name === iv);
     if (
       iv === undefined ||
-      ivInit === undefined ||
+      (ivInit === undefined && !asked) ||
+      [...derived.values()].some((d) => d.from !== ivAt) ||
       copySetIsCyclic(initRecs) ||
-      initRecs.some((r) => r !== ivInit && exprVars(ivInit.value).has(r.name))
+      (ivInit !== undefined && initRecs.some((r) => r !== ivInit && exprVars(ivInit.value).has(r.name)))
     ) {
+      return null;
+    }
+    // neither the test nor the IV's update reads a derived param
+    const derivedVals = new Set([...derived.keys()].map((j) => h.params[j]));
+    const readsDerived = (v: Value, seen = new Set<Value>()): boolean => {
+      if (derivedVals.has(v)) {
+        return true;
+      }
+      const d = defs.get(v);
+      if (seen.has(v) || d === undefined || !fl.body.has(opBlock.get(d)!)) {
+        return false;
+      }
+      seen.add(v);
+      return d.operands.some((o) => readsDerived(o, seen));
+    };
+    if (derived.size > 0 && (readsDerived(cond) || readsDerived(back.args[ivAt] as Value))) {
       return null;
     }
     const sub = subFor(h.params, back.args as Value[]);
     const inner = latchInnerSub(h, fl.body, [latch]);
-    if (inner.sub.size > 0 || inner.unreadable.size > 0 || readsClobbered(cond, sub, new Set([iv]))) {
+    // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. An
+    // asked loop's latch may hold a materialized op its own reads alone use, which the `for` never
+    // renders at its position, so its test and update spell every latch op inline, and the test is
+    // checked through them for a read of the name the update writes.
+    const inlined = asked && latch.ops.some((o) => materialize.has(o));
+    const clobbered = (v: Value, seen = new Set<Value>()): boolean => {
+      const d = defs.get(v);
+      if (!inlined || sub.has(v) || d === undefined || opBlock.get(d) !== latch) {
+        return readsClobbered(v, sub, new Set([iv]));
+      }
+      if (seen.has(v)) {
+        return false;
+      }
+      seen.add(v);
+      return d.operands.some((o) => clobbered(o, seen));
+    };
+    if (inner.sub.size > 0 || inner.unreadable.size > 0 || clobbered(cond)) {
       return null;
     }
     const entryVals = new Map<Value, Value>();
@@ -9313,7 +9437,7 @@ function structureRanked(
       return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
     };
     if (guarded) {
-      const enterIsTaken = gterm.successors[0].block === h;
+      const enterIsTaken = gterm.successors[0].block === (pre ?? h);
       if (!sameAtEntry(cond, gterm.operands[0], entryVals, enterIsTaken !== contIsTaken, atTest)) {
         return null;
       }
@@ -9327,21 +9451,53 @@ function structureRanked(
       hooks.onForOffered?.();
       return null;
     }
-    const [inc] = argAssigns(latch, h);
-    const inits = argAssigns(g, h);
-    const init = inits.find((st) => st.k === 'assign' && st.name === iv);
+    const latchExpr = (s: Map<Value, string> | null) => {
+      const base = s === null ? expr : exprWith(s);
+      const e = (v: Value): Expr => {
+        const d = defs.get(v);
+        return d !== undefined && opBlock.get(d) === latch && s?.has(v) !== true ? lowerDef(d, e) : base(v);
+      };
+      return e;
+    };
+    const ivRec = ivRecs[0];
+    const [inc] =
+      inlined || derived.size > 0
+        ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(ivRec.arg)) }]
+        : argAssigns(latch, h);
+    const inits = [
+      ...(pre !== undefined ? sideEffects(pre) : []),
+      ...argAssigns(entry, h).filter((st) => st.k !== 'assign' || !derivedNames.has(st.name)),
+    ];
+    const init: Stmt | undefined =
+      ivInit === undefined
+        ? { k: 'assign', name: iv, value: { k: 'var', name: iv } }
+        : inits.find((st) => st.k === 'assign' && st.name === iv);
     if (inc?.k !== 'assign' || init === undefined) {
       throw new StructureError(
         `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(h)} lost its update or its init copy`,
       );
     }
-    const test = exprWith(sub)(cond);
+    const ivParam = h.params[ivAt];
+    const heads: Stmt[] = [...derived].map(([j, { op }]) => {
+      const name = varName.get(h.params[j])!;
+      // a latch's constant renders where the head reads it, since the latch never renders
+      const e = (v: Value): Expr => {
+        const d = defs.get(v);
+        if (v === back.args[ivAt]) {
+          return { k: 'var', name: varName.get(ivParam)! };
+        }
+        return d?.opcode === 'const' && opBlock.get(d) === latch ? lowerDef(d, e) : expr(v);
+      };
+      return { k: 'assign', name, value: intoDeclaredTemp(name, lowerDef(op, e)) };
+    });
+    const test = (inlined ? latchExpr(sub) : exprWith(sub))(cond);
     return {
       latch,
       inits: inits.filter((st) => st !== init),
       init,
       cond: contIsTaken ? test : negateCond(test),
       inc,
+      heads,
     };
   };
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null, asFor?: ForPlan): Stmt[] => {
@@ -9385,6 +9541,9 @@ function structureRanked(
       body = withLoop(frame, () => structureBlock(fl.header, asFor?.latch ?? fl.header));
     } finally {
       jumps.forEach((x) => forJumps.delete(x));
+    }
+    if (asFor !== undefined && asFor.heads.length > 0) {
+      body = [...asFor.heads, ...body];
     }
     dwActive.delete(fl.header);
     const loop: Stmt =
