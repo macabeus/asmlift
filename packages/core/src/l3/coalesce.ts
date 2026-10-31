@@ -12,7 +12,15 @@
 // and whether fall-through joins the two arms onto one path. `coalesceCandidates` offers both.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, isLoop, mapExprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
+import {
+  exprChildren,
+  isLoop,
+  mapExprChildren,
+  mentionedName,
+  stmtChildren,
+  stmtExprs,
+  switchArmSuccessors,
+} from './ast';
 import { type Gate, firstRejection } from './gates';
 
 function namesIn(e: Expr, out: Set<string>): void {
@@ -332,8 +340,9 @@ export interface ArmPair {
   b: string;
   /** the confining branch has a loop ancestor, so it can run more than once */
   ifInLoop: boolean;
-  /** control can run from one of the two arms INTO the other — `switch` fall-through, the one
-   *  way two arms of a branch land on a single path. Always false for an `if`. */
+  /** control can run from one of the two arms INTO the other — `switch` fall-through or a
+   *  case-label `goto`, the two ways two arms of a branch land on a single path. Always false for
+   *  an `if`. */
   armsJoined: boolean;
   sameType: boolean;
   /** either local is object-volatile or carries a pointee-volatile qualifier (see MergePair) */
@@ -381,7 +390,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
     id: 'fall-through',
     why: 'a case that runs on into the other arm puts both locals on one path, so they coexist',
     sound: true,
-    guardedBy: 'coalesce.test.ts: two arms joined by fall-through never merge',
+    guardedBy: 'coalesce.test.ts: two arms joined by fall-through never merge; a case-label `goto` joins two arms',
     rejects: (c) => c.armsJoined,
   },
   {
@@ -498,9 +507,10 @@ function mentionIndex(): {
  *  `switch` are one rule here rather than two walkers.
  *
  *  An `if` has exactly two arms and no way to reach one from the other. A `switch`'s arms are its
- *  `case` bodies, and FALL-THROUGH is the one way two of them land on a single path: arm `i` runs
- *  into arm `j` exactly when every arm from `i` up to `j` falls through, so the reach is the
- *  TRANSITIVE chain and not merely the adjacent pair.
+ *  `case` bodies, and two of them land on a single path where one runs on into the other: by
+ *  FALL-THROUGH, or by the case-label `goto` that ends an arm (l3/ast.ts), which lands where a
+ *  fall-through into its target would. The reach is the TRANSITIVE chain of both and not merely
+ *  the adjacent pair.
  *
  *  ITS REACH, MEASURED, because a soundness argument with no corpus witness should say so. Counted
  *  2026-09-19 with a throwaway counter in this walk, over `pnpm bench sweep --fan --map-modes
@@ -522,10 +532,21 @@ const branchArms = (st: Stmt): { arms: Stmt[][]; joined: (i: number, j: number) 
     return { arms: [st.then, st.else], joined: () => false };
   }
   if (st.k === 'switch') {
-    const { cases } = st;
+    // Arm `i` runs on into the arms `switchArmSuccessors` chains it to, by falling through or by the
+    // `goto` that ends it (l3/ast.ts) — two arms on one path either way — so `reach[i]` is that
+    // chain, the `default` included as a node (a case falling into it and jumping out of it puts
+    // both on the path), though never offered as an arm itself.
+    const next = switchArmSuccessors(st);
+    const reach = next.map((_, i) => {
+      const seen = new Set<number>();
+      for (let at = next[i]; at !== undefined && !seen.has(at); at = next[at]) {
+        seen.add(at);
+      }
+      return seen;
+    });
     return {
-      arms: cases.map((c) => c.body),
-      joined: (i, j) => cases.slice(Math.min(i, j), Math.max(i, j)).every((c) => c.fallsThrough),
+      arms: st.cases.map((c) => c.body),
+      joined: (i, j) => reach[i].has(j) || reach[j].has(i),
     };
   }
   return null;
