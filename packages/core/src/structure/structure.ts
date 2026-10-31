@@ -3695,6 +3695,16 @@ function structureRanked(
     const widths = new Map<string, Set<number>>();
     const loadSigns = new Map<string, Set<boolean>>();
     const loadsPointer = new Map<string, boolean>();
+    /** the sign of a symbol's loads whose extension some use reads (`extensionImmaterial`) */
+    const signedLoads = new Map<string, boolean>();
+    const useSites = new Map<Value, Op[]>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        for (const o of op.operands) {
+          (useSites.get(o) ?? useSites.set(o, []).get(o)!).push(op);
+        }
+      }
+    }
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -3721,6 +3731,9 @@ function structureRanked(
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
+              if (!extensionImmaterial(op, op.attrs.width as number, useSites)) {
+                signedLoads.set(s, op.attrs.signed as boolean);
+              }
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
               if (defs.get(op.operands[0])?.opcode === 'gaddr') {
                 loadsPointer.set(s, loadsPointer.get(s) === true || op.results[0].type.kind === 'ptr');
@@ -3785,7 +3798,7 @@ function structureRanked(
             declared,
             {
               width: [...widths.get(n)!][0],
-              signed: [...(loadSigns.get(n) ?? [])][0],
+              signed: signedLoads.get(n),
             },
             { enumBytes, plainCharSigned },
           ),
@@ -10540,7 +10553,9 @@ interface MappedStorage {
 }
 
 /** One global's one access, as the declaration-shape override compares it with a declaration:
- *  `width` bytes at offset 0, and `signed` the extension of a read (undefined for a write). It moves integer bits: no frontend models a float load or store of a
+ *  `width` bytes at offset 0, and `signed` the extension of a read whose extension some use reads
+ *  (undefined for a write, or a read every use of which takes only its own bytes:
+ *  `extensionImmaterial`). It moves integer bits: no frontend models a float load or store of a
  *  global's relocated address (`lwc1`/`swc1` against a `%lo`, `lfs`/`stfs` against a small-data
  *  relocation decline loudly, and agbcc's soft-float helpers refuse an operand loaded from memory:
  *  raise/floathelpers.ts). */
@@ -10584,4 +10599,22 @@ function storageDisagrees(
       return access.width < 4 && access.signed !== undefined && signed !== access.signed;
     }
   }
+}
+
+/** Whether no use of the narrow `load` (`width` bytes) reads the bits its extension fills: every use
+ *  takes at most its own bytes — an extension of them (`zext`/`sext` at no more than its bits), or
+ *  a store of no more than its bytes. A zero-extending `lbz` whose only use is an `extsb` then reads
+ *  the byte a signed declaration names, and its bare name is the same program. A load nothing uses
+ *  is not one: what reads it is out of sight. */
+function extensionImmaterial(load: Op, width: number, useSites: ReadonlyMap<Value, readonly Op[]>): boolean {
+  const uses = useSites.get(load.results[0]) ?? [];
+  return (
+    width < 4 &&
+    uses.length > 0 &&
+    uses.every((u) =>
+      u.opcode === 'zext' || u.opcode === 'sext'
+        ? (u.attrs.width as number) <= width * 8
+        : u.opcode === 'store' && u.operands[0] !== load.results[0] && (u.attrs.width as number) <= width,
+    )
+  );
 }

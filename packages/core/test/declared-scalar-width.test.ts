@@ -45,6 +45,15 @@ const mips = (op: string, decl: string) => {
   return decompile('f', asm, MIPS_IDO, { asmData, contextGlobals: ctx(decl) }).source;
 };
 
+/** mwcc: `op` of the small-data `gN` at offset 0, then `ext` of what it read */
+const ppcExt = (op: string, ext: string, decl: string) =>
+  decompile(
+    'f',
+    `0 <f>:\n   0:\t${op}     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgN\n   4:\t${ext}   r3,r3\n   8:\tblr\n`,
+    PPC_MWCC,
+    { contextGlobals: ctx(decl) },
+  ).source;
+
 /** mwcc: `op` of the small-data `gN` at offset 0 */
 const ppc = (op: string, decl: string) =>
   decompile('f', `0 <f>:\n   0:\t${op}     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgN\n   4:\tblr\n`, PPC_MWCC, {
@@ -116,6 +125,14 @@ describe('a declared scalar whose storage disagrees with its one access', () => 
     expect(agbcc('ldr', 'extern gN;')).toContain('return gN;');
     // a global the context does not declare keeps the usage-inferred spelling
     expect(agbcc('ldrb', 'extern s32 gOther;')).toContain('return gN;');
+  });
+
+  test('a narrow read every use of which takes only its own bytes agrees with either sign', () => {
+    // mwcc has no sign-extending byte load: `extern s8 gN; return gN;` is lbz + extsb
+    expect(ppcExt('lbz', 'extsb', 'extern s8 gN;')).toContain('return (s8)gN;');
+    expect(ppcExt('lbz', 'extsb', 'extern u8 gN;')).toContain('return (s8)gN;');
+    // a use that reads the extension still compares the sign
+    expect(ppc('lbz', 'extern s8 gN;')).toContain('return *(u8 *)&gN;');
   });
 
   test('ido: an offset-0 narrow read, a store and a signed read of a u8 take the address', () => {
