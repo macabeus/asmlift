@@ -2501,7 +2501,7 @@ function failIfSlotKeysIt(
  *  holds (`writerNotKept` says which writers it can hold) — or one per part, where the accesses
  *  prove the bytes are several objects no use reads across (`provenParts`) — and every access
  *  inside it is a cast-spelled access to that array (an element of a part, by its index:
- *  structure.ts `frameArrayElement`), or a view of the union it is declared as where two widths
+ *  structure.ts `framePartDecls`), or a view of the union it is declared as where two widths
  *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
@@ -2641,7 +2641,7 @@ function keepAsOneObject({
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
-  // and the emitter may name them as elements (structure.ts `frameArrayElement`)
+  // and the emitter may name them as elements (structure.ts `framePartDecls`)
   const laddrs = parts.map(({ from: lo, to: hi }) =>
     mkOp('laddr', {
       results: [mkValue(T.unk(32))],

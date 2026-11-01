@@ -12399,7 +12399,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      `keepAsOneObject`), declared as one `u8 sp0[32]` — and a 16-byte image cannot fill that
   //      (l3/constinit.ts `planCopy`). MATCH where the one object splits at each literal-count
   //      memcpy no use reads across (frame-objects.ts `provenParts`), so both images fold, and an
-  //      element of a part is named (`b[5]`, structure.ts `frameArrayElement`; the fold's own
+  //      element of a part is named (`b[5]`, structure.ts `framePartDecls`; the fold's own
   //      element type, l3/constinit.ts `asElement`, for imgswap's signed image there): through a cast
   //      agbcc re-forms sp+0x15 where `b[5]` reads through the base it holds for the memcpy. imgone
   //      (one image) MATCHes. imgnbr keeps the decline: a `u32` handed to `h` beside the image is an
