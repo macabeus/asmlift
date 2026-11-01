@@ -133,6 +133,27 @@ test('a read of the element the fold declares is spelled as that element, not th
   expect(cBackend.emit({ ...both, retType: T.s(8) })).toContain('    g(((u8 *)sp0)[1]);\n');
 });
 
+test('a byte read at the other signedness and converted to the element type is the element', () => {
+  // agbcc has no `ldrsb` with an immediate offset, so `s8 a[4] = {…}; return a[i & 3];` through the
+  // frame base is `ldrb` then `lsl #24; asr #24`: the structurer spells `(s8)((u8 *)sp0)[i & 3]`,
+  // which on the `s8` the image declares is `sp0[i & 3]`
+  const bytes = image([1, -1, 3, 4], 1, true);
+  const idx: Expr = { k: 'bin', op: '&', l: v('a0'), r: c(3) };
+  const read: Expr = { k: 'index', base: { k: 'addr', name: 'sp0' }, idx, width: 1, signed: false };
+  const conv = (to: ReturnType<typeof T.int>): Stmt => ({ k: 'return', value: { k: 'cast', to, e: read } });
+  const folded = foldConstantImages(fn([copy('sp0', '.LC0', 4), conv(T.s(8))], bytes4, bytes));
+  expect(folded.body).toEqual([{ k: 'return', value: { ...read, base: v('sp0'), signed: true, subscript: true } }]);
+  expect(cBackend.emit({ ...fn([copy('sp0', '.LC0', 4), conv(T.s(8))], bytes4, bytes), retType: T.s(32) })).toContain(
+    '    return sp0[a0 & 3];\n',
+  );
+  // …and a conversion to any other type is another value, which keeps the read it converts
+  for (const to of [T.u(8), T.s(16)]) {
+    expect(foldConstantImages(fn([copy('sp0', '.LC0', 4), conv(to)], bytes4, bytes)).body).toEqual([
+      { k: 'return', value: { k: 'cast', to, e: read } },
+    ]);
+  }
+});
+
 test('an image written as a string literal is spelled as one', () => {
   const str = image([0x68, 0x69, 0], 1, false, { string: true });
   expect(

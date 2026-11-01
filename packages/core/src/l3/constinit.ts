@@ -338,17 +338,42 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
  *  signedness keeps its cast, which is the element type it spells. */
 function asElement(e: Expr, by: ReadonlyMap<string, Fold>): Expr {
   const inner = mapExprChildren(e, (c) => asElement(c, by));
-  if (inner.k !== 'index' || (inner.lead?.length ?? 0) > 0 || inner.baseElem !== undefined) {
+  // …and a read of the element's BYTES at the other signedness, converted to the element's own
+  // type, IS the element: `(s8)((u8 *)a)[i]` is `a[i]` on `s8 a[16]`. agbcc has no `ldrsb` with an
+  // immediate offset, so a signed byte read through the frame base is `ldrb` and `lsl #24; asr #24`,
+  // which the lift reads as the unsigned byte sign-extended; C extends the element itself the same
+  // way. Only a conversion to exactly the element type: a wider or a narrower one is another value.
+  if (inner.k === 'cast' && inner.to.kind === 'int' && inner.volatile !== true && inner.e.k === 'index') {
+    const read = inner.e;
+    const elem = elementOf(read, by);
+    if (elem !== undefined && elem.width === inner.to.width && elem.signed === inner.to.signed) {
+      return asElement({ ...read, signed: elem.signed }, by);
+    }
+  }
+  if (inner.k !== 'index') {
     return inner;
+  }
+  const elem = elementOf(inner, by);
+  if (elem === undefined || elem.signed !== inner.signed) {
+    return inner;
+  }
+  return { ...inner, base: { k: 'var', name: wholeObject(inner.base)! }, subscript: true };
+}
+
+/** The element type of the folded local `read` reads one element of — at the element's width,
+ *  whatever its signedness — or undefined for any other access. */
+function elementOf(
+  read: Extract<Expr, { k: 'index' }>,
+  by: ReadonlyMap<string, Fold>,
+): Extract<IrType, { kind: 'int' }> | undefined {
+  if ((read.lead?.length ?? 0) > 0 || read.baseElem !== undefined) {
+    return undefined;
   }
   // the object the base names whole, as the fold's own census of element accesses reads it (`uses`)
-  const name = wholeObject(inner.base);
+  const name = wholeObject(read.base);
   const fold = name === null ? undefined : by.get(name);
   const elem = fold?.type.kind === 'array' ? fold.type.elem : undefined;
-  if (elem?.kind !== 'int' || elem.width !== inner.width * 8 || elem.signed !== inner.signed) {
-    return inner;
-  }
-  return { ...inner, base: { k: 'var', name: name! }, subscript: true };
+  return elem?.kind === 'int' && elem.width === read.width * 8 ? elem : undefined;
 }
 
 /** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
