@@ -1484,8 +1484,6 @@ export interface ForPlanCandidate {
   readonly preheaderTraps: boolean;
   /** a preheader op is a def-site anchored write (`anchorConstCopies`) */
   readonly preheaderAnchored: boolean;
-  /** an edge into the exit carries a copy */
-  readonly exitParams: boolean;
   /** an edge into the latch carries a copy */
   readonly latchParams: boolean;
   /** a latch op has an effect or a qualified access */
@@ -1548,13 +1546,6 @@ export const FOR_PLAN_GATES: readonly Gate<ForPlanCandidate>[] = [
     rejects: (c) => c.preheaderAnchored,
   },
   {
-    id: 'exit-params',
-    why: 'the loop leaves by `break`, which carries no copy into the code after it',
-    sound: true,
-    guardedBy: 'for-plan-gates.test.ts: without exit-params the value the latch hands the exit is read unset',
-    rejects: (c) => c.exitParams,
-  },
-  {
     // DEFENSIVE: a latch param is read only by the latch's own ops, so by the test or the update,
     // which `test-reads-body` and `update-reads-body` refuse as a body value; one nothing reads is dead.
     id: 'latch-params',
@@ -1613,6 +1604,16 @@ export interface ForPlanIv {
   /** the guard is not the test on the entry values, or with no guard the test does not fold to stay
    *  in the loop */
   readonly entryTestDiffers: boolean;
+  /** an edge the test leaves by — the guard's (through its relay) or the latch's — hands the exit a
+   *  copy that the `for`'s own init (on the guard's) or update (on the latch's) does not make */
+  readonly exitCopy: boolean;
+  /** …or a slot it carries without a copy (one `edgeCopyRecords` records none for) names a value
+   *  the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and the
+   *  preheader's), on the latch's the IV past its update, or a latch op it never renders */
+  readonly exitNameRewritten: boolean;
+  /** the code past the loop reads the IV's param itself, not through an exit param (only a loop
+   *  with no guard, whose header dominates its exit, can) */
+  readonly pastReadsIv: boolean;
 }
 
 /** `forPlanAt`'s rules over the IV, its copies and the test. The argument for each is in the THE
@@ -1636,6 +1637,33 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
     sound: true,
     guardedBy: 'for-plan-gates.test.ts: without entry-test-differs a guard other than the test is dropped',
     rejects: (c) => c.entryTestDiffers,
+  },
+  {
+    id: 'exit-copy',
+    why: 'the `for` leaves by its test, which runs no copy into the code after it but the init and the update',
+    sound: true,
+    // the trace oracle does not reach the latch's way out on every fixture, so the second guard
+    // reads the C
+    guardedBy: [
+      'for-plan-gates.test.ts: without exit-copy the value the test edges hand the exit is never written',
+      "for-exit-params.test.ts: without exit-copy the latch's way out leaves the guard's value in the exit",
+    ],
+    rejects: (c) => c.exitCopy,
+  },
+  {
+    id: 'exit-name-rewritten',
+    why: 'the init runs ahead of the first test and the update ahead of every other, so a name either writes no longer holds what the asm left there',
+    sound: true,
+    guardedBy: 'for-plan-gates.test.ts: without exit-name-rewritten the exit reads the IV past its update',
+    rejects: (c) => c.exitNameRewritten,
+  },
+  {
+    id: 'past-reads-iv',
+    why: "past a loop with no guard the code reads the IV as the asm left it on the latch's way out, from before the update the `for` runs ahead of its test",
+    sound: true,
+    guardedBy:
+      'for-exit-params.test.ts: without past-reads-iv the code past a guardless loop reads the IV past its update',
+    rejects: (c) => c.pastReadsIv,
   },
 ];
 
@@ -5336,6 +5364,114 @@ function structureRanked(
     // exclusion seeded with enclosing-loop names → never coalesce onto them
     seedLoopParams(l.header, l.forwardPreds, l.backArgs, enclosingNames(l));
   }
+  // THE LOOP AS A `for`'S SHAPE (the argument is at `forPlanAt`): the guard `g` (or, with no guard,
+  // the header's one way in), a pure preheader `pre` between them where there is one, the one latch,
+  // and the edges the `for` is read from — the init (`pre ?? g` into the header), the back edge, the
+  // latch's way out, and the guard's way out, through a RELAY, a block whose one op jumps to the exit
+  // and that only `g` enters (agbcc's `b .L4 @long jump`), whose `br` is then the guard's edge. Every
+  // reading of the loop as a `for` reads this one shape: `forPlanAt` checks its rules over it, and the
+  // namer below asks it which exit params the `for` leaves in the IV's name. Null where the loop is
+  // not that shape.
+  type ForShape = {
+    latch: Block;
+    initEdge: Successor;
+    back: Successor;
+    latchExit: Successor;
+    guardExit: { pred: Block; succ: Successor } | null;
+  };
+  const forShapeOf = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForShape | null => {
+    const h = fl.header;
+    const exit = fl.exit;
+    const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
+    const into = pre ?? g; // the header's one way in
+    const gterm = g.ops[g.ops.length - 1];
+    const lterm = latch?.ops[latch.ops.length - 1];
+    // `b`, or the exit where `b` is a relay into it that only `g` enters
+    const relayed = (b: Block): Block => {
+      const t = b.ops[0];
+      const from = preds.get(b) ?? [];
+      return b !== exit &&
+        exit !== null &&
+        b.params.length === 0 &&
+        b.ops.length === 1 &&
+        t.opcode === 'br' &&
+        t.successors[0]?.block === exit &&
+        from.length > 0 &&
+        from.every((p) => p === g)
+        ? exit
+        : b;
+    };
+    const onlyTo = (t: Op | undefined, via: (b: Block) => Block = (b) => b, to: Block = h): boolean =>
+      t?.opcode === 'cond_br' &&
+      t.successors.length === 2 &&
+      t.successors.some((sc) => sc.block === to) &&
+      t.successors.some((sc) => via(sc.block) === exit);
+    const guarded = gterm.opcode === 'cond_br';
+    // A preheader is offered only from a guard, as a `br` into the header.
+    const preTerm = pre?.ops[pre.ops.length - 1];
+    if (
+      exit === null ||
+      latch === undefined ||
+      latch === h ||
+      fl.body.has(g) ||
+      (pre !== undefined && (!guarded || preTerm!.opcode !== 'br' || preTerm!.successors[0]?.block !== h)) ||
+      !(guarded ? onlyTo(gterm, relayed, pre ?? h) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
+      !onlyTo(lterm) ||
+      new Set(preds.get(h) ?? []).size !== 2 ||
+      !(preds.get(h) ?? []).every((p) => p === into || p === latch)
+    ) {
+      return null;
+    }
+    const out = guarded ? gterm.successors.find((sc) => sc.block !== (pre ?? h)) : undefined;
+    return {
+      latch,
+      initEdge: successorTo(into, h)!,
+      back: successorTo(latch, h)!,
+      latchExit: successorTo(latch, exit)!,
+      guardExit:
+        out === undefined
+          ? null
+          : out.block === exit
+            ? { pred: g, succ: out }
+            : { pred: out.block, succ: out.block.ops[0].successors[0] },
+    };
+  };
+  // THE IV'S EXIT (THE LOOP AS A `for`, at `forPlanAt`): in a run that asks a loop's `for`, an exit
+  // param the guard's edge (or its relay's) hands the IV's init arg and the latch's edge its update
+  // is the IV past the loop — `for (i = lo; ..) { .. } k(i);`. The `for` leaves it in the IV's name
+  // on both edges its test leaves by, so the param takes that name ahead of the guard's carrier,
+  // whose name the latch's edge would have to copy into and the `for` cannot. The loop is read as
+  // `forShapeOf` reads it, from each guard a structuring offers `forPlanAt` (the header's one way in,
+  // or the block entering a preheader `br`); the rules `forPlanAt` checks past the shape are not
+  // asked here. Only a preference: the name is taken under the same `canTakeName` as any carrier's,
+  // and an unasked run never reads it.
+  const ivExitCarrier = new Map<Value, Value>();
+  for (const fl of foreverLoops.values()) {
+    const [into] = fl.forwardPreds;
+    if (fl.forwardPreds.length !== 1 || (!spellCountedLoopsFor && !forRank.asked.has(fl.header))) {
+      continue;
+    }
+    // the guards the structurer offers `forPlanAt` this loop from, as its call sites pass `g` and `pre`
+    const intoTerm = into.ops[into.ops.length - 1];
+    const guards: [Block, Block | undefined][] =
+      intoTerm.opcode === 'br' && !foreverLoops.has(into)
+        ? (preds.get(into) ?? []).map((p): [Block, Block | undefined] => [p, into])
+        : [[into, undefined]];
+    for (const [g, pre] of guards) {
+      const shape = forShapeOf(g, fl, pre);
+      if (shape === null || shape.guardExit === null) {
+        continue;
+      }
+      const { back, latchExit, initEdge } = shape;
+      const guardExit = shape.guardExit.succ;
+      fl.exit!.params.forEach((p, i) => {
+        const j = back.args.indexOf(latchExit.args[i]);
+        if (j >= 0 && initEdge.args[j] === guardExit.args[i] && backArgName.has(back.args[j])) {
+          ivExitCarrier.set(p, back.args[j]);
+        }
+      });
+    }
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -5363,12 +5499,15 @@ function structureRanked(
          *  went unnamed", since the rejections above it `continue` without recording. Over-marking
          *  costs one downstream merge an extra fresh home, a spelling the differ referees. */
         let refusedParamCarrier = false;
+        const ivCarrier = ivExitCarrier.get(p);
         for (const c of [
-          ...incoming.filter((c) => varName.has(c.v)),
-          ...incoming.filter((c) => backArgName.has(c.v)),
+          ...incoming.filter((c) => c.v === ivCarrier).map((c) => ({ ...c, iv: true })),
+          ...incoming.filter((c) => varName.has(c.v)).map((c) => ({ ...c, iv: false })),
+          ...incoming.filter((c) => backArgName.has(c.v)).map((c) => ({ ...c, iv: false })),
         ]) {
-          const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, varName.has(c.v))) {
+          const named = !c.iv && varName.has(c.v);
+          const nm = named ? varName.get(c.v)! : backArgName.get(c.v)!;
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, named)) {
             continue;
           }
           // `freshParamMerge` (the `/fresh-merge` variation): this merge takes its own home rather
@@ -9437,8 +9576,20 @@ function structureRanked(
   //     way in beside the one latch, which branches only to the header and the exit. `g`'s way to
   //     the exit may pass a RELAY, a block whose one op jumps there and that nothing else reaches:
   //     agbcc writes `ble .LCB; b .L4 @long jump` (or `bl .L4 @far jump`) where the exit is past a
-  //     Thumb conditional branch's range, and that `b` is the same edge;
-  //   • the exit and the latch take no params: no edge into either carries a copy;
+  //     Thumb conditional branch's range, and that `b` is the same edge, carrying the exit's args
+  //     where it takes params;
+  //   • the latch takes no params: no edge into it carries a copy;
+  //   • the exit's params are written where the asm writes them. A `break` writes its edge's
+  //     copies ahead of it, as `while (1)`'s does, but the two edges the test leaves by — the
+  //     guard's and the latch's — are never rendered, so each must hand the exit what the `for`
+  //     already left in the param's name: a name it does not write, holding the arg already, or a
+  //     name its init (ahead of the first test, with the preheader's statements) or its update
+  //     (ahead of every other) writes with that same arg. So `a = 0; for (..) { .. a = 1; break; }
+  //     k(a);` lifts, and so does `k(i)` where the exit param is the IV's name; `for (..) { last =
+  //     i; .. } k(last);` does not, its latch handing the exit `i` from before the update under the
+  //     IV's name. A latch op the latch's edge hands is written nowhere. Past a loop with no guard,
+  //     which the header dominates, the code may read the IV's param itself, the IV from before the
+  //     update on the latch's way out, so that refuses too;
   //   • the latch is never rendered, so it holds no effect, no qualified access, no anchored def and
   //     no named def read outside the latch — a named op the latch alone reads is spelled inline (A
   //     STRENGTH-REDUCED COUNTED LOOP), and one read past it (only where the latch dominates that
@@ -9461,8 +9612,9 @@ function structureRanked(
   // more readings, read like the rest (taken where asked, offered otherwise):
   //   • `pre`, a PURE PREHEADER between the guard and the header: a `br` into the header that only
   //     the guard enters, whose ops neither touch memory nor trap. Its statements run ahead of the
-  //     `for`, so on the zero-trip path too, which is safe because the exit takes no params: every
-  //     value read past the loop is live across the preheader and holds a name of its own;
+  //     `for`, so on the zero-trip path too: every value read past the loop directly is live across
+  //     the preheader and holds a name of its own, and an exit param whose name a preheader
+  //     statement writes is refused as one the init writes;
   //   • an IV whose init edge carries no copy, the name already holding the entry value (`a0`,
   //     the parameter itself): the `for` writes the identity `a0 = a0`, which C prints `for (;`;
   //   • a materialized latch op whose every use is in the latch (`i + 1`, named because the back
@@ -9476,54 +9628,22 @@ function structureRanked(
   // copies; each table's doc comment names what it leaves out.
   type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
+    // THE LOOP'S SHAPE (`forShapeOf`), which every rule of `FOR_PLAN_GATES` reads: not a rule of the
+    // table (see its doc comment)
+    const shape = forShapeOf(g, fl, pre);
+    if (shape === null) {
+      return null;
+    }
+    const { latch, back, initEdge, latchExit, guardExit } = shape;
     const h = fl.header;
-    const exit = fl.exit;
-    const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
+    const exit = fl.exit!;
     const entry = pre ?? g;
     const gterm = g.ops[g.ops.length - 1];
-    const lterm = latch?.ops[latch.ops.length - 1];
-    // `b`, or the exit where `b` is a relay into it that only `g` enters
-    const relayed = (b: Block): Block => {
-      const t = b.ops[0];
-      const from = preds.get(b) ?? [];
-      return b !== exit &&
-        exit !== null &&
-        b.params.length === 0 &&
-        b.ops.length === 1 &&
-        t.opcode === 'br' &&
-        t.successors[0]?.block === exit &&
-        t.successors[0].args.length === 0 &&
-        from.length > 0 &&
-        from.every((p) => p === g)
-        ? exit
-        : b;
-    };
-    const onlyTo = (t: Op | undefined, via: (b: Block) => Block = (b) => b, into: Block = h): boolean =>
-      t?.opcode === 'cond_br' &&
-      t.successors.length === 2 &&
-      t.successors.some((sc) => sc.block === into) &&
-      t.successors.some((sc) => via(sc.block) === exit);
+    const lterm = latch.ops[latch.ops.length - 1];
     const guarded = gterm.opcode === 'cond_br';
     // no effect, no memory, no order, no qualifier; a trap is asked on its own (`preheader-traps`)
     const effectFree = (o: Op): boolean => !effectful(o) && !orderSensitive(o) && !qualified(o);
     const traps = (o: Op): boolean => opSig(o.opcode)?.traps === true;
-    // THE LOOP'S SHAPE, which every rule of `FOR_PLAN_GATES` reads: not a rule of the table (see its
-    // doc comment). A preheader is offered only from a guard, as a `br` into the header.
-    const preTerm = pre?.ops[pre.ops.length - 1];
-    if (
-      exit === null ||
-      latch === undefined ||
-      latch === h ||
-      fl.body.has(g) ||
-      (pre !== undefined && (!guarded || preTerm!.opcode !== 'br' || preTerm!.successors[0]?.block !== h)) ||
-      !(guarded ? onlyTo(gterm, relayed, pre ?? h) : gterm.opcode === 'br' && gterm.successors[0]?.block === h) ||
-      !onlyTo(lterm) ||
-      new Set(preds.get(h) ?? []).size !== 2 ||
-      !(preds.get(h) ?? []).every((p) => p === entry || p === latch)
-    ) {
-      return null;
-    }
-    const back = successorTo(latch, h)!;
     const backArgs = new Set<Value>(back.args);
     // `pure`: below a back-edge value the header computes, where only pure ops may be read
     const closed = (v: Value, pure = false, seen = new Set<Value>()): boolean => {
@@ -9542,7 +9662,7 @@ function structureRanked(
       const inHeader = at === h && (pure || backArgs.has(v)) && !effectful(d) && !orderSensitive(d);
       return (at === latch || inHeader) && d.operands.every((o) => closed(o, pure || inHeader, seen));
     };
-    const cond = lterm!.operands[0];
+    const cond = lterm.operands[0];
     const preOps = pre?.ops.slice(0, -1) ?? [];
     const latchOps = latch.ops.slice(0, -1);
     if (
@@ -9561,9 +9681,6 @@ function structureRanked(
         },
         get preheaderAnchored() {
           return preOps.some((o) => anchoredAt.has(o));
-        },
-        get exitParams() {
-          return exit.params.length > 0;
         },
         get latchParams() {
           return latch.params.length > 0;
@@ -9591,7 +9708,6 @@ function structureRanked(
     ) {
       return null;
     }
-    const initEdge = successorTo(entry, h)!;
     // A loop no run asked for is spelled `for` only under `/for-continue`, and a structuring without it
     // reports that it met one — only once every check has passed, just ahead of the copies it would
     // emit, so the report is exact: a loop the `for` refuses anyway is never offered. Those
@@ -9651,7 +9767,7 @@ function structureRanked(
       const at = opBlock.get(d);
       return at === latch || (at === g && !g.ops.slice(opIndex.get(d)! + 1).some(effectful));
     };
-    const contIsTaken = lterm!.successors[0].block === h;
+    const contIsTaken = lterm.successors[0].block === h;
     // the test on the entry values, where it folds: each leaf a constant, each op one `evalIntPair` reads
     const atEntry = (v0: Value): number | null => {
       const v = entryVals.get(v0) ?? v0;
@@ -9667,6 +9783,75 @@ function structureRanked(
       }
       const [x, y] = [atEntry(d.operands[0]), atEntry(d.operands[1])];
       return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
+    };
+    // THE TWO EDGES THE TEST LEAVES BY (THE LOOP AS A `for`): the guard's, through its relay, and
+    // the latch's. A slot holds already where `edgeCopyRecords` records no copy for it (an
+    // identity, a write anchored at its def, an undefined value that carries nothing). What the
+    // records drop is recorded only for a `for` that is taken, whose edges are never rendered to
+    // record it.
+    const initWrites = new Map<string, Value | null>(initRecs.map((r) => [r.name, r.arg]));
+    for (const o of preOps) {
+      for (const r of o.results) {
+        const nm = varName.get(r);
+        if (nm !== undefined && !initWrites.has(nm)) {
+          initWrites.set(nm, null); // a preheader statement, which writes no exit arg
+        }
+      }
+    }
+    const exitDrops: typeof droppedUndefCopies = [];
+    const exitSlots = (pred: Block, succ: Successor, writes: ReadonlyMap<string, Value | null>): string[] => {
+      const dropMark = droppedUndefCopies.length;
+      const slotGapMark = strictGaps.length;
+      let recs: ReturnType<typeof edgeCopyRecords>;
+      try {
+        recs = edgeCopyRecords(pred, succ);
+      } catch (e) {
+        if (e instanceof StructureError) {
+          return ['copy']; // the `while (1)` reading meets the same error on this edge
+        }
+        throw e;
+      } finally {
+        exitDrops.push(...droppedUndefCopies.slice(dropMark));
+        droppedUndefCopies.length = dropMark;
+        strictGaps.length = slotGapMark;
+      }
+      const copies = new Set(recs.map((r) => r.param));
+      return exit.params.flatMap((p, i) => {
+        const name = varName.get(p)!;
+        const arg = succ.args[i];
+        const copied = copies.has(p);
+        if (writes.has(name)) {
+          return writes.get(name) === arg ? [] : [copied ? 'copy' : 'rewritten'];
+        }
+        if (copied) {
+          return ['copy'];
+        }
+        // a latch op the `for` never renders: its name is written nowhere
+        const d = defs.get(arg);
+        return pred === latch && d !== undefined && opBlock.get(d) === latch ? ['rewritten'] : [];
+      });
+    };
+    let exitFindings: string[] | undefined;
+    const exitFound = (what: string): boolean => {
+      exitFindings ??= [
+        ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
+        ...exitSlots(latch, latchExit, new Map([[iv, updateRecs[0].arg]])),
+      ];
+      return exitFindings.includes(what);
+    };
+    // Past a loop with no guard the header dominates the exit, so the code there may read the IV's
+    // param itself, not through an exit param: the asm's value from before the update on the
+    // latch's way out, which the `for`'s update has rewritten. A named value holds its own.
+    const ivParam = updateRecs[0].param;
+    const readsIv = (v: Value, seen = new Set<Value>()): boolean => {
+      if (v === ivParam) {
+        return true;
+      }
+      if (seen.has(v) || varName.has(v)) {
+        return false;
+      }
+      seen.add(v);
+      return defs.get(v)?.operands.some((o) => readsIv(o, seen)) ?? false;
     };
     // not in `FOR_PLAN_IV_GATES` (its doc comment says why)
     const inner = latchInnerSub(h, fl.body, [latch]);
@@ -9691,6 +9876,15 @@ function structureRanked(
           const first = atEntry(cond);
           return first === null || (first !== 0) !== contIsTaken;
         },
+        get exitCopy() {
+          return exitFound('copy');
+        },
+        get exitNameRewritten() {
+          return exitFound('rewritten');
+        },
+        get pastReadsIv() {
+          return rootsOf(exitRegion(exit, fl.body, null)).some((r) => readsIv(r));
+        },
       }) !== null
     ) {
       return null;
@@ -9699,6 +9893,7 @@ function structureRanked(
       hooks.onForOffered?.();
       return null;
     }
+    droppedUndefCopies.push(...exitDrops);
     const latchExpr = (s: Map<Value, string> | null) => {
       const base = s === null ? expr : exprWith(s);
       const e = (v: Value): Expr => {
