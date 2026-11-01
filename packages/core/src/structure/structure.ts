@@ -1607,9 +1607,10 @@ export interface ForPlanIv {
   /** an edge the test leaves by — the guard's (through its relay) or the latch's — hands the exit a
    *  copy that the `for`'s own init (on the guard's) or update (on the latch's) does not make */
   readonly exitCopy: boolean;
-  /** …or a slot it carries without a copy (an identity, or a write anchored at its def) names a
-   *  value the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and
-   *  the preheader's), on the latch's the IV past its update, or a latch op it never renders */
+  /** …or a slot it carries without a copy (an identity, a write anchored at its def, an undefined
+   *  value that carries nothing: what `edgeCopyRecords` leaves out) names a value the `for` writes
+   *  otherwise ahead of the test: the init's names on the guard's edge (and the preheader's), on the
+   *  latch's the IV past its update, or a latch op it never renders */
   readonly exitNameRewritten: boolean;
   /** with no guard, the code past the loop reads the IV's param itself, not through an exit param */
   readonly pastReadsIv: boolean;
@@ -9576,8 +9577,9 @@ function structureRanked(
   //   • the exit's params are written where the asm writes them. A `break` writes its edge's
   //     copies ahead of it, as `while (1)`'s does; the two edges the test leaves by — the guard's
   //     and the latch's — are never rendered, so each must hand the exit what the `for` already
-  //     left in the param's name: a name the `for` does not write, holding the arg already (an
-  //     identity, or a write anchored at its def), or a name its init (ahead of the first test,
+  //     left in the param's name: a name the `for` does not write, holding the arg already (as
+  //     `edgeCopyRecords` reads any edge: an identity, a write anchored at its def, an undefined
+  //     value that carries nothing), or a name its init (ahead of the first test,
   //     with the preheader's statements) or its update (ahead of every other) writes with that
   //     same arg. So flags set ahead of the loop and rewritten in an arm (`a = 0; for (..) { ..
   //     a = 1; break; } k(a);`) lift, and so does `k(i)` past the loop where the exit param is the
@@ -9782,11 +9784,13 @@ function structureRanked(
       return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
     };
     // THE TWO EDGES THE TEST LEAVES BY (THE LOOP AS A `for`): the guard's, through its relay, and
-    // the latch's. Each slot either holds already (the exit param's name is the arg's, or a write
-    // anchored at its def made it), or is a copy the edge makes. The `for` runs its init ahead of
-    // the first test and its update ahead of every other, and renders neither edge: a slot holds
-    // where that run leaves the name holding the arg, which is a name it never writes holding
-    // already, or a name it writes with that same arg.
+    // the latch's. Each slot is a copy the edge makes, or holds already, as `edgeCopyRecords` reads
+    // every edge (an identity, a write anchored at its def, an undefined value that carries
+    // nothing). The `for` runs its init ahead of the first test and its update ahead of every
+    // other, and renders neither edge: a slot holds where that run leaves the name holding the arg,
+    // which is a slot that holds already in a name the run never writes, or a name it writes with
+    // that same arg. The records are read as the init's and the update's are, and what they drop
+    // is recorded only for a `for` that is taken, whose edges are never rendered to record it.
     const initWrites = new Map<string, Value | null>(initRecs.map((r) => [r.name, r.arg]));
     for (const o of preOps) {
       for (const r of o.results) {
@@ -9796,16 +9800,32 @@ function structureRanked(
         }
       }
     }
+    const exitDrops: typeof droppedUndefCopies = [];
     const exitSlots = (pred: Block, succ: Successor, writes: ReadonlyMap<string, Value | null>): string[] => {
-      const suppressed = suppressedArgs.get(succ);
+      const dropMark = droppedUndefCopies.length;
+      const slotGapMark = strictGaps.length;
+      let recs: ReturnType<typeof edgeCopyRecords>;
+      try {
+        recs = edgeCopyRecords(pred, succ);
+      } catch (e) {
+        if (e instanceof StructureError) {
+          return ['copy']; // a copy the `while (1)` reading spells, and refuses, itself
+        }
+        throw e;
+      } finally {
+        exitDrops.push(...droppedUndefCopies.slice(dropMark));
+        droppedUndefCopies.length = dropMark;
+        strictGaps.length = slotGapMark;
+      }
+      const copies = new Set(recs.map((r) => r.param));
       return exit.params.flatMap((p, i) => {
         const name = varName.get(p)!;
         const arg = succ.args[i];
-        const carried = suppressed?.has(i) !== true && varName.get(arg) !== name;
+        const copied = copies.has(p);
         if (writes.has(name)) {
-          return writes.get(name) === arg ? [] : [carried ? 'copy' : 'rewritten'];
+          return writes.get(name) === arg ? [] : [copied ? 'copy' : 'rewritten'];
         }
-        if (carried) {
+        if (copied) {
           return ['copy'];
         }
         // a latch op the `for` never renders: its name is written nowhere
@@ -9875,6 +9895,7 @@ function structureRanked(
       hooks.onForOffered?.();
       return null;
     }
+    droppedUndefCopies.push(...exitDrops);
     const latchExpr = (s: Map<Value, string> | null) => {
       const base = s === null ? expr : exprWith(s);
       const e = (v: Value): Expr => {

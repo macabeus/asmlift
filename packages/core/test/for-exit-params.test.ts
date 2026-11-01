@@ -208,3 +208,26 @@ test('without past-reads-iv the code past a guardless loop reads the IV past its
   expect(r.src).toMatch(/for \((v\d+) = 0; \1 < 2; \1 = \1 \+ 1\) \{/);
   expect(r.agreement.disagree).toBeGreaterThan(0);
 });
+
+test('an uninitialised local the edges the test leaves by hand on lifts as the `for`', () => {
+  // `int x; for (i = lo; i <= hi; i++) { .. case 0: k(4); x = 3; break; .. } k(x);`: the guard and
+  // the latch hand the exit the undefined value, which carries nothing on any edge (`break`'s
+  // included), so the `for` holds it as `while (1)` would
+  const ir = forExit({
+    consts: '%40: s32 = undef {key="r5"}\n  %41: s32 = const {value=3}\n  ',
+    guardExit: '^bb12(%40)',
+    arm: (n) => (n === 4 ? '%41' : '%40'),
+    latchArgs: '%40',
+    exitParams: '%60: s32',
+    exitCalls: '%62: s32 = call %60 {target="k"}\n  ',
+  });
+  const { src } = judged(ir);
+  // the oracle judges no seed that reads an undefined value, so the C is the witness: the one write
+  // of the exit's name is the arm's, ahead of its `break`
+  const x = /\n\s*k\((v\d+)\);\n\s*v\d+ = 0;/.exec(src)?.[1];
+  expect(x).toBeDefined();
+  expect(src).toMatch(/for \((v\d+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{/);
+  expect(src).not.toContain('while (1)');
+  expect(src.match(new RegExp(`\\b${x} = `, 'g'))).toEqual([`${x} = `]);
+  expect(src).toMatch(new RegExp(`k\\(4\\);\\n\\s*${x} = 3;\\n\\s*break;`));
+});
