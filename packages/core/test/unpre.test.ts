@@ -8,8 +8,9 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
-import { UNPRE_GATES, recomputeRedundantParams } from '../src/raise/unpre';
+import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams } from '../src/raise/unpre';
 import { structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 // `case 0:` falls into `case 1:`; the dispatch hands `case 1:` `a0` and `a0 + 1`, and `case 0:` hands
 // it what `fallArgs` names. `%5` is `case 0:`'s own `a0 + 1`, `%6` the constant 9, `%11` a load.
@@ -183,4 +184,88 @@ test('a join the switch reaches by its default edge but code outside the switch 
 
 test('the fold runs last in the pre-structure record', () => {
   expect(PRE_STRUCTURE_FOLDS.map((f) => f.id).at(-1)).toBe('unpre');
+});
+
+// ── A SIBLING'S LEAF (`recomputeDerivedParams`) ──────────────────────────────────────────────────
+//
+// gcc 2.7.2's strength-reduced `for (i = lo; i < hi; i++) use(i << 3)`, with `+ 3` for the `<< 3`
+// (an op the trace oracle models): the loop's entry hands the header `(lo, lo + 3)`, the latch
+// `(i + 1, (i + 1) + 3)`. `%5` is `%4 + 3` at every entry.
+const derivedIr = ({
+  entry = '%3: s32 = add %0, %2',
+  back = '%9: s32 = add %8, %2',
+  test = '%10: u32 = icmp_slt %8, %1',
+} = {}) => `fn d {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=3}
+  ${entry}
+  br ^bb1(%0, %3)
+^bb1(%4: s32, %5: s32):
+  %6: s32 = call %5 {target="use"}
+  %7: s32 = const {value=1}
+  %8: s32 = add %4, %7
+  ${back}
+  ${test}
+  cond_br %10, ^bb1(%8, %9), ^bb2()
+^bb2():
+  ret
+}
+`;
+const SEEDS = Array.from({ length: 500 }, (_, i) => i + 1);
+const derived = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  const n = recomputeDerivedParams(fn);
+  verify(fn);
+  const sfn = structure(fn, { returnsVoid: true });
+  return { n, fn, src: cBackend.emit(sfn), agreement: irAgreement(ir, sfn, SEEDS) };
+};
+
+test("a param every edge hands the same op of a sibling's argument is that op of the sibling", () => {
+  const r = derived(derivedIr());
+  expect(r.n).toBe(1);
+  expect(r.fn.blocks[1].params).toHaveLength(1);
+  // the entry's `lo + 3` and the latch's `(i + 1) + 3`, read by nothing now, go with it: the
+  // header's `i + 3` and the latch's `i + 1` are the adds left
+  expect(r.fn.blocks.flatMap((b) => b.ops).filter((o) => o.opcode === 'add')).toHaveLength(2);
+  expect(r.src).toMatch(/use\(\w+ \+ 3\)/);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.agreement.judged).toBe(SEEDS.length);
+});
+
+test('a test that reads the derived back-edge value reads the op of the updated sibling', () => {
+  // `(i + 1) + 3 < hi`: the derived param's back-edge value, which stays the latch's own op
+  const r = derived(derivedIr({ test: '%10: u32 = icmp_slt %9, %1' }));
+  expect(r.n).toBe(1);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.agreement.judged).toBe(SEEDS.length);
+});
+
+test('two constants of one value on the two edges are one operand', () => {
+  const r = derived(derivedIr({ back: '%11: s32 = const {value=3}\n  %9: s32 = add %8, %11' }));
+  expect(r.n).toBe(1);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test('a param no one op of the sibling computes is left alone', () => {
+  // two opcodes, two constants, and an operand that is neither the sibling's argument nor shared
+  expect(derived(derivedIr({ entry: '%3: s32 = sub %0, %2' })).n).toBe(0);
+  expect(derived(derivedIr({ back: '%11: s32 = const {value=2}\n  %9: s32 = add %8, %11' })).n).toBe(0);
+  expect(derived(derivedIr({ back: '%9: s32 = add %8, %4' })).n).toBe(0);
+});
+
+test('a load of the sibling is not recomputed: memory may change between the edge and the block', () => {
+  // `*lo` loaded ahead of the store `*lo = 9`, then `*(i + 1)` in the latch: read at the header's
+  // head, the first trip would see the 9
+  const ir = derivedIr({
+    entry:
+      '%3: s32 = load %0 {off=0, signed=false, width=4}\n  %12: s32 = const {value=9}\n  store %0, %12 {off=0, width=4}',
+    back: '%9: s32 = load %8 {off=0, signed=false, width=4}',
+  });
+  expect(derived(ir).n).toBe(0);
+});
+
+test('the derived-param fold runs just ahead of the congruent one', () => {
+  const ids = PRE_STRUCTURE_FOLDS.map((f) => f.id);
+  expect(ids.indexOf('derivedparam')).toBe(ids.indexOf('unpre') - 1);
 });

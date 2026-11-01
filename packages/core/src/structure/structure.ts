@@ -138,7 +138,7 @@ import {
   pointeeFields,
   structFieldInnerExtents,
 } from '../symbols';
-import { type UseSite, analyze, opShape, shortCircuitGuardedValues } from './analysis';
+import { type UseSite, analyze, shortCircuitGuardedValues } from './analysis';
 import { ARITH_TO_BIN } from './arith-ops';
 import { makeBitfieldSpelling } from './bitfields';
 import {
@@ -1449,8 +1449,7 @@ export interface ForPlanCandidate {
  *  `g` outside the loop branching only to the header — or the preheader — and the exit, the latch
  *  branching only to the header and the exit, the header entered only from those two), which every
  *  field reads and no rule could be dropped from without a crash; the caller's own construction of a
- *  preheader (a `br` into the header, offered only from a guard); the reading of a DERIVED IV, which
- *  is `DERIVED_IV_GATES`; the copies the update and the init make (`edgeCopyRecords`, which pushes a
+ *  preheader (a `br` into the header, offered only from a guard); the copies the update and the init make (`edgeCopyRecords`, which pushes a
  *  gap or refuses and so cannot be a prepared field); and `FOR_PLAN_IV_GATES`, the rules that read
  *  those copies.
  *
@@ -1549,80 +1548,9 @@ export const FOR_PLAN_GATES: readonly Gate<ForPlanCandidate>[] = [
   },
 ];
 
-/** One header param `j` read as a DERIVED IV of param `i` (A STRENGTH-REDUCED COUNTED LOOP, at
- *  `forPlanAt`), from the ops `dE` and `dB` that compute its init and back-edge args. Lazy, as
- *  `ForPlanCandidate` is. */
-export interface DerivedIvCandidate {
-  /** `dE` or `dB` has an effect, touches memory, is order-sensitive or qualified */
-  readonly edgeOpEffect: boolean;
-  /** …or can trap */
-  readonly edgeOpTraps: boolean;
-  /** the two are not one op: opcode, attributes, operand count or result type differ */
-  readonly edgeOpsDiffer: boolean;
-  /** no operand of the two is `i`'s own arg on that edge */
-  readonly readsNoIv: boolean;
-  /** an operand of the two is neither `i`'s arg nor one value both edges share (a value from before
-   *  the loop, or two constants of one value) */
-  readonly operandVaries: boolean;
-}
-
-/** When a header param holds F(i) at every entry to the header, so the `for` opens the body with
- *  `j = F(i);` and its update copies only `i`. The argument is in A STRENGTH-REDUCED COUNTED LOOP
- *  above `forPlanAt`. Not in the table: a param whose two args are not both an op's result, which
- *  every field reads; `i` itself derived, and `i` not the loop's IV, which `FOR_PLAN_IV_GATES`
- *  refuses as `derived-from-another-param`.
- *
- *  A shared operand needs no test that it is defined outside the loop: `dE` is, since it computes
- *  the init arg, and its operands dominate it. */
-export const DERIVED_IV_GATES: readonly Gate<DerivedIvCandidate>[] = [
-  {
-    id: 'edge-op-effect',
-    why: 'the derived value is recomputed at the head of the body, where a read of memory could see something else',
-    sound: true,
-    guardedBy: 'for-plan-gates.test.ts: without edge-op-effect the derived value re-reads memory the body wrote',
-    rejects: (c) => c.edgeOpEffect,
-  },
-  {
-    // Not load-bearing: the body's head runs only on paths that already ran the op (ahead of the guard,
-    // or in the latch the trip before), a narrowing and never a speculation (`reevalUnsafe`). Kept so
-    // a division stays where the compiler computed it.
-    id: 'edge-op-traps',
-    why: 'a division stays where the compiler computed it',
-    sound: false,
-    rejects: (c) => c.edgeOpTraps,
-  },
-  {
-    id: 'edge-ops-differ',
-    why: 'the param is one function of the IV only where both edges apply the same op',
-    sound: true,
-    guardedBy:
-      'for-plan-gates.test.ts: without edge-ops-differ an init the body head computes another way is read wrong',
-    rejects: (c) => c.edgeOpsDiffer,
-  },
-  {
-    id: 'reads-no-iv',
-    why: 'a param no op of the IV computes is not this reading’s',
-    sound: false,
-    rejects: (c) => c.readsNoIv,
-  },
-  {
-    id: 'operand-varies',
-    why: 'an operand the two edges do not share makes the param no one function of the IV',
-    sound: true,
-    guardedBy: 'for-derived-iv.test.ts: a derived param whose two edges add different constants refuses the `for`',
-    rejects: (c) => c.operandVaries,
-  },
-];
-
 /** `forPlanAt`'s rules that read the update's and the init's copies, once those are made. Lazy, as
  *  `ForPlanCandidate` is. */
 export interface ForPlanIv {
-  /** a derived param is a function of a param other than the IV */
-  readonly derivedFromAnother: boolean;
-  /** the test reads a derived param or its back-edge value */
-  readonly testReadsDerived: boolean;
-  /** …or the IV's update does */
-  readonly updateReadsDerived: boolean;
   /** the test reads the name the update writes, other than through its back-edge value */
   readonly testReadsUpdate: boolean;
   /** the guard is not the test on the entry values, or with no guard the test does not fold to stay
@@ -1631,39 +1559,13 @@ export interface ForPlanIv {
 }
 
 /** `forPlanAt`'s rules over the IV, its copies and the test. The argument for each is in the THE
- *  LOOP AS A `for` block. Not in the table: the update that is not ONE copy beside the derived
- *  params, which every field reads; and three refusals that predate the strength-reduced readings
+ *  LOOP AS A `for` block. Not in the table: the update that is not ONE copy, which every field
+ *  reads; and three refusals that predate the strength-reduced readings
  *  and no round has had to instrument, left inline ahead of the table — init copies that are cyclic
  *  or whose IV init reads another init copy's name (`copySetIsCyclic`, the `init` clause runs after
  *  the copies ahead of the `for`), and a test or update that reads an inner loop's value
  *  (`latchInnerSub`). */
 export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
-  {
-    // Not load-bearing on any input found: a param with no update copy holds its value under its own
-    // name at the header, so `j = F(i)` read through it is right too. The reading is kept to the IV.
-    id: 'derived-from-another-param',
-    why: 'the body head writes a derived param from the IV alone, the reading measured',
-    sound: false,
-    rejects: (c) => c.derivedFromAnother,
-  },
-  {
-    id: 'test-reads-derived',
-    why: 'the derived name is written only at the head of the body, so the test would read it stale',
-    sound: true,
-    guardedBy: [
-      'for-derived-iv.test.ts: a latch test that reads the derived param refuses the `for`',
-      "for-derived-iv.test.ts: a latch test that reads the derived param's back-edge value refuses the `for`",
-    ],
-    rejects: (c) => c.testReadsDerived,
-  },
-  {
-    // Not load-bearing: the derived name holds F(iv) from the body's head to the update (the THE LOOP
-    // AS A `for` block). Kept as the reading measured.
-    id: 'update-reads-derived',
-    why: 'the update is read from the IV alone, the reading measured',
-    sound: false,
-    rejects: (c) => c.updateReadsDerived,
-  },
   {
     id: 'test-reads-update',
     why: 'the test runs after the update, so a read of the name it writes would see the next trip',
@@ -2496,10 +2398,9 @@ export interface StructureHooks {
   twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
   /** the two-level exit's `break` rule (`TWO_LEVEL_BREAK_GATES`), ablatable the same way. */
   twoLevelBreakGates?: readonly Gate<TwoLevelBreak>[];
-  /** `forPlanAt`'s rules (`FOR_PLAN_GATES`, `DERIVED_IV_GATES`, `FOR_PLAN_IV_GATES`), ablatable the
+  /** `forPlanAt`'s rules (`FOR_PLAN_GATES`, `FOR_PLAN_IV_GATES`), ablatable the
    *  same way and, wrapped in `tallying`, the census of which rule refuses a loop's `for`. */
   forPlanGates?: readonly Gate<ForPlanCandidate>[];
-  derivedIvGates?: readonly Gate<DerivedIvCandidate>[];
   forPlanIvGates?: readonly Gate<ForPlanIv>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
@@ -9457,7 +9358,7 @@ function structureRanked(
   //     either side read through only where it is evaluated at the test; with no guard, that test
   //     folds to a constant that stays in the loop.
   //
-  // A STRENGTH-REDUCED COUNTED LOOP (gcc 2.7.2's `for (i = lo; i <= hi; i++) … gE[i] …`) needs four
+  // A STRENGTH-REDUCED COUNTED LOOP (gcc 2.7.2's `for (i = lo; i <= hi; i++) … gE[i] …`) needs three
   // more readings, read like the rest (taken where asked, offered otherwise):
   //   • `pre`, a PURE PREHEADER between the guard and the header: a `br` into the header that only
   //     the guard enters, whose ops neither touch memory nor trap. Its statements run ahead of the
@@ -9468,17 +9369,13 @@ function structureRanked(
   //   • a materialized latch op whose every use is in the latch (`i + 1`, named because the back
   //     edge's copies read it twice): the `for` never renders the latch, so the test and the update
   //     spell it inline;
-  //   • a DERIVED IV: a header param whose init and back-edge args are one pure op F over the IV's
-  //     own two args, every other operand one value both edges share (`i << 3` beside `i`;
-  //     `DERIVED_IV_GATES`). By induction over the two edges it holds F(iv) at every entry to the
-  //     header, so the body opens with `p = F(iv);` and the update copies only the IV. The test reads
-  //     no derived param and no derived back-edge value, since the first test runs before the body's
-  //     head writes the name; the IV's update reads neither either, which is not load-bearing (the
-  //     name holds F(iv) from the head to the update) and is kept as the reading measured.
+  // The header's `i << 3` beside `i` (a DERIVED IV) is no reading of this one: raise/unpre.ts's
+  // `recomputeDerivedParams` reads that param as the op of `i` it is at every entry, before the
+  // structurer runs, so the header carries the IV alone and its test may read the op as it reads any.
   //
-  // The rules are tables: `FOR_PLAN_GATES` past the loop's shape, `DERIVED_IV_GATES` per derived
-  // param, `FOR_PLAN_IV_GATES` over the copies; each table's doc comment names what it leaves out.
-  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt; heads: Stmt[] };
+  // The rules are tables: `FOR_PLAN_GATES` past the loop's shape, `FOR_PLAN_IV_GATES` over the
+  // copies; each table's doc comment names what it leaves out.
+  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
     const h = fl.header;
     const exit = fl.exit;
@@ -9508,65 +9405,9 @@ function structureRanked(
       t.successors.some((sc) => sc.block === into) &&
       t.successors.some((sc) => via(sc.block) === exit);
     const guarded = gterm.opcode === 'cond_br';
-    // no effect, no memory, no order, no qualifier; a trap is asked on its own (`preheader-traps`,
-    // `edge-op-traps`)
+    // no effect, no memory, no order, no qualifier; a trap is asked on its own (`preheader-traps`)
     const effectFree = (o: Op): boolean => !effectful(o) && !orderSensitive(o) && !qualified(o);
     const traps = (o: Op): boolean => opSig(o.opcode)?.traps === true;
-    // one op apart from its operands' values: `opShape`, the operand count, and the one result's type,
-    // whose width the op computes at
-    const sameOp = (x: Op, y: Op): boolean =>
-      opShape(x) === opShape(y) &&
-      x.operands.length === y.operands.length &&
-      x.results.length === 1 &&
-      typeEquals(x.results[0].type, y.results[0].type);
-    // THE DERIVED IV: param j whose init and back-edge args are one pure op over param i's two args,
-    // slot for slot, each other operand one value both edges share (`DERIVED_IV_GATES`). By j, with
-    // the first such i and the back-edge instance.
-    const derivedParams = (initArgs: Value[], backArgs: Value[]): Map<number, { from: number; op: Op }> => {
-      const gates = hooks.derivedIvGates ?? DERIVED_IV_GATES;
-      const found = new Map<number, { from: number; op: Op }>();
-      h.params.forEach((_, j) => {
-        const dE = defs.get(initArgs[j]);
-        const dB = defs.get(backArgs[j]);
-        if (dE === undefined || dB === undefined) {
-          return;
-        }
-        const from = h.params.findIndex((_p, i) => {
-          if (i === j) {
-            return false;
-          }
-          const ivSlot = (k: number) => dE.operands[k] === initArgs[i] && dB.operands[k] === backArgs[i];
-          // one value both edges share, or two constants of one value
-          const shared = (x: Value, y: Value): boolean => {
-            const [cx, cy] = [defs.get(x), defs.get(y)];
-            return x === y || (cx?.opcode === 'const' && cy?.opcode === 'const' && sameOp(cx, cy));
-          };
-          return (
-            firstRejection(gates, {
-              get edgeOpEffect() {
-                return !effectFree(dE) || !effectFree(dB);
-              },
-              get edgeOpTraps() {
-                return traps(dE) || traps(dB);
-              },
-              get edgeOpsDiffer() {
-                return !sameOp(dE, dB);
-              },
-              get readsNoIv() {
-                return !dE.operands.some((_o, k) => ivSlot(k));
-              },
-              get operandVaries() {
-                return !dE.operands.every((o, k) => ivSlot(k) || shared(o, dB.operands[k]));
-              },
-            }) === null
-          );
-        });
-        if (from >= 0) {
-          found.set(j, { from, op: dB });
-        }
-      });
-      return found;
-    };
     // THE LOOP'S SHAPE, which every rule of `FOR_PLAN_GATES` reads: not a rule of the table (see its
     // doc comment). A preheader is offered only from a guard, as a `br` into the header.
     const preTerm = pre?.ops[pre.ops.length - 1];
@@ -9677,33 +9518,12 @@ function structureRanked(
         strictGaps.length = gapMark;
       }
     }
-    // the header params that hold F(iv) (A STRENGTH-REDUCED COUNTED LOOP), by index, each with the
-    // op whose back-edge instance computes it
-    const derived = derivedParams(initEdge.args as Value[], back.args as Value[]);
-    const derivedNames = new Set([...derived.keys()].map((j) => varName.get(h.params[j])!));
-    const ivRecs = updateRecs.filter((r) => !derivedNames.has(r.name));
-    // the update is ONE copy beside the derived params': not a rule of `FOR_PLAN_IV_GATES`, which
-    // every one of its fields reads
-    if (ivRecs.length !== 1) {
+    // the update is ONE copy: not a rule of `FOR_PLAN_IV_GATES`, which every one of its fields reads
+    if (updateRecs.length !== 1) {
       return null;
     }
-    const iv = ivRecs[0].name;
-    const ivAt = h.params.findIndex((p) => varName.get(p) === iv);
+    const iv = updateRecs[0].name;
     const ivInit = initRecs.find((r) => r.name === iv);
-    // neither the test nor the IV's update reads a derived param, nor its back-edge value: the `for`
-    // writes the derived name only at the body's head, so either read would see a stale value
-    const derivedVals = new Set([...derived.keys()].flatMap((j) => [h.params[j], back.args[j] as Value]));
-    const readsDerived = (v: Value, seen = new Set<Value>()): boolean => {
-      if (derivedVals.has(v)) {
-        return true;
-      }
-      const d = defs.get(v);
-      if (seen.has(v) || d === undefined || !fl.body.has(opBlock.get(d)!)) {
-        return false;
-      }
-      seen.add(v);
-      return d.operands.some((o) => readsDerived(o, seen));
-    };
     const sub = subFor(h.params, back.args as Value[]);
     // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
     // latch may hold a materialized op its own reads alone use, which the `for` never
@@ -9761,15 +9581,6 @@ function structureRanked(
     }
     if (
       firstRejection(hooks.forPlanIvGates ?? FOR_PLAN_IV_GATES, {
-        get derivedFromAnother() {
-          return [...derived.values()].some((d) => d.from !== ivAt);
-        },
-        get testReadsDerived() {
-          return readsDerived(cond);
-        },
-        get updateReadsDerived() {
-          return readsDerived(back.args[ivAt] as Value);
-        },
         get testReadsUpdate() {
           return clobbered(cond);
         },
@@ -9797,15 +9608,10 @@ function structureRanked(
       };
       return e;
     };
-    const ivRec = ivRecs[0];
-    const [inc] =
-      inlined || derived.size > 0
-        ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(ivRec.arg)) }]
-        : argAssigns(latch, h);
-    const inits = [
-      ...(pre !== undefined ? sideEffects(pre) : []),
-      ...argAssigns(entry, h).filter((st) => st.k !== 'assign' || !derivedNames.has(st.name)),
-    ];
+    const [inc] = inlined
+      ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(updateRecs[0].arg)) }]
+      : argAssigns(latch, h);
+    const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h)];
     const init: Stmt | undefined =
       ivInit === undefined
         ? { k: 'assign', name: iv, value: { k: 'var', name: iv } }
@@ -9815,19 +9621,6 @@ function structureRanked(
         `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(h)} lost its update or its init copy`,
       );
     }
-    const ivParam = h.params[ivAt];
-    const heads: Stmt[] = [...derived].map(([j, { op }]) => {
-      const name = varName.get(h.params[j])!;
-      // a latch's constant renders where the head reads it, since the latch never renders
-      const e = (v: Value): Expr => {
-        const d = defs.get(v);
-        if (v === back.args[ivAt]) {
-          return { k: 'var', name: varName.get(ivParam)! };
-        }
-        return d?.opcode === 'const' && opBlock.get(d) === latch ? lowerDef(d, e) : expr(v);
-      };
-      return { k: 'assign', name, value: intoDeclaredTemp(name, lowerDef(op, e)) };
-    });
     const test = (inlined ? latchExpr(sub) : exprWith(sub))(cond);
     return {
       latch,
@@ -9835,7 +9628,6 @@ function structureRanked(
       init,
       cond: contIsTaken ? test : negateCond(test),
       inc,
-      heads,
     };
   };
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null, asFor?: ForPlan): Stmt[] => {
@@ -9879,9 +9671,6 @@ function structureRanked(
       body = withLoop(frame, () => structureBlock(fl.header, asFor?.latch ?? fl.header));
     } finally {
       jumps.forEach((x) => forJumps.delete(x));
-    }
-    if (asFor !== undefined && asFor.heads.length > 0) {
-      body = [...asFor.heads, ...body];
     }
     dwActive.delete(fl.header);
     const loop: Stmt =
