@@ -21,7 +21,7 @@
 // `base + c` as the same load off `base` at its offset plus `c` (`str[0]` against `str[i]` at
 // `i = 0`). Each is an identity of the integer operators, so turning it on for guard fusion is a
 // spelling decision, not a soundness one.
-import { Op, Value } from './core';
+import { Op, Value, attrsKey } from './core';
 import { spelledWhenDead } from './discipline';
 import { NEGATED_ICMP } from './opcodes';
 
@@ -100,8 +100,6 @@ export function sameAtEntry(
     }
     return { base, off, atEntry };
   };
-  const attrsOf = (d: Op, drop: string | null) =>
-    JSON.stringify(Object.fromEntries(Object.entries(d.attrs ?? {}).filter(([k]) => k !== drop)));
   // memoised per (x, y, side): a value its own consumer reads twice would otherwise double the work
   // at every level
   const memo = new Map<string, boolean>();
@@ -115,9 +113,9 @@ export function sameAtEntry(
     if (normalize && da.opcode === 'load' && db.opcode === 'load') {
       const x = address(da, atEntry);
       const y = address(db, true);
-      return x.off === y.off && attrsOf(da, 'off') === attrsOf(db, 'off') && same(x.base, x.atEntry, y.base);
+      return x.off === y.off && attrsKey(da, 'off') === attrsKey(db, 'off') && same(x.base, x.atEntry, y.base);
     }
-    if (attrsOf(da, null) !== attrsOf(db, null)) {
+    if (attrsKey(da) !== attrsKey(db)) {
       return false;
     }
     if (da.operands.every((o, i) => same(o, atEntry, db.operands[i]))) {

@@ -79,7 +79,7 @@
 // cannot be asked per loop as structure.ts's rerun asks its readings: the pre-structure folds run
 // once, ahead of every attempt. The recomputed F(i) has no name, so a loop test that reads it reads
 // the op of the IV that test sees, never a value one trip stale.
-import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue, opShape } from '../ir/core';
 import { deletableWhenDead, placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
 import { inEdgesOf, retireParam, trivialPhiValue } from '../ir/simplify';
@@ -222,13 +222,10 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
 /** Is `x` the same op as `y` apart from its operands' values: one opcode, attributes, operand count
  *  and result type? */
 const sameShape = (x: Op, y: Op): boolean =>
-  x.opcode === y.opcode &&
+  opShape(x) === opShape(y) &&
   x.operands.length === y.operands.length &&
   x.results.length === 1 &&
-  y.results.length === 1 &&
-  typeEquals(x.results[0].type, y.results[0].type) &&
-  JSON.stringify(Object.entries(x.attrs).sort(([a], [b]) => a.localeCompare(b))) ===
-    JSON.stringify(Object.entries(y.attrs).sort(([a], [b]) => a.localeCompare(b)));
+  typeEquals(x.results[0].type, y.results[0].type);
 
 /** Recompute every block parameter `j` whose in-edges each hand it one pure op F over the argument
  *  that edge hands a sibling parameter `i` (A SIBLING'S LEAF, in the header): `j` is F(i). Returns
