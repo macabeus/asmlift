@@ -15585,13 +15585,13 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_forjt_goto1(s32 lo, s32 hi);',
     proto: { sw_forjt_goto1: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
-  //      sw_forjt_skew is the negative of the strength-reduced reading (structure.ts `forPlanAt`, A
-  //      STRENGTH-REDUCED COUNTED LOOP): sw_gotocase2's loop with a second counter `j` that starts at
-  //      `lo << 3` and is reset to `i << 2` after each update. gcc2.7.2 hands the header both, and
-  //      the two edges' shifts differ, so `j` is no one function of `i` and the `for` must refuse
-  //      it. agbcc and gcc2.7.2 decline at the loop-exit refusal and gcc2.7.2kmc at its likely-slot
-  //      gap, as each did before the reading; ido7.1 lifts it as `while (1)` with the latch copied
-  //      into the arms, the way it lifts sw_forjt.
+  //      sw_forjt_skew is the negative of the derived loop parameter (raise/unpre.ts
+  //      `recomputeDerivedParams`, A SIBLING'S LEAF): sw_gotocase2's loop with a second counter `j`
+  //      that starts at `lo << 3` and is reset to `i << 2` after each update. gcc2.7.2 hands the
+  //      header both, and the two edges' shifts differ, so `j` is no one function of `i` and the
+  //      fold must leave it. agbcc and gcc2.7.2 decline at the loop-exit refusal and gcc2.7.2kmc at
+  //      its likely-slot gap; ido7.1 lifts it as `while (1)` with the latch copied into the arms,
+  //      the way it lifts sw_forjt.
   {
     sym: 'sw_forjt_skew',
     src:

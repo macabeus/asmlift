@@ -1,6 +1,6 @@
 // UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`): `FOR_PLAN_GATES`,
-// and `FOR_PLAN_IV_GATES`. Each SOUND gate the suite does not already guard
-// elsewhere is dropped here and the pass re-run on a fixture it refuses: the `for` then lifts and is
+// and `FOR_PLAN_IV_GATES`. Each SOUND gate the suite does not already guard elsewhere is dropped
+// here and the pass re-run on a fixture it refuses: the `for` then lifts and is
 // wrong — the trace oracle (`irAgreement`) disagrees with the IR, a contract fails, or, where the
 // oracle cannot judge (a division, a load from a parameter's address), the emitted C shows the op
 // on a path the asm never ran it on. Every fixture is `for-derived-iv.test.ts`'s strength-reduced
@@ -178,7 +178,8 @@ test('without entry-test-differs a guard other than the test is dropped', () => 
 });
 
 test('the heuristic and defensive rules admit nothing wrong when dropped on these fixtures', () => {
-  // `latch-params`: the latch's param is read by its update, which `update-reads-body` refuses
+  // `latch-params`: the latch's param is read by its update and so by the test of the updated IV,
+  // which `test-reads-body` refuses first
   const lp = srFor()
     .replace('^bb11():', '^bb11(%50: s32):')
     .replace(/\^bb11\(\)/g, '^bb11(%5)')

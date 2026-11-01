@@ -1449,9 +1449,9 @@ export interface ForPlanCandidate {
  *  `g` outside the loop branching only to the header — or the preheader — and the exit, the latch
  *  branching only to the header and the exit, the header entered only from those two), which every
  *  field reads and no rule could be dropped from without a crash; the caller's own construction of a
- *  preheader (a `br` into the header, offered only from a guard); the copies the update and the init make (`edgeCopyRecords`, which pushes a
- *  gap or refuses and so cannot be a prepared field); and `FOR_PLAN_IV_GATES`, the rules that read
- *  those copies.
+ *  preheader (a `br` into the header, offered only from a guard); the copies the update and the init
+ *  make (`edgeCopyRecords`, which pushes a gap or refuses and so cannot be a prepared field); and
+ *  `FOR_PLAN_IV_GATES`, the rules that read those copies.
  *
  *  A preheader in the loop's body is not refused on its own: it is entered only from `g`, and a
  *  natural loop's body holds every predecessor of a block in it but the header, so `g` would be in
@@ -1560,10 +1560,9 @@ export interface ForPlanIv {
 
 /** `forPlanAt`'s rules over the IV, its copies and the test. The argument for each is in the THE
  *  LOOP AS A `for` block. Not in the table: the update that is not ONE copy, which every field
- *  reads; and three refusals that predate the strength-reduced readings
- *  and no round has had to instrument, left inline ahead of the table — init copies that are cyclic
- *  or whose IV init reads another init copy's name (`copySetIsCyclic`, the `init` clause runs after
- *  the copies ahead of the `for`), and a test or update that reads an inner loop's value
+ *  reads; and three refusals left inline ahead of the table — init copies that are cyclic or whose
+ *  IV init reads another init copy's name (`copySetIsCyclic`, the `init` clause runs after the
+ *  copies ahead of the `for`), and a test or update that reads an inner loop's value
  *  (`latchInnerSub`). */
 export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
   {
@@ -9368,7 +9367,7 @@ function structureRanked(
   //     the parameter itself): the `for` writes the identity `a0 = a0`, which C prints `for (;`;
   //   • a materialized latch op whose every use is in the latch (`i + 1`, named because the back
   //     edge's copies read it twice): the `for` never renders the latch, so the test and the update
-  //     spell it inline;
+  //     spell it inline.
   // The header's `i << 3` beside `i` (a DERIVED IV) is no reading of this one: raise/unpre.ts's
   // `recomputeDerivedParams` reads that param as the op of `i` it is at every entry, before the
   // structurer runs, so the header carries the IV alone and its test may read the op as it reads any.

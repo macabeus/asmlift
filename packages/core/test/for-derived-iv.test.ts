@@ -4,9 +4,8 @@
 // because the back edge hands it round twice, and the header carries `i << 3` beside `i` (here `i + 3`,
 // an op the trace oracle models). The derived param is raise's to read: each fixture runs
 // `recomputeDerivedParams` (raise/unpre.ts) ahead of the structurer, as the pipeline does, so the
-// header reaches `forPlanAt` carrying the IV alone. The `for`
-// is taken for a loop the rerun asks (`ForRanking`), so every fixture but the last is a jump table
-// whose `while (1)` reading declines. Each is judged against its own IR by the trace oracle
+// header reaches `forPlanAt` carrying the IV alone. The `for` is taken for a loop the rerun asks
+// (`ForRanking`), so every fixture but the last is a jump table whose `while (1)` reading declines. Each is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. A derived
 // param whose two edges apply different ops or different constants is no op of the IV, so the fold
 // leaves it and the loop declines; so do a preheader that reads memory and a test that reads the IV
@@ -177,17 +176,15 @@ test('a preheader that reads memory refuses the `for`', () => {
 });
 
 test('a latch test that reads the derived param refuses the `for`', () => {
-  // `hi < p` behind the guard `hi < lo + 3`: `p` is `i + 3` of the IV BEFORE its update, which the
-  // `for`'s test, run after the update, has no name for
+  // `hi < p` behind the guard `hi < lo + 3`: `p` is `i + 3` of the IV BEFORE its update, and the
+  // `for`'s test runs after the update (`test-reads-update`)
   const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %6' });
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
 });
 
 test("a latch test that reads the derived param's back-edge value lifts, reading the updated IV", () => {
-  // `hi < (i + 1) + 3` behind the guard `hi < lo + 3`, which is that test on the entry values. A
-  // derived NAME, written at the body's head, would be read stale here (unset on the first test, the
-  // last trip's value after); the folded param has no name, and the test reads `i + 3` of the IV the
-  // update just wrote
+  // `hi < (i + 1) + 3` behind the guard `hi < lo + 3`, which is that test on the entry values: the
+  // folded param has no name to read stale, and the test reads `i + 3` of the IV the update just wrote
   const r = judged(srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %38' }));
   expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1 \+ (\w+|3); \1 = \1 \+ 1\) \{/);
   agrees(r);

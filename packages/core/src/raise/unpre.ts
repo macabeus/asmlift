@@ -73,13 +73,12 @@
 // `i + 1` the dead `(i + 1) << 3` was the second reader of is not named for it.
 //
 // UNGATED, by measurement: a loop header is no switch join, so this is exactly the widening the
-// `not-switch-join` gate keeps from the congruent fold, and it was measured before it shipped. The
-// full synthetic tier with it (and with structure.ts's former structurer-level copy of the reading,
-// a `for` that opened its body with `j = F(i);`, deleted) moves only gcc 2.7.2 and KMC cells, and
-// none of them back: 7 nonmatch -> MATCH (retpost_tail, uninit_bits, sw_h3, sw_h4, bcpy_ind kmc), 25
-// closer, 3 brk2out rows a few insns further with C that reads correct. The name the structurer
-// kept for `j` read stale wherever a test read it (a `for` writes it only at the body's head); the
-// recomputed F(i) has no name to read stale.
+// `not-switch-join` gate keeps from the congruent fold. Over the synthetic tier it moves only gcc
+// 2.7.2 and KMC cells and loses no match (retpost_tail, uninit_bits, sw_h3, sw_h4 and bcpy_ind
+// match through it; the brk2out rows lift a few insns further, with C that reads correct). It
+// cannot be asked per loop as structure.ts's rerun asks its readings: the pre-structure folds run
+// once, ahead of every attempt. The recomputed F(i) has no name, so a loop test that reads it reads
+// the op of the IV that test sees, never a value one trip stale.
 import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue } from '../ir/core';
 import { deletableWhenDead, placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
