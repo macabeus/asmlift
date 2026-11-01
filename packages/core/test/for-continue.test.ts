@@ -9,7 +9,7 @@
 // `for` takes a guard that is its test, a guard whose exit edge passes a relay block, no guard where
 // its first test folds to true, and an update the header computes. It refuses a guard that is not
 // the loop's test, a constant first test that leaves, two updates, a latch with an effect, an exit
-// that takes a value and an update from a call, and those fixtures lift through the rerun's
+// that takes the IV from before its update and an update from a call, and those fixtures lift through the rerun's
 // `while (1)` instead, judged the same way; a relay something else enters refuses it too, and that
 // fixture declines.
 import { expect, test } from 'vitest';
@@ -193,10 +193,29 @@ test('a latch with an effect refuses the `for`', () => {
   refusesFor(forJt({ latch }));
 });
 
-test('an exit that takes a value refuses the `for`', () => {
+test('an exit that takes the IV past the loop lifts as the `for`, its param under the IV name', () => {
+  // `for (i = lo; ..) { .. } post-loop(i)`: the guard hands the exit `lo`, the latch `i + 1`, which
+  // are what the `for`'s init and update leave in the IV's name on the two edges its test leaves by
   const ir = forJt({ exitParams: '%60: s32', exitTail: 'br ^bb13(%60)' })
     .replace('cond_br %4, ^bb12(), ^bb1(%0)', 'cond_br %4, ^bb12(%0), ^bb1(%0)')
     .replace('cond_br %37, ^bb12(), ^bb1(%36)', 'cond_br %37, ^bb12(%36), ^bb1(%36)');
+  const { src, agreement, shipped } = judged(ir);
+  const iv = /for \((v\d+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{/.exec(src)?.[1];
+  expect(iv).toBeDefined();
+  // the code after the loop reads the IV's name: the exit's param took it
+  expect(src).toMatch(new RegExp(`}\\n\\s*v\\d+ = ${iv};\\n\\s*do \\{`));
+  expect(src).not.toContain('while (1)');
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+test('an exit that takes the IV from before its update refuses the `for`', () => {
+  // `last = lo; for (i = lo; ..) { last = i; .. } post-loop(last)`: the latch hands the exit `i`,
+  // which the `for`'s update rewrites ahead of its test
+  const ir = forJt({ exitParams: '%60: s32', exitTail: 'br ^bb13(%60)' })
+    .replace('cond_br %4, ^bb12(), ^bb1(%0)', 'cond_br %4, ^bb12(%0), ^bb1(%0)')
+    .replace('cond_br %37, ^bb12(), ^bb1(%36)', 'cond_br %37, ^bb12(%5), ^bb1(%36)');
   refusesFor(ir);
 });
 
