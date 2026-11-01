@@ -1268,10 +1268,22 @@ interface ForeverLoopInfo {
 // (`outwardExitOf`). The flag is handed out one loop at a time: the hit runs that code and `f = 1;
 // break;`, and `if (f != 0) break;` follows the loop at once, ahead of everything the hit skips.
 // Both loops must take the reading, the enclosing one recording it as `handed`, or neither does.
+//
+// A HIT THAT RUNS CODE FIRST: `for (j…) { if (hit) { a = 1; k(j); goto out; } } k(i); out: …`. The
+// edge out of the body enters the hit's own code, which the code after the loop never meets; the
+// block that code runs on to is the second target (`hitArmOf`), and the hit writes its code ahead of
+// `f = 1; break;` (`hits`). sub_0800D188's MAGNET/BOX case is one, its `out:` the `break;` that ends
+// the case, behind which the switch's own `break;` leaves the loop around it: agbcc threads the
+// `goto` to the code after that loop (jump.c `follow_jumps`), the merge of the switch and the exit of
+// the loop at once. No goto-free spelling matches those bytes (the flag adds a variable), so the hit
+// rung is asked only where every structuring without it declines (`HitRanking`).
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
   outward?: true;
+  /** the edges whose hit runs code of its own on the way to `to` (`hitArmOf`): each region is
+   *  written inside the loop, ahead of `f = 1; break;` */
+  hits?: BreakArm[];
 }
 
 /** One edge out of a loop's body that `foreverShape`'s last resort weighs as a two-level exit: from
@@ -1280,6 +1292,8 @@ interface TwoLevelExit {
 export interface TwoLevelCandidate {
   /** the edge leaves from an inner loop's body, not this loop's own */
   readonly fromInnerBody: boolean;
+  /** the hit runs code of its own before it reaches `to` (`TwoLevelExit.hits`) */
+  readonly hitRunsCode: boolean;
   /** another edge of this loop already took a second target, and it is not `to` */
   readonly secondTargetElsewhere: boolean;
   /** `to` is the loop's own exit or lies in its body */
@@ -1345,6 +1359,12 @@ export const TWO_LEVEL_EXIT_GATES: readonly Gate<TwoLevelCandidate>[] = [
     guardedBy:
       'two-level-exit.test.ts: a `goto` out of both loops takes one flag whichever of its code and the code after the loop is laid out first',
     rejects: (c) => c.ownTargetHeldBack && !c.targetPastEnclosingLoop,
+  },
+  {
+    id: 'hit-code-past-enclosing-loop',
+    why: 'a hit whose code runs past both loops is the outward reading’s, which writes that code itself (defensive)',
+    sound: false,
+    rejects: (c) => c.hitRunsCode && c.targetPastEnclosingLoop,
   },
   {
     id: 'target-two-loops-out',
@@ -3170,6 +3190,8 @@ export const BYPASS_TAIL_GATES: readonly Gate<BypassTailCandidate>[] = [
 interface ForeverAsk {
   readonly copyExitTail?: boolean;
   readonly twoLevel?: boolean;
+  /** a two-level exit's hit may run code of its own first (`TwoLevelExit.hits`) */
+  readonly hits?: boolean;
   readonly outward?: boolean;
   readonly lastResort?: boolean;
   readonly cycles?: boolean;
@@ -3470,6 +3492,13 @@ interface OutwardRanking {
   could: boolean;
 }
 
+/** Whether `while (1)` asks its hit rung (`TwoLevelExit.hits`), and whether a structuring met a loop
+ *  that rung reads. */
+interface HitRanking {
+  readonly asked: boolean;
+  could: boolean;
+}
+
 /** The jump tables, by dispatch block, that ask their jump rungs (THE JUMPS, in the per-switch
  *  ladder), or every one of them; the ones a structuring met where every goto-free rung declined
  *  and an unasked jump rung read the switch; and the ones any structuring spelled with no goto. */
@@ -3510,6 +3539,16 @@ interface ForRanking {
  *  where asking the outward rung there hands the flag out instead. So every run above is made with
  *  the rung unasked, and only where all of them decline and some loop's rung would have read it are
  *  they made again with it asked (`OutwardRanking`).
+ *
+ *  A HIT THAT RUNS CODE FIRST, BEHIND THE DECLINES. A two-level exit whose hit runs code of its own
+ *  on the way to its second target (`TwoLevelExit.hits`) reads loops every other `while (1)` rung
+ *  reads too: agbcc's cross-jumped shared tails, which the copies spell byte for byte, and a search
+ *  loop's hit into a return tail holding a loop, which the last rung copies into the hit. The flag
+ *  is a variable the asm does not hold, so the hit rung is asked only where every run above
+ *  declines and some loop's hit rung would have read it (`HitRanking`): sub_0800D188's
+ *  MAGNET/BOX search loop, whose last-rung copy starts at the merge of the switch arm it sits in,
+ *  where no `break;` inside the loop reaches (`switchBreakAt`). The `for` reruns below make each
+ *  run with it unasked first.
  *
  *  A `for` WHOSE `continue` RUNS THE UPDATE, LAST. `while (1)` spells a counted loop whose latch
  *  holds the update and the test as `if (!c) break; i++;` at the foot of the body, which has no
@@ -3558,6 +3597,7 @@ export function structure(
     outward: OutwardRanking,
     forRank: ForRanking,
     jumps: JumpRanking,
+    hit: HitRanking,
   ): SFn | null => {
     const held: (() => void)[] = [];
     const hold =
@@ -3583,6 +3623,7 @@ export function structure(
         outward,
         forRank,
         jumps,
+        hit,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3594,26 +3635,36 @@ export function structure(
       return null;
     }
   };
-  const ranked = (outward: OutwardRanking, forRank: ForRanking, jumps: JumpRanking): SFn | null => {
+  const ranked = (outward: OutwardRanking, forRank: ForRanking, jumps: JumpRanking, hit: HitRanking): SFn | null => {
     const first: RetCopyRanking = { last: false, took: false };
     const inSpan: PastExitRanking = { first: false, could: false };
     const past: RetCopyRanking = { last: false, took: false };
     return (
-      attempt(first, inSpan, outward, forRank, jumps) ??
-      (first.took ? attempt({ last: true, took: false }, inSpan, outward, forRank, jumps) : null) ??
-      (inSpan.could ? attempt(past, { first: true, could: false }, outward, forRank, jumps) : null) ??
-      (past.took ? attempt({ last: true, took: false }, { first: true, could: false }, outward, forRank, jumps) : null)
+      attempt(first, inSpan, outward, forRank, jumps, hit) ??
+      (first.took ? attempt({ last: true, took: false }, inSpan, outward, forRank, jumps, hit) : null) ??
+      (inSpan.could ? attempt(past, { first: true, could: false }, outward, forRank, jumps, hit) : null) ??
+      (past.took
+        ? attempt({ last: true, took: false }, { first: true, could: false }, outward, forRank, jumps, hit)
+        : null)
     );
   };
-  const outwardRanked = (forRank: ForRanking, jumps: JumpRanking): SFn | null => {
+  const outwardRanked = (forRank: ForRanking, jumps: JumpRanking, hit: HitRanking): SFn | null => {
     const unasked: OutwardRanking = { asked: false, could: false };
     return (
-      ranked(unasked, forRank, jumps) ?? (unasked.could ? ranked({ asked: true, could: false }, forRank, jumps) : null)
+      ranked(unasked, forRank, jumps, hit) ??
+      (unasked.could ? ranked({ asked: true, could: false }, forRank, jumps, hit) : null)
+    );
+  };
+  const hitRanked = (forRank: ForRanking, jumps: JumpRanking): SFn | null => {
+    const unasked: HitRanking = { asked: false, could: false };
+    return (
+      outwardRanked(forRank, jumps, unasked) ??
+      (unasked.could ? outwardRanked(forRank, jumps, { asked: true, could: false }) : null)
     );
   };
   const forRanked = (jumps: JumpRanking): SFn | null => {
     let forRank: ForRanking = { asked: new Set(), wanted: new Set() };
-    let sfn = outwardRanked(forRank, jumps);
+    let sfn = hitRanked(forRank, jumps);
     // each rerun asks every loop the runs before it declined inside of; a nest needs one per level
     for (let n = 0; sfn === null && n < 4; n++) {
       const asked = new Set([...forRank.asked, ...forRank.wanted]);
@@ -3621,7 +3672,7 @@ export function structure(
         break;
       }
       forRank = { asked, wanted: new Set() };
-      sfn = outwardRanked(forRank, jumps);
+      sfn = hitRanked(forRank, jumps);
     }
     return sfn;
   };
@@ -3663,6 +3714,7 @@ function structureRanked(
   outwardRank: OutwardRanking,
   forRank: ForRanking,
   jumpRank: JumpRanking,
+  hitRank: HitRanking,
 ): SFn {
   const {
     returnsVoid = false,
@@ -4326,6 +4378,7 @@ function structureRanked(
     second: TwoLevelExit | undefined,
     outwardAsked: boolean,
     ownTargetHeldBack: boolean,
+    hitRunsCode = false,
   ): TwoLevelCandidate => {
     const outer = forest.parent.get(nl.header);
     const outerBody = outer ? forest.byHeader.get(outer)!.body : null;
@@ -4339,6 +4392,7 @@ function structureRanked(
       get fromInnerBody() {
         return innerBodyHas(nl, from);
       },
+      hitRunsCode,
       secondTargetElsewhere: second !== undefined && second.to !== to,
       get targetIsExitOrInLoop() {
         return to === exit || nl.body.has(to);
@@ -4363,6 +4417,40 @@ function structureRanked(
         return s !== null && [...s].some((x) => nl.body.has(x));
       },
     };
+  };
+  // A TWO-LEVEL EXIT WHOSE HIT RUNS CODE FIRST: `for (j…) { if (hit) { a = 1; k(j); goto out; } }
+  // k(i); out: …` (`TwoLevelExit.hits`). The edge enters `head`, code no other edge enters, which runs
+  // on to ONE block the code after the loop also meets (`reachForward` from `exit`) and nowhere else
+  // but a `return` of its own (`codeBreakArm`, unshared, with that block for its exit): that block is
+  // the second target, and `head`'s region is written in the loop ahead of `f = 1; break;`. Null
+  // where the code from `head` meets the code after the loop at no block or at two.
+  const hitArmOf = (
+    nl: NaturalLoop,
+    from: Block,
+    head: Block,
+    exit: Block,
+  ): { arm: BreakArm; target: Block } | null => {
+    const afterExit = reachForward(exit, dom);
+    if (afterExit.has(head) || nl.body.has(head)) {
+      return null;
+    }
+    const met = new Set<Block>();
+    const seen = new Set<Block>();
+    for (const work = [head]; work.length > 0;) {
+      const x = work.pop()!;
+      if (afterExit.has(x)) {
+        met.add(x);
+      } else if (!seen.has(x) && !nl.body.has(x)) {
+        seen.add(x);
+        work.push(...successorsOf(x).filter((s) => !dom.get(x)!.has(s)));
+      }
+    }
+    if (met.size !== 1) {
+      return null;
+    }
+    const [target] = met;
+    const region = codeBreakArm(preds, dom, from, head, nl.body, target);
+    return region === null ? null : { arm: { from, to: head, region }, target };
   };
   // May the exit edge `from -> to` of `nl`, leaving from an inner loop's body, be that loop's outward
   // two-level exit (`TwoLevelExit.outward`) handed out to `nl`, which leaves for `exit`? The edge
@@ -4644,7 +4732,14 @@ function structureRanked(
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop, ask: ForeverAsk): ForeverLoopInfo | null => {
-    const { copyExitTail = false, twoLevel = false, outward = false, lastResort = false, cycles = false } = ask;
+    const {
+      copyExitTail = false,
+      twoLevel = false,
+      hits = false,
+      outward = false,
+      lastResort = false,
+      cycles = false,
+    } = ask;
     // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
     // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
     // region holding the loop ends at the loop either way (`emitForever`).
@@ -4711,16 +4806,35 @@ function structureRanked(
         }
         // the last resort: a two-level exit, to ONE target beside `exit`, never out of an inner body
         // (`TWO_LEVEL_EXIT_GATES`; what each rule does is at `twoLevelCandidate`)
-        const candidate = twoLevel ? twoLevelCandidate(nl, exit, e.from, e.to, second, outward, !ownFlag) : null;
-        if (candidate === null || firstRejection(hooks.twoLevelExitGates ?? TWO_LEVEL_EXIT_GATES, candidate) !== null) {
+        if (!twoLevel) {
           return false;
         }
+        const gates = hooks.twoLevelExitGates ?? TWO_LEVEL_EXIT_GATES;
+        let to = e.to;
+        let hit: { arm: BreakArm; target: Block } | null = null;
+        let candidate = twoLevelCandidate(nl, exit, e.from, to, second, outward, !ownFlag);
+        // where the edge's own target is no second target, the block its code runs on to may be
+        // (`hitArmOf`)
+        if (firstRejection(gates, candidate) !== null) {
+          hit = hits ? hitArmOf(nl, e.from, e.to, exit) : null;
+          if (hit === null) {
+            return false;
+          }
+          to = hit.target;
+          candidate = twoLevelCandidate(nl, exit, e.from, to, second, outward, !ownFlag, true);
+          if (firstRejection(gates, candidate) !== null) {
+            return false;
+          }
+        }
         second ??= {
-          to: e.to,
+          to,
           from: new Set(),
           ...(candidate.targetPastEnclosingLoop ? { outward: true as const } : {}),
         };
         second.from.add(e.from);
+        if (hit !== null) {
+          (second.hits ??= []).push(hit.arm);
+        }
         breaks.add(e.from);
         return true;
       });
@@ -4782,7 +4896,9 @@ function structureRanked(
   // (`TwoLevelExit.outward`) — only on a run every structuring without it declined
   // (`OutwardRanking`) — and right behind that `while (1)` with every copy, where an arm also
   // copies a return tail a path that bypasses the loop enters, under an exit inside the loop's span
-  // or on the exit path (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). Last of all, where no
+  // or on the exit path (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). Behind that, again only
+  // on a run every structuring without it declined (`HitRanking`), the two-level exit whose hit runs
+  // code first (`TwoLevelExit.hits`). Last of all, where no
   // reading fits and no ret copy waits, every `while (1)` reading above runs again, in the same
   // order, with an arm writing its own copy of a loop in a tail it shares, ending in `break` or in
   // `return` (A LOOP IN THE TAIL, at `earlyReturnArm`): two copies of a loop the asm holds once.
@@ -4808,11 +4924,26 @@ function structureRanked(
         pastExit.could = pastCould;
         return null;
       };
+      // the hit rung (`TwoLevelExit.hits`), behind every copy that holds no loop and ahead of the last
+      // rung's copies of one; unasked, likewise only a probe (`HitRanking`)
+      const hitting = (outward: boolean): ForeverLoopInfo | null => {
+        const ask = { twoLevel: true, hits: true, outward: outward && outwardRank.asked };
+        if (hitRank.asked) {
+          return read(ask);
+        }
+        const pastCould = pastExit.could;
+        hitRank.could ||= read(ask) !== null;
+        pastExit.could = pastCould;
+        return null;
+      };
       return {
         plain: () => read({}),
         copied: () => read({ copyExitTail: true }),
         flagged: (outward: boolean) =>
-          read({ twoLevel: true }) ?? (outward ? handingOut() : null) ?? read({ copyExitTail: true, lastResort: true }),
+          read({ twoLevel: true }) ??
+          (outward ? handingOut() : null) ??
+          read({ copyExitTail: true, lastResort: true }) ??
+          hitting(outward),
       };
     };
     const first = rungs(false);
@@ -9031,8 +9162,10 @@ function structureRanked(
     // outright, since `break` there leaves only the switch (`TWO_LEVEL_BREAK_GATES`): agbcc -O2
     // lays out a case that falls through after `if (h(j)) goto T;` that way. The case-body refusal
     // below declines the same input too, the second target being a loop exit past the switch's end.
+    const hit = loopCtx?.twoLevel?.hits?.find((a) => a.from === b && (a.to === takenB || a.to === fallB));
     const twoLevel =
-      loopCtx?.twoLevel?.from.has(b) === true && (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to)
+      loopCtx?.twoLevel?.from.has(b) === true &&
+      (takenB === loopCtx.twoLevel.to || fallB === loopCtx.twoLevel.to || hit !== undefined)
         ? loopCtx.twoLevel
         : undefined;
     if (
@@ -9059,7 +9192,7 @@ function structureRanked(
       // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
       // the `break`, and its last block's copies into the exit are the break's.
       const arm = frame.breakArms?.find((a) => a.from === b && (a.to === takenB || a.to === fallB));
-      const breakIsTaken = takenB === (twoLevel?.to ?? arm?.to ?? frame.exit);
+      const breakIsTaken = takenB === (hit?.to ?? twoLevel?.to ?? arm?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
       const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
       // an outward exit also leaves the enclosing loop, for its exit: judged there as that loop's break
@@ -9085,6 +9218,7 @@ function structureRanked(
               ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
               ...(arm !== undefined && twoLevel === undefined ? structureRegion(arm.to, frame.exit) : []),
               ...(outer !== undefined ? structureRegion(twoLevel!.to, outer.exit) : []),
+              ...(hit !== undefined ? structureRegion(hit.to, twoLevel!.to) : []),
               ...(twoLevel !== undefined
                 ? [{ k: 'assign', name: twoLevelFlag(frame.header), value: { k: 'const', value: 1 } } as Stmt]
                 : []),
