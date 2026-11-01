@@ -110,10 +110,9 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → pow2-remainder →
- *  soft-division →
- *  scaled-extension → store-sign → array-legalize → truncated-load → struct-array → member-array →
- *  struct-pointer → short-circuit → branch-short-circuit → narrow-reads → narrow-local →
- *  parameter-width → scaled-extension-restore.
+ *  soft-division → scaled-extension → store-sign → array-legalize → truncated-load → struct-array →
+ *  member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
+ *  narrow-local → parameter-width → scaled-extension-restore.
  *  See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer

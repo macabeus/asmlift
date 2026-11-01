@@ -251,16 +251,15 @@ export function recognizeDivPow2(fn: Fn): boolean {
 //
 // IDENTITY-OR-DECLINE again: the mask must be exactly `2^k - 1` of the dividend the first test
 // compares against zero, the second test must compare THAT mask against zero, the correction must
-// be exactly `-2^k` on the mask, and the corrected value must reach the merge only from the arm
+// be exactly `mask - 2^k` (`correctedMask`), and the corrected value must reach the merge only from the arm
 // both tests failed into. The two inner blocks are deleted, so neither may do anything else.
 // agbcc, gcc and kmc COMPILE `%` as a biased floor (`x - (t >> k << k)`), which ir/bits.ts
 // `remainderPair` bounds and this does not touch; mwcc's is branch-free.
 //
-// THE PASS IS NOT GATED BY TARGET, and it is not IDO-only in effect: a HAND-WRITTEN diamond of
-// this shape on any compiler is folded to `%` too (`r = i & 15; if (i < 0 && r != 0) r -= 16;`
-// compiled by agbcc reaches this pass as the same two-test diamond and lifts `i % 16`). The identity holds whatever wrote it, so the C is the
-// same value; whether `%` recompiles to the target's bytes there is the bench's question, not this
-// pass's, and the hand-written agbcc and mwcc diamonds measured came out equal or closer.
+// THE PASS IS NOT GATED BY TARGET: a HAND-WRITTEN diamond of this shape on any compiler is folded
+// to `%` too (agbcc compiles `r = i & 15; if (i < 0 && r != 0) r -= 16;` to the same two-test
+// diamond, which lifts `i % 16`). The identity holds whatever wrote it, so the C is the same value;
+// whether `%` recompiles to the target's bytes there is the bench's question, not this pass's.
 
 /** `and x, const(2^k - 1)` → { x, k }, else null. The and is commutative. */
 function maskOf(defs: Map<Value, Op>, v: Value): { x: Value; k: number } | null {
@@ -352,7 +351,7 @@ export function recognizeSremPow2(fn: Fn): boolean {
         continue;
       }
       for (const fix of mp) {
-        // the CORRECTION arm: `t + -2^k` to the merge, from the second test alone, nothing else
+        // the CORRECTION arm: `mask - 2^k` to the merge, from the second test alone, nothing else
         const ft = term(fix);
         if (ft.opcode !== 'br' || ft.successors[0]?.block !== m || fix === fn.blocks[0] || fix.ops.some(effectful)) {
           continue;

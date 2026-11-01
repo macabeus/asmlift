@@ -2886,9 +2886,8 @@ function unionViews(irBlocks: readonly Block[], base: Value): number[] {
  *  A part is an object of the source's (`provenParts`), and its bare element `sp64[i]` is not the
  *  same compile as the cast `((u16 *)sp64)[i]` beside a second array whose base agbcc holds (see
  *  structure.ts `framePartDecls`) — but the bare spelling exists only for an access of the declared
- *  element's width and extension. Typed `u8` whatever its accesses said, a part of `u16` or `s8`
- *  elements reached no access bare at all. Every access agreeing on one element is the evidence a
- *  declaration of it needs. An access that disagrees with the declaration keeps its cast, which is
+ *  element's width and extension, so a part of `u16` or `s8` elements declared `u8` reaches no
+ *  access bare. Every access agreeing on one element is the evidence a declaration of it needs. An access that disagrees with the declaration keeps its cast, which is
  *  one value under any declaration (structure.ts `bareArrayElement`), so the stamp never changes
  *  what an access reads; nor what it aliases, since a bare element of a `u16` array is a `u16`
  *  lvalue, the type the cast it replaces names.

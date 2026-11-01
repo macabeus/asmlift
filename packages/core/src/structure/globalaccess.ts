@@ -82,8 +82,8 @@ export function globalByteBase(e: Expr): { name: string; residual: Expr } | null
  *  one `+` further down than globalByteBase looks. The sum's terms are flattened, exactly one of
  *  them an address, and the rest are the residual: its runtime terms in order and its constants
  *  summed into one trailing term (`v8 + 32`). Not for the cast forms, which keep the sum as written
- *  (`*(s8 *)((u32)sp0 + 3 + a0)`), so a base with no declaration reads exactly as before. `off` is
- *  the access's own displacement, summed into the same trailing constant. */
+ *  (`*(s8 *)((u32)sp0 + 3 + a0)`). `off` is the access's own displacement, summed into the same
+ *  trailing constant. */
 export function nestedGlobalOf(e: Expr, width: number, off: number): { name: string; idx: Expr } | null {
   const terms: Expr[] = [];
   const flatten = (x: Expr): void => {
