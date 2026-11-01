@@ -231,3 +231,23 @@ test('an uninitialised local the edges the test leaves by hand on lifts as the `
   expect(src.match(new RegExp(`\\b${x} = `, 'g'))).toEqual([`${x} = `]);
   expect(src).toMatch(new RegExp(`k\\(4\\);\\n\\s*${x} = 3;\\n\\s*break;`));
 });
+
+test("without exit-copy the latch's way out leaves the guard's value in the exit", () => {
+  // the guard hands the exit `g(hi)`, every arm `i` and the latch `i + 1`: no edge the test leaves
+  // by is one the init or the update writes. The trace oracle never reaches the latch's way out on
+  // this fixture (it agrees either way), so the C is the witness: past the `for`, `k` reads a name
+  // written only ahead of the loop and in the arms, where the asm hands it `i + 1`
+  const ir = forExit({
+    consts: '%90: s32 = call %1 {target="g"}\n  ',
+    guardExit: '^bb12(%90)',
+    arm: () => '%5',
+    latchArgs: '%36',
+    exitParams: '%60: s32',
+    exitCalls: '%62: s32 = call %60 {target="k"}\n  ',
+  });
+  const full = judged(ir);
+  expect(full.src).not.toContain('for (');
+  agrees(full);
+  const { src } = judged(ir, { forPlanIvGates: without(FOR_PLAN_IV_GATES, 'exit-copy') });
+  expect(src).toMatch(/(v\d+) = g\(a1\);\n\s*for \((v\d+) = a0; a1 >= \2; \2 = \2 \+ 1\) \{[^]*\n {4}}\n\s*k\(\1\);/);
+});
