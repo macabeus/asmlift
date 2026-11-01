@@ -18,7 +18,7 @@ import type { TargetDescription } from '../target';
 import { readDeclaredMembers } from './aggmembers';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
-import { recognizeDivPow2 } from './divpow2';
+import { recognizeDivPow2, recognizeSremPow2 } from './divpow2';
 import {
   type PoolOrder,
   type ScaleRecord,
@@ -109,7 +109,8 @@ export interface PreRecoveryPass {
 }
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
- *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
+ *  address-numbering → const-materialize → magic-division → pow2-division → pow2-remainder →
+ *  soft-division →
  *  scaled-extension → store-sign → array-legalize → truncated-load → struct-array → member-array →
  *  struct-pointer → short-circuit → branch-short-circuit → narrow-reads → narrow-local →
  *  parameter-width → scaled-extension-restore.
@@ -141,6 +142,9 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // ending in `br`. Verified by running it before and after each of them — same result. It sits
   // beside magicdiv so that a reader looking for division recovery finds both together.
   { id: 'divpow2', run: recognizeDivPow2, dce: true },
+  // …and its remainder sibling, IDO's two-test diamond (raise/divpow2.ts `recognizeSremPow2`): no
+  // other pass reads a three-edge merge whose last arm is an `add` of a negative power of two.
+  { id: 'srempow2', run: recognizeSremPow2, dce: true },
   {
     id: 'softdiv',
     run: (fn, _self, _opts, target) => recognizeSoftDiv(fn, target),

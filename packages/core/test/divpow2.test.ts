@@ -10,7 +10,7 @@ import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { dce } from '../src/pattern/engine';
 import { decompile } from '../src/pipeline';
-import { recognizeDivPow2 } from '../src/raise/divpow2';
+import { recognizeDivPow2, recognizeSremPow2 } from '../src/raise/divpow2';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
 const mips = (body: string, target = MIPS_IDO) => decompile('f', `00000000 <f>:\n${body}`, target).source;
@@ -110,4 +110,58 @@ test('a dividend that is ITSELF a shift still folds — SPLIT is tried, not assu
     '^bb1():\n  %4: s32 = const {value=3}\n  %5: s32 = add %1, %4\n  br ^bb2(%5)\n' +
     '^bb2(%6: s32):\n  %7: s32 = shr_s %6 {imm=2}\n  ret %7\n}\n';
   expect(folds(shiftedDividend)).toContain('sdiv');
+});
+
+// ── the signed remainder by 2^k, IDO's two-test diamond (`recognizeSremPow2`) ──────────────────
+test('IDO: the masked remainder with its negative correction folds to `%`', () => {
+  // verbatim IDO 7.1 -O2 for `int modpow2(int a){ return a % 16; }`; `a0 % 16` compiles back to it
+  expect(
+    mips(
+      '   0:\tbgez\ta0,14 <f+0x14>\n   4:\tandi\tv0,a0,0xf\n   8:\tbeqz\tv0,14 <f+0x14>\n   c:\tnop\n' +
+        '  10:\taddiu\tv0,v0,-16\n  14:\tjr\tra\n  18:\tnop\n',
+    ),
+  ).toBe('s32 f(s32 a0) {\n    return a0 % 16;\n}\n');
+});
+
+// mask m, correction c on the arm both tests fail into; `first`/`second` are the two compares
+const srem = (m: number, c: number, first = 'icmp_sge', second = 'icmp_eq', extra = '') =>
+  `fn f {\n^bb0(%0: s32):\n  %1: s32 = const {value=0}\n  %2: u32 = ${first} %0, %1\n` +
+  `  %3: s32 = const {value=${m}}\n  %4: s32 = and %0, %3\n  cond_br %2, ^bb3(%4), ^bb1()\n` +
+  `^bb1():\n  %5: s32 = const {value=0}\n  %6: u32 = ${second} %4, %5\n  cond_br %6, ^bb3(%4), ^bb2()\n` +
+  `^bb2():\n  %7: s32 = const {value=${c}}\n  %8: s32 = add %4, %7\n${extra}  br ^bb3(%8)\n` +
+  `^bb3(%9: s32):\n  ret %9\n}\n`;
+const sremFolds = (ir: string) => {
+  const fn = parse(ir);
+  const changed = recognizeSremPow2(fn);
+  if (changed) {
+    dce(fn);
+    verify(fn);
+  }
+  return changed ? print(fn) : null;
+};
+
+test('the canonical remainder diamond folds — the control for every refusal below', () => {
+  expect(sremFolds(srem(7, -8))).toMatch(/smod %0, %\d+/);
+});
+
+test('the mask must be 2^k - 1 and the correction exactly -2^k of the same k', () => {
+  expect(sremFolds(srem(6, -7))).toBeNull(); // not a low-bits mask
+  expect(sremFolds(srem(7, -16))).toBeNull(); // the correction of k=4 on a k=3 mask
+  expect(sremFolds(srem(7, 8))).toBeNull(); // adding 2^k is not the truncating remainder
+});
+
+test('the tests must send x >= 0 and a zero mask to the merge with the mask', () => {
+  // `x < 0` and `mask != 0` routed the same way as written are the inverted diamond
+  expect(sremFolds(srem(7, -8, 'icmp_slt'))).toBeNull();
+  expect(sremFolds(srem(7, -8, 'icmp_sge', 'icmp_ne'))).toBeNull();
+  expect(sremFolds(srem(7, -8, 'icmp_uge'))).toBeNull(); // unsigned: no negative side
+  // …and the same tests with both arms swapped are the same diamond
+  const swapped = srem(7, -8, 'icmp_slt', 'icmp_ne')
+    .replace('cond_br %2, ^bb3(%4), ^bb1()', 'cond_br %2, ^bb1(), ^bb3(%4)')
+    .replace('cond_br %6, ^bb3(%4), ^bb2()', 'cond_br %6, ^bb2(), ^bb3(%4)');
+  expect(sremFolds(swapped)).toMatch(/smod %0, %\d+/);
+});
+
+test('the deleted arms may do nothing else', () => {
+  expect(sremFolds(srem(7, -8, 'icmp_sge', 'icmp_eq', '  store %0, %7 {off=0, width=4}\n'))).toBeNull();
 });
