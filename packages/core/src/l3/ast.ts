@@ -229,7 +229,7 @@ export type Expr =
        *  *u.half;` returns stale (`mov r0, #0x1`) where the subscript reloads. Set on a view of a
        *  frame union (structure.ts `frameUnionAccess`), the one access that rests on that set,
        *  and on an element of a frame array, where it only keeps the element spelling at index 0
-       *  (structure.ts `frameArrayElement`, l3/constinit.ts `asElement`). */
+       *  (structure.ts `bareArrayIndex`, l3/constinit.ts `asElement`). */
       subscript?: true;
     }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct

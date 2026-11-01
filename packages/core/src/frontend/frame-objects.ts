@@ -2501,7 +2501,7 @@ function failIfSlotKeysIt(
  *  holds (`writerNotKept` says which writers it can hold) — or one per part, where the accesses
  *  prove the bytes are several objects no use reads across (`provenParts`) — and every access
  *  inside it is a cast-spelled access to that array (an element of a part, by its index:
- *  structure.ts `frameArrayElement`), or a view of the union it is declared as where two widths
+ *  structure.ts `framePartDecls`), or a view of the union it is declared as where two widths
  *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
@@ -2641,7 +2641,8 @@ function keepAsOneObject({
       : [{ from, to }];
   // …stamped `part` where there are several: storage a copy proved one object of the source's, so
   // its bytes are that object's elements rather than the one object's mix of members and spills,
-  // and the emitter may name them as elements (structure.ts `frameArrayElement`)
+  // and the emitter may name them as elements (structure.ts `framePartDecls`), of the type their
+  // accesses agree on (`stampPartElements`, below)
   const laddrs = parts.map(({ from: lo, to: hi }) =>
     mkOp('laddr', {
       results: [mkValue(T.unk(32))],
@@ -2713,6 +2714,9 @@ function keepAsOneObject({
       }
     }
     object.attrs = { ...object.attrs, views: unionViews(irBlocks, base) };
+  }
+  if (laddrs.length > 1) {
+    stampPartElements(irBlocks, laddrs, uses.accessOps);
   }
   irBlocks[0].ops.unshift(...(arrayOrder === 'descending' ? [...laddrs].reverse() : laddrs));
 }
@@ -2873,6 +2877,95 @@ function unionViews(irBlocks: readonly Block[], base: Value): number[] {
   return [...byWidth]
     .sort(([a], [b]) => b - a)
     .flatMap(([w, accesses]) => unionViewSigns(w, accesses).map((sg) => (sg && w !== 4 ? -w : w)));
+}
+
+/** THE ELEMENT EACH PROVEN PART IS DECLARED WITH, from the census of its own accesses — the way
+ *  `unionViews` types a union's views from theirs — stamped `elem` on the part's `laddr` (a width in
+ *  bytes, negative for a signed narrow one; absent is the storage default, `u8`).
+ *
+ *  A part is an object of the source's (`provenParts`), and its bare element `sp64[i]` is not the
+ *  same compile as the cast `((u16 *)sp64)[i]` beside a second array whose base agbcc holds (see
+ *  structure.ts `framePartDecls`) — but the bare spelling exists only for an access of the declared
+ *  element's width and extension, so a part of `u16` or `s8` elements declared `u8` reaches no
+ *  access bare. Every access agreeing on one element is the evidence a declaration of it needs. An access that disagrees with the declaration keeps its cast, which is
+ *  one value under any declaration (structure.ts `bareArrayElement`), so the stamp never changes
+ *  what an access reads; nor what it aliases, since a bare element of a `u16` array is a `u16`
+ *  lvalue, the type the cast it replaces names.
+ *
+ *  - One width over every access (a block copy or any other escape has none), aligned to it — the
+ *    part's start, its size and every fixed offset — else the storage default.
+ *  - Its extension from the LOADS: one extension is that one, both is no element (no evidence picks
+ *    between them). An unsigned byte read whose every reader sign-extends it is either: agbcc has
+ *    no `ldrsb` with an immediate offset and mwcc no signed byte load at all, so `s8 a[64]`'s `a[3]`
+ *    is that read (structure.ts `declaredExtendedRead` spells it bare once the part says `s8`). With
+ *    no load committing, such a read makes the element signed, and else a store raise/storesign.ts
+ *    stamped signed does, as `unionViewSigns` reads a view's.
+ *  - A word is one element whatever its loads say (`scalarTypeForAccess`).
+ *  An access whose part is not known — one through a pointer a phi carries, an index nothing bounds
+ *  — leaves every part at the default: its width is not counted, so no census is whole. */
+function stampPartElements(
+  irBlocks: readonly Block[],
+  laddrs: readonly Op[],
+  accessOps: ReadonlyMap<Op, FrameAccessOp>,
+): void {
+  const bases = laddrs.map((d) => d.results[0]);
+  const start = laddrs.map((d) => d.attrs.off as number);
+  const end = laddrs.map((d) => (d.attrs.off as number) + (d.attrs.count as number));
+  const users = new Map<Value, Op[]>();
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    op.operands.forEach((v) => (users.get(v) ?? users.set(v, []).get(v)!).push(op));
+  }
+  type Access = { width: number; at: number | null; load: boolean; signed: boolean | null; stamped: boolean };
+  const census = laddrs.map((): Access[] => []);
+  for (const [op, { index }] of accessOps) {
+    const fixed = bases.indexOf(op.operands[0]);
+    const reach = index?.reach ?? null;
+    const part =
+      fixed >= 0 ? fixed : reach === null ? -1 : start.findIndex((lo, i) => reach.lo >= lo && reach.hi <= end[i]);
+    if (part < 0) {
+      return;
+    }
+    const width = op.attrs.width as number;
+    const load = op.opcode === 'load';
+    // …a sign extension as the frontend lifts it: mwcc's `extsb`, or the `lsl #24; asr #24` pair
+    // (the idiom stage folds it to a `sext` later, pattern/engine.ts `sextPat`)
+    const extends8 = (u: Op): boolean =>
+      (u.opcode === 'sext' && u.attrs.width === 8) ||
+      (u.opcode === 'shl' &&
+        u.attrs.imm === 24 &&
+        (users.get(u.results[0]) ?? []).length > 0 &&
+        users.get(u.results[0])!.every((s) => s.opcode === 'shr_s' && s.attrs.imm === 24));
+    const readers = load ? (users.get(op.results[0]) ?? []) : [];
+    const either = width === 1 && op.attrs.signed !== true && readers.length > 0 && readers.every(extends8);
+    census[part].push({
+      width,
+      at: fixed >= 0 ? (op.attrs.off as number) : null,
+      load,
+      signed: !load || either ? null : op.attrs.signed === true,
+      stamped: !load && op.attrs.signed === true,
+    });
+  }
+  laddrs.forEach((d, i) => {
+    const accesses = census[i];
+    const widths = new Set(accesses.map((a) => a.width));
+    if (widths.size !== 1) {
+      return;
+    }
+    const [w] = widths;
+    const count = d.attrs.count as number;
+    if (start[i] % w !== 0 || count % w !== 0 || accesses.some((a) => a.at !== null && a.at % w !== 0)) {
+      return;
+    }
+    const signs = new Set(accesses.flatMap((a) => (a.signed === null ? [] : [a.signed])));
+    if (signs.size > 1) {
+      return;
+    }
+    const signed = signs.size === 1 ? [...signs][0] : accesses.some((a) => a.load || a.stamped);
+    const elem = signed && w !== 4 ? -w : w;
+    if (elem !== 1) {
+      d.attrs = { ...d.attrs, elem };
+    }
+  });
 }
 
 /** One object's shape: `count` elements of `width` bytes. */

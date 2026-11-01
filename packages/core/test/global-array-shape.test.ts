@@ -13,10 +13,12 @@
 // second opinion.
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { frontendFor } from '../src/frontend/registry';
+import { parse } from '../src/ir/parse';
 import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
-import { decompile } from '../src/pipeline';
+import { decompile, structureChecked } from '../src/pipeline';
 import { foldsShiftPairCasts } from '../src/raise/extscale';
 import {
   ADDRESS_GATES,
@@ -1446,5 +1448,76 @@ describe('the licence reaches L3 on the access node', () => {
 
   test('an unlicensed cast base is left alone', () => {
     expect(stamps('f', INDEX_FIRST)).toEqual(['&gTbl ordered=false']);
+  });
+});
+
+// THE ONE BARE-ARRAY GATE answers for a declared array whatever declared it: the project's map for a
+// global, the frame audit for a proven part of the one frame object (frame-objects.ts
+// `provenParts`). Both spell `name[i]` under the same rule, and both keep the cast form where the
+// rule refuses.
+describe('one bare-array gate for a map global and a proven frame part', () => {
+  const lift = (body: string, symbols?: Map<string, SymbolInfo>): string =>
+    cBackend.emit(structureChecked(parse(`fn f {\n^bb0(%0: s32):\n${body}}\n`), symbols ? { symbols } : {}));
+  const MAP = new Map<string, SymbolInfo>([
+    ['gB', { name: 'gB', kind: 'data', shape: 'array', elemSize: 1, dims: [4], declared: true }],
+  ]);
+  test('a constant subscript inside the declared extent is the element; one past it keeps the cast', () => {
+    const at = (off: number) =>
+      `  %1: u8* = gaddr {sym="gB"}\n  %2: s32 = load %1 {off=${off}, signed=false, width=1}\n  ret %2\n`;
+    expect(lift(at(3), MAP)).toContain('return gB[3];');
+    expect(lift(at(4), MAP)).toContain('return ((u8 *)&gB)[4];');
+  });
+  // `(u32)sp16 + 4 + i`: the part's address one `+` further down than the one-level fold looks,
+  // the residual's constants summed into one trailing term — on the part, and on a map array.
+  const PARTS =
+    '  %1: u8* = laddr {off=0, width=1, signed=false, count=16, part=true}\n' +
+    '  %2: u8* = laddr {off=16, width=1, signed=false, count=16, part=true}\n' +
+    '  %3: s32 = call %1 {target="fill"}\n  %4: s32 = call %2 {target="fill"}\n' +
+    '  %5: s32 = const {value=4}\n  %6: u8* = add %2, %5\n  %7: u8* = add %6, %0\n';
+  test('a runtime index into a part, the part one `+` down, is the part element', () => {
+    const src = lift(`${PARTS}  %8: s32 = load %7 {off=1, signed=false, width=1}\n  ret %8\n`);
+    expect(src).toContain('return sp16[a0 + 5];');
+  });
+  test('…and a store through it, and the same sum off a map array', () => {
+    const store = lift(`${PARTS}  store %7, %0 {off=0, width=1}\n  ret %0\n`);
+    expect(store).toContain('sp16[a0 + 4] = a0;');
+    const g =
+      '  %1: u8* = gaddr {sym="gB"}\n  %2: s32 = const {value=1}\n  %3: u8* = add %1, %2\n' +
+      '  %4: u8* = add %3, %0\n  %5: s32 = load %4 {off=0, signed=false, width=1}\n  ret %5\n';
+    expect(lift(g, MAP)).toContain('return gB[a0 + 1];');
+  });
+  test('a part read at the other extension keeps the cast', () => {
+    const signed = lift(`${PARTS}  %8: s32 = load %7 {off=0, signed=true, width=1}\n  ret %8\n`);
+    expect(signed).toContain('return *(s8 *)((u32)sp16 + 4 + a0);');
+  });
+});
+
+// agbcc has no `ldrsb` with an immediate offset: `extern s8 gT[16]; return gT[3] + i;` is
+// `ldrb r1, [r1, #0x3]; lsl r1, r1, #0x18; asr r1, r1, #0x18`, the unsigned byte sign-extended.
+describe('a sign-extended unsigned byte of a declared `s8` array is the element', () => {
+  const lift = (body: string, symbols?: Map<string, SymbolInfo>): string =>
+    cBackend.emit(structureChecked(parse(`fn f {\n^bb0(%0: s32):\n${body}}\n`), symbols ? { symbols } : {}));
+  const decl = (elemSize: number, elemSigned: boolean) =>
+    new Map<string, SymbolInfo>([
+      ['gT', { name: 'gT', kind: 'data', shape: 'array', elemSize, elemSigned, dims: [16], declared: true }],
+    ]);
+  const ext = (op: string, width: number, signed: boolean) =>
+    `  %1: u8* = gaddr {sym="gT"}\n  %2: s32 = load %1 {off=${3 * width}, signed=${signed}, width=${width}}\n` +
+    `  %3: s32 = ${op} %2 {width=${width * 8}}\n  %4: s32 = add %3, %0\n  ret %4\n`;
+  test('`(s8)` of the unsigned byte of an `s8` array is the element', () => {
+    expect(lift(ext('sext', 1, false), decl(1, true))).toContain('return gT[3] + a0;');
+  });
+  test('a half keeps the cast: mwcc compiles it `lhz; extsh` where the element is `lha`', () => {
+    expect(lift(ext('sext', 2, false), decl(2, true))).toContain('(s16)');
+  });
+  test('a declaration of the other signedness, or none, keeps the cast', () => {
+    expect(lift(ext('sext', 1, false), decl(1, false))).toContain('(s8)');
+    expect(lift(ext('sext', 1, false))).toContain('(s8)');
+  });
+  test('an extension of another width keeps the cast', () => {
+    const wide =
+      '  %1: u8* = gaddr {sym="gT"}\n  %2: s32 = load %1 {off=3, signed=false, width=1}\n' +
+      '  %3: s32 = sext %2 {width=16}\n  ret %3\n';
+    expect(lift(wide, decl(1, true))).toContain('(s16)');
   });
 });

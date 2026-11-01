@@ -230,3 +230,190 @@ export function recognizeDivPow2(fn: Fn): boolean {
   }
   return changed;
 }
+
+// ── the signed REMAINDER by a power of two, in IDO's branching form ─────────────────────────
+//
+// `x % 2^k` truncates toward zero, so a negative x with low bits set takes `2^k` off its masked
+// value. IDO masks first and corrects on a two-test branch (modpow2, `a % 16`):
+//
+//	bgez	a0, .L       ; x >= 0: the mask is the remainder
+//	andi	v0, a0, 15   ; (delay slot: runs on both paths)
+//	beqz	v0, .L       ; low bits clear: so is it
+//	nop
+//	addiu	v0, v0, -16  ; else take 2^k off
+//     .L:
+//
+// Two heads and a correction arm reach one merge, so — like the quotient above — it is a shape in
+// the control flow, out of the idiom patterns' reach. Lifted as written it is spelled
+// `if (x < 0 && (x & 15) != 0) v = (x & 15) + -16; else v = x & 15;`, which IDO compiles to other
+// code; `x % 16` compiles back to this diamond. The identity is exact for every signed x — the
+// diamond IS C's `%` — and the round trip is self-verifying for the reason the quotient's is.
+//
+// IDENTITY-OR-DECLINE again: the mask must be exactly `2^k - 1` of the dividend the first test
+// compares against zero, the second test must compare THAT mask against zero, the correction must
+// be exactly `mask - 2^k` (`correctedMask`), and the corrected value must reach the merge only from the arm
+// both tests failed into. The two inner blocks are deleted, so neither may do anything else.
+// agbcc, gcc and kmc COMPILE `%` as a biased floor (`x - (t >> k << k)`), which ir/bits.ts
+// `remainderPair` bounds and this does not touch; mwcc's is branch-free.
+//
+// THE PASS IS NOT GATED BY TARGET: a HAND-WRITTEN diamond of this shape on any compiler is folded
+// to `%` too (agbcc compiles `r = i & 15; if (i < 0 && r != 0) r -= 16;` to the same two-test
+// diamond, which lifts `i % 16`). The identity holds whatever wrote it, so the C is the same value;
+// whether `%` recompiles to the target's bytes there is the bench's question, not this pass's.
+
+/** `and x, const(2^k - 1)` → { x, k }, else null. The and is commutative. */
+function maskOf(defs: Map<Value, Op>, v: Value): { x: Value; k: number } | null {
+  const d = defs.get(v);
+  if (!d || d.opcode !== 'and' || d.operands.length !== 2) {
+    return null;
+  }
+  for (const [a, b] of [
+    [0, 1],
+    [1, 0],
+  ] as const) {
+    const c = defs.get(d.operands[b]);
+    const m = c?.opcode === 'const' ? (c.attrs.value as number) : undefined;
+    if (m !== undefined && m > 0 && (m & (m + 1)) === 0) {
+      return { x: d.operands[a], k: Math.log2(m + 1) };
+    }
+  }
+  return null;
+}
+
+/** The correction arm's value, `mask - 2^k` for the mask's own k, in either spelling the IR carries
+ *  it: an `add` of the constant `-2^k` (IDO's `addiu v0, v0, -2^k`, where it fits an immediate:
+ *  k < 16), or a `sub` of the constant `2^k` (k >= 16, where IDO materialises `2^k` as the mask's
+ *  register plus one in the second test's delay slot, `addiu at, at, 1; subu v0, v0, at`, which
+ *  the constant fold has made `2^k` by now). The identity is the subtraction, not its encoding. */
+function correctedMask(defs: Map<Value, Op>, v: Value): { t: Value; mk: { x: Value; k: number } } | null {
+  const u = defs.get(v);
+  if ((u?.opcode !== 'add' && u?.opcode !== 'sub') || u.operands.length !== 2) {
+    return null;
+  }
+  // a sub's minuend is its first operand; an add's mask may stand on either side
+  const orders =
+    u.opcode === 'sub'
+      ? ([[0, 1]] as const)
+      : ([
+          [0, 1],
+          [1, 0],
+        ] as const);
+  for (const [a, b] of orders) {
+    const c = defs.get(u.operands[b]);
+    const mk = maskOf(defs, u.operands[a]);
+    const want = u.opcode === 'sub' ? 2 ** (mk?.k ?? 0) : -(2 ** (mk?.k ?? 0));
+    if (c?.opcode === 'const' && mk !== null && c.attrs.value === want) {
+      return { t: u.operands[a], mk };
+    }
+  }
+  return null;
+}
+
+/** `icmp <op> v, const 0` → the compare's opcode, else null. */
+function zeroTest(defs: Map<Value, Op>, c: Value, v: Value): string | null {
+  const d = defs.get(c);
+  if (!d || d.operands.length !== 2 || d.operands[0] !== v) {
+    return null;
+  }
+  const z = defs.get(d.operands[1]);
+  return z?.opcode === 'const' && z.attrs.value === 0 ? d.opcode : null;
+}
+
+/**
+ * Fold IDO's branching signed-remainder-by-2^k diamond into `smod x, 2^k`. Returns true if the IR
+ * changed. Leaves the mask, the compares and the correction behind for the driver's DCE.
+ */
+export function recognizeSremPow2(fn: Fn): boolean {
+  let changed = false;
+  let progress = true;
+  while (progress) {
+    progress = false;
+    const defs = defOpMap(fn);
+    const preds = predecessors(fn);
+    const term = (b: Block) => b.ops[b.ops.length - 1];
+    // a result of `blocks`' ops read anywhere outside them, which deleting them would orphan
+    const escapes = (blocks: Block[]): boolean => {
+      const inside = new Set(blocks.flatMap((b) => b.ops.flatMap((op) => op.results)));
+      return fn.blocks
+        .filter((b) => !blocks.includes(b))
+        .some((b) =>
+          b.ops.some(
+            (op) =>
+              op.operands.some((v) => inside.has(v)) || op.successors.some((s) => s.args.some((v) => inside.has(v))),
+          ),
+        );
+    };
+    outer: for (const m of fn.blocks) {
+      // the merge holds the remainder alone and is reached by exactly the diamond's three edges
+      // (the entry block has an invisible edge; see recognizeDivPow2)
+      const mp = preds.get(m) ?? [];
+      if (m.params.length !== 1 || mp.length !== 3 || new Set(mp).size !== 3 || m === fn.blocks[0]) {
+        continue;
+      }
+      for (const fix of mp) {
+        // the CORRECTION arm: `mask - 2^k` to the merge, from the second test alone, nothing else
+        const ft = term(fix);
+        if (ft.opcode !== 'br' || ft.successors[0]?.block !== m || fix === fn.blocks[0] || fix.ops.some(effectful)) {
+          continue;
+        }
+        const n = preds.get(fix) ?? [];
+        if (n.length !== 1 || !mp.includes(n[0]) || n[0] === fn.blocks[0]) {
+          continue;
+        }
+        const inner = n[0];
+        const it = term(inner);
+        const hp = preds.get(inner) ?? [];
+        if (it.opcode !== 'cond_br' || hp.length !== 1 || !mp.includes(hp[0]) || inner.ops.some(effectful)) {
+          continue;
+        }
+        const head = hp[0];
+        const ht = term(head);
+        if (ht.opcode !== 'cond_br' || head === m || head === fix) {
+          continue;
+        }
+        // the corrected value: the mask less `2^k`
+        const corrected = correctedMask(defs, ft.successors[0].args[0]);
+        if (corrected === null || corrected.mk.k < 1 || corrected.mk.k > 30) {
+          continue;
+        }
+        const { t, mk } = corrected;
+        // the first test: x >= 0 to the merge with the mask, else on to the second
+        const [hTaken, hFall] = ht.successors;
+        const hFirst = zeroTest(defs, ht.operands[0], mk.x);
+        const hm = hFirst === 'icmp_sge' ? hTaken : hFirst === 'icmp_slt' ? hFall : null;
+        const hn = hFirst === 'icmp_sge' ? hFall : hFirst === 'icmp_slt' ? hTaken : null;
+        if (hm?.block !== m || hn?.block !== inner || hm.args[0] !== t || hn.args.length !== 0) {
+          continue;
+        }
+        // the second test: the mask == 0 to the merge with the mask, else to the correction
+        const [iTaken, iFall] = it.successors;
+        const iSecond = zeroTest(defs, it.operands[0], t);
+        const im = iSecond === 'icmp_eq' ? iTaken : iSecond === 'icmp_ne' ? iFall : null;
+        const ifx = iSecond === 'icmp_eq' ? iFall : iSecond === 'icmp_ne' ? iTaken : null;
+        if (im?.block !== m || ifx?.block !== fix || im.args[0] !== t || ifx.args.length !== 0) {
+          continue;
+        }
+        if (escapes([inner, fix])) {
+          continue;
+        }
+        // Rewrite: the head computes the remainder and goes straight to the merge.
+        const by = mkValue(T.s());
+        const r = mkValue(T.s());
+        head.ops.splice(
+          head.ops.length - 1,
+          0,
+          mkOp('const', { results: [by], attrs: { value: 2 ** mk.k } }),
+          mkOp('smod', { operands: [mk.x, by], results: [r] }),
+        );
+        head.ops[head.ops.length - 1] = mkOp('br', { successors: [{ block: m, args: [] }] });
+        replaceAllUsesWith(fn, m.params[0], r);
+        m.params = [];
+        fn.blocks = fn.blocks.filter((b) => b !== inner && b !== fix);
+        changed = true;
+        progress = true;
+        break outer;
+      }
+    }
+  }
+  return changed;
+}
