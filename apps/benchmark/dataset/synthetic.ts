@@ -17128,6 +17128,180 @@ export const SYNTHETIC: SynthSpec[] = [
       memcpy: { params: ['void *', 'const void *', 'unsigned long'], returns: 'void *' },
     },
   },
+  //  36. sw_hitexit / sw_hitexit_ctl / sw_hitexit_in (sub_0800D188, the cause behind item 32's
+  //      four once the `for` reads its exit params: "a case body leaves its switch from inside a
+  //      nested loop, where `break` would leave that instead"). The MAGNET/BOX case holds a search
+  //      loop whose hit runs code and does `goto exit_loop2;`, where `exit_loop2: break;` ends the
+  //      case, and whose normal exit runs code of its own into that same `break;`; `break;` after
+  //      the switch then leaves the `for`. agbcc threads the `goto` past the `for` (jump.c:1785
+  //      `follow_jumps`): `goto done;` to a label after the `for` is byte-identical, a flag spelling
+  //      is 262 instructions against the source's 260. So the hit's edge enters its own code, which
+  //      runs on to the switch's merge, also the `for`'s exit. `while (1)` reads it at the last
+  //      rung as an early return copying the tail (which holds a loop), and that copy starts at the
+  //      case's merge, which no `break;` inside the search loop reaches (`switchBreakAt`).
+  //      item 32's brk2out_sw does not reproduce it: its search loop's normal exit `continue`s, so
+  //      the hit leaves both loops and hands its flag out. sw_hitexit is the real case's shape; it
+  //      declines on agbcc, gcc2.7.2kmc and gcc2.7.2 and lifts on ido7.1, which copies the tail
+  //      into every arm. sw_hitexit_in is the same case with code after the switch, so the merge
+  //      sits inside the loop: it declines on all four ("unrecovered back-edge"), the hit being no
+  //      two-level exit target either. sw_hitexit_ctl `break`s the search loop on a hit, so no edge
+  //      leaves it for the merge: it lifts on all four. mwcc_242_81 has no lane: target and control
+  //      both decline in its frontend ("high half of 'gA' reaches a merge").
+  {
+    sym: 'sw_hitexit',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit(s32 lo, s32 hi) { s32 i, j, a = 0, b = 1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1: case 2:\n' +
+      '                if (gE[i].x > 5) continue;\n' +
+      '                for (j = gLo; j <= gHi; j++) {\n' +
+      '                    if (i != j && gE[j].f == 28) { a = 1; b = 0; k(j); goto hit; }\n' +
+      '                }\n' +
+      '                gE[i].u = 0; gE[i].f = 19; k(i);\n' +
+      '            hit:\n' +
+      '                break;\n' +
+      '            case 4:\n' +
+      '                if (gA[i] == 0) continue;\n' +
+      '                k(i + 4);\n' +
+      '                break;\n' +
+      '            case 9: case 10:\n' +
+      '                gA[i + 1] = gE[i + 1].x + 1; gA[i + 2] = gE[i + 2].x + 2; gA[i + 3] = gE[i + 3].x + 3; gA[i + 4] = gE[i + 4].x + 4;\n' +
+      '                gA[i + 5] = gE[i + 5].x + 5; gA[i + 6] = gE[i + 6].x + 6; gA[i + 7] = gE[i + 7].x + 7; gA[i + 8] = gE[i + 8].x + 8;\n' +
+      '                gA[i + 9] = gE[i + 9].x + 9; gA[i + 10] = gE[i + 10].x + 10; gA[i + 11] = gE[i + 11].x + 11; gA[i + 12] = gE[i + 12].x + 12;\n' +
+      '                if (gE[i].x > 20) continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default: continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(a); k(b);\n' +
+      '    for (i = 0; i < gOut; i++) k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit(s32 lo, s32 hi);',
+    proto: { sw_hitexit: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_hitexit_ctl',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit_ctl(s32 lo, s32 hi) { s32 i, j, a = 0, b = 1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1: case 2:\n' +
+      '                if (gE[i].x > 5) continue;\n' +
+      '                for (j = gLo; j <= gHi; j++) {\n' +
+      '                    if (i != j && gE[j].f == 28) { a = 1; b = 0; k(j); break; }\n' +
+      '                }\n' +
+      '                gE[i].u = 0; gE[i].f = 19; k(i);\n' +
+      '                break;\n' +
+      '            case 4:\n' +
+      '                if (gA[i] == 0) continue;\n' +
+      '                k(i + 4);\n' +
+      '                break;\n' +
+      '            case 9: case 10:\n' +
+      '                gA[i + 1] = gE[i + 1].x + 1; gA[i + 2] = gE[i + 2].x + 2; gA[i + 3] = gE[i + 3].x + 3; gA[i + 4] = gE[i + 4].x + 4;\n' +
+      '                gA[i + 5] = gE[i + 5].x + 5; gA[i + 6] = gE[i + 6].x + 6; gA[i + 7] = gE[i + 7].x + 7; gA[i + 8] = gE[i + 8].x + 8;\n' +
+      '                gA[i + 9] = gE[i + 9].x + 9; gA[i + 10] = gE[i + 10].x + 10; gA[i + 11] = gE[i + 11].x + 11; gA[i + 12] = gE[i + 12].x + 12;\n' +
+      '                if (gE[i].x > 20) continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default: continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(a); k(b);\n' +
+      '    for (i = 0; i < gOut; i++) k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit_ctl(s32 lo, s32 hi);',
+    proto: { sw_hitexit_ctl: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_hitexit_in',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit_in(s32 lo, s32 hi) { s32 i, j, a = 0, b = 1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1: case 2:\n' +
+      '                if (gE[i].x > 5) continue;\n' +
+      '                for (j = gLo; j <= gHi; j++) {\n' +
+      '                    if (i != j && gE[j].f == 28) { a = 1; b = 0; k(j); goto hit; }\n' +
+      '                }\n' +
+      '                gE[i].u = 0; gE[i].f = 19; k(i);\n' +
+      '            hit:\n' +
+      '                break;\n' +
+      '            case 4:\n' +
+      '                if (gA[i] == 0) continue;\n' +
+      '                k(i + 4);\n' +
+      '                break;\n' +
+      '            case 9: case 10:\n' +
+      '                gA[i + 1] = gE[i + 1].x + 1; gA[i + 2] = gE[i + 2].x + 2; gA[i + 3] = gE[i + 3].x + 3; gA[i + 4] = gE[i + 4].x + 4;\n' +
+      '                gA[i + 5] = gE[i + 5].x + 5; gA[i + 6] = gE[i + 6].x + 6; gA[i + 7] = gE[i + 7].x + 7; gA[i + 8] = gE[i + 8].x + 8;\n' +
+      '                gA[i + 9] = gE[i + 9].x + 9; gA[i + 10] = gE[i + 10].x + 10; gA[i + 11] = gE[i + 11].x + 11; gA[i + 12] = gE[i + 12].x + 12;\n' +
+      '                if (gE[i].x > 20) continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default: continue;\n' +
+      '            }\n' +
+      '            k(i + 100);\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(a); k(b);\n' +
+      '    for (i = 0; i < gOut; i++) k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'extern s32 gLo, gHi;\n' +
+      'void k(s32 x);\n' +
+      'void sw_hitexit_in(s32 lo, s32 hi);',
+    proto: { sw_hitexit_in: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   // A SCALAR GLOBAL THE CONTEXT DECLARES AT ANOTHER WIDTH OR SIGNEDNESS THAN ITS ONE ACCESS. The
   // usage inference reads a global accessed only at offset 0 at one width as a scalar of that
   // width, and the bare name is that scalar only where the declaration agrees: `return gN;` over
