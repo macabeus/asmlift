@@ -10250,8 +10250,8 @@ function structureRanked(
         [...asFor.inits, loop].forEach(walk);
         if ([...asFor.derived.names].some((n) => reads.has(n))) {
           throw new StructureError(
-            `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(fl.header)} reads a ` +
-              `derived loop parameter by a name it never writes`,
+            `cannot structure '${fn.name}': loop-recovery declined: the \`for\` at block ` +
+              `#${fn.blocks.indexOf(fl.header)} reads a derived loop parameter by a name it never writes`,
           );
         }
       }
