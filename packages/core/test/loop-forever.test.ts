@@ -23,7 +23,7 @@ import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, StructureError, type StructureHooks, structure } from '../src/structure/structure';
 import { PPC_MWCC } from '../src/target';
-import { irAgreement } from './helpers';
+import { NO_HIT_CODE, irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
@@ -337,11 +337,17 @@ test('a continue nested under an `if` jumps, and the rest of the iteration is wr
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
-test('a loop leaving for two live merges has no one exit, and declines LOUD', () => {
+test('a loop leaving for two live merges has no one exit, and lifts only as a flag', () => {
   // `m(i); return i;` ends the function, but the exit that reaches it after `a(i)` leaves from the
   // header's mid-body test, not a latch's, and nothing enters it from before the loop: no reading
-  // tells it from an arm, so the arm `b(i)` may not copy the tail (`exitTail`, at `earlyReturnArm`)
-  expect(() => judged(TWO_LIVE_EXITS)).toThrow(/unrecovered back-edge/);
+  // tells it from an arm, so the arm `b(i)` may not copy the tail (`exitTail`, at `earlyReturnArm`).
+  // Behind every other reading, the arm is a two-level exit whose hit runs `b(i)` first
+  // (`TwoLevelExit.hits`), and `m(i)` renders once, after `if (f == 0) a(i);`.
+  expect(() => judged(TWO_LIVE_EXITS, NO_HIT_CODE)).toThrow(/unrecovered back-edge/);
+  const r = judged(TWO_LIVE_EXITS);
+  expect(r.src).toMatch(/b\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\) a\(v\d+\);\n\s*m\(v\d+\);/);
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
 test('a header that computes before it tests is a `while (1)` with its test in mid-body', () => {

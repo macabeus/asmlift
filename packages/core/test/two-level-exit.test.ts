@@ -30,7 +30,7 @@ import {
   TWO_LEVEL_REGION_GATES,
   structure,
 } from '../src/structure/structure';
-import { irAgreement, irTraceOf } from './helpers';
+import { NO_HIT_CODE, irAgreement, irTraceOf } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
 
@@ -1590,4 +1590,125 @@ test('without own-target-held-back the hit code laid out first takes a second fl
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
   expectCovered(ir);
+});
+
+/** The hit runs code of its own before it reaches the second target (`TwoLevelExit.hits`): `case 0:
+ *  case 1: case 4: for (j…) { if (probe(j, i) == x) { hit(j); goto out; } } k(i); out: break;`
+ *  (`synthetic:sw_hitexit_in`'s shape). The hit's edge enters `hit(j)`, which no `break` arm reaches
+ *  the loop's exit from and which is no second target itself (the code after the loop never meets
+ *  it); the block it runs on to, the switch arm's merge, is. Without the reading the loop is never
+ *  classified ("unrecovered back-edge"). */
+const HIT_CODE_TO_ARM_END = `fn hitcodearm {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb6()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+/** The same hit where the switch arm's merge is also the outer loop's exit: every arm ends the switch
+ *  and `break;` after it leaves the loop, and the merge hands the tail a value per arm and runs a
+ *  loop of its own (`synthetic:sw_hitexit`'s shape, sub_0800D188's MAGNET/BOX case: `for (j…) { if
+ *  (probe(j, i) == x) { hit(j); a = 1; goto out; } } k(i); out: break;`). The tail's loop keeps the
+ *  hit from copying it as an early `return` until the last rung, whose copy of the merge no `break;`
+ *  inside the search loop can reach. */
+const HIT_CODE_PAST_THE_LOOP = `fn hitcodepast {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %30: s32 = const {value=1}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7(%3, %30)
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb12(), ^bb12(), ^bb8(), ^bb12(), ^bb6() {cases=[0;1;2;4]}
+^bb12():
+  %31: s32 = call %5 {target="skip"}
+  %32: u32 = icmp_eq %31, %3
+  cond_br %32, ^bb6(), ^bb2()
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb7(%7, %3)
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb7(%3, %7)
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  %33: u32 = icmp_eq %17, %3
+  cond_br %33, ^bb6(), ^bb7(%3, %7)
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7(%3, %30)
+^bb7(%20: s32, %21: s32):
+  %22: s32 = call %20 {target="t"}
+  %23: s32 = call %21 {target="t"}
+  %24: u32 = icmp_slt %3, %1
+  cond_br %24, ^bb10(%3), ^bb11()
+^bb10(%25: s32):
+  %26: s32 = call %25 {target="t"}
+  %27: s32 = add %25, %30
+  %28: u32 = icmp_slt %27, %1
+  cond_br %28, ^bb10(%27), ^bb11()
+^bb11():
+  ret
+}`;
+
+test.each([
+  ['to the end of its switch arm', HIT_CODE_TO_ARM_END, /unrecovered back-edge/],
+  ['to the end of its switch arm, the outer loop’s exit', HIT_CODE_PAST_THE_LOOP, /leaves its switch/],
+])('a `goto` whose hit runs code first, %s, lifts as a flag set after that code', (_, ir, without) => {
+  expect(() => judged(ir, NO_HIT_CODE)).toThrow(without);
+  const { src, agreement, shipped } = judged(ir);
+  // the hit writes its code, then the flag, then leaves the search loop; the flag leaves the switch
+  expect(src).toMatch(/hit\(v\d+\);\n\s*(?:v\d+ = v\d+;\n\s*)?(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\)/);
+  expect(src.match(/\bhit\(/g)).toHaveLength(1);
+  expect(src.match(/\bprobe\(/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const seen = covers(ir);
+  expect(seen.firstHit + seen.laterHit).toBeGreaterThan(0);
+  expect(seen.zeroTrips).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
 });
