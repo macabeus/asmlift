@@ -15648,6 +15648,450 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_forjt_skew(s32 lo, s32 hi);',
     proto: { sw_forjt_skew: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      forexit_* are sw_forjt's `for` with an exit that takes params: every edge into the code after
+  //      the loop hands it a value, so the guard's zero-trip edge (agbcc's `b .L4 @long jump` relay
+  //      in the _far rows, where case 1 pushes the exit past a Thumb branch's range) and the latch's
+  //      edge carry copies the `for`'s test owns, and the arms' edges carry their own ahead of
+  //      `break;`. forexit_flags sets two flags ahead of the loop and rewrites them in one arm (the
+  //      constants sub_0800D188's exit takes); forexit_iv reads the IV after the loop, so the guard
+  //      hands the exit `lo` and the latch `i + 1`. forexit_old is the negative: `last = i` heads the
+  //      body, so the latch hands the exit the IV from BEFORE its update and the guard `-1`, and a
+  //      `for` that reads `last` as the IV is wrong on both edges.
+  {
+    sym: 'forexit_flags',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_flags(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 a = 0;\n' +
+      '    s32 b = 1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                a = 1;\n' +
+      '                b = 0;\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(a);\n' +
+      '    k(b);\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_flags(s32 lo, s32 hi);',
+    proto: { forexit_flags: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'forexit_flags_far',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_flags_far(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 a = 0;\n' +
+      '    s32 b = 1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                k(6);\n' +
+      '                k(7);\n' +
+      '                k(8);\n' +
+      '                k(9);\n' +
+      '                k(10);\n' +
+      '                k(11);\n' +
+      '                k(12);\n' +
+      '                k(13);\n' +
+      '                k(14);\n' +
+      '                k(15);\n' +
+      '                k(16);\n' +
+      '                k(17);\n' +
+      '                k(18);\n' +
+      '                k(19);\n' +
+      '                k(20);\n' +
+      '                k(21);\n' +
+      '                k(22);\n' +
+      '                k(23);\n' +
+      '                k(24);\n' +
+      '                k(25);\n' +
+      '                k(26);\n' +
+      '                k(27);\n' +
+      '                k(28);\n' +
+      '                k(29);\n' +
+      '                k(30);\n' +
+      '                k(31);\n' +
+      '                k(32);\n' +
+      '                k(33);\n' +
+      '                k(34);\n' +
+      '                k(35);\n' +
+      '                k(36);\n' +
+      '                k(37);\n' +
+      '                k(38);\n' +
+      '                k(39);\n' +
+      '                k(40);\n' +
+      '                k(41);\n' +
+      '                k(42);\n' +
+      '                k(43);\n' +
+      '                k(44);\n' +
+      '                k(45);\n' +
+      '                k(46);\n' +
+      '                k(47);\n' +
+      '                k(48);\n' +
+      '                k(49);\n' +
+      '                k(50);\n' +
+      '                k(51);\n' +
+      '                k(52);\n' +
+      '                k(53);\n' +
+      '                k(54);\n' +
+      '                k(55);\n' +
+      '                k(56);\n' +
+      '                k(57);\n' +
+      '                k(58);\n' +
+      '                k(59);\n' +
+      '                k(60);\n' +
+      '                k(61);\n' +
+      '                k(62);\n' +
+      '                k(63);\n' +
+      '                k(64);\n' +
+      '                k(65);\n' +
+      '                k(66);\n' +
+      '                k(67);\n' +
+      '                k(68);\n' +
+      '                k(69);\n' +
+      '                k(70);\n' +
+      '                k(71);\n' +
+      '                k(72);\n' +
+      '                k(73);\n' +
+      '                k(74);\n' +
+      '                a = 1;\n' +
+      '                b = 0;\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(a);\n' +
+      '    k(b);\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_flags_far(s32 lo, s32 hi);',
+    proto: { forexit_flags_far: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'forexit_iv',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_iv(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(i);\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_iv(s32 lo, s32 hi);',
+    proto: { forexit_iv: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'forexit_iv_far',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_iv_far(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                k(6);\n' +
+      '                k(7);\n' +
+      '                k(8);\n' +
+      '                k(9);\n' +
+      '                k(10);\n' +
+      '                k(11);\n' +
+      '                k(12);\n' +
+      '                k(13);\n' +
+      '                k(14);\n' +
+      '                k(15);\n' +
+      '                k(16);\n' +
+      '                k(17);\n' +
+      '                k(18);\n' +
+      '                k(19);\n' +
+      '                k(20);\n' +
+      '                k(21);\n' +
+      '                k(22);\n' +
+      '                k(23);\n' +
+      '                k(24);\n' +
+      '                k(25);\n' +
+      '                k(26);\n' +
+      '                k(27);\n' +
+      '                k(28);\n' +
+      '                k(29);\n' +
+      '                k(30);\n' +
+      '                k(31);\n' +
+      '                k(32);\n' +
+      '                k(33);\n' +
+      '                k(34);\n' +
+      '                k(35);\n' +
+      '                k(36);\n' +
+      '                k(37);\n' +
+      '                k(38);\n' +
+      '                k(39);\n' +
+      '                k(40);\n' +
+      '                k(41);\n' +
+      '                k(42);\n' +
+      '                k(43);\n' +
+      '                k(44);\n' +
+      '                k(45);\n' +
+      '                k(46);\n' +
+      '                k(47);\n' +
+      '                k(48);\n' +
+      '                k(49);\n' +
+      '                k(50);\n' +
+      '                k(51);\n' +
+      '                k(52);\n' +
+      '                k(53);\n' +
+      '                k(54);\n' +
+      '                k(55);\n' +
+      '                k(56);\n' +
+      '                k(57);\n' +
+      '                k(58);\n' +
+      '                k(59);\n' +
+      '                k(60);\n' +
+      '                k(61);\n' +
+      '                k(62);\n' +
+      '                k(63);\n' +
+      '                k(64);\n' +
+      '                k(65);\n' +
+      '                k(66);\n' +
+      '                k(67);\n' +
+      '                k(68);\n' +
+      '                k(69);\n' +
+      '                k(70);\n' +
+      '                k(71);\n' +
+      '                k(72);\n' +
+      '                k(73);\n' +
+      '                k(74);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(i);\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_iv_far(s32 lo, s32 hi);',
+    proto: { forexit_iv_far: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'forexit_old',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_old(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 last = -1;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        last = i;\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    k(last);\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void forexit_old(s32 lo, s32 hi);',
+    proto: { forexit_old: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   //      sw_gotocase3 and sw_gotocase_inner are the case-label goto's own rows (l3/ast.ts `goto`,
   //      switch-recover.ts `jumpSharedFallTargets`). sw_gotocase3 has three entrants into the shared
   //      body, two of them written BELOW it, so `if (0) { case N: }` cannot spell them and the goto
