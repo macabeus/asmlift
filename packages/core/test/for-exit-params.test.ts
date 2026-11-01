@@ -5,8 +5,9 @@
 // `for` already left in the param's name (`exit-copy`, `exit-name-rewritten`); past a loop with no
 // guard, the code may not read the IV itself (`past-reads-iv`). Every fixture is
 // for-continue.test.ts's `forJt` (`synthetic:sw_forjt:agbcc`'s shape with its loads as calls) with
-// an exit that takes params, judged against its own IR by the trace oracle (`irAgreement`), as
-// `structure()` returns it and as it ships after `readabilityRewrites`.
+// an exit that takes params, but the guardless one, whose exit takes none; each is judged against
+// its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and as it ships after
+// `readabilityRewrites`, and where the oracle cannot reach the edge at issue, by its C.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

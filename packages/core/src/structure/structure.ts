@@ -1607,12 +1607,12 @@ export interface ForPlanIv {
   /** an edge the test leaves by — the guard's (through its relay) or the latch's — hands the exit a
    *  copy that the `for`'s own init (on the guard's) or update (on the latch's) does not make */
   readonly exitCopy: boolean;
-  /** …or a slot it carries without a copy (an identity, a write anchored at its def, an undefined
-   *  value that carries nothing: what `edgeCopyRecords` leaves out) names a value the `for` writes
-   *  otherwise ahead of the test: the init's names on the guard's edge (and the preheader's), on the
-   *  latch's the IV past its update, or a latch op it never renders */
+  /** …or a slot it carries without a copy (one `edgeCopyRecords` records none for) names a value
+   *  the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and the
+   *  preheader's), on the latch's the IV past its update, or a latch op it never renders */
   readonly exitNameRewritten: boolean;
-  /** with no guard, the code past the loop reads the IV's param itself, not through an exit param */
+  /** the code past the loop reads the IV's param itself, not through an exit param (only a loop
+   *  with no guard, whose header dominates its exit, can) */
   readonly pastReadsIv: boolean;
 }
 
@@ -5451,7 +5451,7 @@ function structureRanked(
     if (fl.forwardPreds.length !== 1 || (!spellCountedLoopsFor && !forRank.asked.has(fl.header))) {
       continue;
     }
-    // the guards the structurer offers `forPlanAt` this loop from (its two cond_br/br call sites)
+    // the guards the structurer offers `forPlanAt` this loop from, as its call sites pass `g` and `pre`
     const intoTerm = into.ops[into.ops.length - 1];
     const guards: [Block, Block | undefined][] =
       intoTerm.opcode === 'br' && !foreverLoops.has(into)
@@ -9580,20 +9580,16 @@ function structureRanked(
   //     where it takes params;
   //   • the latch takes no params: no edge into it carries a copy;
   //   • the exit's params are written where the asm writes them. A `break` writes its edge's
-  //     copies ahead of it, as `while (1)`'s does; the two edges the test leaves by — the guard's
-  //     and the latch's — are never rendered, so each must hand the exit what the `for` already
-  //     left in the param's name: a name the `for` does not write, holding the arg already (as
-  //     `edgeCopyRecords` reads any edge: an identity, a write anchored at its def, an undefined
-  //     value that carries nothing), or a name its init (ahead of the first test,
-  //     with the preheader's statements) or its update (ahead of every other) writes with that
-  //     same arg. So flags set ahead of the loop and rewritten in an arm (`a = 0; for (..) { ..
-  //     a = 1; break; } k(a);`) lift, and so does `k(i)` past the loop where the exit param is the
-  //     IV's name; a slot read under a name the `for` rewrites does not (`for (..) { last = i; ..
-  //     } k(last);`, whose latch hands the exit `i` from before its update and whose guard hands
-  //     `-1`, under the IV's name). A latch op the latch's edge hands under its own name is written
-  //     nowhere, the latch never being rendered. Past a loop with no guard, which the header
-  //     dominates, the code may read the IV's param with no exit param between: that is the IV
-  //     from before the update on the latch's way out, and the `for` has updated it, so it refuses;
+  //     copies ahead of it, as `while (1)`'s does, but the two edges the test leaves by — the
+  //     guard's and the latch's — are never rendered, so each must hand the exit what the `for`
+  //     already left in the param's name: a name it does not write, holding the arg already, or a
+  //     name its init (ahead of the first test, with the preheader's statements) or its update
+  //     (ahead of every other) writes with that same arg. So `a = 0; for (..) { .. a = 1; break; }
+  //     k(a);` lifts, and so does `k(i)` where the exit param is the IV's name; `for (..) { last =
+  //     i; .. } k(last);` does not, its latch handing the exit `i` from before the update under the
+  //     IV's name. A latch op the latch's edge hands is written nowhere. Past a loop with no guard,
+  //     which the header dominates, the code may read the IV's param itself, the IV from before the
+  //     update on the latch's way out, so that refuses too;
   //   • the latch is never rendered, so it holds no effect, no qualified access, no anchored def and
   //     no named def read outside the latch — a named op the latch alone reads is spelled inline (A
   //     STRENGTH-REDUCED COUNTED LOOP), and one read past it (only where the latch dominates that
@@ -9789,13 +9785,10 @@ function structureRanked(
       return x === null || y === null ? null : evalIntPair(d.opcode, x, y);
     };
     // THE TWO EDGES THE TEST LEAVES BY (THE LOOP AS A `for`): the guard's, through its relay, and
-    // the latch's. Each slot is a copy the edge makes, or holds already, as `edgeCopyRecords` reads
-    // every edge (an identity, a write anchored at its def, an undefined value that carries
-    // nothing). The `for` runs its init ahead of the first test and its update ahead of every
-    // other, and renders neither edge: a slot holds where that run leaves the name holding the arg,
-    // which is a slot that holds already in a name the run never writes, or a name it writes with
-    // that same arg. The records are read as the init's and the update's are, and what they drop
-    // is recorded only for a `for` that is taken, whose edges are never rendered to record it.
+    // the latch's. A slot holds already where `edgeCopyRecords` records no copy for it (an
+    // identity, a write anchored at its def, an undefined value that carries nothing). What the
+    // records drop is recorded only for a `for` that is taken, whose edges are never rendered to
+    // record it.
     const initWrites = new Map<string, Value | null>(initRecs.map((r) => [r.name, r.arg]));
     for (const o of preOps) {
       for (const r of o.results) {
@@ -9814,7 +9807,7 @@ function structureRanked(
         recs = edgeCopyRecords(pred, succ);
       } catch (e) {
         if (e instanceof StructureError) {
-          return ['copy']; // a copy the `while (1)` reading spells, and refuses, itself
+          return ['copy']; // the `while (1)` reading meets the same error on this edge
         }
         throw e;
       } finally {
