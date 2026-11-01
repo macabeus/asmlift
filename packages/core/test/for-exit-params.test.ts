@@ -178,3 +178,19 @@ test('an exit read as the IV from before its update refuses the `for`', () => {
   expect(r.src).toContain('while (1)');
   agrees(r);
 });
+
+test('a read of the IV past a loop with no guard refuses the `for`', () => {
+  // `for (i = 0; i < 2; i++) { last = i; .. } k(last);` with no guard, its first test folded: the
+  // header dominates the code after the loop, which reads `i` itself — from before the update on
+  // the latch's way out, where the `for` has run it. The header's test always continues, so the
+  // latch's way out is the one every seed takes.
+  const ir = forExit({ exitCalls: '%62: s32 = call %5 {target="k"}\n  ' })
+    .replace('%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb12(), ^bb1(%0)', '%2: s32 = const {value=0}\n  br ^bb1(%2)')
+    .replace('%8: s32 = const {value=2}', '%8: s32 = const {value=-2147483648}')
+    .replace('%37: u32 = icmp_slt %1, %36', '%38: s32 = const {value=2}\n  %37: u32 = icmp_sge %36, %38');
+  expect(ir).toContain('br ^bb1(%2)');
+  const r = judged(ir);
+  expect(r.src).not.toContain('for (');
+  expect(r.src).toContain('while (1)');
+  agrees(r);
+});

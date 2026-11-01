@@ -1552,7 +1552,8 @@ export interface ForPlanIv {
   readonly exitCopy: boolean;
   /** …or a slot it carries without a copy (an identity, or a write anchored at its def) names a
    *  value the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and
-   *  the preheader's), on the latch's the IV past its update, or a latch op it never renders */
+   *  the preheader's), on the latch's the IV past its update, or a latch op it never renders; or the
+   *  code past the loop reads the IV's param itself, which the update has rewritten there */
   readonly exitNameRewritten: boolean;
 }
 
@@ -9363,7 +9364,9 @@ function structureRanked(
   //     IV's name; a slot read under a name the `for` rewrites does not (`for (..) { last = i; ..
   //     } k(last);`, whose latch hands the exit `i` from before its update and whose guard hands
   //     `-1`, under the IV's name). A latch op the latch's edge hands under its own name is written
-  //     nowhere, the latch never being rendered;
+  //     nowhere, the latch never being rendered. Past a loop with no guard, which the header
+  //     dominates, the code may read the IV's param with no exit param between: that is the IV
+  //     from before the update on the latch's way out, and the `for` has updated it, so it refuses;
   //   • the latch is never rendered, so it holds no effect, no qualified access, no anchored def and
   //     no named def read outside the latch — a named op the latch alone reads is spelled inline (A
   //     STRENGTH-REDUCED COUNTED LOOP), and one read past it (only where the latch dominates that
@@ -9629,11 +9632,26 @@ function structureRanked(
         return pred === latch && d !== undefined && opBlock.get(d) === latch ? ['rewritten'] : [];
       });
     };
+    // Past a loop with no guard the header dominates the exit, so the code there may read the IV's
+    // param itself, not through an exit param: the asm's value from before the update on the
+    // latch's way out, which the `for`'s update has rewritten. A named value holds its own.
+    const ivParam = updateRecs[0].param;
+    const readsIv = (v: Value, seen = new Set<Value>()): boolean => {
+      if (v === ivParam) {
+        return true;
+      }
+      if (seen.has(v) || varName.has(v)) {
+        return false;
+      }
+      seen.add(v);
+      return defs.get(v)?.operands.some((o) => readsIv(o, seen)) ?? false;
+    };
     let exitFindings: string[] | undefined;
     const exitFound = (what: string): boolean => {
       exitFindings ??= [
         ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
         ...exitSlots(latch, successorTo(latch, exit)!, new Map([[iv, updateRecs[0].arg]])),
+        ...(rootsOf(exitRegion(exit, fl.body, null)).some((r) => readsIv(r)) ? ['rewritten'] : []),
       ];
       return exitFindings.includes(what);
     };
