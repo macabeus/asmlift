@@ -15648,6 +15648,183 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_forjt_skew(s32 lo, s32 hi);',
     proto: { sw_forjt_skew: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      sw_forjt_u32 / sw_forjt_lt / sw_forjt_stride read IDO's counted loop as a `for`
+  //      (structure.ts THE LATCH TEST AS ITS BOUND and A SIBLING'S STRIDE). ido7.1 tests sw_forjt's
+  //      `i <= hi` as `i + 1 != hi + 1` and keeps `gE[i]` in a pointer stepped by 8 beside `i`.
+  //      sw_forjt_u32 is the negative of the bound: IDO spells an unsigned `<=` the same way, and
+  //      there `hi == UINT_MAX` is a loop C never leaves, so the `+ 1` form must not read as `<=`.
+  //      sw_forjt_lt is its positive twin, `i < hi` as `i + 1 != hi`, exact for any sign.
+  //      sw_forjt_stride is the negative of the stride: a pointer that starts at `&gE[lo]` but steps
+  //      by 12, so it is no G of `i` on the second trip and must stay a variable of its own.
+  {
+    sym: 'sw_forjt_u32',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_u32(u32 lo, u32 hi)\n' +
+      '{\n' +
+      '    u32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_u32(u32 lo, u32 hi);',
+    proto: { sw_forjt_u32: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_forjt_lt',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_lt(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i < hi; i++) {\n' +
+      '        if (gE[i].f <= 26) {\n' +
+      '            switch (gE[i].id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_lt(s32 lo, s32 hi);',
+    proto: { sw_forjt_lt: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'sw_forjt_stride',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_stride(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    struct E *p;\n' +
+      '    for (i = lo, p = &gE[lo]; i <= hi; i++, p = (struct E *)((u8 *)p + 12)) {\n' +
+      '        if (p->f <= 26) {\n' +
+      '            switch (p->id) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                k(4);\n' +
+      '                break;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                k(5);\n' +
+      '                break;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_stride(s32 lo, s32 hi);',
+    proto: { sw_forjt_stride: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   //      forexit_* are sw_forjt's `for` with an exit that takes params: every edge into the code after
   //      the loop hands it a value, so the guard's zero-trip edge (agbcc's `b .L4 @long jump` relay
   //      in the _far rows, where case 1 pushes the exit past a Thumb branch's range) and the latch's
