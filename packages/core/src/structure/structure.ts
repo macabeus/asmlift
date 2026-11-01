@@ -69,6 +69,7 @@ import {
   defOpMap,
   dominators,
   mergeClasses,
+  mkValue,
   reachForward,
   successorsOf,
 } from '../ir/core';
@@ -9607,6 +9608,8 @@ function structureRanked(
   //   • a guard's condition is the test read on the loop's entry values (`sameAtEntry`), a load on
   //     either side read through only where it is evaluated at the test; with no guard, that test
   //     folds to a constant that stays in the loop.
+  //     Where the latch tests a unit-stepped IV with `!=` against a bound, the test may be read as
+  //     the guard's own compare instead (THE LATCH TEST AS ITS BOUND, at `boundReadings`).
   //
   // A STRENGTH-REDUCED COUNTED LOOP (gcc 2.7.2's `for (i = lo; i <= hi; i++) … gE[i] …`) needs three
   // more readings, read like the rest (taken where asked, offered otherwise):
@@ -9626,6 +9629,94 @@ function structureRanked(
   //
   // The rules are tables: `FOR_PLAN_GATES` past the loop's shape, `FOR_PLAN_IV_GATES` over the
   // copies; each table's doc comment names what it leaves out.
+  // THE LATCH TEST AS ITS BOUND. IDO compiles `for (i = lo; i <= hi; i++)` to a guard `hi < lo`
+  // and a latch that tests `i + 1 != hi + 1` (`synthetic:sw_gotocase2:ido7.1`: `bne v0,s1` against
+  // `addiu v0,a1,1`), and `i < hi` to `i + 1 != hi`. The guard is no `!=`, so `entry-test-differs`
+  // refuses the latch's own test. These are the two readings of that test as the compare the guard
+  // is, each in all four of its spellings (`i' <= hi` is `hi >= i'`, and either stays in when true or
+  // when its negation is false); `forPlanAt` takes the first whose entry reading IS the guard, by
+  // `sameAtEntry`, which also fixes the compare's signedness and orientation to the guard's (IDO's
+  // `hi >= i` is byte-identical to `i <= hi`, its `!=` spellings are not). Each is exact where:
+  //   • `i'`, the IV's back-edge value, is `i + 1` (a unit step), and the bound `hi` (or `H`) is
+  //     defined outside the loop, so one value on every trip;
+  //   • the guard (or, with none, the test on the entry values, which `atEntry` folds) admits the
+  //     loop only where `lo <= hi` (`lo < H`). By induction `i` stays in `[lo, hi]` (`[lo, H)`) on
+  //     the header: the back edge is taken only where `i' != hi + 1`, so `i != hi` and `i' <= hi`.
+  //     Then `i' != hi + 1` and `i' <= hi` agree on every trip where `i < hi`, and at `i == hi` both
+  //     leave unless `hi` is INT_MAX, where `i++` overflows. That is the source's own signed overflow,
+  //     which C leaves undefined, so the `for` admits the asm there; a host differential under
+  //     -fwrapv would flag that one input. `i' != H` and `i' < H` agree on every trip, any sign.
+  //   • the `+ 1` form is SIGNED ONLY. IDO emits it for an unsigned `i <= hi` as well (`sltu` guard,
+  //     `bne` against `hi + 1`), and there `hi == UINT_MAX` is a defined loop the asm leaves after one
+  //     wrap and C's `<=` never does, so it stays the `!=` and `entry-test-differs` refuses it.
+  // A step other than one, a test against a pointer, and a bound computed in the loop read nothing.
+  const boundReadings = (
+    cond: Value,
+    contIsTaken: boolean,
+    stepped: Value,
+    ivParam: Value,
+    body: ReadonlySet<Block>,
+  ): { cond: Value; contIsTaken: boolean }[] => {
+    const c = defs.get(cond);
+    const step = defs.get(stepped);
+    const constOf = (v: Value): number | null => {
+      const d = defs.get(v);
+      return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
+    };
+    /** `v` is `x + 1`: `x` */
+    const lessOne = (v: Value): Value | null => {
+      const d = defs.get(v);
+      if (d?.opcode !== 'add' || d.operands.length !== 2) {
+        return null;
+      }
+      return constOf(d.operands[1]) === 1 ? d.operands[0] : constOf(d.operands[0]) === 1 ? d.operands[1] : null;
+    };
+    const fromOutside = (v: Value): boolean => {
+      const d = defs.get(v);
+      const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
+      return (at !== undefined && !body.has(at)) || constOf(v) !== null;
+    };
+    // stays in where `i' != H`: a `!=` taken into the loop, or an `==` taken out of it
+    if (
+      c === undefined ||
+      c.operands.length !== 2 ||
+      (c.opcode === 'icmp_ne') !== contIsTaken ||
+      (c.opcode !== 'icmp_ne' && c.opcode !== 'icmp_eq') ||
+      step === undefined ||
+      lessOne(stepped) !== ivParam ||
+      !c.operands.includes(stepped)
+    ) {
+      return [];
+    }
+    const bound = c.operands[c.operands[0] === stepped ? 1 : 0];
+    const synth = (opcode: string, operands: Value[], stay: boolean): { cond: Value; contIsTaken: boolean } => {
+      const r = mkValue(cond.type);
+      defs.set(r, { opcode, operands, results: [r], attrs: {}, successors: [] });
+      return { cond: r, contIsTaken: stay };
+    };
+    /** the four spellings of `i' < x` (`strict`) or `i' <= x`, signed or not */
+    const spellings = (x: Value, strict: boolean, sign: 's' | 'u') => {
+      const [lt, le, gt, ge] = ['lt', 'le', 'gt', 'ge'].map((k) => `icmp_${sign}${k}`);
+      return strict
+        ? [
+            synth(lt, [stepped, x], true),
+            synth(gt, [x, stepped], true),
+            synth(ge, [stepped, x], false),
+            synth(le, [x, stepped], false),
+          ]
+        : [
+            synth(le, [stepped, x], true),
+            synth(ge, [x, stepped], true),
+            synth(gt, [stepped, x], false),
+            synth(lt, [x, stepped], false),
+          ];
+    };
+    const hi = lessOne(bound);
+    return [
+      ...(hi !== null && fromOutside(hi) ? spellings(hi, false, 's') : []),
+      ...(fromOutside(bound) ? [...spellings(bound, true, 's'), ...spellings(bound, true, 'u')] : []),
+    ];
+  };
   type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
     // THE LOOP'S SHAPE (`forShapeOf`), which every rule of `FOR_PLAN_GATES` reads: not a rule of the
@@ -9768,6 +9859,10 @@ function structureRanked(
       return at === latch || (at === g && !g.ops.slice(opIndex.get(d)! + 1).some(effectful));
     };
     const contIsTaken = lterm.successors[0].block === h;
+    // THE LATCH TEST AS ITS BOUND (IDO's counted loop, at the THE LOOP AS A `for` block): the test
+    // `forPlanAt` spells, and which way it stays in the loop. The latch's own unless the guard reads
+    // it otherwise, below.
+    let test: { cond: Value; contIsTaken: boolean } = { cond, contIsTaken };
     // the test on the entry values, where it folds: each leaf a constant, each op one `evalIntPair` reads
     const atEntry = (v0: Value): number | null => {
       const v = entryVals.get(v0) ?? v0;
@@ -9869,12 +9964,30 @@ function structureRanked(
           return clobbered(cond);
         },
         get entryTestDiffers() {
-          if (guarded) {
-            const enterIsTaken = gterm.successors[0].block === (pre ?? h);
-            return !sameAtEntry(cond, gterm.operands[0], entryVals, enterIsTaken !== contIsTaken, atTest);
+          const differs = (t: { cond: Value; contIsTaken: boolean }): boolean => {
+            if (guarded) {
+              const enterIsTaken = gterm.successors[0].block === (pre ?? h);
+              return !sameAtEntry(t.cond, gterm.operands[0], entryVals, enterIsTaken !== t.contIsTaken, atTest);
+            }
+            const first = atEntry(t.cond);
+            return first === null || (first !== 0) !== t.contIsTaken;
+          };
+          if (!differs(test)) {
+            return false;
           }
-          const first = atEntry(cond);
-          return first === null || (first !== 0) !== contIsTaken;
+          const bound = boundReadings(
+            cond,
+            contIsTaken,
+            back.args[h.params.indexOf(ivParam)] as Value,
+            ivParam,
+            fl.body,
+          );
+          const read = bound.find((t) => !differs(t));
+          if (read === undefined) {
+            return true;
+          }
+          test = read;
+          return false;
         },
         get exitCopy() {
           return exitFound('copy');
@@ -9915,12 +10028,12 @@ function structureRanked(
         `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(h)} lost its update or its init copy`,
       );
     }
-    const test = (inlined ? latchExpr(sub) : exprWith(sub))(cond);
+    const spelled = (inlined ? latchExpr(sub) : exprWith(sub))(test.cond);
     return {
       latch,
       inits: inits.filter((st) => st !== init),
       init,
-      cond: contIsTaken ? test : negateCond(test),
+      cond: test.contIsTaken ? spelled : negateCond(spelled),
       inc,
     };
   };

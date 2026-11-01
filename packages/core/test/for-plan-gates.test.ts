@@ -222,3 +222,40 @@ test('the heuristic and defensive rules admit nothing wrong when dropped on thes
   ).toThrow(LOOP_EXIT);
   expect(iv.refusals().map(([id]) => id)).toContain('entry-test-differs');
 });
+
+// THE LATCH TEST AS ITS BOUND (structure.ts `boundReadings`): IDO's latch tests `i + 1 != hi + 1`
+// (here the `==` that leaves) beside a guard `hi < lo`, and `i + 1 != hi` beside `!(lo < hi)`. The
+// guard is no `!=`, so the latch's own test differs from it at entry; the `for` reads the test as the
+// guard's compare, which the guard proves exact by induction.
+const IDO_LE = '%39: s32 = add %1, %35\n  %37: u32 = icmp_eq %39, %36';
+
+test("IDO's `i + 1 != hi + 1` under a signed guard reads as `hi >= i`, in the guard's orientation", () => {
+  const r = lift(srFor({ test: IDO_LE }));
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test('`i + 1 != hi` under the guard `!(lo < hi)` reads as `i < hi`', () => {
+  const r = lift(srFor({ guard: '%4: u32 = icmp_sge %0, %1', test: '%37: u32 = icmp_eq %1, %36' }));
+  expect(r.src).toMatch(/for \(v0 = a0; v0 < a1; v0 = v0 \+ 1\)/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test('the `+ 1` bound under an UNSIGNED guard stays refused: at `hi == UINT_MAX` C would never leave', () => {
+  expect(() => lift(srFor({ guard: '%4: u32 = icmp_ult %1, %0', test: IDO_LE }))).toThrow(LOOP_EXIT);
+});
+
+test('a step of two reads no bound', () => {
+  const ir = srFor({ test: IDO_LE }).replace(
+    '%36: s32 = add %5, %35',
+    '%97: s32 = const {value=2}\n  %36: s32 = add %5, %97',
+  );
+  expect(() => lift(ir)).toThrow(LOOP_EXIT);
+});
+
+test('a test against a value derived from the IV, not the IV itself, reads no bound', () => {
+  // `hi + 1 == (i + 1) + 3`: the derived param's back-edge value, which no unit step reaches
+  expect(() => lift(srFor({ test: '%39: s32 = add %1, %35\n  %37: u32 = icmp_eq %39, %38' }))).toThrow(LOOP_EXIT);
+});
