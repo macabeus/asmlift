@@ -259,3 +259,37 @@ test('a test against a value derived from the IV, not the IV itself, reads no bo
   // `hi + 1 == (i + 1) + 3`: the derived param's back-edge value, which no unit step reaches
   expect(() => lift(srFor({ test: '%39: s32 = add %1, %35\n  %37: u32 = icmp_eq %39, %38' }))).toThrow(LOOP_EXIT);
 });
+
+// A SIBLING'S STRIDE (structure.ts, raise/unpre.ts `strideDerivedParams`): the header's second param
+// starts at `lo + 3` and the latch steps it by one beside `i + 1`, so it is `i + 3` at every entry by
+// induction but no op of `i + 1` on the back edge (the derived-param fold leaves it). The `for`
+// writes it nowhere and reads `i + 3` at each use.
+const STRIDE = { backDerived: '%38: s32 = add %6, %35' };
+
+test('a param stepped beside the counter is read as G of the counter, and the `for` writes it nowhere', () => {
+  const r = lift(srFor(STRIDE));
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.src).toMatch(/f\(v0 \+ 3\)/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test("a step that is not G's own stride keeps the param a copy, and the `for` refuses its two updates", () => {
+  expect(() => lift(srFor({ backDerived: '%38: s32 = add %6, %3' }))).toThrow(LOOP_EXIT);
+});
+
+test('a stride the test reads is no counted loop the `for` reads', () => {
+  expect(() => lift(srFor({ ...STRIDE, test: '%37: u32 = icmp_slt %1, %38' }))).toThrow(LOOP_EXIT);
+});
+
+test('a stride handed to the code after the loop stays a variable', () => {
+  // the latch's way out hands the exit the stepped param, whose name the `for` never writes
+  expect(() => lift(withExitParam(srFor(STRIDE), '%2', '%38'))).toThrow(LOOP_EXIT);
+});
+
+test("IDO's whole counted loop: the `+ 1` bound and a stride together", () => {
+  const r = lift(srFor({ ...STRIDE, test: IDO_LE }));
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});

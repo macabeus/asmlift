@@ -130,6 +130,7 @@ import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
 import { storeSigned } from '../raise/storesign';
 import { collectStructs } from '../raise/structs';
+import { type StrideDerived, strideDerivedParams } from '../raise/unpre';
 import {
   type DeclaredField,
   type SymbolInfo,
@@ -6714,6 +6715,9 @@ function structureRanked(
       : mkGap(`no lowering for op '${d.opcode}'`, d.operands.map(e));
   };
 
+  // The derived parameters of the `for` loops being emitted (A SIBLING'S STRIDE, at `forPlanAt`): a
+  // read of one renders G of the loop's counter, since the `for` writes the parameter nowhere.
+  let derivedReads: Map<Value, (e: (v: Value) => Expr) => Expr> | null = null;
   // A map EXTENDS the ambient post-loop substitution (`activeSub`, below) and wins where both map a
   // value: a loop's own reading is layered over the enclosing exit region's, which still holds
   // inside it. Replacing the ambient one would re-derive a value a previous loop left in its
@@ -6721,6 +6725,11 @@ function structureRanked(
   // substitution at all.
   const exprWith = (sub: Map<Value, string> | null) => {
     const e = (v: Value): Expr => {
+      // a `for`'s derived parameter (A SIBLING'S STRIDE, at `forPlanAt`), read as G of its counter
+      const derived = derivedReads?.get(v);
+      if (derived !== undefined) {
+        return derived(e);
+      }
       const subbed = sub === null ? undefined : (sub.get(v) ?? activeSub?.get(v));
       if (subbed) {
         if (zeroTripStale?.get(v) === subbed) {
@@ -9629,6 +9638,118 @@ function structureRanked(
   //
   // The rules are tables: `FOR_PLAN_GATES` past the loop's shape, `FOR_PLAN_IV_GATES` over the
   // copies; each table's doc comment names what it leaves out.
+  // A SIBLING'S STRIDE. IDO keeps `gE[i]` of `for (i = lo; i <= hi; i++)` in a pointer the header
+  // takes beside `i`, `gE + (lo << 3)` on entry and stepped by 8 in the latch; raise/unpre.ts
+  // `strideDerivedParams` proves it G(i) at every entry, by induction. `while (1)` spells it as the
+  // variable the asm holds, which reads closest to the bytes there, and the `for` cannot: its update
+  // is ONE copy. So the `for` writes the pointer nowhere — no init copy, no update copy — and renders
+  // every read of it as G of the counter's name. That is exact where the name holds the counter and
+  // each of G's other leaves holds itself at every read, and where the pointer is read nowhere the
+  // `for` does not render G:
+  //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
+  //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
+  //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here);
+  //   • no value in the body but the counter's param and the latch's ops is named for the counter,
+  //     and none for a leaf of G or for the param (the latch is never rendered, and the update is the
+  //     one write of the counter in the `for`); a read of a leaf G adds is then a read of that leaf;
+  //   • and, checked on the emitted loop, nothing the `for` spells reads the param's name.
+  /** The stride's param and its back-edge value stay inside the loop, and off its test and update. */
+  const strideStaysInLoop = (
+    sd: StrideDerived,
+    h: Block,
+    back: Successor,
+    latch: Block,
+    lterm: Op,
+    cond: Value,
+    body: ReadonlySet<Block>,
+  ): boolean => {
+    const p = h.params[sd.j];
+    const stepped = back.args[sd.j] as Value;
+    const onEdges = (v: Value, except?: Successor) =>
+      fn.blocks.some((b) =>
+        b.ops.some((o) => o.successors.some((sc) => sc.args.some((a, k) => a === v && !(sc === except && k === sd.j)))),
+      );
+    const readers = (v: Value) => (useSitesOf.get(v) ?? []).filter((u) => u.op.operands.includes(v));
+    /** `v` reads `p` or `stepped`, through ops in the loop */
+    const reads = (v: Value, seen = new Set<Value>()): boolean => {
+      if (v === p || v === stepped) {
+        return true;
+      }
+      const d = defs.get(v);
+      const at = d === undefined ? undefined : opBlock.get(d);
+      if (seen.has(v) || d === undefined || at === undefined || !body.has(at)) {
+        return false;
+      }
+      seen.add(v);
+      return d.operands.some((o) => reads(o, seen));
+    };
+    return (
+      !onEdges(p) &&
+      !onEdges(stepped, back) &&
+      readers(p).every((u) => body.has(u.blk)) &&
+      readers(stepped).length === 0 &&
+      lterm.successors.includes(back) &&
+      opBlock.get(defs.get(stepped)!) === latch &&
+      !reads(cond) &&
+      !reads(back.args[sd.i] as Value)
+    );
+  };
+  /** No value in the body holds the counter's name but the counter, or a stride's or a leaf's name
+   *  but its own. */
+  const stridesNamed = (
+    strides: readonly StrideDerived[],
+    h: Block,
+    ivParam: Value,
+    iv: string,
+    latch: Block,
+    body: ReadonlySet<Block>,
+  ): boolean => {
+    if (strides.some((sd) => h.params[sd.i] !== ivParam)) {
+      return false;
+    }
+    const owners = new Map<string, Value>();
+    for (const sd of strides) {
+      for (const v of [h.params[sd.j], ...sd.leaves]) {
+        const name = varName.get(v);
+        if (name !== undefined) {
+          owners.set(name, v);
+        }
+      }
+    }
+    if (owners.has(iv)) {
+      return false;
+    }
+    for (const b of body) {
+      for (const v of [...b.params, ...b.ops.flatMap((o) => o.results)]) {
+        const name = varName.get(v);
+        if (name === undefined) {
+          continue;
+        }
+        if (name === iv && v !== ivParam && b !== latch) {
+          return false;
+        }
+        const owner = owners.get(name);
+        if (owner !== undefined && owner !== v) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  /** A read of the stride's param: G of the counter's param, G's own ops spelled inline. */
+  const strideRead =
+    (sd: StrideDerived, ivParam: Value) =>
+    (e: (v: Value) => Expr): Expr => {
+      const ops = new Set(sd.ops);
+      const g = (v: Value): Expr => {
+        if (v === sd.x0) {
+          return e(ivParam);
+        }
+        const d = defs.get(v);
+        return d !== undefined && ops.has(d) ? lowerDef(d, g) : e(v);
+      };
+      return lowerDef(sd.ops[sd.ops.length - 1], g);
+    };
   // THE LATCH TEST AS ITS BOUND. IDO compiles `for (i = lo; i <= hi; i++)` to a guard `hi < lo`
   // and a latch that tests `i + 1 != hi + 1` (`synthetic:sw_gotocase2:ido7.1`: `bne v0,s1` against
   // `addiu v0,a1,1`), and `i < hi` to `i + 1 != hi`. The guard is no `!=`, so `entry-test-differs`
@@ -9717,7 +9838,15 @@ function structureRanked(
       ...(fromOutside(bound) ? [...spellings(bound, true, 's'), ...spellings(bound, true, 'u')] : []),
     ];
   };
-  type ForPlan = { latch: Block; inits: Stmt[]; init: Stmt; cond: Expr; inc: Stmt };
+  type ForPlan = {
+    latch: Block;
+    inits: Stmt[];
+    init: Stmt;
+    cond: Expr;
+    inc: Stmt;
+    /** the derived parameters' reads (A SIBLING'S STRIDE), and the names the `for` never writes */
+    derived?: { reads: Map<Value, (e: (v: Value) => Expr) => Expr>; names: Set<string> };
+  };
   const forPlanAt = (g: Block, fl: ForeverLoopInfo, pre?: Block): ForPlan | null => {
     // THE LOOP'S SHAPE (`forShapeOf`), which every rule of `FOR_PLAN_GATES` reads: not a rule of the
     // table (see its doc comment)
@@ -9806,13 +9935,21 @@ function structureRanked(
     // for a loop that is only being offered, that is undone, so the structuring that reports it keeps
     // exactly the outcome it had before it asked.
     const offered = !spellCountedLoopsFor && !forRank.asked.has(h);
+    // A SIBLING'S STRIDE: a header param that holds G of the counter at every entry (raise/unpre.ts
+    // `strideDerivedParams`) is no copy of the `for`'s; its reads are G of the counter (see above)
+    const strides = strideDerivedParams(defs, h, initEdge, back, (v) => {
+      const d = defs.get(v);
+      const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
+      return at !== undefined && at !== h && !fl.body.has(at) && dom.get(h)!.has(at);
+    }).filter((sd) => strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body));
+    const keep = (k: number): boolean => !strides.some((sd) => sd.j === k);
     const auditMark = droppedUndefCopies.length;
     const gapMark = strictGaps.length;
     let updateRecs: ReturnType<typeof edgeCopyRecords>;
     let initRecs: ReturnType<typeof edgeCopyRecords>;
     try {
-      updateRecs = edgeCopyRecords(latch, back);
-      initRecs = edgeCopyRecords(entry, initEdge);
+      updateRecs = edgeCopyRecords(latch, back, null, keep);
+      initRecs = edgeCopyRecords(entry, initEdge, null, keep);
     } catch (e) {
       if (offered && e instanceof StructureError) {
         return null;
@@ -9830,6 +9967,9 @@ function structureRanked(
     }
     const iv = updateRecs[0].name;
     const ivInit = initRecs.find((r) => r.name === iv);
+    if (strides.length > 0 && !stridesNamed(strides, h, updateRecs[0].param, iv, latch, fl.body)) {
+      return null;
+    }
     const sub = subFor(h.params, back.args as Value[]);
     // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
     // latch may hold a materialized op its own reads alone use, which the `for` never
@@ -10017,8 +10157,8 @@ function structureRanked(
     };
     const [inc] = inlined
       ? [{ k: 'assign' as const, name: iv, value: intoDeclaredTemp(iv, latchExpr(null)(updateRecs[0].arg)) }]
-      : argAssigns(latch, h);
-    const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h)];
+      : argAssigns(latch, h, null, keep);
+    const inits = [...(pre !== undefined ? sideEffects(pre) : []), ...argAssigns(entry, h, null, keep)];
     const init: Stmt | undefined =
       ivInit === undefined
         ? { k: 'assign', name: iv, value: { k: 'var', name: iv } }
@@ -10035,6 +10175,14 @@ function structureRanked(
       init,
       cond: test.contIsTaken ? spelled : negateCond(spelled),
       inc,
+      ...(strides.length > 0
+        ? {
+            derived: {
+              reads: new Map(strides.map((sd) => [h.params[sd.j], strideRead(sd, updateRecs[0].param)])),
+              names: new Set(strides.map((sd) => varName.get(h.params[sd.j])!)),
+            },
+          }
+        : {}),
     };
   };
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null, asFor?: ForPlan): Stmt[] => {
@@ -10074,9 +10222,14 @@ function structureRanked(
     const jumps = asFor === undefined ? [] : [asFor.latch, fl.exit!].filter((x) => !forJumps.has(x));
     jumps.forEach((x) => forJumps.add(x));
     let body: Stmt[];
+    const outerDerived = derivedReads;
+    if (asFor?.derived !== undefined) {
+      derivedReads = new Map([...(outerDerived ?? []), ...asFor.derived.reads]);
+    }
     try {
       body = withLoop(frame, () => structureBlock(fl.header, asFor?.latch ?? fl.header));
     } finally {
+      derivedReads = outerDerived;
       jumps.forEach((x) => forJumps.delete(x));
     }
     dwActive.delete(fl.header);
@@ -10086,6 +10239,22 @@ function structureRanked(
         : { k: 'for', init: asFor.init, cond: asFor.cond, inc: asFor.inc, body };
     const exit = fl.exit;
     if (asFor !== undefined) {
+      // A SIBLING'S STRIDE: the `for` writes a derived param's name nowhere, so nothing it spells may
+      // read it (DEFENSIVE: every read of the param renders G through `derivedReads`)
+      if (asFor.derived !== undefined) {
+        const reads = new Set<string>();
+        const walk = (st: Stmt): void => {
+          stmtExprs(st).forEach((x) => exprVars(x, reads));
+          stmtChildren(st).forEach(walk);
+        };
+        [...asFor.inits, loop].forEach(walk);
+        if ([...asFor.derived.names].some((n) => reads.has(n))) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(fl.header)} reads a ` +
+              `derived loop parameter by a name it never writes`,
+          );
+        }
+      }
       return [...asFor.inits, ...emitForeverExit(fl, stop, exit!, loop, through)];
     }
     if (exit === null || !breaksOut(body)) {

@@ -89,7 +89,17 @@
 // cannot be asked per loop as structure.ts's rerun asks its readings: the pre-structure folds run
 // once, ahead of every attempt. The recomputed F(i) has no name, so a loop test that reads it reads
 // the op of the IV that test sees, never a value one trip stale.
-import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue, opShape } from '../ir/core';
+import {
+  type Block,
+  type Fn,
+  type Op,
+  type Successor,
+  type Value,
+  defOpMap,
+  dominators,
+  mkValue,
+  opShape,
+} from '../ir/core';
 import { deletableWhenDead, placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
 import { inEdgesOf, retireParam, trivialPhiValue } from '../ir/simplify';
@@ -371,4 +381,120 @@ function sweepOrphans(fn: Fn, seeds: readonly Op[]): void {
       b.ops = b.ops.filter((op) => !dead.has(op));
     }
   }
+}
+
+// A SIBLING'S STRIDE (`strideDerivedParams`): the fact `recomputeDerivedParams` folds — a header
+// parameter `j` holds G(i) at every entry, `i` a sibling — proved over a loop's two edges by
+// INDUCTION where the back edge hands `j + K` rather than G of the argument it hands `i`. IDO
+// strength-reduces `gE[i]` in `for (i = lo; i <= hi; i++)` (`synthetic:sw_gotocase2:ido7.1`) to a
+// pointer that starts at `gE + (lo << 3)` and steps by 8 beside `i`: the entry hands the header
+// `(gE + (lo << 3), lo)` and the back edge `(p + 8, i + 1)`. G is `B + T(x)` or `T(x)`, T one of
+// `x << s`, `x * M` (M a constant) or `x` (the last only beside a base), and B one value from outside
+// the loop. The entry hands `j` exactly G(x0), x0 being what it hands `i`; the back edge hands `i + D`
+// and `j + K` with K = T(D). T is linear in 32-bit words, so G(i + D) = G(i) + T(D) with no overflow
+// argument: if `j` = G(i) on one entry, it is G(i + D) = G(i') on the next.
+//
+// A FACT, NOT A FOLD, by measurement: recomputed in the header ahead of every structuring, as
+// `recomputeDerivedParams` recomputes its params, it re-spells every IDO loop that stays `while (1)`
+// as an index recomputed per trip, and those lift further from the bytes (synthetic:brk2out_ctl:ido7.1
+// 151/176 -> 214/224, forexit_old 163 -> 173). So the structurer reads it only where it spells the
+// loop as a `for` (structure.ts `forPlanAt`, A SIBLING'S STRIDE), which writes `j` nowhere and reads
+// G(i) at each of its uses. The caller states which values are from outside the loop.
+
+/** A header parameter that is G of a sibling at every entry (A SIBLING'S STRIDE). */
+export interface StrideDerived {
+  /** the derived parameter's slot in the header */
+  readonly j: number;
+  /** the sibling's (the counter's) slot */
+  readonly i: number;
+  /** G's ops as the entry edge computes them, innermost first; the last one's result is G(x0) */
+  readonly ops: readonly Op[];
+  /** what the entry hands the sibling: the one leaf of G that is not from outside the loop */
+  readonly x0: Value;
+  /** G's other operands (the base, a multiplier, a shift amount), each from outside the loop */
+  readonly leaves: readonly Value[];
+}
+
+/** Every header parameter that is G of a sibling at each entry, read over the loop's one entry edge
+ *  and one back edge (A SIBLING'S STRIDE). `outside` says a value is defined in a block that strictly
+ *  dominates the header. */
+export function strideDerivedParams(
+  defs: ReadonlyMap<Value, Op>,
+  header: Block,
+  entry: Successor,
+  back: Successor,
+  outside: (v: Value) => boolean,
+): StrideDerived[] {
+  const constOf = (v: Value): number | null => {
+    const d = defs.get(v);
+    return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
+  };
+  /** `v` is `p + c`, `c` a constant: `c` */
+  const stepOf = (v: Value, p: Value): number | null => {
+    const d = defs.get(v);
+    if (d?.opcode !== 'add' || d.operands.length !== 2) {
+      return null;
+    }
+    const [a, b] = d.operands;
+    return a === p ? constOf(b) : b === p ? constOf(a) : null;
+  };
+  /** `v` is T(x0): its ops, its constant operands, and T(d) */
+  const term = (v: Value, x0: Value, d: number): { ops: Op[]; leaves: Value[]; k: number } | null => {
+    if (v === x0) {
+      return { ops: [], leaves: [], k: d };
+    }
+    const t = defs.get(v);
+    if (t === undefined || !clonable(t) || (t.opcode === 'shl' && t.operands[0] !== x0)) {
+      return null;
+    }
+    if (t.opcode === 'shl') {
+      const amount = t.operands.length === 1 ? t.attrs.imm : t.operands.length === 2 ? constOf(t.operands[1]) : null;
+      return typeof amount !== 'number' || amount < 0 || amount > 31
+        ? null
+        : { ops: [t], leaves: t.operands.slice(1), k: (d << amount) | 0 };
+    }
+    if (t.opcode === 'mul' && t.operands.length === 2) {
+      const at = t.operands.indexOf(x0);
+      const m = at < 0 ? null : constOf(t.operands[1 - at]);
+      return m === null ? null : { ops: [t], leaves: [t.operands[1 - at]], k: Math.imul(d, m) };
+    }
+    return null;
+  };
+  const out: StrideDerived[] = [];
+  header.params.forEach((pj, j) => {
+    const k = stepOf(back.args[j], pj);
+    if (k === null) {
+      return;
+    }
+    for (let i = 0; i < header.params.length; i++) {
+      const d = i === j ? null : stepOf(back.args[i], header.params[i]);
+      if (d === null || d === 0) {
+        continue;
+      }
+      const x0 = entry.args[i];
+      const g = entry.args[j];
+      let found: { ops: Op[]; leaves: Value[]; k: number } | null = null;
+      const bare = term(g, x0, d);
+      if (bare !== null && bare.ops.length > 0) {
+        found = bare;
+      } else {
+        const add = defs.get(g);
+        if (add?.opcode === 'add' && add.operands.length === 2 && clonable(add)) {
+          for (const at of [0, 1]) {
+            const t = term(add.operands[at], x0, d);
+            const base = add.operands[1 - at];
+            if (t !== null && base !== x0 && outside(base)) {
+              found = { ops: [...t.ops, add], leaves: [...t.leaves, base], k: t.k };
+              break;
+            }
+          }
+        }
+      }
+      if (found !== null && found.k === k && found.leaves.every(outside)) {
+        out.push({ j, i, ops: found.ops, x0, leaves: found.leaves });
+        return;
+      }
+    }
+  });
+  return out;
 }

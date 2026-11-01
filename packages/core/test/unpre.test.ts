@@ -4,11 +4,12 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { type Block, type Value, defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
-import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams } from '../src/raise/unpre';
+import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams, strideDerivedParams } from '../src/raise/unpre';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -308,4 +309,83 @@ test('a load of the sibling is not recomputed: memory may change between the edg
 test('the derived-param fold runs just ahead of the congruent one', () => {
   const ids = PRE_STRUCTURE_FOLDS.map((f) => f.id);
   expect(ids.indexOf('derivedparam')).toBe(ids.indexOf('unpre') - 1);
+});
+
+// ── A SIBLING'S STRIDE (`strideDerivedParams`) ───────────────────────────────────────────────────
+//
+// IDO's `for (i = lo; i <= hi; i++) .. gE[i] ..`: the entry hands the header `(gE + (lo << 3), lo)`
+// and the back edge `(p + 8, i + 1)`. `p` is G(i) = `gE + (i << 3)` at every entry, by induction.
+const strideIr = ({
+  entry = '%4: s32 = shl %0 {imm=3}\n  %5: s32 = add %4, %3',
+  step = '%11: s32 = const {value=8}',
+  base = '%3: s32 = gaddr {sym="gE"}',
+  ivStep = '%9: s32 = const {value=1}',
+} = {}) => `fn s {
+^bb0(%0: s32, %1: s32):
+  ${base}
+  ${entry}
+  br ^bb1(%5, %0)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = load %6 {off=4, signed=false, width=1}
+  %12: s32 = call %8 {target="use"}
+  ${ivStep}
+  %10: s32 = add %7, %9
+  ${step}
+  %13: s32 = add %6, %11
+  %14: u32 = icmp_slt %1, %10
+  cond_br %14, ^bb2(), ^bb1(%13, %10)
+^bb2():
+  ret
+}
+`;
+const strides = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  const defs = defOpMap(fn);
+  const dom = dominators(fn);
+  const home = new Map<Value, Block>();
+  for (const b of fn.blocks) {
+    b.params.forEach((p) => home.set(p, b));
+    b.ops.forEach((o) => o.results.forEach((r) => home.set(r, b)));
+  }
+  const h = fn.blocks[1];
+  const [entry] = fn.blocks[0].ops.at(-1)!.successors;
+  const back = fn.blocks[1].ops.at(-1)!.successors[1];
+  return strideDerivedParams(defs, h, entry, back, (v) => {
+    const at = home.get(v);
+    return at !== undefined && at !== h && dom.get(h)!.has(at);
+  });
+};
+
+test('a pointer that starts at `B + (lo << s)` and steps by `1 << s` beside `i` is G(i)', () => {
+  const got = strides(strideIr());
+  expect(got).toHaveLength(1);
+  expect(got[0]).toMatchObject({ j: 0, i: 1 });
+  expect(got[0].ops.map((o) => o.opcode)).toEqual(['shl', 'add']);
+});
+
+test('a stride of `i * M` with K = D * M is G(i) too', () => {
+  const got = strides(
+    strideIr({
+      entry: '%15: s32 = const {value=12}\n  %4: s32 = mul %0, %15\n  %5: s32 = add %3, %4',
+      step: '%11: s32 = const {value=12}',
+    }),
+  );
+  expect(got).toHaveLength(1);
+});
+
+test('a step that is not T(D) is no stride', () => {
+  expect(strides(strideIr({ step: '%11: s32 = const {value=12}' }))).toHaveLength(0);
+  // the counter stepping by two: K would have to be 16
+  expect(strides(strideIr({ ivStep: '%9: s32 = const {value=2}' }))).toHaveLength(0);
+});
+
+test('a base the caller does not place outside the loop is no stride', () => {
+  // the same IR, with the caller's dominance answer withheld for every value
+  const fn = parse(strideIr());
+  verify(fn);
+  const h = fn.blocks[1];
+  const entry = fn.blocks[0].ops.at(-1)!.successors[0];
+  const back = h.ops.at(-1)!.successors[1];
+  expect(strideDerivedParams(defOpMap(fn), h, entry, back, () => false)).toHaveLength(0);
 });
