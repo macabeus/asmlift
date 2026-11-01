@@ -143,7 +143,7 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // beside magicdiv so that a reader looking for division recovery finds both together.
   { id: 'divpow2', run: recognizeDivPow2, dce: true },
   // …and its remainder sibling, IDO's two-test diamond (raise/divpow2.ts `recognizeSremPow2`): no
-  // other pass reads a three-edge merge whose last arm is an `add` of a negative power of two.
+  // other pass reads a three-edge merge whose last arm takes a power of two off the mask.
   { id: 'srempow2', run: recognizeSremPow2, dce: true },
   {
     id: 'softdiv',

@@ -123,6 +123,24 @@ test('IDO: the masked remainder with its negative correction folds to `%`', () =
   ).toBe('s32 f(s32 a0) {\n    return a0 % 16;\n}\n');
 });
 
+// …and for k >= 16, where `-2^k` no longer fits `addiu`: IDO holds the mask in `at` and adds one to
+// it in the second test's delay slot, so the correction is `mask - 2^k` as a SUBTRACTION. Verbatim
+// IDO 7.1 -O2 for `a % 65536` and `a % 0x100000`; each `%` compiles back to it.
+test('IDO: the remainder whose correction is the mask register plus one folds to `%`', () => {
+  expect(
+    mips(
+      '   0:\tli\tat,0xffff\n   4:\tbgez\ta0,18 <f+0x18>\n   8:\tand\tv0,a0,at\n   c:\tbeqz\tv0,18 <f+0x18>\n' +
+        '  10:\taddiu\tat,at,1\n  14:\tsubu\tv0,v0,at\n  18:\tjr\tra\n  1c:\tnop\n',
+    ),
+  ).toBe('s32 f(s32 a0) {\n    return a0 % 65536;\n}\n');
+  expect(
+    mips(
+      '  20:\tlui\tat,0x10\n  24:\taddiu\tat,at,-1\n  28:\tbgez\ta0,3c <f+0x1c>\n  2c:\tand\tv0,a0,at\n' +
+        '  30:\tbeqz\tv0,3c <f+0x1c>\n  34:\taddiu\tat,at,1\n  38:\tsubu\tv0,v0,at\n  3c:\tjr\tra\n  40:\tnop\n',
+    ),
+  ).toBe('s32 f(s32 a0) {\n    return a0 % 1048576;\n}\n');
+});
+
 // mask m, correction c on the arm both tests fail into; `first`/`second` are the two compares
 const srem = (m: number, c: number, first = 'icmp_sge', second = 'icmp_eq', extra = '') =>
   `fn f {\n^bb0(%0: s32):\n  %1: s32 = const {value=0}\n  %2: u32 = ${first} %0, %1\n` +
@@ -148,6 +166,15 @@ test('the mask must be 2^k - 1 and the correction exactly -2^k of the same k', (
   expect(sremFolds(srem(6, -7))).toBeNull(); // not a low-bits mask
   expect(sremFolds(srem(7, -16))).toBeNull(); // the correction of k=4 on a k=3 mask
   expect(sremFolds(srem(7, 8))).toBeNull(); // adding 2^k is not the truncating remainder
+});
+
+test('a subtracted correction must be exactly +2^k of the same k, subtracted from the mask', () => {
+  const sub = (m: number, c: number, swap = false) =>
+    srem(m, c).replace('%8: s32 = add %4, %7', swap ? '%8: s32 = sub %7, %4' : '%8: s32 = sub %4, %7');
+  expect(sremFolds(sub(7, 8))).toMatch(/smod %0, %\d+/);
+  expect(sremFolds(sub(7, -8))).toBeNull(); // mask + 2^k
+  expect(sremFolds(sub(7, 16))).toBeNull(); // the k=4 correction on a k=3 mask
+  expect(sremFolds(sub(7, 8, true))).toBeNull(); // 2^k - mask is not the remainder
 });
 
 test('the tests must send x >= 0 and a zero mask to the merge with the mask', () => {

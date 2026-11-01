@@ -275,6 +275,35 @@ function maskOf(defs: Map<Value, Op>, v: Value): { x: Value; k: number } | null 
   return null;
 }
 
+/** The correction arm's value, `mask - 2^k` for the mask's own k, in either spelling the IR carries
+ *  it: an `add` of the constant `-2^k` (IDO's `addiu v0, v0, -2^k`, where it fits an immediate:
+ *  k < 16), or a `sub` of the constant `2^k` (k >= 16, where IDO materialises `2^k` as the mask's
+ *  register plus one in the second test's delay slot, `addiu at, at, 1; subu v0, v0, at`, which
+ *  the constant fold has made `2^k` by now). The identity is the subtraction, not its encoding. */
+function correctedMask(defs: Map<Value, Op>, v: Value): { t: Value; mk: { x: Value; k: number } } | null {
+  const u = defs.get(v);
+  if ((u?.opcode !== 'add' && u?.opcode !== 'sub') || u.operands.length !== 2) {
+    return null;
+  }
+  // a sub's minuend is its first operand; an add's mask may stand on either side
+  const orders =
+    u.opcode === 'sub'
+      ? ([[0, 1]] as const)
+      : ([
+          [0, 1],
+          [1, 0],
+        ] as const);
+  for (const [a, b] of orders) {
+    const c = defs.get(u.operands[b]);
+    const mk = maskOf(defs, u.operands[a]);
+    const want = u.opcode === 'sub' ? 2 ** (mk?.k ?? 0) : -(2 ** (mk?.k ?? 0));
+    if (c?.opcode === 'const' && mk !== null && c.attrs.value === want) {
+      return { t: u.operands[a], mk };
+    }
+  }
+  return null;
+}
+
 /** `icmp <op> v, const 0` → the compare's opcode, else null. */
 function zeroTest(defs: Map<Value, Op>, c: Value, v: Value): string | null {
   const d = defs.get(c);
@@ -337,27 +366,12 @@ export function recognizeSremPow2(fn: Fn): boolean {
         if (ht.opcode !== 'cond_br' || head === m || head === fix) {
           continue;
         }
-        // the corrected value: an add of `-2^k` to the mask
-        const u = defs.get(ft.successors[0].args[0]);
-        if (u?.opcode !== 'add' || u.operands.length !== 2) {
+        // the corrected value: the mask less `2^k`
+        const corrected = correctedMask(defs, ft.successors[0].args[0]);
+        if (corrected === null || corrected.mk.k < 1 || corrected.mk.k > 30) {
           continue;
         }
-        let t: Value | null = null;
-        let mk: { x: Value; k: number } | null = null;
-        for (const [a, b] of [
-          [0, 1],
-          [1, 0],
-        ] as const) {
-          const c = defs.get(u.operands[b]);
-          const mm = maskOf(defs, u.operands[a]);
-          if (c?.opcode === 'const' && mm !== null && c.attrs.value === -(2 ** mm.k)) {
-            t = u.operands[a];
-            mk = mm;
-          }
-        }
-        if (t === null || mk === null || mk.k < 1 || mk.k > 30) {
-          continue;
-        }
+        const { t, mk } = corrected;
         // the first test: x >= 0 to the merge with the mask, else on to the second
         const [hTaken, hFall] = ht.successors;
         const hFirst = zeroTest(defs, ht.operands[0], mk.x);
