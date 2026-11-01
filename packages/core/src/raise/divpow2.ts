@@ -253,8 +253,14 @@ export function recognizeDivPow2(fn: Fn): boolean {
 // compares against zero, the second test must compare THAT mask against zero, the correction must
 // be exactly `-2^k` on the mask, and the corrected value must reach the merge only from the arm
 // both tests failed into. The two inner blocks are deleted, so neither may do anything else.
-// agbcc, gcc and kmc spell the same remainder as a biased floor (`x - (t >> k << k)`), which
-// ir/bits.ts `remainderPair` bounds and this does not touch; mwcc's is branch-free.
+// agbcc, gcc and kmc COMPILE `%` as a biased floor (`x - (t >> k << k)`), which ir/bits.ts
+// `remainderPair` bounds and this does not touch; mwcc's is branch-free.
+//
+// THE PASS IS NOT GATED BY TARGET, and it is not IDO-only in effect: a HAND-WRITTEN diamond of
+// this shape on any compiler is folded to `%` too (`r = i & 15; if (i < 0 && r != 0) r -= 16;`
+// compiled by agbcc reaches this pass as the same two-test diamond and lifts `i % 16`). The identity holds whatever wrote it, so the C is the
+// same value; whether `%` recompiles to the target's bytes there is the bench's question, not this
+// pass's, and the hand-written agbcc and mwcc diamonds measured came out equal or closer.
 
 /** `and x, const(2^k - 1)` → { x, k }, else null. The and is commutative. */
 function maskOf(defs: Map<Value, Op>, v: Value): { x: Value; k: number } | null {
