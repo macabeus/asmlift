@@ -125,7 +125,6 @@ const CASES: {
     sym: 'halves',
     c: 's32 halves(s32 i) { static const s16 cs[3] = {-1, 2, -300}; return cs[i]; }',
     spelled: /static const s16 cs\[3\] = \{ -1, 2, -0x12c \};/,
-    agbccScore: 2,
   },
   {
     sym: 'bssf',
@@ -256,7 +255,6 @@ const CASES: {
     c: 's32 palette(s32 i) { static s16 pal[] __attribute__((aligned(32))) = {1, 2, 3, 4, 5, 6, 7, 8}; return pal[i]; }',
     spelled: /static s16 pal\[8\] __attribute__\(\(aligned\(16\)\)\) = \{ 1, 2, 3, 4, 5, 6, 7, 8 \};/,
     mwccSpelled: /static s16 pal\[8\] __attribute__\(\(aligned\(32\)\)\) = \{ 1, 2, 3, 4, 5, 6, 7, 8 \};/,
-    agbccScore: 2,
   },
   {
     // scalars mwcc aligns to their width, an array of one byte it aligns to a word, and an array of
