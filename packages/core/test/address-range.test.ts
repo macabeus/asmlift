@@ -680,7 +680,8 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
 describe('addressRangeOf — a signed remainder by a power of two', () => {
   const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
   /** agbcc's (and gcc's) `x % 2^n` of a signed `x`: `t = x; if (x < 0) t = x + 2^n - 1; x - (t >> n
-   *  << n)`, the arm `bias` passes on the negative edge and `x` on the other; `x` is `of(entry)`. */
+   *  << n)`, with `x` = `of(entry)`; the arm `test` takes passes `x + bias`, the other edge
+   *  `x + positiveBias`, and the floor is scaled by `scale`. */
   const srem = (
     of: (entry: ReturnType<typeof block>, p: Value) => Value,
     {
@@ -839,7 +840,7 @@ describe('addressRangeOf — a signed remainder by a power of two', () => {
     br(neg, join, [neg.op('add', {}, [y, k(neg, 7)])]);
     const r = join.op('sub', {}, [p, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
     expect(rangeIn([entry, neg, join], plus(join, r, 8))).toBeUndefined();
-    // two arms no compare on x separates: each edge's part is bounded with nothing known of x
+    // two arms that no compare on x separates: each edge's part is bounded with nothing known of x
     const q = v();
     const e2 = block([q, p]);
     const n2 = block();

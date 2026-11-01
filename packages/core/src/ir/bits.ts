@@ -823,12 +823,12 @@ const RANGE_BUDGET = 256;
  *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
  *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
  *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by what a shift or a mask
- *  leaves of its operand's range (`shiftMaskRange`), by its divisor, a remainder (`remainderRange`:
- *  `smod`, `umod`), or, a block param, by the union of what its
- *  in-edges pass, each read under what its branch proves, or by a range every in-edge provably
- *  keeps it in (`integerRange`'s induction, for a loop counter whose latch bounds one side). A
- *  signed remainder by a power of two spelled with shifts, `x - (t >> k << k)` with `t` a biased `x` and `x` any linear
- *  form (`(i + 1) % 8`), is one bounded term (`remainderPair`).
+ *  leaves of its operand's range (`shiftMaskRange`), a remainder by its divisor (`remainderRange`:
+ *  `smod`, `umod`), or, a block param, by the union of what its in-edges pass, each read under what
+ *  its branch proves, or by a range every in-edge provably keeps it in (`integerRange`'s induction,
+ *  for a loop counter whose latch bounds one side). A signed remainder by a power of two spelled
+ *  with shifts, `x - (t >> k << k)` with `t` a biased `x` and `x` any linear form (`(i + 1) % 8`),
+ *  is one bounded term (`remainderPair`).
  *  Anything else — a function parameter, a whole word loaded from memory, a name nothing places, a
  *  param whose range depends on itself through a loop that no branch bounds — bounds nothing, and
  *  nothing is the answer. The form equals the word modulo 2^32, so the words are the sum's integer
@@ -1259,7 +1259,7 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
    *  sign-filling shift and `p` the operand `X + B` with a bias `B` in [0, 2^k), or a block param
    *  whose every in-edge passes `X + B` for its own `B`: agbcc's (and gcc's) `X % 8` is `if (X < 0)
    *  t = X + 7; else t = X; X - (t >> 3 << 3)`, and agbcc's `X % 2` is `X - ((X + (X >>> 31)) >> 1
-   *  << 1)`, its bias a term. The dividend `X` is any linear form, not one name: `(i + 1) % 8`
+   *  << 1)`, its bias a term. The dividend `X` is any linear form: `(i + 1) % 8`
    *  passes `i + 1` and `i + 8`, `(i * 2) % 8` passes `2 * i` and `2 * i + 7`. `X` is the terms the
    *  outer form holds `c` times of the in-edge argument with the least constant, with that
    *  argument's constant (moved out of the pair); every edge passes each of `X`'s terms as often,
@@ -1272,7 +1272,8 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
    *  floor `q` is one constant over `X`'s range: `X` is read under each in-edge's branch and under
    *  `facts` (what holds where the form is read: `X`'s terms are the same words there), and the
    *  parts hulled, an edge never taken passing nothing (`null` when none is taken). Undefined,
-   *  leaving the pair as terms, where a bias is out of range or holds the shift, or the outer form
+   *  leaving the pair as terms, where `k` is outside [1, 30], an in-edge passes no linear form or
+   *  not each of `X`'s terms as often, a bias is out of range or holds the shift, or the outer form
    *  holds none of the argument's terms `c` times.
    *
    *  raise/divpow2.ts folds the same bias diamond into `sdiv`, but only in runPreRecovery, after the
