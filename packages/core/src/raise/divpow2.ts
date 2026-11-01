@@ -40,6 +40,11 @@
 // `2^k - 1` for the SAME k the shift uses, the guard must test the SAME value the arms divide, and
 // the biased arm must be the negative one — the consistency check m2c's `49b5d87` also adds),
 // because every one of those is a way for a superficially similar diamond to mean something else.
+//
+// ir/bits.ts `integerRange` (its `remainderPair`) reads the same SUNK diamond under a remainder,
+// `x - (phi >> k << k)`, as one bounded term. It cannot wait for this pass's `sdiv`: the frontends'
+// frame audit asks those ranges before runPreRecovery runs; and as a bound, not a rewrite, it holds
+// for any bias in [0, 2^k) on any edge, so it does not take this pass's gates.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
 import { effectful } from '../ir/discipline';
 import { T } from '../ir/types';

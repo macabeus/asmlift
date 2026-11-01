@@ -1184,25 +1184,57 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
     }
     return out;
   };
+  /** Two sets of facts on the same values, both holding: of two bounds in one window, their meet
+   *  (`null` where they meet nowhere, so no value passes both), else the narrower. */
+  const bothFacts = (a: Facts, b: Facts): Facts | null => {
+    if (a.size === 0 || b.size === 0) {
+      return a.size === 0 ? b : a;
+    }
+    const out = new Map(a);
+    for (const [x, bb] of b) {
+      const had = out.get(x);
+      if (had === undefined) {
+        out.set(x, bb);
+      } else if (had.window === bb.window) {
+        const r = meetIn(had.r, bb.r);
+        if (r === null) {
+          return null;
+        }
+        out.set(x, { r, window: bb.window });
+      } else if (bb.r.hi - bb.r.lo < had.r.hi - had.r.lo) {
+        out.set(x, bb);
+      }
+    }
+    return out;
+  };
   /** A signed remainder by `2^k` the form holds as the pair `c * X - c * 2^k * (p >> k)`, `>>` the
-   *  sign-filling shift and `p` the operand `X + b` with a bias `0 <= b < 2^k`, or a block param
-   *  whose every in-edge passes `X + b` for its own `b`: agbcc's (and gcc's) `X % 8` is `if (X < 0)
-   *  t = X + 7; else t = X; X - (t >> 3 << 3)`. The dividend `X` is any linear form, not one name:
-   *  `(i + 1) % 8` passes `i + 1` and `i + 8`, `(i * 2) % 8` passes `2 * i` and `2 * i + 7`. `X` is
-   *  the in-edge argument with the least constant, every other edge passing its terms plus `b`, and
-   *  the outer form holds `c` times each of `X`'s terms (its constant is moved out of the pair).
-   *  Where `X + b` stays inside the signed window, the pair is `c` times `X - 2^k * floor((X + b) /
-   *  2^k)`, which is in [-b, 2^k - 1 - b] and exactly `X - 2^k * q` where the floor `q` is one
-   *  constant over `X`'s range; `X` is read under each in-edge's branch, the parts hulled and an
-   *  edge never taken passing nothing (`null` when none is taken). `X`'s terms are SSA values, the
-   *  same words at the edge and at the use, so the edges relate. Undefined, leaving the pair as two
-   *  terms, where the edges pass forms that differ beyond a constant, `b` is out of range or `X + b`
-   *  may wrap, or the outer coefficients are not `c` on `X`'s terms and `-c * 2^k` on the shift;
-   *  agbcc's `x % 2`, biased by `x >>> 31`, is no such pair. */
+   *  sign-filling shift and `p` the operand `X + B` with a bias `B` in [0, 2^k), or a block param
+   *  whose every in-edge passes `X + B` for its own `B`: agbcc's (and gcc's) `X % 8` is `if (X < 0)
+   *  t = X + 7; else t = X; X - (t >> 3 << 3)`, and agbcc's `X % 2` is `X - ((X + (X >>> 31)) >> 1
+   *  << 1)`, its bias a term. The dividend `X` is any linear form, not one name: `(i + 1) % 8`
+   *  passes `i + 1` and `i + 8`, `(i * 2) % 8` passes `2 * i` and `2 * i + 7`. `X` is the terms the
+   *  outer form holds `c` times of the in-edge argument with the least constant, with that
+   *  argument's constant (moved out of the pair); every edge passes each of `X`'s terms as often,
+   *  so each is an SSA value defined above the join, the same word at the edge and at the use.
+   *
+   *  Modulo 2^32, `X - 2^k * ((X + B) >> k)` is `(W mod 2^k) - B` of the signed word `W` the shift
+   *  reads, whether or not `X + B` wrapped to it: each edge's part is in [-B_hi, 2^k - 1 - B_lo]
+   *  with nothing known of `X`. Where every bias is a constant `b` and `X + b` stays inside the
+   *  signed window, the part is `X - 2^k * floor((X + b) / 2^k)`, exactly `X - 2^k * q` where the
+   *  floor `q` is one constant over `X`'s range: `X` is read under each in-edge's branch and under
+   *  `facts` (what holds where the form is read: `X`'s terms are the same words there), and the
+   *  parts hulled, an edge never taken passing nothing (`null` when none is taken). Undefined,
+   *  leaving the pair as terms, where a bias is out of range or holds the shift, or the outer form
+   *  holds none of the argument's terms `c` times.
+   *
+   *  raise/divpow2.ts folds the same bias diamond into `sdiv`, but only in runPreRecovery, after the
+   *  frontends' frame audit has asked these ranges; and it is identity-or-decline about the shape
+   *  where this is a bound, which holds for any bias in range. */
   const remainderPair = (
     s: Value,
     cs: number,
     form: ReadonlyMap<Value | 1, number>,
+    facts: Facts,
   ):
     | { readonly terms: readonly Value[]; readonly c: number; readonly moved: number; readonly r: StridedRange | null }
     | undefined => {
@@ -1228,43 +1260,74 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
     }
     const constOf = (f: ReadonlyMap<Value | 1, number>) => f.get(1) ?? 0;
     const at = forms.reduce((m, f, i) => (constOf(f!) < constOf(forms[m]!) ? i : m), 0);
-    const x = edges[at].arg!;
     const fx = forms[at]!;
-    const terms = [...fx].filter(([t, n]) => t !== 1 && n !== 0) as [Value, number][];
-    // the outer form holds `c` times each of X's terms, and X is not computed from the shift itself
-    if (terms.some(([t, n]) => t === s || form.get(t) !== c * n)) {
+    // X: the terms of that argument the outer form holds `c` times; X is not computed from the shift
+    const terms = [...fx].filter(([t, n]) => t !== 1 && n !== 0 && form.get(t) === c * n) as [Value, number][];
+    if (terms.length === 0 || terms.some(([t]) => t === s)) {
       return undefined;
     }
-    const biases: number[] = [];
+    // each edge's bias B: its form less X's, holding none of X's terms and not the shift
+    const biases: Map<Value | 1, number>[] = [];
     for (const f of forms) {
-      const own = [...f!].filter(([t, n]) => t !== 1 && n !== 0);
-      const b = constOf(f!) - constOf(fx);
-      if (own.length !== terms.length || own.some(([t, n]) => fx.get(t) !== n) || !(b >= 0 && b < by)) {
+      const b = new Map<Value | 1, number>();
+      for (const [t, n] of f!) {
+        if (n !== 0) {
+          b.set(t, n);
+        }
+      }
+      for (const [t, n] of terms) {
+        if (b.get(t) !== n) {
+          return undefined;
+        }
+        b.delete(t);
+      }
+      b.set(1, constOf(f!) - constOf(fx));
+      if (b.has(s)) {
         return undefined;
       }
       biases.push(b);
     }
+    // where every bias is a constant, X is the least argument itself
+    const exact = biases.every((b) => b.size === 1);
+    const x = edges[at].arg!;
     const parts: StridedRange[] = [];
     for (const [i, e] of edges.entries()) {
-      const b = biases[i];
-      if (!spend()) {
+      const bias = biases[i];
+      const own = e.holds === undefined ? NO_FACTS : factsOf(e.holds);
+      // B is read where the edge leaves, under its branch alone: its terms need not be above the join
+      const br =
+        bias.size === 1
+          ? { lo: bias.get(1)!, hi: bias.get(1)!, stride: 0 }
+          : spend()
+            ? formRange(bias, own)
+            : undefined;
+      if (br === null) {
+        continue; // never taken
+      }
+      if (br === undefined || !(br.lo >= 0 && br.hi < by)) {
         return undefined;
       }
-      const read = rangeOf(x, e.holds === undefined ? NO_FACTS : factsOf(e.holds));
+      const any = { lo: -br.hi, hi: by - 1 - br.lo, stride: 1 };
+      if (!exact) {
+        parts.push(any);
+        continue;
+      }
+      const under = bothFacts(facts, own);
+      if (under === null) {
+        continue; // never taken where the form is read
+      }
+      const read = spend() ? rangeOf(x, under) : undefined;
       if (read === null) {
         continue; // never taken
       }
-      // an unbounded X is any signed word, which only a bias of 0 cannot wrap
-      const xs = read === undefined ? { lo: S_MIN, hi: S_MAX, stride: 1 } : intoSigned(read);
+      const xs = read === undefined ? undefined : intoSigned(read);
+      const b = br.lo;
       if (xs === undefined || xs.hi + b > S_MAX) {
-        return undefined;
+        parts.push(any);
+        continue;
       }
       const [q0, q1] = [Math.floor((xs.lo + b) / by), Math.floor((xs.hi + b) / by)];
-      parts.push(
-        q0 === q1
-          ? { lo: xs.lo - q0 * by, hi: xs.hi - q0 * by, stride: xs.stride }
-          : { lo: -b, hi: by - 1 - b, stride: 1 },
-      );
+      parts.push(q0 === q1 ? { lo: xs.lo - q0 * by, hi: xs.hi - q0 * by, stride: xs.stride } : any);
     }
     const moved = c * constOf(fx);
     return Number.isSafeInteger(moved)
@@ -1273,16 +1336,17 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
   };
   const rangeOf = (x: Value, facts: Facts): StridedRange | undefined | null => {
     const form = linearTerms(ctx, x, 0, facts);
-    if (form === undefined) {
-      return undefined;
-    }
+    return form === undefined ? undefined : formRange(form, facts);
+  };
+  /** The integers a linear form holds, its terms read under `facts`. */
+  const formRange = (form: ReadonlyMap<Value | 1, number>, facts: Facts): StridedRange | undefined | null => {
     let lo = 0;
     let hi = 0;
     let stride = 0;
     // each remainder pair first, as one bounded term; the rest of the form after it
     const paired = new Set<Value | 1>();
     for (const [s, cs] of form) {
-      const pair = s === 1 || cs === 0 || paired.has(s) ? undefined : remainderPair(s, cs, form);
+      const pair = s === 1 || cs === 0 || paired.has(s) ? undefined : remainderPair(s, cs, form, facts);
       if (pair === undefined || pair.terms.some((t) => paired.has(t))) {
         continue;
       }
