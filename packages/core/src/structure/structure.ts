@@ -151,6 +151,7 @@ import {
   globalOf,
   memberQualsAllow,
   memoFieldsOf,
+  nestedGlobalOf,
   ptrMemberDecl,
   structMemberAt,
   subscriptsFromExtents,
@@ -753,6 +754,46 @@ function stampedStoreLval(
   return { k: 'index', base: flatBase, idx: { k: 'const', value: off / width }, width, signed: stamp };
 }
 
+/** The declaration of a PROVEN FRAME PART by the name the lift minted for it (frame-objects.ts
+ *  `provenParts`), stated as the map states an array global's, so the one bare-array gate
+ *  ({@link bareArrayLead}) spells both: `sp64[i]`, not `((u8 *)sp64)[i]`. Absent for any other frame
+ *  object — the one object's bytes are members and spills of any type, which the cast spells
+ *  honestly — and for a QUALIFIED access, whose qualifier needs the cast to sit on. */
+type FrameArrayDecl = (name: string) => SymbolInfo | undefined;
+
+/** THE bare-name spelling of an element `name[idx]` of a declared array, or null for the cast
+ *  form: the frame part's declaration first (a minted frame name is never a map symbol's), else
+ *  the map's. A map global registers its element type in the env, so the stride check passes and
+ *  no cast is added; a frame part is declared by the lift already (`laddrType`) and keeps its
+ *  element spelling at index 0 (`subscript`, see l3/ast.ts). */
+function bareArrayIndex(
+  name: string,
+  idx: Expr,
+  width: number,
+  signed: boolean,
+  sym: SymRenderCtx | undefined,
+  frameArray: FrameArrayDecl | undefined,
+): Extract<Expr, { k: 'index' }> | null {
+  const part = frameArray?.(name);
+  const si = part ?? sym?.info(name);
+  const lead = si === undefined ? null : bareArrayLead(si, width, signed, idx);
+  if (lead === null) {
+    return null;
+  }
+  if (part === undefined) {
+    sym!.noteGlobal(name, T.ptr(T.int(width * 8, si!.elemSigned ?? false)));
+  }
+  return {
+    k: 'index',
+    base: { k: 'var', name },
+    idx,
+    width,
+    signed,
+    ...lead,
+    ...(part !== undefined ? { subscript: true as const } : {}),
+  };
+}
+
 function memAccess(
   base: Value,
   baseExpr: Expr,
@@ -765,6 +806,7 @@ function memAccess(
   isStore = false,
   advancedBy?: number,
   castQualified = false,
+  frameArray?: FrameArrayDecl,
 ): Expr {
   // A deref of a global's address collapses to the bare global: `*(&gSym)` at off 0 is `gSym`;
   // at off N the global is an array — `gSym[N/width]` (a C global name decays to a pointer, so
@@ -882,14 +924,21 @@ function memAccess(
     const idx = addOffset(idxVal, displacementIndex(off, width));
     // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
-    // so the stride check passes and no cast is added. Element-width match only.
-    const siArr = sym?.info(g.name);
-    const lead = siArr === undefined ? null : bareArrayLead(siArr, width, signed);
-    if (lead !== null) {
-      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead, ...addressEvidence };
+    // so the stride check passes and no cast is added. Element-width match only. A proven frame
+    // part is declared by the lift itself and answers the same gate (see {@link FrameArrayDecl}).
+    const bare = bareArrayIndex(g.name, idx, width, signed, sym, frameArray);
+    if (bare !== null) {
+      return { ...bare, ...addressEvidence };
     }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...addressEvidence };
+  }
+  // …and the same bare spelling where the array's address sits deeper in the sum than globalOf
+  // looks (`(u32)sp56 + 32 + v8`, see nestedGlobalOf): taken only when a declaration answers it,
+  // so the cast forms below keep every other such sum as written.
+  const nested = nestedGlobalOf(baseExpr, width, off);
+  const bareNested = nested ? bareArrayIndex(nested.name, nested.idx, width, signed, sym, frameArray) : null;
+  if (bareNested !== null) {
+    return { ...bareNested, ...addressEvidence };
   }
   const bt = base.type;
   // A field declared at its cell's widest view (raise/structs.ts `castViewCell`) is read at any
@@ -953,6 +1002,7 @@ function arrayAccess(
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
   sym?: SymRenderCtx,
+  frameArray?: FrameArrayDecl,
 ): Expr {
   // An indexed access through a POINTER MEMBER's value is an ELEMENT of what it points at, exactly
   // as in memAccess — the index the aload already carries is the subscript, and any byte residual
@@ -970,8 +1020,8 @@ function arrayAccess(
   // this spelling has no place to put the constant offset, so taking it would DROP the member and
   // address the wrong bytes.
   if (baseExpr.k === 'addr' && fieldOff === undefined && memberOff === undefined) {
-    // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
-    const si = sym?.info(baseExpr.name);
+    // ARRAY-declared global (symbol map) or proven frame part: the bare-name spelling, same rule
+    // as memAccess.
     // NO declared-subscript recovery here, and the reason is the evidence, not the shape. The
     // index reaching this spelling is already in ELEMENTS — the asm scaled the whole sum ONCE, at
     // the end — and that single scale is what both candidate sources reduce to, so the term at the
@@ -990,10 +1040,9 @@ function arrayAccess(
     // Both cases say decline: in the first the evidence points the other way, in the second there
     // is none. The recovery therefore lives on the byte residual alone (memAccess), where the two
     // spellings are still distinguishable. Pinned by matching/array-rank-variation.test.ts.
-    const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
-    if (lead !== null) {
-      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed, ...lead };
+    const bare = bareArrayIndex(baseExpr.name, idxExpr, elemSize, signed, sym, frameArray);
+    if (bare !== null) {
+      return bare;
     }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }
@@ -3854,8 +3903,6 @@ function structureRanked(
     }
     return { laddr: names, undef: undefNames };
   })();
-  /** the frame object each minted name declares (every `laddr` of one name addresses one object) */
-  const laddrByName = new Map([...laddrName].map(([op, n]) => [n, op]));
 
   const scalarGlobals = new Set<string>();
   /** The scalar GLOBALS (never a frame object) the IR loads as a pointer at least once: one load
@@ -5804,74 +5851,33 @@ function structureRanked(
       : null;
   };
   // A PART OF THE ONE FRAME OBJECT a copy proved one object of the source's (frame-objects.ts
-  // `provenParts`, stamped `part`) is read and written through the element an access names exactly
-  // — at a whole element, inside the array, of the element's width, and of the type the cast it
-  // replaces would spell (a load's alone, as for a struct member) — `sp16[5]`, not
-  // `((u8 *)sp16)[5]`. The two are one C value, and not one compile: with a second array at sp+16
-  // whose address agbcc already holds for its `memcpy`, `b[5]` reads `ldrb [r4, #0x5]` through it
-  // while the cast re-forms `sp + 0x15`. Only a part: the one object's bytes are members and spills
-  // of any type, which the cast spells honestly, and a lone array at sp+0 compiles the same either
-  // way. Unqualified only, like the member.
-  const frameArrayElement = (op: Op, off: number, width: number, signed: boolean | null): Expr | null => {
-    const d = defs.get(op.operands[0]);
-    if (d?.opcode !== 'laddr' || off < 0 || off % width !== 0) {
-      return null;
+  // `provenParts`, stamped `part`) is DECLARED as the array it is, and an access to it answers the
+  // bare-array gate memAccess and arrayAccess put every map-declared array global through
+  // (`bareArrayLead`: a whole element of the declared width and extension, a constant subscript
+  // inside the array) — `sp16[5]`, `sp64[i % 32 + 32]`, not `((u8 *)sp16)[5]`. The two are one C
+  // value, and not one compile: with a second array at sp+16 whose address agbcc already holds for
+  // its `memcpy`, `b[5]` reads `ldrb [r4, #0x5]` through it while the cast re-forms `sp + 0x15`,
+  // and `b[i]` keeps that `sp + 64` spilled across three calls into a frame word of its own where
+  // the cast re-forms it at the read (bcpy_rem). A runtime subscript is licensed by the audit that
+  // split the part: every runtime index's reach stays inside one part. Only a part: the one
+  // object's bytes are members and spills of any type, which the cast spells honestly, and a lone
+  // array at sp+0 compiles the same either way. Unqualified only, like the member.
+  const framePartDecls = new Map<string, SymbolInfo>();
+  for (const [d, name] of laddrName) {
+    const t = d.attrs.part === true && d.attrs.views === undefined ? laddrType(d) : null;
+    if (t?.kind === 'array' && t.elem.kind === 'int') {
+      framePartDecls.set(name, {
+        name,
+        kind: 'data',
+        shape: 'array',
+        elemSize: t.elem.width / 8,
+        elemSigned: t.elem.signed,
+        dims: [t.count],
+      });
     }
-    return partElement(op, d, { k: 'const', value: off / width }, width, signed);
-  };
-  // …and the same element at a RUNTIME index, or through an address the lift built off the part
-  // (`sp64 + (i % 32 + 32)`, IDO's interior `laddr` rewritten to `sp56 + 32`): `sp64[i % 32 + 32]`,
-  // not `((u8 *)sp64)[…]`. The address is the one the cast spells, element for element, and the
-  // licence is the same one: the copies proved the part an object of the source's, and the frame
-  // audit split it only because every runtime index's reach stays inside one part (frame-objects.ts
-  // `provenParts`), so the subscript names an element of the array the source declared. Not one
-  // compile either: on agbcc `b[i]` keeps the `sp + 64` formed for `b`'s copy, spilled across three
-  // calls into a frame word of its own, where the cast re-forms it at the read and the frame is a
-  // word smaller (bcpy_rem). A constant subscript is held to the part's bounds, as above; a runtime
-  // one is the audit's.
-  const framePartIndexed = (op: Op, baseExpr: Expr, off: number, width: number, signed: boolean | null) => {
-    // the sum's terms, flattened: `(u32)sp56 + 32 + v8` holds the part's address one `+` down
-    const terms: Expr[] = [];
-    const flatten = (x: Expr): void => {
-      if (x.k === 'bin' && x.op === '+') {
-        flatten(x.l);
-        flatten(x.r);
-      } else {
-        terms.push(x);
-      }
-    };
-    flatten(baseExpr);
-    const at = terms.filter((x) => addrIn(x) !== null);
-    const d = at.length === 1 ? laddrByName.get(addrIn(at[0])!.name) : undefined;
-    if (d === undefined) {
-      return null;
-    }
-    // the residual in bytes, its constants summed into one trailing term: `v8 + 32`
-    const rest = terms.filter((x) => x !== at[0]);
-    const bias = rest.reduce((n, x) => (x.k === 'const' ? n + x.value : n), off);
-    const runtime = rest.filter((x) => x.k !== 'const');
-    const sum = runtime.reduce<Expr | null>((l, r) => (l === null ? r : { k: 'bin', op: '+', l, r }), null);
-    if (bias % width !== 0) {
-      return null;
-    }
-    const idx = sum === null ? { k: 'const' as const, value: 0 } : elementIndex(sum, width);
-    return idx === null ? null : partElement(op, d, addOffset(idx, bias / width), width, signed);
-  };
-  const partElement = (op: Op, d: Op, idx: Expr, width: number, signed: boolean | null): Expr | null => {
-    if (d.attrs.part !== true || d.attrs.views !== undefined) {
-      return null;
-    }
-    const t = laddrType(d);
-    if (t.kind !== 'array' || t.elem.kind !== 'int' || t.elem.width !== width * 8 || qualifiedBy(op) !== null) {
-      return null;
-    }
-    if (idx.k === 'const' && (idx.value < 0 || idx.value >= (d.attrs.count as number) / width)) {
-      return null;
-    }
-    return signed === null || spellsAccessType(t.elem.signed, width, signed)
-      ? { k: 'index', base: { k: 'var', name: laddrName.get(d)! }, idx, width, signed: t.elem.signed, subscript: true }
-      : null;
-  };
+  }
+  const frameArrayFor = (op: Op): FrameArrayDecl | undefined =>
+    framePartDecls.size === 0 || qualifiedBy(op) !== null ? undefined : (n) => framePartDecls.get(n);
   // A FLOATING MEMBER READ AS ITS INTEGER BITS is spelled `*(s32 *)&s`, which C converts wherever
   // a float is what the reader takes (`gF = *(s32 *)&s;` against `float gF` is `bl __floatsisf` on
   // agbcc, a `cvt` on MIPS), which the bytes never did. So such a read is spelled only where every
@@ -6469,30 +6475,10 @@ function structureRanked(
       if (member !== null) {
         return member;
       }
-      const element = frameArrayElement(
-        d,
-        d.attrs.off as number,
-        d.attrs.width as number,
-        (d.attrs.signed as boolean) ?? false,
-      );
-      if (element !== null) {
-        return element;
-      }
-      const baseExpr = e(d.operands[0]);
-      const indexed = framePartIndexed(
-        d,
-        baseExpr,
-        d.attrs.off as number,
-        d.attrs.width as number,
-        (d.attrs.signed as boolean) ?? false,
-      );
-      if (indexed !== null) {
-        return indexed;
-      }
       refuseFloatMemberRead(d);
       const access = memAccess(
         d.operands[0],
-        baseExpr,
+        e(d.operands[0]),
         d.attrs.off as number,
         d.attrs.width as number,
         (d.attrs.signed as boolean) ?? false,
@@ -6502,25 +6488,13 @@ function structureRanked(
         false,
         advanceStepOf(d.operands[0]),
         qualifiedBy(d) === 'cast',
+        frameArrayFor(d),
       );
       return pinnedAccess(d, access);
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
     // `base[index].field_K` when it carries a `fieldOff` (array-of-STRUCT element access).
     if (d.opcode === 'aload') {
-      const part =
-        d.attrs.fieldOff === undefined && d.attrs.memberOff === undefined && defs.get(d.operands[0])?.opcode === 'laddr'
-          ? partElement(
-              d,
-              defs.get(d.operands[0])!,
-              e(d.operands[1]),
-              d.attrs.elemSize as number,
-              (d.attrs.signed as boolean) ?? false,
-            )
-          : null;
-      if (part !== null) {
-        return part;
-      }
       const access = arrayAccess(
         d.operands[0],
         e(d.operands[0]),
@@ -6531,6 +6505,7 @@ function structureRanked(
         (d.attrs.signed as boolean) ?? false,
         ctype,
         symCtx,
+        frameArrayFor(d),
       );
       return pinnedAccess(d, access);
     }
@@ -7124,16 +7099,13 @@ function structureRanked(
           out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
           continue;
         }
-        const baseExpr = expr(op.operands[0]);
-        const member =
-          frameStructMember(op, off, width, null) ??
-          frameArrayElement(op, off, width, null) ??
-          framePartIndexed(op, baseExpr, off, width, null);
+        const member = frameStructMember(op, off, width, null);
         if (member !== null) {
           floatBitsStoreTarget(op.operands[1], member);
           out.push({ k: 'store', lval: member, value: intoPtrCell(member, expr(op.operands[1])) });
           continue;
         }
+        const baseExpr = expr(op.operands[0]);
         const lval0 = structBytesCell(
           op.operands[1],
           memAccess(
@@ -7148,6 +7120,7 @@ function structureRanked(
             true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
             advanceStepOf(op.operands[0]),
             qualifiedBy(op) === 'cast',
+            frameArrayFor(op),
           ),
         );
         floatBitsStoreTarget(op.operands[1], lval0);
@@ -7174,16 +7147,6 @@ function structureRanked(
         const elemSize = op.attrs.elemSize as number;
         const fieldOff = op.attrs.fieldOff as number | undefined;
         const stamp = op.attrs.signed as boolean | undefined;
-        const partBase = defs.get(op.operands[0]);
-        const part =
-          fieldOff === undefined && op.attrs.memberOff === undefined && partBase?.opcode === 'laddr'
-            ? partElement(op, partBase, expr(op.operands[1]), elemSize, null)
-            : null;
-        if (part !== null) {
-          floatBitsStoreTarget(op.operands[2], part);
-          out.push({ k: 'store', lval: part, value: intoPtrCell(part, expr(op.operands[2])) });
-          continue;
-        }
         const lval0 = structBytesCell(
           op.operands[2],
           arrayAccess(
@@ -7196,6 +7159,7 @@ function structureRanked(
             storeView(op, elemSize),
             ctype,
             symCtx,
+            frameArrayFor(op),
           ),
         );
         // a struct-array element's field: `base[i].field_K`, whose flat cell is

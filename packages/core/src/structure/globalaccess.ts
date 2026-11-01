@@ -75,6 +75,42 @@ export function globalByteBase(e: Expr): { name: string; residual: Expr } | null
   return null;
 }
 
+/** {@link globalOf} with the address any number of `+` down — FOR THE BARE-ARRAY SPELLING ONLY, the
+ *  one consumer whose declaration says what the residual indexes. An interior address the lift
+ *  rewrote as the object's plus a constant before the index was added (IDO's `addiu t, sp, 0x58`
+ *  for the second of two copied arrays reaches the lift as `(u32)sp56 + 32 + v8`) has its object
+ *  one `+` further down than globalByteBase looks. The sum's terms are flattened, exactly one of
+ *  them an address, and the rest are the residual: its runtime terms in order and its constants
+ *  summed into one trailing term (`v8 + 32`). Not for the cast forms, which keep the sum as written
+ *  (`*(s8 *)((u32)sp0 + 3 + a0)`), so a base with no declaration reads exactly as before. `off` is
+ *  the access's own displacement, summed into the same trailing constant. */
+export function nestedGlobalOf(e: Expr, width: number, off: number): { name: string; idx: Expr } | null {
+  const terms: Expr[] = [];
+  const flatten = (x: Expr): void => {
+    if (x.k === 'bin' && x.op === '+') {
+      flatten(x.l);
+      flatten(x.r);
+    } else {
+      terms.push(x);
+    }
+  };
+  flatten(e);
+  const at = terms.filter((x) => addrIn(x) !== null);
+  if (at.length !== 1) {
+    return null;
+  }
+  const rest = terms.filter((x) => x !== at[0]);
+  const bias = rest.reduce((n, x) => (x.k === 'const' ? n + x.value : n), off);
+  const runtime = rest
+    .filter((x) => x.k !== 'const')
+    .reduce<Expr | null>((l, r) => (l === null ? r : { k: 'bin', op: '+', l, r }), null);
+  if (bias % width !== 0) {
+    return null;
+  }
+  const idx = runtime === null ? { k: 'const' as const, value: 0 } : elementIndex(runtime, width);
+  return idx === null ? null : { name: addrIn(at[0])!.name, idx: addOffset(idx, bias / width) };
+}
+
 // THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
 // shared by the constant-offset and variable-index access paths so the two cannot disagree.
 // Returns the `index` node's `lead` fragment when the bare form is spellable, or null to fall
@@ -93,8 +129,17 @@ export function globalByteBase(e: Expr): { name: string; residual: Expr } | null
 // inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
 // declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
 // ABSENT rank is read as 1 rather than as unknown.
-export function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: Expr[] } | null {
+//
+// …and a CONSTANT subscript must name an element of the declaration, where it states its extent: a
+// subscript past a rank-1 array's end (or before its start) is not an element of it, so it keeps
+// the cast form, which states only the address. A runtime subscript is the access's own business —
+// for a frame part, the audit that split it bounded the reach (frame-objects.ts `provenParts`).
+export function bareArrayLead(si: SymbolInfo, width: number, signed: boolean, idx?: Expr): { lead?: Expr[] } | null {
   if (!bareArrayElement(si, width, signed)) {
+    return null;
+  }
+  const extent = si.dims?.length === 1 ? si.dims[0] : undefined;
+  if (idx?.k === 'const' && (idx.value < 0 || (typeof extent === 'number' && idx.value >= extent))) {
     return null;
   }
   const inner = arrayInnerExtents(si);
