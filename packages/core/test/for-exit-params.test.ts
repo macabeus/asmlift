@@ -2,7 +2,8 @@
 // edge's copies ahead of it, as `while (1)`'s does; the two edges the `for`'s test leaves by — the
 // guard's, through agbcc's `b .L4 @long jump` relay where the exit is out of a Thumb branch's range,
 // and the latch's — are never rendered, so the `for` is read only where each hands the exit what the
-// `for` already left in the param's name (`exit-copy`, `exit-name-rewritten`). Every fixture is
+// `for` already left in the param's name (`exit-copy`, `exit-name-rewritten`); past a loop with no
+// guard, the code may not read the IV itself (`past-reads-iv`). Every fixture is
 // for-continue.test.ts's `forJt` (`synthetic:sw_forjt:agbcc`'s shape with its loads as calls) with
 // an exit that takes params, judged against its own IR by the trace oracle (`irAgreement`), as
 // `structure()` returns it and as it ships after `readabilityRewrites`.
@@ -11,18 +12,19 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { tallying, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { FOR_PLAN_IV_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
 
-const judged = (ir: string) => {
+const judged = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn, {});
+  const sfn = structure(fn, {}, hooks);
   return {
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
@@ -179,18 +181,30 @@ test('an exit read as the IV from before its update refuses the `for`', () => {
   agrees(r);
 });
 
-test('a read of the IV past a loop with no guard refuses the `for`', () => {
-  // `for (i = 0; i < 2; i++) { last = i; .. } k(last);` with no guard, its first test folded: the
-  // header dominates the code after the loop, which reads `i` itself — from before the update on
-  // the latch's way out, where the `for` has run it. The header's test always continues, so the
-  // latch's way out is the one every seed takes.
+/** `for (i = 0; i < 2; i++) { last = i; .. } k(last);` with no guard, its first test folded: the
+ *  header dominates the code after the loop, which reads `i` itself — from before the update on the
+ *  latch's way out, where the `for` has run it. The header's test always continues, so the latch's
+ *  way out is the one every seed takes. The exit takes no params. */
+const guardlessReadsIv = () => {
   const ir = forExit({ exitCalls: '%62: s32 = call %5 {target="k"}\n  ' })
     .replace('%4: u32 = icmp_slt %1, %0\n  cond_br %4, ^bb12(), ^bb1(%0)', '%2: s32 = const {value=0}\n  br ^bb1(%2)')
     .replace('%8: s32 = const {value=2}', '%8: s32 = const {value=-2147483648}')
     .replace('%37: u32 = icmp_slt %1, %36', '%38: s32 = const {value=2}\n  %37: u32 = icmp_sge %36, %38');
   expect(ir).toContain('br ^bb1(%2)');
-  const r = judged(ir);
+  return ir;
+};
+
+test('a read of the IV past a loop with no guard refuses the `for`', () => {
+  const tally = tallying(FOR_PLAN_IV_GATES);
+  const r = judged(guardlessReadsIv(), { forPlanIvGates: tally.gates });
   expect(r.src).not.toContain('for (');
   expect(r.src).toContain('while (1)');
+  expect(tally.refusals().map(([id]) => id)).toContain('past-reads-iv');
   agrees(r);
+});
+
+test('without past-reads-iv the code past a guardless loop reads the IV past its update', () => {
+  const r = judged(guardlessReadsIv(), { forPlanIvGates: without(FOR_PLAN_IV_GATES, 'past-reads-iv') });
+  expect(r.src).toMatch(/for \((v\d+) = 0; \1 < 2; \1 = \1 \+ 1\) \{/);
+  expect(r.agreement.disagree).toBeGreaterThan(0);
 });

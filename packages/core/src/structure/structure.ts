@@ -1552,9 +1552,10 @@ export interface ForPlanIv {
   readonly exitCopy: boolean;
   /** …or a slot it carries without a copy (an identity, or a write anchored at its def) names a
    *  value the `for` writes otherwise ahead of the test: the init's names on the guard's edge (and
-   *  the preheader's), on the latch's the IV past its update, or a latch op it never renders; or the
-   *  code past the loop reads the IV's param itself, which the update has rewritten there */
+   *  the preheader's), on the latch's the IV past its update, or a latch op it never renders */
   readonly exitNameRewritten: boolean;
+  /** with no guard, the code past the loop reads the IV's param itself, not through an exit param */
+  readonly pastReadsIv: boolean;
 }
 
 /** `forPlanAt`'s rules over the IV, its copies and the test. The argument for each is in the THE
@@ -1592,6 +1593,14 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
     sound: true,
     guardedBy: 'for-plan-gates.test.ts: without exit-name-rewritten the exit reads the IV past its update',
     rejects: (c) => c.exitNameRewritten,
+  },
+  {
+    id: 'past-reads-iv',
+    why: "past a loop with no guard the code reads the IV as the asm left it on the latch's way out, from before the update the `for` runs ahead of its test",
+    sound: true,
+    guardedBy:
+      'for-exit-params.test.ts: without past-reads-iv the code past a guardless loop reads the IV past its update',
+    rejects: (c) => c.pastReadsIv,
   },
 ];
 
@@ -9704,6 +9713,14 @@ function structureRanked(
         return pred === latch && d !== undefined && opBlock.get(d) === latch ? ['rewritten'] : [];
       });
     };
+    let exitFindings: string[] | undefined;
+    const exitFound = (what: string): boolean => {
+      exitFindings ??= [
+        ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
+        ...exitSlots(latch, latchExit, new Map([[iv, updateRecs[0].arg]])),
+      ];
+      return exitFindings.includes(what);
+    };
     // Past a loop with no guard the header dominates the exit, so the code there may read the IV's
     // param itself, not through an exit param: the asm's value from before the update on the
     // latch's way out, which the `for`'s update has rewritten. A named value holds its own.
@@ -9717,15 +9734,6 @@ function structureRanked(
       }
       seen.add(v);
       return defs.get(v)?.operands.some((o) => readsIv(o, seen)) ?? false;
-    };
-    let exitFindings: string[] | undefined;
-    const exitFound = (what: string): boolean => {
-      exitFindings ??= [
-        ...(guardExit === null ? [] : exitSlots(guardExit.pred, guardExit.succ, initWrites)),
-        ...exitSlots(latch, latchExit, new Map([[iv, updateRecs[0].arg]])),
-        ...(rootsOf(exitRegion(exit, fl.body, null)).some((r) => readsIv(r)) ? ['rewritten'] : []),
-      ];
-      return exitFindings.includes(what);
     };
     // not in `FOR_PLAN_IV_GATES` (its doc comment says why)
     const inner = latchInnerSub(h, fl.body, [latch]);
@@ -9755,6 +9763,9 @@ function structureRanked(
         },
         get exitNameRewritten() {
           return exitFound('rewritten');
+        },
+        get pastReadsIv() {
+          return rootsOf(exitRegion(exit, fl.body, null)).some((r) => readsIv(r));
         },
       }) !== null
     ) {
