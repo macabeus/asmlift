@@ -823,10 +823,11 @@ const RANGE_BUDGET = 256;
  *  term is bounded by the word a caller places it at (`pointOf`), by `provableBits` (a zero-fill
  *  shift right, an unsigned narrow load, a non-negative mask) or a `zext`'s width, by the range a
  *  narrow read or `sext` leaves (`narrowLeaf`: signed ones included), by what a shift or a mask
- *  leaves of its operand's range (`shiftMaskRange`), or, a block param, by the union of what its
+ *  leaves of its operand's range (`shiftMaskRange`), by its divisor, a remainder (`remainderRange`:
+ *  `smod`, `umod`), or, a block param, by the union of what its
  *  in-edges pass, each read under what its branch proves, or by a range every in-edge provably
  *  keeps it in (`integerRange`'s induction, for a loop counter whose latch bounds one side). A
- *  signed remainder by a power of two, `x - (t >> k << k)` with `t` a biased `x` and `x` any linear
+ *  signed remainder by a power of two spelled with shifts, `x - (t >> k << k)` with `t` a biased `x` and `x` any linear
  *  form (`(i + 1) % 8`), is one bounded term (`remainderPair`).
  *  Anything else — a function parameter, a whole word loaded from memory, a name nothing places, a
  *  param whose range depends on itself through a loop that no branch bounds — bounds nothing, and
@@ -953,6 +954,45 @@ function shiftMaskRange(
   return undefined;
 }
 
+/** The integers a remainder `x % y` leaves (`smod`, C's truncating one, or `umod`), from the
+ *  integers its operands may hold (`rangeOf`, undefined where nothing bounds them): the divisor
+ *  bounds it whatever the dividend holds, `umod` in [0, y - 1] and `smod` in [-(|y| - 1), |y| - 1],
+ *  and the dividend narrows that, its sign (`smod` of an `x` proven non-negative is in [0, |y| -
+ *  1]) or itself where it is already smaller than every `y` (`x % y` is `x`). IDO's `div; mfhi`,
+ *  which the MIPS frontend reads as `smod`/`umod`, is `i % 30` in [-29, 29] by this alone. A
+ *  divisor that may be zero bounds nothing: the remainder is then whatever the machine leaves.
+ *  The shift spelling of `x % 2^k` (agbcc, gcc, kmc: no `smod` at all) is the same bound read off
+ *  its own ops (`remainderPair`). */
+function remainderRange(d: Op, rangeOf: (x: Value) => StridedRange | undefined): StridedRange | undefined {
+  if ((d.opcode !== 'smod' && d.opcode !== 'umod') || d.operands.length !== 2) {
+    return undefined;
+  }
+  const point = (lo: number, hi: number): StridedRange => ({ lo, hi, stride: lo === hi ? 0 : 1 });
+  const [rx, ry] = [rangeOf(d.operands[0]), rangeOf(d.operands[1])];
+  if (d.opcode === 'umod') {
+    const y = ry === undefined ? undefined : intoWord(ry);
+    if (y === undefined || y.lo < 1) {
+      return undefined;
+    }
+    const x = rx === undefined ? undefined : intoWord(rx);
+    return x !== undefined && x.hi < y.lo ? x : point(0, Math.min(y.hi - 1, x?.hi ?? y.hi - 1));
+  }
+  const y = ry === undefined ? undefined : intoSigned(ry);
+  if (y === undefined || (y.lo <= 0 && y.hi >= 0)) {
+    return undefined;
+  }
+  const [least, most] = y.lo > 0 ? [y.lo, y.hi] : [-y.hi, -y.lo];
+  const x = rx === undefined ? undefined : intoSigned(rx);
+  if (x !== undefined && -x.lo < least && x.hi < least) {
+    return x;
+  }
+  const m = most - 1;
+  return point(
+    x === undefined || x.lo < 0 ? Math.max(-m, x?.lo ?? -m) : 0,
+    x === undefined || x.hi > 0 ? Math.min(m, x?.hi ?? m) : 0,
+  );
+}
+
 /** `stridedRange` before the move into one word: integers, every one of which is congruent modulo
  *  2^32 to a word `v` may hold, and which cover them all. A block param is the union of what its
  *  in-edges pass, read one of two ways, each a sound cover on its own: as the integers they are
@@ -1024,6 +1064,14 @@ function rangeIn(ctx: RangeCtx, v: Value, wordFirst: boolean, holds?: readonly E
       });
       const n = provableBits(bits, t);
       const width = n < 32 ? { lo: 0, hi: 2 ** n - 1, stride: n === 0 ? 0 : 1 } : undefined;
+      // a remainder is bounded by its divisor whatever its dividend holds: IDO's `i % 30`
+      const rem = remainderRange(d, (x) => {
+        const r = spend() ? rangeOf(x, facts) : undefined;
+        return r === null ? undefined : r;
+      });
+      if (rem !== undefined) {
+        return width !== undefined && width.hi - width.lo < rem.hi - rem.lo ? width : rem;
+      }
       return moved !== undefined && (width === undefined || moved.hi - moved.lo <= width.hi - width.lo) ? moved : width;
     }
     const hypothesis = assumed.get(t);

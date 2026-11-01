@@ -861,3 +861,49 @@ describe('addressRangeOf — a signed remainder by a power of two', () => {
     expect(rangeIn([b], plus(b, r4, 2))).toBeUndefined();
   });
 });
+
+describe('addressRangeOf — a remainder op is bounded by its divisor', () => {
+  const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
+  const narrowest = (blocks: Block[], x: Value) =>
+    literalAddresses(blocks, undefined).addressRangeOf(x, undefined, 'narrowest');
+
+  test("IDO's `div; mfhi`: `i % 30` of any i is [-29, 29], `(u32)i % 60` is [0, 59]", () => {
+    const p = v();
+    const b = block([p]);
+    const s = b.op('smod', {}, [p, k(b, 30)]);
+    // words on both sides of zero: no word interval names them, the signed window does
+    expect(rangeIn([b], s)).toBeUndefined();
+    expect(narrowest([b], s)).toEqual({ lo: -29, hi: 29, stride: 1 });
+    expect(rangeIn([b], b.op('add', {}, [s, k(b, 30)]))).toEqual({ lo: 1, hi: 59, stride: 1 });
+    expect(rangeIn([b], b.op('umod', {}, [p, k(b, 60)]))).toEqual({ lo: 0, hi: 59, stride: 1 });
+    // a negative divisor bounds by its magnitude
+    expect(narrowest([b], b.op('smod', {}, [p, k(b, -8)]))).toEqual({ lo: -7, hi: 7, stride: 1 });
+  });
+
+  test('the dividend narrows it: its sign, or itself where it is already smaller than the divisor', () => {
+    const p = v();
+    const b = block([p]);
+    const byte = u8Of(b, p);
+    expect(rangeIn([b], b.op('smod', {}, [byte, k(b, 30)]))).toEqual({ lo: 0, hi: 29, stride: 1 });
+    expect(rangeIn([b], b.op('umod', {}, [byte, k(b, 300)]))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    const small = b.op('and', { imm: 3 }, [p]);
+    expect(rangeIn([b], b.op('smod', {}, [small, k(b, 30)]))).toEqual({ lo: 0, hi: 3, stride: 1 });
+    // a signed byte by 100 is itself; by 30, [-29, 29]
+    const sbyte = b.op('sext', { width: 8 }, [p]);
+    expect(narrowest([b], b.op('smod', {}, [sbyte, k(b, 200)]))).toEqual({ lo: -128, hi: 127, stride: 1 });
+    expect(narrowest([b], b.op('smod', {}, [sbyte, k(b, 30)]))).toEqual({ lo: -29, hi: 29, stride: 1 });
+  });
+
+  test('a divisor that may be zero, or of either sign, bounds nothing; a runtime one bounded away from zero does', () => {
+    const [p, q] = [v(), v()];
+    const b = block([p, q]);
+    expect(narrowest([b], b.op('umod', {}, [p, q]))).toBeUndefined();
+    expect(narrowest([b], b.op('smod', {}, [p, q]))).toBeUndefined();
+    const nib = b.op('and', { imm: 15 }, [q]);
+    expect(narrowest([b], b.op('umod', {}, [p, nib]))).toBeUndefined();
+    expect(narrowest([b], b.op('smod', {}, [p, k(b, 0)]))).toBeUndefined();
+    const one = b.op('add', {}, [nib, k(b, 1)]);
+    expect(rangeIn([b], b.op('umod', {}, [p, one]))).toEqual({ lo: 0, hi: 15, stride: 1 });
+    expect(narrowest([b], b.op('smod', {}, [p, one]))).toEqual({ lo: -15, hi: 15, stride: 1 });
+  });
+});
