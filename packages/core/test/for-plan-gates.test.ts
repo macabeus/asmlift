@@ -144,17 +144,40 @@ test('without preheader-traps a division runs ahead of the loop the guard skippe
   expect(r.src).toMatch(/= a1 \/ a0;\n\s*for \(/);
 });
 
-test('without exit-params the value the latch hands the exit is read unset', () => {
-  // the guard hands the exit `lo`, an arm `i`, the latch `i + 1`; `break` carries none of them
-  const ir = srFor()
-    .replace('cond_br %4, ^bb12(), ^bb16()', 'cond_br %4, ^bb12(%0), ^bb16()')
+/** `ir` (an `srFor`) with an exit that takes one param: the guard hands it `entry` (a value of bb0;
+ *  none where the loop has no guard), every arm `i`, and the latch `latchArg`; the code after the
+ *  loop calls `exitv` on it. */
+const withExitParam = (ir: string, entry: string | null, latchArg: string) =>
+  (entry === null ? ir : ir.replace('cond_br %4, ^bb12(), ^bb16()', `cond_br %4, ^bb12(${entry}), ^bb16()`))
     .replace(/br \^bb12\(\)/g, 'br ^bb12(%5)')
-    .replace('cond_br %37, ^bb12(), ^bb1(%36, %38)', 'cond_br %37, ^bb12(%36), ^bb1(%36, %38)')
+    .replace('cond_br %37, ^bb12(), ^bb1(%36, %38)', `cond_br %37, ^bb12(${latchArg}), ^bb1(%36, %38)`)
     .replace(
       '^bb12():\n  %70: s32 = const {value=0}',
       '^bb12(%60: s32):\n  %61: s32 = call %60 {target="exitv"}\n  %70: s32 = const {value=0}',
     );
-  expect(refusedOnlyBy('exit-params', ir).agreement.disagree).toBeGreaterThan(0);
+
+test('without exit-copy the value the test edges hand the exit is never written', () => {
+  // the guard hands the exit 7 and the latch `i + 1`: the `for` leaves by its test, and neither
+  // edge's copy is one its init or update makes
+  const ir = withExitParam(srFor({ guard: '%90: s32 = const {value=7}\n  %4: u32 = icmp_slt %1, %0' }), '%90', '%36');
+  expect(refusedOnlyBy('exit-copy', ir).agreement.disagree).toBeGreaterThan(0);
+});
+
+test('without exit-name-rewritten the exit reads the IV past its update', () => {
+  // `for (i = 0; i < 40; i++) { last = i; .. } exitv(last);` with no guard (the first test folds):
+  // every edge hands the exit `i`, under the IV's name, and the latch hands it from before the
+  // update, which the `for` runs ahead of its test
+  const guardless = srFor({
+    guard: '%39: s32 = const {value=40}\n  %80: s32 = const {value=1}',
+    entryDerived: '%91: s32 = const {value=0}\n  %2: s32 = add %91, %3',
+    test: '%37: u32 = icmp_slt %39, %36',
+  }).replace(
+    'cond_br %4, ^bb12(), ^bb16()\n^bb16():\n  %80: s32 = const {value=1}\n  br ^bb1(%0, %2)',
+    'br ^bb1(%91, %2)',
+  );
+  expect(guardless).not.toContain('bb16');
+  const r = refusedOnlyBy('exit-name-rewritten', withExitParam(guardless, null, '%5'));
+  expect(r.agreement.disagree).toBeGreaterThan(0);
 });
 
 test('without latch-effect a call in the latch never runs', () => {
