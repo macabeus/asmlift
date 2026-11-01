@@ -5973,6 +5973,103 @@ function structureRanked(
     return viewed;
   };
 
+  // A memory READ (`load`, else `aload`), spelled at the extension `signed` (the op's own, or the one a
+  // sign-extension of it states: see `declaredExtendedRead`).
+  const lowerRead = (d: Op, e: (v: Value) => Expr, signed: boolean): Expr => {
+    if (d.opcode === 'load') {
+      const viewed = frameUnionAccess(d.operands[0], d.attrs.off as number, d.attrs.width as number, signed, false);
+      if (viewed !== null) {
+        return unqualifiedView(d, viewed);
+      }
+      const member = frameStructMember(d, d.attrs.off as number, d.attrs.width as number, signed);
+      if (member !== null) {
+        return member;
+      }
+      refuseFloatMemberRead(d);
+      const access = memAccess(
+        d.operands[0],
+        e(d.operands[0]),
+        d.attrs.off as number,
+        d.attrs.width as number,
+        signed,
+        ctype,
+        scalarGlobals,
+        symCtx,
+        false,
+        advanceStepOf(d.operands[0]),
+        qualifiedBy(d) === 'cast',
+        frameArrayFor(d),
+      );
+      return pinnedAccess(d, access);
+    }
+    // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
+    // `base[index].field_K` when it carries a `fieldOff` (array-of-STRUCT element access).
+    {
+      const access = arrayAccess(
+        d.operands[0],
+        e(d.operands[0]),
+        e(d.operands[1]),
+        d.attrs.fieldOff as number | undefined,
+        d.attrs.memberOff as number | undefined,
+        d.attrs.elemSize as number,
+        signed,
+        ctype,
+        symCtx,
+        frameArrayFor(d),
+      );
+      return pinnedAccess(d, access);
+    }
+  };
+
+  // A SIGN-EXTENSION OF AN UNSIGNED BYTE READ IS THE SIGNED BYTE, exactly, whatever the byte
+  // holds. agbcc has no `ldrsb` with an immediate offset, so it reads `extern s8 gT[16]`'s `gT[3]`
+  // as `ldrb r1, [r1, #0x3]; lsl #24; asr #24`, which reaches the structurer as the unsigned byte
+  // sign-extended (mwcc's `lbz; extsb` is the same shape, and spells both ways alike). Spelled as
+  // written that is `(s8)((u8 *)&gT)[3]`, which agbcc compiles through a literal of its own
+  // (`.word gT+0x3; ldrb [r1, #0]`), so a nonmatch where the bare element is the target's bytes.
+  //
+  // The read is re-spelled signed and taken only where it comes back as a DECLARED ARRAY's element
+  // (the one bare-array gate, `bareArrayIndex`, which checks the declared extension): the
+  // declaration is the evidence the source read an `s8`. Anywhere else the cast stays.
+  //
+  // BYTES ONLY, BY MEASUREMENT: every target here has a signed HALF load the bare element compiles
+  // to (agbcc `mov r2, #6; ldrsh` for `gH[3]` and for `(s16)((u16 *)gH)[3]` alike, mwcc `lha`), and on
+  // mwcc the cast is `lhz; extsh` where the element is `lha`, so a sign-extended unsigned half is
+  // the cast's own code. Nor the other direction: a `(u8)` of a signed byte compiles to the unsigned
+  // load on agbcc, IDO, gcc 2.7.2 and KMC, so no compiler emits the shape. A volatile read keeps its
+  // spelling, as does a value held in a name. The L3 half of the same identity is
+  // l3/constinit.ts `asElement`: a local the image fold types `s8` is typed only there.
+  const declaredExtendedRead = (d: Op, e: (v: Value) => Expr): Expr | null => {
+    const v = d.operands[0];
+    const ld = defs.get(v);
+    if (d.opcode !== 'sext' || d.attrs.width !== 8) {
+      return null;
+    }
+    if ((ld?.opcode !== 'load' && ld?.opcode !== 'aload') || qualifiedBy(ld) !== null) {
+      return null;
+    }
+    const bytes = (ld.opcode === 'load' ? ld.attrs.width : ld.attrs.elemSize) as number;
+    if (bytes !== 1 || ld.attrs.signed === true) {
+      return null;
+    }
+    // a frame UNION is read through its views, never as a declared array's element
+    const at = defs.get(ld.operands[0]);
+    if (at?.opcode === 'laddr' && at.attrs.views !== undefined) {
+      return null;
+    }
+    if (e(v).k === 'var') {
+      return null;
+    }
+    const read = lowerRead(ld, e, true);
+    if (read.k !== 'index' || read.base.k !== 'var' || read.signed !== true || read.width !== 1) {
+      return null;
+    }
+    const name = read.base.name;
+    const declared =
+      framePartDecls.get(name) ?? (symCtx?.info(name)?.shape === 'array' ? symCtx.info(name) : undefined);
+    return declared === undefined ? null : read;
+  };
+
   // Lower ONE def's operation to an Expr, rendering operands through `e`. Shared between the
   // inline-at-use path (exprWith) and the materialized-temp path (sideEffects), so both spell a
   // given op identically.
@@ -6294,6 +6391,10 @@ function structureRanked(
     // such a width, which is a different decision from spelling one.
     if (d.opcode === 'zext' || d.opcode === 'sext') {
       const w = d.attrs.width as number;
+      const read = declaredExtendedRead(d, e);
+      if (read !== null) {
+        return read;
+      }
       return CAST_WIDTHS.has(w)
         ? { k: 'cast', to: T.int(w, d.opcode === 'sext'), e: e(d.operands[0]) }
         : mkGap(`no C type for a ${w}-bit '${d.opcode}'`, [e(d.operands[0])]);
@@ -6455,59 +6556,8 @@ function structureRanked(
       }
       return { k: 'addr', name: d.attrs.sym as string };
     }
-    if (d.opcode === 'load') {
-      const viewed = frameUnionAccess(
-        d.operands[0],
-        d.attrs.off as number,
-        d.attrs.width as number,
-        (d.attrs.signed as boolean) ?? false,
-        false,
-      );
-      if (viewed !== null) {
-        return unqualifiedView(d, viewed);
-      }
-      const member = frameStructMember(
-        d,
-        d.attrs.off as number,
-        d.attrs.width as number,
-        (d.attrs.signed as boolean) ?? false,
-      );
-      if (member !== null) {
-        return member;
-      }
-      refuseFloatMemberRead(d);
-      const access = memAccess(
-        d.operands[0],
-        e(d.operands[0]),
-        d.attrs.off as number,
-        d.attrs.width as number,
-        (d.attrs.signed as boolean) ?? false,
-        ctype,
-        scalarGlobals,
-        symCtx,
-        false,
-        advanceStepOf(d.operands[0]),
-        qualifiedBy(d) === 'cast',
-        frameArrayFor(d),
-      );
-      return pinnedAccess(d, access);
-    }
-    // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
-    // `base[index].field_K` when it carries a `fieldOff` (array-of-STRUCT element access).
-    if (d.opcode === 'aload') {
-      const access = arrayAccess(
-        d.operands[0],
-        e(d.operands[0]),
-        e(d.operands[1]),
-        d.attrs.fieldOff as number | undefined,
-        d.attrs.memberOff as number | undefined,
-        d.attrs.elemSize as number,
-        (d.attrs.signed as boolean) ?? false,
-        ctype,
-        symCtx,
-        frameArrayFor(d),
-      );
-      return pinnedAccess(d, access);
+    if (d.opcode === 'load' || d.opcode === 'aload') {
+      return lowerRead(d, e, (d.attrs.signed as boolean) ?? false);
     }
     return d.opcode === 'opaque'
       ? mkGap(gapReasonFor(d.attrs), d.operands.map(e))

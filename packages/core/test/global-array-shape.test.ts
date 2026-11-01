@@ -1491,3 +1491,33 @@ describe('one bare-array gate for a map global and a proven frame part', () => {
     expect(signed).toContain('return *(s8 *)((u32)sp16 + 4 + a0);');
   });
 });
+
+// agbcc has no `ldrsb` with an immediate offset: `extern s8 gT[16]; return gT[3] + i;` is
+// `ldrb r1, [r1, #0x3]; lsl r1, r1, #0x18; asr r1, r1, #0x18`, the unsigned byte sign-extended.
+describe('a sign-extended unsigned byte of a declared `s8` array is the element', () => {
+  const lift = (body: string, symbols?: Map<string, SymbolInfo>): string =>
+    cBackend.emit(structureChecked(parse(`fn f {\n^bb0(%0: s32):\n${body}}\n`), symbols ? { symbols } : {}));
+  const decl = (elemSize: number, elemSigned: boolean) =>
+    new Map<string, SymbolInfo>([
+      ['gT', { name: 'gT', kind: 'data', shape: 'array', elemSize, elemSigned, dims: [16], declared: true }],
+    ]);
+  const ext = (op: string, width: number, signed: boolean) =>
+    `  %1: u8* = gaddr {sym="gT"}\n  %2: s32 = load %1 {off=${3 * width}, signed=${signed}, width=${width}}\n` +
+    `  %3: s32 = ${op} %2 {width=${width * 8}}\n  %4: s32 = add %3, %0\n  ret %4\n`;
+  test('`(s8)` of the unsigned byte of an `s8` array is the element', () => {
+    expect(lift(ext('sext', 1, false), decl(1, true))).toContain('return gT[3] + a0;');
+  });
+  test('a half keeps the cast: mwcc compiles it `lhz; extsh` where the element is `lha`', () => {
+    expect(lift(ext('sext', 2, false), decl(2, true))).toContain('(s16)');
+  });
+  test('a declaration of the other signedness, or none, keeps the cast', () => {
+    expect(lift(ext('sext', 1, false), decl(1, false))).toContain('(s8)');
+    expect(lift(ext('sext', 1, false))).toContain('(s8)');
+  });
+  test('an extension of another width keeps the cast', () => {
+    const wide =
+      '  %1: u8* = gaddr {sym="gT"}\n  %2: s32 = load %1 {off=3, signed=false, width=1}\n' +
+      '  %3: s32 = sext %2 {width=16}\n  ret %3\n';
+    expect(lift(wide, decl(1, true))).toContain('(s16)');
+  });
+});

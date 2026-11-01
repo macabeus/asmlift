@@ -343,6 +343,9 @@ function asElement(e: Expr, by: ReadonlyMap<string, Fold>): Expr {
   // immediate offset, so a signed byte read through the frame base is `ldrb` and `lsl #24; asr #24`,
   // which the lift reads as the unsigned byte sign-extended; C extends the element itself the same
   // way. Only a conversion to exactly the element type: a wider or a narrower one is another value.
+  // A DECLARED array's byte (a map global's, a proven frame part's) is read signed before this, by
+  // the structurer (structure.ts `declaredExtendedRead`); the type this pass gives a local exists
+  // only here, so for those the identity is applied here.
   if (inner.k === 'cast' && inner.to.kind === 'int' && inner.volatile !== true && inner.e.k === 'index') {
     const read = inner.e;
     const elem = elementOf(read, by);
