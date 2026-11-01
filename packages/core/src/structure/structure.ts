@@ -9182,7 +9182,7 @@ function structureRanked(
   //     folds to a constant that stays in the loop.
   //
   // A STRENGTH-REDUCED COUNTED LOOP (gcc 2.7.2's `for (i = lo; i <= hi; i++) … gE[i] …`) needs four
-  // more readings, each taken only for a loop the rerun asks (`ForRanking`), never offered:
+  // more readings, read like the rest (taken where asked, offered otherwise):
   //   • `pre`, a PURE PREHEADER between the guard and the header: a `br` into the header that only
   //     the guard enters, whose ops neither touch memory nor trap. Its statements run ahead of the
   //     `for`, so on the zero-trip path too, which is safe because the exit takes no params: every
@@ -9202,7 +9202,6 @@ function structureRanked(
     const h = fl.header;
     const exit = fl.exit;
     const latch = fl.latches.length === 1 ? fl.latches[0] : undefined;
-    const asked = forRank.asked.has(h);
     const entry = pre ?? g;
     const gterm = g.ops[g.ops.length - 1];
     const lterm = latch?.ops[latch.ops.length - 1];
@@ -9281,8 +9280,7 @@ function structureRanked(
       latch === h ||
       fl.body.has(g) ||
       (pre !== undefined &&
-        (!asked ||
-          !guarded ||
+        (!guarded ||
           fl.body.has(pre) ||
           pre.params.length > 0 ||
           pre.ops[pre.ops.length - 1].opcode !== 'br' ||
@@ -9297,9 +9295,7 @@ function structureRanked(
       !(preds.get(h) ?? []).every((p) => p === entry || p === latch) ||
       latch.ops
         .slice(0, -1)
-        .some(
-          (o) => effectful(o) || qualified(o) || (materialize.has(o) && !(asked && latchLocal(o))) || anchoredAt.has(o),
-        )
+        .some((o) => effectful(o) || qualified(o) || (materialize.has(o) && !latchLocal(o)) || anchoredAt.has(o))
     ) {
       return null;
     }
@@ -9354,9 +9350,7 @@ function structureRanked(
     }
     // the header params that hold F(iv) (A STRENGTH-REDUCED COUNTED LOOP), by index, each with the
     // op whose back-edge instance computes it
-    const derived = asked
-      ? derivedParams(initEdge.args as Value[], back.args as Value[])
-      : new Map<number, { from: number; op: Op }>();
+    const derived = derivedParams(initEdge.args as Value[], back.args as Value[]);
     const derivedNames = new Set([...derived.keys()].map((j) => varName.get(h.params[j])!));
     const ivRecs = updateRecs.filter((r) => !derivedNames.has(r.name));
     const iv = ivRecs.length === 1 ? ivRecs[0].name : undefined;
@@ -9364,7 +9358,6 @@ function structureRanked(
     const ivInit = initRecs.find((r) => r.name === iv);
     if (
       iv === undefined ||
-      (ivInit === undefined && !asked) ||
       [...derived.values()].some((d) => d.from !== ivAt) ||
       copySetIsCyclic(initRecs) ||
       (ivInit !== undefined && initRecs.some((r) => r !== ivInit && exprVars(ivInit.value).has(r.name)))
@@ -9390,11 +9383,11 @@ function structureRanked(
     }
     const sub = subFor(h.params, back.args as Value[]);
     const inner = latchInnerSub(h, fl.body, [latch]);
-    // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. An
-    // asked loop's latch may hold a materialized op its own reads alone use, which the `for` never
+    // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
+    // latch may hold a materialized op its own reads alone use, which the `for` never
     // renders at its position, so its test and update spell every latch op inline, and the test is
     // checked through them for a read of the name the update writes.
-    const inlined = asked && latch.ops.some((o) => materialize.has(o));
+    const inlined = latch.ops.some((o) => materialize.has(o));
     const clobbered = (v: Value, seen = new Set<Value>()): boolean => {
       const d = defs.get(v);
       if (!inlined || sub.has(v) || d === undefined || opBlock.get(d) !== latch) {

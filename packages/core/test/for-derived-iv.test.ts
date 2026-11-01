@@ -3,12 +3,12 @@
 // through a pure preheader, the IV is the parameter itself (no init copy), the latch names `i + 1`
 // because the back edge hands it round twice, and the header carries `i << 3` beside `i` (here `i + 3`,
 // an op the trace oracle models). The `for`
-// reads each only for a loop the rerun asks (`ForRanking`), so every fixture is a jump table whose
-// `while (1)` reading declines. Each is judged against its own IR by the trace oracle
+// is taken for a loop the rerun asks (`ForRanking`), so every fixture but the last is a jump table
+// whose `while (1)` reading declines. Each is judged against its own IR by the trace oracle
 // (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The `for`
 // refuses a derived param whose two edges apply different ops or different constants, a preheader that
 // reads memory, and a test that reads the derived param or its back-edge value; each of those
-// declines.
+// declines. `/for-continue` takes the same readings where the default lifts.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -184,4 +184,24 @@ test("a latch test that reads the derived param's back-edge value refuses the `f
   // the first test, the last trip's value after)
   const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %38' });
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+});
+
+test('`/for-continue` takes the strength-reduced readings where the default lifts', () => {
+  // the code after the loop is a call and a `return`, so each arm that leaves copies it, `while (1)`
+  // lifts, and no rerun asks the loop: only `/for-continue` spells it `for`, and the default
+  // structuring offers it
+  const ir = srFor().replace(
+    /\^bb12\(\):[\s\S]*$/,
+    '^bb12():\n  %70: s32 = const {value=99}\n  %69: s32 = call %70 {target="k"}\n  ret\n}',
+  );
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  let offered = 0;
+  expect(cBackend.emit(structure(fn, {}, { onForOffered: () => offered++ }))).toContain('while (1)');
+  expect(offered).toBe(1);
+  const r = judged(ir, { spellCountedLoopsFor: true });
+  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{/);
+  expect(r.src).not.toContain('while (1)');
+  agrees(r);
 });
