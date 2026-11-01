@@ -9,7 +9,7 @@
 import { Fn } from '../ir/core';
 import { foldEmptyLatches, foldExitTrampolines } from './latch';
 import { rerollPeeledTests } from './reroll';
-import { recomputeRedundantParams } from './unpre';
+import { recomputeDerivedParams, recomputeRedundantParams } from './unpre';
 import { unthreadLoopExits } from './unthread';
 
 export interface PreStructureFold {
@@ -31,9 +31,10 @@ export interface PreStructureFold {
  *  trampoline fold reshapes, and sits ahead of the re-roll so a loop it gives one way out is one
  *  the re-roll may then read. That place is a precaution: `synthetic:thrbreak:agbcc` and the
  *  pointer walk unthread.ts names lift the same C wherever the fold sits, so `unthread.test.ts`
- *  pins its position, not a lift that needs it. The parameter recompute (`unpre`) runs last
- *  because that is the one place it was measured: it moves no edge, so no loop fold reads what it
- *  leaves, and `unpre.test.ts` pins the place, not a lift that needs it. */
+ *  pins its position, not a lift that needs it. The two parameter recomputes run last, the
+ *  derived one (`derivedparam`) just ahead of `unpre`, because that is the one place each was
+ *  measured: neither moves an edge, so no loop fold reads what they leave, and `unpre.test.ts` pins
+ *  the places, not a lift that needs them. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',
@@ -54,6 +55,12 @@ export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
     id: 'reroll',
     title: 'Peeled-test re-rolling (a loop test peeled into the entry becomes the first iteration)',
     run: (fn) => rerollPeeledTests(fn),
+  },
+  {
+    id: 'derivedparam',
+    title:
+      "Derived-parameter recomputing (a parameter every edge hands one pure op of a sibling's argument becomes that op)",
+    run: (fn) => recomputeDerivedParams(fn),
   },
   {
     id: 'unpre',

@@ -15585,6 +15585,69 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_forjt_goto1(s32 lo, s32 hi);',
     proto: { sw_forjt_goto1: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      sw_forjt_skew is the negative of the derived loop parameter (raise/unpre.ts
+  //      `recomputeDerivedParams`, A SIBLING'S LEAF): sw_gotocase2's loop with a second counter `j`
+  //      that starts at `lo << 3` and is reset to `i << 2` after each update. gcc2.7.2 hands the
+  //      header both, and the two edges' shifts differ, so `j` is no one function of `i` and the
+  //      fold must leave it. agbcc and gcc2.7.2 decline at the loop-exit refusal and gcc2.7.2kmc at
+  //      its likely-slot gap; ido7.1 lifts it as `while (1)` with the latch copied into the arms,
+  //      the way it lifts sw_forjt.
+  {
+    sym: 'sw_forjt_skew',
+    src:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_skew(s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 j;\n' +
+      '    for (i = lo, j = lo << 3; i <= hi; i++, j = i << 2) {\n' +
+      '        if (((u8 *)gE)[j + 5] <= 26) {\n' +
+      '            switch (((u8 *)gE)[j + 4]) {\n' +
+      '            case 1:\n' +
+      '                if (gE[i].u == 1)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 2:\n' +
+      '                if (gE[i + 1].v != 0)\n' +
+      '                    continue;\n' +
+      '                goto shared;\n' +
+      '            case 3:\n' +
+      '            case 4:\n' +
+      '            shared:\n' +
+      '                if (gE[i].x > 20)\n' +
+      '                    continue;\n' +
+      '                gOut = 1;\n' +
+      '                k(i);\n' +
+      '                break;\n' +
+      '            case 7:\n' +
+      '                if (gE[i].x < 0)\n' +
+      '                    continue;\n' +
+      '                k(gA[i]);\n' +
+      '                break;\n' +
+      '            default:\n' +
+      '                continue;\n' +
+      '            }\n' +
+      '            break;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    for (i = 0; i < gOut; i++)\n' +
+      '        k(gA[i]);\n' +
+      '}',
+    features: ['branch', 'switch-arms'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx:
+      'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; };\n' +
+      'extern struct E gE[];\n' +
+      'extern s32 gA[];\n' +
+      'extern s32 gOut;\n' +
+      'void k(s32 x);\n' +
+      'void sw_forjt_skew(s32 lo, s32 hi);',
+    proto: { sw_forjt_skew: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   //      sw_gotocase3 and sw_gotocase_inner are the case-label goto's own rows (l3/ast.ts `goto`,
   //      switch-recover.ts `jumpSharedFallTargets`). sw_gotocase3 has three entrants into the shared
   //      body, two of them written BELOW it, so `if (0) { case N: }` cannot spell them and the goto

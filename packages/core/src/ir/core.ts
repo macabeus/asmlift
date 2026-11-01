@@ -356,6 +356,19 @@ export function mkOp(opcode: Opcode, o: Partial<Op> = {}): Op {
   };
 }
 
+/** An op's attributes as one comparable key, keys sorted (so insertion order never tells two
+ *  equal attribute sets apart), leaving out the attribute `drop` names. */
+export function attrsKey(op: Op, drop: string | null = null): string {
+  return JSON.stringify(
+    Object.entries(op.attrs ?? {})
+      .filter(([k]) => k !== drop)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+/** One op's identity apart from its operands: opcode, result count and attributes. */
+export const opShape = (op: Op): string => `${op.opcode}/${op.results.length}/${attrsKey(op)}`;
+
 // ── a call's callee: a NAME (`attrs.target`) or, for a call through a register, a VALUE ─────────
 //
 // An INDIRECT call carries `indirect: true` and no `target`, and calls the function whose address

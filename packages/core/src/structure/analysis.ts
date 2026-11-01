@@ -28,6 +28,7 @@ import {
   defOpMap,
   dominators,
   mergeClasses,
+  opShape,
   predecessors,
   successorsOf,
 } from '../ir/core';
@@ -2283,10 +2284,6 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
 }
 
 const COMMUTATIVE_OPS: ReadonlySet<string> = new Set(['add', 'mul', 'and', 'or', 'xor']);
-
-/** One op's identity apart from its operands: opcode, result count and attributes, keys sorted. */
-const opShape = (op: Op): string =>
-  `${op.opcode}/${op.results.length}/${JSON.stringify(Object.entries(op.attrs).sort(([a], [b]) => a.localeCompare(b)))}`;
 
 /** Do two values name the same address: one value, or two `gaddr`s of one symbol? */
 function sameAddress(defOf: Map<Value, Op>, a: Value, b: Value): boolean {
