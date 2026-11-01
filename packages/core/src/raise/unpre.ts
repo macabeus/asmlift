@@ -53,6 +53,16 @@
 //    variation, and a variation never ships a function its default declines (rank.ts), so it could
 //    not have lifted this row: the gate is what lets the default carry it. `unpre.test.ts` pins both
 //    joins and an ordinary `if` join the gate keeps out.
+//    A LOOP'S LATCH passes too: the block holding the back edge to a header that dominates it.
+//    IDO computes a counted loop's loop-invariant bound `hi + 1` (`addiu v0,a1,1`) in the header
+//    and again in the delay slot of every arm's `b latch`, so the latch of `for (i = lo; i <= hi;
+//    i++) switch (..) { .. }` (`synthetic:sw_gotocase2:ido7.1`) takes `hi + 1` as a parameter every
+//    in-edge hands it. The parameter is spellable — a copy at the end of every arm — but the
+//    structurer reads a latch with a parameter as no `for` (`forPlanAt`'s `latch-params`), so the
+//    fold is what lets the `for` read the latch at all. Measured with the scope widened to latches
+//    alone, every ido7.1 row that keeps `while (1)` moves by a line or none (sw_forjt_skew 186 ->
+//    185, forexit_old 162 -> 163, brk2out_ctl 151 -> 151, sw_forjt 152 -> 150) and no row's
+//    decline turns; `unpre.test.ts` pins an ido-shaped latch folding and the `if` join staying out.
 //  • the argument must be an op with operands (`operand-free`). An operand-free argument (a constant, a symbol's
 //    address) is what a merge of `return 0;` arms or of a register the compiler set to one constant
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
@@ -96,6 +106,8 @@ export interface RedundantParam {
   /** one in-edge is a `switch_br`'s, another comes from elsewhere, and every other comes from a block
    *  the dispatch dominates */
   readonly switchJoin: boolean;
+  /** the block holds a loop's back edge: one of its successors is a header that dominates it */
+  readonly latchJoin: boolean;
   /** the expression is an op with operands, not a constant or a symbol's address */
   readonly hasOperands: boolean;
 }
@@ -109,9 +121,9 @@ export interface RedundantParam {
 export const UNPRE_GATES: readonly Gate<RedundantParam>[] = [
   {
     id: 'not-switch-join',
-    why: 'outside a switch the parameter is spellable as a variable, and recomputing it re-spells functions that match',
+    why: 'outside a switch or a loop latch the parameter is spellable as a variable, and recomputing it re-spells functions that match',
     sound: false,
-    rejects: (c) => !c.switchJoin,
+    rejects: (c) => !c.switchJoin && !c.latchJoin,
   },
   {
     id: 'operand-free',
@@ -121,8 +133,9 @@ export const UNPRE_GATES: readonly Gate<RedundantParam>[] = [
   },
 ];
 
-/** Recompute every parameter of a switch's join (a case fallen into, or the switch's exit) whose
- *  in-edges all hand it one pure expression; returns how many parameters it removed. */
+/** Recompute every parameter of a switch's join (a case fallen into, or the switch's exit) or of a
+ *  loop's latch whose in-edges all hand it one pure expression; returns how many parameters it
+ *  removed. */
 export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantParam>[] = UNPRE_GATES): number {
   // The CFG does not change, so dominance and the in-edge index are computed once; the def map and
   // the homes grow with each clone.
@@ -146,6 +159,8 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
       ins.every((e) => e.from === dispatch.from || dom.get(e.from)!.has(dispatch.from))
     );
   };
+  /** a block holding a back edge: a successor that dominates it is the header of a loop it closes */
+  const latchJoin = (b: Block): boolean => b.ops[b.ops.length - 1].successors.some((s) => dom.get(b)!.has(s.block));
   const through = (v: Value) => {
     const d = defs.get(v);
     return d !== undefined && clonable(d);
@@ -200,7 +215,11 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
         if (
           value === undefined ||
           !leavesDominate ||
-          firstRejection(gates, { switchJoin: switchJoin(ins), hasOperands: d0!.operands.length > 0 }) !== null
+          firstRejection(gates, {
+            switchJoin: switchJoin(ins),
+            latchJoin: latchJoin(b),
+            hasOperands: d0!.operands.length > 0,
+          }) !== null
         ) {
           k++;
           continue;
