@@ -211,6 +211,7 @@ export function verify(fn: Fn): void {
           // second as `u8 name[count]`, so a typed element there would be a type nothing pinned —
           // the exact answer the audit refuses to invent. (One BYTE encodes like a real `u8`
           // scalar either way; the declaration is the same one, so nothing has to tell them apart.)
+          // A part's element, where its own accesses pin one, rides beside them as `elem` below.
           if (op.opcode === 'laddr') {
             const count = op.attrs.count;
             if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) {
@@ -228,6 +229,21 @@ export function verify(fn: Fn): void {
             }
             if (op.attrs.part === true && count < 2) {
               throw new VerifyError(`'laddr' part must be storage of two or more bytes, got ${count}`);
+            }
+            // …whose ELEMENT its accesses may agree on (frame-objects.ts `stampPartElements`): a
+            // width that tiles the part, negative for a signed narrow one, never the default `u8`
+            const elem = op.attrs.elem;
+            if (
+              elem !== undefined &&
+              (op.attrs.part !== true ||
+                op.attrs.views !== undefined ||
+                ![2, 4, -1, -2].includes(elem as number) ||
+                count % Math.abs(elem as number) !== 0)
+            ) {
+              throw new VerifyError(
+                `'laddr' elem is a part's element width (2, 4; -1, -2 signed) tiling its ${count} bytes, ` +
+                  `got ${String(elem)}${op.attrs.part === true ? '' : ' on storage that is no part'}`,
+              );
             }
             // …and storage accessed at two widths over one byte names the VIEWS a union of it
             // declares (frame-objects.ts `unionViews`): one per element width in bytes, negative

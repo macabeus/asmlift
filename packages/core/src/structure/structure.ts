@@ -295,7 +295,8 @@ function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalB
  *  elements of `width` bytes, signed or not. ONE element is a SCALAR typed by the access every
  *  access agreed on. More is STORAGE the frontend's frame-object audit sized without typing —
  *  no access pins an element type there, so the audit stamps bytes and this declares the array
- *  that spells them. Both arms are the audit's own facts; neither infers anything here.
+ *  that spells them — except a proven PART, whose own accesses may pin its element (`elem`, below).
+ *  Every arm is the audit's own facts; none infers anything here.
  *
  *  …and storage the audit found accessed at two widths over one byte carries the VIEWS those
  *  accesses use (`views`, frame-objects.ts `unionViews`), and is declared the union of them —
@@ -319,6 +320,13 @@ function laddrType(op: Op): IrType {
       return { off: 0, type: count === w ? elem : T.array(elem, count / w), name };
     });
     return { kind: 'union', members, size: count };
+  }
+  // …and a proven PART is declared with the element its accesses agree on, where they do
+  // (frame-objects.ts `stampPartElements`): `elem` bytes, negative for a signed narrow one
+  const partElem = op.attrs.elem as number | undefined;
+  if (partElem !== undefined) {
+    const w = Math.abs(partElem);
+    return T.array(scalarTypeForAccess(w, partElem < 0), (op.attrs.count as number) / w);
   }
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
@@ -5861,7 +5869,9 @@ function structureRanked(
   // the cast re-forms it at the read (bcpy_rem). A runtime subscript is licensed by the audit that
   // split the part: every runtime index's reach stays inside one part. Only a part: the one
   // object's bytes are members and spills of any type, which the cast spells honestly, and a lone
-  // array at sp+0 compiles the same either way. Unqualified only, like the member.
+  // array at sp+0 compiles the same either way. Unqualified only, like the member. The part is
+  // declared with the element its accesses agree on (frame-objects.ts `stampPartElements`), so a
+  // `u16` or `s8` part answers the gate as one: `u8` storage would turn every other access away.
   const framePartDecls = new Map<string, SymbolInfo>();
   for (const [d, name] of laddrName) {
     const t = d.attrs.part === true && d.attrs.views === undefined ? laddrType(d) : null;

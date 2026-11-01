@@ -4289,6 +4289,57 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
           '    sp16[15 & a0] = a1;\n    return sp0[3] + sp16[5];',
         );
       });
+      // …each part DECLARED with the element its accesses agree on (`stampPartElements`), so an
+      // element of a `u16` or `s8` part is named bare too: u8 storage would hand the gate a type no
+      // access reads, and the runtime index keeps `((u16 *)sp64)[…]`, which agbcc compiles with the
+      // `sp + 64` re-formed at the read. Verbatim agbcc for `u16 a[32], b[32]` / `s8 a[64], b[64]`,
+      // `memcpy` each, `sink(1, 2, 3, 4)`, `return a[3] + b[(i & 15) + 16]` (`+ 32` for s8); each
+      // lift recompiles to the target's instructions. The s8 part's constant read is `ldrb; lsl;
+      // asr` — no `ldrsb` takes an immediate — and it counts as the signed read it is.
+      const pairOf64 = (name: string, regs: string, tail: string) =>
+        `${name}:\n\tpush\t{${regs}, lr}\n\tadd\tsp, sp, #-0x80\n\tadd\tr5, r0, #0\n` +
+        (regs === 'r4, r5, r6' ? '\tadd\tr6, r1, #0\n' : '') +
+        `\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x40\n\tbl\tmemcpy\n\tadd\tr4, sp, #0x40\n` +
+        '\tldr\tr1, .L3+0x4\n\tadd\tr0, r4, #0\n\tmov\tr2, #0x40\n\tbl\tmemcpy\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tsink\n' +
+        `${tail}\tadd\tsp, sp, #0x80\n\tpop\t{${regs}}\n\tpop\t{r1}\n\tbx\tr1\n` +
+        '\t.align\t2, 0\n.L3:\n\t.word\tgS1\n\t.word\tgS2\n';
+      const prototypes = { sink: { params: ['u32', 'u32', 'u32', 'u32'], returnsVoid: true } };
+      test('a part whose every access is one element is declared that element', () => {
+        const halves = pairOf64(
+          'cpyh',
+          'r4, r5',
+          '\tmov\tr0, sp\n\tldrh\tr0, [r0, #0x6]\n\tmov\tr1, #0xf\n\tand\tr1, r1, r5\n\tadd\tr1, r1, #0x10\n' +
+            '\tlsl\tr1, r1, #0x1\n\tadd\tr4, r4, r1\n\tldrh\tr1, [r4]\n\tadd\tr0, r0, r1\n',
+        );
+        const h = decompile('cpyh', halves, ARMV4T_AGBCC, { prototypes }).source;
+        expect(h).toContain('    u16 sp0[32];\n    u16 sp64[32];\n');
+        expect(h).toContain('return sp0[3] + sp64[(15 & a0) + 16];');
+        const bytes = pairOf64(
+          'cpysb',
+          'r4, r5',
+          '\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x3]\n\tlsl\tr0, r0, #24\n\tasr\tr0, r0, #24\n\tmov\tr1, #0xf\n' +
+            '\tand\tr1, r1, r5\n\tadd\tr1, r1, #0x20\n\tadd\tr4, r4, r1\n\tmov\tr1, #0x0\n\tldrsb\tr1, [r4, r1]\n' +
+            '\tadd\tr0, r0, r1\n',
+        );
+        const b = decompile('cpysb', bytes, ARMV4T_AGBCC, { prototypes }).source;
+        expect(b).toContain('    s8 sp0[64];\n    s8 sp64[64];\n');
+        expect(b).toContain('return sp0[3] + sp64[(15 & a0) + 32];');
+      });
+      test('a part read at both extensions keeps the storage default, and its cast', () => {
+        // `… + b[(i & 15) + 32] + ((u8 *)b)[j & 15]` on `s8 b[64]`: no evidence picks one element
+        const mixed = pairOf64(
+          'cpymix',
+          'r4, r5, r6',
+          '\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x3]\n\tlsl\tr0, r0, #24\n\tasr\tr0, r0, #24\n\tmov\tr2, #0xf\n' +
+            '\tand\tr5, r5, r2\n\tadd\tr5, r5, #0x20\n\tadd\tr1, r4, r5\n\tmov\tr3, #0x0\n\tldrsb\tr1, [r1, r3]\n' +
+            '\tand\tr6, r6, r2\n\tadd\tr4, r4, r6\n\tadd\tr0, r0, r1\n\tldrb\tr4, [r4]\n\tadd\tr0, r0, r4\n',
+        );
+        const m = decompile('cpymix', mixed, ARMV4T_AGBCC, { prototypes }).source;
+        expect(m).toContain('    s8 sp0[64];\n    u8 sp64[64];\n');
+        expect(m).toContain('sp64[a1 & 15]');
+        expect(m).not.toContain('sp64[(a0 & 15) + 32]');
+      });
       // the same pair with eight values live across two `sink` calls, at agbcc -O2: reload puts the
       // eighth one's spill slot ABOVE the arrays, at [sp,#0x20] (the Thumb frame grows up). Kept in
       // the one object it would join `b`; handed back to the slot model (`reliftRange`), it is a
