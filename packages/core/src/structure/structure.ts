@@ -5349,6 +5349,51 @@ function structureRanked(
     // exclusion seeded with enclosing-loop names → never coalesce onto them
     seedLoopParams(l.header, l.forwardPreds, l.backArgs, enclosingNames(l));
   }
+  // THE IV'S EXIT (THE LOOP AS A `for`, at `forPlanAt`): in a run that asks a loop's `for`, an exit
+  // param the guard's edge (or its relay's) hands the IV's init arg and the latch's edge its update
+  // is the IV past the loop — `for (i = lo; ..) { .. } k(i);`. The `for` leaves it in the IV's name
+  // on both edges its test leaves by, so the param takes that name ahead of the guard's carrier,
+  // whose name the latch's edge would have to copy into and the `for` cannot. Only a preference: the
+  // name is taken under the same `canTakeName` as any carrier's, and an unasked run never reads it.
+  const ivExitCarrier = new Map<Value, Value>();
+  for (const fl of foreverLoops.values()) {
+    const h = fl.header;
+    const [latch] = fl.latches;
+    const [into] = fl.forwardPreds;
+    if (
+      fl.exit === null ||
+      fl.latches.length !== 1 ||
+      fl.forwardPreds.length !== 1 ||
+      (!spellCountedLoopsFor && !forRank.asked.has(h))
+    ) {
+      continue;
+    }
+    // the guard: the header's one way in, or the one block entering a preheader `br`
+    const intoTerm = into.ops[into.ops.length - 1];
+    const intoFrom = preds.get(into) ?? [];
+    const g = intoTerm.opcode === 'br' && intoFrom.length === 1 ? intoFrom[0] : into;
+    const gterm = g.ops[g.ops.length - 1];
+    const out = gterm.opcode === 'cond_br' ? gterm.successors.find((sc) => sc.block !== into) : undefined;
+    const relay = out?.block.ops.length === 1 ? out.block.ops[0] : undefined;
+    const guardExit =
+      out?.block === fl.exit
+        ? out
+        : relay?.opcode === 'br' && relay.successors[0]?.block === fl.exit
+          ? relay.successors[0]
+          : undefined;
+    const back = successorTo(latch, h);
+    const latchExit = successorTo(latch, fl.exit);
+    const initEdge = successorTo(into, h);
+    if (guardExit === undefined || back === undefined || latchExit === undefined || initEdge === undefined) {
+      continue;
+    }
+    fl.exit.params.forEach((p, i) => {
+      const j = back.args.indexOf(latchExit.args[i]);
+      if (j >= 0 && initEdge.args[j] === guardExit.args[i] && backArgName.has(back.args[j])) {
+        ivExitCarrier.set(p, back.args[j]);
+      }
+    });
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -5376,12 +5421,15 @@ function structureRanked(
          *  went unnamed", since the rejections above it `continue` without recording. Over-marking
          *  costs one downstream merge an extra fresh home, a spelling the differ referees. */
         let refusedParamCarrier = false;
+        const ivCarrier = ivExitCarrier.get(p);
         for (const c of [
-          ...incoming.filter((c) => varName.has(c.v)),
-          ...incoming.filter((c) => backArgName.has(c.v)),
+          ...incoming.filter((c) => c.v === ivCarrier).map((c) => ({ ...c, iv: true })),
+          ...incoming.filter((c) => varName.has(c.v)).map((c) => ({ ...c, iv: false })),
+          ...incoming.filter((c) => backArgName.has(c.v)).map((c) => ({ ...c, iv: false })),
         ]) {
-          const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, varName.has(c.v))) {
+          const named = !c.iv && varName.has(c.v);
+          const nm = named ? varName.get(c.v)! : backArgName.get(c.v)!;
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, named)) {
             continue;
           }
           // `freshParamMerge` (the `/fresh-merge` variation): this merge takes its own home rather
