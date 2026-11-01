@@ -1,11 +1,13 @@
 // UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`): `FOR_PLAN_GATES`,
-// `DERIVED_IV_GATES` and `FOR_PLAN_IV_GATES`. Each SOUND gate the suite does not already guard
+// and `FOR_PLAN_IV_GATES`. Each SOUND gate the suite does not already guard
 // elsewhere is dropped here and the pass re-run on a fixture it refuses: the `for` then lifts and is
 // wrong — the trace oracle (`irAgreement`) disagrees with the IR, a contract fails, or, where the
 // oracle cannot judge (a division, a load from a parameter's address), the emitted C shows the op
 // on a path the asm never ran it on. Every fixture is `for-derived-iv.test.ts`'s strength-reduced
 // loop with one part changed, so the default structuring declines it with the loop-exit refusal;
-// `/for-continue` (`spellCountedLoopsFor`) asks every loop's `for`.
+// `/for-continue` (`spellCountedLoopsFor`) asks every loop's `for`. Each runs raise's derived-param
+// fold first, as the pipeline does, so its header carries the IV alone (the fold's own refusals are
+// unpre.test.ts's).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -14,13 +16,8 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { type Gate, tallying, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
-import {
-  DERIVED_IV_GATES,
-  FOR_PLAN_GATES,
-  FOR_PLAN_IV_GATES,
-  type StructureHooks,
-  structure,
-} from '../src/structure/structure';
+import { recomputeDerivedParams } from '../src/raise/unpre';
+import { FOR_PLAN_GATES, FOR_PLAN_IV_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 500 }, (_, i) => i + 1);
@@ -30,15 +27,14 @@ const dropping = (id: string): StructureHooks => {
   const has = <C>(t: readonly Gate<C>[]) => t.some((g) => g.id === id);
   return has(FOR_PLAN_GATES)
     ? { forPlanGates: without(FOR_PLAN_GATES, id) }
-    : has(FOR_PLAN_IV_GATES)
-      ? { forPlanIvGates: without(FOR_PLAN_IV_GATES, id) }
-      : { derivedIvGates: without(DERIVED_IV_GATES, id) };
+    : { forPlanIvGates: without(FOR_PLAN_IV_GATES, id) };
 };
 
 const lift = (ir: string, hooks: StructureHooks = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
+  recomputeDerivedParams(fn);
   const sfn = structure(fn, { spellCountedLoopsFor: true }, hooks);
   return { sfn, src: cBackend.emit(sfn), agreement: irAgreement(ir, sfn, SEEDS) };
 };
@@ -181,33 +177,7 @@ test('without entry-test-differs a guard other than the test is dropped', () => 
   expect(r.agreement.disagree).toBeGreaterThan(0);
 });
 
-test('without edge-op-effect the derived value re-reads memory the body wrote', () => {
-  // the derived param is `*i`: loaded ahead of the store `*lo = 9` on entry, and in the latch on
-  // the back edge. The body's head would load it after the store. The oracle does not model a load
-  // through a parameter, so the C is the witness.
-  const ir = srFor({
-    entryDerived:
-      '%2: s32 = load %0 {off=0, signed=false, width=4}\n  %59: s32 = const {value=9}\n  store %0, %59 {off=0, width=4}',
-    backDerived: '%38: s32 = load %36 {off=0, signed=false, width=4}',
-  });
-  const r = refusedOnlyBy('edge-op-effect', ir);
-  expect(r.src).toMatch(/\*\(s32 \*\)a0 = 9;\n\s*for \((\w+) = a0;[^\n]*\{\n\s*\w+ = \*\(s32 \*\)\1;/);
-});
-
-test('without edge-ops-differ an init the body head computes another way is read wrong', () => {
-  // `lo - 3` in, `(i + 1) + 3` back: the head writes `i + 3` on the first trip too
-  const r = refusedOnlyBy('edge-ops-differ', srFor({ entryDerived: '%2: s32 = sub %0, %3' }));
-  expect(r.agreement.disagree).toBeGreaterThan(0);
-});
-
 test('the heuristic and defensive rules admit nothing wrong when dropped on these fixtures', () => {
-  // `reads-no-iv`: a param both edges compute from `hi` alone holds that value at every entry, so
-  // reading it as derived is right, and the rule only keeps the reading to the IV's own values
-  const ir = srFor({ entryDerived: '%2: s32 = add %1, %3', backDerived: '%38: s32 = add %1, %3' });
-  expect(() => lift(ir)).toThrow(LOOP_EXIT);
-  const r = lift(ir, dropping('reads-no-iv'));
-  expect(r.agreement.disagree).toBe(0);
-  expect(r.agreement.judged).toBe(SEEDS.length);
   // `latch-params`: the latch's param is read by its update, which `update-reads-body` refuses
   const lp = srFor()
     .replace('^bb11():', '^bb11(%50: s32):')

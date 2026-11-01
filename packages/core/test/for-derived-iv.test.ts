@@ -2,13 +2,16 @@
 // `for (i = lo; i <= hi; i++) { .. gE[i] .. switch (..) { .. } break; }`. The guard enters the loop
 // through a pure preheader, the IV is the parameter itself (no init copy), the latch names `i + 1`
 // because the back edge hands it round twice, and the header carries `i << 3` beside `i` (here `i + 3`,
-// an op the trace oracle models). The `for`
+// an op the trace oracle models). The derived param is raise's to read: each fixture runs
+// `recomputeDerivedParams` (raise/unpre.ts) ahead of the structurer, as the pipeline does, so the
+// header reaches `forPlanAt` carrying the IV alone. The `for`
 // is taken for a loop the rerun asks (`ForRanking`), so every fixture but the last is a jump table
 // whose `while (1)` reading declines. Each is judged against its own IR by the trace oracle
-// (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. The `for`
-// refuses a derived param whose two edges apply different ops or different constants, a preheader that
-// reads memory, and a test that reads the derived param or its back-edge value; each of those
-// declines. `/for-continue` takes the same readings where the default lifts.
+// (`irAgreement`), as `structure()` returns it and as it ships after `readabilityRewrites`. A derived
+// param whose two edges apply different ops or different constants is no op of the IV, so the fold
+// leaves it and the loop declines; so do a preheader that reads memory and a test that reads the IV
+// before its update. A test that reads the derived back-edge value reads the op of the updated IV,
+// and lifts. `/for-continue` takes the same readings where the default lifts.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -16,6 +19,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { recomputeDerivedParams } from '../src/raise/unpre';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -25,6 +29,7 @@ const judged = (ir: string, opts: Parameters<typeof structure>[1] = {}) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
+  recomputeDerivedParams(fn);
   const sfn = structure(fn, opts);
   return {
     src: cBackend.emit(sfn),
@@ -119,8 +124,8 @@ const srFor = ({
 
 test('a strength-reduced counted loop entered through a preheader lifts as a `for`', () => {
   const r = judged(srFor());
-  // the update copies only the IV, and the body opens with the derived param
-  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{\n\s*(\w+) = \1 \+ \w+;\n\s*if \(\(s32\)f\(\2\)/);
+  // the update copies only the IV, and the body reads the derived param as the op of it
+  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{\n\s*if \(\(s32\)f\(\1 \+ 3\)/);
   expect(r.src).not.toContain('while (1)');
   agrees(r);
 });
@@ -172,18 +177,20 @@ test('a preheader that reads memory refuses the `for`', () => {
 });
 
 test('a latch test that reads the derived param refuses the `for`', () => {
-  // `hi < p` behind the guard `hi < lo + 3`: the test would read the derived name, which the update
-  // no longer writes
+  // `hi < p` behind the guard `hi < lo + 3`: `p` is `i + 3` of the IV BEFORE its update, which the
+  // `for`'s test, run after the update, has no name for
   const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %6' });
   expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
 });
 
-test("a latch test that reads the derived param's back-edge value refuses the `for`", () => {
-  // `hi < (i + 1) + 3` behind the guard `hi < lo + 3`, which is that test on the entry values: the
-  // `for` writes the derived name only at the body's head, so its test would read it stale (unset on
-  // the first test, the last trip's value after)
-  const ir = srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %38' });
-  expect(() => judged(ir)).toThrow(/leaves its switch for a loop exit/);
+test("a latch test that reads the derived param's back-edge value lifts, reading the updated IV", () => {
+  // `hi < (i + 1) + 3` behind the guard `hi < lo + 3`, which is that test on the entry values. A
+  // derived NAME, written at the body's head, would be read stale here (unset on the first test, the
+  // last trip's value after); the folded param has no name, and the test reads `i + 3` of the IV the
+  // update just wrote
+  const r = judged(srFor({ guard: '%4: u32 = icmp_slt %1, %2', test: '%37: u32 = icmp_slt %1, %38' }));
+  expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1 \+ (\w+|3); \1 = \1 \+ 1\) \{/);
+  agrees(r);
 });
 
 test('`/for-continue` takes the strength-reduced readings where the default lifts', () => {
@@ -197,6 +204,7 @@ test('`/for-continue` takes the strength-reduced readings where the default lift
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
+  recomputeDerivedParams(fn);
   let offered = 0;
   expect(cBackend.emit(structure(fn, {}, { onForOffered: () => offered++ }))).toContain('while (1)');
   expect(offered).toBe(1);

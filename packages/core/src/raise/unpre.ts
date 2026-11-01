@@ -58,10 +58,33 @@
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
 //    switch edge and a falling case hand the constant 7 (the KMC/gcc2.7.2 shape thumb-switch.test.ts
 //    pins) therefore still declines.
+//
+// A SIBLING'S LEAF (`recomputeDerivedParams`, its own trace stage just ahead of this one): the
+// congruence above with one leaf allowed to differ per edge, where on every edge it is the argument
+// that same edge hands a sibling parameter `i`. gcc 2.7.2 strength-reduces `for (i = lo; i <= hi;
+// i++) .. gE[i] ..` to a header that carries `i << 3` beside `i`: the guard hands it `(lo, lo << 3)`
+// and the latch `(i + 1, (i + 1) << 3)`. SOUND BY SSA, with no induction: on edge `e` the parameter
+// `j` receives F(a_e) and `i` receives a_e, so at every entry `j` holds F(i), and reading F(i) in the
+// block is reading `j`. F is one `clonable` op of one shape and result type on every edge; each other
+// operand is one value every edge shares, defined in a block that strictly dominates this one, or a
+// constant of one value (the latch's own `3` against the entry's). An argument that is not such an op
+// on some edge (a back edge handing the parameter itself, a load, a call) leaves the parameter alone.
+// The edge ops the fold leaves unread are deleted with whatever pure ops only they read, so a latch's
+// `i + 1` the dead `(i + 1) << 3` was the second reader of is not named for it.
+//
+// UNGATED, by measurement: a loop header is no switch join, so this is exactly the widening the
+// `not-switch-join` gate keeps from the congruent fold, and it was measured before it shipped. The
+// full synthetic tier with it (and with structure.ts's former structurer-level copy of the reading,
+// a `for` that opened its body with `j = F(i);`, deleted) moves only gcc 2.7.2 and KMC cells, and
+// none of them back: 7 nonmatch -> MATCH (retpost_tail, uninit_bits, sw_h3, sw_h4, bcpy_ind kmc), 25
+// closer, 3 brk2out rows a few insns further with C that reads correct. The name the structurer
+// kept for `j` read stale wherever a test read it (a `for` writes it only at the body's head); the
+// recomputed F(i) has no name to read stale.
 import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkValue } from '../ir/core';
-import { placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
+import { deletableWhenDead, placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
 import { inEdgesOf, retireParam, trivialPhiValue } from '../ir/simplify';
+import { typeEquals } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
 /** May this op be evaluated again at another program point to the same value? */
@@ -195,4 +218,142 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
     }
   }
   return removed;
+}
+
+/** Is `x` the same op as `y` apart from its operands' values: one opcode, attributes, operand count
+ *  and result type? */
+const sameShape = (x: Op, y: Op): boolean =>
+  x.opcode === y.opcode &&
+  x.operands.length === y.operands.length &&
+  x.results.length === 1 &&
+  y.results.length === 1 &&
+  typeEquals(x.results[0].type, y.results[0].type) &&
+  JSON.stringify(Object.entries(x.attrs).sort(([a], [b]) => a.localeCompare(b))) ===
+    JSON.stringify(Object.entries(y.attrs).sort(([a], [b]) => a.localeCompare(b)));
+
+/** Recompute every block parameter `j` whose in-edges each hand it one pure op F over the argument
+ *  that edge hands a sibling parameter `i` (A SIBLING'S LEAF, in the header): `j` is F(i). Returns
+ *  how many parameters it removed. */
+export function recomputeDerivedParams(fn: Fn): number {
+  const dom = dominators(fn);
+  const defs = defOpMap(fn);
+  const home = new Map<Value, Block>();
+  for (const b of fn.blocks) {
+    b.params.forEach((p) => home.set(p, b));
+    for (const op of b.ops) {
+      op.results.forEach((r) => home.set(r, b));
+    }
+  }
+  const inEdges = inEdgesOf(fn);
+  /** the edge ops a fold stopped reading, swept once every block is done */
+  const orphaned: Op[] = [];
+  let removed = 0;
+  for (const b of fn.blocks.slice(1)) {
+    const ins = inEdges.get(b) ?? [];
+    if (ins.length < 2) {
+      continue;
+    }
+    const incoming = ins.map((e) => e.succ);
+    /** F(i) as fresh ops at the head of `b`, or null where `j` is no one op of `i`'s arguments */
+    const derive = (j: number): { ops: Op[]; value: Value } | null => {
+      const ds = incoming.map((s) => defs.get(s.args[j]));
+      const d0 = ds[0];
+      if (d0 === undefined || !ds.every((d) => d !== undefined && clonable(d) && sameShape(d, d0))) {
+        return null;
+      }
+      for (let i = 0; i < b.params.length; i++) {
+        if (i === j) {
+          continue;
+        }
+        const ivSlot = d0.operands.map((_, k) => incoming.every((s, x) => ds[x]!.operands[k] === s.args[i]));
+        if (!ivSlot.some(Boolean)) {
+          continue;
+        }
+        const ops: Op[] = [];
+        const operands: Value[] = [];
+        const ok = d0.operands.every((o, k) => {
+          if (ivSlot[k]) {
+            operands.push(b.params[i]);
+            return true;
+          }
+          const vals = ds.map((d) => d!.operands[k]);
+          if (vals.every((v) => v === o)) {
+            // one value every edge shares, which must hold that value here too
+            const h = home.get(o);
+            operands.push(o);
+            return h !== undefined && h !== b && dom.get(b)!.has(h);
+          }
+          // or a constant of one value on every edge, made again here
+          const cs = vals.map((v) => defs.get(v));
+          const c0 = cs[0];
+          if (c0?.opcode !== 'const' || !cs.every((c) => c !== undefined && c.opcode === 'const' && sameShape(c, c0))) {
+            return false;
+          }
+          const r = mkValue(o.type);
+          ops.push({ opcode: 'const', operands: [], results: [r], attrs: { ...c0.attrs }, successors: [] });
+          operands.push(r);
+          return true;
+        });
+        if (!ok) {
+          continue;
+        }
+        const r = mkValue(d0.results[0].type);
+        ops.push({ opcode: d0.opcode, operands, results: [r], attrs: { ...d0.attrs }, successors: [] });
+        return { ops, value: r };
+      }
+      return null;
+    };
+    for (let j = 0; j < b.params.length;) {
+      const got = derive(j);
+      if (got === null) {
+        j++;
+        continue;
+      }
+      orphaned.push(...incoming.map((s) => defs.get(s.args[j])!));
+      b.ops.unshift(...got.ops);
+      for (const op of got.ops) {
+        defs.set(op.results[0], op);
+        home.set(op.results[0], b);
+      }
+      retireParam(fn, b, j, got.value, incoming);
+      removed++;
+    }
+  }
+  sweepOrphans(fn, orphaned);
+  return removed;
+}
+
+/** Delete each of `seeds` nothing reads any more, and then each pure op only the deleted read: never
+ *  an op the fold did not orphan, which other passes own. */
+function sweepOrphans(fn: Fn, seeds: readonly Op[]): void {
+  const defs = defOpMap(fn);
+  const uses = new Map<Value, number>();
+  const read = (v: Value, by: number) => uses.set(v, (uses.get(v) ?? 0) + by);
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.operands.forEach((o) => read(o, 1));
+      op.successors.forEach((s) => s.args.forEach((a) => read(a, 1)));
+    }
+  }
+  const dead = new Set<Op>();
+  const work = [...seeds];
+  while (work.length > 0) {
+    const op = work.pop()!;
+    if (dead.has(op) || !clonable(op) || !deletableWhenDead(op) || (uses.get(op.results[0]) ?? 0) > 0) {
+      continue;
+    }
+    dead.add(op);
+    for (const o of op.operands) {
+      read(o, -1);
+      const d = defs.get(o);
+      if (d !== undefined) {
+        work.push(d);
+      }
+    }
+  }
+  if (dead.size > 0) {
+    for (const b of fn.blocks) {
+      b.ops = b.ops.filter((op) => !dead.has(op));
+    }
+  }
 }

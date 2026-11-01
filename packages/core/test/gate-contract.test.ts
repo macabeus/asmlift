@@ -64,7 +64,6 @@ import {
   BREAK_TAIL_GATES,
   BYPASS_TAIL_GATES,
   CARRIER_NAME_GATES,
-  DERIVED_IV_GATES,
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
   FOR_PLAN_GATES,
@@ -164,10 +163,9 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   // ... and when an edge out of an inner loop's body is that loop's outward exit, handed out
   OUTWARD_EXIT_GATES: OUTWARD_EXIT_GATES as readonly Gate<never>[],
   BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],
-  // structure.ts's `forPlanAt`: a `while (1)` read as a `for` past the loop's shape, each derived IV,
-  // and the rules over the update's and the init's copies
+  // structure.ts's `forPlanAt`: a `while (1)` read as a `for` past the loop's shape, and the rules
+  // over the update's and the init's copies
   FOR_PLAN_GATES: FOR_PLAN_GATES as readonly Gate<never>[],
-  DERIVED_IV_GATES: DERIVED_IV_GATES as readonly Gate<never>[],
   FOR_PLAN_IV_GATES: FOR_PLAN_IV_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
