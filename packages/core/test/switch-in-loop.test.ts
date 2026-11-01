@@ -130,15 +130,19 @@ test('gcc 2.7.2: the latch increment reorg spread into the arms lifts at the loo
   // reorg fills two arms' delay slots with the latch's `i++`, so they jump to the test block while
   // the rest go to a separate `i++` block (the default and both holes): two `ret`s and no CFG
   // merge, so the switch takes the body's own join (the test block) and the arms that reach it
-  // through the `i++` block take that block back as a copy. Each arm ends `i + 1` and breaks.
+  // through the `i++` block take that block back as a copy. Every edge into the test block hands
+  // it `i + 1`, so raise/unpre.ts recomputes it there (A LOOP'S LATCH): each arm breaks, and the
+  // switch is followed by the one `i++` the source wrote.
   const out = lift('sw_loopret', 'gcc2.7.2', 'gcc272-swloopret.asm', 'gcc272-swloopret.txt');
   const sw = switchOf(out);
   expect(armOf(sw, 'case 0')).toMatch(/k\(a0\);\s*return;/);
   expect([...out.matchAll(/\breturn\b/g)]).toHaveLength(1);
   for (const label of ['case 1', 'case 3', 'case 4', 'case 6', 'case 7']) {
-    expect(armOf(sw, label)).toMatch(/v\d+ = v\d+ \+ 1;\s*break;\s*$/);
+    expect(armOf(sw, label)).toMatch(/break;\s*$/);
+    expect(armOf(sw, label)).not.toMatch(/\+ 1;/);
   }
-  expect(sw).toMatch(/case 2:\s*case 5:\s*v\d+ = v\d+ \+ 1;\s*break;/);
+  expect(sw).toMatch(/case 2:\s*case 5:\s*break;/);
+  expect(out.slice(out.indexOf(sw) + sw.length)).toMatch(/^\s*v\d+ = v\d+ \+ 1;\s*\} while/);
   expect(out).not.toContain('continue');
   expect(sw).not.toContain('k(7)');
   expect(out.indexOf('k(7)')).toBeGreaterThan(out.indexOf(sw) + sw.length);
