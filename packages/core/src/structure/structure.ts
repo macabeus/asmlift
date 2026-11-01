@@ -1585,7 +1585,12 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
     id: 'exit-copy',
     why: 'the `for` leaves by its test, which runs no copy into the code after it but the init and the update',
     sound: true,
-    guardedBy: 'for-plan-gates.test.ts: without exit-copy the value the test edges hand the exit is never written',
+    // the trace oracle does not reach the latch's way out on every fixture, so the second guard
+    // reads the C
+    guardedBy: [
+      'for-plan-gates.test.ts: without exit-copy the value the test edges hand the exit is never written',
+      "for-exit-params.test.ts: without exit-copy the latch's way out leaves the guard's value in the exit",
+    ],
     rejects: (c) => c.exitCopy,
   },
   {
