@@ -676,3 +676,235 @@ describe('addressRangeOf — what a loop latch proves of the counter its back ed
     expect(rangeIn([e2, h2, side, x2], q2)).toBeUndefined();
   });
 });
+
+describe('addressRangeOf — a signed remainder by a power of two', () => {
+  const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
+  /** agbcc's (and gcc's) `x % 2^n` of a signed `x`: `t = x; if (x < 0) t = x + 2^n - 1; x - (t >> n
+   *  << n)`, with `x` = `of(entry)`; the arm `test` takes passes `x + bias`, the other edge
+   *  `x + positiveBias`, and the floor is scaled by `scale`. */
+  const srem = (
+    of: (entry: ReturnType<typeof block>, p: Value) => Value,
+    {
+      n = 3,
+      bias = 2 ** n - 1,
+      positiveBias = 0,
+      scale = 2 ** n,
+      test = 'icmp_slt',
+    }: { n?: number; bias?: number; positiveBias?: number; scale?: number; test?: string } = {},
+  ) => {
+    const p = v();
+    const entry = block([p]);
+    const x = of(entry, p);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    const zero = k(entry, 0);
+    condBr(
+      entry,
+      entry.op(test, {}, [x, zero]),
+      [neg, []],
+      [join, [positiveBias === 0 ? x : entry.op('add', {}, [x, k(entry, positiveBias)])]],
+    );
+    br(neg, join, [neg.op('add', {}, [x, k(neg, bias)])]);
+    const floor = join.op('mul', {}, [join.op('shr_s', { imm: n }, [t]), k(join, scale)]);
+    const r = join.op('sub', {}, [x, floor]);
+    return { blocks: [entry, neg, join], join, r, x };
+  };
+  const plus = (b: ReturnType<typeof block>, x: Value, c: number) => b.op('add', {}, [x, k(b, c)]);
+
+  test('of an unknown sign it is exactly [-7, 7]: one past it fits an array, a narrowing of it does not', () => {
+    const { blocks, join, r } = srem((_e, p) => p);
+    // [-7, 7] holds words on both sides of zero: no one interval names them
+    expect(rangeIn(blocks, r)).toBeUndefined();
+    expect(rangeIn(blocks, plus(join, r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    expect(rangeIn(blocks, plus(join, r, 7))).toEqual({ lo: 0, hi: 14, stride: 1 });
+    // `(u8)(x % 8)` of a negative x is 249..255, so the narrowing keeps its whole width
+    expect(rangeIn(blocks, u8Of(join, r))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    // the bias on the edge `x >= 0` proves: x + 7 there may wrap past INT_MAX, but the shift reads
+    // the word it wrapped to, and modulo 2^32 the pair is that word's remainder less the bias
+    const ge = srem((_e, p) => p, { test: 'icmp_sge' });
+    expect(rangeIn(ge.blocks, plus(ge.join, ge.r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+  });
+
+  test('read where a test above the diamond holds, the dividend is not negative: [0, 7]', () => {
+    // `if (p >= 0) { t = p; if (p < 0) t = p + 7; p - (t >> 3 << 3) }`: the negative edge is never
+    // taken where the form is read, so the pair is p's own remainder
+    const p = v();
+    const entry = block([p]);
+    const guard = block();
+    const out = block();
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    condBr(entry, entry.op('icmp_sge', {}, [p, k(entry, 0)]), [guard, []], [out, []]);
+    condBr(guard, guard.op('icmp_slt', {}, [p, k(guard, 0)]), [neg, []], [join, [p]]);
+    br(neg, join, [plus(neg, p, 7)]);
+    const r = join.op('sub', {}, [p, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
+    const blocks = [entry, guard, out, neg, join];
+    expect(rangeAt(blocks, plus(join, r, 0), join)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeAt(blocks, u8Of(join, r), join)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // asked with nothing known where it is read, it is still any remainder
+    expect(rangeIn(blocks, plus(join, r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+  });
+
+  test('of a value known not negative it is [0, 7], exact where the floor is one constant', () => {
+    // a u8: the `x < 0` arm is never taken
+    const u8 = srem((e, p) => u8Of(e, p));
+    expect(rangeIn(u8.blocks, u8.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    expect(rangeIn(u8.blocks, u8Of(u8.join, u8.r))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // `(u8)(x % 8) * 2`, agbcc's `lsl #24; lsr #23`
+    const twice = u8.join.op('shr_u', { imm: 23 }, [u8.join.op('shl', { imm: 24 }, [u8.r])]);
+    expect(rangeIn(u8.blocks, twice)).toEqual({ lo: 0, hi: 14, stride: 2 });
+    // x in [0, 3] is its own remainder
+    const small = srem((e, p) => e.op('and', { imm: 3 }, [p]));
+    expect(rangeIn(small.blocks, small.r)).toEqual({ lo: 0, hi: 3, stride: 1 });
+    // a remainder by 32, scaled by 2 in the form: `2 * (x % 32)`
+    const scaled = srem((e, p) => u8Of(e, p), { n: 5 });
+    const by2 = scaled.join.op('shl', { imm: 1 }, [scaled.r]);
+    expect(rangeIn(scaled.blocks, by2)).toEqual({ lo: 0, hi: 62, stride: 2 });
+  });
+
+  test('a bias with no branch: `x - (x >> 3 << 3)` of any x, and `x + 7` of a u8', () => {
+    const p = v();
+    const b = block([p]);
+    const floorOf = (t: Value) => b.op('shl', { imm: 3 }, [b.op('shr_s', { imm: 3 }, [t])]);
+    expect(rangeIn([b], b.op('sub', {}, [p, floorOf(p)]))).toEqual({ lo: 0, hi: 7, stride: 1 });
+    const x = u8Of(b, p);
+    // x - 8 * floor((x + 7) / 8) is 0 at x = 0 and -7 at x = 1: [-7, 0]
+    const r = b.op('sub', {}, [x, floorOf(plus(b, x, 7))]);
+    expect(rangeIn([b], plus(b, r, 8))).toEqual({ lo: 1, hi: 8, stride: 1 });
+    // of any x, `x + 7` may wrap past INT_MAX, but the shift reads the word it wrapped to: the pair
+    // is `X - 8 * (X >> 3)` of X = x + 7, less the 7, [-7, 0] whatever x holds
+    expect(rangeIn([b], plus(b, b.op('sub', {}, [p, floorOf(plus(b, p, 7))]), 8))).toEqual({ lo: 1, hi: 8, stride: 1 });
+  });
+
+  test('a dividend that is a sum or a multiple: the pair is X % 8 whatever form X takes', () => {
+    // agbcc's `(i + 1) % 8` passes `i + 1` and `i + 8`: biases 0 and 7 off X = i + 1, not 1 and 8 off i
+    const next = srem((e, p) => plus(e, u8Of(e, p), 1));
+    expect(rangeIn(next.blocks, next.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // `(i - 3) % 8` of a u8 i: X in [-3, 252], of either sign, its negative part its own remainder
+    const back = srem((e, p) => plus(e, u8Of(e, p), -3));
+    expect(rangeIn(back.blocks, back.r)).toBeUndefined();
+    expect(rangeIn(back.blocks, plus(back.join, back.r, 8))).toEqual({ lo: 5, hi: 15, stride: 1 });
+    // `(i * 2) % 8`, X = 2 * i of any sign, and `(i + j) % 8` of two u8s
+    const twice = srem((e, p) => e.op('shl', { imm: 1 }, [p]));
+    expect(rangeIn(twice.blocks, plus(twice.join, twice.r, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    const sum = srem((e, p) => e.op('add', {}, [u8Of(e, p), u8Of(e, e.op('load', { off: 0, width: 4 }, [p]))]));
+    expect(rangeIn(sum.blocks, sum.r)).toEqual({ lo: 0, hi: 7, stride: 1 });
+    // the dividend's constant is moved out of the pair, whatever constant the outer form adds
+    expect(rangeIn(next.blocks, plus(next.join, next.r, 5))).toEqual({ lo: 5, hi: 12, stride: 1 });
+  });
+
+  test('a dividend form the outer form does not hold c times is no pair', () => {
+    // X = 2 * i on both edges, but the outer form subtracts the floor from i alone
+    const p = v();
+    const entry = block([p]);
+    const i = u8Of(entry, p);
+    const x = entry.op('shl', { imm: 1 }, [i]);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    condBr(entry, entry.op('icmp_slt', {}, [x, k(entry, 0)]), [neg, []], [join, [x]]);
+    br(neg, join, [plus(neg, x, 7)]);
+    const r = join.op('sub', {}, [i, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
+    expect(rangeIn([entry, neg, join], plus(join, r, 8))).toBeUndefined();
+    // edges whose forms differ beyond a constant: `i + 1` and `2 * i + 8`
+    const e2 = block([p]);
+    const i2 = u8Of(e2, p);
+    const n2 = block();
+    const t2 = v();
+    const j2 = block([t2]);
+    const x2 = plus(e2, i2, 1);
+    condBr(e2, e2.op('icmp_slt', {}, [x2, k(e2, 0)]), [n2, []], [j2, [x2]]);
+    br(n2, j2, [plus(n2, n2.op('shl', { imm: 1 }, [i2]), 8)]);
+    const r2 = j2.op('sub', {}, [x2, j2.op('shl', { imm: 3 }, [j2.op('shr_s', { imm: 3 }, [t2])])]);
+    expect(rangeIn([e2, n2, j2], plus(j2, r2, 8))).toBeUndefined();
+  });
+
+  test('what is no remainder pair: a bias out of range, another x, other coefficients; and what is one', () => {
+    const plus8 = (s: ReturnType<typeof srem>) => rangeIn(s.blocks, plus(s.join, s.r, 8));
+    // a bias of 8 is not below 2^3
+    expect(plus8(srem((_e, p) => p, { bias: 8 }))).toBeUndefined();
+    // biasing the non-negative edge is still a remainder less its bias, x + 7 wrapped or not
+    expect(plus8(srem((_e, p) => p, { positiveBias: 7, bias: 0 }))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    // 4 * (t >> 3) is not 2^3 times it
+    expect(plus8(srem((_e, p) => p, { scale: 4 }))).toBeUndefined();
+    // an edge that passes another value
+    const p = v();
+    const entry = block([p]);
+    const y = entry.op('load', { off: 0, width: 4 }, [v()]);
+    const neg = block();
+    const t = v();
+    const join = block([t]);
+    condBr(entry, entry.op('icmp_slt', {}, [p, k(entry, 0)]), [neg, []], [join, [p]]);
+    br(neg, join, [neg.op('add', {}, [y, k(neg, 7)])]);
+    const r = join.op('sub', {}, [p, join.op('shl', { imm: 3 }, [join.op('shr_s', { imm: 3 }, [t])])]);
+    expect(rangeIn([entry, neg, join], plus(join, r, 8))).toBeUndefined();
+    // two arms that no compare on x separates: each edge's part is bounded with nothing known of x
+    const q = v();
+    const e2 = block([q, p]);
+    const n2 = block();
+    const t2 = v();
+    const j2 = block([t2]);
+    condBr(e2, e2.op('load', { off: 0, width: 1 }, [v()]), [n2, []], [j2, [p]]);
+    br(n2, j2, [n2.op('add', {}, [p, k(n2, 7)])]);
+    const r2 = j2.op('sub', {}, [p, j2.op('shl', { imm: 3 }, [j2.op('shr_s', { imm: 3 }, [t2])])]);
+    expect(rangeIn([e2, n2, j2], plus(j2, r2, 8))).toEqual({ lo: 1, hi: 15, stride: 1 });
+    // agbcc's `x % 2` is `x - ((x + (x >>> 31)) >> 1 << 1)`: its bias is a term in [0, 1], and the
+    // pair is in [-1, 1]
+    const b = block([p]);
+    const t3 = b.op('add', {}, [p, b.op('shr_u', { imm: 31 }, [p])]);
+    const r3 = b.op('sub', {}, [p, b.op('shl', { imm: 1 }, [b.op('shr_s', { imm: 1 }, [t3])])]);
+    expect(rangeIn([b], plus(b, r3, 2))).toEqual({ lo: 1, hi: 3, stride: 1 });
+    // a term bias that may reach 2^k is none: `x >>> 30` is up to 3
+    const t4 = b.op('add', {}, [p, b.op('shr_u', { imm: 30 }, [p])]);
+    const r4 = b.op('sub', {}, [p, b.op('shl', { imm: 1 }, [b.op('shr_s', { imm: 1 }, [t4])])]);
+    expect(rangeIn([b], plus(b, r4, 2))).toBeUndefined();
+  });
+});
+
+describe('addressRangeOf — a remainder op is bounded by its divisor', () => {
+  const k = (b: ReturnType<typeof block>, value: number) => b.op('const', { value });
+  const narrowest = (blocks: Block[], x: Value) =>
+    literalAddresses(blocks, undefined).addressRangeOf(x, undefined, 'narrowest');
+
+  test("IDO's `div; mfhi`: `i % 30` of any i is [-29, 29], `(u32)i % 60` is [0, 59]", () => {
+    const p = v();
+    const b = block([p]);
+    const s = b.op('smod', {}, [p, k(b, 30)]);
+    // words on both sides of zero: no word interval names them, the signed window does
+    expect(rangeIn([b], s)).toBeUndefined();
+    expect(narrowest([b], s)).toEqual({ lo: -29, hi: 29, stride: 1 });
+    expect(rangeIn([b], b.op('add', {}, [s, k(b, 30)]))).toEqual({ lo: 1, hi: 59, stride: 1 });
+    expect(rangeIn([b], b.op('umod', {}, [p, k(b, 60)]))).toEqual({ lo: 0, hi: 59, stride: 1 });
+    // a negative divisor bounds by its magnitude
+    expect(narrowest([b], b.op('smod', {}, [p, k(b, -8)]))).toEqual({ lo: -7, hi: 7, stride: 1 });
+  });
+
+  test('the dividend narrows it: its sign, or itself where it is already smaller than the divisor', () => {
+    const p = v();
+    const b = block([p]);
+    const byte = u8Of(b, p);
+    expect(rangeIn([b], b.op('smod', {}, [byte, k(b, 30)]))).toEqual({ lo: 0, hi: 29, stride: 1 });
+    expect(rangeIn([b], b.op('umod', {}, [byte, k(b, 300)]))).toEqual({ lo: 0, hi: 255, stride: 1 });
+    const small = b.op('and', { imm: 3 }, [p]);
+    expect(rangeIn([b], b.op('smod', {}, [small, k(b, 30)]))).toEqual({ lo: 0, hi: 3, stride: 1 });
+    // a signed byte by 100 is itself; by 30, [-29, 29]
+    const sbyte = b.op('sext', { width: 8 }, [p]);
+    expect(narrowest([b], b.op('smod', {}, [sbyte, k(b, 200)]))).toEqual({ lo: -128, hi: 127, stride: 1 });
+    expect(narrowest([b], b.op('smod', {}, [sbyte, k(b, 30)]))).toEqual({ lo: -29, hi: 29, stride: 1 });
+  });
+
+  test('a divisor that may be zero, or of either sign, bounds nothing; a runtime one bounded away from zero does', () => {
+    const [p, q] = [v(), v()];
+    const b = block([p, q]);
+    expect(narrowest([b], b.op('umod', {}, [p, q]))).toBeUndefined();
+    expect(narrowest([b], b.op('smod', {}, [p, q]))).toBeUndefined();
+    const nib = b.op('and', { imm: 15 }, [q]);
+    expect(narrowest([b], b.op('umod', {}, [p, nib]))).toBeUndefined();
+    expect(narrowest([b], b.op('smod', {}, [p, k(b, 0)]))).toBeUndefined();
+    const one = b.op('add', {}, [nib, k(b, 1)]);
+    expect(rangeIn([b], b.op('umod', {}, [p, one]))).toEqual({ lo: 0, hi: 15, stride: 1 });
+    expect(narrowest([b], b.op('smod', {}, [p, one]))).toEqual({ lo: -15, hi: 15, stride: 1 });
+  });
+});

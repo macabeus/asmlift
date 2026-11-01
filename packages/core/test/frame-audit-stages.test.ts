@@ -345,6 +345,68 @@ describe('classifyFrameUses', () => {
     expect(reachOf(8)).toEqual([{ lo: 1, hi: 16 }]);
     expect(reachOf(9)).toEqual([{ lo: 1, hi: 18 }]);
   });
+
+  // IDO's `a[i % 32 + 32]` on a `u8 a[64]` at sp+0 folds the `+ 32` into the base, laddr@32, and
+  // spells the remainder `t = i & 31; if (i < 0 && t != 0) t -= 32`: an index in [-32, 31], whose
+  // words straddle zero, reaches [0, 64) from there; `(u8)t` of the same is [0, 255] and reaches
+  // [32, 288)
+  test('records the bytes a runtime index whose words straddle zero may reach, as signed integers', () => {
+    const reachOf = (narrowed: boolean) => {
+      const i = value();
+      const [m, zero, minus] = [konst(31), konst(0), konst(-32)];
+      const t = mkOp('and', { operands: [i, m.results[0]], results: [value()] });
+      const neg = mkOp('icmp_slt', { operands: [i, zero.results[0]], results: [value()] });
+      const nz = mkOp('icmp_eq', { operands: [t.results[0], zero.results[0]], results: [value()] });
+      const down = mkOp('add', { operands: [t.results[0], minus.results[0]], results: [value()] });
+      const j = value();
+      const a = laddr(32);
+      const up = mkOp('shl', { operands: [j], results: [value()], attrs: { imm: 24 } });
+      const u8 = mkOp('shr_u', { operands: [up.results[0]], results: [value()], attrs: { imm: 24 } });
+      const at = mkOp('add', { operands: [a.results[0], narrowed ? u8.results[0] : j], results: [value()] });
+      const join: Block = {
+        params: [j],
+        ops: [a, ...(narrowed ? [up, u8] : []), at, load(at.results[0], 0, 1), ret()],
+      };
+      const lower: Block = {
+        params: [],
+        ops: [down, mkOp('br', { successors: [{ block: join, args: [down.results[0]] }] })],
+      };
+      const check: Block = {
+        params: [],
+        ops: [
+          nz,
+          mkOp('cond_br', {
+            operands: [nz.results[0]],
+            successors: [
+              { block: join, args: [t.results[0]] },
+              { block: lower, args: [] },
+            ],
+          }),
+        ],
+      };
+      const entry: Block = {
+        params: [i],
+        ops: [
+          m,
+          zero,
+          minus,
+          t,
+          neg,
+          mkOp('cond_br', {
+            operands: [neg.results[0]],
+            successors: [
+              { block: check, args: [] },
+              { block: join, args: [t.results[0]] },
+            ],
+          }),
+        ],
+      };
+      const { uses } = classify([entry, check, lower, join], { owned: { from: 0, to: 64 } });
+      return uses.indexed.get(32)?.map((x) => x.reach);
+    };
+    expect(reachOf(false)).toEqual([{ lo: 0, hi: 64 }]);
+    expect(reachOf(true)).toEqual([{ lo: 32, hi: 288 }]);
+  });
 });
 
 describe('readWindow', () => {

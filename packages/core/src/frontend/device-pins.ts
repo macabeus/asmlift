@@ -69,8 +69,11 @@ export interface LiteralAddresses {
   /** every value the word `v` may hold, as a strided unsigned interval, or undefined when this
    *  cannot bound it: not only the addresses an address may denote — a runtime index into a frame
    *  object is bounded here too (frame-objects.ts `indexedAccess`); asked `at` the block that reads
-   *  `v`, also under what the branches above that block prove there */
-  addressRangeOf(v: Value, at?: Block): StridedRange | undefined;
+   *  `v`, also under what the branches above that block prove there. In the `narrowest` window,
+   *  for an index added to a base: the signed integers those words are where that interval is
+   *  narrower (`lo` then below 0: IDO folds `+ 32` into the frame base, and its `i % 32` index is
+   *  [-32, 31] from there, where the words are every word) */
+  addressRangeOf(v: Value, at?: Block, window?: 'word' | 'narrowest'): StridedRange | undefined;
 }
 
 /** `literalAddrOf`: `const` is the bare pool word, `gaddr` is the same word after the symbol map
@@ -153,7 +156,7 @@ export function literalAddresses(irBlocks: readonly Block[], symbols: SymbolMap 
     defOf,
     constOf,
     literalAddrOf: (v) => literalAddrOf(v),
-    addressRangeOf: (v, at) => stridedRange(rangeCtx, v, at),
+    addressRangeOf: (v, at, window) => stridedRange(rangeCtx, v, at, window),
   };
 }
 
