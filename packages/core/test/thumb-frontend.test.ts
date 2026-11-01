@@ -4265,6 +4265,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         expect(src).toContain('    u8 sp0[16];\n    u8 sp16[16];\n');
         expect(src).toContain('memcpy(sp0, &gS1, 16);\n    memcpy(sp16, &gS2, 16);\n    return sp0[3] + sp16[5];');
       });
+      // …and at a RUNTIME index, whose reach the audit bounded inside `b` before it split the
+      // object: the element of the part, `sp16[15 & a0]`, read and written, never the cast
+      // `((u8 *)sp16)[15 & a0]` the one object's bytes get. Verbatim agbcc for
+      // `return a[3] + b[i & 15];` and `b[i & 15] = v; return a[3] + b[5];`; each lift recompiles
+      // to the same instructions.
+      test('a runtime index into one of two copied arrays is an element of that part', () => {
+        const head =
+          '\tadd\tsp, sp, #-0x20\n\tadd\tr5, r0, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n' +
+          '\tadd\tr4, sp, #0x10\n\tldr\tr1, .L3+0x4\n\tadd\tr0, r4, #0\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n';
+        const pool = '\t.align\t2, 0\n.L3:\n\t.word\tgS1\n\t.word\tgS2\n';
+        const read =
+          `cpyidx:\n\tpush\t{r4, r5, lr}\n${head}\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x3]\n\tmov\tr1, #0xf\n` +
+          '\tand\tr1, r1, r5\n\tadd\tr4, r4, r1\n\tldrb\tr1, [r4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x20\n' +
+          `\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n${pool}`;
+        expect(decompile('cpyidx', read, ARMV4T_AGBCC).source).toContain('return sp0[3] + sp16[15 & a0];');
+        const write =
+          `cpyset:\n\tpush\t{r4, r5, r6, lr}\n${head.replace('\tldr\tr1, .L3\n', '\tadd\tr6, r1, #0\n\tldr\tr1, .L3\n')}` +
+          '\tmov\tr0, #0xf\n\tand\tr0, r0, r5\n\tadd\tr0, r4, r0\n\tstrb\tr6, [r0]\n\tmov\tr0, sp\n' +
+          '\tldrb\tr0, [r0, #0x3]\n\tldrb\tr1, [r4, #0x5]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x20\n' +
+          `\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n${pool}`;
+        expect(decompile('cpyset', write, ARMV4T_AGBCC).source).toContain(
+          '    sp16[15 & a0] = a1;\n    return sp0[3] + sp16[5];',
+        );
+      });
       // the same pair with eight values live across two `sink` calls, at agbcc -O2: reload puts the
       // eighth one's spill slot ABOVE the arrays, at [sp,#0x20] (the Thumb frame grows up). Kept in
       // the one object it would join `b`; handed back to the slot model (`reliftRange`), it is a
