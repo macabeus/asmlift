@@ -1,5 +1,5 @@
 // UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`): `FOR_PLAN_GATES`,
-// and `FOR_PLAN_IV_GATES`. Each SOUND gate the suite does not already guard elsewhere is dropped
+// `FOR_PLAN_IV_GATES` and `FOR_BOUND_GATES`. Each SOUND gate the suite does not already guard elsewhere is dropped
 // here and the pass re-run on a fixture it refuses: the `for` then lifts and is
 // wrong — the trace oracle (`irAgreement`) disagrees with the IR, a contract fails, or, where the
 // oracle cannot judge (a division, a load from a parameter's address), the emitted C shows the op
@@ -17,7 +17,13 @@ import { verify } from '../src/ir/verify';
 import { type Gate, tallying, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { recomputeDerivedParams } from '../src/raise/unpre';
-import { FOR_PLAN_GATES, FOR_PLAN_IV_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import {
+  FOR_BOUND_GATES,
+  FOR_PLAN_GATES,
+  FOR_PLAN_IV_GATES,
+  type StructureHooks,
+  structure,
+} from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 500 }, (_, i) => i + 1);
@@ -27,7 +33,9 @@ const dropping = (id: string): StructureHooks => {
   const has = <C>(t: readonly Gate<C>[]) => t.some((g) => g.id === id);
   return has(FOR_PLAN_GATES)
     ? { forPlanGates: without(FOR_PLAN_GATES, id) }
-    : { forPlanIvGates: without(FOR_PLAN_IV_GATES, id) };
+    : has(FOR_BOUND_GATES)
+      ? { forBoundGates: without(FOR_BOUND_GATES, id) }
+      : { forPlanIvGates: without(FOR_PLAN_IV_GATES, id) };
 };
 
 const lift = (ir: string, hooks: StructureHooks = {}) => {
@@ -243,16 +251,31 @@ test('`i + 1 != hi` under the guard `!(lo < hi)` reads as `i < hi`', () => {
   expect(r.agreement.disagree).toBe(0);
 });
 
+const UNSIGNED_LE = srFor({ guard: '%4: u32 = icmp_ult %1, %0', test: IDO_LE });
+
 test('the `+ 1` bound under an UNSIGNED guard stays refused: at `hi == UINT_MAX` C would never leave', () => {
-  expect(() => lift(srFor({ guard: '%4: u32 = icmp_ult %1, %0', test: IDO_LE }))).toThrow(LOOP_EXIT);
+  expect(() => lift(UNSIGNED_LE)).toThrow(LOOP_EXIT);
 });
 
+test('without bound-plus-one-unsigned an unsigned `+ 1` bound reads as `<=`', () => {
+  // the oracle draws no `hi == UINT_MAX`, the one input where the two differ, so the C is the witness
+  const r = refusedOnlyBy('bound-plus-one-unsigned', UNSIGNED_LE);
+  expect(r.src).toMatch(/for \(v0 = a0; [^;]*a1[^;]* >= [^;]*v0[^;]*; v0 = v0 \+ 1\)/);
+});
+
+const STEP_TWO = srFor({ test: IDO_LE }).replace(
+  '%36: s32 = add %5, %35',
+  '%97: s32 = const {value=2}\n  %36: s32 = add %5, %97',
+);
+
 test('a step of two reads no bound', () => {
-  const ir = srFor({ test: IDO_LE }).replace(
-    '%36: s32 = add %5, %35',
-    '%97: s32 = const {value=2}\n  %36: s32 = add %5, %97',
-  );
-  expect(() => lift(ir)).toThrow(LOOP_EXIT);
+  expect(() => lift(STEP_TWO)).toThrow(LOOP_EXIT);
+});
+
+test('without bound-step-not-unit a step of two reads the `!=` as a compare', () => {
+  // `i + 2 != hi + 1` never leaves where `hi - lo` is even, and `hi >= i` does
+  const r = refusedOnlyBy('bound-step-not-unit', STEP_TWO);
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 2\)/);
 });
 
 test('a test against a value derived from the IV, not the IV itself, reads no bound', () => {
@@ -292,4 +315,43 @@ test("IDO's whole counted loop: the `+ 1` bound and a stride together", () => {
   expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
   expect(r.agreement.judged).toBeGreaterThan(0);
   expect(r.agreement.disagree).toBe(0);
+});
+
+test('without stride-escapes the code after the loop reads a stride never written', () => {
+  // `for (i = 0; ..; i++)` with no guard (the first test folds): the header dominates the exit, and
+  // the code there calls `exitv` on the stride itself, whose name the `for` never writes
+  const guardless = srFor({
+    ...STRIDE,
+    guard: '%39: s32 = const {value=40}\n  %80: s32 = const {value=1}',
+    entryDerived: '%91: s32 = const {value=0}\n  %2: s32 = add %91, %3',
+    test: '%37: u32 = icmp_slt %39, %36',
+  })
+    .replace(
+      'cond_br %4, ^bb12(), ^bb16()\n^bb16():\n  %80: s32 = const {value=1}\n  br ^bb1(%0, %2)',
+      'br ^bb1(%91, %2)',
+    )
+    .replace('^bb12():\n', '^bb12():\n  %61: s32 = call %6 {target="exitv"}\n');
+  expect(guardless).not.toContain('bb16');
+  const r = refusedOnlyBy('stride-escapes', guardless);
+  expect(() => assertLocalsWritten(r.sfn)).toThrow(/read but never assigned/);
+});
+
+// `struct E *b = gP; for (..) .. b[i] ..` on IDO: the base is loaded once ahead of the loop and kept
+// in a register, unnamed, so G spells it as the load itself
+const LOADED_BASE = srFor({
+  ...STRIDE,
+  test: IDO_LE,
+  entryDerived:
+    '%93: s32* = gaddr {sym="gP"}\n  %92: s32 = load %93 {off=0, signed=true, width=4}\n  %2: s32 = add %0, %92',
+});
+
+test('a stride whose base is an unnamed load stays a variable', () => {
+  expect(() => lift(LOADED_BASE)).toThrow(LOOP_EXIT);
+});
+
+test('without stride-leaf-reread a base loaded once is loaded again on every trip', () => {
+  // the calls in the body may write `gP`; the oracle's calls write no memory, so the C is the witness
+  const r = refusedOnlyBy('stride-leaf-reread', LOADED_BASE);
+  const body = r.src.slice(r.src.indexOf('for ('));
+  expect(body).toMatch(/f\([^)]*gP/);
 });

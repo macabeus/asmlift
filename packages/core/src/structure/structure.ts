@@ -73,7 +73,15 @@ import {
   reachForward,
   successorsOf,
 } from '../ir/core';
-import { effectful, orderSensitive, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
+import {
+  effectful,
+  orderSensitive,
+  placedAt,
+  qualified,
+  qualifiedBy,
+  reevalUnsafe,
+  spelledWhenDead,
+} from '../ir/discipline';
 import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, FLOAT_RESIZE, FLOAT_TO_INT, INT_TO_FLOAT, NEGATED_FCMP, WIDE_BITS, opSig } from '../ir/opcodes';
 import {
@@ -1601,6 +1609,15 @@ export const FOR_PLAN_GATES: readonly Gate<ForPlanCandidate>[] = [
 /** `forPlanAt`'s rules that read the update's and the init's copies, once those are made. Lazy, as
  *  `ForPlanCandidate` is. */
 export interface ForPlanIv {
+  /** a stride's param or its stepped value reaches an edge but the back edge's own slot, an op
+   *  outside the loop, the test or the counter's update (A SIBLING'S STRIDE) */
+  readonly strideEscapes: boolean;
+  /** a stride is of a sibling other than the counter, or a body value other than the counter's
+   *  param and the latch's ops holds the counter's name, or one holds a stride's or a leaf's name
+   *  but that value itself */
+  readonly strideNameShared: boolean;
+  /** a leaf of a stride's G is neither named nor an operand-free op that reads no memory */
+  readonly strideLeafReread: boolean;
   /** the test reads the name the update writes, other than through its back-edge value */
   readonly testReadsUpdate: boolean;
   /** the guard is not the test on the entry values, or with no guard the test does not fold to stay
@@ -1623,8 +1640,31 @@ export interface ForPlanIv {
  *  reads; and three refusals left inline ahead of the table — init copies that are cyclic or whose
  *  IV init reads another init copy's name (`copySetIsCyclic`, the `init` clause runs after the
  *  copies ahead of the `for`), and a test or update that reads an inner loop's value
- *  (`latchInnerSub`). */
+ *  (`latchInnerSub`). Nor the scan of the emitted `for` for a read of a stride's name, which only an
+ *  emitted loop can answer (DEFENSIVE: every read of the param renders G). */
 export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
+  {
+    id: 'stride-escapes',
+    why: 'the `for` writes a stride nowhere, so a read of it past its own back-edge slot would see no value',
+    sound: true,
+    guardedBy: 'for-plan-gates.test.ts: without stride-escapes the code after the loop reads a stride never written',
+    rejects: (c) => c.strideEscapes,
+  },
+  {
+    // DEFENSIVE: the naming walk names a header param and every body value apart, unless coalescing
+    // merges them, and no fixture or probe has brought a merged one here
+    id: 'stride-name-shared',
+    why: 'a stride is read as G of the counter and of its leaves by name, so each name must hold that one value in the loop (defensive)',
+    sound: false,
+    rejects: (c) => c.strideNameShared,
+  },
+  {
+    id: 'stride-leaf-reread',
+    why: 'a stride is spelled at every read, so a leaf spelled as its own expression would be evaluated again there, past the stores and calls between',
+    sound: true,
+    guardedBy: 'for-plan-gates.test.ts: without stride-leaf-reread a base loaded once is loaded again on every trip',
+    rejects: (c) => c.strideLeafReread,
+  },
   {
     id: 'test-reads-update',
     why: 'the test runs after the update, so a read of the name it writes would see the next trip',
@@ -1666,6 +1706,46 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
     guardedBy:
       'for-exit-params.test.ts: without past-reads-iv the code past a guardless loop reads the IV past its update',
     rejects: (c) => c.pastReadsIv,
+  },
+];
+
+/** One reading of a latch's `!=` test as a compare against its bound (`forPlanAt`, THE LATCH TEST
+ *  AS ITS BOUND). */
+export interface ForBoundReading {
+  /** the IV's back-edge value is not `i + 1` */
+  readonly stepNotUnit: boolean;
+  /** the bound (`hi` of the `+ 1` form, `H` of the strict one) is computed in the loop */
+  readonly boundInLoop: boolean;
+  /** the `+ 1` form read as an unsigned compare */
+  readonly plusOneUnsigned: boolean;
+}
+
+/** `forPlanAt`'s rules over each reading of the latch's `!=` test as a compare. The argument for each
+ *  is in the THE LATCH TEST AS ITS BOUND block. Not in the table: a test that is no `==`/`!=` of the
+ *  IV's back-edge value, which names no bound to read; and the reading's agreement with the guard,
+ *  which `entry-test-differs` asks of the reading this table admits. */
+export const FOR_BOUND_GATES: readonly Gate<ForBoundReading>[] = [
+  {
+    id: 'bound-step-not-unit',
+    why: 'a counter that steps by more than one can step past the bound the `!=` waits for, which a compare would leave at',
+    sound: true,
+    guardedBy: 'for-plan-gates.test.ts: without bound-step-not-unit a step of two reads the `!=` as a compare',
+    rejects: (c) => c.stepNotUnit,
+  },
+  {
+    // DEFENSIVE: the test reads only the latch's ops and the header's params (`test-reads-body`), a
+    // header param other than the IV is a second update copy, and a stride the test reads escapes
+    id: 'bound-in-loop',
+    why: 'the induction reads one bound on every trip, so a bound the loop computes reads nothing (defensive)',
+    sound: false,
+    rejects: (c) => c.boundInLoop,
+  },
+  {
+    id: 'bound-plus-one-unsigned',
+    why: 'an unsigned counter at a bound of UINT_MAX leaves the `!=` after one wrap and never leaves the compare',
+    sound: true,
+    guardedBy: 'for-plan-gates.test.ts: without bound-plus-one-unsigned an unsigned `+ 1` bound reads as `<=`',
+    rejects: (c) => c.plusOneUnsigned,
   },
 ];
 
@@ -2488,6 +2568,8 @@ export interface StructureHooks {
    *  same way and, wrapped in `tallying`, the census of which rule refuses a loop's `for`. */
   forPlanGates?: readonly Gate<ForPlanCandidate>[];
   forPlanIvGates?: readonly Gate<ForPlanIv>[];
+  /** the rules over each reading of a latch's `!=` test as a compare (`FOR_BOUND_GATES`) */
+  forBoundGates?: readonly Gate<ForBoundReading>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -9637,7 +9719,9 @@ function structureRanked(
   // structurer runs, so the header carries the IV alone and its test may read the op as it reads any.
   //
   // The rules are tables: `FOR_PLAN_GATES` past the loop's shape, `FOR_PLAN_IV_GATES` over the
-  // copies; each table's doc comment names what it leaves out.
+  // copies, `FOR_BOUND_GATES` over each reading of the latch's test; each table's doc comment names
+  // what it leaves out.
+  //
   // A SIBLING'S STRIDE. IDO keeps `gE[i]` of `for (i = lo; i <= hi; i++)` in a pointer the header
   // takes beside `i`, `gE + (lo << 3)` on entry and stepped by 8 in the latch; raise/unpre.ts
   // `strideDerivedParams` proves it G(i) at every entry, by induction. `while (1)` spells it as the
@@ -9648,10 +9732,17 @@ function structureRanked(
   // `for` does not render G:
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
   //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
-  //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here);
+  //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
+  //     (`stride-escapes`);
   //   • no value in the body but the counter's param and the latch's ops is named for the counter,
   //     and none for a leaf of G or for the param (the latch is never rendered, and the update is the
-  //     one write of the counter in the `for`); a read of a leaf G adds is then a read of that leaf;
+  //     one write of the counter in the `for`); a read of a NAMED leaf is then a read of that leaf
+  //     (`stride-name-shared`);
+  //   • every leaf is named, or an operand-free op that reads no memory (a constant, a symbol's
+  //     address). Any other is spelled as its own expression at each read, so evaluated again there:
+  //     IDO keeps `b = gP` of `struct E *b = gP; for (..) .. b[i] ..` in a register, unnamed, and G
+  //     spelled `gP + (i << 3)` would load `gP` again on every trip, past the calls that may write it
+  //     (`stride-leaf-reread`);
   //   • and, checked on the emitted loop, nothing the `for` spells reads the param's name.
   /** The stride's param and its back-edge value stay inside the loop, and off its test and update. */
   const strideStaysInLoop = (
@@ -9764,61 +9855,71 @@ function structureRanked(
   //     loop only where `lo <= hi` (`lo < H`). By induction `i` stays in `[lo, hi]` (`[lo, H)`) on
   //     the header: the back edge is taken only where `i' != hi + 1`, so `i != hi` and `i' <= hi`.
   //     Then `i' != hi + 1` and `i' <= hi` agree on every trip where `i < hi`, and at `i == hi` both
-  //     leave unless `hi` is INT_MAX, where `i++` overflows. That is the source's own signed overflow,
-  //     which C leaves undefined, so the `for` admits the asm there; a host differential under
-  //     -fwrapv would flag that one input. `i' != H` and `i' < H` agree on every trip, any sign.
+  //     leave unless `hi` is INT_MAX. There the asm leaves after `i + 1` wraps, and the `for` never
+  //     leaves. The asm does not say the source overflowed there: an unsigned counter under a signed
+  //     guard (`u32 i; if (lo <= hi) do .. while (++i != (u32)hi + 1)`) compiles to the same bytes
+  //     and is defined at INT_MAX. The overflow is asmlift's own, declaring the counter `s32` as the
+  //     `while (1)` reading does too (its `i + 1` overflows at the same trip), so both spellings are
+  //     undefined there and the `for` is taken; a host differential under -fwrapv flags only the
+  //     `for`, on that one input. `i' != H` and `i' < H` agree on every trip, any sign.
   //   • the `+ 1` form is SIGNED ONLY. IDO emits it for an unsigned `i <= hi` as well (`sltu` guard,
   //     `bne` against `hi + 1`), and there `hi == UINT_MAX` is a defined loop the asm leaves after one
-  //     wrap and C's `<=` never does, so it stays the `!=` and `entry-test-differs` refuses it.
-  // A step other than one, a test against a pointer, and a bound computed in the loop read nothing.
+  //     wrap and C's `<=` never does: `bound-plus-one-unsigned` refuses that reading, and with no
+  //     other `entry-test-differs` refuses the `for`.
+  // The rules are `FOR_BOUND_GATES`, asked of each reading; a test against a pointer reads nothing.
+  /** A reading of the latch's test: the compare op (none for the latch's own test, which is `cond`),
+   *  its result, and which way it stays in the loop. The op is held here, never in `defs`. */
+  type TestReading = { cond: Value; contIsTaken: boolean; op?: Op };
   const boundReadings = (
     cond: Value,
     contIsTaken: boolean,
     stepped: Value,
     ivParam: Value,
     body: ReadonlySet<Block>,
-  ): { cond: Value; contIsTaken: boolean }[] => {
+  ): TestReading[] => {
     const c = defs.get(cond);
-    const step = defs.get(stepped);
     const constOf = (v: Value): number | null => {
       const d = defs.get(v);
       return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d.attrs.value | 0 : null;
     };
-    /** `v` is `x + 1`: `x` */
-    const lessOne = (v: Value): Value | null => {
+    /** `v` is `x + k`, `k` a constant: `[x, k]` */
+    const plusConst = (v: Value): [Value, number] | null => {
       const d = defs.get(v);
       if (d?.opcode !== 'add' || d.operands.length !== 2) {
         return null;
       }
-      return constOf(d.operands[1]) === 1 ? d.operands[0] : constOf(d.operands[0]) === 1 ? d.operands[1] : null;
+      const [a, b] = d.operands;
+      const kb = constOf(b);
+      const ka = constOf(a);
+      return kb !== null ? [a, kb] : ka !== null ? [b, ka] : null;
     };
-    const fromOutside = (v: Value): boolean => {
+    const inLoop = (v: Value): boolean => {
       const d = defs.get(v);
       const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
-      return (at !== undefined && !body.has(at)) || constOf(v) !== null;
+      return constOf(v) === null && (at === undefined || body.has(at));
     };
+    const step = plusConst(stepped);
     // stays in where `i' != H`: a `!=` taken into the loop, or an `==` taken out of it
     if (
       c === undefined ||
       c.operands.length !== 2 ||
       (c.opcode === 'icmp_ne') !== contIsTaken ||
       (c.opcode !== 'icmp_ne' && c.opcode !== 'icmp_eq') ||
-      step === undefined ||
-      lessOne(stepped) !== ivParam ||
+      step?.[0] !== ivParam ||
       !c.operands.includes(stepped)
     ) {
       return [];
     }
     const bound = c.operands[c.operands[0] === stepped ? 1 : 0];
-    const synth = (opcode: string, operands: Value[], stay: boolean): { cond: Value; contIsTaken: boolean } => {
+    const hi = plusConst(bound)?.[1] === 1 ? plusConst(bound)![0] : null;
+    const synth = (opcode: string, operands: Value[], stay: boolean): TestReading => {
       const r = mkValue(cond.type);
-      defs.set(r, { opcode, operands, results: [r], attrs: {}, successors: [] });
-      return { cond: r, contIsTaken: stay };
+      return { cond: r, contIsTaken: stay, op: { opcode, operands, results: [r], attrs: {}, successors: [] } };
     };
-    /** the four spellings of `i' < x` (`strict`) or `i' <= x`, signed or not */
+    /** the four spellings of `i' < x` (`strict`) or `i' <= x`, signed or not, each with its rules' facts */
     const spellings = (x: Value, strict: boolean, sign: 's' | 'u') => {
       const [lt, le, gt, ge] = ['lt', 'le', 'gt', 'ge'].map((k) => `icmp_${sign}${k}`);
-      return strict
+      const reads = strict
         ? [
             synth(lt, [stepped, x], true),
             synth(gt, [x, stepped], true),
@@ -9831,11 +9932,17 @@ function structureRanked(
             synth(gt, [stepped, x], false),
             synth(lt, [x, stepped], false),
           ];
+      const facts: ForBoundReading = {
+        stepNotUnit: step[1] !== 1,
+        boundInLoop: inLoop(x),
+        plusOneUnsigned: !strict && sign === 'u',
+      };
+      return firstRejection(hooks.forBoundGates ?? FOR_BOUND_GATES, facts) === null ? reads : [];
     };
-    const hi = lessOne(bound);
     return [
-      ...(hi !== null && fromOutside(hi) ? spellings(hi, false, 's') : []),
-      ...(fromOutside(bound) ? [...spellings(bound, true, 's'), ...spellings(bound, true, 'u')] : []),
+      ...(hi !== null ? [...spellings(hi, false, 's'), ...spellings(hi, false, 'u')] : []),
+      ...spellings(bound, true, 's'),
+      ...spellings(bound, true, 'u'),
     ];
   };
   type ForPlan = {
@@ -9941,7 +10048,7 @@ function structureRanked(
       const d = defs.get(v);
       const at = d === undefined ? paramBlock.get(v) : opBlock.get(d);
       return at !== undefined && at !== h && !fl.body.has(at) && dom.get(h)!.has(at);
-    }).filter((sd) => strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body));
+    });
     const keep = (k: number): boolean => !strides.some((sd) => sd.j === k);
     const auditMark = droppedUndefCopies.length;
     const gapMark = strictGaps.length;
@@ -9967,9 +10074,6 @@ function structureRanked(
     }
     const iv = updateRecs[0].name;
     const ivInit = initRecs.find((r) => r.name === iv);
-    if (strides.length > 0 && !stridesNamed(strides, h, updateRecs[0].param, iv, latch, fl.body)) {
-      return null;
-    }
     const sub = subFor(h.params, back.args as Value[]);
     // The plain reading renders the latch's copies and test as `argAssigns` and `exprWith` do. A
     // latch may hold a materialized op its own reads alone use, which the `for` never
@@ -9999,10 +10103,6 @@ function structureRanked(
       return at === latch || (at === g && !g.ops.slice(opIndex.get(d)! + 1).some(effectful));
     };
     const contIsTaken = lterm.successors[0].block === h;
-    // THE LATCH TEST AS ITS BOUND (IDO's counted loop, at the THE LOOP AS A `for` block): the test
-    // `forPlanAt` spells, and which way it stays in the loop. The latch's own unless the guard reads
-    // it otherwise, below.
-    let test: { cond: Value; contIsTaken: boolean } = { cond, contIsTaken };
     // the test on the entry values, where it folds: each leaf a constant, each op one `evalIntPair` reads
     const atEntry = (v0: Value): number | null => {
       const v = entryVals.get(v0) ?? v0;
@@ -10088,6 +10188,40 @@ function structureRanked(
       seen.add(v);
       return defs.get(v)?.operands.some((o) => readsIv(o, seen)) ?? false;
     };
+    // THE LATCH TEST AS ITS BOUND (IDO's counted loop, at the THE LOOP AS A `for` block): the test
+    // the `for` spells, the latch's own where the guard is that test on the entry values, else the
+    // first reading of it as a compare that the guard is; none where no reading is
+    const differs = (t: TestReading): boolean => {
+      // a reading's compare is no op of the function: it is visible to `sameAtEntry` while asked
+      if (t.op !== undefined) {
+        defs.set(t.cond, t.op);
+      }
+      try {
+        if (guarded) {
+          const enterIsTaken = gterm.successors[0].block === (pre ?? h);
+          return !sameAtEntry(t.cond, gterm.operands[0], entryVals, enterIsTaken !== t.contIsTaken, atTest);
+        }
+        const first = atEntry(t.cond);
+        return first === null || (first !== 0) !== t.contIsTaken;
+      } finally {
+        if (t.op !== undefined) {
+          defs.delete(t.cond);
+        }
+      }
+    };
+    const own: TestReading = { cond, contIsTaken };
+    let reading: TestReading | null | undefined;
+    const testReading = (): TestReading | null =>
+      (reading ??= !differs(own)
+        ? own
+        : (boundReadings(cond, contIsTaken, back.args[h.params.indexOf(ivParam)] as Value, ivParam, fl.body).find(
+            (t) => !differs(t),
+          ) ?? null));
+    // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
+    const rereadable = (v: Value): boolean => {
+      const d = defs.get(v);
+      return varName.has(v) || (d !== undefined && d.operands.length === 0 && d.opcode !== 'undef' && !reevalUnsafe(d));
+    };
     // not in `FOR_PLAN_IV_GATES` (its doc comment says why)
     const inner = latchInnerSub(h, fl.body, [latch]);
     if (
@@ -10100,34 +10234,20 @@ function structureRanked(
     }
     if (
       firstRejection(hooks.forPlanIvGates ?? FOR_PLAN_IV_GATES, {
+        get strideEscapes() {
+          return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body));
+        },
+        get strideNameShared() {
+          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body);
+        },
+        get strideLeafReread() {
+          return strides.some((sd) => !sd.leaves.every(rereadable));
+        },
         get testReadsUpdate() {
           return clobbered(cond);
         },
         get entryTestDiffers() {
-          const differs = (t: { cond: Value; contIsTaken: boolean }): boolean => {
-            if (guarded) {
-              const enterIsTaken = gterm.successors[0].block === (pre ?? h);
-              return !sameAtEntry(t.cond, gterm.operands[0], entryVals, enterIsTaken !== t.contIsTaken, atTest);
-            }
-            const first = atEntry(t.cond);
-            return first === null || (first !== 0) !== t.contIsTaken;
-          };
-          if (!differs(test)) {
-            return false;
-          }
-          const bound = boundReadings(
-            cond,
-            contIsTaken,
-            back.args[h.params.indexOf(ivParam)] as Value,
-            ivParam,
-            fl.body,
-          );
-          const read = bound.find((t) => !differs(t));
-          if (read === undefined) {
-            return true;
-          }
-          test = read;
-          return false;
+          return testReading() === null;
         },
         get exitCopy() {
           return exitFound('copy');
@@ -10168,7 +10288,10 @@ function structureRanked(
         `cannot structure '${fn.name}': the \`for\` at block #${fn.blocks.indexOf(h)} lost its update or its init copy`,
       );
     }
-    const spelled = (inlined ? latchExpr(sub) : exprWith(sub))(test.cond);
+    // the latch's own where no rule asked (an ablated `entry-test-differs`)
+    const test = testReading() ?? own;
+    const spell = inlined ? latchExpr(sub) : exprWith(sub);
+    const spelled = test.op === undefined ? spell(test.cond) : lowerDef(test.op, spell);
     return {
       latch,
       inits: inits.filter((st) => st !== init),
