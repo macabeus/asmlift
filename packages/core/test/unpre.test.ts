@@ -4,11 +4,12 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { type Block, type Value, defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
-import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams } from '../src/raise/unpre';
+import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams, strideDerivedParams } from '../src/raise/unpre';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -182,6 +183,58 @@ test('a join the switch reaches by its default edge but code outside the switch 
   expect(fold(exitIr('^bb4')).n).toBe(0);
 });
 
+// IDO's counted loop (`synthetic:sw_gotocase2:ido7.1`): the loop-invariant bound `hi + 1` is
+// computed again in the delay slot of every arm's `b latch`, so the latch takes it as a parameter
+// both arms hand it. A latch is no switch join; the scope admits it as a loop's latch.
+const latchIr = (secondBound = '%9: s32 = add %1, %8') => `fn f {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0)
+^bb1(%2: s32):
+  %3: s32 = load %2 {off=0, signed=true, width=4}
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb3()
+^bb2():
+  %6: s32 = const {value=1}
+  %7: s32 = add %1, %6
+  br ^bb4(%7)
+^bb3():
+  %10: s32 = call %2 {target="side1"}
+  %8: s32 = const {value=1}
+  ${secondBound}
+  br ^bb4(%9)
+^bb4(%11: s32):
+  %12: s32 = const {value=1}
+  %13: s32 = add %2, %12
+  %14: u32 = icmp_ne %11, %13
+  cond_br %14, ^bb1(%13), ^bb5()
+^bb5():
+  ret
+}
+`;
+
+test("a loop's latch every arm hands the bound `hi + 1` recomputes it, and its test reads it inline", () => {
+  const { n, fn } = fold(latchIr());
+  expect(n).toBe(1);
+  expect(fn.blocks[4].params).toHaveLength(0);
+});
+
+test('the recomputed value takes the type of the parameter it replaces, not the arm op it was cloned from', () => {
+  // type recovery types a parameter by its uses (an unsigned compare: `u32`) and the arms' adds by
+  // their operands (`s32`); the reconciliation of declared signedness reads what stands in the
+  // parameter's place, and a `u32` counter that declared `s32` would overflow where the asm wraps
+  // (kleod's `sub_080240F4`)
+  const { n, fn } = fold(latchIr().replace('^bb4(%11: s32):', '^bb4(%11: u32):'));
+  expect(n).toBe(1);
+  const root = defOpMap(fn).get(fn.blocks[4].ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
+  expect(root.opcode).toBe('add');
+  expect(root.results[0].type).toEqual({ kind: 'int', width: 32, signed: false });
+});
+
+test('a latch handed two different values keeps its parameter', () => {
+  expect(fold(latchIr('%9: s32 = add %0, %8')).n).toBe(0);
+});
+
 test('the fold runs last in the pre-structure record', () => {
   expect(PRE_STRUCTURE_FOLDS.map((f) => f.id).at(-1)).toBe('unpre');
 });
@@ -268,4 +321,83 @@ test('a load of the sibling is not recomputed: memory may change between the edg
 test('the derived-param fold runs just ahead of the congruent one', () => {
   const ids = PRE_STRUCTURE_FOLDS.map((f) => f.id);
   expect(ids.indexOf('derivedparam')).toBe(ids.indexOf('unpre') - 1);
+});
+
+// ── A SIBLING'S STRIDE (`strideDerivedParams`) ───────────────────────────────────────────────────
+//
+// IDO's `for (i = lo; i <= hi; i++) .. gE[i] ..`: the entry hands the header `(gE + (lo << 3), lo)`
+// and the back edge `(p + 8, i + 1)`. `p` is G(i) = `gE + (i << 3)` at every entry, by induction.
+const strideIr = ({
+  entry = '%4: s32 = shl %0 {imm=3}\n  %5: s32 = add %4, %3',
+  step = '%11: s32 = const {value=8}',
+  base = '%3: s32 = gaddr {sym="gE"}',
+  ivStep = '%9: s32 = const {value=1}',
+} = {}) => `fn s {
+^bb0(%0: s32, %1: s32):
+  ${base}
+  ${entry}
+  br ^bb1(%5, %0)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = load %6 {off=4, signed=false, width=1}
+  %12: s32 = call %8 {target="use"}
+  ${ivStep}
+  %10: s32 = add %7, %9
+  ${step}
+  %13: s32 = add %6, %11
+  %14: u32 = icmp_slt %1, %10
+  cond_br %14, ^bb2(), ^bb1(%13, %10)
+^bb2():
+  ret
+}
+`;
+const strides = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  const defs = defOpMap(fn);
+  const dom = dominators(fn);
+  const home = new Map<Value, Block>();
+  for (const b of fn.blocks) {
+    b.params.forEach((p) => home.set(p, b));
+    b.ops.forEach((o) => o.results.forEach((r) => home.set(r, b)));
+  }
+  const h = fn.blocks[1];
+  const [entry] = fn.blocks[0].ops.at(-1)!.successors;
+  const back = fn.blocks[1].ops.at(-1)!.successors[1];
+  return strideDerivedParams(defs, h, entry, back, (v) => {
+    const at = home.get(v);
+    return at !== undefined && at !== h && dom.get(h)!.has(at);
+  });
+};
+
+test('a pointer that starts at `B + (lo << s)` and steps by `1 << s` beside `i` is G(i)', () => {
+  const got = strides(strideIr());
+  expect(got).toHaveLength(1);
+  expect(got[0]).toMatchObject({ j: 0, i: 1 });
+  expect(got[0].ops.map((o) => o.opcode)).toEqual(['shl', 'add']);
+});
+
+test('a stride of `i * M` with K = D * M is G(i) too', () => {
+  const got = strides(
+    strideIr({
+      entry: '%15: s32 = const {value=12}\n  %4: s32 = mul %0, %15\n  %5: s32 = add %3, %4',
+      step: '%11: s32 = const {value=12}',
+    }),
+  );
+  expect(got).toHaveLength(1);
+});
+
+test('a step that is not T(D) is no stride', () => {
+  expect(strides(strideIr({ step: '%11: s32 = const {value=12}' }))).toHaveLength(0);
+  // the counter stepping by two: K would have to be 16
+  expect(strides(strideIr({ ivStep: '%9: s32 = const {value=2}' }))).toHaveLength(0);
+});
+
+test('a base the caller does not place outside the loop is no stride', () => {
+  // the same IR, with the caller's dominance answer withheld for every value
+  const fn = parse(strideIr());
+  verify(fn);
+  const h = fn.blocks[1];
+  const entry = fn.blocks[0].ops.at(-1)!.successors[0];
+  const back = h.ops.at(-1)!.successors[1];
+  expect(strideDerivedParams(defOpMap(fn), h, entry, back, () => false)).toHaveLength(0);
 });

@@ -66,6 +66,7 @@ import {
   CARRIER_NAME_GATES,
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
+  FOR_BOUND_GATES,
   FOR_PLAN_GATES,
   FOR_PLAN_IV_GATES,
   FRESH_MERGE_GATES,
@@ -164,9 +165,10 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   OUTWARD_EXIT_GATES: OUTWARD_EXIT_GATES as readonly Gate<never>[],
   BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],
   // structure.ts's `forPlanAt`: a `while (1)` read as a `for` past the loop's shape, and the rules
-  // over the update's and the init's copies
+  // over the update's and the init's copies, and over each reading of the latch's test as a compare
   FOR_PLAN_GATES: FOR_PLAN_GATES as readonly Gate<never>[],
   FOR_PLAN_IV_GATES: FOR_PLAN_IV_GATES as readonly Gate<never>[],
+  FOR_BOUND_GATES: FOR_BOUND_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
