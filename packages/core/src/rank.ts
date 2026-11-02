@@ -2856,10 +2856,11 @@ export function compareScored<S extends { score: number }>(
 }
 
 /** `goto` statements in a candidate's rendered source — the readability tie-break above, asked
- *  before the casts. The one goto asmlift writes (l3/ast.ts, a jump to a case label of the switch it
- *  sits in) is a ranked spelling against goto-free copies (`/case-goto`), and where the two score
- *  alike the goto-free one is published: the goto is the narrow exception the differ has to earn,
- *  never a tie's winner. Deterministic, and total on any string. */
+ *  before the casts. Each goto asmlift writes (l3/ast.ts: a jump to a case label of the switch it
+ *  sits in, or to the `break;` that ends its arm) is a ranked spelling against a goto-free one —
+ *  copies (`/case-goto`) or a flag (`/case-end-goto`) — and where the two score alike the goto-free
+ *  one is published: a goto is the narrow exception the differ has to earn, never a tie's winner.
+ *  Deterministic, and total on any string. */
 export function gotoCount(source: string): number {
   return source.match(/\bgoto [A-Za-z_]\w*;/g)?.length ?? 0;
 }

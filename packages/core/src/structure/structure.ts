@@ -36,7 +36,9 @@
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
-// (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
+// (`goto` past that code; `TwoLevelExit`, spelled with a flag, or, where that code ends the switch
+// arm the loop sits in, by the ranked `/case-end-goto` as a goto to the arm's end, `caseEndGoto`).
+// Still DECLINED (loud
 // StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
 // merge that no flag spells (among them a third target, a second one at the enclosing loop's header
 // or past it short of its exit, and one whose code never joins the code after the first exit: `goto
@@ -1263,9 +1265,10 @@ interface ForeverLoopInfo {
 // A SECOND EXIT PAST THE CODE AFTER THE LOOP: `for (j…) { if (hit) goto next; } k(i); next: …`, the
 // `goto` a search loop takes out of its own exit region. The loop leaves to `exit` and, from the
 // blocks in `from`, to `to`, a block every path from `exit` reaches unless it leaves first
-// (`twoLevelCandidate`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
-// break;` on the edge to `to`, and the code from `exit` up to `to` under `if (f == 0)` after it
-// (`emitForever`). Only a `while (1)` takes one, and only where no other reading fits.
+// (`twoLevelCandidate`). L3 holds no `goto` past arbitrary code, so a flag spells it: `f = 0;`
+// ahead of the loop, `f = 1; break;` on the edge to `to`, and the code from `exit` up to `to` under
+// `if (f == 0)` after it (`emitForever`). Only a `while (1)` takes one, and only where no other
+// reading fits.
 //
 // OUTWARD: `for (i…) { for (j…) { if (hit) { s(j); goto out; } } k(i); } out:`, the `goto` out of
 // BOTH loops. `to` lies past the enclosing loop, and the code from it runs on to that loop's own exit
@@ -1281,7 +1284,8 @@ interface ForeverLoopInfo {
 // leaves the loop around it: agbcc threads the `goto` to the code after that loop (jump.c
 // `follow_jumps`), the merge of the switch and the exit of the loop at once. No goto-free spelling
 // matches those bytes (the flag adds a variable), so the hit rung is asked only where every
-// structuring without it declines (`LAST_RESORT_RUNGS`).
+// structuring without it declines (`LAST_RESORT_RUNGS`), and the ranked `/case-end-goto` spells the
+// flag read at such a case end as the goto itself (`caseEndGoto`).
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
