@@ -1116,6 +1116,35 @@ export class StructureError extends Error {
   }
 }
 
+/** THE COPY BUDGET: how many times one structuring may enter a region, per block of the function,
+ *  before `structure()` stops it. A region both arms of an `if` reach with no join between them is
+ *  written into each arm, and a chain of such `if`s doubles it per link — sub_0800D188 entered
+ *  3.6M statements' worth of regions over 1783 blocks, and the C printer could not hold the result.
+ *  The bound is far above anything a lifted function reaches, so it decides only between an
+ *  exponential structuring and a decline.
+ *
+ *  CENSUS (2026-11-02, the default lift of every row of both tiers in both map modes, 5,438
+ *  structurings): only `synthetic:retchain` and `synthetic:retchain_xj`, whose 32 tails are the
+ *  copies this bounds, enter more than 4 regions per block, and they peak at 9. The `--fan` sweep
+ *  of the same tree, which ran out of heap partway through the real tier, found nothing more. */
+export const COPY_BUDGET = 64;
+/** The floor under it, so a small function's legitimate copies never reach it. */
+export const COPY_BUDGET_FLOOR = 4096;
+
+/** A structuring entered more regions than the copy budget allows. Not a `StructureError`: no
+ *  rung of the ladder may read it as a refusal and go on to the next, since every rung would write
+ *  the same copies; `structure()` catches it above the ladder (`structureWithinBudget`). */
+class CopyBudgetExceeded extends Error {
+  constructor(
+    readonly block: number,
+    readonly copies: number,
+    readonly limit: number,
+  ) {
+    super(`copy budget exceeded at block #${block}`);
+    this.name = 'CopyBudgetExceeded';
+  }
+}
+
 // THE one copy of the guard shape (like fieldSpellsDot/derefStrideOk): a predecessor whose
 // cond_br decides "enter `header` vs its `exit`". The self-loop DISCOVERY classifies ownership
 // with it, and the guard-FUSION site consumes the same shape (its `takenB/fallB === li.exit`
@@ -2489,7 +2518,8 @@ export interface StructureOptions extends ArithCompilerFacts {
   // Give a DIVERGENT `if` outside every loop the block its non-returning paths meet at, ahead of
   // the CFG's join where that is EXIT or a straight-line return tail: `joinsPastReturns` below.
   // Absent, such an `if` keeps its arms divergent and everything below it is written into each arm,
-  // once more per such `if` of a chain. rank.ts enumerates it as the `/ret-join` twin.
+  // once more per such `if` of a chain. rank.ts enumerates it as the `/ret-join` twin; `structure()`
+  // also asks it, unranked, of a structuring over its copy budget (`COPY_BUDGET`).
   joinPastReturns?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
@@ -3773,6 +3803,59 @@ export function structure(
   hooks: StructureHooks = {},
   memo?: DefaultAcceptsMemo,
 ): SFn {
+  return structureWithinBudget(fn, opts, hooks, memo);
+}
+
+/** THE COPY BUDGET'S RUNG, above the whole ladder. A structuring that enters more regions than
+ *  `COPY_BUDGET` allows is stopped where it crosses the bound, and the ladder is run again asking
+ *  the `joinPastReturns` reading (`overBudget`, not the option, so the default-accepts guard does
+ *  not take the rerun for the `/ret-join` variation), which gives each divergent `if` outside a
+ *  loop the block its non-returning paths meet at, so the code below it is written once. Where that run crosses the bound too, the
+ *  function declines with a `StructureError` naming the block copied most: a structure decline,
+ *  never an exponential tree published or an internal overflow in the printer.
+ *
+ *  Never asked by default and never ranked: a structuring under the bound is the ladder's own,
+ *  byte for byte, and on the corpus no structuring comes near it (the census at `COPY_BUDGET`). The
+ *  hooks a stopped run fired without holding them (`onCounterSignRefused`) have fired; the held
+ *  ones are dropped with the run. */
+function structureWithinBudget(
+  fn: Fn,
+  opts: StructureOptions,
+  hooks: StructureHooks,
+  memo: DefaultAcceptsMemo | undefined,
+): SFn {
+  let over: CopyBudgetExceeded;
+  try {
+    return structureLadder(fn, opts, hooks, memo, false);
+  } catch (error) {
+    if (!(error instanceof CopyBudgetExceeded)) {
+      throw error;
+    }
+    over = error;
+  }
+  if (opts.joinPastReturns !== true) {
+    try {
+      return structureLadder(fn, opts, hooks, memo, true);
+    } catch (error) {
+      if (!(error instanceof CopyBudgetExceeded)) {
+        throw error;
+      }
+      over = error;
+    }
+  }
+  throw new StructureError(
+    `cannot structure '${fn.name}': block #${over.block} is written ${over.copies} times, ` +
+      `past the copy budget of ${over.limit} region entries`,
+  );
+}
+
+function structureLadder(
+  fn: Fn,
+  opts: StructureOptions,
+  hooks: StructureHooks,
+  memo: DefaultAcceptsMemo | undefined,
+  overBudget: boolean,
+): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
   const attempt = (
     retCopy: RetCopyRanking,
@@ -3805,6 +3888,7 @@ export function structure(
         lastResort,
         forRank,
         jumps,
+        overBudget,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3915,6 +3999,7 @@ function structureRanked(
   lastResort: LastResortRungs,
   forRank: ForRanking,
   jumpRank: JumpRanking,
+  overBudget: boolean,
 ): SFn {
   const {
     returnsVoid = false,
@@ -4200,6 +4285,19 @@ function structureRanked(
     return follow;
   };
 
+  // THE COPY BUDGET (`COPY_BUDGET`): every region this structuring enters, per block, counted
+  // speculative entries and all, since a reading that is tried and dropped costs the same.
+  const copyLimit = COPY_BUDGET * fn.blocks.length + COPY_BUDGET_FLOOR;
+  const entered = new Map<Block, number>();
+  let enteredTotal = 0;
+  const charge = (b: Block): void => {
+    entered.set(b, (entered.get(b) ?? 0) + 1);
+    enteredTotal++;
+    if (enteredTotal > copyLimit) {
+      const [most, copies] = [...entered].reduce((x, y) => (y[1] > x[1] ? y : x));
+      throw new CopyBudgetExceeded(fn.blocks.indexOf(most), copies, copyLimit);
+    }
+  };
   const { isStraightReturn, joinOf: joinPastReturnsOf } = joinsPastReturns(fn, reachFrom);
   const joinPastReturnsAt = (b: Block, stop: Block | null): Block | null => {
     const join = joinPastReturnsOf(b);
@@ -8165,6 +8263,7 @@ function structureRanked(
     if (b === stop) {
       return [];
     }
+    charge(b);
     // The merge of the switch a falling arm also leaves: the edge copies are already out, and
     // `break;` is the jump.
     const brk = switchBreakAt(b);
@@ -9483,14 +9582,16 @@ function structureRanked(
     // structuring options, sunk and unsunk), and every row of both tiers enumerates a byte-identical
     // variations-and-source set (810 synthetic, 251 real, `ProcessInputAndUpdateEntities` excepted).
     //
-    // `joinPastReturns` asks its join ahead of both where the CFG's is EXIT or a straight-line return
-    // tail: an epilogue every early return and the tail branch to (ido7.1, mwcc) is a post-dominator,
-    // and merging there writes everything above it into each arm exactly as EXIT does.
+    // `joinPastReturns` (or the copy budget's rerun) asks its join ahead of both where the CFG's is
+    // EXIT or a straight-line return tail: an epilogue every early return and the tail branch to
+    // (agbcc, ido7.1, mwcc) is a post-dominator, and merging there writes everything above it into
+    // each arm exactly as EXIT does.
     // Where it finds none and the enclosing region ends before that return tail (its `stop`, an
     // outer `if`'s join past returns, is reachable around it), the tail is no join HERE either: the
     // `if` keeps its arms to `stop`, as one whose CFG join is EXIT does.
     const cfgJoin = ipdom.get(b) ?? null;
-    const pastReturnsAsked = joinPastReturns && loopCtx === null && (cfgJoin === null || isStraightReturn(cfgJoin));
+    const pastReturnsAsked =
+      (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isStraightReturn(cfgJoin));
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
     const cfgInRegion =
       pastReturnsAsked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)

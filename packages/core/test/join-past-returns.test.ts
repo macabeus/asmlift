@@ -158,6 +158,35 @@ describe('a chain of divergent `if`s with early returns', () => {
   });
 });
 
+describe('the copy budget', () => {
+  test('a chain past the budget lifts with the tail written once, with nothing asked', () => {
+    // 2^12 tails: far past `COPY_BUDGET` region entries per block, so `structure()` stops the
+    // default and reruns it with `joinPastReturns`
+    for (const flavor of ['own', 'epilogue', 'crossjumped'] as const) {
+      const fn = chain(12, flavor);
+      const src = emit(fn, {});
+      expect(count(src, 'tail(')).toBe(1);
+      expect(count(src, 'k3(')).toBe(12);
+      expect(src).toBe(emit(fn, { joinPastReturns: true }));
+    }
+  });
+
+  test('a chain under the budget keeps the default copies', () => {
+    expect(count(emit(chain(4, 'own'), {}), 'tail(')).toBe(16);
+  });
+
+  test('a chain the join cannot read declines with a structure refusal naming the copied block', () => {
+    // both arms of every `if` return early into one return tail that branches, so no block is
+    // where only the non-returning paths meet, and the copies stay exponential
+    const fn = chain(12, 'tangled');
+    expect(() => structure(fn, { returnsVoid: true })).toThrow(
+      /cannot structure 'f': block #\d+ is written \d+ times, past the copy budget of \d+ region entries/,
+    );
+    const small = chain(3, 'tangled');
+    expect(count(emit(small, { joinPastReturns: true }), 'tail(')).toBe(8);
+  });
+});
+
 describe('the `/ret-join` variation', () => {
   // agbcc -O2 of two links of `synthetic:retchain_xj`, then `m(gA); m(gB);`: the early returns
   // `k(11); gT = 1; return;` and `k(21); gT = 2; return;` cross-jump into one `bl k; str; b .L2`
