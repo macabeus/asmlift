@@ -17141,10 +17141,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      case's merge, which no `break;` inside the search loop reaches (`switchBreakAt`).
   //      Item 32's brk2out_sw does not reproduce it: its search loop's normal exit `continue`s, so
   //      the hit leaves both loops and hands its flag out. sw_hitexit is the real case's shape;
-  //      ido7.1 copies the tail into every arm, and the other lanes lift only with the hit's flag
-  //      (`hitArmOf`), which cannot match. sw_hitexit_in is the same case with code after the
-  //      switch, so the merge sits inside the loop and the hit's code is no two-level exit target
-  //      by itself: without the hit's flag it declines on all four ("unrecovered back-edge").
+  //      ido7.1 copies the tail into every arm, and the other lanes lift with the hit's flag
+  //      (`hitArmOf`), which cannot match, or with the ranked `/case-end-goto` spelling the flag as
+  //      the source's goto, which wins on agbcc and KMC (the rest of their gap is shared with
+  //      sw_hitexit_ctl) and loses to the flag on gcc2.7.2. sw_hitexit_in is the same case with
+  //      code after the switch, so the merge sits inside the loop and the hit's code is no
+  //      two-level exit target by itself: without the hit's flag it declines on all four ("unrecovered back-edge").
   //      sw_hitexit_ctl `break`s the search loop on a hit, so no edge leaves it for the merge.
   //      mwcc_242_81 has no lane: target and control both decline in its frontend ("high half of
   //      'gA' reaches a merge").
