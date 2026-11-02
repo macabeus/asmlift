@@ -41,7 +41,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge, hasTwoTargetLoopExit } from './structure/structure';
 import type { VariationName } from './variation-tokens';
 
 /** The STRUCTURE VARIATIONS — the boolean candidate dimensions crossed into every enumeration
@@ -471,12 +471,16 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   //
   // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): the two settings differ only
   // where `CASE_END_GOTO_GATES` admits the goto in place of a flag (`onCaseEndRead`), which only the
-  // hit rung's flag reaches. In the strip closure, and reset by `assertDefaultAccepts` like the
-  // other variations that write a goto.
+  // hit rung's flag reaches. Crossed into the settings at all only where some loop leaves for two
+  // blocks that do not just return (`hasTwoTargetLoopExit`): every crossed variation doubles the
+  // settings the enumeration walks, which costs memory even where the witness skips each one, and
+  // kleod:sub_0803F68C's shard ran out of heap on that alone. In the strip closure, and reset by
+  // `assertDefaultAccepts` like the other variations that write a goto.
   {
     flag: 'caseEndGoto',
     name: 'case-end-goto',
     options: (on) => ({ jumpToCaseEnds: on }),
+    sharedGate: (sharedLift) => hasTwoTargetLoopExit(sharedLift),
     offWitness: 'onCaseEndRead',
     strip: true,
   },

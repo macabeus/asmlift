@@ -1523,6 +1523,19 @@ export const CASE_END_GOTO_GATES: readonly Gate<CaseEndGoto>[] = [
   },
 ];
 
+/** Can any structuring of `fn` read a two-level exit's flag, the one place `/case-end-goto` changes
+ *  a tree (`CASE_END_GOTO_GATES`)? Only where some natural loop leaves for two or more blocks that
+ *  do not just return: the loop's own exit and the second target its hit runs on to. A NECESSARY
+ *  condition, read off the CFG before any structuring, so the variation is not crossed into the
+ *  settings of a function no witness could fire on (rank-variations.ts `sharedGate`). */
+export function hasTwoTargetLoopExit(fn: Fn): boolean {
+  const forest = analyzeLoops(fn, dominators(fn));
+  const returnsOnly = (b: Block): boolean => b.ops.length === 1 && b.ops[0].opcode === 'ret';
+  return [...forest.byHeader.values()].some(
+    (nl) => new Set(nl.exitEdges.map((e) => e.to).filter((b) => !returnsOnly(b))).size >= 2,
+  );
+}
+
 /** A tail several `break` arms share that holds a cycle (`codeBreakArm`, shared). */
 export interface BreakTailCycle {
   /** asked by `while (1)`'s last rung (`ArmCopies.cycles`), once every reading that copies no cycle
