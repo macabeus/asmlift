@@ -1801,3 +1801,65 @@ test.each([
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
 });
+
+/** mwcc_242_81's `for (i = lo; i <= hi; i++) { for (j = gLo; j <= gHi; j++) if (gE[j].f == 28) {
+ *  k(j); gE[j].u = 1; goto out; } k(i); } k(-1); out: k(-2);` with its loads as calls and its inner
+ *  bounds as `0` and `hi`, the CFG its frontend hands `structure` (a guarded, count-down inner loop):
+ *  the hit runs code first and leaves both loops. The inner loop's hit reading needs the outward rung
+ *  asked by that loop as well, and the plain outward probe, which reads no hit's code, reads only the
+ *  outer loop; the hit probe notes the inner loop for the outward rung, so the hit rung is reached at
+ *  all (`LAST_RESORT_RUNGS`). */
+const HIT_CODE_OUT_OF_BOTH_LOOPS = `fn hitoutward {
+^bb0(%0: s32, %1: s32, %2: s32):
+  br ^bb6(%0)
+^bb1():
+  %4: s32 = const {value=0}
+  %7: s32 = const {value=1}
+  %8: s32 = add %1, %7
+  %10: s32 = sub %8, %4
+  %12: u32 = icmp_slt %1, %4
+  cond_br %12, ^bb5(), ^bb2(%4, %10)
+^bb2(%14: s32, %15: s32):
+  %16: s32 = call %14 {target="probe"}
+  %18: u32 = icmp_eq %16, %2
+  cond_br %18, ^bb3(), ^bb4()
+^bb3():
+  %19: s32 = call %14 {target="hit"}
+  br ^bb8()
+^bb4():
+  %25: s32 = const {value=1}
+  %26: s32 = add %14, %25
+  %28: s32 = sub %15, %25
+  %29: s32 = const {value=0}
+  %30: u32 = icmp_eq %28, %29
+  cond_br %30, ^bb5(), ^bb2(%26, %28)
+^bb5():
+  %31: s32 = call %34 {target="k"}
+  %32: s32 = const {value=1}
+  %33: s32 = add %34, %32
+  br ^bb6(%33)
+^bb6(%34: s32):
+  %35: u32 = icmp_slt %1, %34
+  cond_br %35, ^bb7(), ^bb1()
+^bb7():
+  %37: s32 = call {target="done"}
+  br ^bb8()
+^bb8():
+  %39: s32 = call {target="out"}
+  ret
+}`;
+
+test('a hit that runs code first and leaves both loops asks the outward rung of the loop it leaves', () => {
+  const { src, agreement, shipped } = judged(HIT_CODE_OUT_OF_BOTH_LOOPS);
+  // the hit's code runs once, under the outward flag, past both loops
+  expect(src).toMatch(/if \((v\d+) == 0\) hit\(v\d+\);\n\s*out\(\);/);
+  expect(src.match(/\bhit\(/g)).toHaveLength(1);
+  expect(src.match(/\bprobe\(/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const fn = parse(HIT_CODE_OUT_OF_BOTH_LOOPS);
+  const traces = SEEDS.map((seed) => irTraceOf(fn, seed).map((ev) => ev.fn));
+  expect(traces.filter((t) => t.includes('hit')).length).toBeGreaterThan(0);
+  expect(traces.filter((t) => t.includes('done')).length).toBeGreaterThan(0);
+});
