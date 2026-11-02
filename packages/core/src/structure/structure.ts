@@ -3025,7 +3025,7 @@ export const EXIT_TAIL_GATES: readonly Gate<ExitTailCandidate>[] = [
     id: 'exit-not-test-out',
     why: 'an exit only a mid-body branch enters is another arm, not where the loop test leaves to',
     sound: false,
-    guardedBy: 'loop-break-exit.test.ts: a shared tail the exit also reaches is refused',
+    guardedBy: 'loop-break-exit.test.ts: a shared tail the exit also reaches lifts only as a flag',
     rejects: (c) => !c.exitIsTestOut,
   },
   {
