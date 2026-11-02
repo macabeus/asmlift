@@ -68,6 +68,9 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       // if/else-arm control
       'synthetic:brk2sw_ctl:mwcc_242_81  unsigned/unreduce',
       'synthetic:brk2sw:mwcc_242_81  unsigned/unreduce',
+      // a counted loop whose arms each step two pointers by 2: once unpre recomputes the latch's
+      // `p + 2`, IDO's pointer walk reads closest as the index it was reduced from
+      'synthetic:loop_elsebreak:ido7.1  unsigned/defsite/loop-entry/merge-names/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
       'synthetic:sw_h4:mwcc_242_81  signed/unreduce',
