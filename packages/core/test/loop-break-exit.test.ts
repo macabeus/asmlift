@@ -1136,7 +1136,7 @@ describe('break arms that share a tail', () => {
   // nothing entering it from before the loop, so `exitTail` (at `earlyReturnArm`) does not take it.
   // Behind every other reading, the two-level exit whose hits run code first takes it: each arm
   // writes its own code and the flag, and the shared tail renders once, after the loop.
-  test('a shared tail the exit also reaches is refused', () => {
+  test('a shared tail the exit also reaches lifts only as a flag', () => {
     const ir = SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
       '^bb7():\n',
       '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
