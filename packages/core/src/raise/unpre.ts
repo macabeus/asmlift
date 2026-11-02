@@ -111,8 +111,11 @@ import {
 import { deletableWhenDead, placedAt, reevalUnsafe, spelledWhenDead } from '../ir/discipline';
 import { sameAtEntry } from '../ir/entry';
 import { inEdgesOf, retireParam, trivialPhiValue } from '../ir/simplify';
-import { typeEquals } from '../ir/types';
+import { type IrType, typeEquals } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
+
+/** two integer types of one width, which may differ only in sign */
+const sameIntWidth = (a: IrType, b: IrType): boolean => a.kind === 'int' && b.kind === 'int' && a.width === b.width;
 
 /** May this op be evaluated again at another program point to the same value? */
 const clonable = (d: Op): boolean =>
@@ -210,7 +213,14 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
           const d = defs.get(v);
           let out = v;
           if (d !== undefined && clonable(d)) {
-            const r = mkValue(v.type);
+            // THE ROOT TAKES THE PARAMETER'S TYPE, which every reader of the parameter was typed
+            // against: type recovery reads a block parameter off its uses (an unsigned compare makes
+            // it `u32`) and an arm's op off its operands, so the two can differ in sign, and the
+            // declaration-signedness reconciliation reads the value that stands in the parameter's
+            // place. Typed as the arm's `s32` add, a counter compared unsigned would declare `s32`
+            // and overflow (UB) where the asm's `u32` wraps (`kleod:sub_080240F4`).
+            const p = b.params[k];
+            const r = mkValue(v === first && sameIntWidth(p.type, v.type) ? p.type : v.type);
             const op: Op = {
               opcode: d.opcode,
               operands: d.operands.map(clone),

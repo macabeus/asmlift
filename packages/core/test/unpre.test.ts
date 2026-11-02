@@ -219,6 +219,18 @@ test("a loop's latch every arm hands the bound `hi + 1` recomputes it, and its t
   expect(fn.blocks[4].params).toHaveLength(0);
 });
 
+test('the recomputed value takes the type of the parameter it replaces, not the arm op it was cloned from', () => {
+  // type recovery types a parameter by its uses (an unsigned compare: `u32`) and the arms' adds by
+  // their operands (`s32`); the reconciliation of declared signedness reads what stands in the
+  // parameter's place, and a `u32` counter that declared `s32` would overflow where the asm wraps
+  // (`kleod:sub_080240F4`)
+  const { n, fn } = fold(latchIr().replace('^bb4(%11: s32):', '^bb4(%11: u32):'));
+  expect(n).toBe(1);
+  const root = defOpMap(fn).get(fn.blocks[4].ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
+  expect(root.opcode).toBe('add');
+  expect(root.results[0].type).toEqual({ kind: 'int', width: 32, signed: false });
+});
+
 test('a latch handed two different values keeps its parameter', () => {
   expect(fold(latchIr('%9: s32 = add %0, %8')).n).toBe(0);
 });
