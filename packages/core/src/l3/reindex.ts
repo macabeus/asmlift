@@ -94,6 +94,7 @@ import {
   SFn,
   Stmt,
   SwitchCase,
+  caseEndGotoLeaves,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
@@ -304,8 +305,13 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
 
 /** A `break`/`continue` that would target the ENCLOSING loop: found at if/switch depth, but not
  *  inside a nested loop (whose own exits target itself). A switch's own `break` (`ofSwitch`)
- *  leaves only its switch, and the loop's tail still runs after it, so it is not one. */
+ *  leaves only its switch, and the loop's tail still runs after it, so it is not one. A case-end
+ *  `goto` whose label lies outside `stmts` leaves every loop it sits in, at any depth. */
 function hasLoopExit(stmts: Stmt[]): boolean {
+  return caseEndGotoLeaves(stmts) || hasShallowLoopExit(stmts);
+}
+
+function hasShallowLoopExit(stmts: Stmt[]): boolean {
   return stmts.some((s) => {
     switch (s.k) {
       case 'break':
@@ -313,9 +319,9 @@ function hasLoopExit(stmts: Stmt[]): boolean {
       case 'continue':
         return true;
       case 'if':
-        return hasLoopExit(s.then) || hasLoopExit(s.else);
+        return hasShallowLoopExit(s.then) || hasShallowLoopExit(s.else);
       case 'switch':
-        return s.cases.some((c) => hasLoopExit(c.body)) || hasLoopExit(s.default ?? []);
+        return s.cases.some((c) => hasShallowLoopExit(c.body)) || hasShallowLoopExit(s.default ?? []);
       default:
         return false;
     }

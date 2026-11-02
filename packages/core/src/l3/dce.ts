@@ -25,7 +25,7 @@
 // unresolved `?` value trips the contract first and never reaches DCE; `mustKeep` treating `?` as
 // keep is defense-in-depth for any future caller that skips that check.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, keepsHelperRel, negateCond, stmtChildren, stmtExprs } from './ast';
+import { caseEndGotoLeaves, exprChildren, keepsHelperRel, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
  *  `addr` name counts too: taking a local's address makes every store to it observable through the
@@ -109,6 +109,21 @@ interface JumpLive {
   /** live at a case label of the innermost switch: what its `goto` (l3/ast.ts) lands on — absent
    *  where no switch encloses the statement, or a loop stands between it and the switch */
   caseLabel?: ReadonlySet<string>;
+  /** live at the end of the innermost switch arm around the statement, loops between included: what
+   *  a case-end `goto` lands on — absent where no switch encloses it */
+  caseEnd?: ReadonlySet<string>;
+}
+
+/** The conservative set live throughout a loop: what is live after it and every read in it, and,
+ *  where a case-end `goto` in its body leaves it, what is live at the arm's end that goto lands on —
+ *  a later iteration may take it. */
+function loopLiveOf(s: Stmt & { body: Stmt[] }, live: ReadonlySet<string>, jumps: JumpLive | null): Set<string> {
+  const loopLive = new Set(live);
+  allReadsInto([s], loopLive);
+  if (jumps?.caseEnd && caseEndGotoLeaves(s.body)) {
+    jumps.caseEnd.forEach((n) => loopLive.add(n));
+  }
+  return loopLive;
 }
 
 /** Backward live-variable walk over one block. `liveOut` is the set of locals live on exit;
@@ -169,8 +184,17 @@ function dceBlock(
         break;
       }
       case 'goto': {
-        // The jump lands on a case label of the switch it sits in (l3/ast.ts, contracts.ts
-        // `assertCaseGotosNarrow`), whose every read the switch below already counts live.
+        // The jump lands on a case label of the switch it sits in, or on the `break;` that ends its
+        // arm (l3/ast.ts, contracts.ts `assertCaseGotosNarrow`), whose every read the switch below
+        // already counts live.
+        if (s.caseEnd === true) {
+          if (!jumps?.caseEnd) {
+            throw new Error('dce: a case-end goto outside a switch arm');
+          }
+          setLive(new Set(jumps.caseEnd));
+          rev.push(s);
+          break;
+        }
         if (!jumps?.caseLabel) {
           throw new Error('dce: a goto outside the switch whose case it names');
         }
@@ -220,9 +244,12 @@ function dceBlock(
       case 'dowhile': {
         // Conservative: any local read anywhere in the loop is live throughout it, so a
         // loop-carried store is never cut. Body DCE removes only what is dead on EVERY path.
-        const loopLive = new Set(live);
-        allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals, volatiles, { brk: loopLive, cont: loopLive });
+        const loopLive = loopLiveOf(s, live, jumps);
+        const b = dceBlock(s.body, loopLive, locals, volatiles, {
+          brk: loopLive,
+          cont: loopLive,
+          caseEnd: jumps?.caseEnd,
+        });
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -232,9 +259,12 @@ function dceBlock(
         break;
       }
       case 'for': {
-        const loopLive = new Set(live);
-        allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals, volatiles, { brk: loopLive, cont: loopLive });
+        const loopLive = loopLiveOf(s, live, jumps);
+        const b = dceBlock(s.body, loopLive, locals, volatiles, {
+          brk: loopLive,
+          cont: loopLive,
+          caseEnd: jumps?.caseEnd,
+        });
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -248,7 +278,7 @@ function dceBlock(
         // read anywhere in the switch as live throughout — no case-body store is ever cut.
         const swLive = new Set(live);
         allReadsInto([s], swLive);
-        const inSwitch: JumpLive = { brk: swLive, cont: jumps?.cont, caseLabel: swLive };
+        const inSwitch: JumpLive = { brk: swLive, cont: jumps?.cont, caseLabel: swLive, caseEnd: swLive };
         const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals, volatiles, inSwitch).out }));
         const def = s.default ? dceBlock(s.default, swLive, locals, volatiles, inSwitch).out : s.default;
         const nlive = new Set(swLive);

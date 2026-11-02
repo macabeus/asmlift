@@ -285,13 +285,15 @@ function dotSelectedAccess(e: Access): Access {
 }
 
 /** The executions on the paths through a statement list, split by how each path LEAVES it: falling off
- *  the end, or by a `return`, `break` or `continue`. Null when no path leaves that way. Each is the
+ *  the end, or by a `return`, `break`, `continue` or case-end `goto` (`end`, which leaves every loop
+ *  up to its switch arm and then the switch). Null when no path leaves that way. Each is the
  *  per-name maximum over the paths of that kind. */
 interface PathCounts {
   through: EffectCounts | null;
   ret: EffectCounts | null;
   brk: EffectCounts | null;
   cont: EffectCounts | null;
+  end: EffectCounts | null;
 }
 
 const sum = (a: EffectCounts, b: EffectCounts): EffectCounts => combine(a, b, (x, y) => x + y);
@@ -303,6 +305,7 @@ const after = (c: EffectCounts, p: PathCounts): PathCounts => ({
   ret: p.ret && sum(c, p.ret),
   brk: p.brk && sum(c, p.brk),
   cont: p.cont && sum(c, p.cont),
+  end: p.end && sum(c, p.end),
 });
 /** `a` then `b`: only a path that falls off the end of `a` reaches `b` */
 const seq = (a: PathCounts, b: PathCounts): PathCounts =>
@@ -313,6 +316,7 @@ const seq = (a: PathCounts, b: PathCounts): PathCounts =>
         ret: most(a.ret, b.ret && sum(a.through, b.ret)),
         brk: most(a.brk, b.brk && sum(a.through, b.brk)),
         cont: most(a.cont, b.cont && sum(a.through, b.cont)),
+        end: most(a.end, b.end && sum(a.through, b.end)),
       };
 /** whichever of the alternatives runs */
 const either = (...ps: PathCounts[]): PathCounts => ({
@@ -320,8 +324,9 @@ const either = (...ps: PathCounts[]): PathCounts => ({
   ret: most(...ps.map((p) => p.ret)),
   brk: most(...ps.map((p) => p.brk)),
   cont: most(...ps.map((p) => p.cont)),
+  end: most(...ps.map((p) => p.end)),
 });
-const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null });
+const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null, end: null });
 
 /** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
  *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
@@ -379,25 +384,39 @@ function countEffects(
         return (chain[i] = then === undefined ? bodies[i].paths : seq(bodies[i].paths, then));
       };
       const dfltChain = chainAt(arms.length);
-      // No `default` is one more alternative: no arm runs. A `break` leaves the switch, so it
-      // continues after it as a fall-off-the-end does.
+      // No `default` is one more alternative: no arm runs. A `break` or a case-end `goto` leaves the
+      // switch, so it continues after it as a fall-off-the-end does.
       const inner = either(...arms.map((_, i) => chainAt(i)), s.default ? dfltChain : falls(new Map()));
-      here = after(own, { through: most(inner.through, inner.brk), ret: inner.ret, brk: null, cont: inner.cont });
+      here = after(own, {
+        through: most(inner.through, inner.brk, inner.end),
+        ret: inner.ret,
+        brk: null,
+        cont: inner.cont,
+        end: null,
+      });
     } else if (stmtChildren(s).length > 0) {
       // A loop: its sequenced children (a body, a `for`'s init/inc) counted ONCE — a loop's dynamic
       // trip count is not a syntactic occurrence, and the IR side is static too. A `break` or
       // `continue` in the body lands after the loop or at its test, and the test may exit without
-      // running the body.
+      // running the body. A case-end `goto` leaves the loop for its switch's end.
       const body = countEffects(stmtChildren(s), ctx, unreached);
       total = sum(total, body.total);
       const p = body.paths;
-      here = after(own, { through: most(p.through, p.brk, p.cont, new Map()), ret: p.ret, brk: null, cont: null });
+      here = after(own, {
+        through: most(p.through, p.brk, p.cont, new Map()),
+        ret: p.ret,
+        brk: null,
+        cont: null,
+        end: p.end,
+      });
     } else if (s.k === 'return') {
-      here = { through: null, ret: own, brk: null, cont: null };
+      here = { through: null, ret: own, brk: null, cont: null, end: null };
     } else if (s.k === 'break') {
-      here = { through: null, ret: null, brk: own, cont: null };
+      here = { through: null, ret: null, brk: own, cont: null, end: null };
     } else if (s.k === 'continue') {
-      here = { through: null, ret: null, brk: null, cont: own };
+      here = { through: null, ret: null, brk: null, cont: own, end: null };
+    } else if (s.k === 'goto' && s.caseEnd === true) {
+      here = { through: null, ret: null, brk: null, cont: null, end: own };
     } else {
       here = falls(own);
     }
@@ -406,9 +425,10 @@ function countEffects(
   return { total, paths };
 }
 
-/** Every `goto` keeps the one form L3 allows it (l3/ast.ts `caseGotoViolation`): the last
- *  statement of a switch arm's own body, naming a case label of that switch. The effect count
- *  below reads a goto that way, so a tree outside it is refused before it is counted. */
+/** Every `goto` keeps one of the two forms L3 allows it (l3/ast.ts `caseGotoViolation`): the last
+ *  statement of a switch arm's own body naming a case label of that switch, or a case-end goto
+ *  naming a labelled `break;` that ends the arm it sits in. The effect count below reads a goto
+ *  that way, so a tree outside it is refused before it is counted. */
 export function assertCaseGotosNarrow(sfn: SFn): void {
   const why = caseGotoViolation(sfn.body);
   if (why !== null) {
