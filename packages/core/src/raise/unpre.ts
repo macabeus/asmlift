@@ -218,7 +218,7 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
             // it `u32`) and an arm's op off its operands, so the two can differ in sign, and the
             // declaration-signedness reconciliation reads the value that stands in the parameter's
             // place. Typed as the arm's `s32` add, a counter compared unsigned would declare `s32`
-            // and overflow (UB) where the asm's `u32` wraps (`kleod:sub_080240F4`).
+            // and overflow (UB) where the asm's `u32` wraps (kleod's `sub_080240F4`).
             const p = b.params[k];
             const r = mkValue(v === first && sameIntWidth(p.type, v.type) ? p.type : v.type);
             const op: Op = {
