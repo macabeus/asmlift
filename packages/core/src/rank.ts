@@ -508,7 +508,7 @@ interface TreeSource {
  *  alone says nothing about the decline. The question is asked the one way that answers it: the
  *  same structuring with that rule off. Where that one structures, the refusal was the rule's, and
  *  the other pin, whose counter the rule admits, can take the loop; where it still throws, the
- *  decline is the function's and the row aborts as it did before the rule existed. The tree the
+ *  decline is the function's and the row aborts as any other default decline does. The tree the
  *  ablated run builds is discarded — it is the `for` the rule refuses as wrong under this pin.
  *  Not holding every pinnable decline instead: that would let the signed pin past any structure
  *  refusal that reads a declared type, not only this one, and re-lift every declined row. */

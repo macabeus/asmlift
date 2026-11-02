@@ -1,13 +1,14 @@
 // UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`): `FOR_PLAN_GATES`,
-// `FOR_PLAN_IV_GATES` and `FOR_BOUND_GATES`. Each SOUND gate the suite does not already guard elsewhere is dropped
-// here and the pass re-run on a fixture it refuses: the `for` then lifts and is
+// `FOR_PLAN_IV_GATES` and `FOR_BOUND_GATES`. Each SOUND gate the suite does not already guard
+// elsewhere is dropped here and the pass re-run on a fixture it refuses: the `for` then lifts and is
 // wrong — the trace oracle (`irAgreement`) disagrees with the IR, a contract fails, or, where the
-// oracle cannot judge (a division, a load from a parameter's address), the emitted C shows the op
-// on a path the asm never ran it on. Every fixture is `for-derived-iv.test.ts`'s strength-reduced
-// loop with one part changed, so the default structuring declines it with the loop-exit refusal;
-// `/for-continue` (`spellCountedLoopsFor`) asks every loop's `for`. Each runs raise's derived-param
-// fold first, as the pipeline does, so its header carries the IV alone (the fold's own refusals are
-// unpre.test.ts's).
+// oracle cannot judge (a division, a load from a parameter's address, a call that may write a global,
+// a bound at INT_MAX or UINT_MAX it never draws), the emitted C shows the wrong reading. Every fixture
+// is `for-derived-iv.test.ts`'s strength-reduced loop with one part changed, so the default
+// structuring declines it with the loop-exit refusal; `/for-continue` (`spellCountedLoopsFor`) asks
+// every loop's `for`. Each runs raise's derived-param fold first, as the pipeline does, so its header
+// carries the IV alone, or the IV and a stride the fold leaves (A SIBLING'S STRIDE, below); the
+// fold's own refusals are unpre.test.ts's.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -277,7 +278,7 @@ test('the signed `+ 1` bound over a `u32` counter stays refused: at `hi == INT_M
 });
 
 test('the refusal over a `u32` counter is reported, so rank.ts can hand the loop to the signed pin', () => {
-  // rank.ts holds the unsigned pin's decline only where this fired, in the DEFAULT setting's own
+  // rank.ts reads this as the filter ahead of its causation probe, in the DEFAULT setting's own
   // structuring (no `/for-continue`: that setting asks the default first, with this hook dropped so
   // its memo answers); the `s32` declaration of the same counter takes the `for` and fires nothing
   const counted = (ir: string) => {

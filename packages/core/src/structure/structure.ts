@@ -1724,7 +1724,7 @@ export interface ForBoundReading {
 
 /** `forPlanAt`'s rules over each reading of the latch's `!=` test as a compare. The argument for each
  *  is in the THE LATCH TEST AS ITS BOUND block. Not in the table: a test that is no `==`/`!=` of the
- *  IV's back-edge value, which names no bound to read; and the reading's agreement with the guard,
+ *  IV's back-edge value `i + k`, which names no bound to read; and the reading's agreement with the guard,
  *  which `entry-test-differs` asks of the reading this table admits. */
 export const FOR_BOUND_GATES: readonly Gate<ForBoundReading>[] = [
   {

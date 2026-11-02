@@ -62,15 +62,12 @@
 //    fold is what lets the `for` read the latch at all. It is a pre-structure fold on every
 //    toolchain, so it also folds a latch param no `for` reads: a `do`-`while` latch every arm hands
 //    `p + 2` (KMC's `loop_elsebreak`) is spelled as the update `p = p + 2` rather than as a copy at
-//    the end of each arm. Measured with the scope widened to latches alone over the synthetic tier,
-//    16 cells move, no match is lost and no decline turns. Closer: uninit_bits ido 13 -> 6,
-//    sw_loopret gcc2.7.2 81 -> 73, sw_loopret_ctl gcc2.7.2 60 -> 56, brk2sw_ctl agbcc 38 -> 34,
-//    loop_elsebreak ido 26 -> 22, brk2out_sw ido 151 -> 148. Further: loop_elsebreak gcc2.7.2kmc
-//    16 -> 23 and agbcc 26 -> 28, forexit_iv gcc2.7.2kmc 117 -> 121, brk2out_ctl gcc2.7.2kmc
-//    151 -> 152; the other six by a line or none. A SIBLING'S STRIDE below is kept
-//    out of the pre-structure folds on the same kind of measurement, and there the moves were one
-//    way (brk2out_ctl ido 151 -> 214). `unpre.test.ts` pins an ido-shaped latch folding and the `if`
-//    join staying out.
+//    the end of each arm. Over the synthetic tier the latch scope alone moves 16 cells, loses no
+//    match and turns no decline: closer on six (uninit_bits ido 13 -> 6, sw_loopret gcc2.7.2
+//    81 -> 73), further on four (loop_elsebreak gcc2.7.2kmc 16 -> 23 the most), so the scope stays.
+//    A SIBLING'S STRIDE below is kept out of the pre-structure folds by the same measurement, where
+//    the moves were one way (brk2out_ctl ido 151 -> 214). `unpre.test.ts` pins an ido-shaped latch
+//    folding and the `if` join staying out.
 //  • the argument must be an op with operands (`operand-free`). An operand-free argument (a constant, a symbol's
 //    address) is what a merge of `return 0;` arms or of a register the compiler set to one constant
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
