@@ -4,16 +4,27 @@
 // contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask) and every other placement
 // it refuses, how the C family prints it and that Pascal refuses it, how the effect contract and
 // dead-store elimination read a path that takes it, and what `reachesEnd` and `caseEndGotoLeaves`
-// answer for it.
+// answer for it. Then its producer (structure.ts `caseEndGoto`, `StructureOptions.jumpToCaseEnds`):
+// a search loop's hit flag read where its target is the end of the switch arm the loop sits in,
+// spelled as the goto, each judged against its own IR by the trace oracle (`irAgreement`); the
+// witness the `/case-end-goto` variation is gated by; and the hit whose target is a join running
+// code, which keeps its flag (`CASE_END_GOTO_GATES`).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved } from '../src/contracts';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseEndGotoLeaves, caseGotoViolation, reachesEnd } from '../src/l3/ast';
 import { eliminateDeadStores } from '../src/l3/dce';
+import { tallying, without } from '../src/l3/gates';
+import { readabilityRewrites } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { CASE_END_GOTO_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const call = (fn: string, ...args: string[]): Stmt => ({
   k: 'exprstmt',
@@ -209,5 +220,171 @@ describe('assertEffectsPreserved over a case-end goto', () => {
     expect(() => assertEffectsPreserved(irCalling(['k']), sfnWith([s, call('k')]))).toThrow(
       /emitted 2 calls to 'k' on one path/,
     );
+  });
+});
+
+// ── the producer ──────────────────────────────────────────────────────────────────────────────────
+
+const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
+
+/** two-level-exit.test.ts's fixture of the same name: `case 0: case 1: case 4: for (j…) { if
+ *  (probe(j, i) == x) { hit(j); goto out; } } k(i); out: break;`, the arm's end the outer loop's
+ *  latch (`synthetic:sw_hitexit_in`'s source shape) */
+const HIT_CODE_TO_ARM_END = `fn hitcodearm {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb6()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+/** two-level-exit.test.ts's fixture of the same name: the same hit where the arm's merge is also
+ *  the outer loop's exit, and the arm ends in an explicit `break;` (`synthetic:sw_hitexit`'s shape) */
+const HIT_CODE_PAST_THE_LOOP = `fn hitcodepast {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %30: s32 = const {value=1}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7(%3, %30)
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb12(), ^bb12(), ^bb8(), ^bb12(), ^bb6() {cases=[0;1;2;4]}
+^bb12():
+  %31: s32 = call %5 {target="skip"}
+  %32: u32 = icmp_eq %31, %3
+  cond_br %32, ^bb6(), ^bb2()
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb7(%7, %3)
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb7(%3, %7)
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  %33: u32 = icmp_eq %17, %3
+  cond_br %33, ^bb6(), ^bb7(%3, %7)
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7(%3, %30)
+^bb7(%20: s32, %21: s32):
+  %22: s32 = call %20 {target="t"}
+  %23: s32 = call %21 {target="t"}
+  %24: u32 = icmp_slt %3, %1
+  cond_br %24, ^bb10(%3), ^bb11()
+^bb10(%25: s32):
+  %26: s32 = call %25 {target="t"}
+  %27: s32 = add %25, %30
+  %28: u32 = icmp_slt %27, %1
+  cond_br %28, ^bb10(%27), ^bb11()
+^bb11():
+  ret
+}`;
+
+/** `HIT_CODE_TO_ARM_END` with a join between the hit and the arm's end that runs `post(i)`: the hit's
+ *  target is that join, which a `break;` does not reach */
+const HIT_CODE_TO_A_JOIN = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitcodejoin')
+  .replace(/(%19: s32 = call %10 \{target="hit"\}\n  br )\^bb6\(\)/, '$1^bb10()')
+  .replace(/(%15: s32 = call %5 \{target="k"\}\n  br )\^bb6\(\)/, '$1^bb10()')
+  .replace('^bb6():', '^bb10():\n  %40: s32 = call %5 {target="post"}\n  br ^bb6()\n^bb6():');
+
+const lifted = (ir: string, opts: Parameters<typeof structure>[1] = {}, hooks: StructureHooks = {}) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn, opts, hooks);
+  return {
+    src: cBackend.emit(sfn),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+describe('the producer', () => {
+  test.each([
+    ['ends in the arm’s own `break;`', HIT_CODE_PAST_THE_LOOP],
+    ['ends where the arm does', HIT_CODE_TO_ARM_END],
+  ])('a hit whose target %s is spelled as a goto to that end, and agrees', (_, ir) => {
+    let read = 0;
+    const off = lifted(ir, {}, { onCaseEndRead: () => read++ });
+    expect(read).toBe(1);
+    expect(off.src).not.toMatch(/\bgoto\b/);
+    const on = lifted(ir, { jumpToCaseEnds: true });
+    // the hit's code, then the jump; the loop's own exit runs `k(i)` into the labelled `break;`
+    expect(on.src).toMatch(/hit\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)?\s*goto case_end;/);
+    expect(on.src).toMatch(/k\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)*\s*case_end:\n\s*break;/);
+    // no flag: nothing is compared with 0 after the search loop
+    expect(on.src).not.toMatch(/if \(v\d+ == 0\)/);
+    for (const r of [off.agreement, off.shipped, on.agreement, on.shipped]) {
+      expect(r.disagree).toBe(0);
+      expect(r.judged).toBe(SEEDS.length);
+    }
+  });
+
+  test('a hit whose target is a join running code keeps its flag, and the rule that keeps it is named', () => {
+    let read = 0;
+    const census = tallying(CASE_END_GOTO_GATES);
+    const on = lifted(
+      HIT_CODE_TO_A_JOIN,
+      { jumpToCaseEnds: true },
+      { caseEndGotoGates: census.gates, onCaseEndRead: () => read++ },
+    );
+    expect(on.src).toMatch(/post\(/);
+    expect(on.src).not.toMatch(/\bgoto\b/);
+    expect(read).toBe(0);
+    expect(census.refusals().map(([id]) => id)).toContain('target-not-arm-end');
+    expect(on.agreement.disagree).toBe(0);
+    expect(on.shipped.disagree).toBe(0);
+  });
+
+  test('without target-not-arm-end the join is skipped by the goto: the rule is load-bearing', () => {
+    const on = lifted(
+      HIT_CODE_TO_A_JOIN,
+      { jumpToCaseEnds: true },
+      { caseEndGotoGates: without(CASE_END_GOTO_GATES, 'target-not-arm-end') },
+    );
+    expect(on.src).toMatch(/\bgoto case_end;/);
+    expect(on.agreement.disagree).toBeGreaterThan(0);
   });
 });
