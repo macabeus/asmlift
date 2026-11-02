@@ -1307,7 +1307,7 @@ test('a shared ret tail no flag-free `while (1)` takes is copied, not flagged', 
 /** mwcc_242_81's `for (i…) { for (j…) if (probe(j, i) == x) goto out; k(i); } out: t(i);`: the
  *  hit's ret-tail copy is refused where it is emitted on the first structuring, and lifts once the
  *  ret copies rank last. The outward flag, a variable the asm does not hold, is asked only of a
- *  structuring every reading without it declines (`OutwardRanking`). */
+ *  structuring every reading without it declines (`LAST_RESORT_RUNGS`). */
 const RET_COPY_RANKED_LAST = `fn retlast {
 ^bb0(%0: s32, %1: s32, %2: s32):
   br ^bb6(%0)
