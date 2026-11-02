@@ -98,7 +98,12 @@ import {
   sameBases,
 } from './rank-variations';
 import { type Stillborn, stillbornVerdict } from './stillborn';
-import { DefaultAcceptsMemo, DefaultAcceptsMemoMisuse, hasDivergentSharedRet } from './structure/structure';
+import {
+  DefaultAcceptsMemo,
+  DefaultAcceptsMemoMisuse,
+  StructureError,
+  hasDivergentSharedRet,
+} from './structure/structure';
 import {
   type SymbolInfo,
   type SymbolMap,
@@ -519,6 +524,15 @@ export function enumerateCandidates(
   /** The last refusal from a backend asked to spell a tree — what the empty-enumeration check
    *  below reports, so "this backend can spell nothing here" names its reason. */
   let lastEmitError: unknown = null;
+  /** THE UNSIGNED PIN'S DECLINE, HELD FOR THE SIGNED ONE. The default candidate's structuring aborts
+   *  the row (`abortsRow`) on the premise that a structure refusal does not depend on the pin. One
+   *  does: `forPlanAt`'s `bound-plus-one-counter-wraps` reads the counter's declared type, so IDO's
+   *  counted loop (`synthetic:sw_gotocase2:ido7.1`) takes its `for` under the `s32` pin and not the
+   *  `u32` one, and without the `for` the switch's loop exit cannot be spelled at all. Where that
+   *  rule fired in a structuring the unsigned pin declines, the decline is held here and the signed
+   *  pin runs as it would have; a row that then produces no candidate declines with it. Nothing the
+   *  signed pin builds is new: it is the same pass, under its own default setting and its own gates. */
+  let heldPinDecline: unknown = undefined;
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
   const ownContext = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
@@ -2384,6 +2398,7 @@ export function enumerateCandidates(
                   : [],
               ),
             );
+            let counterSignRefused = false;
             try {
               sfn = structureChecked(
                 fn,
@@ -2405,7 +2420,12 @@ export function enumerateCandidates(
                   ),
                   ...(alternative ? { followEarlyReturns: true } : {}),
                 },
-                witnessHooks,
+                {
+                  ...witnessHooks,
+                  onCounterSignRefused: () => {
+                    counterSignRefused = true;
+                  },
+                },
                 acceptsMemo,
               );
               witnessed.set(key, fired);
@@ -2414,7 +2434,10 @@ export function enumerateCandidates(
                 throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation
               }
               if (abortsRow([...liftVariations, ...symbolSetting.variations], s)) {
-                throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
+                if (!(counterSignRefused && !cand.signed && pinnable && e instanceof StructureError)) {
+                  throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
+                }
+                heldPinDecline ??= e; // THE UNSIGNED PIN'S DECLINE, HELD FOR THE SIGNED ONE
               }
               // Recorded for EVERY dropped setting: a candidate with more variations on looks its siblings
               // up by stripping one variation at a time, and the stripped key can itself carry the other.
@@ -2599,6 +2622,9 @@ export function enumerateCandidates(
   // Every tree the fan produced was refused by the backend. Each refusal on its own is a dropped
   // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
   // ranking an empty list and reporting no match for a function nothing ever tried to spell.
+  if (out.length === 0 && heldPinDecline !== undefined) {
+    throw heldPinDecline;
+  }
   if (out.length === 0) {
     throw new NoSpellableCandidateError(
       `no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`,

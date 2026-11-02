@@ -15825,6 +15825,37 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_forjt_stride(s32 lo, s32 hi);',
     proto: { sw_forjt_stride: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      for_u32ctr is the negative of the bound's COUNTER: a signed `i <= hi` whose counter the
+  //      `unsigned` signedness variation declares `u32` (the unsigned `m` makes that half win the
+  //      tie). There `i + 1` steps defined from INT_MAX to INT_MIN and a signed `<=` never leaves,
+  //      where the asm's `!=` does, so the `+ 1` form must not read as `<=` over a `u32` counter.
+  {
+    sym: 'for_u32ctr',
+    src:
+      'void k(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void for_u32ctr(u32 m, s32 lo, s32 hi)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    for (i = lo; i <= hi; i++) {\n' +
+      '        if (q(i))\n' +
+      '            continue;\n' +
+      '        if (q(m >> 1))\n' +
+      '            break;\n' +
+      '        if (m < 7u)\n' +
+      '            k(i);\n' +
+      '        if (m > 100u)\n' +
+      '            k(m / 3);\n' +
+      '        k(m >> 2);\n' +
+      '        k(m % 10);\n' +
+      '    }\n' +
+      '    k(9);\n' +
+      '}',
+    features: ['branch'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void k(s32 x);\n' + 's32 q(s32 x);\n' + 'void for_u32ctr(u32 m, s32 lo, s32 hi);',
+    proto: { for_u32ctr: { returnsVoid: true }, k: { params: 1, returnsVoid: true }, q: { params: 1 } },
+  },
   //      forexit_* are sw_forjt's `for` with an exit that takes params: every edge into the code after
   //      the loop hands it a value, so the guard's zero-trip edge (agbcc's `b .L4 @long jump` relay
   //      in the _far rows, where case 1 pushes the exit past a Thumb branch's range) and the latch's

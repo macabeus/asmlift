@@ -263,6 +263,69 @@ test('without bound-plus-one-unsigned an unsigned `+ 1` bound reads as `<=`', ()
   expect(r.src).toMatch(/for \(v0 = a0; [^;]*a1[^;]* >= [^;]*v0[^;]*; v0 = v0 \+ 1\)/);
 });
 
+// The `unsigned` signedness variation declares the counter `u32` under the same signed guard and
+// test: the source `u32 i; if (lo <= hi) do .. while (++i != (u32)hi + 1)` compiles to these bytes.
+const U32_COUNTER = srFor({ test: IDO_LE })
+  .replace('^bb0(%0: s32, %1: s32):', '^bb0(%0: u32, %1: s32):')
+  .replace('^bb1(%5: s32, %6: s32):', '^bb1(%5: u32, %6: s32):')
+  .replace('%36: s32 = add %5, %35', '%36: u32 = add %5, %35')
+  .replace('%39: s32 = add %1, %35', '%39: u32 = add %1, %35');
+
+test('the signed `+ 1` bound over a `u32` counter stays refused: at `hi == INT_MAX` C would never leave', () => {
+  expect(U32_COUNTER).toContain('%5: u32');
+  expect(() => lift(U32_COUNTER)).toThrow(LOOP_EXIT);
+});
+
+test('the refusal over a `u32` counter is reported, so rank.ts can hand the loop to the signed pin', () => {
+  // rank.ts holds the unsigned pin's decline only where this fired, in the DEFAULT setting's own
+  // structuring (no `/for-continue`: that setting asks the default first, with this hook dropped so
+  // its memo answers); the `s32` declaration of the same counter takes the `for` and fires nothing
+  const counted = (ir: string) => {
+    const fn = parse(ir);
+    verify(fn);
+    recoverTypes(fn);
+    recomputeDerivedParams(fn);
+    let fired = 0;
+    const run = () =>
+      structure(
+        fn,
+        {},
+        {
+          onCounterSignRefused: () => {
+            fired++;
+          },
+        },
+      );
+    return { run, fired: () => fired };
+  };
+  const u = counted(U32_COUNTER);
+  expect(u.run).toThrow(LOOP_EXIT);
+  expect(u.fired()).toBeGreaterThan(0);
+  const s = counted(srFor({ test: IDO_LE }));
+  expect(cBackend.emit(s.run())).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(s.fired()).toBe(0);
+});
+
+test('without bound-plus-one-counter-wraps a `u32` counter reads the signed `+ 1` bound as `<=`', () => {
+  // `v0 + 1` steps defined from INT_MAX to INT_MIN, which the signed `>=` reads as still in; the
+  // oracle draws no `hi == INT_MAX`, so the C is the witness
+  const r = refusedOnlyBy('bound-plus-one-counter-wraps', U32_COUNTER);
+  expect(r.src).toMatch(/u32 v0;/);
+  expect(r.src).toMatch(/for \(v0 = a0; [^;]*a1[^;]* >= [^;]*v0[^;]*; v0 = v0 \+ 1\)/);
+});
+
+test('the strict `i + 1 != H` bound reads as `<` over a `u32` counter too: under the guard it never wraps', () => {
+  const ir = srFor({ guard: '%4: u32 = icmp_sge %0, %1', test: '%37: u32 = icmp_eq %1, %36' })
+    .replace('^bb0(%0: s32, %1: s32):', '^bb0(%0: u32, %1: s32):')
+    .replace('^bb1(%5: s32, %6: s32):', '^bb1(%5: u32, %6: s32):')
+    .replace('%36: s32 = add %5, %35', '%36: u32 = add %5, %35');
+  const r = lift(ir);
+  expect(r.src).toMatch(/u32 v0;/);
+  expect(r.src).toMatch(/for \(v0 = a0; [^;]*v0[^;]* < [^;]*a1[^;]*; v0 = v0 \+ 1\)/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
 const STEP_TWO = srFor({ test: IDO_LE }).replace(
   '%36: s32 = add %5, %35',
   '%97: s32 = const {value=2}\n  %36: s32 = add %5, %97',

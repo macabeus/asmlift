@@ -1718,6 +1718,8 @@ export interface ForBoundReading {
   readonly boundInLoop: boolean;
   /** the `+ 1` form read as an unsigned compare */
   readonly plusOneUnsigned: boolean;
+  /** the `+ 1` form, over a counter the `for` declares as no `s32` (the signedness variation's `u32`) */
+  readonly plusOneCounterWraps: boolean;
 }
 
 /** `forPlanAt`'s rules over each reading of the latch's `!=` test as a compare. The argument for each
@@ -1746,6 +1748,14 @@ export const FOR_BOUND_GATES: readonly Gate<ForBoundReading>[] = [
     sound: true,
     guardedBy: 'for-plan-gates.test.ts: without bound-plus-one-unsigned an unsigned `+ 1` bound reads as `<=`',
     rejects: (c) => c.plusOneUnsigned,
+  },
+  {
+    id: 'bound-plus-one-counter-wraps',
+    why: 'a counter declared unsigned steps defined from INT_MAX to INT_MIN, where the asm leaves the `!=` and a signed `<=` never leaves',
+    sound: true,
+    guardedBy:
+      'for-plan-gates.test.ts: without bound-plus-one-counter-wraps a `u32` counter reads the signed `+ 1` bound as `<=`',
+    rejects: (c) => c.plusOneCounterWraps,
   },
 ];
 
@@ -2607,6 +2617,12 @@ export interface StructureHooks {
    *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
    *  `assertDefaultAccepts`' structuring. */
   onForOffered?: () => void;
+  /** Fired each time `bound-plus-one-counter-wraps` is the rule that refuses a reading of a latch's
+   *  `!=` test: the one refusal of `forPlanAt` that reads how the signedness pin declared the
+   *  counter, so the other pin may take the `for` this one cannot. rank.ts reads it to let a
+   *  structuring the unsigned pin declines fall through to the signed one rather than abort the row.
+   *  Unheld: it fires from every attempt, committed or not. */
+  onCounterSignRefused?: () => void;
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -3799,7 +3815,13 @@ function structureRanked(
     assertDefaultAccepts(
       fn,
       opts,
-      { ...hooks, onTailFallerKept: undefined, onCaseCopied: undefined, onForOffered: undefined },
+      {
+        ...hooks,
+        onTailFallerKept: undefined,
+        onCaseCopied: undefined,
+        onForOffered: undefined,
+        onCounterSignRefused: undefined,
+      },
       memo,
     );
   }
@@ -9858,10 +9880,15 @@ function structureRanked(
   //     leave unless `hi` is INT_MAX. There the asm leaves after `i + 1` wraps, and the `for` never
   //     leaves. The asm does not say the source overflowed there: an unsigned counter under a signed
   //     guard (`u32 i; if (lo <= hi) do .. while (++i != (u32)hi + 1)`) compiles to the same bytes
-  //     and is defined at INT_MAX. The overflow is asmlift's own, declaring the counter `s32` as the
-  //     `while (1)` reading does too (its `i + 1` overflows at the same trip), so both spellings are
-  //     undefined there and the `for` is taken; a host differential under -fwrapv flags only the
-  //     `for`, on that one input. `i' != H` and `i' < H` agree on every trip, any sign.
+  //     and is defined at INT_MAX. Where the `for` declares the counter `s32`, the overflow is
+  //     asmlift's own, as the `while (1)` reading's is (its `i + 1` overflows at the same trip), so
+  //     both spellings are undefined there and the `for` is taken; a host differential under -fwrapv
+  //     flags only the `for`, on that one input. Where it declares it otherwise (the `unsigned`
+  //     signedness variation's `u32`, a reconciled `u32` local), `i + 1` steps DEFINED to INT_MIN
+  //     and the signed `<=` stays in forever, where that variation's `while (1)` leaves on the u32
+  //     `==`: `bound-plus-one-counter-wraps` refuses the reading unless the counter is `s32`.
+  //     `i' != H` and `i' < H` agree on every trip, any sign and any declaration: under the guard
+  //     `i + 1 <= H`, which never wraps.
   //   • the `+ 1` form is SIGNED ONLY. IDO emits it for an unsigned `i <= hi` as well (`sltu` guard,
   //     `bne` against `hi + 1`), and there `hi == UINT_MAX` is a defined loop the asm leaves after one
   //     wrap and C's `<=` never does: `bound-plus-one-unsigned` refuses that reading, and with no
@@ -9876,6 +9903,7 @@ function structureRanked(
     stepped: Value,
     ivParam: Value,
     body: ReadonlySet<Block>,
+    counter: IrType | undefined,
   ): TestReading[] => {
     const c = defs.get(cond);
     const constOf = (v: Value): number | null => {
@@ -9936,8 +9964,13 @@ function structureRanked(
         stepNotUnit: step[1] !== 1,
         boundInLoop: inLoop(x),
         plusOneUnsigned: !strict && sign === 'u',
+        plusOneCounterWraps: !strict && !(counter?.kind === 'int' && counter.width === 32 && counter.signed),
       };
-      return firstRejection(hooks.forBoundGates ?? FOR_BOUND_GATES, facts) === null ? reads : [];
+      const refused = firstRejection(hooks.forBoundGates ?? FOR_BOUND_GATES, facts);
+      if (refused === 'bound-plus-one-counter-wraps') {
+        hooks.onCounterSignRefused?.();
+      }
+      return refused === null ? reads : [];
     };
     return [
       ...(hi !== null ? [...spellings(hi, false, 's'), ...spellings(hi, false, 'u')] : []),
@@ -10214,9 +10247,14 @@ function structureRanked(
     const testReading = (): TestReading | null =>
       (reading ??= !differs(own)
         ? own
-        : (boundReadings(cond, contIsTaken, back.args[h.params.indexOf(ivParam)] as Value, ivParam, fl.body).find(
-            (t) => !differs(t),
-          ) ?? null));
+        : (boundReadings(
+            cond,
+            contIsTaken,
+            back.args[h.params.indexOf(ivParam)] as Value,
+            ivParam,
+            fl.body,
+            varType.get(iv),
+          ).find((t) => !differs(t)) ?? null));
     // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
     const rereadable = (v: Value): boolean => {
       const d = defs.get(v);
