@@ -1267,10 +1267,10 @@ interface ForeverLoopInfo {
 // block that code runs on to is the second target (`hitArmOf`), and the hit is a break arm whose
 // region stops there (`BreakArm.exit`), written ahead of `f = 1; break;`. sub_0800D188's MAGNET/BOX
 // case is one, its `out:` the `break;` that ends the case, behind which the switch's own `break;`
-// leaves the loop around it: agbcc threads the
-// `goto` to the code after that loop (jump.c `follow_jumps`), the merge of the switch and the exit of
-// the loop at once. No goto-free spelling matches those bytes (the flag adds a variable), so the hit
-// rung is asked only where every structuring without it declines (`LAST_RESORT_RUNGS`).
+// leaves the loop around it: agbcc threads the `goto` to the code after that loop (jump.c
+// `follow_jumps`), the merge of the switch and the exit of the loop at once. No goto-free spelling
+// matches those bytes (the flag adds a variable), so the hit rung is asked only where every
+// structuring without it declines (`LAST_RESORT_RUNGS`).
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
@@ -3385,16 +3385,17 @@ interface PastExitRanking {
   could: boolean;
 }
 
-/** The `while (1)` loops, by header, that ask one of the last-resort rungs (`LAST_RESORT_RUNGS`);
- *  the ones a structuring met that the rung, unasked, would have read; and of those, the ones whose
- *  every other reading declined, with each such loop's enclosing loop on the `outward` rung, which
- *  takes the exit handed out to it, or, on the `hit` rung, whose reading a case arm refused for a
- *  `break` the loop would capture (`switchBreakAt`). Per loop, as `ForRanking` is: a loop that needs the rung's flag
- *  would otherwise drag every loop the rung also reads, such as agbcc's cross-jumped shared tails
- *  the copies spell byte for byte, onto the flag. */
+/** One last-resort rung's `while (1)` loops, by header (`LAST_RESORT_RUNGS`). Per loop, as
+ *  `ForRanking` is: a loop that needs the rung's flag would otherwise drag every loop the rung also
+ *  reads, such as agbcc's cross-jumped shared tails the copies spell byte for byte, onto the flag. */
 interface LastResortRanking {
+  /** the loops that ask the rung */
   readonly asked: ReadonlySet<Block>;
+  /** the loops a structuring met that the rung, unasked, would have read */
   readonly could: Set<Block>;
+  /** of those, the ones no other reading read; on the `outward` rung also each one's enclosing loop,
+   *  which takes the exit handed out to it; on the `hit` rung also a loop whose reading a case arm
+   *  refused for a `break` the loop would capture (`switchBreakAt`) */
   readonly needs: Set<Block>;
 }
 
@@ -3451,8 +3452,9 @@ interface ForRanking {
  *
  *  A HIT THAT RUNS CODE FIRST, BEHIND THE DECLINES. A two-level exit whose hit runs code of its own
  *  on the way to its second target (`hitArmOf`, `BreakArm.exit`) reads loops every other
- *  `while (1)` rung reads too: agbcc's cross-jumped shared tails, which the copies spell byte for byte, and a search
- *  loop's hit into a return tail holding a loop, which the last rung copies into the hit. The flag
+ *  `while (1)` rung reads too: agbcc's cross-jumped shared tails, which the copies spell byte for
+ *  byte, and a search loop's hit into a return tail holding a loop, which the last rung copies into
+ *  the hit. The flag
  *  is a variable the asm does not hold, so the hit rung is asked only where every run above
  *  declines and some loop's hit rung would have read it (`LAST_RESORT_RUNGS`): sub_0800D188's
  *  MAGNET/BOX search loop, whose last-rung copy starts at the merge of the switch arm it sits in,
@@ -4816,9 +4818,10 @@ function structureRanked(
   // copies a return tail a path that bypasses the loop enters, under an exit inside the loop's span
   // or on the exit path (A PATH THAT BYPASSES THE LOOP, at `earlyReturnArm`). Behind that, again only
   // on a run every structuring without it declined (`LAST_RESORT_RUNGS`), the two-level exit whose
-  // hit runs code first (`hitArmOf`). Last of all, where no reading fits and no ret copy waits, every `while (1)` reading above runs again, in the same
-  // order, with an arm writing its own copy of a loop in a tail it shares, ending in `break` or in
-  // `return` (A LOOP IN THE TAIL, at `earlyReturnArm`): two copies of a loop the asm holds once.
+  // hit runs code first (`hitArmOf`). Last of all, where no reading fits and no ret copy waits, every
+  // `while (1)` reading above runs again, in the same order, with an arm writing its own copy of a
+  // loop in a tail it shares, ending in `break` or in `return` (A LOOP IN THE TAIL, at
+  // `earlyReturnArm`): two copies of a loop the asm holds once.
   // `rungs` asks every reading with or without `cycles`, so a reading added to `rungs` is asked
   // again with it at the last rung. A loop whose outward reading its partner refused runs the ladder
   // from the two-level rung again with `outward` off (`handedFallbacks`).
