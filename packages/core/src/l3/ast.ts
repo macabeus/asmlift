@@ -1204,6 +1204,9 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
    *  with no loop entered since it began, where a labelled `break` may sit. */
   type Scope = { labels: ReadonlySet<string> | null; armTop: boolean; ends: ReadonlySet<string>; inArm: boolean };
   const walk = (list: readonly Stmt[], scope: Scope): string | null => {
+    // `after[i]`: the `break` labels later in this list than `i`, beside the enclosing ones — built
+    // only for a list holding one, so the walk allocates nothing per statement on a goto-free tree
+    const after = endsAfter(list, scope.ends);
     for (const [i, s] of list.entries()) {
       if (s.k === 'goto') {
         if (s.caseEnd === true) {
@@ -1242,7 +1245,7 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
           }
         }
         for (const arm of [...s.cases.map((c) => c.body), s.default ?? []]) {
-          const why = walk(arm, { labels: own, armTop: true, ends: new Set<string>(), inArm: true });
+          const why = walk(arm, { labels: own, armTop: true, ends: NO_ENDS, inArm: true });
           if (why !== null) {
             return why;
           }
@@ -1252,7 +1255,7 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
       // The `break` labels later in this list are the ends a goto inside `s` may reach. Inside a
       // loop the switch's case labels are out of reach (a case-label goto there would leave the
       // loop) and no `break;` leaves the arm.
-      const ends = new Set([...scope.ends, ...endLabelsAfter(list, i)]);
+      const ends = after?.[i] ?? scope.ends;
       const loop = isLoop(s);
       for (const inner of stmtLists(s)) {
         const why = walk(inner, {
@@ -1266,7 +1269,7 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
         }
       }
       if (s.k === 'for') {
-        const why = walk([s.init, s.inc], { labels: null, armTop: false, ends: new Set(), inArm: false });
+        const why = walk([s.init, s.inc], { labels: null, armTop: false, ends: NO_ENDS, inArm: false });
         if (why !== null) {
           return why;
         }
@@ -1274,12 +1277,27 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
     }
     return null;
   };
-  return walk(body, { labels: null, armTop: false, ends: new Set(), inArm: false });
+  return walk(body, { labels: null, armTop: false, ends: NO_ENDS, inArm: false });
 }
 
-/** The labels of the labelled `break`s that are elements of `list` after index `i`. */
-function endLabelsAfter(list: readonly Stmt[], i: number): string[] {
-  return list.slice(i + 1).flatMap((s) => (s.k === 'break' && s.label !== undefined ? [s.label] : []));
+const NO_ENDS: ReadonlySet<string> = new Set();
+
+/** For each index of `list`, `outer` and the labels of the labelled `break`s that are elements of
+ *  `list` after it; undefined where `list` holds none, so every index reads `outer`. */
+function endsAfter(list: readonly Stmt[], outer: ReadonlySet<string>): ReadonlySet<string>[] | undefined {
+  if (!list.some((s) => s.k === 'break' && s.label !== undefined)) {
+    return undefined;
+  }
+  const out: ReadonlySet<string>[] = new Array(list.length);
+  let later: ReadonlySet<string> = outer;
+  for (let i = list.length - 1; i >= 0; i--) {
+    out[i] = later;
+    const s = list[i];
+    if (s.k === 'break' && s.label !== undefined) {
+      later = new Set([...later, s.label]);
+    }
+  }
+  return out;
 }
 
 /** Does a case-end `goto` in `list`, at any depth, name a labelled `break` that `list` does not
