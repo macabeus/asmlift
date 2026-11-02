@@ -496,6 +496,16 @@ function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf
   return `${dest.name} = ${printExpr({ k: 'call', fn: call.fn, args: rest }, 99, vt, leaf)}`;
 }
 
+/** `out.push(...lines)` without the spread: a spread passes every line as an ARGUMENT, and V8 throws
+ *  "Maximum call stack size exceeded" past about 120k of them (120,000 print, 130,000 throw, node
+ *  24). A structuring with a long arm reaches that at a nesting depth of a few dozen, so the throw
+ *  reads as deep recursion when it is only size. */
+function append(out: string[], lines: readonly string[]): void {
+  for (const line of lines) {
+    out.push(line);
+  }
+}
+
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
@@ -524,12 +534,12 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       }
       const out = [`${indent}if (${cond}) {`];
       for (const t of s.then) {
-        out.push(...printStmt(t, indent + '    ', vt, leaf));
+        append(out, printStmt(t, indent + '    ', vt, leaf));
       }
       if (s.else.length) {
         out.push(`${indent}} else {`);
         for (const e of s.else) {
-          out.push(...printStmt(e, indent + '    ', vt, leaf));
+          append(out, printStmt(e, indent + '    ', vt, leaf));
         }
       }
       out.push(`${indent}}`);
@@ -539,7 +549,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       refuseMisboundBreak(s.body, 'loop');
       const out = [`${indent}while (${pe(s.cond, 99)}) {`];
       for (const t of s.body) {
-        out.push(...printStmt(t, indent + '    ', vt, leaf));
+        append(out, printStmt(t, indent + '    ', vt, leaf));
       }
       out.push(`${indent}}`);
       return out;
@@ -548,7 +558,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       refuseMisboundBreak(s.body, 'loop');
       const out = [`${indent}do {`];
       for (const t of s.body) {
-        out.push(...printStmt(t, indent + '    ', vt, leaf));
+        append(out, printStmt(t, indent + '    ', vt, leaf));
       }
       out.push(`${indent}} while (${pe(s.cond, 99)});`);
       return out;
@@ -565,7 +575,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       const identity = s.init.k === 'assign' && s.init.value.k === 'var' && s.init.value.name === s.init.name;
       const out = [`${indent}for (${identity ? '' : clause(s.init)}; ${pe(s.cond, 99)}; ${clause(s.inc)}) {`];
       for (const t of s.body) {
-        out.push(...printStmt(t, indent + '    ', vt, leaf));
+        append(out, printStmt(t, indent + '    ', vt, leaf));
       }
       out.push(`${indent}}`);
       return out;
@@ -625,7 +635,7 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
   const printDefault = (): void => {
     out.push(`${ci}default:`);
     for (const t of s.default!) {
-      out.push(...printStmt(t, bi, vt, leaf));
+      append(out, printStmt(t, bi, vt, leaf));
     }
     // A default that is NOT last would otherwise fall into the case below it — the mirror of the
     // rule for cases. The last one needs no `break;` because there is nothing under it.
@@ -654,7 +664,7 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
       out.push(`${ci}${c.label}:`);
     }
     for (const t of c.body) {
-      out.push(...printStmt(t, bi, vt, leaf));
+      append(out, printStmt(t, bi, vt, leaf));
     }
     // A case whose body ends in `return`/`break` (a terminated arm) needs no `break;`; only an
     // open non-fall-through arm gets one. `fallsThrough` omits it so control drops to the next case.
@@ -801,7 +811,7 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean)
     );
   }
   for (const s of fn.body) {
-    lines.push(...printStmt(s, '    ', vt, leaf));
+    append(lines, printStmt(s, '    ', vt, leaf));
   }
   return lines;
 }
