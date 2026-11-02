@@ -30,7 +30,7 @@ import {
   TWO_LEVEL_REGION_GATES,
   structure,
 } from '../src/structure/structure';
-import { irAgreement, irTraceOf } from './helpers';
+import { NO_HIT_CODE, irAgreement, irTraceOf } from './helpers';
 
 const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
 
@@ -1307,7 +1307,7 @@ test('a shared ret tail no flag-free `while (1)` takes is copied, not flagged', 
 /** mwcc_242_81's `for (i…) { for (j…) if (probe(j, i) == x) goto out; k(i); } out: t(i);`: the
  *  hit's ret-tail copy is refused where it is emitted on the first structuring, and lifts once the
  *  ret copies rank last. The outward flag, a variable the asm does not hold, is asked only of a
- *  structuring every reading without it declines (`OutwardRanking`). */
+ *  structuring every reading without it declines (`LAST_RESORT_RUNGS`). */
 const RET_COPY_RANKED_LAST = `fn retlast {
 ^bb0(%0: s32, %1: s32, %2: s32):
   br ^bb6(%0)
@@ -1590,4 +1590,276 @@ test('without own-target-held-back the hit code laid out first takes a second fl
   expect(shipped.disagree).toBe(0);
   expect(agreement.judged).toBe(SEEDS.length);
   expectCovered(ir);
+});
+
+/** The hit runs code of its own before it reaches the second target (`hitArmOf`, `BreakArm.exit`): `case 0:
+ *  case 1: case 4: for (j…) { if (probe(j, i) == x) { hit(j); goto out; } } k(i); out: break;`
+ *  (`synthetic:sw_hitexit_in`'s shape). The hit's edge enters `hit(j)`, which no `break` arm reaches
+ *  the loop's exit from and which is no second target itself (the code after the loop never meets
+ *  it); the block it runs on to, the switch arm's merge, is. Without the reading the loop is never
+ *  classified ("unrecovered back-edge"). */
+const HIT_CODE_TO_ARM_END = `fn hitcodearm {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7()
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb2(), ^bb2(), ^bb8(), ^bb2(), ^bb6() {cases=[0;1;2;4]}
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb6()
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb6()
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  br ^bb6()
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7()
+^bb7():
+  ret
+}`;
+
+/** The same hit where the switch arm's merge is also the outer loop's exit: every arm ends the switch
+ *  and `break;` after it leaves the loop, and the merge hands the tail a value per arm and runs a
+ *  loop of its own (`synthetic:sw_hitexit`'s shape, sub_0800D188's MAGNET/BOX case: `for (j…) { if
+ *  (probe(j, i) == x) { hit(j); a = 1; goto out; } } k(i); out: break;`). The tail's loop keeps the
+ *  hit from copying it as an early `return` until the last rung, whose copy of the merge no `break;`
+ *  inside the search loop can reach. */
+const HIT_CODE_PAST_THE_LOOP = `fn hitcodepast {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %30: s32 = const {value=1}
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb1(%3), ^bb7(%3, %30)
+^bb1(%5: s32):
+  %6: s32 = call %5 {target="mark"}
+  %7: s32 = const {value=1}
+  switch_br %5, ^bb12(), ^bb12(), ^bb8(), ^bb12(), ^bb6() {cases=[0;1;2;4]}
+^bb12():
+  %31: s32 = call %5 {target="skip"}
+  %32: u32 = icmp_eq %31, %3
+  cond_br %32, ^bb6(), ^bb2()
+^bb2():
+  %9: u32 = icmp_slt %1, %3
+  cond_br %9, ^bb5(), ^bb3(%3)
+^bb3(%10: s32):
+  %11: s32 = call %10, %5 {target="probe"}
+  %12: u32 = icmp_eq %11, %2
+  cond_br %12, ^bb9(), ^bb4()
+^bb9():
+  %19: s32 = call %10 {target="hit"}
+  br ^bb7(%7, %3)
+^bb4():
+  %13: s32 = add %10, %7
+  %14: u32 = icmp_slt %1, %13
+  cond_br %14, ^bb5(), ^bb3(%13)
+^bb5():
+  %15: s32 = call %5 {target="k"}
+  br ^bb7(%3, %7)
+^bb8():
+  %17: s32 = call %5 {target="h"}
+  %33: u32 = icmp_eq %17, %3
+  cond_br %33, ^bb6(), ^bb7(%3, %7)
+^bb6():
+  %8: s32 = add %5, %7
+  %16: u32 = icmp_slt %8, %0
+  cond_br %16, ^bb1(%8), ^bb7(%3, %30)
+^bb7(%20: s32, %21: s32):
+  %22: s32 = call %20 {target="t"}
+  %23: s32 = call %21 {target="t"}
+  %24: u32 = icmp_slt %3, %1
+  cond_br %24, ^bb10(%3), ^bb11()
+^bb10(%25: s32):
+  %26: s32 = call %25 {target="t"}
+  %27: s32 = add %25, %30
+  %28: u32 = icmp_slt %27, %1
+  cond_br %28, ^bb10(%27), ^bb11()
+^bb11():
+  ret
+}`;
+
+test.each([
+  ['to the end of its switch arm', HIT_CODE_TO_ARM_END, /unrecovered back-edge/],
+  ['to the end of its switch arm, the outer loop’s exit', HIT_CODE_PAST_THE_LOOP, /leaves its switch/],
+])('a `goto` whose hit runs code first, %s, lifts as a flag set after that code', (_, ir, without) => {
+  expect(() => judged(ir, NO_HIT_CODE)).toThrow(without);
+  const { src, agreement, shipped } = judged(ir);
+  // the hit writes its code, then the flag, then leaves the search loop; the flag leaves the switch
+  expect(src).toMatch(/hit\(v\d+\);\n\s*(?:v\d+ = v\d+;\n\s*)?(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\)/);
+  expect(src.match(/\bhit\(/g)).toHaveLength(1);
+  expect(src.match(/\bprobe\(/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const seen = covers(ir);
+  expect(seen.firstHit + seen.laterHit).toBeGreaterThan(0);
+  expect(seen.zeroTrips).toBeGreaterThan(0);
+  expect(seen.noHit).toBeGreaterThan(0);
+});
+
+/** `HIT_CODE_TO_ARM_END`'s nest, then a second loop whose two arms share a tail holding a search
+ *  loop and ending in `return` (loop-break-exit.test.ts's shape: `if (a(i) == k) f(1); else if
+ *  (b(i) == k) f(2); else continue; for (j…) if (t(j) == i) break; return hit(j);`). Alone, the
+ *  second loop lifts with each arm writing its own copy of the search loop, no flag; the first
+ *  loop's hit rung asks for the loop that needs it only (`LastResortRanking`), and does not drag the
+ *  second onto a flag the asm does not hold. */
+const SECOND_LOOP_SHARED_TAIL = `^bb100():
+  %102: s32 = const {value=0}
+  br ^bb101(%102)
+^bb101(%103: s32):
+  %104: u32 = icmp_slt %103, %0
+  cond_br %104, ^bb102(), ^bb107()
+^bb102():
+  %105: s32 = call %103 {target="a"}
+  %106: u32 = icmp_eq %105, %1
+  cond_br %106, ^bb103(), ^bb104()
+^bb103():
+  %107: s32 = const {value=1}
+  %108: s32 = call %107 {target="f"}
+  br ^bb106()
+^bb104():
+  %109: s32 = call %103 {target="b"}
+  %110: u32 = icmp_eq %109, %1
+  cond_br %110, ^bb105(), ^bb108()
+^bb105():
+  %111: s32 = const {value=2}
+  %112: s32 = call %111 {target="f"}
+  br ^bb106()
+^bb106():
+  br ^bb109(%102)
+^bb109(%130: s32):
+  %131: u32 = icmp_slt %130, %0
+  cond_br %131, ^bb110(), ^bb111(%130)
+^bb110():
+  %132: s32 = call %130 {target="t"}
+  %133: u32 = icmp_eq %132, %103
+  cond_br %133, ^bb111(%130), ^bb112()
+^bb112():
+  %134: s32 = const {value=1}
+  %135: s32 = add %130, %134
+  br ^bb109(%135)
+^bb111(%136: s32):
+  %113: s32 = call %136 {target="hit"}
+  ret %113
+^bb108():
+  %114: s32 = const {value=1}
+  %115: s32 = add %103, %114
+  br ^bb101(%115)
+^bb107():
+  %116: s32 = call {target="out"}
+  ret %116
+}`;
+const HIT_CODE_BESIDE_SHARED_TAIL = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside').replace(
+  '^bb7():\n  ret\n}',
+  `^bb7():\n  br ^bb100()\n${SECOND_LOOP_SHARED_TAIL}`,
+);
+
+/** The same second loop behind `HIT_CODE_PAST_THE_LOOP`'s nest, sub_0800D188's own shape: there the
+ *  search loop IS read, by the last rung's ret-tail copy, and refused only where that copy meets the
+ *  switch arm's merge (`switchBreakAt`), which is what notes the loop as needing the hit rung. */
+const HIT_CODE_PAST_BESIDE_SHARED_TAIL = HIT_CODE_PAST_THE_LOOP.replace('fn hitcodepast', 'fn hitpastbeside').replace(
+  '^bb11():\n  ret\n}',
+  `^bb11():\n  br ^bb100()\n${SECOND_LOOP_SHARED_TAIL}`,
+);
+
+test.each([
+  ['', HIT_CODE_BESIDE_SHARED_TAIL, HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside')],
+  [
+    ', where a case arm refuses the loop that needs it',
+    HIT_CODE_PAST_BESIDE_SHARED_TAIL,
+    HIT_CODE_PAST_THE_LOOP.replace('fn hitcodepast', 'fn hitpastbeside'),
+  ],
+])('a hit rung one loop needs leaves the loop beside it to the copies it lifts with alone%s', (_, ir, unreplaced) => {
+  expect(ir).not.toBe(unreplaced);
+  const { src, agreement, shipped } = judged(ir);
+  // the first loop takes the hit's flag
+  expect(src).toMatch(/hit\(v\d+\);\n\s*(?:v\d+ = v\d+;\n\s*)?(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\)/);
+  // the second keeps one copy of the search loop per arm (per copy of the tail it sits in), ahead
+  // of each `return`, and no flag
+  const copies = src.match(/if \(t\(v\d+\) == v\d+\) break;/g)?.length ?? 0;
+  expect(copies).toBeGreaterThanOrEqual(2);
+  expect(copies % 2).toBe(0);
+  expect(src.match(/return hit\(v\d+\);/g)).toHaveLength(copies);
+  expect(src.match(/ = 1;\n\s*break;/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
+
+/** mwcc_242_81's `for (i = lo; i <= hi; i++) { for (j = gLo; j <= gHi; j++) if (gE[j].f == 28) {
+ *  k(j); gE[j].u = 1; goto out; } k(i); } k(-1); out: k(-2);` with its loads as calls and its inner
+ *  bounds as `0` and `hi`, the CFG its frontend hands `structure` (a guarded, count-down inner loop):
+ *  the hit runs code first and leaves both loops. The inner loop's hit reading needs the outward rung
+ *  asked by that loop as well, and the plain outward probe, which reads no hit's code, reads only the
+ *  outer loop; the hit probe notes the inner loop for the outward rung, so the hit rung is reached at
+ *  all (`LAST_RESORT_RUNGS`). */
+const HIT_CODE_OUT_OF_BOTH_LOOPS = `fn hitoutward {
+^bb0(%0: s32, %1: s32, %2: s32):
+  br ^bb6(%0)
+^bb1():
+  %4: s32 = const {value=0}
+  %7: s32 = const {value=1}
+  %8: s32 = add %1, %7
+  %10: s32 = sub %8, %4
+  %12: u32 = icmp_slt %1, %4
+  cond_br %12, ^bb5(), ^bb2(%4, %10)
+^bb2(%14: s32, %15: s32):
+  %16: s32 = call %14 {target="probe"}
+  %18: u32 = icmp_eq %16, %2
+  cond_br %18, ^bb3(), ^bb4()
+^bb3():
+  %19: s32 = call %14 {target="hit"}
+  br ^bb8()
+^bb4():
+  %25: s32 = const {value=1}
+  %26: s32 = add %14, %25
+  %28: s32 = sub %15, %25
+  %29: s32 = const {value=0}
+  %30: u32 = icmp_eq %28, %29
+  cond_br %30, ^bb5(), ^bb2(%26, %28)
+^bb5():
+  %31: s32 = call %34 {target="k"}
+  %32: s32 = const {value=1}
+  %33: s32 = add %34, %32
+  br ^bb6(%33)
+^bb6(%34: s32):
+  %35: u32 = icmp_slt %1, %34
+  cond_br %35, ^bb7(), ^bb1()
+^bb7():
+  %37: s32 = call {target="done"}
+  br ^bb8()
+^bb8():
+  %39: s32 = call {target="out"}
+  ret
+}`;
+
+test('a hit that runs code first and leaves both loops asks the outward rung of the loop it leaves', () => {
+  const { src, agreement, shipped } = judged(HIT_CODE_OUT_OF_BOTH_LOOPS);
+  // the hit's code runs once, under the outward flag, past both loops
+  expect(src).toMatch(/if \((v\d+) == 0\) hit\(v\d+\);\n\s*out\(\);/);
+  expect(src.match(/\bhit\(/g)).toHaveLength(1);
+  expect(src.match(/\bprobe\(/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+  const fn = parse(HIT_CODE_OUT_OF_BOTH_LOOPS);
+  const traces = SEEDS.map((seed) => irTraceOf(fn, seed).map((ev) => ev.fn));
+  expect(traces.filter((t) => t.includes('hit')).length).toBeGreaterThan(0);
+  expect(traces.filter((t) => t.includes('done')).length).toBeGreaterThan(0);
 });

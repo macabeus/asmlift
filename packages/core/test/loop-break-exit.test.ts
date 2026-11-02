@@ -17,7 +17,7 @@ import { foldExitTrampolines } from '../src/raise/latch';
 import { recoverTypes } from '../src/raise/recover';
 import { BREAK_TAIL_GATES, BYPASS_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-import { irAgreement } from './helpers';
+import { NO_HIT_CODE, irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -1115,9 +1115,6 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  // Each refusal leaves the loop to decline LOUD.
-  const declines = (ir: string) => expect(() => judged(ir)).toThrow(/cannot structure/);
-
   // An entry from before the loop runs on a path that ran no arm, and the exit does not reach the
   // tail: each path runs one copy once, whatever the tail does (the duplication policy, at
   // `earlyReturnArm`).
@@ -1137,13 +1134,18 @@ describe('break arms that share a tail', () => {
 
   // The exit's own `pre()` runs before the tail, but the exit leaves by the header's test with
   // nothing entering it from before the loop, so `exitTail` (at `earlyReturnArm`) does not take it.
-  test('a shared tail the exit also reaches is refused', () => {
-    declines(
-      SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
-        '^bb7():\n',
-        '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
-      ),
+  // Behind every other reading, the two-level exit whose hits run code first takes it: each arm
+  // writes its own code and the flag, and the shared tail renders once, after the loop.
+  test('a shared tail the exit also reaches lifts only as a flag', () => {
+    const ir = SHARED_TAIL_TOP_TESTED.replace('  cond_br %4, ^bb2(), ^bb7()', '  cond_br %4, ^bb2(), ^bb9()').replace(
+      '^bb7():\n',
+      '^bb9():\n  %21: s32 = call {target="pre"}\n  %22: u32 = icmp_eq %21, %1\n  cond_br %22, ^bb6(), ^bb7()\n^bb7():\n',
     );
+    expect(() => judged(ir, NO_HIT_CODE)).toThrow(/cannot structure/);
+    const { src, agreement, shipped } = judged(ir);
+    expect(src.match(/f\([12]\);\n\s*v\d+ = 1;\n\s*break;/g)).toHaveLength(2);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
   test('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {

@@ -15,6 +15,7 @@ import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { type StructureHooks, TWO_LEVEL_EXIT_GATES } from '../src/structure/structure';
 
 /** `{ k: 'var' }` — the leaf every tree-building test needs most. */
 export const v = (name: string): Expr => ({ k: 'var', name });
@@ -758,3 +759,12 @@ export function agreesOverWords(fn: Fn, want: (a: number, b: number) => number, 
     }
   }
 }
+
+/** `while (1)`'s hit rung refused outright (`hitArmOf`), so a fixture shows what structures
+ *  without it: a two-level exit whose hit runs code before it reaches its second target. */
+export const NO_HIT_CODE: StructureHooks = {
+  twoLevelExitGates: [
+    ...TWO_LEVEL_EXIT_GATES,
+    { id: 'no-hit-code', why: 'the hit rung off', sound: false, rejects: (c) => c.hitRunsCode },
+  ],
+};
