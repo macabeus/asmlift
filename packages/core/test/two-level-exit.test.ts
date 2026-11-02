@@ -1719,11 +1719,7 @@ test.each([
  *  second loop lifts with each arm writing its own copy of the search loop, no flag; the first
  *  loop's hit rung asks for the loop that needs it only (`LastResortRanking`), and does not drag the
  *  second onto a flag the asm does not hold. */
-const HIT_CODE_BESIDE_SHARED_TAIL = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside').replace(
-  '^bb7():\n  ret\n}',
-  `^bb7():
-  br ^bb100()
-^bb100():
+const SECOND_LOOP_SHARED_TAIL = `^bb100():
   %102: s32 = const {value=0}
   br ^bb101(%102)
 ^bb101(%103: s32):
@@ -1768,17 +1764,38 @@ const HIT_CODE_BESIDE_SHARED_TAIL = HIT_CODE_TO_ARM_END.replace('fn hitcodearm',
 ^bb107():
   %116: s32 = call {target="out"}
   ret %116
-}`,
+}`;
+const HIT_CODE_BESIDE_SHARED_TAIL = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside').replace(
+  '^bb7():\n  ret\n}',
+  `^bb7():\n  br ^bb100()\n${SECOND_LOOP_SHARED_TAIL}`,
 );
 
-test('a hit rung one loop needs leaves the loop beside it to the copies it lifts with alone', () => {
-  expect(HIT_CODE_BESIDE_SHARED_TAIL).not.toBe(HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside'));
-  const { src, agreement, shipped } = judged(HIT_CODE_BESIDE_SHARED_TAIL);
+/** The same second loop behind `HIT_CODE_PAST_THE_LOOP`'s nest, sub_0800D188's own shape: there the
+ *  search loop IS read, by the last rung's ret-tail copy, and refused only where that copy meets the
+ *  switch arm's merge (`switchBreakAt`), which is what notes the loop as needing the hit rung. */
+const HIT_CODE_PAST_BESIDE_SHARED_TAIL = HIT_CODE_PAST_THE_LOOP.replace('fn hitcodepast', 'fn hitpastbeside').replace(
+  '^bb11():\n  ret\n}',
+  `^bb11():\n  br ^bb100()\n${SECOND_LOOP_SHARED_TAIL}`,
+);
+
+test.each([
+  ['', HIT_CODE_BESIDE_SHARED_TAIL, HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside')],
+  [
+    ', where a case arm refuses the loop that needs it',
+    HIT_CODE_PAST_BESIDE_SHARED_TAIL,
+    HIT_CODE_PAST_THE_LOOP.replace('fn hitcodepast', 'fn hitpastbeside'),
+  ],
+])('a hit rung one loop needs leaves the loop beside it to the copies it lifts with alone%s', (_, ir, unreplaced) => {
+  expect(ir).not.toBe(unreplaced);
+  const { src, agreement, shipped } = judged(ir);
   // the first loop takes the hit's flag
-  expect(src).toMatch(/hit\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\) k\(/);
-  // the second keeps one copy of the search loop per arm, ahead of each `return`, and no flag
-  expect(src.match(/if \(t\(v\d+\) == v\d+\) break;/g)).toHaveLength(2);
-  expect(src.match(/return hit\(v\d+\);/g)).toHaveLength(2);
+  expect(src).toMatch(/hit\(v\d+\);\n\s*(?:v\d+ = v\d+;\n\s*)?(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\)/);
+  // the second keeps one copy of the search loop per arm (per copy of the tail it sits in), ahead
+  // of each `return`, and no flag
+  const copies = src.match(/if \(t\(v\d+\) == v\d+\) break;/g)?.length ?? 0;
+  expect(copies).toBeGreaterThanOrEqual(2);
+  expect(copies % 2).toBe(0);
+  expect(src.match(/return hit\(v\d+\);/g)).toHaveLength(copies);
   expect(src.match(/ = 1;\n\s*break;/g)).toHaveLength(1);
   expect(agreement.disagree).toBe(0);
   expect(shipped.disagree).toBe(0);
