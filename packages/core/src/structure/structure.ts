@@ -3385,17 +3385,23 @@ interface PastExitRanking {
   could: boolean;
 }
 
-/** Whether `while (1)` asks one of its last-resort rungs (`LAST_RESORT_RUNGS`), and whether a
- *  structuring met a loop that rung reads. */
+/** The `while (1)` loops, by header, that ask one of the last-resort rungs (`LAST_RESORT_RUNGS`);
+ *  the ones a structuring met that the rung, unasked, would have read; and of those, the ones whose
+ *  every other reading declined, with each such loop's enclosing loop on the `outward` rung, which
+ *  takes the exit handed out to it. Per loop, as `ForRanking` is: a loop that needs the rung's flag
+ *  would otherwise drag every loop the rung also reads, such as agbcc's cross-jumped shared tails
+ *  the copies spell byte for byte, onto the flag. */
 interface LastResortRanking {
-  readonly asked: boolean;
-  could: boolean;
+  readonly asked: ReadonlySet<Block>;
+  readonly could: Set<Block>;
+  readonly needs: Set<Block>;
 }
 
 /** The `while (1)` rungs that add a variable the asm does not hold, asked only where every
  *  structuring without them declines, in the order their reruns nest, outermost first: every run
  *  with `hit` unasked comes before any with it asked, and within each, every run with `outward`
- *  unasked before any with it asked (`lastResortRanked`, at `structure`).
+ *  unasked before any with it asked (`lastResortRanked`, at `structure`). The asked runs ask the
+ *  loops that need the rung first, then every loop it read (`LastResortRanking`).
  *  - `outward`: a `goto` out of both loops, handed out (`TwoLevelExit.outward`);
  *  - `hit`: a two-level exit whose hit runs code first (`hitArmOf`). */
 const LAST_RESORT_RUNGS = ['hit', 'outward'] as const;
@@ -3450,7 +3456,9 @@ interface ForRanking {
  *  declines and some loop's hit rung would have read it (`LAST_RESORT_RUNGS`): sub_0800D188's
  *  MAGNET/BOX search loop, whose last-rung copy starts at the merge of the switch arm it sits in,
  *  where no `break;` inside the loop reaches (`switchBreakAt`). The `for` reruns below make each
- *  run with it unasked first.
+ *  run with it unasked first. Both rungs are asked per loop (`LastResortRanking`): first by the
+ *  loops no other reading read, then by every loop the rung read, so a loop beside the one that
+ *  needs the flag keeps the copies it lifts with alone.
  *
  *  A `for` WHOSE `continue` RUNS THE UPDATE, LAST. `while (1)` spells a counted loop whose latch
  *  holds the update and the test as `if (!c) break; i++;` at the foot of the body, which has no
@@ -3549,7 +3557,8 @@ export function structure(
     );
   };
   // the last-resort rungs, one level of reruns each (`LAST_RESORT_RUNGS`): the runs below rung `i`
-  // with it unasked, and only where they all decline and one met a loop it reads, again with it asked
+  // with it unasked, and only where they all decline and one met a loop it reads, again with it
+  // asked by the loops that need it, then by every loop it read, once more for each loop a run adds
   const lastResortRanked = (
     forRank: ForRanking,
     jumps: JumpRanking,
@@ -3560,13 +3569,26 @@ export function structure(
       return ranked(rungs as LastResortRungs, forRank, jumps);
     }
     const name = LAST_RESORT_RUNGS[i];
-    const unasked: LastResortRanking = { asked: false, could: false };
-    return (
-      lastResortRanked(forRank, jumps, i + 1, { ...rungs, [name]: unasked }) ??
-      (unasked.could
-        ? lastResortRanked(forRank, jumps, i + 1, { ...rungs, [name]: { asked: true, could: false } })
-        : null)
-    );
+    const could = new Set<Block>();
+    const needs = new Set<Block>();
+    const at = (asked: ReadonlySet<Block>) =>
+      lastResortRanked(forRank, jumps, i + 1, { ...rungs, [name]: { asked, could, needs } });
+    let asked: ReadonlySet<Block> = new Set();
+    let sfn = at(asked);
+    if (sfn === null && needs.size > 0 && ![...could].every((h) => needs.has(h))) {
+      asked = new Set(needs);
+      sfn = at(asked);
+    }
+    // a run that asks every loop the rung read is the one asking every loop, once no run adds one
+    while (sfn === null) {
+      const next = new Set([...asked, ...could, ...needs]);
+      if (next.size === asked.size) {
+        break;
+      }
+      asked = next;
+      sfn = at(asked);
+    }
+    return sfn;
   };
   const forRanked = (jumps: JumpRanking): SFn | null => {
     let forRank: ForRanking = { asked: new Set(), wanted: new Set() };
@@ -4805,16 +4827,21 @@ function structureRanked(
     const open = !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl);
     const copying = copyingReadings.get(h);
     const retCopying = open ? retCopyingReadings.get(h) : undefined;
+    // the last-resort rungs whose unasked probe read this loop
+    const couldHere = new Set<LastResortRanking>();
     const rungs = (cycles: boolean) => {
       const read = (ask: ForeverAsk) => (open ? foreverShape(nl, { ...ask, cycles }) : null);
-      // a last-resort rung (`LAST_RESORT_RUNGS`): asked, it reads the loop; unasked, it only notes
-      // whether it would, a probe that leaves no ranking of its own behind
+      // a last-resort rung (`LAST_RESORT_RUNGS`): asked by this loop, it reads the loop; unasked, it
+      // only notes whether it would, a probe that leaves no ranking of its own behind
       const probed = (rung: LastResortRanking, ask: ForeverAsk): ForeverLoopInfo | null => {
-        if (rung.asked) {
+        if (rung.asked.has(h)) {
           return read(ask);
         }
         const pastCould = pastExit.could;
-        rung.could ||= read(ask) !== null;
+        if (read(ask) !== null) {
+          rung.could.add(h);
+          couldHere.add(rung);
+        }
         pastExit.could = pastCould;
         return null;
       };
@@ -4827,7 +4854,7 @@ function structureRanked(
           read({ copyExitTail: true, lastResort: true }) ??
           // the hit rung (`hitArmOf`), behind every copy that holds no loop and ahead of the last
           // rung's copies of one
-          probed(lastResort.hit, { twoLevel: true, hits: true, outward: outward && lastResort.outward.asked }),
+          probed(lastResort.hit, { twoLevel: true, hits: true, outward: outward && lastResort.outward.asked.has(h) }),
       };
     };
     const first = rungs(false);
@@ -4844,6 +4871,15 @@ function structureRanked(
         foreverLoops.set(h, fl);
       } else {
         retCopying?.();
+        // no other reading read the loop: it needs the rungs that would have, and an outward exit
+        // needs the enclosing loop that takes it handed out
+        for (const rung of couldHere) {
+          rung.needs.add(h);
+          const parent = forest.parent.get(h);
+          if (rung === lastResort.outward && parent !== null && parent !== undefined) {
+            rung.needs.add(parent);
+          }
+        }
       }
       return fl;
     };
