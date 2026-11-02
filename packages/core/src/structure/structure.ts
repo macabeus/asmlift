@@ -2619,9 +2619,10 @@ export interface StructureHooks {
   onForOffered?: () => void;
   /** Fired each time `bound-plus-one-counter-wraps` is the rule that refuses a reading of a latch's
    *  `!=` test: the one refusal of `forPlanAt` that reads how the signedness pin declared the
-   *  counter, so the other pin may take the `for` this one cannot. rank.ts reads it to let a
-   *  structuring the unsigned pin declines fall through to the signed one rather than abort the row.
-   *  Unheld: it fires from every attempt, committed or not. */
+   *  counter, so the other pin may take the `for` this one cannot. Unheld: it fires from every
+   *  attempt, committed or not, so it is a NECESSARY condition only. rank.ts reads it as the cheap
+   *  filter ahead of its causation probe (`declinesOnCounterSign`, the same structuring with the rule
+   *  off), and only a decline that probe ties to the rule falls through to the signed pin. */
   onCounterSignRefused?: () => void;
 }
 

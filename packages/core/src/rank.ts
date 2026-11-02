@@ -101,6 +101,7 @@ import { type Stillborn, stillbornVerdict } from './stillborn';
 import {
   DefaultAcceptsMemo,
   DefaultAcceptsMemoMisuse,
+  FOR_BOUND_GATES,
   StructureError,
   hasDivergentSharedRet,
 } from './structure/structure';
@@ -501,6 +502,27 @@ interface TreeSource {
   signedUnsignedCompare?: true;
 }
 
+/** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
+ *  attempt `forPlanAt` makes, committed or not, and on loops the thrown refusal never reaches
+ *  (`synthetic:sw_gotocase_inner:ido7.1` fires it and declines on a nested switch), so its firing
+ *  alone says nothing about the decline. The question is asked the one way that answers it: the
+ *  same structuring with that rule off. Where that one structures, the refusal was the rule's, and
+ *  the other pin, whose counter the rule admits, can take the loop; where it still throws, the
+ *  decline is the function's and the row aborts as it did before the rule existed. The tree the
+ *  ablated run builds is discarded — it is the `for` the rule refuses as wrong under this pin.
+ *  Not holding every pinnable decline instead: that would let the signed pin past any structure
+ *  refusal that reads a declared type, not only this one, and re-lift every declined row. */
+function declinesOnCounterSign(fn: Fn, opts: Parameters<typeof structureChecked>[1]): boolean {
+  try {
+    structureChecked(fn, opts, {
+      forBoundGates: FOR_BOUND_GATES.filter((g) => g.id !== 'bound-plus-one-counter-wraps'),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Emit the DISTINCT type/branch-sense candidates for `name` — PURE, no scoring.
  *  It differs from `decompile()` in exactly two arguments to the shared spine — the signedness
  *  pin, injected between pre-recovery and recoverTypes via the `beforeRecover` hook, and the
@@ -528,10 +550,12 @@ export function enumerateCandidates(
    *  the row (`abortsRow`) on the premise that a structure refusal does not depend on the pin. One
    *  does: `forPlanAt`'s `bound-plus-one-counter-wraps` reads the counter's declared type, so IDO's
    *  counted loop (`synthetic:sw_gotocase2:ido7.1`) takes its `for` under the `s32` pin and not the
-   *  `u32` one, and without the `for` the switch's loop exit cannot be spelled at all. Where that
-   *  rule fired in a structuring the unsigned pin declines, the decline is held here and the signed
-   *  pin runs as it would have; a row that then produces no candidate declines with it. Nothing the
-   *  signed pin builds is new: it is the same pass, under its own default setting and its own gates. */
+   *  `u32` one, and without the `for` the switch's loop exit cannot be spelled at all. The decline is
+   *  held only where that rule CAUSED it (`declinesOnCounterSign`), and then the rest of the unsigned
+   *  pin is skipped: its other settings would run behind a declined default, which `abortsRow` exists
+   *  to forbid. The signed pin runs as it would have; a row that then produces no candidate declines
+   *  with the held error. Nothing the signed pin builds is new: it is the same pass, under its own
+   *  default setting and its own gates. */
   let heldPinDecline: unknown = undefined;
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
@@ -2002,7 +2026,7 @@ export function enumerateCandidates(
     // Read off the pin's OWN call, per symbol-map setting — the `/raw-globals` setting lifts without
     // the map and answers for itself, so no lift is governed by a fact measured on a different one.
     let pinnable = false;
-    for (const cand of SIGNEDNESS) {
+    pins: for (const cand of SIGNEDNESS) {
       if (cand.signed && !pinnable) {
         break;
       }
@@ -2399,27 +2423,28 @@ export function enumerateCandidates(
               ),
             );
             let counterSignRefused = false;
+            const structOpts = {
+              ...symbolSettingOpts,
+              ...(inferredSymbols.size ? { inferredSymbols } : {}),
+              ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
+              preserveDivergentBranchSense: s.sense,
+              negateJoinedBranchSense: s.join ? !defSense : defSense,
+              ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
+              anchorConstCopies: s.anchor,
+              anchorLoopEntryConsts: s.entry,
+              spellBitfieldMembers: s.bitfields,
+              spellPtrMemberElements: s.ptrElems,
+              spellDeclaredSubscripts: s.declRank,
+              ...STRUCTURE_VARIATIONS.reduce(
+                (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
+                {},
+              ),
+              ...(alternative ? { followEarlyReturns: true } : {}),
+            };
             try {
               sfn = structureChecked(
                 fn,
-                {
-                  ...symbolSettingOpts,
-                  ...(inferredSymbols.size ? { inferredSymbols } : {}),
-                  ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-                  preserveDivergentBranchSense: s.sense,
-                  negateJoinedBranchSense: s.join ? !defSense : defSense,
-                  ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
-                  anchorConstCopies: s.anchor,
-                  anchorLoopEntryConsts: s.entry,
-                  spellBitfieldMembers: s.bitfields,
-                  spellPtrMemberElements: s.ptrElems,
-                  spellDeclaredSubscripts: s.declRank,
-                  ...STRUCTURE_VARIATIONS.reduce(
-                    (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
-                    {},
-                  ),
-                  ...(alternative ? { followEarlyReturns: true } : {}),
-                },
+                structOpts,
                 {
                   ...witnessHooks,
                   onCounterSignRefused: () => {
@@ -2434,10 +2459,19 @@ export function enumerateCandidates(
                 throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation
               }
               if (abortsRow([...liftVariations, ...symbolSetting.variations], s)) {
-                if (!(counterSignRefused && !cand.signed && pinnable && e instanceof StructureError)) {
+                if (!(
+                  counterSignRefused &&
+                  !cand.signed &&
+                  pinnable &&
+                  e instanceof StructureError &&
+                  declinesOnCounterSign(fn, structOpts)
+                )) {
                   throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
                 }
-                heldPinDecline ??= e; // THE UNSIGNED PIN'S DECLINE, HELD FOR THE SIGNED ONE
+                // THE UNSIGNED PIN'S DECLINE, HELD FOR THE SIGNED ONE — and the rest of the unsigned
+                // pin is not built: every other setting of it would run behind a declined default.
+                heldPinDecline ??= e;
+                continue pins;
               }
               // Recorded for EVERY dropped setting: a candidate with more variations on looks its siblings
               // up by stripping one variation at a time, and the stripped key can itself carry the other.
