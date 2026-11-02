@@ -59,10 +59,18 @@
 //    i++) switch (..) { .. }` (`synthetic:sw_gotocase2:ido7.1`) takes `hi + 1` as a parameter every
 //    in-edge hands it. The parameter is spellable — a copy at the end of every arm — but the
 //    structurer reads a latch with a parameter as no `for` (`forPlanAt`'s `latch-params`), so the
-//    fold is what lets the `for` read the latch at all. Measured with the scope widened to latches
-//    alone, every ido7.1 row that keeps `while (1)` moves by a line or none (sw_forjt_skew 186 ->
-//    185, forexit_old 162 -> 163, brk2out_ctl 151 -> 151, sw_forjt 152 -> 150) and no row's
-//    decline turns; `unpre.test.ts` pins an ido-shaped latch folding and the `if` join staying out.
+//    fold is what lets the `for` read the latch at all. It is a pre-structure fold on every
+//    toolchain, so it also folds a latch param no `for` reads: a `do`-`while` latch every arm hands
+//    `p + 2` (KMC's `loop_elsebreak`) is spelled as the update `p = p + 2` rather than as a copy at
+//    the end of each arm. Measured with the scope widened to latches alone over the synthetic tier,
+//    16 cells move, no match is lost and no decline turns. Closer: uninit_bits ido 13 -> 6,
+//    sw_loopret gcc2.7.2 81 -> 73, sw_loopret_ctl gcc2.7.2 60 -> 56, brk2sw_ctl agbcc 38 -> 34,
+//    loop_elsebreak ido 26 -> 22, brk2out_sw ido 151 -> 148. Further: loop_elsebreak gcc2.7.2kmc
+//    16 -> 23 and agbcc 26 -> 28, forexit_iv gcc2.7.2kmc 117 -> 121, brk2out_ctl gcc2.7.2kmc
+//    151 -> 152; the other six by a line or none. A SIBLING'S STRIDE below is kept
+//    out of the pre-structure folds on the same kind of measurement, and there the moves were one
+//    way (brk2out_ctl ido 151 -> 214). `unpre.test.ts` pins an ido-shaped latch folding and the `if`
+//    join staying out.
 //  • the argument must be an op with operands (`operand-free`). An operand-free argument (a constant, a symbol's
 //    address) is what a merge of `return 0;` arms or of a register the compiler set to one constant
 //    on several paths carries, and those are spellings other passes own. A default arm that both the
