@@ -1712,3 +1712,75 @@ test.each([
   expect(seen.zeroTrips).toBeGreaterThan(0);
   expect(seen.noHit).toBeGreaterThan(0);
 });
+
+/** `HIT_CODE_TO_ARM_END`'s nest, then a second loop whose two arms share a tail holding a search
+ *  loop and ending in `return` (loop-break-exit.test.ts's shape: `if (a(i) == k) f(1); else if
+ *  (b(i) == k) f(2); else continue; for (j…) if (t(j) == i) break; return hit(j);`). Alone, the
+ *  second loop lifts with each arm writing its own copy of the search loop, no flag; the first
+ *  loop's hit rung asks for the loop that needs it only (`LastResortRanking`), and does not drag the
+ *  second onto a flag the asm does not hold. */
+const HIT_CODE_BESIDE_SHARED_TAIL = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside').replace(
+  '^bb7():\n  ret\n}',
+  `^bb7():
+  br ^bb100()
+^bb100():
+  %102: s32 = const {value=0}
+  br ^bb101(%102)
+^bb101(%103: s32):
+  %104: u32 = icmp_slt %103, %0
+  cond_br %104, ^bb102(), ^bb107()
+^bb102():
+  %105: s32 = call %103 {target="a"}
+  %106: u32 = icmp_eq %105, %1
+  cond_br %106, ^bb103(), ^bb104()
+^bb103():
+  %107: s32 = const {value=1}
+  %108: s32 = call %107 {target="f"}
+  br ^bb106()
+^bb104():
+  %109: s32 = call %103 {target="b"}
+  %110: u32 = icmp_eq %109, %1
+  cond_br %110, ^bb105(), ^bb108()
+^bb105():
+  %111: s32 = const {value=2}
+  %112: s32 = call %111 {target="f"}
+  br ^bb106()
+^bb106():
+  br ^bb109(%102)
+^bb109(%130: s32):
+  %131: u32 = icmp_slt %130, %0
+  cond_br %131, ^bb110(), ^bb111(%130)
+^bb110():
+  %132: s32 = call %130 {target="t"}
+  %133: u32 = icmp_eq %132, %103
+  cond_br %133, ^bb111(%130), ^bb112()
+^bb112():
+  %134: s32 = const {value=1}
+  %135: s32 = add %130, %134
+  br ^bb109(%135)
+^bb111(%136: s32):
+  %113: s32 = call %136 {target="hit"}
+  ret %113
+^bb108():
+  %114: s32 = const {value=1}
+  %115: s32 = add %103, %114
+  br ^bb101(%115)
+^bb107():
+  %116: s32 = call {target="out"}
+  ret %116
+}`,
+);
+
+test('a hit rung one loop needs leaves the loop beside it to the copies it lifts with alone', () => {
+  expect(HIT_CODE_BESIDE_SHARED_TAIL).not.toBe(HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitbeside'));
+  const { src, agreement, shipped } = judged(HIT_CODE_BESIDE_SHARED_TAIL);
+  // the first loop takes the hit's flag
+  expect(src).toMatch(/hit\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\) k\(/);
+  // the second keeps one copy of the search loop per arm, ahead of each `return`, and no flag
+  expect(src.match(/if \(t\(v\d+\) == v\d+\) break;/g)).toHaveLength(2);
+  expect(src.match(/return hit\(v\d+\);/g)).toHaveLength(2);
+  expect(src.match(/ = 1;\n\s*break;/g)).toHaveLength(1);
+  expect(agreement.disagree).toBe(0);
+  expect(shipped.disagree).toBe(0);
+  expect(agreement.judged).toBe(SEEDS.length);
+});
