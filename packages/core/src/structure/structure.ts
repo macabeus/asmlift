@@ -3388,7 +3388,8 @@ interface PastExitRanking {
 /** The `while (1)` loops, by header, that ask one of the last-resort rungs (`LAST_RESORT_RUNGS`);
  *  the ones a structuring met that the rung, unasked, would have read; and of those, the ones whose
  *  every other reading declined, with each such loop's enclosing loop on the `outward` rung, which
- *  takes the exit handed out to it. Per loop, as `ForRanking` is: a loop that needs the rung's flag
+ *  takes the exit handed out to it, or, on the `hit` rung, whose reading a case arm refused for a
+ *  `break` the loop would capture (`switchBreakAt`). Per loop, as `ForRanking` is: a loop that needs the rung's flag
  *  would otherwise drag every loop the rung also reads, such as agbcc's cross-jumped shared tails
  *  the copies spell byte for byte, onto the flag. */
 interface LastResortRanking {
@@ -7692,6 +7693,17 @@ function structureRanked(
       return undefined;
     }
     if (!switchBreaks(b)) {
+      // a `while (1)` some ladder rung read, refused here, needs the hit rung's flag where that
+      // rung would read it (`LastResortRanking.needs`), as `wantFor` notes a loop for the `for`
+      // rerun: sub_0800D188's search loop, read by the last rung's ret-tail copy starting here
+      if (
+        i === switchFrames.length - 1 &&
+        loopCtx !== null &&
+        foreverLoops.has(loopCtx.header) &&
+        lastResort.hit.could.has(loopCtx.header)
+      ) {
+        lastResort.hit.needs.add(loopCtx.header);
+      }
       throw new StructureError(
         `cannot structure '${fn.name}': a case body leaves its switch from inside a nested ` +
           `${i !== switchFrames.length - 1 ? 'switch' : 'loop'}, where \`break\` would leave that instead`,
