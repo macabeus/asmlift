@@ -81,12 +81,13 @@ export interface StructureVariation {
     | 'siteSense'
     | 'tailCopies'
     | 'forContinue'
-    | 'caseGoto';
+    | 'caseGoto'
+    | 'caseEndGoto';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
-  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onCaseCopied';
+  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onCaseCopied' | 'onCaseEndRead';
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -456,6 +457,27 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     name: 'case-goto',
     options: (on) => ({ jumpToSharedCases: on }),
     offWitness: 'onCaseCopied',
+    strip: true,
+  },
+  // `/case-end-goto` — A SEARCH LOOP'S HIT FLAG AS A `goto` TO THE END OF ITS CASE (structure.ts
+  // `caseEndGoto`, `jumpToCaseEnds`). Where a two-level exit's hit flag is read after its loop as
+  // `if (f == 0) { X } break;`, the `break;` ending the switch arm the loop sits in, this writes
+  // `goto L;` at each hit and `X L: break;` after the loop, the source's own spelling (`for (j…) {
+  // if (hit) goto L; } k(i); L: break;`). agbcc threads that goto past the loop around the switch
+  // (jump.c `follow_jumps`), and on agbcc, KMC, gcc 2.7.2 and IDO the goto compiles to the source's
+  // bytes where the flag never does (`synthetic:sw_hitexit`); but inside asmlift's own winner the
+  // flag can still score closer (gcc 2.7.2), so the differ referees it per row, and a tie goes to the
+  // candidate without the goto (rank.ts `gotoCount`).
+  //
+  // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): the two settings differ only
+  // where `CASE_END_GOTO_GATES` admits the goto in place of a flag (`onCaseEndRead`), which only the
+  // hit rung's flag reaches. In the strip closure, and reset by `assertDefaultAccepts` like the
+  // other variations that write a goto.
+  {
+    flag: 'caseEndGoto',
+    name: 'case-end-goto',
+    options: (on) => ({ jumpToCaseEnds: on }),
+    offWitness: 'onCaseEndRead',
     strip: true,
   },
 ];
