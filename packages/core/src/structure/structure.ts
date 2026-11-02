@@ -4962,7 +4962,14 @@ function structureRanked(
           read({ copyExitTail: true, lastResort: true }) ??
           // the hit rung (`hitArmOf`), behind every copy that holds no loop and ahead of the last
           // rung's copies of one
-          probed(lastResort.hit, { twoLevel: true, hits: true, outward: outward && lastResort.outward.asked.has(h) }),
+          probed(lastResort.hit, { twoLevel: true, hits: true, outward: outward && lastResort.outward.asked.has(h) }) ??
+          // a hit that leaves both loops (mwcc_242_81's `for (…) { for (…) if (c) { k(j); goto out; }
+          // k(i); }`) needs the outward rung asked by this loop as well, and the plain outward probe
+          // above, which reads no hit's code, never notes it: this probe notes the loop for the
+          // outward rung, and once that rung asks it, the hit probe above reads it with `outward`
+          (outward && !lastResort.outward.asked.has(h)
+            ? probed(lastResort.outward, { twoLevel: true, hits: true, outward: true })
+            : null),
       };
     };
     const first = rungs(false);
