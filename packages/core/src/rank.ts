@@ -105,6 +105,7 @@ import {
   FOR_BOUND_GATES,
   StructureError,
   hasDivergentSharedRet,
+  hasJoinPastReturns,
 } from './structure/structure';
 import {
   type SymbolInfo,
@@ -2277,6 +2278,14 @@ export function enumerateCandidates(
           reportThrow(settingVariations, e);
           continue;
         }
+        // THE JOIN PAST EARLY RETURNS, `/ret-join`: the same raised fn, structured again with
+        // `joinPastReturns`, in its own pass between the follow and the sink, on the fn as raised. A
+        // chain of `if`s each holding an early `return;` has no CFG join (`synthetic:retchain`), and
+        // where the early returns cross-jump into one return tail the follow lands on that tail
+        // (`synthetic:retchain_xj`); both copy the code below every such `if` into its arms. Gated
+        // on `hasJoinPastReturns`, so a function with no such `if` pays no candidate. Not the
+        // default, so a row whose copies are the bytes keeps them where they score.
+        //
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
         // in two passes after the default one.
         //   - `/shared-ret` is the follow ALONE, on the fn as raised. Some divergent `if` shares a
@@ -2321,8 +2330,11 @@ export function enumerateCandidates(
         const droppedDefault = new Set<string>();
         // What `assertDefaultAccepts` learned about this fn, shared by every setting structured from it.
         let acceptsMemo = new DefaultAcceptsMemo(fn);
-        for (const pass of ['default', 'follow', 'sink'] as const) {
+        for (const pass of ['default', 'follow', 'join', 'sink'] as const) {
           if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
+            continue;
+          }
+          if (pass === 'join' && !hasJoinPastReturns(fn)) {
             continue;
           }
           if (pass === 'sink') {
@@ -2348,9 +2360,11 @@ export function enumerateCandidates(
           const liftVariations: readonly Variation[] =
             pass === 'follow'
               ? [...liftSetting.variations, 'shared-ret']
-              : pass === 'sink'
-                ? [...liftSetting.variations, 'shared-tail']
-                : liftSetting.variations;
+              : pass === 'join'
+                ? [...liftSetting.variations, 'ret-join']
+                : pass === 'sink'
+                  ? [...liftSetting.variations, 'shared-tail']
+                  : liftSetting.variations;
           // the per-lift gates, on THIS lift's fn — see the table doc
           const offForThisLift = STRUCTURE_VARIATIONS.filter(
             (variation) => variation.perLiftGate !== undefined && !variation.perLiftGate(fn),
@@ -2425,6 +2439,7 @@ export function enumerateCandidates(
               ),
             );
             let counterSignRefused = false;
+            let joinRead = false;
             const structOpts = {
               ...symbolSettingOpts,
               ...(inferredSymbols.size ? { inferredSymbols } : {}),
@@ -2441,7 +2456,7 @@ export function enumerateCandidates(
                 (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
                 {},
               ),
-              ...(alternative ? { followEarlyReturns: true } : {}),
+              ...(pass === 'join' ? { joinPastReturns: true } : alternative ? { followEarlyReturns: true } : {}),
             };
             try {
               sfn = structureChecked(
@@ -2452,10 +2467,20 @@ export function enumerateCandidates(
                   onCounterSignRefused: () => {
                     counterSignRefused = true;
                   },
+                  onJoinPastReturns: () => {
+                    joinRead = true;
+                  },
                 },
                 acceptsMemo,
               );
               witnessed.set(key, fired);
+              // THE `/ret-join` PASS'S STOP: `hasJoinPastReturns` is a superset (it asks no region's
+              // `stop` and no switch arm's own join), and where the reading changed nothing in the
+              // first setting it structured, that tree is the default pass's and so is every other
+              // setting's, which the tree dedup below would drop one by one after paying for each.
+              if (pass === 'join' && !joinRead) {
+                break;
+              }
             } catch (e) {
               if (e instanceof DefaultAcceptsMemoMisuse) {
                 throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation

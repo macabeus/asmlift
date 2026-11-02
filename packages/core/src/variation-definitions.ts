@@ -417,6 +417,33 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: STRUCTURE,
     seeAlso: ['shared-tail'],
   },
+  'ret-join': {
+    title: 'Join past early returns',
+    summary: 'code below an `if` whose arms only meet at the `return` is written once, after the `if`',
+    detail:
+      'An `if` with an early `return` in one arm has no block both arms reach before the function ' +
+      'returns, so by default everything below it is written into each arm, once more per such `if` of ' +
+      'a chain. This structures the same raised function again with the block where the paths that do ' +
+      "not return meet as the `if`'s join: the code from there is written once, and every other path " +
+      'leaves through its early `return`. Unlike `shared-ret` it needs no `return` block the arms share ' +
+      "apart from the function's own end, so it also reads early returns the compiler merged into the " +
+      'epilogue or cross-jumped into one return tail.',
+    offeredWhen: {
+      when:
+        'Some `if` outside every loop has no join but the end of the function, and a block its arms ' +
+        'both reach past early returns.',
+      decidedBy: { symbol: 'hasJoinPastReturns', file: STRUCTURE },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'extern s32 gT; void example(s32 a, s32 b) { @ }',
+      before: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); X(); Y(); } else { C(); X(); Y(); }',
+      after: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); } else { C(); } X(); Y();',
+      note: 'the shape of `synthetic:retchain_one`',
+    },
+    implementedIn: STRUCTURE,
+    seeAlso: ['shared-ret'],
+  },
   'shared-tail': {
     title: 'Store tail copied back',
     summary: 'a store the compiler merged into one tail is copied back into each path, then shared',
