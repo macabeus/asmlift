@@ -570,8 +570,9 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       out.push(`${indent}}`);
       return out;
     }
+    // A labelled `break` is the end of a switch arm a case-end `goto` lands on (l3/ast.ts).
     case 'break':
-      return [`${indent}break;`];
+      return s.label === undefined ? [`${indent}break;`] : [`${indent}${s.label}:`, `${indent}break;`];
     case 'continue':
       return [`${indent}continue;`];
     // Where it may sit is the tree's contract (l3/ast.ts `caseGotoViolation`), which `emitCFamily`

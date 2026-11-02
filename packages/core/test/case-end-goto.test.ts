@@ -2,11 +2,13 @@
 // loops and ifs included, to a labelled `break;` that ends that same arm (`for (j…) { if (hit)
 // goto L; } k(i); L: break;`). On hand-built trees: its contract (`caseGotoViolation`, which
 // contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask) and every other placement
-// it refuses, how the effect contract and dead-store elimination read a path that takes it, and
-// what `reachesEnd` and `caseEndGotoLeaves` answer for it.
+// it refuses, how the C family prints it and that Pascal refuses it, how the effect contract and
+// dead-store elimination read a path that takes it, and what `reachesEnd` and `caseEndGotoLeaves`
+// answer for it.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { pascalBackend } from '../src/backend/pascal';
 import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved } from '../src/contracts';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
@@ -124,6 +126,23 @@ describe('caseGotoViolation — the case-end goto', () => {
       arm([2], [call('g')], { label: 'case_2' }),
     ]);
     expect(caseGotoViolation([s])).toMatch(/not the last statement of a switch arm/);
+  });
+});
+
+describe('the printers', () => {
+  test('C prints the goto and the label on the `break;` that ends the arm', () => {
+    const src = cBackend.emit(sfnWith([narrow()]));
+    expect(src).toMatch(/s\(\);\n\s*goto case_end;\n/);
+    expect(src).toMatch(/k\(\);\n\s*case_end:\n\s*break;\n/);
+  });
+
+  test('C refuses to print a case-end goto outside its form', () => {
+    const s = sw([arm([1], [search([goto()]), brk]), arm([2], [call('k'), end()])]);
+    expect(() => cBackend.emit(sfnWith([s]))).toThrow(/c backend: .*names no labelled `break;`/);
+  });
+
+  test('Pascal declines it loud', () => {
+    expect(() => pascalBackend.emit(sfnWith([narrow()]))).toThrow(/goto.*end of a case arm.*no IDO Pascal spelling/);
   });
 });
 
