@@ -342,7 +342,7 @@ test('a loop leaving for two live merges has no one exit, and lifts only as a fl
   // header's mid-body test, not a latch's, and nothing enters it from before the loop: no reading
   // tells it from an arm, so the arm `b(i)` may not copy the tail (`exitTail`, at `earlyReturnArm`).
   // Behind every other reading, the arm is a two-level exit whose hit runs `b(i)` first
-  // (`TwoLevelExit.hits`), and `m(i)` renders once, after `if (f == 0) a(i);`.
+  // (`hitArmOf`), and `m(i)` renders once, after `if (f == 0) a(i);`.
   expect(() => judged(TWO_LIVE_EXITS, NO_HIT_CODE)).toThrow(/unrecovered back-edge/);
   const r = judged(TWO_LIVE_EXITS);
   expect(r.src).toMatch(/b\(v\d+\);\n\s*(v\d+) = 1;\n\s*break;[^]*if \(\1 == 0\) a\(v\d+\);\n\s*m\(v\d+\);/);

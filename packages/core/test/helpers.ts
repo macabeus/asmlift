@@ -760,7 +760,7 @@ export function agreesOverWords(fn: Fn, want: (a: number, b: number) => number, 
   }
 }
 
-/** `while (1)`'s hit rung refused outright (`TwoLevelExit.hits`), so a fixture shows what structures
+/** `while (1)`'s hit rung refused outright (`hitArmOf`), so a fixture shows what structures
  *  without it: a two-level exit whose hit runs code before it reaches its second target. */
 export const NO_HIT_CODE: StructureHooks = {
   twoLevelExitGates: [

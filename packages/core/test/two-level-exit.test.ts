@@ -1592,7 +1592,7 @@ test('without own-target-held-back the hit code laid out first takes a second fl
   expectCovered(ir);
 });
 
-/** The hit runs code of its own before it reaches the second target (`TwoLevelExit.hits`): `case 0:
+/** The hit runs code of its own before it reaches the second target (`hitArmOf`, `BreakArm.exit`): `case 0:
  *  case 1: case 4: for (j…) { if (probe(j, i) == x) { hit(j); goto out; } } k(i); out: break;`
  *  (`synthetic:sw_hitexit_in`'s shape). The hit's edge enters `hit(j)`, which no `break` arm reaches
  *  the loop's exit from and which is no second target itself (the code after the loop never meets
