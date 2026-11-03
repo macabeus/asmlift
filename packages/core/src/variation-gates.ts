@@ -11,6 +11,7 @@
 import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from './l3/advance';
 import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from './l3/argcopy';
 import { BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, ORDERBASE_GATES, UNFOLDED_GATES } from './l3/basecse';
+import { CASE_END_GOTO_GATES } from './l3/caseendgoto';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES } from './l3/homesplit';
@@ -49,6 +50,7 @@ export const VARIATION_GATE_TABLES = {
   ARM_DISJOINT_GATES,
   ARM_REREAD_GATES,
   BASEFOLD_GATES,
+  CASE_END_GOTO_GATES,
   COALESCE_GATES,
   COUNTDOWN_GATES,
   FRESH_MERGE_GATES,

@@ -24,7 +24,7 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Fourteen passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
+// holding the call. Fifteen passes have one — `unmergeJoins` and `jumpToCaseEnds` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
 // in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`, `unpre`), whose
@@ -53,6 +53,7 @@ import {
   auditFrameObjects,
 } from '@asmlift/core/frontend/frame-objects';
 import type { Fn } from '@asmlift/core/ir/core';
+import { CASE_END_GOTO_GATES, type CaseEndSite, jumpToCaseEnds } from '@asmlift/core/l3/caseendgoto';
 import type { Gate } from '@asmlift/core/l3/gates';
 import { tallying } from '@asmlift/core/l3/gates';
 import type { UnmergeGates } from '@asmlift/core/l3/unmerge';
@@ -163,6 +164,24 @@ export const PASSES: Record<string, CensusablePass> = {
       unmergeVariation.apply = (s) => unmergeJoins(s, gates);
       return () => {
         unmergeVariation.apply = restore;
+      };
+    },
+  },
+  'case-end-goto': {
+    // l3/caseendgoto.ts's `CASE_END_GOTO_GATES` — which rule keeps a search loop's hit flag rather
+    // than the case-end goto. ONE table, asked once per flag read after its loop, per structured
+    // tree the enumeration respells.
+    tables: [['site', CASE_END_GOTO_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      // BY NAME, never by index, for the reason the `unmerge` entry gives.
+      const entry = PRE_RESPELL_VARIATIONS.find((p) => p.name === 'case-end-goto');
+      if (!entry) {
+        throw new Error("no PRE_RESPELL_VARIATIONS entry 'case-end-goto' — the pass's caller-side seam moved");
+      }
+      const restore = entry.apply;
+      entry.apply = (s) => jumpToCaseEnds(s, w[0] as readonly Gate<CaseEndSite>[]);
+      return () => {
+        entry.apply = restore;
       };
     },
   },

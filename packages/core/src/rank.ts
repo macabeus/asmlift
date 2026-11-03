@@ -22,6 +22,7 @@ import { cBackend } from './backend/c';
 import {
   assertCaseGotosNarrow,
   assertDerefsTyped,
+  assertEffectsPreserved,
   assertFrameUnionsViewed,
   assertLocalStorageStaysInteger,
   assertLocalsWritten,
@@ -1206,6 +1207,7 @@ export function enumerateCandidates(
     // `assertEffectsPreserved` is the fourth and is NOT here: it needs the L1 `fn`, and
     // `respellTree`'s parameter list is the invariant the tree-dedup skip rests on (see its header).
     // Widening it for a contract is a defensible change and an argued one — not a silent import.
+    // The PRE-RESPELL loop below has `fn` in scope and no such invariant, so it runs it there.
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
     const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
@@ -2522,7 +2524,13 @@ export function enumerateCandidates(
             // The PRE-RESPELL variations (PRE_RESPELL_VARIATIONS, the last composition the POLICY note
             // names): rewrite the TREE, then run the whole respell set over the result, so every
             // respell variation derives from the rewrite instead of composing onto it. The gate is the pass's
-            // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
+            // own decline; the contracts are `respell`'s, for `respell`'s reasons, plus the effect count
+            // `respell` cannot run (its note above): a pre-respell rewrite moves control, not just
+            // spelling — `/unmerge` copies a join into its arms, `/case-end-goto` jumps over the code
+            // between a loop and its arm's end — and the per-path count is what refuses a rewrite that
+            // runs a call twice on one path or drops one. It is also the only production reader of
+            // that count's case-end-goto paths (contracts.ts `PathCounts.end`): structuring never
+            // writes the goto, so without it those paths are read by unit tests alone.
             for (const pf of PRE_RESPELL_VARIATIONS) {
               try {
                 const made = pf.apply(sfn);
@@ -2547,6 +2555,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(sfn, made);
                 assertLocalStorageStaysInteger(sfn, made);
                 assertFrameUnionsViewed(made);
+                assertEffectsPreserved(fn, made);
                 // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.
@@ -2856,10 +2865,11 @@ export function compareScored<S extends { score: number }>(
 }
 
 /** `goto` statements in a candidate's rendered source — the readability tie-break above, asked
- *  before the casts. The one goto asmlift writes (l3/ast.ts, a jump to a case label of the switch it
- *  sits in) is a ranked spelling against goto-free copies (`/case-goto`), and where the two score
- *  alike the goto-free one is published: the goto is the narrow exception the differ has to earn,
- *  never a tie's winner. Deterministic, and total on any string. */
+ *  before the casts. Each goto asmlift writes (l3/ast.ts: a jump to a case label of the switch it
+ *  sits in, or to the `break;` that ends its arm) is a ranked spelling against a goto-free one —
+ *  copies (`/case-goto`) or a flag (`/case-end-goto`) — and where the two score alike the goto-free
+ *  one is published: a goto is the narrow exception the differ has to earn, never a tie's winner.
+ *  Deterministic, and total on any string. */
 export function gotoCount(source: string): number {
   return source.match(/\bgoto [A-Za-z_]\w*;/g)?.length ?? 0;
 }

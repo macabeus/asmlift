@@ -48,6 +48,7 @@ describe('the gate census seam', () => {
     // rather than arrive silently.
     expect(CENSUSABLE_PASSES).toEqual([
       'unmerge',
+      'case-end-goto',
       'arm-reread',
       'truncload',
       'displaced',

@@ -98,6 +98,7 @@ const TOKENS = [
   { name: 'case-goto', variationKind: 'structure' },
   // respell: the structured tree rewritten
   { name: 'unmerge', variationKind: 'respell' },
+  { name: 'case-end-goto', variationKind: 'respell' },
   { name: 'argbase', variationKind: 'respell' },
   { name: 'zerosub', variationKind: 'respell' },
   { name: 'volatile', variationKind: 'respell', subject: LOCALS },

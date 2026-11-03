@@ -24,6 +24,7 @@ import {
   ORDERBASE_GATES,
   UNFOLDED_GATES,
 } from './l3/basecse';
+import { jumpToCaseEnds } from './l3/caseendgoto';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
@@ -549,8 +550,18 @@ export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
  *  `synthetic:ladidx1`, `synthetic:ladidx2`, `synthetic:revlad5s`. `bench regression` is an
  *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
  *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
- *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
-export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ name: 'unmerge', apply: unmergeJoins }];
+ *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block.
+ *
+ *  `/case-end-goto` (l3/caseendgoto.ts) is the second entry: a search loop's hit flag read where the
+ *  code after its loop ends the switch arm, rewritten as the case-end goto the source wrote. Here
+ *  rather than among the stacked members because the rest of the respell set must derive from the
+ *  goto tree (an `initfirst` or `sinkinit` over a tree that no longer declares the flag), and here
+ *  rather than as a structure variation for the cost l3/caseendgoto.ts's header gives. Each entry applies to
+ *  the structured tree on its own, so `/unmerge` and `/case-end-goto` never compose. */
+export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [
+  { name: 'unmerge', apply: unmergeJoins },
+  { name: 'case-end-goto', apply: jumpToCaseEnds },
+];
 
 /** Every subset of `xs`, the empty one first, each in `xs`' order. */
 const subsets = <X>(xs: readonly X[]): X[][] =>

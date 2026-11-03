@@ -1031,7 +1031,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     detail:
       "When several `case` arms run on into one other arm's body, by default the arm placed directly above " +
       'that body keeps falling into it and the others get a copy of it. This leaves the copies out: those ' +
-      'arms end in `goto` to a label on that arm, after its `case` labels. It is the only `goto` asmlift writes.',
+      'arms end in `goto` to a label on that arm, after its `case` labels. It is one of the two kinds of `goto` asmlift writes.',
     compilerBehavior:
       'A compiler that cross-jumps keeps one copy of code that several arms end in, so a copy and a `goto` can ' +
       'build the same object. agbcc stops that merge short where an arm already formed an address the copy ' +
@@ -1091,6 +1091,40 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('unmerge'),
     seeAlso: ['initfirst', 'regionbase'],
   },
+  'case-end-goto': {
+    title: 'Search loop leaving its case by `goto`',
+    summary: "a search loop's hit that skips the rest of its `case` jumps to a label on the case's closing `break;`",
+    detail:
+      'When a loop inside a `case` has a second way out that skips the code after the loop and ends the ' +
+      '`case`, the default sets a flag before it leaves the loop and runs that code under `if (flag == 0)` ' +
+      'after it. This leaves the flag out: the second way out is `goto` to a label on the `break;` that ' +
+      'ends the case, and the code after the loop runs unguarded before that label. It is one of the two ' +
+      'kinds of `goto` asmlift writes.',
+    compilerBehavior:
+      'agbcc sends a `goto` to a `break;` straight to the end of the `switch`, and past a loop the switch ' +
+      'ends, so only the `goto` builds the bytes the source did; the flag adds a variable and its tests.',
+    offeredWhen: {
+      judges: "each flag set at a loop's own `break` and tested right after that loop",
+      gates: ['CASE_END_GOTO_GATES'],
+    },
+    example: {
+      compiler: 'agbcc',
+      unit:
+        'struct E { s32 x; u8 id; u8 f; u8 u; u8 v; }; extern struct E gE[]; extern s32 gLo, gHi; void k(s32);\n' +
+        'void example(s32 lo, s32 hi) { s32 i, j, h, a = 0; for (i = lo; i <= hi; i++) { if (gE[i].f <= 26) { ' +
+        'switch (gE[i].id) { @ default: continue; } break; } } k(a); }',
+      before:
+        'case 1: case 2: if (gE[i].x > 5) continue; h = 0; for (j = gLo; j <= gHi; j++) { if (i != j && gE[j].f == 28) ' +
+        '{ a = 1; k(j); h = 1; break; } } if (h == 0) { gE[i].f = 19; k(i); } break; case 4: k(i + 4); break;',
+      after:
+        'case 1: case 2: if (gE[i].x > 5) continue; for (j = gLo; j <= gHi; j++) { if (i != j && gE[j].f == 28) ' +
+        '{ a = 1; k(j); goto hit; } } gE[i].f = 19; k(i); hit: break; case 4: k(i + 4); break;',
+      note: 'the search loop in cases 1 and 2 either finds a hit, which skips the rest of the case, or runs out into it',
+    },
+    implementedIn: l3('caseendgoto'),
+    seeAlso: ['case-goto'],
+  },
+
   argbase: {
     title: 'Argument bases named before the call',
     summary: "the fixed addresses a call's arguments read are loaded into pointer locals first",

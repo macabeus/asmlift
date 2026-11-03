@@ -84,8 +84,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   section).
 - **L3 — the neutral AST.** A genuinely different structure
   ([`l3/ast.ts`](../packages/core/src/l3/ast.ts)): `if`/`while`/`switch`/expressions, no
-  registers, and no `goto` but a jump to a case label of the enclosing switch from the end of one
-  of its arms (the `goto` statement, docs/asmlift-101.md §2.7). Expressions are pure but for
+  registers, and no `goto` but two narrow ones: a jump to a case label of the enclosing switch
+  from the end of one of its arms, and a jump to the labelled `break;` that ends the arm it sits in
+  (the `goto` and `caseEndGoto` statements, docs/asmlift-101.md §2.7). Expressions are pure but for
   `call`, `marker` and `postincr` — the last is an expression that WRITES, and the `l3/` passes
   that count a name's mentions have to know it
   (`mentionedName`, and the source scan in `test/postincr.test.ts` that holds them to it).
@@ -265,10 +266,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   RE-RUNS `structure()` under different options, or by a RESPELL variation, which REWRITES the tree
   `structure()` already produced. Both are ranked, both are refereed by the differ, so the deciding
   terms are COST and REACH. A structure variation doubles the enumeration wherever it CHANGES THE
-  TREE, and costs one more `structure()` call and nothing else wherever it does not — `rank.ts`
-  respells a structured tree once and skips a tree an earlier setting already produced, so an inert
-  structure variation pays no respell work and no compiles. What is expensive is therefore a
-  structure variation that fires broadly, and a ranked run is already minutes:
+  TREE. Wherever it does not, it pays no respell work and no compiles — `rank.ts` respells a
+  structured tree once and skips a tree an earlier setting already produced — but it still doubles
+  the SETTINGS every enumeration walks, and that walk is not free: crossed into every function,
+  `/case-end-goto`, built first as a structure variation whose witness skipped every ON setting
+  (none structured), took kleod:sub_0803F68C's enumeration peak from 2.11 to 2.44 GB and its bench
+  shard out of heap (`/usr/bin/time -v pnpm bench fan kleod:sub_0803F68C:agbcc --enumerate`). A
+  `sharedGate` (rank-variations.ts) that keeps such a variation out of functions where no witness
+  could fire brought it back to 2.10 GB, so a structure variation crossed more narrowly than
+  "everywhere" is the first fix for that cost; a respell, which pays one walk of each structured
+  tree, is cheaper still. What is expensive is therefore a structure variation that fires — or is
+  crossed — broadly, and a ranked run is already minutes:
   `/inlinebase` inverts `structure/analysis.ts`'s const value-home decision — the same question
   `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a structure
   variation (a `STRUCTURE_VARIATIONS` entry) — and answering it by substitution instead costs **766

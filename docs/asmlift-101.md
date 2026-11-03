@@ -202,7 +202,7 @@ reverse — each level is closer to _source_:
   `u32`/pointer types. The _boundary contract_ `assertTypesRecovered` refuses to pass any
   lingering `unknown` downward.
 - **L3** — a language-**neutral** structured AST: `if`/`while`/`switch`/expressions, no
-  registers, and no goto but one narrow kind (§2.7). The contract into L3 is the structurer
+  registers, and no goto but two narrow kinds (§2.7). The contract into L3 is the structurer
   refusing any CFG shape it cannot prove structured.
 
 The levels are **enforced contracts, not folders** — a verifier (`ir/verify.ts`) runs after
@@ -284,20 +284,36 @@ all five toolchains. The structurer lives in
 project, because destroying SSA (assigning merge values back to named C variables without
 changing meaning) is where several audit rounds found the subtlest bugs.
 
-**The one goto L3 holds** is a jump to a case label of the switch it sits in, from the end of
-another arm of that switch (`goto` in `l3/ast.ts`, contract `caseGotoViolation`). It is the
-source's own spelling where two arms run on into one case's body and C fall-through reaches only
-one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`, kleod `sub_0800D188`). It
-has two producers, both over `jumpSharedFallTargets` in `structure/switch-recover.ts`: the
-structurer's default writes it only where every goto-free structuring of the whole function
-declines, its `for`, outward and ret-copy reruns included, and only in a switch none of them spelled
-goto-free (`JumpRanking` in `structure.ts`); and
-the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
-into an entrant, as a candidate the scorer weighs against those copies, where the goto is kept only
-if it scores better (a tie goes to the candidate without one, `gotoCount` in `rank.ts`). An arm
-whose own structuring already leaves gets no jump, and neither does the arm laid out directly above
-the target case, whose fall-through already lands there. The Pascal backend refuses it. No other
-goto is representable.
+**L3 holds two gotos, both narrow** (`goto` and `caseEndGoto` in `l3/ast.ts`, contract
+`caseGotoViolation`). The
+first is a jump to a case label of the switch it sits in, from the end of another arm of that
+switch. It is the source's own spelling where two arms run on into one case's body and C
+fall-through reaches only one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`,
+kleod `sub_0800D188`). It has two producers, both over `jumpSharedFallTargets` in
+`structure/switch-recover.ts`: the structurer's default writes it only where every goto-free
+structuring of the whole function declines, its `for`, outward and ret-copy reruns included, and
+only in a switch none of them spelled goto-free (`JumpRanking` in `structure.ts`); and the ranked
+`/case-goto` variation spells with it the case bodies the goto-free copies write back into an
+entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
+already leaves gets no jump, and neither does the arm laid out directly above the target case,
+whose fall-through already lands there.
+
+The second (`caseEndGoto`) is a jump to the end of the arm it sits in: `goto L;` from anywhere inside a case
+body, under `if`s and out of loops, to a labelled `L: break;` later in a statement list that
+encloses it, in the same arm and with no switch between (`for (j…) { if (hit) { …; goto L; } }
+k(i); L: break;`, kleod `sub_0800D188`'s MAGNET/BOX case). agbcc threads it past a loop the switch
+ends (jump.c `follow_jumps`), and on agbcc, KMC, gcc 2.7.2 and IDO it compiles to the source's
+bytes where the flag spelling of the same exit never does (`synthetic:sw_hitexit`). Its one
+producer is the ranked `/case-end-goto` respell (`l3/caseendgoto.ts`, gated by
+`CASE_END_GOTO_GATES`): over the structured tree, where a flag set only at a loop's own `break`s
+is tested right after that loop and what follows the test leaves the switch arm with nothing run,
+the flag becomes the goto. The hit rung of `structure.ts` is what writes such a flag, but the
+rewrite reads only the tree, so a flag the source declared and the compiler kept (IDO keeps one) is
+rewritten too wherever it has that shape.
+
+Both are ranked: a goto is kept only if it scores better than the goto-free candidate beside it,
+and a tie goes to the candidate without one (`gotoCount` in `rank.ts`). The Pascal backend refuses
+both. No other goto is representable.
 
 Historical grounding, if you want it: the founding academic treatment of decompilation is
 Cristina Cifuentes' 1994 thesis _Reverse Compilation Techniques_

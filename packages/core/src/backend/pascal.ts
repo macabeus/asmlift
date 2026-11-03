@@ -259,6 +259,9 @@ function makePrinter(vt: VarTypes) {
       // label may not be entered from outside the statement that holds it.
       case 'goto':
         throw new Error('pascal backend: a `goto` into a case arm has no IDO Pascal spelling');
+      // A jump to an arm's end lands on a `break`, which Pascal has none of either.
+      case 'caseEndGoto':
+        throw new Error('pascal backend: a `goto` to the end of a case arm has no IDO Pascal spelling');
       case 'switch': {
         // IDO/SGI Pascal `case E of L: S; … otherwise S end`. There is NO fall-through in Pascal case-of,
         // so a `fallsThrough` arm has no faithful spelling → loud-fail (mirrors the `field`/`cast`/`%`

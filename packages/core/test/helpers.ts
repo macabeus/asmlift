@@ -350,10 +350,20 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   // events after it and the comparison reports a clobber that no execution has. The `while` and
   // `for` forms let a `continue` fall through to the update, which is what C does.
   // A `goto` (l3/ast.ts: the last statement of an arm, naming a case label of that switch) leaves
-  // its arm as `goto:<label>`, and the switch below resumes at the arm that label names.
-  type Sig = 'none' | 'break' | 'continue' | 'return' | `goto:${string}`;
-  const exec = (list: Stmt[]): Sig => {
-    for (const s of list) {
+  // its arm as `goto:<label>`, and the switch below resumes at the arm that label names. A case-end
+  // `goto` leaves as `end:<label>`, out of every statement and loop it sits in, until a list holding
+  // the labelled statement later than the one that left resumes there.
+  type Sig = 'none' | 'break' | 'continue' | 'return' | `goto:${string}` | `end:${string}`;
+  const exec = (list: Stmt[], from = 0): Sig => {
+    const resume = (i: number, sig: Sig): Sig => {
+      if (!sig.startsWith('end:')) {
+        return sig;
+      }
+      const at = list.findIndex((x, j) => j > i && x.k === 'break' && `end:${x.label}` === sig);
+      return at < 0 ? sig : exec(list, at);
+    };
+    for (const [i, s] of list.entries()) {
+      if (i < from) continue;
       if (++steps > 4000) throw new Error('step cap');
       switch (s.k) {
         case 'assign':
@@ -375,35 +385,44 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         }
         case 'if': {
           const sig = truthy(s.cond) ? exec(s.then) : exec(s.else ?? []);
-          if (sig !== 'none') return sig;
+          if (sig !== 'none') return resume(i, sig);
           break;
         }
-        case 'while':
+        case 'while': {
+          let left: Sig = 'none';
           while (truthy(s.cond)) {
             if (++steps > 4000) throw new Error('step cap');
             const sig = exec(s.body);
-            if (sig === 'return') return sig;
-            if (sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) left = sig;
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
           }
+          if (left !== 'none') return resume(i, left);
           break;
-        case 'dowhile':
+        }
+        case 'dowhile': {
+          let left: Sig = 'none';
           do {
             if (++steps > 4000) throw new Error('step cap');
             const sig = exec(s.body);
-            if (sig === 'return') return sig;
-            if (sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) left = sig;
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
           } while (truthy(s.cond));
+          if (left !== 'none') return resume(i, left);
           break;
-        case 'for':
+        }
+        case 'for': {
+          let left: Sig = 'none';
           exec([s.init]);
           while (truthy(s.cond)) {
             if (++steps > 4000) throw new Error('step cap');
             const sig = exec(s.body);
-            if (sig === 'return') return sig;
-            if (sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) left = sig;
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
             exec([s.inc]);
           }
+          if (left !== 'none') return resume(i, left);
           break;
+        }
         case 'return':
           trace.push({ fn: 'ret', args: s.value === undefined ? [] : [evalExpr(s.value)] });
           return 'return';
@@ -413,6 +432,8 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           return 'continue';
         case 'goto':
           return `goto:${s.label}`;
+        case 'caseEndGoto':
+          return resume(i, `end:${s.label}`);
         // A `switch` runs the arm its scrutinee selects, then the arms it falls into
         // (`fallsThrough`), in printed order, the default at `defaultAt`, until one leaves: a
         // `break` leaves the switch, a `continue` or `return` what encloses it. A case that falls
@@ -440,6 +461,9 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           for (; at >= 0 && at < arms.length; at++) {
             if (++steps > 4000) throw new Error('step cap');
             sig = exec(arms[at].body);
+            if (sig.startsWith('end:')) {
+              throw new Error(`a ${sig} that names no labelled break of its arm`);
+            }
             if (sig.startsWith('goto:')) {
               const to = arms.findIndex((c) => c.label !== undefined && `goto:${c.label}` === sig);
               if (to < 0) {

@@ -36,13 +36,15 @@
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
-// (`goto` past that code; `TwoLevelExit`, spelled with a flag). Still DECLINED (loud
-// StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
-// merge that no flag spells (among them a third target, a second one at the enclosing loop's header
-// or past it short of its exit, and one whose code never joins the code after the first exit: `goto
-// hit; } k(i); goto next; hit: y(i); next:`), a `break` out of a nested loop's body other than a
-// flag handed out one loop at a time (`TwoLevelExit.outward`), a `break` whose exit copies would
-// clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
+// (`goto` past that code; `TwoLevelExit`, spelled with a flag, which the ranked `/case-end-goto`
+// respells as a goto where that code ends the switch arm the loop sits in, l3/caseendgoto.ts).
+// Still DECLINED (loud StructureError, never wrong code): irreducible/overlapping loops, exits to
+// more than one live merge that no flag spells (among them a third target, a second one at the
+// enclosing loop's header or past it short of its exit, and one whose code never joins the code
+// after the first exit: `goto hit; } k(i); goto next; hit: y(i); next:`), a `break` out of a nested
+// loop's body other than a flag handed out one loop at a time (`TwoLevelExit.outward`), a `break`
+// whose exit copies would clobber, and mixed-entry self-loops (a guarded header also entered by a
+// plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
@@ -1262,9 +1264,11 @@ interface ForeverLoopInfo {
 // A SECOND EXIT PAST THE CODE AFTER THE LOOP: `for (j…) { if (hit) goto next; } k(i); next: …`, the
 // `goto` a search loop takes out of its own exit region. The loop leaves to `exit` and, from the
 // blocks in `from`, to `to`, a block every path from `exit` reaches unless it leaves first
-// (`twoLevelCandidate`). L3 has no `goto`, so a flag spells it: `f = 0;` ahead of the loop, `f = 1;
-// break;` on the edge to `to`, and the code from `exit` up to `to` under `if (f == 0)` after it
-// (`emitForever`). Only a `while (1)` takes one, and only where no other reading fits.
+// (`twoLevelCandidate`). L3 holds no `goto` past arbitrary code, so a flag spells it: `f = 0;`
+// ahead of the loop, `f = 1; break;` on the edge to `to`, and the code from `exit` up to `to` under
+// `if (f == 0)` after it (`emitForever`). Only a `while (1)` takes one, and only where no other
+// reading fits. l3/caseendgoto.ts reads that shape back, so a change to it is a change to that
+// respell's matcher too.
 //
 // OUTWARD: `for (i…) { for (j…) { if (hit) { s(j); goto out; } } k(i); } out:`, the `goto` out of
 // BOTH loops. `to` lies past the enclosing loop, and the code from it runs on to that loop's own exit
@@ -1280,7 +1284,8 @@ interface ForeverLoopInfo {
 // leaves the loop around it: agbcc threads the `goto` to the code after that loop (jump.c
 // `follow_jumps`), the merge of the switch and the exit of the loop at once. No goto-free spelling
 // matches those bytes (the flag adds a variable), so the hit rung is asked only where every
-// structuring without it declines (`LAST_RESORT_RUNGS`).
+// structuring without it declines (`LAST_RESORT_RUNGS`), and the ranked `/case-end-goto` respells
+// the flag read at such a case end as the goto itself (l3/caseendgoto.ts).
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
@@ -3578,7 +3583,7 @@ interface ForRanking {
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
- *  `jumpSharedFallTargets`) write the one goto L3 holds, and the default writes one only where
+ *  `jumpSharedFallTargets`) write the case-label goto L3 holds, and the default writes one only where
  *  every goto-free reading declines. One switch's ladder sees only
  *  its own rungs, not the whole-function reruns above: a `while (1)` jump table whose copies decline
  *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
@@ -8547,7 +8552,7 @@ function structureRanked(
       // THE JUMPS: TWO ARMS ENTERING ONE CASE'S BODY, ONE OF THEM BY `goto`. Where every reading above
       // still declines, the arms that enter one case arm's body two or more at a time keep one
       // fall-through and the rest end `goto` to that arm's label (`jumpSharedFallTargets`, over what
-      // the copies leave) — the one goto L3 holds (l3/ast.ts). Asked at the readings that may take
+      // the copies leave) — the case-label goto L3 holds (l3/ast.ts). Asked at the readings that may take
       // the copies, in their order: the switch's own merge (or the retry's), then the loop clamp's.
       // LAST, and adopted only where it declines nothing, for the reason the copies are: it turns a
       // decline into a lift, never one lift into another. And asked only in the runs `structure`

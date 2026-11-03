@@ -1,0 +1,84 @@
+
+target.o:     file format elf32-tradbigmips
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 /tmp/asmlift-mgcc272-ref-5539644719dd0bed/ref.c
+00000000 l     O .text	00000000 gcc2_compiled.
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .rodata	00000000 .rodata
+00000000 l    d  .data	00000000 .data
+00000000 l    d  .bss	00000000 .bss
+00000000 l    d  .reginfo	00000000 .reginfo
+00000000 l    d  .note	00000000 .note
+00000000 l    d  .comment	00000000 .comment
+00000000 g     F .text	000000f8 brk2sw_one
+00000000         *UND*	00000000 gE
+00000000         *UND*	00000000 gA
+00000000         *UND*	00000000 k
+00000000         *UND*	00000000 gOut
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+00000014 R_MIPS_HI16       gE
+0000001c R_MIPS_LO16       gE
+00000030 R_MIPS_HI16       .rodata
+00000038 R_MIPS_LO16       .rodata
+0000004c R_MIPS_HI16       gA
+00000054 R_MIPS_LO16       gA
+00000064 R_MIPS_HI16       gE
+0000006c R_MIPS_LO16       gE
+0000007c R_MIPS_HI16       gE
+00000084 R_MIPS_LO16       gE
+0000009c R_MIPS_26         k
+000000a4 R_MIPS_26         .text
+000000ac R_MIPS_26         k
+000000b4 R_MIPS_26         .text
+000000bc R_MIPS_26         .text
+000000c4 R_MIPS_26         k
+000000cc R_MIPS_26         .text
+000000d8 R_MIPS_HI16       gOut
+000000dc R_MIPS_LO16       gOut
+000000e0 R_MIPS_HI16       gA
+000000e4 R_MIPS_LO16       gA
+
+
+RELOCATION RECORDS FOR [.rodata]:
+OFFSET   TYPE              VALUE
+00000000 R_MIPS_32         .text
+00000004 R_MIPS_32         .text
+00000008 R_MIPS_32         .text
+0000000c R_MIPS_32         .text
+00000010 R_MIPS_32         .text
+00000014 R_MIPS_32         .text
+
+
+Contents of section .text:
+ 0000 27bdffe8 afbf0014 afb00010 00808021  '..............!
+ 0010 001010c0 3c010000 00220821 90220004  ....<....".!."..
+ 0020 2443ffff 2c620006 1040002d 00031080  $C..,b...@.-....
+ 0030 3c010000 00220821 8c220000 00400008  <....".!."...@..
+ 0040 00000000 00101880 24020001 3c010000  ........$...<...
+ 0050 00230821 ac220000 04a00010 00002021  .#.!."........ !
+ 0060 000418c0 3c020000 00431021 90420005  ....<....C.!.B..
+ 0070 2c420019 10400006 24840001 3c020000  ,B...@..$...<...
+ 0080 00431021 8c420000 10500015 00000000  .C.!.B...P......
+ 0090 00a4102a 1040fff3 000418c0 0c000000  ...*.@..........
+ 00a0 02002021 08000038 00000000 0c000000  .. !...8........
+ 00b0 24040003 08000038 00000000 08000036  $......8.......6
+ 00c0 24020004 0c000000 24040005 08000038  $.......$......8
+ 00d0 00000000 24020006 3c010000 ac220000  ....$...<...."..
+ 00e0 3c010000 ac300000 8fbf0014 8fb00010  <....0..........
+ 00f0 03e00008 27bd0018 00000000 00000000  ....'...........
+Contents of section .reginfo:
+ 0000 a001003e 00000000 00000000 00000000  ...>............
+ 0010 00000000 00000000                    ........        
+Contents of section .note:
+ 0000 00000008 00000000 00000001 30312e30  ............01.0
+ 0010 31000000                             1...            
+Contents of section .rodata:
+ 0000 00000044 00000044 000000ac 000000bc  ...D...D........
+ 0010 000000c4 000000d4                    ........        
+Contents of section .comment:
+ 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.
+ 0010 3200                                 2.              
