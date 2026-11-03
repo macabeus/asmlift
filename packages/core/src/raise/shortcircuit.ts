@@ -377,7 +377,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     local is precisely the shape analysis.ts inlines into the connective's right operand, where
 //     C's own short-circuit re-guards it. The table is what keeps a load in `b` from being hoisted
 //     across the guard in `a`; what it admits is an ADDRESS (`&gS`, `&gS + k`), which reads nothing,
-//     so wherever it is spelled it runs nothing the source did not.
+//     so wherever it is spelled it runs nothing the source did not (l3/basecse.ts's
+//     `guarded-operand` keeps the default spelling inline under the operand).
 //   - a value defined in ^g is ALSO read past ^g, and a rule in `ARM_REREAD_GATES` refuses
 //     re-deriving it in the arm. A read past ^g is otherwise not a refusal: on verified IR it can
 //     only sit under the arm ^g's non-shared edge enters (^g dominates nothing else — the shared
