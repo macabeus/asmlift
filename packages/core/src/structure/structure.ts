@@ -2650,8 +2650,9 @@ export interface StructureHooks {
   onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
   /** Fired each time an `if` or a jump table takes the join past early returns (`joinPastReturns`,
    *  or the copy budget's rerun) where its CFG join differs: the one place the reading changes a
-   *  tree. rank.ts's `/ret-join` pass stops after a structuring that never fired it, whose tree is
-   *  the default's. */
+   *  tree. Held, like the other observation hooks, until the run that fired it is the one returned.
+   *  rank.ts's `/ret-join` pass stops after a structuring that never fired it, whose tree is the
+   *  default's, and names a tree of any other pass that fired it `/ret-join` (the budget's rerun). */
   onJoinPastReturns?: () => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
    *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
@@ -3919,6 +3920,7 @@ function structureLadder(
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
           onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
+          onJoinPastReturns: hooks.onJoinPastReturns && hold(hooks.onJoinPastReturns),
         },
         memo,
         retCopy,

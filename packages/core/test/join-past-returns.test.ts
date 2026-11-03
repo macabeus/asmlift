@@ -270,6 +270,15 @@ describe('the copy budget', () => {
     }
   });
 
+  test('the rerun reports the reading it took, so rank.ts names its tree `/ret-join`', () => {
+    let over = 0;
+    structure(chain(12, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => over++ });
+    expect(over).toBeGreaterThan(0);
+    let under = 0;
+    structure(chain(4, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => under++ });
+    expect(under).toBe(0);
+  });
+
   test('a chain under the budget keeps the default copies', () => {
     expect(count(emit(chain(4, 'own'), {}), 'tail(')).toBe(16);
   });
