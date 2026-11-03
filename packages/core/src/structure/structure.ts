@@ -4161,6 +4161,7 @@ function structureRanked(
         onCaseCopied: undefined,
         onForOffered: undefined,
         onCounterSignRefused: undefined,
+        onJoinPastReturns: undefined,
       },
       memo,
     );
