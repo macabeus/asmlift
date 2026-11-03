@@ -24,7 +24,11 @@ import { eliminateDeadStores } from '../src/l3/dce';
 import { tallying, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { enumerateCandidates } from '../src/rank';
+import { PRE_RESPELL_VARIATIONS } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 import { irAgreement } from './helpers';
 
 const call = (fn: string, ...args: string[]): Stmt => ({
@@ -486,5 +490,57 @@ describe('jumpToCaseEnds', () => {
 
   test('a tree with no flag read after its loop is declined', () => {
     expect(jumpToCaseEnds(sfnWith([narrow()]))).toBeNull();
+  });
+});
+
+// ── the effect count over a pre-respell tree in the fan ───────────────────────────────────────────
+
+describe('rank.ts runs the effect count over every pre-respell tree', () => {
+  // rank-backend-decline.test.ts's `/unmerge` fixture, `if (c) { *A = 1; } else { *B = 2; } g();`
+  // as agbcc cross-jumps it: a function the pre-respell loop reaches, with a call to count
+  const asm = [
+    'f:',
+    '\tpush\t{lr}',
+    '\tcmp\tr0, #0x0',
+    '\tbeq\t.L2',
+    '\tldr\tr1, .L8',
+    '\tmov\tr2, #0x1',
+    '\tb\t.L3',
+    '.L2:',
+    '\tldr\tr1, .L9',
+    '\tmov\tr2, #0x2',
+    '.L3:',
+    '\tstr\tr2, [r1]',
+    '\tbl\tg',
+    '\tpop\t{r0}',
+    '\tbx\tr0',
+    '.L8:',
+    '\t.word\t0x03001000',
+    '.L9:',
+    '\t.word\t0x03002000',
+  ].join('\n');
+
+  test('a pre-respell rewrite that runs a call twice on one path is dropped and reported', () => {
+    expect(enumerateCandidates('f', asm, ARMV4T_AGBCC).some((c) => hasVariation(c.variations, 'unmerge'))).toBe(true);
+    // every pre-respell entry's output with a second `g()` in front: what a rewrite that copies code
+    // onto a path the asm runs it once on looks like to the count
+    const saved = PRE_RESPELL_VARIATIONS.map((p) => p.apply);
+    PRE_RESPELL_VARIATIONS.forEach((p, i) => {
+      p.apply = (sfn: SFn) => {
+        const made = saved[i](sfn);
+        return made && { ...made, body: [call('g'), ...made.body] };
+      };
+    });
+    const seen: string[] = [];
+    try {
+      const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
+        onEnumerationError: (variations, error) => seen.push(`${variations.join('/')}: ${error}`),
+      });
+      expect(kept.length).toBeGreaterThan(0);
+      expect(kept.some((c) => hasVariation(c.variations, 'unmerge'))).toBe(false);
+      expect(seen.some((s) => s.startsWith('unmerge: ') && /2 calls to 'g' on one path/.test(s))).toBe(true);
+    } finally {
+      PRE_RESPELL_VARIATIONS.forEach((p, i) => (p.apply = saved[i]));
+    }
   });
 });
