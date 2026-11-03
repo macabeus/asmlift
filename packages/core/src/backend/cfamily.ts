@@ -29,6 +29,7 @@ import {
   writesNonPointerIntoPointer,
 } from '../l3/typing';
 import { spellableType } from '../proto';
+import { append } from './lines';
 
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
@@ -496,16 +497,6 @@ function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf
   return `${dest.name} = ${printExpr({ k: 'call', fn: call.fn, args: rest }, 99, vt, leaf)}`;
 }
 
-/** `out.push(...lines)` without the spread: a spread passes every line as an ARGUMENT, and V8 throws
- *  "Maximum call stack size exceeded" past about 120k of them (120,000 print, 130,000 throw, node
- *  24). A structuring with a long arm reaches that at a nesting depth of a few dozen, so the throw
- *  reads as deep recursion when it is only size. */
-function append(out: string[], lines: readonly string[]): void {
-  for (const line of lines) {
-    out.push(line);
-  }
-}
-
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
@@ -792,7 +783,7 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean)
   const vt: PrintEnv = printEnv(fn);
   const lines: string[] = [];
   for (const st of fn.statics ?? []) {
-    lines.push(...staticDefinition(st));
+    append(lines, staticDefinition(st));
   }
   for (const l of fn.locals) {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them
