@@ -10887,28 +10887,20 @@ function structureRanked(
             varType.get(iv),
           ).find((t) => !differs(t)) ?? null));
     // A SIBLING'S STRIDE read on the way out (see above): the blocks of the loop's exit arms — a
-    // `break` that runs code first, an early return — that the `for` writes inside its body, that the
-    // header dominates and that the latch reaches only through the header
+    // `break` that runs code first, an early return — that the `for` writes inside its body. Every
+    // such block runs before the update, by construction: `codeBreakArm`'s region stops at the
+    // loop's exit and admits no block the exit's forward path runs, and `LoopArm.owned` holds none
+    // of the exit path's tails. So no block here is one the latch reaches past its step without
+    // passing the header, and none needs a test for it. A block the header does not dominate (a tail
+    // shared with an `else` ahead of the loop) cannot read the header's params at all, so it leaves
+    // `strideEscapes` as it is; it only widens `stridesNamed`'s scan, which can refuse more, never less.
     let armBlocks: Set<Block> | undefined;
-    const exitArms = (): ReadonlySet<Block> => {
-      if (armBlocks !== undefined) {
-        return armBlocks;
-      }
-      const pastLatch = new Set<Block>();
-      for (const stack = successorsOf(latch).filter((x) => x !== h); stack.length > 0;) {
-        const x = stack.pop()!;
-        if (!pastLatch.has(x)) {
-          pastLatch.add(x);
-          stack.push(...successorsOf(x).filter((y) => y !== h));
-        }
-      }
-      armBlocks = new Set(
+    const exitArms = (): ReadonlySet<Block> =>
+      (armBlocks ??= new Set(
         [...fl.breakArms.flatMap((a) => [...a.region]), ...fl.arms.flatMap((a) => [...a.owned])].filter(
-          (x) => !fl.body.has(x) && !pastLatch.has(x) && dom.get(x)!.has(h),
+          (x) => !fl.body.has(x),
         ),
-      );
-      return armBlocks;
-    };
+      ));
     // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
     const rereadable = (v: Value): boolean => {
       const d = defs.get(v);
