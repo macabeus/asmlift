@@ -19,8 +19,8 @@
 //
 // The structurer is not the only writer the rewrite reaches: it reads the tree, not who built it,
 // so a flag the source declared and the compiler kept is rewritten too where it has the same shape
-// (IDO keeps a `u8 found` set to 2 in a case arm; at 7d1ca3da both goto candidates agree with the
-// source over 4000 seeds). That is sound for the reason below, and ranked like the rest.
+// (IDO keeps a `u8 found` a source sets to 2 in a case arm, and lifts it as that flag). That is
+// sound for the reason below, which reads only the tree, and ranked like the rest.
 //
 // SOUND OVER THE TREE ALONE. `f` is a local mentioned only by `f = 0;` right before the loop, by
 // each hit's `f = c; break;` (c a nonzero constant, the `break` the loop's own: reached from the
@@ -37,9 +37,13 @@
 //
 // A RESPELL, NOT A STRUCTURE VARIATION — the third fork of docs/level-tower.md. The rewrite reads
 // nothing but the flag's tree, so asked of the structured tree it reaches every site a structure
-// option inside `emitForeverExit` would, and it pays only where it fires: a structure variation
-// doubles the settings every enumeration walks, which on kleod:sub_0803F68C alone outran the shard
-// heap with no structuring firing. What a respell gives up is composition with the other
+// option inside `emitForeverExit` would, and it pays only where it fires. Built first as a structure
+// variation, it doubled the settings every enumeration walks, and that walk alone, with no ON
+// setting structured, took kleod:sub_0803F68C's enumeration from 2.11 to 2.44 GB and its shard out of
+// heap; a `sharedGate` keeping it out of functions with no loop leaving for two blocks brought that
+// back to 2.10 GB (`/usr/bin/time -v pnpm bench fan kleod:sub_0803F68C:agbcc --enumerate`). The
+// respell, at the same reach, costs less still: one walk of each structured tree, and nothing more
+// where no flag is read after its loop. What a respell gives up is composition with the other
 // pre-respell variation (`/unmerge` runs on the structured tree beside it, not on its output); no
 // row has asked for both.
 //
