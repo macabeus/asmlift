@@ -232,6 +232,61 @@ function switchChain(n: number, flavor: 'own' | 'epilogue'): Fn {
   return fn;
 }
 
+/** `n` chained comparison trees over `%0 + i` (`case 0:` returns early through an `if` of its own,
+ *  `case 1:`, `case 2:` and a default run on to the next), then a tail — a switch Regime A
+ *  recovers, as ido7.1 and mwcc compile a small `switch`. */
+function treeChain(n: number): Fn {
+  let v = 1;
+  let blk = 1;
+  const lines: string[] = ['fn t {', '^bb0(%0: s32):', '  br ^bb1()'];
+  const heads = Array.from({ length: n + 1 }, () => blk++);
+  for (let i = 0; i < n; i++) {
+    const [t1, t2, r, ry, rr, c1, c2, d] = Array.from({ length: 8 }, () => blk++);
+    const [c, x, z, e0, one, e1, two, e2, g] = Array.from({ length: 9 }, () => `%${v++}`);
+    lines.push(`^bb${heads[i]}():`, `  ${c}: s32 = const {value=${i + 1}}`, `  ${x}: s32 = add %0, ${c}`);
+    lines.push(`  ${z}: s32 = const {value=0}`, `  ${e0}: u32 = icmp_eq ${x}, ${z}`);
+    lines.push(`  cond_br ${e0}, ^bb${r}(), ^bb${t1}()`);
+    lines.push(`^bb${t1}():`, `  ${one}: s32 = const {value=1}`, `  ${e1}: u32 = icmp_eq ${x}, ${one}`);
+    lines.push(`  cond_br ${e1}, ^bb${c1}(), ^bb${t2}()`);
+    lines.push(`^bb${t2}():`, `  ${two}: s32 = const {value=2}`, `  ${e2}: u32 = icmp_eq ${x}, ${two}`);
+    lines.push(`  cond_br ${e2}, ^bb${c2}(), ^bb${d}()`);
+    const z2 = `%${v++}`;
+    lines.push(`^bb${r}():`, `  %${v++}: s32 = call ${c} {target="k"}`, `  ${z2}: s32 = const {value=0}`);
+    lines.push(`  ${g}: u32 = icmp_eq %0, ${z2}`);
+    lines.push(`  cond_br ${g}, ^bb${ry}(), ^bb${rr}()`);
+    lines.push(`^bb${ry}():`, `  %${v++}: s32 = call ${c} {target="y"}`, `  br ^bb${rr}()`);
+    lines.push(`^bb${rr}():`, '  ret');
+    for (const [blkN, callee] of [
+      [c1, 'k2'],
+      [c2, 'k3'],
+      [d, 'm'],
+    ] as const) {
+      lines.push(`^bb${blkN}():`, `  %${v++}: s32 = call ${c} {target="${callee}"}`, `  br ^bb${heads[i + 1]}()`);
+    }
+  }
+  lines.push(`^bb${heads[n]}():`, `  %${v++}: s32 = call %0 {target="tail"}`, '  ret', '}', '');
+  const fn = parse(lines.join('\n'));
+  verify(fn);
+  return fn;
+}
+
+describe('a chain of comparison-tree switches with a `case` that returns early', () => {
+  test('the join writes the tail once, and the trees stay switches', () => {
+    const fn = treeChain(3);
+    expect(count(emit(fn, {}), 'tail(')).toBe(27);
+    const once = emit(fn, { joinPastReturns: true });
+    expect(count(once, 'tail(')).toBe(1);
+    expect(count(once, 'switch (')).toBe(3);
+    expect(count(once, 'y(')).toBe(3);
+  });
+
+  test('past the copy budget it lifts with the tail written once', () => {
+    const src = emit(treeChain(8), {});
+    expect(count(src, 'tail(')).toBe(1);
+    expect(count(src, 'switch (')).toBe(8);
+  });
+});
+
 describe('a chain of jump tables with a `case` that returns early', () => {
   for (const flavor of ['own', 'epilogue'] as const) {
     test(`${flavor}: the default writes the tail 3^n times, the join writes it once`, () => {
