@@ -2282,8 +2282,9 @@ export function enumerateCandidates(
         // `joinPastReturns`, in its own pass between the follow and the sink, on the fn as raised. A
         // chain of `if`s each holding an early `return;` has no CFG join (`synthetic:retchain`), and
         // where the early returns cross-jump into one return tail the follow lands on that tail
-        // (`synthetic:retchain_xj`); both copy the code below every such `if` into its arms. Gated
-        // on `hasJoinPastReturns`, so a function with no such `if` pays no candidate. Not the
+        // (`synthetic:retchain_xj`); both copy the code below every such `if` into its arms, and a
+        // switch with a `case` that returns early likewise. Gated on `hasJoinPastReturns`, so a
+        // function with no such branch pays no candidate. Not the
         // default, so a row whose copies are the bytes keeps them where they score.
         //
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -2484,8 +2485,8 @@ export function enumerateCandidates(
               // A SHARED-TAIL PASS'S SETTING PAST THE COPY BUDGET is dropped, not published as the
               // budget rerun's tree: that tree crosses the follow or the sink with the join past
               // early returns, a reading no setting under the budget is given, and the `/ret-join`
-              // pass holds the join's own tree for the setting. Kept, the crossing more than
-              // doubled an over-budget fan (a 12-link kmc chain: 10,824 candidates, 6,456 crossed).
+              // pass holds the join's own tree for the setting. The crossing would more than double
+              // an over-budget fan (a 12-link kmc chain: 10,824 candidates, 6,456 crossed).
               if (alternative && pass !== 'join' && joinRead) {
                 dropped.add(key);
                 continue;
