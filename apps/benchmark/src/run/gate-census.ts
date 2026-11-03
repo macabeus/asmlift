@@ -26,7 +26,7 @@
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
 // holding the call. Fifteen passes have one — `unmergeJoins` and `jumpToCaseEnds` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
+// `arm-reread` and `shared-value`, one entry per table), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
 // in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`, `unpre`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
@@ -90,7 +90,12 @@ import {
   TOP_TEST_GATES,
   rerollPeeledTests,
 } from '@asmlift/core/raise/reroll';
-import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
+import {
+  ARM_REREAD_GATES,
+  type ArmRereadSite,
+  SHARED_VALUE_GATES,
+  type SharedValueSite,
+} from '@asmlift/core/raise/shortcircuit';
 import {
   DISPLACED_BASE_GATES,
   DISPLACED_ROOT_GATES,
@@ -202,6 +207,26 @@ export const PASSES: Record<string, CensusablePass> = {
       const armReread = w[0] as readonly Gate<ArmRereadSite>[];
       pass.run = (fn, self, opts, target, lifted) =>
         restore(fn, self, { ...opts, shortCircuit: { ...opts.shortCircuit, armReread } }, target, lifted);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  'shared-value': {
+    // raise/shortcircuit.ts's `SHARED_VALUE_GATES` — the same fold's use-count refusals, asked once
+    // per value the second condition block reads 2+ times itself, below every refusal but tree
+    // ownership. Same seam and same per-lift counting as `arm-reread` above.
+    tables: [['value', SHARED_VALUE_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'branch-shortcircuit' — the pass's caller-side seam moved");
+      }
+      const restore = pass.run;
+      const sharedValue = w[0] as readonly Gate<SharedValueSite>[];
+      pass.run = (fn, self, opts, target, lifted) =>
+        restore(fn, self, { ...opts, shortCircuit: { ...opts.shortCircuit, sharedValue } }, target, lifted);
       return () => {
         pass.run = restore;
       };

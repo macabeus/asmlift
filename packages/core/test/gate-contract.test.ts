@@ -54,7 +54,7 @@ import { OFFSET_NAME_GATES } from '../src/raise/offsetnames';
 import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { REROLL_GATES, TOP_TEST_GATES } from '../src/raise/reroll';
 import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
-import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
+import { ARM_REREAD_GATES, SHARED_VALUE_GATES } from '../src/raise/shortcircuit';
 import { DISPLACED_BASE_GATES, DISPLACED_ROOT_GATES } from '../src/raise/structs';
 import { TRUNC_LOAD_GATES } from '../src/raise/truncload';
 import { UNPRE_GATES } from '../src/raise/unpre';
@@ -114,6 +114,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
   ARM_REREAD_GATES: ARM_REREAD_GATES as readonly Gate<never>[],
+  SHARED_VALUE_GATES: SHARED_VALUE_GATES as readonly Gate<never>[],
   TRUNC_LOAD_GATES: TRUNC_LOAD_GATES as readonly Gate<never>[],
   // raise/structs.ts's displaced-access fold: one table per materialised base, one per root
   DISPLACED_BASE_GATES: DISPLACED_BASE_GATES as readonly Gate<never>[],

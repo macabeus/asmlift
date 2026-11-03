@@ -24,7 +24,12 @@ import {
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { tallying, without } from '../src/l3/gates';
-import { ARM_REREAD_GATES, recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
+import {
+  ARM_REREAD_GATES,
+  SHARED_VALUE_GATES,
+  recognizeBranchShortCircuit,
+  recognizeShortCircuit,
+} from '../src/raise/shortcircuit';
 
 const blk = (ops: Op[], params: Value[] = []): Block => ({ params, ops });
 
@@ -686,6 +691,84 @@ describe('refusals', () => {
     const local = fn.blocks[1].ops[1].results[0];
     fn.blocks[1].ops.splice(2, 0, mkOp('neg', { operands: [local], results: [mkValue(T.unk(32))] }));
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  /** `chain` whose second condition ORs three bytes read off ONE base — `(gS.a | gS.d | gS.c) != 0`
+   *  as agbcc leaves it: the base defined once in ^g and read by all three loads. `base` picks what
+   *  that shared value is: the struct's address, the address plus a constant, or a READ. */
+  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load'): Fn {
+    return chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const sym = mkValue(T.ptr(T.u(8)));
+        const ops: Op[] = [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
+        let p = sym;
+        if (base !== 'gaddr') {
+          p = mkValue(T.ptr(T.u(8)));
+          const k = mkValue(T.unk(32));
+          ops.push(
+            ...(base === 'load'
+              ? [mkOp('load', { operands: [sym], results: [p], attrs: { off: 0, width: 4, signed: false } })]
+              : [
+                  mkOp('const', { results: [k], attrs: { value: 4 } }),
+                  mkOp('add', { operands: [sym, k], results: [p] }),
+                ]),
+          );
+        }
+        const bytes = [0, 3, 2].map((off) => {
+          const v = mkValue(T.u(8));
+          ops.push(mkOp('load', { operands: [p], results: [v], attrs: { off, width: 1, signed: false } }));
+          return v;
+        });
+        const o1 = mkValue(T.unk(32));
+        const o2 = mkValue(T.unk(32));
+        const zero = mkValue(T.unk(32));
+        ops.push(
+          mkOp('or', { operands: [bytes[0], bytes[1]], results: [o1] }),
+          mkOp('or', { operands: [o1, bytes[2]], results: [o2] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [o2, zero], results: [out] }),
+        );
+        return ops;
+      },
+    });
+  }
+
+  test.each(['gaddr', 'gaddr+k'] as const)(
+    'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
+    (base) => {
+      // sub_0800D188 wrote 6,338 of its 17,132 lines twice behind this one refusal (synthetic:scbase).
+      const fn = sharedBase(base);
+      expect(recognizeBranchShortCircuit(fn)).toBe(true);
+      expect(connective(fn)).toBe('logic_or');
+      verify(fn);
+    },
+  );
+
+  test('REFUSED: a READ the second test consumes twice would run above the first', () => {
+    // `if (a || (*p | *p >> 4) != 0)`: a value read twice is materialized as a local, a statement
+    // ahead of the `if`, so the load would run before the first test decided anything.
+    expect(recognizeBranchShortCircuit(sharedBase('load'))).toBe(false);
+    expect(
+      recognizeBranchShortCircuit(sharedBase('load'), { sharedValue: without(SHARED_VALUE_GATES, 'shared-read') }),
+    ).toBe(true);
+  });
+
+  test('the use-count refusals are REPORTED: a census names the rule that refused each value', () => {
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(sharedBase('load'), { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-read', 1]]);
+    const pure = tallying(SHARED_VALUE_GATES);
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
+    const local = fn.blocks[1].ops[1].results[0];
+    fn.blocks[1].ops.splice(2, 0, mkOp('neg', { operands: [local], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: pure.gates })).toBe(false);
+    expect(pure.refusals()).toEqual([['shared-pure', 1]]);
+    // an address is admitted, and nothing is counted
+    const quiet = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(sharedBase('gaddr'), { sharedValue: quiet.gates })).toBe(true);
+    expect(quiet.refusals()).toEqual([]);
   });
 
   test('DIFFERENT args on the two edges into the shared block: only one edge survives', () => {
