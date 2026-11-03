@@ -2654,9 +2654,12 @@ export function enumerateCandidates(
                 }
                 continue;
               }
+              // a tree the copy budget's rerun gave the join past early returns is that reading's
+              const rerunRead: readonly Variation[] = joinRead && pass !== 'join' ? ['ret-join'] : [];
               const variations: readonly Variation[] = [
                 cand.variation,
                 ...liftVariations,
+                ...rerunRead,
                 ...s.variations,
                 ...sp.variations,
                 ...symbolSetting.variations,
