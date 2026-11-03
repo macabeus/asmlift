@@ -9,11 +9,15 @@
 // the end of the switch arm the loop sits in, spelled as the goto, each judged against its own IR
 // by the trace oracle (`irAgreement`); the hit whose target is a join running code, which keeps its
 // flag; and, on hand-built trees, each rule of `CASE_END_GOTO_GATES` and two sites sharing a label.
+// Last, the fan: `enumerateCandidates` over a benchmark object yields the `/case-end-goto` candidates,
+// with every contract rank.ts holds a pre-respell tree to passing them.
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved, assertNoOrphanedLocals } from '../src/contracts';
+import { parseAsmData } from '../src/frontend/asmdata';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
@@ -27,7 +31,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { PRE_RESPELL_VARIATIONS } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 import { hasVariation } from '../src/variation-tokens';
 import { irAgreement } from './helpers';
 
@@ -542,5 +546,41 @@ describe('rank.ts runs the effect count over every pre-respell tree', () => {
     } finally {
       PRE_RESPELL_VARIATIONS.forEach((p, i) => (p.apply = saved[i]));
     }
+  });
+});
+
+// ── the variation in the fan ──────────────────────────────────────────────────────────────────────
+
+describe('enumerateCandidates yields /case-end-goto', () => {
+  // `synthetic:brk2sw_one` on gcc 2.7.2, as `pnpm bench target` builds it and the bench's own
+  // `objdump -d --no-show-raw-insn` / `objdump -s -r -t` read it: `case 1: case 2: gA[i] = 1;
+  // for (j = 0; j <= m; j++) { if (gE[j].f <= 24) { if (gE[j].x == i) goto next; } } k(i); next:
+  // break;`, whose winner the variation is. Every contract the fan holds a pre-respell tree to
+  // (rank.ts) runs on these: a wiring or contract change that drops each goto tree fails here, not
+  // only in the bench.
+  const corpus = (f: string) => readFileSync(new URL(`corpus/${f}`, import.meta.url), 'utf8');
+  const dump = corpus('gcc272-brk2swone.txt');
+
+  test("a search loop leaving for its arm's end comes out of the fan as the goto, with nothing thrown", () => {
+    const threw: string[] = [];
+    const cands = enumerateCandidates(
+      'brk2sw_one',
+      corpus('gcc272-brk2swone.asm'),
+      TOOLCHAIN_TARGETS['gcc2.7.2'].description,
+      {
+        prototypes: { brk2sw_one: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+        asmData: parseAsmData(dump, dump, dump, true),
+        onEnumerationError: (variations, error) => threw.push(`${variations.join('/')}: ${error}`),
+      },
+    );
+    expect(threw).toEqual([]);
+    const gotos = cands.filter((c) => hasVariation(c.variations, 'case-end-goto'));
+    expect(gotos.length).toBeGreaterThan(0);
+    for (const c of gotos) {
+      expect(c.source).toMatch(/\bgoto case_end;/);
+      expect(c.source).toMatch(/k\(a0\);\n\s*case_end:\n\s*break;/);
+    }
+    // the flag reading stays in the fan beside it, for the differ to referee
+    expect(cands.some((c) => !hasVariation(c.variations, 'case-end-goto') && !/\bgoto\b/.test(c.source))).toBe(true);
   });
 });
