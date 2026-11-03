@@ -392,6 +392,24 @@ test('a stride read in an exit arm, ahead of its `break`, is G of the counter th
   expect(r.agreement.disagree).toBe(0);
 });
 
+test('stride-name-shared scans the exit arms as well as the body', () => {
+  // case 6's exit arm #10 takes the counter as a param of its own, which naming coalesces onto the
+  // counter's name: a value in an arm named for the counter, the clash the scan refuses. Here the two
+  // hold one value, so the lift past the gate is right (the gate is DEFENSIVE); a scan of the body
+  // alone never sees #10, and the `for` lifts with every table in place
+  const ir = srFor(STRIDE)
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %6 {target="k"}\n  %51: s32 = call %50 {target="m"}')
+    .replace('cond_br %33, ^bb11(), ^bb10()', 'cond_br %33, ^bb11(), ^bb10(%5)')
+    .replace('^bb10():', '^bb10(%50: s32):');
+  const t = tallying(FOR_PLAN_IV_GATES);
+  expect(() => lift(ir, { forPlanIvGates: t.gates })).toThrow(LOOP_EXIT);
+  expect(t.refusals().map(([id]) => id)).toEqual(['stride-name-shared']);
+  const r = lift(ir, dropping('stride-name-shared'));
+  expect(r.src).toMatch(/k\(v0 \+ 3\);\s*m\(v0\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
 test('without stride-escapes the code after the loop reads a stride never written', () => {
   // `for (i = 0; ..; i++)` with no guard (the first test folds): the header dominates the exit, and
   // the code there calls `exitv` on the stride itself, whose name the `for` never writes

@@ -1708,7 +1708,9 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
   },
   {
     // DEFENSIVE: the naming walk names a header param and every body value apart, unless coalescing
-    // merges them, and no fixture or probe has brought a merged one here
+    // merges them, and the one merge a fixture brings here holds a single value under both names (an
+    // exit arm's param that is the counter, for-plan-gates.test.ts), so no refusal is known to save a
+    // wrong read
     id: 'stride-name-shared',
     why: 'a stride is read as G of the counter and of its leaves by name, so each name must hold that one value in the loop (defensive)',
     sound: false,
