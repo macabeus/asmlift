@@ -427,11 +427,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "not return meet as the `if`'s join: the code from there is written once, and every other path " +
       'leaves through its early `return`. Unlike `shared-ret` it needs no `return` block the arms share ' +
       "apart from the function's own end, so it also reads early returns the compiler merged into the " +
-      'epilogue or cross-jumped into one return tail.',
+      'epilogue or cross-jumped into one return tail. A `switch` with a `case` that returns early is ' +
+      'read the same way.',
     offeredWhen: {
-      when:
-        'Some `if` outside every loop has no join but the end of the function, and a block its arms ' +
-        'both reach past early returns.',
+      when: 'An `if` or `switch` outside every loop joins only at the return, but its arms meet past early returns.',
       decidedBy: { symbol: 'hasJoinPastReturns', file: STRUCTURE },
     },
     example: {

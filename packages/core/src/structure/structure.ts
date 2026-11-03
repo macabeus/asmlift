@@ -2648,9 +2648,10 @@ export interface StructureHooks {
    *  domain of the shared-tail twins (that domain is `hasDivergentSharedRet`, which asks for a
    *  `cond_br`). */
   onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
-  /** Fired each time an `if` takes the join past early returns (`joinPastReturns`, or the copy
-   *  budget's rerun) where its CFG join differs: the one place the reading changes a tree. rank.ts's
-   *  `/ret-join` pass stops after a structuring that never fired it, whose tree is the default's. */
+  /** Fired each time an `if` or a jump table takes the join past early returns (`joinPastReturns`,
+   *  or the copy budget's rerun) where its CFG join differs: the one place the reading changes a
+   *  tree. rank.ts's `/ret-join` pass stops after a structuring that never fired it, whose tree is
+   *  the default's. */
   onJoinPastReturns?: () => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
    *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
@@ -2981,9 +2982,12 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
 // `k(9); if (c) k(8); gT = 1; return;` written in every early return and at the function's end,
 // which the tail past `j` enters as well, and which is then the post-dominator of every link.
 //
-// WHICH `j`: the first in reverse postorder after `b` that EVERY successor of `b` reaches. The
-// copies this removes are of a region both arms reach, so a block one arm never reaches is no
-// meeting point, however straight the other arm's way to its `return`: that is what refuses the
+// WHICH `j`: the first in reverse postorder after `b` that EVERY successor of `b` reaches. Of a jump
+// table, whose `case` may return on its own, the one the most successors reach, two at least, ahead
+// of its CFG join (the return tail every arm reaches): a block two `case`s share on their way to
+// the code after the switch is no join of the table. The copies this removes are of a region both
+// arms reach, so a block one arm never reaches is no meeting point, however straight the other
+// arm's way to its `return`: that is what refuses the
 // join of an `if` inside an early return (`if (d) { if (c) x(); k(); return; }`, its `k()`), which
 // the other arm reaches only through the epilogue. In acyclic code every block on an arm of `b`
 // precedes the arms' meeting point. Sound for the reason the follow is: every path from `b` either
@@ -3075,9 +3079,19 @@ function joinsPastReturns(
     const rpo = reversePostorder();
     const at = rpo.get(b);
     if (!reach.has(b) && at !== undefined) {
+      const succs = [...new Set(successorsOf(b))];
+      const meet = new Map<Block, number>(
+        [...reach].map((j) => [j, succs.filter((x) => x === j || reachFrom(x).has(j)).length]),
+      );
+      const table = b.ops[b.ops.length - 1].opcode === 'switch_br';
+      // a jump table's CFG join, and the return tail past it, are where its arms meet the returns
+      const cfg = ipdom.get(b) ?? null;
+      const pastCfg = (j: Block): boolean => cfg !== null && (j === cfg || reachFrom(cfg).has(j));
       const candidates = [...reach]
-        .filter((j) => (rpo.get(j) ?? -1) > at && successorsOf(b).every((x) => x === j || reachFrom(x).has(j)))
-        .sort((x, y) => rpo.get(x)! - rpo.get(y)!);
+        .filter(
+          (j) => (rpo.get(j) ?? -1) > at && (table ? meet.get(j)! >= 2 && !pastCfg(j) : meet.get(j) === succs.length),
+        )
+        .sort((x, y) => meet.get(y)! - meet.get(x)! || rpo.get(x)! - rpo.get(y)!);
       for (const j of candidates) {
         const past = reachFrom(j);
         // the early-return blocks already met from another successor of `b`
@@ -3114,10 +3128,11 @@ function joinsPastReturns(
   return { isReturnTail, joinOf };
 }
 
-/** Is there an `if` outside every loop that `joinPastReturns` gives a join its CFG does not — its
- *  post-dominator EXIT or a return tail, and a block past early returns where its arms
- *  meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it asks neither
- *  the enclosing region's `stop` nor whether a switch arm's own join wins there. */
+/** Is there an `if` or a jump table outside every loop that `joinPastReturns` gives a join its CFG
+ *  does not — its post-dominator EXIT or a return tail, and a block past early returns
+ *  where its arms meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it
+ *  asks neither the enclosing region's `stop`, nor whether a switch arm's own join wins there, nor
+ *  whether a jump table's arms read at the join decline. */
 export function hasJoinPastReturns(fn: Fn): boolean {
   const ipdom = functionPostDominators(fn);
   const inLoop = new Set([...analyzeLoops(fn, dominators(fn)).byHeader.values()].flatMap((nl) => [...nl.body]));
@@ -3139,7 +3154,8 @@ export function hasJoinPastReturns(fn: Fn): boolean {
   };
   const { isReturnTail, joinOf } = joinsPastReturns(fn, reachFrom, ipdom);
   return fn.blocks.some((b) => {
-    if (b.ops[b.ops.length - 1]?.opcode !== 'cond_br' || inLoop.has(b)) {
+    const op = b.ops[b.ops.length - 1]?.opcode;
+    if ((op !== 'cond_br' && op !== 'switch_br') || inLoop.has(b)) {
       return false;
     }
     // a join that IS the CFG's (a guard around a loop that runs on into the epilogue) changes nothing
@@ -8470,7 +8486,23 @@ function structureRanked(
       // successor — and where that reading declines, the default-anchored RETRY below gets one try.
       // Neither reading knows about loops: inside a loop body, where post-dominance names a join
       // PAST the loop and every reading declines there, THE LOOP CLAMP below reads the body's own.
-      const joined = ipdom.get(b) ?? followOverReturns(b, stop);
+      //
+      // THE JOIN PAST EARLY RETURNS is asked here as at the `if` (`joinPastReturns`, or the copy
+      // budget's rerun), for the same no-join shape: a chain of switches each with a `case` that
+      // `return`s early writes the code below every one of them into its arms, once more per
+      // switch, exactly as a chain of `if`s does. Same precedence and same `stop` rule as there, and
+      // adopted only where the arms read at it decline nothing (below): it turns copies into one
+      // tail, never a switch that spells into a decline.
+      const cfgJoin = ipdom.get(b) ?? null;
+      const pastReturnsAsked =
+        (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin));
+      const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
+      const cfgInRegion =
+        pastReturnsAsked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
+          ? null
+          : cfgJoin;
+      const cfgFollow = cfgInRegion ?? followOverReturns(b, stop);
+      let joined = pastReturns !== null && pastReturns !== cfgJoin ? pastReturns : cfgFollow;
       let merge = joined ?? stop;
       const succ = term.successors;
       const caseVals = term.attrs.cases as number[];
@@ -8714,6 +8746,15 @@ function structureRanked(
         }
       };
       let read = readArms(merge);
+      if (joined !== cfgFollow) {
+        if (read.declines) {
+          joined = cfgFollow;
+          merge = joined ?? stop;
+          read = readArms(merge);
+        } else {
+          hooks.onJoinPastReturns?.();
+        }
+      }
       // THE RETRY: A SWITCH WHOSE ARMS DO NOT ALL REACH THE CODE AFTER IT. When neither
       // post-dominance nor the every-successor reading gives the table an end, the `?? stop`
       // reading above puts the default block among the siblings, so every plain `break` reads as
