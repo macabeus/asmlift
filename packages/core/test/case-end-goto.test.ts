@@ -234,9 +234,9 @@ describe('assertEffectsPreserved over a case-end goto', () => {
 
   test('a labelled `break;` that only a goto reaches is reached, beside another or after a `continue`', () => {
     // two search loops into one case end, the second's label right after the first's (`for (j…) {
-    // if (h) goto L2; } k(); for (j…) { if (h) goto L; } t(); L: break; L2: break;`, as the
-    // structurer once spelled two sequential hits), and an arm whose code before its end leaves
-    // by `continue`
+    // if (h) goto L2; } k(); for (j…) { if (h) goto L; } t(); L: break; L2: break;`, two sequential
+    // hits that each took a label of their own), and an arm whose code before its end leaves by
+    // `continue`
     const twoEnds = sw([
       arm([1], [search([goto('case_end_2')]), call('k'), search([goto()]), call('t'), end(), end('case_end_2')]),
     ]);

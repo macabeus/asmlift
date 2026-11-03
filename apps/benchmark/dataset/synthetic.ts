@@ -17146,7 +17146,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //      the source's goto, which wins on agbcc and KMC (the rest of their gap is shared with
   //      sw_hitexit_ctl) and loses to the flag on gcc2.7.2. sw_hitexit_in is the same case with
   //      code after the switch, so the merge sits inside the loop and the hit's code is no
-  //      two-level exit target by itself: without the hit's flag it declines on all four ("unrecovered back-edge").
+  //      two-level exit target by itself: without the hit's flag it declines on all four
+  //      ("unrecovered back-edge").
   //      sw_hitexit_ctl `break`s the search loop on a hit, so no edge leaves it for the merge.
   //      mwcc_242_81 has no lane: target and control both decline in its frontend ("high half of
   //      'gA' reaches a merge").

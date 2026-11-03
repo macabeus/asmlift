@@ -37,15 +37,11 @@
 //
 // A RESPELL, NOT A STRUCTURE VARIATION — the third fork of docs/level-tower.md. The rewrite reads
 // nothing but the flag's tree, so asked of the structured tree it reaches every site a structure
-// option inside `emitForeverExit` would, and it pays only where it fires. Built first as a structure
-// variation, it doubled the settings every enumeration walks, and that walk alone, with no ON
-// setting structured, took kleod:sub_0803F68C's enumeration from 2.11 to 2.44 GB and its shard out of
-// heap; a `sharedGate` keeping it out of functions with no loop leaving for two blocks brought that
-// back to 2.10 GB (`/usr/bin/time -v pnpm bench fan kleod:sub_0803F68C:agbcc --enumerate`). The
-// respell, at the same reach, costs less still: one walk of each structured tree, and nothing more
-// where no flag is read after its loop. What a respell gives up is composition with the other
-// pre-respell variation (`/unmerge` runs on the structured tree beside it, not on its output); no
-// row has asked for both.
+// option inside `emitForeverExit` would. A structure variation doubles the settings every
+// enumeration walks even where it changes no tree, which level-tower.md measures on this one; the
+// respell costs one walk of each structured tree, and nothing more where no flag is read after its
+// loop. What it gives up is composition with the other pre-respell variation (`/unmerge` runs on
+// the structured tree beside it, not on its output); no row has asked for both.
 //
 // Outer sites first, and an inner site whose `if` the outer rewrite leaves right before the outer
 // label takes that label, so two search loops in sequence into one case end share one `L:`.

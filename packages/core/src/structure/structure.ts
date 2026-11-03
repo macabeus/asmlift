@@ -38,8 +38,7 @@
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
 // (`goto` past that code; `TwoLevelExit`, spelled with a flag, which the ranked `/case-end-goto`
 // respells as a goto where that code ends the switch arm the loop sits in, l3/caseendgoto.ts).
-// Still DECLINED (loud
-// StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
+// Still DECLINED (loud StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
 // merge that no flag spells (among them a third target, a second one at the enclosing loop's header
 // or past it short of its exit, and one whose code never joins the code after the first exit: `goto
 // hit; } k(i); goto next; hit: y(i); next:`), a `break` out of a nested loop's body other than a
