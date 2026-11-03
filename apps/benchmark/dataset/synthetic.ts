@@ -17415,6 +17415,34 @@ export const SYNTHETIC: SynthSpec[] = [
       'void scbase_far(void);',
     proto: { scbase_far: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      scbase_pfar is scbase_far with a pointer PARAMETER as the base: the shared sum is
+  //      `p + 0x35`, a constant offset over a value the function was handed rather than a symbol.
+  //      Admitting only a symbol or frame-address leaf refused it, and the tail was written twice.
+  {
+    sym: 'scbase_pfar',
+    src:
+      'struct T { u8 pad[0x35]; u8 a; u8 pad2[7]; u8 c; u8 pad3[0x19]; s8 d; };\n' +
+      'extern u16 gY;\n' +
+      'extern s32 gA, gB, gC;\n' +
+      'void k(s32 x);\n' +
+      'void scbase_pfar(struct T *p) {\n' +
+      '    k(p->pad[0]);\n' +
+      '    if (gY != 5 || (p->a | p->d | p->c) != 0) {\n' +
+      '        if (gA == 1) { gB = 0; return; }\n' +
+      '        k(1);\n' +
+      '    }\n' +
+      '    k(2); gC = gC + 1; k(3);\n' +
+      '}',
+    features: ['branch', 'pointer'],
+    toolchains: FIVE,
+    ctx:
+      'struct T { u8 pad[0x35]; u8 a; u8 pad2[7]; u8 c; u8 pad3[0x19]; s8 d; };\n' +
+      'extern u16 gY;\n' +
+      'extern s32 gA, gB, gC;\n' +
+      'void k(s32 x);\n' +
+      'void scbase_pfar(struct T *p);',
+    proto: { scbase_pfar: { params: 1, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   // A SCALAR GLOBAL THE CONTEXT DECLARES AT ANOTHER WIDTH OR SIGNEDNESS THAN ITS ONE ACCESS. The
   // usage inference reads a global accessed only at offset 0 at one width as a scalar of that
   // width, and the bare name is that scalar only where the declaration agrees: `return gN;` over
