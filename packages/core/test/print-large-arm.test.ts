@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
 import type { SFn, Stmt } from '../src/l3/ast';
 
@@ -28,5 +29,33 @@ describe('C printer over a very long arm', () => {
     const lines = cBackend.emit(fn).split('\n');
     expect(lines.filter((l) => l.trim().startsWith('x = ')).length).toBe(2 * n);
     expect(lines.filter((l) => l.includes('x = 199999;')).length).toBe(2);
+  });
+});
+
+// The same limit in the sibling printer: IDO Pascal's `if` arms, `case` arms, `otherwise` clause and
+// the function body each appended their lines by spread.
+describe('Pascal printer over a very long arm', () => {
+  it('prints a 200,000-statement arm in every statement list without exceeding the argument limit', () => {
+    const n = 200_000;
+    const arm: Stmt[] = Array.from({ length: n }, (_, i) => ({
+      k: 'assign',
+      name: 'x',
+      value: { k: 'const', value: i },
+    }));
+    const x = { k: 'var', name: 'x' };
+    const fn: SFn = {
+      name: 'big',
+      params: [],
+      locals: [{ name: 'x', type: T.s() }],
+      retType: { kind: 'void' },
+      body: [
+        { k: 'if', cond: x, then: arm, else: arm },
+        { k: 'switch', scrutinee: x, cases: [{ values: [1], body: arm }], default: arm },
+        ...arm,
+      ],
+    } as unknown as SFn;
+    const lines = pascalBackend.emit(fn).split('\n');
+    expect(lines.filter((l) => l.trim().startsWith('x := ')).length).toBe(5 * n);
+    expect(lines.filter((l) => l.includes('x := 199999;')).length).toBe(5);
   });
 });
