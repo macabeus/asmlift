@@ -519,9 +519,12 @@ export function strideDerivedParams(
       : null;
   };
   const slots = header.params.map((_, x) => x);
-  // A sibling that is itself G of another is asked last: KMC strength-reduces both `i << 3` and
-  // `gE + (i << 3)` beside `i`, and the pointer is then `x + gE` of the shift as well as G of the
-  // counter, which is the one the `for` names
+  // A sibling that is itself G of another is asked last. The one reader, structure.ts's `for`, drops
+  // every slot in `strides` from its copies, so no such slot is the counter its update writes, and it
+  // takes a stride only as G of that counter's param: asking the other slots first asks exactly the
+  // slots that can be the counter, and a pair asked later is one the `for` would refuse anyway, so the
+  // order turns no lift into a decline. (KMC strength-reduces both `i << 3` and `gE + (i << 3)` beside
+  // `i`; in index order the pointer was found as `x + gE` of the shift.)
   const strides = new Set(slots.filter((j) => slots.some((i) => fit(j, i) !== null)));
   const order = [...slots.filter((x) => !strides.has(x)), ...slots.filter((x) => strides.has(x))];
   const out: StrideDerived[] = [];
