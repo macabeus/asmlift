@@ -488,41 +488,51 @@ export function strideDerivedParams(
     }
     return null;
   };
-  const out: StrideDerived[] = [];
-  header.params.forEach((pj, j) => {
-    const k = stepOf(back.args[j], pj);
-    if (k === null) {
-      return;
+  /** `j` as G of the sibling `i`, or null */
+  const fit = (j: number, i: number): StrideDerived | null => {
+    const k = stepOf(back.args[j], header.params[j]);
+    const d = i === j ? null : stepOf(back.args[i], header.params[i]);
+    if (k === null || d === null || d === 0) {
+      return null;
     }
-    for (let i = 0; i < header.params.length; i++) {
-      const d = i === j ? null : stepOf(back.args[i], header.params[i]);
-      if (d === null || d === 0) {
-        continue;
-      }
-      const x0 = entry.args[i];
-      const g = entry.args[j];
-      let found: { ops: Op[]; leaves: Value[]; k: number } | null = null;
-      const bare = term(g, x0, d);
-      if (bare !== null && bare.ops.length > 0) {
-        found = bare;
-      } else {
-        const add = defs.get(g);
-        if (add?.opcode === 'add' && add.operands.length === 2 && clonable(add)) {
-          for (const at of [0, 1]) {
-            const t = term(add.operands[at], x0, d);
-            const base = add.operands[1 - at];
-            if (t !== null && base !== x0 && outside(base)) {
-              found = { ops: [...t.ops, add], leaves: [...t.leaves, base], k: t.k };
-              break;
-            }
+    const x0 = entry.args[i];
+    const g = entry.args[j];
+    let found: { ops: Op[]; leaves: Value[]; k: number } | null = null;
+    const bare = term(g, x0, d);
+    if (bare !== null && bare.ops.length > 0) {
+      found = bare;
+    } else {
+      const add = defs.get(g);
+      if (add?.opcode === 'add' && add.operands.length === 2 && clonable(add)) {
+        for (const at of [0, 1]) {
+          const t = term(add.operands[at], x0, d);
+          const base = add.operands[1 - at];
+          if (t !== null && base !== x0 && outside(base)) {
+            found = { ops: [...t.ops, add], leaves: [...t.leaves, base], k: t.k };
+            break;
           }
         }
       }
-      if (found !== null && found.k === k && found.leaves.every(outside)) {
-        out.push({ j, i, ops: found.ops, x0, leaves: found.leaves });
-        return;
+    }
+    return found !== null && found.k === k && found.leaves.every(outside)
+      ? { j, i, ops: found.ops, x0, leaves: found.leaves }
+      : null;
+  };
+  const slots = header.params.map((_, x) => x);
+  // A sibling that is itself G of another is asked last: KMC strength-reduces both `i << 3` and
+  // `gE + (i << 3)` beside `i`, and the pointer is then `x + gE` of the shift as well as G of the
+  // counter, which is the one the `for` names
+  const strides = new Set(slots.filter((j) => slots.some((i) => fit(j, i) !== null)));
+  const order = [...slots.filter((x) => !strides.has(x)), ...slots.filter((x) => strides.has(x))];
+  const out: StrideDerived[] = [];
+  for (const j of strides) {
+    for (const i of order) {
+      const sd = fit(j, i);
+      if (sd !== null) {
+        out.push(sd);
+        break;
       }
     }
-  });
+  }
   return out;
 }

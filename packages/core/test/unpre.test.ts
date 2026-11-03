@@ -410,3 +410,45 @@ test('a base the caller does not place outside the loop is no stride', () => {
   const back = h.ops.at(-1)!.successors[1];
   expect(strideDerivedParams(defOpMap(fn), h, entry, back, () => false)).toHaveLength(0);
 });
+
+test('a pointer that is G of the counter and of a shifted sibling is read as G of the counter', () => {
+  // KMC's `for (i = lo; i <= hi; i++) .. gE[i].f .. gE[i].x ..`: the header takes `(i << 3,
+  // gE + (i << 3), i)`, the shift stepped by 8 as well. The pointer is `x + gE` of the shift too, but
+  // the `for` names the counter, so the shift is the sibling asked last
+  const fn = parse(`fn s {
+^bb0(%0: s32, %1: s32):
+  %3: s32 = gaddr {sym="gE"}
+  %4: s32 = shl %0 {imm=3}
+  %5: s32 = add %4, %3
+  br ^bb1(%4, %5, %0)
+^bb1(%6: s32, %7: s32, %8: s32):
+  %20: s32 = add %3, %6
+  %21: s32 = load %20 {off=5, signed=false, width=1}
+  %22: s32 = call %21 {target="use"}
+  %23: s32 = load %7 {off=0, signed=true, width=4}
+  %24: s32 = call %23 {target="use"}
+  %9: s32 = const {value=1}
+  %10: s32 = add %8, %9
+  %11: s32 = const {value=8}
+  %12: s32 = add %6, %11
+  %13: s32 = const {value=8}
+  %14: s32 = add %7, %13
+  %15: u32 = icmp_slt %1, %10
+  cond_br %15, ^bb2(), ^bb1(%12, %14, %10)
+^bb2():
+  ret
+}
+`);
+  verify(fn);
+  const h = fn.blocks[1];
+  const entry = fn.blocks[0].ops.at(-1)!.successors[0];
+  const back = h.ops.at(-1)!.successors[1];
+  const got = strideDerivedParams(defOpMap(fn), h, entry, back, (v) =>
+    fn.blocks[0].ops.some((o) => o.results.includes(v)),
+  );
+  expect(got.map(({ j, i }) => ({ j, i }))).toEqual([
+    { j: 0, i: 2 },
+    { j: 1, i: 2 },
+  ]);
+  expect(got[1].ops.map((o) => o.opcode)).toEqual(['shl', 'add']);
+});
