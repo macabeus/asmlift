@@ -2511,7 +2511,7 @@ export interface StructureOptions extends ArithCompilerFacts {
   // divergent and a region both of them reach is emitted in each.
   followEarlyReturns?: boolean;
   // Give a DIVERGENT `if` outside every loop the block its non-returning paths meet at, ahead of
-  // the CFG's join where that is EXIT or a straight-line return tail: `joinsPastReturns` below.
+  // the CFG's join where that is EXIT or a return tail: `joinsPastReturns` below.
   // Absent, such an `if` keeps its arms divergent and everything below it is written into each arm,
   // once more per such `if` of a chain. rank.ts enumerates it as the `/ret-join` twin; `structure()`
   // also asks it, unranked, of a structuring over its copy budget (`COPY_BUDGET`).
@@ -2974,8 +2974,12 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
 // and the function's end into one epilogue, so the only `ret` every arm reaches is the one the
 // tail reaches too, and the follow lands on it (`synthetic:retchain_xj`). Read instead the block
 // `j` the paths that do not return meet at, where every path from `b` that never reaches `j`
-// (an EARLY-RETURN path) enters nothing `j` reaches but a straight-line return tail — a chain of
-// `br`s ending in the `ret` — which the arm copies, as the cross-jump took it from the source.
+// (an EARLY-RETURN path) enters nothing `j` reaches but a RETURN TAIL, which the arm copies, as the
+// cross-jump took it from the source. A return tail is a straight line of `br`s ending in the `ret`,
+// or code no cycle passes through, every path from which ends in a `ret`, holding no branch this
+// reading joins anywhere but at its post-dominator: agbcc and gcc cross-jump a branching one,
+// `k(9); if (c) k(8); gT = 1; return;` written in every early return and at the function's end,
+// which the tail past `j` enters as well, and which is then the post-dominator of every link.
 //
 // WHICH `j`: the first in reverse postorder after `b` that EVERY successor of `b` reaches. The
 // copies this removes are of a region both arms reach, so a block one arm never reaches is no
@@ -2988,8 +2992,14 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
 // control).
 //
 // AND THE EARLY-RETURN PATHS BELONG TO ONE ARM EACH. Where both arms return early into one return
-// tail that branches (`if (x) y(); k(); return;`), that tail is a meeting point ahead of `j` the
-// straight-line exception does not cover, and the arms stay divergent.
+// tail that branches (`if (x) y(); k(); return;`), that tail is a meeting point ahead of `j`, and
+// the arms stay divergent: only a straight-line tail is copied into two arms of one `if`.
+//
+// A RETURN TAIL REACHES NO `j` AND NO CYCLE, AND HOLDS NO JOIN PAST RETURNS OF ITS OWN, so the copy
+// an early return takes of it is that code and nothing below `b`, and no join past returns inside
+// the copy copies in its turn: the copies stay linear in the early returns. A tail that holds one
+// (`if (c) { if (d) goto T; A(); } B(); T: ...`, repeated in `T`) is no return tail, and the arms
+// stay divergent.
 //
 // REFUSES (null, the arms stay divergent) when `b` sits on a cycle, when no block qualifies, and
 // when the enclosing region's `stop` is reachable from `b` around `j` — the same refusal as the
@@ -2997,7 +3007,8 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
 function joinsPastReturns(
   fn: Fn,
   reachFrom: (b: Block) => ReadonlySet<Block>,
-): { isStraightReturn: (x: Block) => boolean; joinOf: (b: Block) => Block | null } {
+  ipdom: ReadonlyMap<Block, Block | null>,
+): { isReturnTail: (x: Block) => boolean; joinOf: (b: Block) => Block | null } {
   const straightReturn = new Map<Block, boolean>();
   const isStraightReturn = (x: Block): boolean => {
     let known = straightReturn.get(x);
@@ -3037,6 +3048,22 @@ function joinsPastReturns(
     }
     return postorder;
   };
+  const returnTail = new Map<Block, boolean>();
+  const isReturnTail = (x: Block): boolean => {
+    let known = returnTail.get(x);
+    if (known === undefined) {
+      returnTail.set(x, false); // a block met again before it is settled sits on a cycle
+      const succs = successorsOf(x);
+      const join = (): Block | null => joinOf(x);
+      known =
+        isRet(x) ||
+        (succs.length > 0 &&
+          succs.every(isReturnTail) &&
+          (new Set(succs).size === 1 || join() === null || join() === (ipdom.get(x) ?? null)));
+      returnTail.set(x, known);
+    }
+    return known;
+  };
   const joins = new Map<Block, Block | null>();
   const joinOf = (b: Block): Block | null => {
     let join = joins.get(b);
@@ -3069,9 +3096,9 @@ function joinsPastReturns(
               continue;
             }
             // An early-return path reaches no `j`, so it may enter what follows `j` only by a
-            // straight-line return tail — and it belongs to ONE arm: a block both arms reach
-            // without `j` is a meeting point ahead of `j`.
-            fits = !past.has(x) && (owner.get(x) ?? from) === from;
+            // return tail — and it belongs to ONE arm: a block both arms reach without `j` is a
+            // meeting point ahead of `j`.
+            fits = (!past.has(x) || isReturnTail(x)) && (owner.get(x) ?? from) === from;
             owner.set(x, from);
           }
         }
@@ -3084,11 +3111,11 @@ function joinsPastReturns(
     joins.set(b, join);
     return join;
   };
-  return { isStraightReturn, joinOf };
+  return { isReturnTail, joinOf };
 }
 
 /** Is there an `if` outside every loop that `joinPastReturns` gives a join its CFG does not — its
- *  post-dominator EXIT or a straight-line return tail, and a block past early returns where its arms
+ *  post-dominator EXIT or a return tail, and a block past early returns where its arms
  *  meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it asks neither
  *  the enclosing region's `stop` nor whether a switch arm's own join wins there. */
 export function hasJoinPastReturns(fn: Fn): boolean {
@@ -3110,14 +3137,14 @@ export function hasJoinPastReturns(fn: Fn): boolean {
     }
     return out;
   };
-  const { isStraightReturn, joinOf } = joinsPastReturns(fn, reachFrom);
+  const { isReturnTail, joinOf } = joinsPastReturns(fn, reachFrom, ipdom);
   return fn.blocks.some((b) => {
     if (b.ops[b.ops.length - 1]?.opcode !== 'cond_br' || inLoop.has(b)) {
       return false;
     }
     // a join that IS the CFG's (a guard around a loop that runs on into the epilogue) changes nothing
     const cfgJoin = ipdom.get(b) ?? null;
-    const join = cfgJoin === null || isStraightReturn(cfgJoin) ? joinOf(b) : null;
+    const join = cfgJoin === null || isReturnTail(cfgJoin) ? joinOf(b) : null;
     return join !== null && join !== cfgJoin;
   });
 }
@@ -4294,7 +4321,7 @@ function structureRanked(
       throw new CopyBudgetExceeded(fn.blocks.indexOf(most), copies, copyLimit);
     }
   };
-  const { isStraightReturn, joinOf: joinPastReturnsOf } = joinsPastReturns(fn, reachFrom);
+  const { isReturnTail, joinOf: joinPastReturnsOf } = joinsPastReturns(fn, reachFrom, ipdom);
   const joinPastReturnsAt = (b: Block, stop: Block | null): Block | null => {
     const join = joinPastReturnsOf(b);
     return join === null || (stop !== null && join !== stop && reachesAvoiding(b, stop, join)) ? null : join;
@@ -9579,7 +9606,7 @@ function structureRanked(
     // variations-and-source set (810 synthetic, 251 real, `ProcessInputAndUpdateEntities` excepted).
     //
     // `joinPastReturns` (or the copy budget's rerun) asks its join ahead of both where the CFG's is
-    // EXIT or a straight-line return tail: an epilogue every early return and the tail branch to
+    // EXIT or a return tail: an epilogue every early return and the tail branch to
     // (agbcc, ido7.1, mwcc) is a post-dominator, and merging there writes everything above it into
     // each arm exactly as EXIT does.
     // Where it finds none and the enclosing region ends before that return tail (its `stop`, an
@@ -9587,7 +9614,7 @@ function structureRanked(
     // `if` keeps its arms to `stop`, as one whose CFG join is EXIT does.
     const cfgJoin = ipdom.get(b) ?? null;
     const pastReturnsAsked =
-      (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isStraightReturn(cfgJoin));
+      (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin));
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
     const cfgInRegion =
       pastReturnsAsked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
