@@ -219,6 +219,15 @@ test("a loop's latch every arm hands the bound `hi + 1` recomputes it, and its t
   expect(fn.blocks[4].params).toHaveLength(0);
 });
 
+test("the arms' copies the latch fold leaves unread are deleted, so an arm holding only its copy is bodyless", () => {
+  // KMC steps `gA[i]`'s pointer in the default arm, which falls into the latch, and in the slot of
+  // the branch into the latch's second entry (`synthetic:sw_gotocase2:gcc2.7.2kmc`)
+  const { n, fn } = fold(latchIr());
+  expect(n).toBe(1);
+  expect(fn.blocks[2].ops.map((op) => op.opcode)).toEqual(['br']);
+  expect(fn.blocks[3].ops.map((op) => op.opcode)).toEqual(['call', 'br']);
+});
+
 test('the recomputed value takes the type of the parameter it replaces, not the arm op it was cloned from', () => {
   // type recovery types a parameter by its uses (an unsigned compare: `u32`) and the arms' adds by
   // their operands (`s32`); the reconciliation of declared signedness reads what stands in the

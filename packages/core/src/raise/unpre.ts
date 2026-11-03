@@ -24,7 +24,11 @@
 // function of its leaves alone; and every leaf must be defined in a block that strictly dominates
 // the block, so it holds the same value there. C names need no argument of their own: the
 // recomputed expression is fresh SSA ops reading the leaves, and namecoalesce gives a leaf that is
-// live at the block a name no other live value shares.
+// live at the block a name no other live value shares. The edge ops the fold leaves unread are
+// deleted with whatever pure ops only they read, as the derived fold below deletes its own: KMC
+// steps `gA[i]`'s pointer in the default arm and in the slot of the branch into the latch's second
+// entry, and once the latch reads the step itself the default arm's dead copy would still be a body
+// (`synthetic:sw_gotocase2:gcc2.7.2kmc`), which the structurer reads as one more case it reaches.
 //
 // SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`):
 //  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, at least
@@ -185,6 +189,8 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
   };
   /** structural congruence: one pure expression over the same leaves */
   const congruent = (a: Value, b: Value) => sameAtEntry(defs, a, b, { entry: new Map(), through });
+  /** the edge ops a fold stopped reading, swept once no sweep removes anything */
+  const orphaned: Op[] = [];
   let removed = 0;
   // A recomputed parameter can make a later block's arguments equal (a second case fallen into
   // whose argument reads the first's parameter), so sweep until a sweep removes nothing.
@@ -254,12 +260,19 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
           defs.set(op.results[0], op);
           home.set(op.results[0], b);
         }
+        for (const s of incoming) {
+          const d = defs.get(s.args[k]);
+          if (d !== undefined) {
+            orphaned.push(d);
+          }
+        }
         retireParam(fn, b, k, value, incoming);
         removed++;
         changed = true;
       }
     }
   }
+  sweepOrphans(fn, orphaned);
   return removed;
 }
 
