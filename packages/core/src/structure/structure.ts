@@ -70,6 +70,7 @@ import {
   calleeValue,
   defOpMap,
   dominators,
+  forwardingTarget,
   mergeClasses,
   mkValue,
   reachForward,
@@ -8632,6 +8633,21 @@ function structureRanked(
             : (loopCtx.forLatch ??
               (foreverLoops.has(loopCtx.header) && forRank.asked.has(loopCtx.header) ? loopCtx.header : undefined));
         const jumps = new Set<Block>(continueTo !== undefined && continueTo !== at ? [continueTo] : []);
+        // Nor is an arm that only forwards there, a bodyless block whose lone `br` hands no value:
+        // an edge into it is the same `continue;`. KMC enters the latch of `for (i = lo; i <= hi;
+        // i++) switch (..)` at two points, the step of a pointer the loop strides being a word of
+        // its own that the default arm and every branch-likely `continue` run first, and the
+        // non-likely branch into the second point runs in its delay slot. Once the latch reads the
+        // step itself (raise/unpre.ts drops the copies), the default arm forwards to the latch,
+        // and as a sibling every arm that continues would read as falling into it
+        // (`synthetic:sw_gotocase2:gcc2.7.2kmc`).
+        if (jumps.size > 0) {
+          for (const x of siblings) {
+            if (x !== at && jumps.has(forwardingTarget(x))) {
+              jumps.add(x);
+            }
+          }
+        }
         jumps.forEach((x) => siblings.delete(x));
         // `analyzeArmExit` does not depend on emission order, so the exits can be settled before
         // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
