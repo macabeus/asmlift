@@ -4,11 +4,11 @@
 // contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask) and every other placement
 // it refuses, how the C family prints it and that Pascal refuses it, how the effect contract and
 // dead-store elimination read a path that takes it, and what `reachesEnd` and `caseEndGotoLeaves`
-// answer for it. Then its producer (structure.ts `caseEndGoto`, `StructureOptions.jumpToCaseEnds`):
-// a search loop's hit flag read where its target is the end of the switch arm the loop sits in,
-// spelled as the goto, each judged against its own IR by the trace oracle (`irAgreement`); the
-// witness the `/case-end-goto` variation is gated by; and the hit whose target is a join running
-// code, which keeps its flag (`CASE_END_GOTO_GATES`).
+// answer for it. Then its producer, the `/case-end-goto` respell (l3/caseendgoto.ts
+// `jumpToCaseEnds`) over the structurer's tree: a search loop's hit flag read where its target is
+// the end of the switch arm the loop sits in, spelled as the goto, each judged against its own IR
+// by the trace oracle (`irAgreement`); the hit whose target is a join running code, which keeps its
+// flag; and, on hand-built trees, each rule of `CASE_END_GOTO_GATES` and two sites sharing a label.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
