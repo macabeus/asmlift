@@ -96,9 +96,9 @@ const TOKENS = [
   { name: 'tail-copies', variationKind: 'structure' },
   { name: 'for-continue', variationKind: 'structure' },
   { name: 'case-goto', variationKind: 'structure' },
-  { name: 'case-end-goto', variationKind: 'structure' },
   // respell: the structured tree rewritten
   { name: 'unmerge', variationKind: 'respell' },
+  { name: 'case-end-goto', variationKind: 'respell' },
   { name: 'argbase', variationKind: 'respell' },
   { name: 'zerosub', variationKind: 'respell' },
   { name: 'volatile', variationKind: 'respell', subject: LOCALS },

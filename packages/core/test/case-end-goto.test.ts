@@ -13,17 +13,18 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
-import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved } from '../src/contracts';
+import { ContractError, assertCaseGotosNarrow, assertEffectsPreserved, assertNoOrphanedLocals } from '../src/contracts';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt, type SwitchCase, caseEndGotoLeaves, caseGotoViolation, reachesEnd } from '../src/l3/ast';
+import { CASE_END_GOTO_GATES, jumpToCaseEnds } from '../src/l3/caseendgoto';
 import { eliminateDeadStores } from '../src/l3/dce';
 import { tallying, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { CASE_END_GOTO_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
 const call = (fn: string, ...args: string[]): Stmt => ({
@@ -192,22 +193,23 @@ describe('the readers', () => {
   });
 });
 
-describe('assertEffectsPreserved over a case-end goto', () => {
-  const irCalling = (calls: string[]): Fn => {
-    const entry: Block = {
-      params: [],
-      ops: [...calls.map((t) => mkOp('call', { results: [mkValue(T.s(32))], attrs: { target: t } })), mkOp('ret', {})],
-    };
-    return {
-      name: 'F',
-      blocks: [entry],
-      writeOrder: undefined,
-      slotHomes: undefined,
-      paramEvidence: undefined,
-      localObjects: undefined,
-    };
+/** an IR function making `calls` in a line, the effect contract's side of each tree below */
+const irCalling = (calls: string[]): Fn => {
+  const entry: Block = {
+    params: [],
+    ops: [...calls.map((t) => mkOp('call', { results: [mkValue(T.s(32))], attrs: { target: t } })), mkOp('ret', {})],
   };
+  return {
+    name: 'F',
+    blocks: [entry],
+    writeOrder: undefined,
+    slotHomes: undefined,
+    paramEvidence: undefined,
+    localObjects: undefined,
+  };
+};
 
+describe('assertEffectsPreserved over a case-end goto', () => {
   test('the goto skips the code between the loop and the end: `s` and `k` are never on one path', () => {
     // with the goto read as falling out of the loop, `s(); … k();` would count `k` after `s` — fine —
     // but a third call on both paths must count once
@@ -350,62 +352,139 @@ const HIT_CODE_TO_A_JOIN = HIT_CODE_TO_ARM_END.replace('fn hitcodearm', 'fn hitc
   .replace(/(%15: s32 = call %5 \{target="k"\}\n  br )\^bb6\(\)/, '$1^bb10()')
   .replace('^bb6():', '^bb10():\n  %40: s32 = call %5 {target="post"}\n  br ^bb6()\n^bb6():');
 
-const lifted = (ir: string, opts: Parameters<typeof structure>[1] = {}, hooks: StructureHooks = {}) => {
+const lifted = (ir: string) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn, opts, hooks);
-  return {
+  const off = structure(fn);
+  const on = jumpToCaseEnds(off);
+  const judged = (sfn: SFn) => ({
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
     shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
-  };
+  });
+  return { off: judged(off), on: on && judged(on), offTree: off };
 };
 
-describe('the producer', () => {
+describe('the producer (l3/caseendgoto.ts over the structured tree)', () => {
   test.each([
     ['ends in the arm’s own `break;`', HIT_CODE_PAST_THE_LOOP],
     ['ends where the arm does', HIT_CODE_TO_ARM_END],
   ])('a hit whose target %s is spelled as a goto to that end, and agrees', (_, ir) => {
-    let read = 0;
-    const off = lifted(ir, {}, { onCaseEndRead: () => read++ });
-    expect(read).toBe(1);
+    const { off, on } = lifted(ir);
     expect(off.src).not.toMatch(/\bgoto\b/);
-    const on = lifted(ir, { jumpToCaseEnds: true });
+    expect(off.src).toMatch(/if \(v\d+ == 0\)/);
+    expect(on).not.toBeNull();
     // the hit's code, then the jump; the loop's own exit runs `k(i)` into the labelled `break;`
-    expect(on.src).toMatch(/hit\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)?\s*goto case_end;/);
-    expect(on.src).toMatch(/k\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)*\s*case_end:\n\s*break;/);
-    // no flag: nothing is compared with 0 after the search loop
-    expect(on.src).not.toMatch(/if \(v\d+ == 0\)/);
-    for (const r of [off.agreement, off.shipped, on.agreement, on.shipped]) {
+    expect(on!.src).toMatch(/hit\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)?\s*goto case_end;/);
+    expect(on!.src).toMatch(/k\(v\d+\);\n(?:\s*v\d+ = v\d+;\n)*\s*case_end:\n\s*break;/);
+    // no flag: nothing is compared with 0 after the search loop, and its declaration is gone
+    expect(on!.src).not.toMatch(/if \(v\d+ == 0\)/);
+    for (const r of [off.agreement, off.shipped, on!.agreement, on!.shipped]) {
       expect(r.disagree).toBe(0);
       expect(r.judged).toBe(SEEDS.length);
     }
   });
 
-  test('a hit whose target is a join running code keeps its flag, and the rule that keeps it is named', () => {
-    let read = 0;
+  test('a hit whose target is a join running code keeps its flag', () => {
     const census = tallying(CASE_END_GOTO_GATES);
-    const on = lifted(
-      HIT_CODE_TO_A_JOIN,
-      { jumpToCaseEnds: true },
-      { caseEndGotoGates: census.gates, onCaseEndRead: () => read++ },
-    );
-    expect(on.src).toMatch(/post\(/);
-    expect(on.src).not.toMatch(/\bgoto\b/);
-    expect(read).toBe(0);
+    const { offTree } = lifted(HIT_CODE_TO_A_JOIN);
+    expect(cBackend.emit(offTree)).toMatch(/post\(/);
+    expect(jumpToCaseEnds(offTree, census.gates)).toBeNull();
     expect(census.refusals().map(([id]) => id)).toContain('target-not-arm-end');
-    expect(on.agreement.disagree).toBe(0);
-    expect(on.shipped.disagree).toBe(0);
   });
 
   test('without target-not-arm-end the join is skipped by the goto: the rule is load-bearing', () => {
-    const on = lifted(
-      HIT_CODE_TO_A_JOIN,
-      { jumpToCaseEnds: true },
-      { caseEndGotoGates: without(CASE_END_GOTO_GATES, 'target-not-arm-end') },
+    const { offTree } = lifted(HIT_CODE_TO_A_JOIN);
+    const on = jumpToCaseEnds(offTree, without(CASE_END_GOTO_GATES, 'target-not-arm-end'));
+    expect(on).not.toBeNull();
+    expect(cBackend.emit(on!)).toMatch(/\bgoto case_end;/);
+    expect(irAgreement(HIT_CODE_TO_A_JOIN, on!, SEEDS).disagree).toBeGreaterThan(0);
+  });
+});
+
+// ── the respell over hand-built trees ─────────────────────────────────────────────────────────────
+
+const assign = (name: string, value: number): Stmt => ({ k: 'assign', name, value: { k: 'const', value } });
+const isZero = (name: string): Extract<Stmt, { k: 'if' }>['cond'] => ({
+  k: 'bin',
+  op: '==',
+  l: v(name),
+  r: { k: 'const', value: 0 },
+});
+/** `f = 0; while (1) { if (h) { s(); f = 1; break; } if (d) break; } if (f == 0) { …x }` */
+const flagged = (f: string, x: Stmt[], hit: Stmt[] = [call('s'), assign(f, 1), { k: 'break' }]): Stmt[] => [
+  assign(f, 0),
+  search(hit),
+  { k: 'if', cond: isZero(f), then: x, else: [] },
+];
+
+describe('jumpToCaseEnds', () => {
+  test('two search loops in sequence into one case end share one label', () => {
+    const tree = sfnWith(
+      [sw([arm([1], [...flagged('f', [call('k'), ...flagged('g', [call('t')])]), brk]), arm([2], [call('u')])])],
+      ['f', 'g'],
     );
-    expect(on.src).toMatch(/\bgoto case_end;/);
-    expect(on.agreement.disagree).toBeGreaterThan(0);
+    const on = jumpToCaseEnds(tree);
+    expect(on).not.toBeNull();
+    const src = cBackend.emit(on!);
+    expect(src.match(/goto case_end;/g)).toHaveLength(2);
+    expect(src.match(/case_end:/g)).toHaveLength(1);
+    expect(src).toMatch(/t\(\);\n\s*case_end:\n\s*break;/);
+    expect(on!.locals).toEqual([]);
+    expect(caseGotoViolation(on!.body)).toBeNull();
+    expect(() => assertEffectsPreserved(irCalling(['s', 'k', 't', 'u']), on!)).not.toThrow();
+  });
+
+  test('a site under an `if` whose falling off leaves the arm takes a label of its own', () => {
+    const tree = sfnWith(
+      [sw([arm([1], [{ k: 'if', cond: v('c'), then: flagged('f', [call('k')]), else: [] }])])],
+      ['f'],
+    );
+    const on = jumpToCaseEnds(tree);
+    expect(on).not.toBeNull();
+    expect(cBackend.emit(on!)).toMatch(/k\(\);\n\s*case_end:\n\s*break;/);
+    expect(caseGotoViolation(on!.body)).toBeNull();
+  });
+
+  test('a flag read outside a switch arm, or in a loop inside one, keeps its flag', () => {
+    const census = tallying(CASE_END_GOTO_GATES);
+    const outside = sfnWith([...flagged('f', [call('k')])], ['f']);
+    expect(jumpToCaseEnds(outside, census.gates)).toBeNull();
+    const inLoop = sfnWith(
+      [sw([arm([1], [{ k: 'while', cond: v('c'), body: [...flagged('f', [call('k')]), { k: 'break' }] }, brk])])],
+      ['f'],
+    );
+    expect(jumpToCaseEnds(inLoop, census.gates)).toBeNull();
+    expect(census.refusals()).toEqual([['target-not-arm-end', 2]]);
+    // without the rule the label lands where no `break;` leaves a switch arm
+    const ablated = jumpToCaseEnds(inLoop, without(CASE_END_GOTO_GATES, 'target-not-arm-end'));
+    expect(caseGotoViolation(ablated!.body)).not.toBeNull();
+  });
+
+  test('a flag read or written anywhere else keeps its flag', () => {
+    const census = tallying(CASE_END_GOTO_GATES);
+    const site = (x: Stmt[], hit?: Stmt[]) => sw([arm([1], [...flagged('f', x, hit), brk])]);
+    // read again after the switch
+    const readAfter = sfnWith([site([call('k')]), call('u', 'f')], ['f']);
+    expect(jumpToCaseEnds(readAfter, census.gates)).toBeNull();
+    // a hit that writes zero, which the test after the loop cannot tell from no hit
+    const zeroHit = sfnWith([site([call('k')], [call('s'), assign('f', 0), { k: 'break' }])], ['f']);
+    expect(jumpToCaseEnds(zeroHit, census.gates)).toBeNull();
+    // a write in a loop nested in the search loop, whose `break` is that loop's
+    const nested: Stmt = { k: 'while', cond: v('c'), body: [assign('f', 1), { k: 'break' }] };
+    const deep = sfnWith([site([call('k')], [nested, { k: 'break' }])], ['f']);
+    expect(jumpToCaseEnds(deep, census.gates)).toBeNull();
+    // a parameter is not the flag's to drop
+    const param = { ...sfnWith([sw([arm([1], [...flagged('x', [call('k')]), brk])])]) };
+    expect(jumpToCaseEnds(param, census.gates)).toBeNull();
+    expect(census.refusals()).toEqual([['flag-elsewhere', 4]]);
+    // without the rule, the read after the switch names a local the rewrite no longer declares
+    const ablated = jumpToCaseEnds(readAfter, without(CASE_END_GOTO_GATES, 'flag-elsewhere'));
+    expect(() => assertNoOrphanedLocals(readAfter, ablated!)).toThrow(ContractError);
+  });
+
+  test('a tree with no flag read after its loop is declined', () => {
+    expect(jumpToCaseEnds(sfnWith([narrow()]))).toBeNull();
   });
 });

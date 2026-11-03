@@ -24,6 +24,7 @@ import {
   ORDERBASE_GATES,
   UNFOLDED_GATES,
 } from './l3/basecse';
+import { jumpToCaseEnds } from './l3/caseendgoto';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
@@ -41,7 +42,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { edgeCopyOrdersDiffer, hasParamRootedMerge, hasTwoTargetLoopExit } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
 import type { VariationName } from './variation-tokens';
 
 /** The STRUCTURE VARIATIONS — the boolean candidate dimensions crossed into every enumeration
@@ -81,13 +82,12 @@ export interface StructureVariation {
     | 'siteSense'
     | 'tailCopies'
     | 'forContinue'
-    | 'caseGoto'
-    | 'caseEndGoto';
+    | 'caseGoto';
   name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
-  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onCaseCopied' | 'onCaseEndRead';
+  offWitness?: 'onTailFallerKept' | 'onForOffered' | 'onCaseCopied';
   strip: boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
@@ -459,31 +459,6 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     offWitness: 'onCaseCopied',
     strip: true,
   },
-  // `/case-end-goto` — A SEARCH LOOP'S HIT FLAG AS A `goto` TO THE END OF ITS CASE (structure.ts
-  // `caseEndGoto`, `jumpToCaseEnds`). Where a two-level exit's hit flag is read after its loop as
-  // `if (f == 0) { X } break;`, the `break;` ending the switch arm the loop sits in, this writes
-  // `goto L;` at each hit and `X L: break;` after the loop, the source's own spelling (`for (j…) {
-  // if (hit) goto L; } k(i); L: break;`). agbcc threads that goto past the loop around the switch
-  // (jump.c `follow_jumps`), and on agbcc, KMC, gcc 2.7.2 and IDO the goto compiles to the source's
-  // bytes where the flag never does (`synthetic:sw_hitexit`); but inside asmlift's own winner the
-  // flag can still score closer (gcc 2.7.2), so the differ referees it per row, and a tie goes to the
-  // candidate without the goto (rank.ts `gotoCount`).
-  //
-  // Gated EXACTLY, by its OFF sibling's structuring (`offWitness`): the two settings differ only
-  // where `CASE_END_GOTO_GATES` admits the goto in place of a flag (`onCaseEndRead`), which only the
-  // hit rung's flag reaches. Crossed into the settings at all only where some loop leaves for two
-  // blocks that do not just return (`hasTwoTargetLoopExit`): every crossed variation doubles the
-  // settings the enumeration walks, which costs memory even where the witness skips each one, and
-  // kleod:sub_0803F68C's shard ran out of heap on that alone. In the strip closure, and reset by
-  // `assertDefaultAccepts` like the other variations that write a goto.
-  {
-    flag: 'caseEndGoto',
-    name: 'case-end-goto',
-    options: (on) => ({ jumpToCaseEnds: on }),
-    sharedGate: (sharedLift) => hasTwoTargetLoopExit(sharedLift),
-    offWitness: 'onCaseEndRead',
-    strip: true,
-  },
 ];
 
 /** The statement-order/shape members. */
@@ -575,8 +550,18 @@ export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
  *  `synthetic:ladidx1`, `synthetic:ladidx2`, `synthetic:revlad5s`. `bench regression` is an
  *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
  *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
- *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
-export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ name: 'unmerge', apply: unmergeJoins }];
+ *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block.
+ *
+ *  `/case-end-goto` (l3/caseendgoto.ts) is the second entry: a search loop's hit flag read where the
+ *  code after its loop ends the switch arm, rewritten as the case-end goto the source wrote. Here
+ *  rather than among the stacked members because the rest of the respell set must derive from the
+ *  goto tree (an `initfirst` or `sinkinit` over a tree that no longer declares the flag), and here
+ *  rather than as a structure variation for the cost l3/caseendgoto.ts's header gives. Each entry applies to
+ *  the structured tree on its own, so `/unmerge` and `/case-end-goto` never compose. */
+export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [
+  { name: 'unmerge', apply: unmergeJoins },
+  { name: 'case-end-goto', apply: jumpToCaseEnds },
+];
 
 /** Every subset of `xs`, the empty one first, each in `xs`' order. */
 const subsets = <X>(xs: readonly X[]): X[][] =>

@@ -21,6 +21,7 @@ import {
   ORDERBASE_GATES,
   UNFOLDED_GATES,
 } from '../src/l3/basecse';
+import { CASE_END_GOTO_GATES } from '../src/l3/caseendgoto';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects, guardsOf } from '../src/l3/gates';
 import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
@@ -64,7 +65,6 @@ import {
   BREAK_TAIL_GATES,
   BYPASS_TAIL_GATES,
   CARRIER_NAME_GATES,
-  CASE_END_GOTO_GATES,
   ENCLOSING_CARRIER_GATES,
   EXIT_TAIL_GATES,
   FOR_BOUND_GATES,
@@ -137,6 +137,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
   VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],
   UNREDUCE_GATES: UNREDUCE_GATES as readonly Gate<never>[],
+  CASE_END_GOTO_GATES: CASE_END_GOTO_GATES as readonly Gate<never>[],
   // l3/unmerge.ts's five, one per context it judges — see its header for which is which
   UNMERGE_SITE_GATES: UNMERGE_SITE_GATES as readonly Gate<never>[],
   UNMERGE_ARM_GATES: UNMERGE_ARM_GATES as readonly Gate<never>[],
@@ -162,7 +163,6 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],
   TWO_LEVEL_REGION_GATES: TWO_LEVEL_REGION_GATES as readonly Gate<never>[],
   TWO_LEVEL_BREAK_GATES: TWO_LEVEL_BREAK_GATES as readonly Gate<never>[],
-  CASE_END_GOTO_GATES: CASE_END_GOTO_GATES as readonly Gate<never>[],
   // ... and when an edge out of an inner loop's body is that loop's outward exit, handed out
   OUTWARD_EXIT_GATES: OUTWARD_EXIT_GATES as readonly Gate<never>[],
   BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],

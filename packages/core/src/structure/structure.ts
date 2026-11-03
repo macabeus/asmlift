@@ -36,8 +36,8 @@
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts), on some paths only, leaving the switch by a `break;` on the
 // others (`switchFrames`), and a `while (1)` whose second exit target lies past the code after it
-// (`goto` past that code; `TwoLevelExit`, spelled with a flag, or, where that code ends the switch
-// arm the loop sits in, by the ranked `/case-end-goto` as a goto to the arm's end, `caseEndGoto`).
+// (`goto` past that code; `TwoLevelExit`, spelled with a flag, which the ranked `/case-end-goto`
+// respells as a goto where that code ends the switch arm the loop sits in, l3/caseendgoto.ts).
 // Still DECLINED (loud
 // StructureError, never wrong code): irreducible/overlapping loops, exits to more than one live
 // merge that no flag spells (among them a third target, a second one at the enclosing loop's header
@@ -113,7 +113,6 @@ import {
   keepsHelperRel,
   mapExprChildren,
   mapStmtExprs,
-  mapStmtLists,
   mentionedName,
   negateCond,
   reachesEnd,
@@ -1268,7 +1267,8 @@ interface ForeverLoopInfo {
 // (`twoLevelCandidate`). L3 holds no `goto` past arbitrary code, so a flag spells it: `f = 0;`
 // ahead of the loop, `f = 1; break;` on the edge to `to`, and the code from `exit` up to `to` under
 // `if (f == 0)` after it (`emitForever`). Only a `while (1)` takes one, and only where no other
-// reading fits.
+// reading fits. l3/caseendgoto.ts reads that shape back, so a change to it is a change to that
+// respell's matcher too.
 //
 // OUTWARD: `for (i…) { for (j…) { if (hit) { s(j); goto out; } } k(i); } out:`, the `goto` out of
 // BOTH loops. `to` lies past the enclosing loop, and the code from it runs on to that loop's own exit
@@ -1284,8 +1284,8 @@ interface ForeverLoopInfo {
 // leaves the loop around it: agbcc threads the `goto` to the code after that loop (jump.c
 // `follow_jumps`), the merge of the switch and the exit of the loop at once. No goto-free spelling
 // matches those bytes (the flag adds a variable), so the hit rung is asked only where every
-// structuring without it declines (`LAST_RESORT_RUNGS`), and the ranked `/case-end-goto` spells the
-// flag read at such a case end as the goto itself (`caseEndGoto`).
+// structuring without it declines (`LAST_RESORT_RUNGS`), and the ranked `/case-end-goto` respells
+// the flag read at such a case end as the goto itself (l3/caseendgoto.ts).
 interface TwoLevelExit {
   to: Block;
   from: Set<Block>;
@@ -1480,61 +1480,6 @@ export const TWO_LEVEL_BREAK_GATES: readonly Gate<TwoLevelBreak>[] = [
     rejects: (c) => c.inCaseBody,
   },
 ];
-
-/** A two-level exit about to be spelled with its flag read after the loop (`emitForeverExit`), where
- *  the `/case-end-goto` variation (`StructureOptions.jumpToCaseEnds`) would spell it as a case-end
- *  `goto` instead (l3/ast.ts). */
-export interface CaseEndGoto {
-  /** the second target is not the merge of the switch arm the loop sits in, reached by a `break;`
-   *  written after the loop, or the code from it renders as more than that `break;`: a join that
-   *  runs code of its own (`synthetic:sw_hitexit_in`'s winners) */
-  readonly targetNotArmEnd: boolean;
-  /** an inner loop hands this loop a flag of its own (`ForeverLoopInfo.handed`) */
-  readonly handsFlags: boolean;
-  /** the flag is mentioned somewhere other than a hit's `f = 1; break;` in the loop's own body and
-   *  the test after it */
-  readonly flagElsewhere: boolean;
-}
-
-/** When a two-level exit's flag, read once after its loop as `if (f == 0) { X } break;` where that
- *  `break;` ends the switch arm the loop sits in, is spelled instead as `goto L;` at each hit and
- *  `X L: break;` after the loop. The two are one program: the flag is clear on every entry and set
- *  only on the hit's way out, so `X` runs exactly when the loop left by its own exit, and `L:` is
- *  where the flag's test sends the hit. The argument for the reading is at `emitForeverExit`. */
-export const CASE_END_GOTO_GATES: readonly Gate<CaseEndGoto>[] = [
-  {
-    id: 'target-not-arm-end',
-    why: 'the goto may land only on a `break;` that ends its switch arm, and the target is not reached by one',
-    sound: true,
-    guardedBy: 'case-end-goto.test.ts: a hit whose target is a join running code keeps its flag',
-    rejects: (c) => c.targetNotArmEnd,
-  },
-  {
-    id: 'hands-flags',
-    why: 'a loop an outward exit is handed out to reads that flag in its body as well (defensive)',
-    sound: false,
-    rejects: (c) => c.handsFlags,
-  },
-  {
-    id: 'flag-elsewhere',
-    why: 'a flag mentioned past its writes and its one test is read where no goto replaces it (defensive)',
-    sound: false,
-    rejects: (c) => c.flagElsewhere,
-  },
-];
-
-/** Can any structuring of `fn` read a two-level exit's flag, the one place `/case-end-goto` changes
- *  a tree (`CASE_END_GOTO_GATES`)? Only where some natural loop leaves for two or more blocks that
- *  do not just return: the loop's own exit and the second target its hit runs on to. A NECESSARY
- *  condition, read off the CFG before any structuring, so the variation is not crossed into the
- *  settings of a function no witness could fire on (rank-variations.ts `sharedGate`). */
-export function hasTwoTargetLoopExit(fn: Fn): boolean {
-  const forest = analyzeLoops(fn, dominators(fn));
-  const returnsOnly = (b: Block): boolean => b.ops.length === 1 && b.ops[0].opcode === 'ret';
-  return [...forest.byHeader.values()].some(
-    (nl) => new Set(nl.exitEdges.map((e) => e.to).filter((b) => !returnsOnly(b))).size >= 2,
-  );
-}
 
 /** A tail several `break` arms share that holds a cycle (`codeBreakArm`, shared). */
 export interface BreakTailCycle {
@@ -2292,13 +2237,6 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  address the arm already formed), so the differ referees it. Inert where no switch has such a
    *  sibling. */
   jumpToSharedCases?: boolean;
-  /** Spell a two-level exit whose flag is read after its loop as `if (f == 0) { X } break;`, that
-   *  `break;` ending the switch arm the loop sits in, as `goto L;` at each hit and `X L: break;`
-   *  after the loop (`CASE_END_GOTO_GATES`), the source's own spelling of a search loop whose hit
-   *  jumps to the end of its case. rank.ts's `/case-end-goto` variation: agbcc threads that goto
-   *  past the loop around the switch, and only the goto reproduces those bytes, while elsewhere the
-   *  flag can compile closer, so the differ referees it. Inert where no such flag is read. */
-  jumpToCaseEnds?: boolean;
   /** Spell EVERY `while (1)` loop `forPlanAt` accepts as `for (init; cond; inc)` on the first
    *  structuring, not only one a declined run asked for (`ForRanking`). rank.ts's `/for-continue`
    *  variation: a counted loop whose latch holds the update and the test is the same asm as
@@ -2662,9 +2600,6 @@ export interface StructureHooks {
   twoLevelRegionGates?: readonly Gate<TwoLevelRegion>[];
   /** the two-level exit's `break` rule (`TWO_LEVEL_BREAK_GATES`), ablatable the same way. */
   twoLevelBreakGates?: readonly Gate<TwoLevelBreak>[];
-  /** `emitForeverExit`'s case-end goto rules (`CASE_END_GOTO_GATES`), ablatable the same way and,
-   *  wrapped in `tallying`, the census of which rule keeps a flag. */
-  caseEndGotoGates?: readonly Gate<CaseEndGoto>[];
   /** `forPlanAt`'s rules (`FOR_PLAN_GATES`, `FOR_PLAN_IV_GATES`), ablatable the
    *  same way and, wrapped in `tallying`, the census of which rule refuses a loop's `for`. */
   forPlanGates?: readonly Gate<ForPlanCandidate>[];
@@ -2708,12 +2643,6 @@ export interface StructureHooks {
    *  options with it on, so rank.ts skips `/for-continue` on its sibling. Not fired by
    *  `assertDefaultAccepts`' structuring. */
   onForOffered?: () => void;
-  /** Fired each time a two-level exit's flag is read after its loop where every rule of
-   *  `CASE_END_GOTO_GATES` admits a case-end `goto` in its place — the one place
-   *  `jumpToCaseEnds` changes what the structurer writes. A structuring with that option off that
-   *  never fires it builds the same tree as the same options with it on, so rank.ts skips
-   *  `/case-end-goto` on its sibling. Not fired by `assertDefaultAccepts`' structuring. */
-  onCaseEndRead?: () => void;
   /** Fired each time `bound-plus-one-counter-wraps` is the rule that refuses a reading of a latch's
    *  `!=` test: the one refusal of `forPlanAt` that reads how the signedness pin declared the
    *  counter, so the other pin may take the `for` this one cannot. Unheld: it fires from every
@@ -2758,7 +2687,6 @@ function assertDefaultAccepts(
     followEarlyReturns: false,
     copyEveryTailEntrant: false,
     jumpToSharedCases: false,
-    jumpToCaseEnds: false,
     spellCountedLoopsFor: false,
   };
   if (memo === undefined) {
@@ -3706,7 +3634,6 @@ export function structure(
           onTailFallerKept: hooks.onTailFallerKept && hold(hooks.onTailFallerKept),
           onCaseCopied: hooks.onCaseCopied && hold(hooks.onCaseCopied),
           onForOffered: hooks.onForOffered && hold(hooks.onForOffered),
-          onCaseEndRead: hooks.onCaseEndRead && hold(hooks.onCaseEndRead),
         },
         memo,
         retCopy,
@@ -3836,7 +3763,6 @@ function structureRanked(
     preferDefPosCopyOrder = false,
     copyEveryTailEntrant = false,
     jumpToSharedCases = false,
-    jumpToCaseEnds = false,
     spellCountedLoopsFor = false,
     switchAllowsNeqCase = true,
     switchBoundCase,
@@ -3971,7 +3897,6 @@ function structureRanked(
     followEarlyReturns ||
     copyEveryTailEntrant ||
     jumpToSharedCases ||
-    jumpToCaseEnds ||
     spellCountedLoopsFor
   ) {
     // The observation hooks are this setting's, not the default's: dropped for that run, which also
@@ -3984,7 +3909,6 @@ function structureRanked(
         onTailFallerKept: undefined,
         onCaseCopied: undefined,
         onForOffered: undefined,
-        onCaseEndRead: undefined,
         onCounterSignRefused: undefined,
       },
       memo,
@@ -10741,91 +10665,16 @@ function structureRanked(
         ...after(() => structureRegion(exit, stop)),
       ];
     }
-    const skippedCode = after(() => structureRegion(exit, second.to));
-    const rest = after(() => structureRegion(second.to, stop));
-    const caseEnd = caseEndGoto(fl, flag, loop, skippedCode, rest, breakReachesTarget);
-    if (caseEnd !== null) {
-      return caseEnd;
-    }
     return [
       { k: 'assign', name: flag, value: { k: 'const', value: 0 } },
       loop,
-      mkIf({ k: 'bin', op: '==', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } }, skippedCode, []),
-      ...rest,
+      mkIf(
+        { k: 'bin', op: '==', l: { k: 'var', name: flag }, r: { k: 'const', value: 0 } },
+        after(() => structureRegion(exit, second.to)),
+        [],
+      ),
+      ...after(() => structureRegion(second.to, stop)),
     ];
-  };
-  // THE CASE-END GOTO (`CASE_END_GOTO_GATES`, l3/ast.ts): where a two-level exit's second target is
-  // the merge of the switch arm the loop sits in and a `break;` written after the loop reaches it
-  // (`switchBreaks`), and the code from that target renders as that one `break;` or as nothing (the
-  // region ends there), `f = 0; loop; if (f == 0) { X } <rest>` is the same program as `loop; X L:
-  // break;` with each hit's `f = 1; break;` written `goto L;`. The flag is cleared ahead of the loop
-  // and set only where a hit leaves it, so `X` runs exactly when the loop left by its own exit; after
-  // it both spellings go on to the merge, `<rest>` by rendering it and `L: break;` by leaving the
-  // switch it is the merge of. No loop stands between that `break;` and its arm, so it is a legal end
-  // label, and the hits' `break`s are the loop's own, never in a case body opened in it
-  // (`TWO_LEVEL_BREAK_GATES`), so no switch stands between them and the label. Null keeps the flag: where the option is off (after firing
-  // `onCaseEndRead` where it would have fired), or where a rule refuses.
-  const caseEndGoto = (
-    fl: ForeverLoopInfo,
-    flag: string,
-    loop: Stmt,
-    skippedCode: Stmt[],
-    rest: Stmt[],
-    breakReachesTarget: boolean,
-  ): Stmt[] | null => {
-    const only = rest.length === 1 ? rest[0] : undefined;
-    const targetNotArmEnd =
-      !breakReachesTarget ||
-      (rest.length > 0 && (only?.k !== 'break' || only.ofSwitch !== true || only.label !== undefined));
-    let hits = 0;
-    const rewrite = (list: Stmt[]): Stmt[] =>
-      list.flatMap((st, i): Stmt[] => {
-        const next = list[i + 1];
-        if (st.k === 'assign' && st.name === flag && next?.k === 'break' && next.ofSwitch !== true) {
-          hits++;
-          return [{ k: 'caseEndGoto', label: '' }];
-        }
-        if (
-          st.k === 'break' &&
-          i > 0 &&
-          list[i - 1].k === 'assign' &&
-          (list[i - 1] as { name: string }).name === flag
-        ) {
-          return [];
-        }
-        return isLoop(st) ? [st] : [mapStmtLists(st, rewrite)];
-      });
-    // the hits' writes sit in the loop's own body, never in a loop nested in it
-    const rewritten = [mapStmtLists(loop, rewrite)];
-    const mentions = new Set<string>();
-    const walk = (st: Stmt): void => {
-      if (st.k === 'assign') {
-        mentions.add(st.name);
-      }
-      stmtExprs(st).forEach((x) => exprVars(x, mentions));
-      stmtChildren(st).forEach(walk);
-    };
-    [...rewritten, ...skippedCode].forEach(walk);
-    const refused = firstRejection(hooks.caseEndGotoGates ?? CASE_END_GOTO_GATES, {
-      targetNotArmEnd,
-      handsFlags: (fl.handed?.size ?? 0) > 0,
-      flagElsewhere: hits === 0 || mentions.has(flag),
-    });
-    if (refused !== null) {
-      return null;
-    }
-    if (!jumpToCaseEnds) {
-      hooks.onCaseEndRead?.();
-      return null;
-    }
-    let label = 'case_end';
-    for (let n = 2; caseLabelNames.has(label); n++) {
-      label = `case_end_${n}`;
-    }
-    caseLabelNames.add(label);
-    const named = (st: Stmt): Stmt =>
-      st.k === 'caseEndGoto' && st.label === '' ? { ...st, label } : mapStmtLists(st, (l) => l.map(named));
-    return [...rewritten.map(named), ...skippedCode, { k: 'break', ofSwitch: true, label }];
   };
   // The flag of the two-level exit out of the loop at `header`: one `s32` local per loop, named on
   // first use, after the naming walk. Declared only where the body still mentions it
