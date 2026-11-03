@@ -197,6 +197,66 @@ describe('a chain of divergent `if`s with early returns', () => {
   });
 });
 
+/** `n` chained jump tables over `%0 + i`, each with a `case 0:` that returns early (to its own `ret`,
+ *  or to one epilogue), two cases and a default that run on to the next, then a tail. */
+function switchChain(n: number, flavor: 'own' | 'epilogue'): Fn {
+  let v = 1;
+  let blk = 1;
+  const lines: string[] = ['fn s {', '^bb0(%0: s32):'];
+  const heads = Array.from({ length: n + 1 }, () => blk++);
+  const epi = blk++;
+  lines.push(`  br ^bb${heads[0]}()`);
+  for (let i = 0; i < n; i++) {
+    const [r, c1, c2, d] = [blk++, blk++, blk++, blk++];
+    const [c, x] = [`%${v++}`, `%${v++}`];
+    lines.push(`^bb${heads[i]}():`, `  ${c}: s32 = const {value=${i + 1}}`, `  ${x}: s32 = add %0, ${c}`);
+    lines.push(`  switch_br ${x}, ^bb${r}(), ^bb${c1}(), ^bb${c2}(), ^bb${d}() {cases=[0;1;2]}`);
+    lines.push(`^bb${r}():`, `  %${v++}: s32 = call ${c} {target="k"}`);
+    lines.push(flavor === 'own' ? '  ret' : `  br ^bb${epi}()`);
+    for (const [blkN, callee] of [
+      [c1, 'k2'],
+      [c2, 'k3'],
+      [d, 'm'],
+    ] as const) {
+      lines.push(`^bb${blkN}():`, `  %${v++}: s32 = call ${c} {target="${callee}"}`, `  br ^bb${heads[i + 1]}()`);
+    }
+  }
+  lines.push(`^bb${heads[n]}():`, `  %${v++}: s32 = call %0 {target="tail"}`);
+  lines.push(flavor === 'own' ? '  ret' : `  br ^bb${epi}()`);
+  if (flavor === 'epilogue') {
+    lines.push(`^bb${epi}():`, '  ret');
+  }
+  lines.push('}', '');
+  const fn = parse(lines.join('\n'));
+  verify(fn);
+  return fn;
+}
+
+describe('a chain of jump tables with a `case` that returns early', () => {
+  for (const flavor of ['own', 'epilogue'] as const) {
+    test(`${flavor}: the default writes the tail 3^n times, the join writes it once`, () => {
+      const fn = switchChain(3, flavor);
+      expect(count(emit(fn, {}), 'tail(')).toBe(27);
+      const once = emit(fn, { joinPastReturns: true });
+      expect(count(once, 'tail(')).toBe(1);
+      expect(count(once, 'switch (')).toBe(3);
+      expect(count(once, 'k(')).toBe(3);
+      expect(count(once, 'm(')).toBe(3);
+    });
+
+    test(`${flavor}: past the copy budget it lifts with the tail written once`, () => {
+      const src = emit(switchChain(8, flavor), {});
+      expect(count(src, 'tail(')).toBe(1);
+      expect(count(src, 'switch (')).toBe(8);
+    });
+  }
+
+  test('the gate answers for a jump table', () => {
+    expect(hasJoinPastReturns(switchChain(1, 'own'))).toBe(true);
+    expect(hasJoinPastReturns(switchChain(1, 'epilogue'))).toBe(true);
+  });
+});
+
 describe('the copy budget', () => {
   test('a chain past the budget lifts with the tail written once, with nothing asked', () => {
     // 2^12 tails: far past `COPY_BUDGET` region entries per block, so `structure()` stops the
