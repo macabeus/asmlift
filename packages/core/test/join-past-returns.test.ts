@@ -17,6 +17,8 @@
 //     (agbcc, gcc2.7.2), which `followEarlyReturns` lands on and so still copies;
 //   - `branchyxj`: identical `if (a == 0) y(x); k(x); return;` arms cross-jumped into one return tail
 //     that BRANCHES, which the code after the chain ends in too (agbcc, gcc2.7.2, gcc2.7.2kmc).
+import { readFileSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -333,6 +335,25 @@ describe('the copy budget', () => {
     structure(chain(4, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => under++ });
     expect(under).toBe(0);
   });
+
+  test("a shared-tail pass past the budget is dropped, not crossed with the rerun's join", () => {
+    // agbcc -O2 of twelve `if (gA > i) { if (gB == i) { k(9); if (gC) k(8); gT = 1; return; } k(); }
+    // else k();` links, then `gOut = gOut + 1;` and the same return tail: past the budget, and the
+    // `/shared-tail` pass's rerun built a sink-plus-join tree no setting under the budget is given
+    const asm = readFileSync(joinPath(import.meta.dirname, 'corpus', 'agbcc-retbudget.s'), 'utf8');
+    const cands = enumerateCandidates('retbudget', asm, ARMV4T_AGBCC, {
+      prototypes: { retbudget: { params: 0, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+    });
+    const join = cands.filter((c) => hasVariation(c.variations, 'ret-join'));
+    expect(join.length).toBeGreaterThan(0);
+    expect(join.every((c) => count(c.source, 'gOut = ') === 1)).toBe(true);
+    const crossed = cands.filter(
+      (c) =>
+        hasVariation(c.variations, 'ret-join') &&
+        (hasVariation(c.variations, 'shared-tail') || hasVariation(c.variations, 'shared-ret')),
+    );
+    expect(crossed.map((c) => joinVariations(c.variations))).toEqual([]);
+  }, 90_000); // ~5 s alone: every setting structures to the budget before its rerun
 
   test('a chain under the budget keeps the default copies', () => {
     expect(count(emit(chain(4, 'own'), {}), 'tail(')).toBe(16);

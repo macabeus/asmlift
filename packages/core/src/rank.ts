@@ -2479,6 +2479,15 @@ export function enumerateCandidates(
               if (pass === 'join' && !joinRead) {
                 break;
               }
+              // A SHARED-TAIL PASS'S SETTING PAST THE COPY BUDGET is dropped, not published as the
+              // budget rerun's tree: that tree crosses the follow or the sink with the join past
+              // early returns, a reading no setting under the budget is given, and the `/ret-join`
+              // pass holds the join's own tree for the setting. Kept, the crossing more than
+              // doubled an over-budget fan (a 12-link kmc chain: 10,824 candidates, 6,456 crossed).
+              if (alternative && pass !== 'join' && joinRead) {
+                dropped.add(key);
+                continue;
+              }
             } catch (e) {
               if (e instanceof DefaultAcceptsMemoMisuse) {
                 throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation
@@ -2645,8 +2654,9 @@ export function enumerateCandidates(
                 }
                 continue;
               }
-              // a tree the copy budget's rerun gave the join past early returns is that reading's
-              const rerunRead: readonly Variation[] = joinRead && pass !== 'join' ? ['ret-join'] : [];
+              // a tree the copy budget's rerun gave the join past early returns is that reading's (only
+              // the default pass gets here with one: the shared-tail passes drop theirs above)
+              const rerunRead: readonly Variation[] = joinRead && pass === 'default' ? ['ret-join'] : [];
               const variations: readonly Variation[] = [
                 cand.variation,
                 ...liftVariations,
