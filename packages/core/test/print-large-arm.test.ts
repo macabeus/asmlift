@@ -6,8 +6,8 @@ import { T } from '../src/ir/types';
 import type { SFn, Stmt } from '../src/l3/ast';
 
 // A statement list long enough that spreading one arm's printed lines into `push` passes more
-// arguments than V8 takes (about 120k): the printer threw "Maximum call stack size exceeded" at a
-// nesting depth of one, which reads as deep recursion when it is only size.
+// arguments than V8 takes (about 120k), and throws "Maximum call stack size exceeded" at a nesting
+// depth of one, which reads as deep recursion when it is only size.
 describe('C printer over a very long arm', () => {
   it('prints a 200,000-statement `if` arm without exceeding the argument limit', () => {
     const n = 200_000;
@@ -32,8 +32,8 @@ describe('C printer over a very long arm', () => {
   });
 });
 
-// The same limit in the sibling printer: IDO Pascal's `if` arms, `case` arms, `otherwise` clause and
-// the function body each appended their lines by spread.
+// The same limit in the sibling printer, over every statement list it appends: IDO Pascal's `if`
+// arms, `case` arms, `otherwise` clause and the function body.
 describe('Pascal printer over a very long arm', () => {
   it('prints a 200,000-statement arm in every statement list without exceeding the argument limit', () => {
     const n = 200_000;

@@ -338,8 +338,8 @@ describe('the copy budget', () => {
 
   test("a shared-tail pass past the budget is dropped, not crossed with the rerun's join", () => {
     // agbcc -O2 of twelve `if (gA > i) { if (gB == i) { k(9); if (gC) k(8); gT = 1; return; } k(); }
-    // else k();` links, then `gOut = gOut + 1;` and the same return tail: past the budget, and the
-    // `/shared-tail` pass's rerun built a sink-plus-join tree no setting under the budget is given
+    // else k();` links, then `gOut = gOut + 1;` and the same return tail: past the budget, where the
+    // `/shared-tail` pass's rerun builds a sink-plus-join tree no setting under the budget is given
     const asm = readFileSync(joinPath(import.meta.dirname, 'corpus', 'agbcc-retbudget.s'), 'utf8');
     const cands = enumerateCandidates('retbudget', asm, ARMV4T_AGBCC, {
       prototypes: { retbudget: { params: 0, returnsVoid: true }, k: { params: 1, returnsVoid: true } },

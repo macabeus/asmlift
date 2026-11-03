@@ -2510,10 +2510,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   // non-returning paths share: `followOverReturns` below. Absent, such an `if` keeps its arms
   // divergent and a region both of them reach is emitted in each.
   followEarlyReturns?: boolean;
-  // Give a DIVERGENT `if` outside every loop the block its non-returning paths meet at, ahead of
-  // the CFG's join where that is EXIT or a return tail: `joinsPastReturns` below.
-  // Absent, such an `if` keeps its arms divergent and everything below it is written into each arm,
-  // once more per such `if` of a chain. rank.ts enumerates it as the `/ret-join` twin; `structure()`
+  // Give a DIVERGENT `if` or switch outside every loop the block its non-returning paths meet at,
+  // ahead of the CFG's join where that is EXIT or a return tail: `joinsPastReturns` below. Absent,
+  // such a branch keeps its arms divergent and everything below it is written into each arm, once
+  // more per such branch of a chain. rank.ts enumerates it as the `/ret-join` twin; `structure()`
   // also asks it, unranked, of a structuring over its copy budget (`COPY_BUDGET`).
   joinPastReturns?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
@@ -2989,9 +2989,9 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
 // of its CFG join (the return tail every arm reaches): a block two `case`s share on their way to
 // the code after the switch is no join of the table. The copies this removes are of a region both
 // arms reach, so a block one arm never reaches is no meeting point, however straight the other
-// arm's way to its `return`: that is what refuses the
-// join of an `if` inside an early return (`if (d) { if (c) x(); k(); return; }`, its `k()`), which
-// the other arm reaches only through the epilogue. In acyclic code every block on an arm of `b`
+// arm's way to its `return`: that is what refuses the join of an `if` inside an early return
+// (`if (d) { if (c) x(); k(); return; }`, its `k()`), which the other arm reaches only through the
+// epilogue. In acyclic code every block on an arm of `b`
 // precedes the arms' meeting point. Sound for the reason the follow is: every path from `b` either
 // passes `j` or ends in its own `return`, so each arm structures up to `j` or into a `return`, and a
 // return tail an early-return path shares with code past `j` is written in that arm too (bytes, not
@@ -3866,15 +3866,16 @@ export function structure(
 /** THE COPY BUDGET'S RUNG, above the whole ladder. A structuring that enters more regions than
  *  `COPY_BUDGET` allows is stopped where it crosses the bound, and the ladder is run again asking
  *  the `joinPastReturns` reading (`overBudget`, not the option, so the default-accepts guard does
- *  not take the rerun for the `/ret-join` variation), which gives each divergent `if` outside a
- *  loop the block its non-returning paths meet at, so the code below it is written once. Where that run crosses the bound too, the
- *  function declines with a `StructureError` naming the block copied most: a structure decline,
- *  never an exponential tree published or an internal overflow in the printer.
+ *  not take the rerun for the `/ret-join` variation), which gives each divergent `if` or switch
+ *  outside a loop the block its non-returning paths meet at, so the code below it is written once.
+ *  Where that run crosses the bound too, the function declines with a `StructureError` naming the
+ *  block copied most: a structure decline, never an exponential tree published or an internal
+ *  overflow in the printer.
  *
- *  Never asked by default and never ranked: a structuring under the bound is the ladder's own,
- *  byte for byte, and on the corpus no structuring comes near it (the census at `COPY_BUDGET`). The
- *  hooks a stopped run fired without holding them (`onCounterSignRefused`) have fired; the held
- *  ones are dropped with the run. */
+ *  A structuring under the bound is the ladder's own, byte for byte, and on the corpus none comes
+ *  near it (the census at `COPY_BUDGET`). A rerun that took the join fires `onJoinPastReturns`,
+ *  which rank.ts reads to name its tree `/ret-join`. The hooks a stopped run fired without holding
+ *  them (`onCounterSignRefused`) have fired; the held ones are dropped with the run. */
 function structureWithinBudget(
   fn: Fn,
   opts: StructureOptions,
