@@ -695,15 +695,17 @@ describe('refusals', () => {
 
   /** `chain` whose second condition ORs three bytes read off ONE base — `(gS.a | gS.d | gS.c) != 0`
    *  as agbcc leaves it: the base defined once in ^g and read by all three loads. `base` picks what
-   *  that shared value is: the struct's address, the address plus a constant, or a READ. */
-  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load'): Fn {
-    return chain({
+   *  that shared value is: the struct's address, the address plus a constant, a READ, or a pointer
+   *  PARAMETER of the function plus a constant (`p->a | p->d | p->c` past the ldrb displacement). */
+  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k'): Fn {
+    const param = mkValue(T.ptr(T.u(8)));
+    const fn = chain({
       gOnTaken: false,
       sharedOnGTaken: true,
       gBody: (out) => {
         const sym = mkValue(T.ptr(T.u(8)));
-        const ops: Op[] = [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
-        let p = sym;
+        const ops: Op[] = base === 'param+k' ? [] : [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
+        let p = base === 'param+k' ? param : sym;
         if (base !== 'gaddr') {
           p = mkValue(T.ptr(T.u(8)));
           const k = mkValue(T.unk(32));
@@ -712,7 +714,7 @@ describe('refusals', () => {
               ? [mkOp('load', { operands: [sym], results: [p], attrs: { off: 0, width: 4, signed: false } })]
               : [
                   mkOp('const', { results: [k], attrs: { value: 4 } }),
-                  mkOp('add', { operands: [sym, k], results: [p] }),
+                  mkOp('add', { operands: [base === 'param+k' ? param : sym, k], results: [p] }),
                 ]),
           );
         }
@@ -733,9 +735,13 @@ describe('refusals', () => {
         return ops;
       },
     });
+    if (base === 'param+k') {
+      fn.blocks[0].params = [param];
+    }
+    return fn;
   }
 
-  test.each(['gaddr', 'gaddr+k'] as const)(
+  test.each(['gaddr', 'gaddr+k', 'param+k'] as const)(
     'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
     (base) => {
       // sub_0800D188 wrote 6,338 of its 17,132 lines twice behind this one refusal (synthetic:scbase).

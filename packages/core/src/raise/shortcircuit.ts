@@ -1486,28 +1486,35 @@ function gConeOf(c: SharedValueSite): Op[] {
   return [...out];
 }
 
-/** Is `v` an ADDRESS that is a symbol plus constant offsets — `&gS`, `&gS + 0x35`, `&gS + 0x35 +
- *  0x22`, a frame object's address — and nothing else? Asked over the WHOLE function's defs, not
- *  ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an earlier block loaded is GVN's one `gaddr`
- *  (`sub_0800D188`'s site). Such a value reads no memory and cannot trap, so spelling it above the
- *  guard (as a local, or l3/basecse.ts's hoisted base) runs nothing the source did not. */
-function pureAddressCone(c: SharedValueSite): boolean {
-  const ok = (v: Value): boolean => {
+/** Is `v` constant offsets over a value ^g did not compute — `&gS + 0x35`, `p + 0x35 + 0x22` off a
+ *  pointer parameter, a frame object's address — and nothing else? Asked over the WHOLE function's
+ *  defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an earlier block loaded is GVN's one
+ *  `gaddr` (`sub_0800D188`'s site). The LEAF is a symbol or frame address, or any value defined
+ *  outside ^g (a block parameter, an earlier block's result): by dominance that value is already
+ *  computed when the first test runs, so the cone spelled above the guard (as a local, or
+ *  l3/basecse.ts's hoisted base) adds only `+ k` arithmetic, which reads nothing and cannot trap.
+ *  The pointer-parameter leaf is measured too: agbcc's `add r0, r4, #0x35; ldrb; add r0, r0, #0x22`
+ *  off `struct T *p` folds to bytes identical to the target (synthetic:scbase_pfar). */
+function constOffsetCone(c: SharedValueSite): boolean {
+  const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
+  const ok = (v: Value, top: boolean): boolean => {
+    if (!top && !c.defOf.has(v)) {
+      return true; // computed before ^g: a symbol, a parameter, an earlier block's value
+    }
     const d = c.defs.get(v);
     if (!d) {
-      return false; // a block parameter — a variable, not an address this test can see the shape of
+      return false; // not reached: every value ^g defines has a def
     }
     if (d.opcode === 'gaddr' || d.opcode === 'laddr') {
       return true;
     }
     if (d.opcode === 'add') {
       const [a, b] = d.operands;
-      const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
-      return (isConst(b) && ok(a)) || (isConst(a) && ok(b));
+      return (isConst(b) && ok(a, false)) || (isConst(a) && ok(b, false));
     }
     return false;
   };
-  return ok(c.value);
+  return ok(c.value, true);
 }
 
 // ── THE USE-COUNT REFUSALS, AS DATA ──────────────────────────────────────────────────────────
@@ -1522,8 +1529,9 @@ function pureAddressCone(c: SharedValueSite): boolean {
 // members off it (`(gS.a | gS.d | gS.c) != 0`), so the address is the one value with three readers.
 // Refused, the `||` splits into a nest and the structurer copies the shared arm AND everything after
 // it into both branches — kleod's `sub_0800D188` writes 6,338 of its 17,132 lines twice from one such
-// site, and refuses here at 33 heads. An address cone reads nothing and cannot trap, so hoisting it
-// changes no behaviour.
+// site, and refuses here at 33 heads. The base may as well be a pointer parameter (`p->a | p->d`),
+// or anything computed before ^g: a constant-offset cone over it reads nothing and cannot trap, so
+// hoisting it changes no behaviour.
 //
 // RESIDUE, not in the table: the ESCAPE half of `definedValuesStayLocal` (a value read past ^g that
 // the arm does not re-derive). `armRereadCone` copies the cone of every outside read, so on the
@@ -1541,14 +1549,14 @@ export const SHARED_VALUE_GATES: readonly Gate<SharedValueSite>[] = [
     rejects: (c) => gConeOf(c).some(reevalUnsafe),
   },
   {
-    // A pure, non-trapping value that is not an address — `(x * x) != 0` over a computed `x`.
+    // A pure, non-trapping value that is not constant offsets — `(x * x) != 0` over a computed `x`.
     // Hoisting it is correct C; what the target spells there is unmeasured, so it keeps the nest
     // main produced. A pure SPELLING rule: disjoint from `shared-read` (a read or a trap in the cone
     // is that rule's), so each ablates alone and ablating this one admits nothing unsafe.
     id: 'shared-pure',
     why: 'a computed value the second test reuses is kept in the nest until its spelling is measured',
     sound: false,
-    rejects: (c) => !pureAddressCone(c) && !gConeOf(c).some(reevalUnsafe),
+    rejects: (c) => !constOffsetCone(c) && !gConeOf(c).some(reevalUnsafe),
   },
 ];
 
