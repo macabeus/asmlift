@@ -17,6 +17,11 @@
 // can still score closer (gcc 2.7.2), so both are emitted, the differ referees, and a tie goes to
 // the candidate without the goto (rank.ts `gotoCount`).
 //
+// The structurer is not the only writer the rewrite reaches: it reads the tree, not who built it,
+// so a flag the source declared and the compiler kept is rewritten too where it has the same shape
+// (IDO keeps a `u8 found` set to 2 in a case arm; at 7d1ca3da both goto candidates agree with the
+// source over 4000 seeds). That is sound for the reason below, and ranked like the rest.
+//
 // SOUND OVER THE TREE ALONE. `f` is a local mentioned only by `f = 0;` right before the loop, by
 // each hit's `f = c; break;` (c a nonzero constant, the `break` the loop's own: reached from the
 // loop's body through `if`s only) and by the test right after the loop (`CASE_END_GOTO_GATES`

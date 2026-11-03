@@ -307,7 +307,9 @@ bytes where the flag spelling of the same exit never does (`synthetic:sw_hitexit
 producer is the ranked `/case-end-goto` respell (`l3/caseendgoto.ts`, gated by
 `CASE_END_GOTO_GATES`): over the structured tree, where a flag set only at a loop's own `break`s
 is tested right after that loop and what follows the test leaves the switch arm with nothing run,
-the flag becomes the goto. The hit rung of `structure.ts` is what writes such a flag.
+the flag becomes the goto. The hit rung of `structure.ts` is what writes such a flag, but the
+rewrite reads only the tree, so a flag the source declared and the compiler kept (IDO keeps one) is
+rewritten too wherever it has that shape.
 
 Both are ranked: a goto is kept only if it scores better than the goto-free candidate beside it,
 and a tie goes to the candidate without one (`gotoCount` in `rank.ts`). The Pascal backend refuses
