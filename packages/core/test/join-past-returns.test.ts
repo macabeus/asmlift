@@ -14,7 +14,9 @@
 //   - `epilogue`: every early return and the tail branch to one epilogue `ret` (ido7.1, mwcc,
 //     gcc2.7.2's shared exit), so the only `ret` the arms share is the tail's too;
 //   - `crossjumped`: identical `k(x); return;` arms cross-jumped into one return tail taking `x`
-//     (agbcc, gcc2.7.2), which `followEarlyReturns` lands on and so still copies.
+//     (agbcc, gcc2.7.2), which `followEarlyReturns` lands on and so still copies;
+//   - `branchyxj`: identical `if (a == 0) y(x); k(x); return;` arms cross-jumped into one return tail
+//     that BRANCHES, which the code after the chain ends in too (agbcc, gcc2.7.2, gcc2.7.2kmc).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -27,7 +29,7 @@ import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
 import { count } from './helpers';
 
-type Flavor = 'own' | 'epilogue' | 'crossjumped' | 'tangled';
+type Flavor = 'own' | 'epilogue' | 'crossjumped' | 'branchyxj' | 'tangled';
 
 /** `n` chained divergent `if`s, then a tail calling `tail`. With `innerIf`, each early return
  *  holds an `if` of its own before returning (`if (b == i) { if (a == 0) x(); k(i); return; }`). */
@@ -78,11 +80,13 @@ function chain(n: number, flavor: Flavor, innerIf = false): Fn {
     }
   }
   lines.push(`^bb${heads[n]}():`, `  %${v++}: s32 = call %0 {target="tail"}`);
-  lines.push(...(flavor === 'epilogue' ? [`  br ^bb${epi}()`] : ['  ret']));
+  lines.push(
+    ...(flavor === 'epilogue' ? [`  br ^bb${epi}()`] : flavor === 'branchyxj' ? [`  br ^bb${shared}(%0)`] : ['  ret']),
+  );
   if (flavor === 'epilogue') {
     lines.push(`^bb${epi}():`, '  ret');
   }
-  if (flavor === 'tangled') {
+  if (flavor === 'tangled' || flavor === 'branchyxj') {
     const p = val();
     const z = val();
     const zc = val();
@@ -118,6 +122,17 @@ describe('a chain of divergent `if`s with early returns', () => {
     });
   }
 
+  test('branchyxj: a cross-jumped return tail that branches is copied into each early return', () => {
+    const fn = chain(4, 'branchyxj');
+    expect(count(emit(fn, {}), 'tail(')).toBe(16);
+    const once = emit(fn, { joinPastReturns: true });
+    expect(count(once, 'tail(')).toBe(1);
+    // the return tail, written in each of the 4 early returns and after the tail
+    expect(count(once, 'y(')).toBe(5);
+    expect(count(once, 'k(')).toBe(5);
+    expect(count(once, 'return;')).toBe(5);
+  });
+
   test('crossjumped: the shared-ret follow lands on the return tail and still copies', () => {
     const fn = chain(4, 'crossjumped');
     expect(count(emit(fn, { followEarlyReturns: true }), 'tail(')).toBeGreaterThan(1);
@@ -135,6 +150,30 @@ describe('a chain of divergent `if`s with early returns', () => {
       expect(count(once, 'x(')).toBe(3);
     });
   }
+
+  test('a return tail holding a join past returns of its own is not copied', () => {
+    // `if (a > i) { if (b == i) goto T; k2(i); } k3(i); T:` per link, then `tail()`: each `T` is
+    // acyclic and ends in the `ret`, but holds the next link, whose join past returns is its
+    // `k3`, so copying it into the `goto` arm would copy that link's copy in its turn
+    let v = 2;
+    const n = 8;
+    const lines = ['fn g {', '^bb0(%0: s32, %1: s32):', '  br ^bb1()'];
+    for (let i = 0; i < n; i++) {
+      const [h, t, a, k3, next] = [1 + 4 * i, 2 + 4 * i, 3 + 4 * i, 4 + 4 * i, 5 + 4 * i];
+      const [c, x, y] = [`%${v++}`, `%${v++}`, `%${v++}`];
+      lines.push(`^bb${h}():`, `  ${c}: s32 = const {value=${i + 1}}`, `  ${x}: u32 = icmp_slt ${c}, %0`);
+      lines.push(`  cond_br ${x}, ^bb${t}(), ^bb${k3}()`);
+      lines.push(`^bb${t}():`, `  ${y}: u32 = icmp_eq %1, ${c}`, `  cond_br ${y}, ^bb${next}(), ^bb${a}()`);
+      lines.push(`^bb${a}():`, `  %${v++}: s32 = call ${c} {target="k2"}`, `  br ^bb${k3}()`);
+      lines.push(`^bb${k3}():`, `  %${v++}: s32 = call ${c} {target="k3"}`, `  br ^bb${next}()`);
+    }
+    lines.push(`^bb${1 + 4 * n}():`, `  %${v++}: s32 = call %0 {target="tail"}`, '  ret', '}', '');
+    const fn = parse(lines.join('\n'));
+    verify(fn);
+    expect(count(emit(fn, {}), 'tail(')).toBe(1);
+    // only the last link's `T` is a return tail, a straight one
+    expect(count(emit(fn, { joinPastReturns: true }), 'tail(')).toBe(2);
+  });
 
   test('an `if` that already has a join is unchanged', () => {
     const fn = parse(`fn g {
@@ -162,7 +201,7 @@ describe('the copy budget', () => {
   test('a chain past the budget lifts with the tail written once, with nothing asked', () => {
     // 2^12 tails: far past `COPY_BUDGET` region entries per block, so `structure()` stops the
     // default and reruns it with `joinPastReturns`
-    for (const flavor of ['own', 'epilogue', 'crossjumped'] as const) {
+    for (const flavor of ['own', 'epilogue', 'crossjumped', 'branchyxj'] as const) {
       const fn = chain(12, flavor);
       const src = emit(fn, {});
       expect(count(src, 'tail(')).toBe(1);
