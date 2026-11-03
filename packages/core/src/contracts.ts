@@ -418,7 +418,7 @@ function countEffects(
       here = { through: null, ret: null, brk: own, cont: null, end: null };
     } else if (s.k === 'continue') {
       here = { through: null, ret: null, brk: null, cont: own, end: null };
-    } else if (s.k === 'goto' && s.caseEnd === true) {
+    } else if (s.k === 'caseEndGoto') {
       here = { through: null, ret: null, brk: null, cont: null, end: own };
     } else {
       here = falls(own);

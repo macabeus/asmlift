@@ -365,18 +365,23 @@ export type Stmt =
   // level, and its label is a case of THAT switch — so no loop or nested switch stands between the
   // jump and its target, and the jump runs exactly what a fall-through into that arm would run.
   //
-  // A CASE-END goto (`caseEnd`) jumps to the end of the arm it sits in: `label` names a labelled
-  // switch-scoped `break` (`L: break;`) that is an element of a statement list enclosing the goto,
-  // later in that list than the statement holding it, with no switch between the two and no loop
-  // around the label inside the arm — so the jump leaves every loop it sits in and then the switch,
-  // and runs nothing on the way. It is the source's `for (j…) { if (hit) { …; goto L; } } k(i); L:
-  // break;`, which agbcc threads past the loop around the switch (jump.c `follow_jumps`).
-  //
-  // Both are checked by `caseGotoViolation` (contracts.ts `assertCaseGotosNarrow`, which every
-  // structured and respelled tree passes). Any other goto is not representable. A goto ends its
-  // path like `break` and `continue`. SGI/IDO Pascal has neither a goto into a `case-of` arm nor a
-  // `break`, so its backend loud-fails both.
-  | { k: 'goto'; label: string; caseEnd?: true }
+  // A CASE-END goto is the next kind, `caseEndGoto`. Both are checked by `caseGotoViolation`
+  // (contracts.ts `assertCaseGotosNarrow`, which every structured and respelled tree passes). Any
+  // other goto is not representable. A goto ends its path like `break` and `continue`. SGI/IDO
+  // Pascal has no goto into a `case-of` arm, so its backend loud-fails it.
+  | { k: 'goto'; label: string }
+  // `goto <label>;` — THE CASE-END GOTO, the second goto L3 holds, a jump to the end of the arm it
+  // sits in: `label` names a labelled switch-scoped `break` (`L: break;`) that is an element of a
+  // statement list enclosing the goto, later in that list than the statement holding it, with no
+  // switch between the two and no loop around the label inside the arm — so the jump leaves every
+  // loop it sits in and then the switch, and runs nothing on the way. It is the source's `for (j…)
+  // { if (hit) { …; goto L; } } k(i); L: break;`, which agbcc threads past the loop around the
+  // switch (jump.c `follow_jumps`). Its own kind, not a flag on `goto`, so every pass that reads a
+  // `goto` as the jump into a case arm (`switchArmSuccessors`, `switchJumpsBack`) never meets one,
+  // and every exhaustive switch over `Stmt` decides it. It ends its path, and leaves the innermost
+  // switch around it. Written only by l3/caseendgoto.ts. SGI/IDO Pascal has no `break`, so its
+  // backend loud-fails it.
+  | { k: 'caseEndGoto'; label: string }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
   // is emitted after `defaultAt` of them, or after all of them when that is absent.
@@ -924,6 +929,7 @@ export function stmtExprs(s: Stmt): Expr[] {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return [];
   }
 }
@@ -964,6 +970,7 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return s;
   }
 }
@@ -1121,6 +1128,7 @@ export function stmtChildren(s: Stmt): Stmt[] {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return [];
     case 'if':
       return [...s.then, ...s.else];
@@ -1172,6 +1180,7 @@ export function isLoop(s: Stmt): s is Loop {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return false;
   }
 }
@@ -1179,7 +1188,7 @@ export function isLoop(s: Stmt): s is Loop {
 /** Why `body` breaks the two forms a `goto` may take in L3 (the `goto` statement's contract), or
  *  null when every `goto` in it keeps one. A case-label goto is the LAST statement of a case or
  *  default body, at that body's top level, naming a label one case of THAT switch carries. A
- *  case-end goto (`caseEnd`) names a labelled switch-scoped `break` later in a statement list that
+ *  case-end goto (`caseEndGoto`) names a labelled switch-scoped `break` later in a statement list that
  *  encloses it, inside the same switch arm, with no switch between them; ifs and loops may stand
  *  between, but no loop may stand between the labelled `break` and its arm. Labels are unique
  *  across the function, case labels and `break` labels together. Any other placement is refused:
@@ -1208,13 +1217,13 @@ export function caseGotoViolation(body: readonly Stmt[]): string | null {
     // only for a list holding one, so the walk allocates nothing per statement on a goto-free tree
     const after = endsAfter(list, scope.ends);
     for (const [i, s] of list.entries()) {
-      if (s.k === 'goto') {
-        if (s.caseEnd === true) {
-          if (!scope.ends.has(s.label)) {
-            return `\`goto ${s.label};\` names no labelled \`break;\` that ends the switch arm it sits in`;
-          }
-          continue;
+      if (s.k === 'caseEndGoto') {
+        if (!scope.ends.has(s.label)) {
+          return `\`goto ${s.label};\` names no labelled \`break;\` that ends the switch arm it sits in`;
         }
+        continue;
+      }
+      if (s.k === 'goto') {
         if (scope.labels === null || !scope.armTop || i !== list.length - 1) {
           return `\`goto ${s.label};\` is not the last statement of a switch arm's own body`;
         }
@@ -1309,7 +1318,7 @@ export function caseEndGotoLeaves(list: readonly Stmt[]): boolean {
   const visit = (s: Stmt): void => {
     if (s.k === 'break' && s.label !== undefined) {
       held.add(s.label);
-    } else if (s.k === 'goto' && s.caseEnd === true) {
+    } else if (s.k === 'caseEndGoto') {
       named.push(s.label);
     }
     stmtChildren(s).forEach(visit);
@@ -1337,7 +1346,9 @@ export function reachesEnd(list: readonly Stmt[]): boolean {
           return { end: false, leaves };
         // a case-end goto leaves the innermost switch around it, as its labelled `break;` does
         case 'goto':
-          return { end: false, leaves: leaves || s.caseEnd === true };
+          return { end: false, leaves };
+        case 'caseEndGoto':
+          return { end: false, leaves: true };
         case 'break':
           return { end: false, leaves: leaves || s.ofSwitch === true };
         case 'if': {
@@ -1446,6 +1457,7 @@ export function stmtLists(s: Stmt): Stmt[][] {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return [];
   }
 }
@@ -1476,6 +1488,7 @@ export function mapStmtLists(s: Stmt, f: (list: Stmt[]) => Stmt[]): Stmt {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return s;
   }
 }

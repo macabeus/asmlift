@@ -578,6 +578,7 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     // Where it may sit is the tree's contract (l3/ast.ts `caseGotoViolation`), which `emitCFamily`
     // asks of the whole function before printing any of it.
     case 'goto':
+    case 'caseEndGoto':
       return [`${indent}goto ${s.label};`];
     case 'switch':
       return printSwitchStmt(s, indent, vt, leaf);
@@ -699,6 +700,7 @@ function endsTerminated(body: Stmt[]): boolean {
       last.k === 'break' ||
       last.k === 'continue' ||
       last.k === 'goto' ||
+      last.k === 'caseEndGoto' ||
       (last.k === 'if' && endsTerminated(last.then) && last.else.length > 0 && endsTerminated(last.else)))
   );
 }

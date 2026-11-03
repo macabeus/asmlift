@@ -516,6 +516,7 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
     case 'break':
     case 'continue':
     case 'goto':
+    case 'caseEndGoto':
       return s;
   }
 }

@@ -431,7 +431,9 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         case 'continue':
           return 'continue';
         case 'goto':
-          return s.caseEnd === true ? resume(i, `end:${s.label}`) : `goto:${s.label}`;
+          return `goto:${s.label}`;
+        case 'caseEndGoto':
+          return resume(i, `end:${s.label}`);
         // A `switch` runs the arm its scrutinee selects, then the arms it falls into
         // (`fallsThrough`), in printed order, the default at `defaultAt`, until one leaves: a
         // `break` leaves the switch, a `continue` or `return` what encloses it. A case that falls

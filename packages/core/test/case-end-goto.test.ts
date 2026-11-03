@@ -1,4 +1,4 @@
-// THE CASE-END GOTO (l3/ast.ts `goto` with `caseEnd`): a jump from anywhere inside a switch arm,
+// THE CASE-END GOTO (l3/ast.ts `caseEndGoto`): a jump from anywhere inside a switch arm,
 // loops and ifs included, to a labelled `break;` that ends that same arm (`for (j…) { if (hit)
 // goto L; } k(i); L: break;`). On hand-built trees: its contract (`caseGotoViolation`, which
 // contracts.ts `assertCaseGotosNarrow` and the C-family printer both ask) and every other placement
@@ -50,7 +50,7 @@ const sfnWith = (body: Stmt[], locals: string[] = []): SFn => ({
   retType: T.void(),
   body,
 });
-const goto = (label = 'case_end'): Stmt => ({ k: 'goto', label, caseEnd: true });
+const goto = (label = 'case_end'): Stmt => ({ k: 'caseEndGoto', label });
 const end = (label = 'case_end'): Stmt => ({ k: 'break', ofSwitch: true, label });
 const brk: Stmt = { k: 'break', ofSwitch: true };
 const search = (hit: Stmt[]): Stmt => ({
@@ -225,7 +225,7 @@ describe('assertEffectsPreserved over a case-end goto', () => {
   test('a labelled `break;` that only a goto reaches is reached, beside another or after a `continue`', () => {
     // two search loops into one case end, the second's label right after the first's (`for (j…) {
     // if (h) goto L2; } k(); for (j…) { if (h) goto L; } t(); L: break; L2: break;`, as the
-    // structurer spells two sequential hits), and an arm whose code before its end leaves
+    // structurer once spelled two sequential hits), and an arm whose code before its end leaves
     // by `continue`
     const twoEnds = sw([
       arm([1], [search([goto('case_end_2')]), call('k'), search([goto()]), call('t'), end(), end('case_end_2')]),

@@ -10783,7 +10783,7 @@ function structureRanked(
         const next = list[i + 1];
         if (st.k === 'assign' && st.name === flag && next?.k === 'break' && next.ofSwitch !== true) {
           hits++;
-          return [{ k: 'goto', label: '', caseEnd: true }];
+          return [{ k: 'caseEndGoto', label: '' }];
         }
         if (
           st.k === 'break' &&
@@ -10824,9 +10824,7 @@ function structureRanked(
     }
     caseLabelNames.add(label);
     const named = (st: Stmt): Stmt =>
-      st.k === 'goto' && st.caseEnd === true && st.label === ''
-        ? { ...st, label }
-        : mapStmtLists(st, (l) => l.map(named));
+      st.k === 'caseEndGoto' && st.label === '' ? { ...st, label } : mapStmtLists(st, (l) => l.map(named));
     return [...rewritten.map(named), ...skippedCode, { k: 'break', ofSwitch: true, label }];
   };
   // The flag of the two-level exit out of the loop at `header`: one `s32` local per loop, named on

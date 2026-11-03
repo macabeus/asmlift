@@ -183,18 +183,19 @@ function dceBlock(
         rev.push(s);
         break;
       }
-      case 'goto': {
-        // The jump lands on a case label of the switch it sits in, or on the `break;` that ends its
-        // arm (l3/ast.ts, contracts.ts `assertCaseGotosNarrow`), whose every read the switch below
-        // already counts live.
-        if (s.caseEnd === true) {
-          if (!jumps?.caseEnd) {
-            throw new Error('dce: a case-end goto outside a switch arm');
-          }
-          setLive(new Set(jumps.caseEnd));
-          rev.push(s);
-          break;
+      // The jump lands on the `break;` that ends its arm (l3/ast.ts, contracts.ts
+      // `assertCaseGotosNarrow`), whose every read the switch below already counts live.
+      case 'caseEndGoto': {
+        if (!jumps?.caseEnd) {
+          throw new Error('dce: a case-end goto outside a switch arm');
         }
+        setLive(new Set(jumps.caseEnd));
+        rev.push(s);
+        break;
+      }
+      case 'goto': {
+        // The jump lands on a case label of the switch it sits in (l3/ast.ts, contracts.ts
+        // `assertCaseGotosNarrow`), whose every read the switch below already counts live.
         if (!jumps?.caseLabel) {
           throw new Error('dce: a goto outside the switch whose case it names');
         }
