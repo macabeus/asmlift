@@ -1486,27 +1486,44 @@ function gConeOf(c: SharedValueSite): Op[] {
   return [...out];
 }
 
-/** Is `v` constant offsets over a value ^g did not compute — `&gS + 0x35`, `p + 0x35 + 0x22` off a
- *  pointer parameter, a frame object's address — and nothing else? Asked over the WHOLE function's
- *  defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an earlier block loaded is GVN's one
- *  `gaddr` (`sub_0800D188`'s site). The LEAF is a symbol or frame address, or any value defined
- *  outside ^g (a block parameter, an earlier block's result): by dominance that value is already
- *  computed when the first test runs, so the cone spelled above the guard (as a local, or
- *  l3/basecse.ts's hoisted base) adds only `+ k` arithmetic, which reads nothing and cannot trap.
- *  The pointer-parameter leaf is measured too: agbcc's `add r0, r4, #0x35; ldrb; add r0, r0, #0x22`
- *  off `struct T *p` folds to bytes identical to the target (synthetic:scbase_pfar). */
+/** Is `v` constant offsets over a symbol or frame address, or over a value ^g did not compute that
+ *  ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p + 0x35 + 0x22` off a pointer parameter —
+ *  and nothing else? Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35`
+ *  off an `&gS` an earlier block loaded is GVN's one `gaddr` (`sub_0800D188`'s site). A leaf ^g did
+ *  not compute (a parameter, an earlier block's result) is, by dominance, already computed when
+ *  the first test runs, so the cone spelled above the guard (as a local, or l3/basecse.ts's
+ *  hoisted base) adds only `+ k` arithmetic, which reads nothing and cannot trap. That leaf is
+ *  admitted only when every ^g read of `v` is a load's address or a further `+ k` that is: the
+ *  pointer-parameter base is measured (agbcc's `add r0, r4, #0x35; ldrb; add r0, r0, #0x22` off
+ *  `struct T *p` folds to the target's bytes, synthetic:scbase_pfar), while a counter's `i + 1`
+ *  read twice by a latch's compare is not an address, and folding it lost retpost_notail's
+ *  gcc2.7.2 and gcc2.7.2kmc lifts to a structure decline. */
 function constOffsetCone(c: SharedValueSite): boolean {
   const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
+  /** every ^g read of `v` is a load's address, or `v + k` read only that way */
+  const readAsAddress = (v: Value): boolean =>
+    c.g.ops.every((op) => {
+      if (!op.operands.includes(v)) {
+        return true;
+      }
+      if (op.opcode === 'load') {
+        return true; // its one operand is the address
+      }
+      if (op.opcode === 'add' && op.operands.length === 2 && op.operands.some(isConst)) {
+        return op.results.every(readAsAddress);
+      }
+      return false;
+    });
   const ok = (v: Value, top: boolean): boolean => {
-    if (!top && !c.defOf.has(v)) {
-      return true; // computed before ^g: a symbol, a parameter, an earlier block's value
-    }
     const d = c.defs.get(v);
+    if (d?.opcode === 'gaddr' || d?.opcode === 'laddr') {
+      return true;
+    }
+    if (!top && !c.defOf.has(v)) {
+      return readAsAddress(c.value); // computed before ^g: a parameter, an earlier block's value
+    }
     if (!d) {
       return false; // not reached: every value ^g defines has a def
-    }
-    if (d.opcode === 'gaddr' || d.opcode === 'laddr') {
-      return true;
     }
     if (d.opcode === 'add') {
       const [a, b] = d.operands;

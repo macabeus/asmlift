@@ -774,6 +774,38 @@ describe('refusals', () => {
     ).toBe(true);
   });
 
+  test('a PARAMETER plus a constant that the second test reads as a VALUE, not an address, keeps the nest', () => {
+    // `if (a || ((i + 1) ^ (i + 1) >> 4) != 0)`: a counter's `i + 1` read twice by arithmetic. The
+    // pointer-parameter base is measured; this spelling is not (folding it lost
+    // synthetic:retpost_notail's gcc2.7.2 lifts), so it is the spelling rule's.
+    const i = mkValue(T.s(32));
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const one = mkValue(T.unk(32));
+        const n = mkValue(T.s(32));
+        const four = mkValue(T.unk(32));
+        const hi = mkValue(T.s(32));
+        const x = mkValue(T.s(32));
+        const zero = mkValue(T.unk(32));
+        return [
+          mkOp('const', { results: [one], attrs: { value: 1 } }),
+          mkOp('add', { operands: [i, one], results: [n] }),
+          mkOp('const', { results: [four], attrs: { value: 4 } }),
+          mkOp('shr_u', { operands: [n, four], results: [hi] }),
+          mkOp('xor', { operands: [n, hi], results: [x] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [x, zero], results: [out] }),
+        ];
+      },
+    });
+    fn.blocks[0].params = [i];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
   test('REFUSED: a DIVIDE the second test consumes twice would run above the first, by the SOUND rule', () => {
     // `if (b == 0 || (q = a / b) + q != 0)`: the named quotient is an unconditional statement
     // ahead of the `if`, so it would divide by the zero the first test guards against. The sound
