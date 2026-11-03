@@ -646,7 +646,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // `r0` values. The verdict is a conjunction of pure tests, so the order moves no fold. And
         // BEFORE tree ownership, so `onTreeOwned` keeps its meaning — the one thing in the way.
         const reread = armRereadCone(fn, g, otherEdge.block, preds, opts);
-        if (!reread || !definedValuesStayLocal(fn, g, reread, opts.sharedValue ?? SHARED_VALUE_GATES)) {
+        if (!reread || !definedValuesStayLocal(fn, g, reread, defs, opts.sharedValue ?? SHARED_VALUE_GATES)) {
           continue;
         }
         // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in the
@@ -1417,6 +1417,7 @@ function definedValuesStayLocal(
   fn: Fn,
   g: Block,
   { copy, drop }: ArmReread,
+  defs: ReadonlyMap<Value, Op>,
   gates: readonly Gate<SharedValueSite>[],
 ): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
@@ -1448,7 +1449,7 @@ function definedValuesStayLocal(
   // ONE inlines into the connective's operand. TWO or more is the table's question.
   const defOf = new Map<Value, Op>(g.ops.flatMap((op) => op.results.map((r): [Value, Op] => [r, op])));
   return [...defined].every(
-    (value) => (uses.get(value) ?? 0) <= 1 || firstRejection(gates, { g, value, defOf }) === null,
+    (value) => (uses.get(value) ?? 0) <= 1 || firstRejection(gates, { g, value, defOf, defs }) === null,
   );
 }
 
@@ -1460,6 +1461,9 @@ export interface SharedValueSite {
   readonly value: Value;
   /** the op in ^g defining each value ^g defines */
   readonly defOf: ReadonlyMap<Value, Op>;
+  /** the defining op of every value in the function — an address's symbol and offsets are often
+   *  defined ABOVE ^g, where GVN numbered them with an earlier use */
+  readonly defs: ReadonlyMap<Value, Op>;
 }
 
 /** The part of `v`'s operand cone ^g computes — the ops a hoisted local would carry above the `if`. */
@@ -1475,21 +1479,23 @@ function gConeOf(c: SharedValueSite): Op[] {
   return [...out];
 }
 
-/** Is `v` an ADDRESS whose ^g cone is a symbol plus constant offsets — `&gS`, `&gS + 3`, a frame
- *  object's address — and nothing else? Such a value reads no memory and cannot trap, so spelling it
- *  above the guard (as a local, or l3/basecse.ts's hoisted base) runs nothing the source did not. */
+/** Is `v` an ADDRESS that is a symbol plus constant offsets — `&gS`, `&gS + 0x35`, `&gS + 0x35 +
+ *  0x22`, a frame object's address — and nothing else? Asked over the WHOLE function's defs, not
+ *  ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an earlier block loaded is GVN's one `gaddr`
+ *  (`sub_0800D188`'s site). Such a value reads no memory and cannot trap, so spelling it above the
+ *  guard (as a local, or l3/basecse.ts's hoisted base) runs nothing the source did not. */
 function pureAddressCone(c: SharedValueSite): boolean {
   const ok = (v: Value): boolean => {
-    const d = c.defOf.get(v);
+    const d = c.defs.get(v);
     if (!d) {
-      return false; // from outside ^g — not an address this test can see the shape of
+      return false; // a block parameter — a variable, not an address this test can see the shape of
     }
     if (d.opcode === 'gaddr' || d.opcode === 'laddr') {
       return true;
     }
     if (d.opcode === 'add') {
       const [a, b] = d.operands;
-      const isConst = (x: Value) => c.defOf.get(x)?.opcode === 'const';
+      const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
       return (isConst(b) && ok(a)) || (isConst(a) && ok(b));
     }
     return false;

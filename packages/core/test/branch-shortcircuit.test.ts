@@ -746,6 +746,19 @@ describe('refusals', () => {
     },
   );
 
+  test('an ADDRESS whose symbol and offset an EARLIER block defined is re-derived too', () => {
+    // agbcc's `add r0, r2, #0x35` off an `&gS` loaded above the condition: GVN's one `gaddr` and
+    // `const` live in the head, and only the sum, read twice, is ^g's (sub_0800D188's site).
+    const fn = sharedBase('gaddr+k');
+    const [head, g] = fn.blocks;
+    const leaves = g.ops.filter((o) => o.opcode === 'gaddr' || (o.opcode === 'const' && o.attrs.value === 4));
+    g.ops = g.ops.filter((o) => !leaves.includes(o));
+    head.ops.splice(0, 0, ...leaves);
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+  });
+
   test('REFUSED: a READ the second test consumes twice would run above the first', () => {
     // `if (a || (*p | *p >> 4) != 0)`: a value read twice is materialized as a local, a statement
     // ahead of the `if`, so the load would run before the first test decided anything.
