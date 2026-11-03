@@ -3018,7 +3018,7 @@ function joinsPastReturns(
   fn: Fn,
   reachFrom: (b: Block) => ReadonlySet<Block>,
   ipdom: ReadonlyMap<Block, Block | null>,
-): { isReturnTail: (x: Block) => boolean; joinOf: (b: Block) => Block | null } {
+): { isReturnTail: (x: Block) => boolean; joinOf: (b: Block, arms?: readonly Block[]) => Block | null } {
   const straightReturn = new Map<Block, boolean>();
   const isStraightReturn = (x: Block): boolean => {
     let known = straightReturn.get(x);
@@ -3075,8 +3075,12 @@ function joinsPastReturns(
     return known;
   };
   const joins = new Map<Block, Block | null>();
-  const joinOf = (b: Block): Block | null => {
-    let join = joins.get(b);
+  const treeJoins = new Map<Block, Block | null>();
+  // `arms`: the case and default blocks of a comparison tree rooted at `b`, read as a jump table's
+  // successors (a switch Regime A recovers)
+  const joinOf = (b: Block, arms?: readonly Block[]): Block | null => {
+    const memo = arms === undefined ? joins : treeJoins;
+    let join = memo.get(b);
     if (join !== undefined) {
       return join;
     }
@@ -3085,11 +3089,11 @@ function joinsPastReturns(
     const rpo = reversePostorder();
     const at = rpo.get(b);
     if (!reach.has(b) && at !== undefined) {
-      const succs = [...new Set(successorsOf(b))];
+      const succs = [...new Set(arms ?? successorsOf(b))];
       const meet = new Map<Block, number>(
         [...reach].map((j) => [j, succs.filter((x) => x === j || reachFrom(x).has(j)).length]),
       );
-      const table = b.ops[b.ops.length - 1].opcode === 'switch_br';
+      const table = arms !== undefined || b.ops[b.ops.length - 1].opcode === 'switch_br';
       // a jump table's CFG join, and the return tail past it, are where its arms meet the returns
       const cfg = ipdom.get(b) ?? null;
       const pastCfg = (j: Block): boolean => cfg !== null && (j === cfg || reachFrom(cfg).has(j));
@@ -3103,7 +3107,7 @@ function joinsPastReturns(
         // the early-return blocks already met from another successor of `b`
         const owner = new Map<Block, Block>();
         let fits = true;
-        for (const from of new Set(successorsOf(b))) {
+        for (const from of succs) {
           const seen = new Set<Block>([b, j]);
           for (const stack = [from]; fits && stack.length;) {
             const x = stack.pop()!;
@@ -3128,7 +3132,7 @@ function joinsPastReturns(
         }
       }
     }
-    joins.set(b, join);
+    memo.set(b, join);
     return join;
   };
   return { isReturnTail, joinOf };
@@ -3138,7 +3142,11 @@ function joinsPastReturns(
  *  does not — its post-dominator EXIT or a return tail, and a block past early returns
  *  where its arms meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it
  *  asks neither the enclosing region's `stop`, nor whether a switch arm's own join wins there, nor
- *  whether a jump table's arms read at the join decline. */
+ *  whether a jump table's arms read at the join decline.
+ *
+ *  KNOWN GAP: a comparison tree Regime A recovers as a `switch` is asked its join over the tree's
+ *  case blocks, which only Regime A finds, so this answers for it only where another `if` or jump
+ *  table of the function does. Such a chain is still read at its join past the copy budget. */
 export function hasJoinPastReturns(fn: Fn): boolean {
   const ipdom = functionPostDominators(fn);
   const inLoop = new Set([...analyzeLoops(fn, dominators(fn)).byHeader.values()].flatMap((nl) => [...nl.body]));
@@ -4345,8 +4353,8 @@ function structureRanked(
     }
   };
   const { isReturnTail, joinOf: joinPastReturnsOf } = joinsPastReturns(fn, reachFrom, ipdom);
-  const joinPastReturnsAt = (b: Block, stop: Block | null): Block | null => {
-    const join = joinPastReturnsOf(b);
+  const joinPastReturnsAt = (b: Block, stop: Block | null, arms?: readonly Block[]): Block | null => {
+    const join = joinPastReturnsOf(b, arms);
     return join === null || (stop !== null && join !== stop && reachesAvoiding(b, stop, join)) ? null : join;
   };
 
@@ -9640,7 +9648,30 @@ function structureRanked(
     // Regime-A switch: if this cond_br roots a comparison tree over a single scrutinee, emit a
     // `switch`. A pre-check here — mirroring the guard-fused-loop check above — so it sees the raw
     // tree before if-recovery claims the diamonds. Declines (null) fall through to plain if-recovery.
-    const asSwitch = handedThroughSwitch(() => recognizeSwitch(b, stop));
+    //
+    // A comparison tree is a jump table to the join past early returns (`joinPastReturns`, or the
+    // copy budget's rerun): its end is asked over the tree's case and default blocks, as the
+    // `switch_br`'s over its successors, and taken only where the tree recovers at it; where it does
+    // not, the tree is read again at the CFG's merge, as without the reading.
+    const asSwitch = handedThroughSwitch(() => {
+      const cfgJoin = ipdom.get(b) ?? null;
+      if ((joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin))) {
+        let took = false;
+        const joined = recognizeSwitch(b, stop, (arms) => {
+          const join = joinPastReturnsAt(b, stop, arms);
+          took = join !== null && join !== cfgJoin;
+          return took ? join! : undefined;
+        });
+        if (joined !== null && took) {
+          hooks.onJoinPastReturns?.();
+          return joined;
+        }
+        if (joined !== null) {
+          return joined;
+        }
+      }
+      return recognizeSwitch(b, stop);
+    });
     if (asSwitch) {
       out.push(...asSwitch);
       return out;

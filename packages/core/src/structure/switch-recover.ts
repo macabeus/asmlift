@@ -109,7 +109,13 @@ export type ArmExit =
   | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
-  recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
+  /** `mergeAt`, given the tree's case and default blocks, may name the switch's end ahead of the
+   *  CFG's (structure.ts's join past early returns); `undefined` keeps `ipdom ?? stop`. */
+  recognizeSwitch: (
+    b: Block,
+    stop: Block | null,
+    mergeAt?: (arms: readonly Block[]) => Block | undefined,
+  ) => Stmt[] | null;
   /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
    *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
    *  Regime B, which has no fallback, fails loud. */
@@ -1006,7 +1012,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     };
   };
 
-  const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
+  const recognizeSwitch = (
+    b: Block,
+    stop: Block | null,
+    mergeAt?: (arms: readonly Block[]) => Block | undefined,
+  ): Stmt[] | null => {
     const root = testInfo(b);
     if (!root) {
       return null;
@@ -1230,8 +1240,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // a sibling beside a block the switch does not dominate — and Regime A declines to if-recovery,
     // which spells every one of those edges. (Regime B reads the same verdicts and fails LOUD on
     // either.)
-    const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
+    const merge = mergeAt?.([...targets]) ?? ipdom.get(b) ?? stop;
     const siblings = new Set([...targets].filter((t) => t !== merge));
     const exitOf = new Map<Block, ArmExit>();
     for (const t of siblings) {
