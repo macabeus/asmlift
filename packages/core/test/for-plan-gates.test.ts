@@ -381,6 +381,17 @@ test("IDO's whole counted loop: the `+ 1` bound and a stride together", () => {
   expect(r.agreement.disagree).toBe(0);
 });
 
+test('a stride read in an exit arm, ahead of its `break`, is G of the counter the header left with', () => {
+  // case 6's `k(p); break;` (#10) lies outside the natural loop, but the `for` writes it inside its
+  // body, entered from the header without passing the update: KMC's `case 7: k(gA[i]); break;`
+  const ir = srFor(STRIDE).replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %6 {target="k"}');
+  const r = lift(ir);
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.src).toMatch(/k\(v0 \+ 3\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
 test('without stride-escapes the code after the loop reads a stride never written', () => {
   // `for (i = 0; ..; i++)` with no guard (the first test folds): the header dominates the exit, and
   // the code there calls `exitv` on the stride itself, whose name the `for` never writes

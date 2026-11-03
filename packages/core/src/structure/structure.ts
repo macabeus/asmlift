@@ -1666,7 +1666,7 @@ export const FOR_PLAN_GATES: readonly Gate<ForPlanCandidate>[] = [
  *  `ForPlanCandidate` is. */
 export interface ForPlanIv {
   /** a stride's param or its stepped value reaches an edge but the back edge's own slot, an op
-   *  outside the loop, the test or the counter's update (A SIBLING'S STRIDE) */
+   *  outside the loop and its exit arms, the test or the counter's update (A SIBLING'S STRIDE) */
   readonly strideEscapes: boolean;
   /** a stride is of a sibling other than the counter, or a body value other than the counter's
    *  param and the latch's ops holds the counter's name, or one holds a stride's or a leaf's name
@@ -10374,11 +10374,19 @@ function structureRanked(
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
   //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
   //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
-  //     (`stride-escapes`);
-  //   • no value in the body but the counter's param and the latch's ops is named for the counter,
-  //     and none for a leaf of G or for the param (the latch is never rendered, and the update is the
-  //     one write of the counter in the `for`); a read of a NAMED leaf is then a read of that leaf
-  //     (`stride-name-shared`);
+  //     (`stride-escapes`). The param may also be read ON THE WAY OUT, in a block of an exit arm the
+  //     `for` writes inside its body ahead of its `break` or `return` (a `BreakArm`'s region, a
+  //     `LoopArm`'s owned blocks) that the header dominates and the latch reaches only through the
+  //     header: `case 7: k(gA[i]); break;` leaving `for (..) switch (..)` (KMC's
+  //     `synthetic:sw_gotocase2:gcc2.7.2kmc`, which keeps `gA[i]` in a pointer it steps by 4). Every
+  //     path into such a block leaves the header without passing the update, so the counter's name
+  //     holds what it held there, which is what the param is G of; the next rule holds the arm's
+  //     values off the names too. Past the loop the param is still refused: the code after it is
+  //     written outside the `for`, where nothing renders G;
+  //   • no value in the body or in those exit arms but the counter's param and the latch's ops is
+  //     named for the counter, and none for a leaf of G or for the param (the latch is never
+  //     rendered, and the update is the one write of the counter in the `for`); a read of a NAMED
+  //     leaf is then a read of that leaf (`stride-name-shared`);
   //   • every leaf is named, or an operand-free op that reads no memory (a constant, a symbol's
   //     address). Any other is spelled as its own expression at each read, so evaluated again there:
   //     IDO keeps `b = gP` of `struct E *b = gP; for (..) .. b[i] ..` in a register, unnamed, and G
@@ -10394,6 +10402,7 @@ function structureRanked(
     lterm: Op,
     cond: Value,
     body: ReadonlySet<Block>,
+    arms: ReadonlySet<Block>,
   ): boolean => {
     const p = h.params[sd.j];
     const stepped = back.args[sd.j] as Value;
@@ -10418,7 +10427,7 @@ function structureRanked(
     return (
       !onEdges(p) &&
       !onEdges(stepped, back) &&
-      readers(p).every((u) => body.has(u.blk)) &&
+      readers(p).every((u) => body.has(u.blk) || arms.has(u.blk)) &&
       readers(stepped).length === 0 &&
       lterm.successors.includes(back) &&
       opBlock.get(defs.get(stepped)!) === latch &&
@@ -10435,6 +10444,7 @@ function structureRanked(
     iv: string,
     latch: Block,
     body: ReadonlySet<Block>,
+    arms: ReadonlySet<Block>,
   ): boolean => {
     if (strides.some((sd) => h.params[sd.i] !== ivParam)) {
       return false;
@@ -10451,7 +10461,7 @@ function structureRanked(
     if (owners.has(iv)) {
       return false;
     }
-    for (const b of body) {
+    for (const b of [...body, ...arms]) {
       for (const v of [...b.params, ...b.ops.flatMap((o) => o.results)]) {
         const name = varName.get(v);
         if (name === undefined) {
@@ -10874,6 +10884,29 @@ function structureRanked(
             fl.body,
             varType.get(iv),
           ).find((t) => !differs(t)) ?? null));
+    // A SIBLING'S STRIDE read on the way out (see above): the blocks of the loop's exit arms — a
+    // `break` that runs code first, an early return — that the `for` writes inside its body, that the
+    // header dominates and that the latch reaches only through the header
+    let armBlocks: Set<Block> | undefined;
+    const exitArms = (): ReadonlySet<Block> => {
+      if (armBlocks !== undefined) {
+        return armBlocks;
+      }
+      const pastLatch = new Set<Block>();
+      for (const stack = successorsOf(latch).filter((x) => x !== h); stack.length > 0;) {
+        const x = stack.pop()!;
+        if (!pastLatch.has(x)) {
+          pastLatch.add(x);
+          stack.push(...successorsOf(x).filter((y) => y !== h));
+        }
+      }
+      armBlocks = new Set(
+        [...fl.breakArms.flatMap((a) => [...a.region]), ...fl.arms.flatMap((a) => [...a.owned])].filter(
+          (x) => !fl.body.has(x) && !pastLatch.has(x) && dom.get(x)!.has(h),
+        ),
+      );
+      return armBlocks;
+    };
     // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
     const rereadable = (v: Value): boolean => {
       const d = defs.get(v);
@@ -10892,10 +10925,10 @@ function structureRanked(
     if (
       firstRejection(hooks.forPlanIvGates ?? FOR_PLAN_IV_GATES, {
         get strideEscapes() {
-          return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body));
+          return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body, exitArms()));
         },
         get strideNameShared() {
-          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body);
+          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body, exitArms());
         },
         get strideLeafReread() {
           return strides.some((sd) => !sd.leaves.every(rereadable));
