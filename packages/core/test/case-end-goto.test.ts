@@ -221,6 +221,27 @@ describe('assertEffectsPreserved over a case-end goto', () => {
       /emitted 2 calls to 'k' on one path/,
     );
   });
+
+  test('a labelled `break;` that only a goto reaches is reached, beside another or after a `continue`', () => {
+    // two search loops into one case end, the second's label right after the first's (`for (j…) {
+    // if (h) goto L2; } k(); for (j…) { if (h) goto L; } t(); L: break; L2: break;`, as the
+    // structurer spells two sequential hits), and an arm whose code before its end leaves
+    // by `continue`
+    const twoEnds = sw([
+      arm([1], [search([goto('case_end_2')]), call('k'), search([goto()]), call('t'), end(), end('case_end_2')]),
+    ]);
+    expect(caseGotoViolation([twoEnds])).toBeNull();
+    expect(() => assertEffectsPreserved(irCalling(['k', 't']), sfnWith([twoEnds]))).not.toThrow();
+    const loop: Stmt = {
+      k: 'while',
+      cond: v('c'),
+      body: [sw([arm([1], [search([goto()]), { k: 'continue' }, end()])])],
+    };
+    expect(() => assertEffectsPreserved(irCalling([]), sfnWith([loop]))).not.toThrow();
+    // code after a `break;`, labelled or not, is still unreached
+    const dead = sw([arm([1], [search([goto()]), brk, end(), call('k')])]);
+    expect(() => assertEffectsPreserved(irCalling(['k']), sfnWith([dead]))).toThrow(/no path reaches/);
+  });
 });
 
 // ── the producer ──────────────────────────────────────────────────────────────────────────────────

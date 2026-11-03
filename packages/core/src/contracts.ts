@@ -332,7 +332,10 @@ const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: nu
  *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
  *  `if (…) { f(); return; }` arms are one call on any path, not two. `unreached` collects every
  *  statement that follows one no path falls past: the path count skips it, so the caller refuses it
- *  rather than let a duplicated region hide there. */
+ *  rather than let a duplicated region hide there. A labelled `break;` no path falls into is not
+ *  one of them while a case-end `goto` in an earlier statement of the list is still leaving
+ *  (`paths.end`): the goto lands on it, or on a labelled `break;` further out that this one's
+ *  `break` reaches too, so it is reached, and it holds no code a region could hide in. */
 function countEffects(
   stmts: Stmt[],
   ctx: TreeContext,
@@ -341,7 +344,7 @@ function countEffects(
   let total: EffectCounts = new Map();
   let paths = falls(new Map());
   for (const s of stmts) {
-    if (paths.through === null) {
+    if (paths.through === null && !(s.k === 'break' && s.label !== undefined && paths.end !== null)) {
       unreached.push(s);
     }
     const own: EffectCounts = new Map();
