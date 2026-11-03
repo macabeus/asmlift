@@ -17306,6 +17306,44 @@ export const SYNTHETIC: SynthSpec[] = [
       'void sw_hitexit_in(s32 lo, s32 hi);',
     proto: { sw_hitexit_in: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //  37. retchain / retchain_xj / retchain_one (sub_0800D188 once its `for` reads: the tail written
+  //      2^n times). A chain of `if`s each holding an early `return` in one arm: no two arms of such an
+  //      `if` meet before the function's `ret`, so post-dominance gives it no join, and the default
+  //      structuring writes everything after it into both arms, doubling once per `if` of the chain.
+  //      sub_0800D188's tile-collision chain (warp door, game over) wrote the entity loop and the rest
+  //      of the function 16 times and its tail end 176 times, 3.6M statements, past what the printer
+  //      took. retchain gives each early return its own code; retchain_xj gives every one the same
+  //      `k(x); gT = x; return;`, which agbcc and gcc2.7.2 cross-jump into one shared return tail;
+  //      retchain_one is a single such `if`, written once by every reading.
+  ...(
+    [
+      [
+        'retchain',
+        5,
+        (i: number) => ['gT = gT * 3;', 'gU = gU + gC;', 'm(gD);', 'gV = gW - 7;', 'gT = gU ^ 5;'][i - 1],
+      ],
+      ['retchain_xj', 5, (i: number) => `k(${i}1); gT = ${i};`],
+      ['retchain_one', 1, (i: number) => `k(${i}1); gT = ${i};`],
+    ] as const
+  ).map(([sym, n, ret]): SynthSpec => ({
+    sym,
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      `void ${sym}(void) {\n` +
+      Array.from(
+        { length: n },
+        (_, j) =>
+          `    if (gA > ${j + 1}) { if (gB == ${j + 1}) { ${ret(j + 1)} return; } k(${j + 1}2); } else { k(${j + 1}3); }\n`,
+      ).join('') +
+      '    m(gC); m(gD); gOut = gOut + 1; m(gU); m(gV);\n' +
+      '}',
+    features: ['branch', 'global'],
+    toolchains: FIVE,
+    ctx: `extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\nvoid k(s32 x);\nvoid m(s32 x);\nvoid ${sym}(void);`,
+    proto: { [sym]: { returnsVoid: true }, k: { params: 1, returnsVoid: true }, m: { params: 1, returnsVoid: true } },
+  })),
   // A SCALAR GLOBAL THE CONTEXT DECLARES AT ANOTHER WIDTH OR SIGNEDNESS THAN ITS ONE ACCESS. The
   // usage inference reads a global accessed only at offset 0 at one width as a scalar of that
   // width, and the bare name is that scalar only where the declaration agrees: `return gN;` over

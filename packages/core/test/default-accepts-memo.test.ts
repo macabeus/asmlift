@@ -170,6 +170,15 @@ describe('DefaultAcceptsMemo', () => {
     expect(refusal(fn, { coalesceMergeNames: true }, memo, hooks)).not.toBe(first);
   });
 
+  test('still answers a setting that carries only the hooks rank.ts passes every setting', () => {
+    // the hooks a setting observes itself through are not the default run's, which drops them
+    const fn = fnOf(IRREDUCIBLE);
+    const memo = new DefaultAcceptsMemo(fn);
+    const hooks: StructureHooks = { onCounterSignRefused: () => {}, onJoinPastReturns: () => {} };
+    const first = refusal(fn, { coalesceMergeNames: true }, memo, hooks);
+    expect(refusal(fn, { materializeJoinFeeds: true }, memo, hooks)).toBe(first);
+  });
+
   test('answers an accepted reset once it has structured it', () => {
     const fn = fnOf(VOLATILE_READ);
     const memo = new DefaultAcceptsMemo(fn);

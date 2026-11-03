@@ -12,6 +12,7 @@ import { IrType, typeToString } from '../ir/types';
 import { BinOp, Expr, LanguageBackend, SFn, Stmt, isLoop } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
 import { type VarTypes, declaredTypes, derefStrideOk, exprCType, writesNonPointerIntoPointer } from '../l3/typing';
+import { append } from './lines';
 
 // Infix operators IDO Pascal spells directly.
 const OP: Partial<Record<BinOp, string>> = {
@@ -215,10 +216,10 @@ function makePrinter(vt: VarTypes) {
             : [`${ind}begin`, ...list(stmts, ind + '  ', tail), `${ind}end`];
         // Pascal: no `;` before `else`; the branch statements already carry their own.
         const out = [`${indent}if ${cond} then`];
-        out.push(...block(s.then, indent + '  ', s.else.length > 0));
+        append(out, block(s.then, indent + '  ', s.else.length > 0));
         if (s.else.length) {
           out.push(`${indent}else`);
-          out.push(...block(s.else, indent + '  '));
+          append(out, block(s.else, indent + '  '));
         }
         return out;
       }
@@ -291,14 +292,15 @@ function makePrinter(vt: VarTypes) {
           if (c.fallsThrough) {
             throw new Error('pascal backend: switch fall-through has no faithful IDO Pascal case-of spelling');
           }
-          out.push(`${indent}  ${c.values.join(', ')}:`, ...arm(c.body, indent + '  '));
+          out.push(`${indent}  ${c.values.join(', ')}:`);
+          append(out, arm(c.body, indent + '  '));
         }
         // A C `switch` with no `default` runs on past a value it does not list; IDO Pascal's
         // `case` raises a run-time `caseerror` there instead. So the clause is always printed, an
         // empty one when the source had no default.
         out.push(`${indent}  otherwise`);
         if (s.default?.length) {
-          out.push(...arm(s.default, indent + '  '));
+          append(out, arm(s.default, indent + '  '));
         }
         out.push(`${indent}end;`);
         return out;
@@ -358,7 +360,7 @@ export const pascalBackend: LanguageBackend = {
       lines.push('var', ...fn.locals.map((l) => `  ${l.name}: ${pasType(l.type)};`));
     }
     lines.push('begin');
-    fn.body.forEach((s, i) => lines.push(...ps(fn.name, s, '  ', i === fn.body.length - 1)));
+    fn.body.forEach((s, i) => append(lines, ps(fn.name, s, '  ', i === fn.body.length - 1)));
     lines.push('end;');
     return lines.join('\n') + '\n';
   },
