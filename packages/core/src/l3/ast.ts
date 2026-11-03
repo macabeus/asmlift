@@ -1330,9 +1330,9 @@ export function caseEndGotoLeaves(list: readonly Stmt[]): boolean {
 /** Can control fall off the END of `list`? False only where every path through it is provably
  *  left first — by `return`, `continue`, a loop's `break`, a `goto`, a switch-scoped `break` or a
  *  case-end `goto` (which leave the arm they sit in), or an `if` or `switch` none of whose paths
- *  reaches its own end. A loop is read as reaching its end (a decided exit is not looked for), so the answer errs toward
- *  "reaches", which is the side a caller appending a jump after the list can afford: the jump it
- *  then writes is one no path runs, dead code and never a path cut. */
+ *  reaches its own end. A loop is read as reaching its end (a decided exit is not looked for), so
+ *  the answer errs toward "reaches", which is the side a caller appending a jump after the list
+ *  can afford: the jump it then writes is one no path runs, dead code and never a path cut. */
 export function reachesEnd(list: readonly Stmt[]): boolean {
   // `end`: some path falls off the list's last statement; `leaves`: some path takes a
   // switch-scoped `break` out of it, which ends the innermost switch around it.
