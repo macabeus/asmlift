@@ -3139,6 +3139,15 @@ function joinsPastReturns(
   return { isReturnTail, joinOf };
 }
 
+/** WHERE THE JOIN PAST EARLY RETURNS IS ASKED, of a branch outside every loop body: where its CFG
+ *  join is EXIT or a return tail (an epilogue every early return and the tail branch to is a
+ *  post-dominator, and merging there writes everything above it into each arm exactly as EXIT
+ *  does). Any other CFG join is where the paths already meet. The one test the structurer's three
+ *  sites (`askJoinPastReturns`) and the enumeration gate (`hasJoinPastReturns`) share. */
+function joinPastReturnsAsked(cfgJoin: Block | null, isReturnTail: (x: Block) => boolean): boolean {
+  return cfgJoin === null || isReturnTail(cfgJoin);
+}
+
 /** Is there an `if` or a jump table outside every loop that `joinPastReturns` gives a join its CFG
  *  does not — its post-dominator EXIT or a return tail, and a block past early returns
  *  where its arms meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it
@@ -3175,7 +3184,7 @@ export function hasJoinPastReturns(fn: Fn): boolean {
     }
     // a join that IS the CFG's (a guard around a loop that runs on into the epilogue) changes nothing
     const cfgJoin = ipdom.get(b) ?? null;
-    const join = cfgJoin === null || isReturnTail(cfgJoin) ? joinOf(b) : null;
+    const join = joinPastReturnsAsked(cfgJoin, isReturnTail) ? joinOf(b) : null;
     return join !== null && join !== cfgJoin;
   });
 }
@@ -8314,6 +8323,34 @@ function structureRanked(
   // `structure/retspell.ts`. `l3/tailret.ts` owns whether a marked return is safe to delete.
   const unspelledRets = unspelledEpilogues(fn);
 
+  /** THE JOIN PAST EARLY RETURNS, as every branch that can take it asks it: an `if`, a jump table
+   *  and a comparison tree. Asked under `joinPastReturns` or the copy budget's rerun, outside loop
+   *  bodies only (inside one, `clampToLoop` owns the question), and only where the CFG's join is
+   *  EXIT or a return tail (`joinPastReturnsAsked`). The join itself is `joinPastReturnsAt` — over
+   *  the branch's successors, or a comparison tree's case blocks — which the caller asks, since only
+   *  it knows which arms to ask it over.
+   *
+   *  `cfgInRegion` is what the CFG's join becomes when the question is asked: where the enclosing
+   *  region ends before that return tail (its `stop`, an outer `if`'s join past returns, is
+   *  reachable around it), the tail is no join HERE either, and the branch keeps its arms to `stop`,
+   *  as one whose CFG join is EXIT does. The `if` and the jump table read it in place of the CFG's
+   *  join. A comparison tree does not: its fallback is `recognizeSwitch`'s own merge, which makes
+   *  the same check where it matters — a tree whose arm `break`s to a merge `stop` is reachable
+   *  around declines to if-recovery, which reads `cfgInRegion` (switch-recover.ts, "AN ARM'S
+   *  `break;` NEEDS THE MERGE TO BE THE SWITCH'S END IN THIS REGION"). */
+  const askJoinPastReturns = (
+    b: Block,
+    stop: Block | null,
+  ): { asked: boolean; cfgJoin: Block | null; cfgInRegion: Block | null } => {
+    const cfgJoin = ipdom.get(b) ?? null;
+    const asked = (joinPastReturns || overBudget) && loopCtx === null && joinPastReturnsAsked(cfgJoin, isReturnTail);
+    const cfgInRegion =
+      asked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
+        ? null
+        : cfgJoin;
+    return { asked, cfgJoin, cfgInRegion };
+  };
+
   const structureRegion = (b: Block, stop: Block | null): Stmt[] => {
     if (b === stop) {
       return [];
@@ -8509,14 +8546,8 @@ function structureRanked(
       // switch, exactly as a chain of `if`s does. Same precedence and same `stop` rule as there, and
       // adopted only where the arms read at it decline nothing (below): it turns copies into one
       // tail, never a switch that spells into a decline.
-      const cfgJoin = ipdom.get(b) ?? null;
-      const pastReturnsAsked =
-        (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin));
+      const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
       const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
-      const cfgInRegion =
-        pastReturnsAsked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
-          ? null
-          : cfgJoin;
       const cfgFollow = cfgInRegion ?? followOverReturns(b, stop);
       let joined = pastReturns !== null && pastReturns !== cfgJoin ? pastReturns : cfgFollow;
       let merge = joined ?? stop;
@@ -9655,8 +9686,8 @@ function structureRanked(
     // `switch_br`'s over its successors, and taken only where the tree recovers at it; where it does
     // not, the tree is read again at the CFG's merge, as without the reading.
     const asSwitch = handedThroughSwitch(() => {
-      const cfgJoin = ipdom.get(b) ?? null;
-      if ((joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin))) {
+      const { asked, cfgJoin } = askJoinPastReturns(b, stop);
+      if (asked) {
         let took = false;
         const joined = recognizeSwitch(b, stop, (arms) => {
           const join = joinPastReturnsAt(b, stop, arms);
@@ -9685,21 +9716,10 @@ function structureRanked(
     // structuring options, sunk and unsunk), and every row of both tiers enumerates a byte-identical
     // variations-and-source set (810 synthetic, 251 real, `ProcessInputAndUpdateEntities` excepted).
     //
-    // `joinPastReturns` (or the copy budget's rerun) asks its join ahead of both where the CFG's is
-    // EXIT or a return tail: an epilogue every early return and the tail branch to
-    // (agbcc, ido7.1, mwcc) is a post-dominator, and merging there writes everything above it into
-    // each arm exactly as EXIT does.
-    // Where it finds none and the enclosing region ends before that return tail (its `stop`, an
-    // outer `if`'s join past returns, is reachable around it), the tail is no join HERE either: the
-    // `if` keeps its arms to `stop`, as one whose CFG join is EXIT does.
-    const cfgJoin = ipdom.get(b) ?? null;
-    const pastReturnsAsked =
-      (joinPastReturns || overBudget) && loopCtx === null && (cfgJoin === null || isReturnTail(cfgJoin));
+    // The join past early returns is asked ahead of both (`askJoinPastReturns` says where, and what
+    // the CFG's join becomes when it is).
+    const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
-    const cfgInRegion =
-      pastReturnsAsked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
-        ? null
-        : cfgJoin;
     if (pastReturns !== null && pastReturns !== cfgJoin) {
       hooks.onJoinPastReturns?.();
     }
