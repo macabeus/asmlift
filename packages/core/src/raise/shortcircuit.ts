@@ -59,7 +59,14 @@ import {
   replaceAllUsesWith,
   successorsOf,
 } from '../ir/core';
-import { effectful, forgetHelperPlacement, orderSensitive, placedAt, speculationUnsafe } from '../ir/discipline';
+import {
+  effectful,
+  forgetHelperPlacement,
+  orderSensitive,
+  placedAt,
+  reevalUnsafe,
+  speculationUnsafe,
+} from '../ir/discipline';
 import { NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -1524,20 +1531,24 @@ function pureAddressCone(c: SharedValueSite): boolean {
 export const SHARED_VALUE_GATES: readonly Gate<SharedValueSite>[] = [
   {
     // `if (p == 0 || (*p | *p >> 4) != 0)`: the read, materialized, runs above the null test.
+    // `if (b == 0 || (q = a / b) + q != 0)`: so does the divide, on the path the test kept it off.
+    // A named local is an UNCONDITIONAL statement, so the predicate is `reevalUnsafe` (effects,
+    // reads AND traps), not `orderSensitive`, which has no trap half.
     id: 'shared-read',
-    why: 'a read the second test makes twice would be spelled as a local, read before the first test',
+    why: 'a read or trapping op the second test makes twice would be spelled as a local, run before the first test',
     sound: true,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a READ the second test consumes twice would run above the first',
-    rejects: (c) => gConeOf(c).some(orderSensitive),
+    rejects: (c) => gConeOf(c).some(reevalUnsafe),
   },
   {
-    // A pure value that is not an address — `(x * x) != 0` over a computed `x`. Hoisting it is
-    // correct C; what the target spells there is unmeasured, so it keeps the nest main produced.
-    // Disjoint from `shared-read` (a read in the cone is that rule's), so each ablates alone.
+    // A pure, non-trapping value that is not an address — `(x * x) != 0` over a computed `x`.
+    // Hoisting it is correct C; what the target spells there is unmeasured, so it keeps the nest
+    // main produced. A pure SPELLING rule: disjoint from `shared-read` (a read or a trap in the cone
+    // is that rule's), so each ablates alone and ablating this one admits nothing unsafe.
     id: 'shared-pure',
     why: 'a computed value the second test reuses is kept in the nest until its spelling is measured',
     sound: false,
-    rejects: (c) => !pureAddressCone(c) && !gConeOf(c).some(orderSensitive),
+    rejects: (c) => !pureAddressCone(c) && !gConeOf(c).some(reevalUnsafe),
   },
 ];
 

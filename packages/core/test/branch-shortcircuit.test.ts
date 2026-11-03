@@ -768,6 +768,43 @@ describe('refusals', () => {
     ).toBe(true);
   });
 
+  test('REFUSED: a DIVIDE the second test consumes twice would run above the first, by the SOUND rule', () => {
+    // `if (b == 0 || (q = a / b) + q != 0)`: the named quotient is an unconditional statement
+    // ahead of the `if`, so it would divide by the zero the first test guards against. The sound
+    // rule refuses it on its own, so ablating the spelling rule `shared-pure` admits nothing unsafe.
+    const divide = (opcode: 'sdiv' | 'mul'): Fn => {
+      const a = mkValue(T.s(32));
+      const b = mkValue(T.s(32));
+      const fn = chain({
+        gOnTaken: false,
+        sharedOnGTaken: true,
+        gBody: (out) => {
+          const q = mkValue(T.s(32));
+          const sum = mkValue(T.s(32));
+          const zero = mkValue(T.unk(32));
+          return [
+            mkOp(opcode, { operands: [a, b], results: [q] }),
+            mkOp('add', { operands: [q, q], results: [sum] }),
+            mkOp('const', { results: [zero], attrs: { value: 0 } }),
+            mkOp('icmp_ne', { operands: [sum, zero], results: [out] }),
+          ];
+        },
+      });
+      fn.blocks[0].params = [a, b];
+      return fn;
+    };
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(divide('sdiv'), { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-read', 1]]);
+    expect(
+      recognizeBranchShortCircuit(divide('sdiv'), { sharedValue: without(SHARED_VALUE_GATES, 'shared-pure') }),
+    ).toBe(false);
+    // the same cone with a multiply, which cannot trap, is only the spelling rule's
+    const pure = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(divide('mul'), { sharedValue: pure.gates })).toBe(false);
+    expect(pure.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
   test('the use-count refusals are REPORTED: a census names the rule that refused each value', () => {
     const t = tallying(SHARED_VALUE_GATES);
     expect(recognizeBranchShortCircuit(sharedBase('load'), { sharedValue: t.gates })).toBe(false);
