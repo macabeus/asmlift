@@ -3881,12 +3881,15 @@ function structureWithinBudget(
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
 ): SFn {
-  const overBudget = (error: CopyBudgetExceeded): StructureError =>
-    new StructureError(
+  // the budget decline, thrown where `declined` is: the throw keeps the message where the decline
+  // harvest (apps/web/test/declines.test.ts) reads it
+  const overBudget = (error: CopyBudgetExceeded): never => {
+    throw new StructureError(
       `cannot structure '${fn.name}': block #${error.block} is written ${error.copies} times, ` +
         `past the copy budget of ${error.limit} region entries`,
     );
-  // a declining run: its error as `structure()` throws it, and the held hooks of its refusal
+  };
+  // a declining run: its error as `structure()` throws it, having fired the held hooks of its refusal
   const declined = (error: unknown, held: readonly (() => void)[]): unknown => {
     if (error instanceof CopyBudgetExceeded) {
       return overBudget(error);
