@@ -400,10 +400,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     title: 'Shared code after an early return',
     summary: 'code both arms of an `if` reach before returning is written once, after the `if`',
     detail:
-      'An `if` whose arms never meet again before the function returns has no follow, so by default a ' +
-      'region both arms reach is written in each of them. This structures the same raised function again ' +
-      "with that shared region as the `if`'s follow: it is written once after the `if`, and every other " +
-      'path leaves through an early `return`.',
+      'An `if` whose arms never meet again before the function returns has no follow, so under the ' +
+      'return-tail copies (`ret-copy`) a region both arms reach is written in each of them. This structures ' +
+      "the same raised function again with the copies and that shared region as the `if`'s follow: it is " +
+      'written once after the `if`, and every other path leaves through an early `return`. The default ' +
+      "join past early returns already writes this example's region once, since the paths that do not " +
+      'return meet at it: the variation is a reading of the copies, ranked beside them.',
     offeredWhen: {
       when: 'Some `if` has arms that reach a common `return` block and no common block before it.',
       decidedBy: { symbol: 'hasDivergentSharedRet', file: STRUCTURE },
@@ -415,7 +417,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'if (c) { A(); } else { if (x) { C(); return; } } B();',
     },
     implementedIn: STRUCTURE,
-    seeAlso: ['shared-tail'],
+    seeAlso: ['shared-tail', 'ret-copy'],
   },
   'ret-copy': {
     title: 'Return tails copied',
@@ -449,7 +451,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     detail:
       "agbcc's global common-subexpression pass can move a trailing store into every predecessor of a join, " +
       'and the paths then jump into one `store; return` tail. This lift copies that tail back into each ' +
-      'path that branches to it, and then structures with the shared follow `shared-ret` uses, so the ' +
+      'path that branches to it, and then structures with the copies and the shared follow `shared-ret` uses, so the ' +
       'store the source wrote once is written after the `if` and the others before an early `return`. It is ' +
       'enumerated apart from `shared-ret` because the sink can delete the shared `return` that variation needs.',
     compilerBehavior:
