@@ -18,7 +18,9 @@
 #      least one `ASMLIFT_*`, since a worktree's sibling defaults resolve to nothing, and a `cpp`
 #      (or `$ASMLIFT_CPP`) that writes to `-o` — the probe `bench run` makes, so a GNU /usr/bin/cpp
 #      on Linux passes and Apple's does not. Nothing sources the file for you.
-#   4. `pnpm install --frozen-lockfile --prefer-offline` in the worktree.
+#   4. `pnpm install --frozen-lockfile --prefer-offline` in the worktree, then appends the lane's
+#      memory budget to .envrc.local (host RAM, node's heap limit in the lane's environment) for
+#      scripts/heap-check.sh.
 #   5. with `--board`, `--handle` and `--args`: writes the Workflow args to
 #      <board>/args/<handle>.json BEFORE the launch. A resume needs the exact args of the run it
 #      resumes, and the only other copy is in a context that may not survive.
@@ -116,6 +118,24 @@ echo "lane: .envrc.local has $(grep -c '^export ASMLIFT_' "$wt/.envrc.local") AS
 
 # 4. dependencies
 (cd "$wt" && pnpm install --frozen-lockfile --prefer-offline --silent)
+
+# 4b. the lane's memory budget, read in the lane's own environment (its node, its NODE_OPTIONS) and
+# appended to .envrc.local, so every shell and every bench the lane starts carries it. A row whose
+# peak outgrows node's heap limit kills its bench shard; scripts/heap-check.sh compares a measured
+# peak with these. Report-only: nothing reads them to refuse a job.
+total=$(awk '/^MemTotal:/ { print $2 * 1024 }' /proc/meminfo 2>/dev/null || true)
+[ -n "$total" ] || total=$(sysctl -n hw.memsize 2>/dev/null || true)
+heap=$(env -i HOME="$HOME" PATH=/usr/bin:/bin sh -c '. "$1" && node -e "process.stdout.write(String(require(\"v8\").getHeapStatistics().heap_size_limit))"' sh "$wt/.envrc.local" 2>/dev/null || true)
+{
+  echo "# Memory budget, recorded by scripts/lane-setup.sh; compare a peak with scripts/heap-check.sh."
+  [ -z "$total" ] || echo "export ASMLIFT_LANE_MEM_TOTAL_BYTES=$total"
+  [ -z "$heap" ] || echo "export ASMLIFT_LANE_HEAP_LIMIT_BYTES=$heap"
+} >>"$wt/.envrc.local"
+if [ -n "$heap" ]; then
+  echo "lane: memory budget: node heap limit $heap bytes, host RAM ${total:-unknown} bytes"
+else
+  echo "lane: WARNING could not read node's heap limit in the lane's environment; scripts/heap-check.sh will read it at check time" >&2
+fi
 
 # 5. the args a resume needs
 if [ -n "$board" ]; then

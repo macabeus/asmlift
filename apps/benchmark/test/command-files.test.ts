@@ -66,6 +66,7 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const COMMANDS_DIR = join(ROOT, '.claude', 'commands');
 const WORKFLOWS_DIR = join(ROOT, '.claude', 'workflows');
+const TEMPLATES_DIR = join(ROOT, '.claude', 'templates');
 const DOCS_DIR = join(ROOT, 'docs');
 const BENCH_COST_DOC = join(DOCS_DIR, 'bench-cost.md');
 const DISCIPLINE_DOC = join(DOCS_DIR, 'measurement-discipline.md');
@@ -668,12 +669,12 @@ describe('docs/bench-cost.md', () => {
 });
 
 /** Everything under `.claude/` an agent or a brief author reads: the four command files, the
- *  workflow brief generator and its ledger. Deliberately NOT a walk of all of `.claude/` — that
+ *  workflow brief generator and its ledger, and the hand-written brief template. Deliberately NOT a walk of all of `.claude/` — that
  *  includes the gitignored `.claude/worktrees/`, which would make a committed gate's verdict depend
  *  on untracked local content and let CI and a developer machine disagree. */
 function claudeFiles(): string[] {
   const out: string[] = [];
-  for (const dir of [COMMANDS_DIR, WORKFLOWS_DIR]) {
+  for (const dir of [COMMANDS_DIR, WORKFLOWS_DIR, TEMPLATES_DIR]) {
     if (!existsSync(dir)) {
       continue;
     }

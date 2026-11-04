@@ -199,7 +199,7 @@ edit it here, never in the script. Each round is held to:
   freshly fetched `origin/main`;
 - read [`/match-function`](./match-function.md) **from that worktree, by absolute path** — the rule
   and the incident behind it are `docs/measurement-discipline.md` §0 — and follow it without
-  exception, save for the one override below;
+  exception, save for the overrides below;
 - read `<board>/README.md` first and `<board>/INDEX.md` at the start of every phase;
 - **not merge its own PR.** This overrides `docs/measurement-discipline.md` §8 for the duration of
   this command, and it is the single most important line in the brief: that table's "green and
@@ -207,22 +207,24 @@ edit it here, never in the script. Each round is held to:
   round that merges itself bypasses the whole of Phase 3 on a base that may already have moved.
   `match-round`'s preamble says it in so many words, and must keep saying it — every agent reads
   the table, and the table says merge.
-- **resolve an artifact conflict by regenerating, never by editing.**
-  `apps/benchmark/results/results.json` is a tracked multi-megabyte JSON file and the repo has no
-  `.gitattributes`, so git will line-merge it and a hand-merged artifact publishes per-row numbers
-  no run ever produced — passing `bench regression`, `bench diff` and the provenance check, all of
-  which are blind to it. The only legal resolution is to take one side whole and re-run the bench.
-- **never pass `--no-lock` for the duration of this command.** It is a sanctioned door and this is
-  the one configuration it was not designed for.
+- follow every rule under **Hard rules** in
+  [`.claude/templates/agent-brief.md`](../templates/agent-brief.md), read from that worktree. That
+  section is the one copy of the rules every agent of this run is held to, round or not. Two of
+  them override [`/match-function`](./match-function.md): rule 10 overrides
+  `docs/measurement-discipline.md` §8's merge, as above, and rule 11 overrides Phase 7's memory
+  update, since concurrent rounds would race on the same files there — the write-back goes to the
+  board as `facts/`, `traps/` and `rounds/` posts, and Phase 4 below promotes it per merge.
 - expect other branches to be open, expect conflicts, and **never degrade the code to dodge one**;
-- never `git stash` — the stack is shared with every other worktree and with the user's checkout,
-  so a bare `stash`/`pop` can take another agent's work. Use a WIP commit.
-- **not write the memory directory.** [`/match-function`](./match-function.md) Phase 7 asks for a
-  memory update, and concurrent rounds would race on the same files there; the write-back goes to
-  the board as `facts/`, `traps/` and `rounds/` posts, and Phase 4 below promotes it per merge.
 - treat its own brief as a hypothesis, and **report a refuted brief as soon as it is refuted**,
   rather than at the end. Every round in both recorded runs refuted its brief. A lane held by a
   round whose premise is already dead is the cheapest thing this command can free.
+
+**Every agent you brief by hand is briefed from the template.** A merge agent (Phase 3), a fix
+agent, a ship continuation, a lane that is not a round: copy the block in
+[`.claude/templates/agent-brief.md`](../templates/agent-brief.md) whole, from a worktree on
+`origin/main`, into the brief file, and fill its fields. Never write a brief freehand, and never
+trim its **Hard rules**: on 2026-11-01 a freehand fix-agent brief left the quoted-heredoc rule out,
+and its agent ran a bench in the frozen main checkout.
 
 Give each round a short stable handle (`CRC`, `SIO`, `LLFROM`) and use it as the author on every
 post and every message. **Pass the absolute board path in `args`** — never the literal string
@@ -376,11 +378,12 @@ the order it was held.
 A silent wrong the PR's own commits introduce is not this case: that round's work is not finished,
 and its branch goes back to a lane of its own instead of to a fix lane.
 
-**Delegate each merge to a fresh subagent.** Give it the PR number, `MERGE-QUEUE.md`, and the list
-of other open branches; it returns a verdict and merges on green. This is not ceremony: the agent
-that feels an idle lane is the wrong agent to decide whether the expensive consistency read can be
-skipped, and this repo already separates implementer from reviewer for the same reason. It also
-keeps the read out of your context, which is the measured bottleneck.
+**Delegate each merge to a fresh subagent**, briefed from the template (Phase 1). Give it the PR
+number, `MERGE-QUEUE.md`, and the list of other open branches; it returns a verdict and merges on
+green. This is not ceremony: the agent that feels an idle lane is the wrong agent to decide whether
+the expensive consistency read can be skipped, and this repo already separates implementer from
+reviewer for the same reason. It also keeps the read out of your context, which is the measured
+bottleneck.
 
 The merge, in order:
 
@@ -570,8 +573,20 @@ Plain shell over the board directory, and it must:
   `INDEX.md`, and report a mismatch as a failure. A lost index line is a silently unpublished post.
 - **report `--stats`** — messages filed, messages answered, and the longest gap between a message's
   stamp and its reply's.
+- **report orphan processes** — run `scripts/orphan-check.sh` as `origin/main` has it, so a main
+  checkout behind `main` still runs the current check, without writing anything there:
+  `git -C <main checkout> show origin/main:scripts/orphan-check.sh | sh -s -- --repo <main checkout> --root <board>`,
+  behind a `git cat-file -e` of the same blob that prints `orphan-check: CANNOT CHECK` when it is
+  missing: an empty script piped to `sh` exits 0 and reads as a clean host. It lists every process
+  older than 24 h whose cwd or open files are under the checkout, a worktree, a removed lane's
+  path, this project's Claude Code scratchpads or the board, and kills nothing. Print its output
+  whole. Its findings are a **warning, not a failure**: the check cannot tell an orphan from the
+  user's own terminal or session in the checkout, which it lists the same way (with its tty), and
+  a failure only the user can clear would fail every pass after it, with no move left to the
+  coordinator, who never kills a process. So the pass report quotes every `ORPHAN` line, and any
+  `CANNOT CHECK` line, to the user, who decides.
 - **exit non-zero while anything is unanswered or the index does not reconcile**, and exit 0
-  otherwise.
+  otherwise. Orphans and an orphan check that cannot run do not change the exit status.
 
 Quote every path expansion. An unquoted variable that expands to nothing is the exact shape of the
 false negative this script exists to prevent.
