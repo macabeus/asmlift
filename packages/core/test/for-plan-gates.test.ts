@@ -381,6 +381,52 @@ test("IDO's whole counted loop: the `+ 1` bound and a stride together", () => {
   expect(r.agreement.disagree).toBe(0);
 });
 
+test('a stride read in an exit arm, ahead of its `break`, is G of the counter the header left with', () => {
+  // case 6's `k(p); break;` (#10) lies outside the natural loop, but the `for` writes it inside its
+  // body, entered from the header without passing the update: KMC's `case 7: k(gA[i]); break;`
+  const ir = srFor(STRIDE).replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %6 {target="k"}');
+  const r = lift(ir);
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.src).toMatch(/k\(v0 \+ 3\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test('stride-name-shared scans the exit arms as well as the body', () => {
+  // case 6's exit arm #10 takes the counter as a param of its own, which naming coalesces onto the
+  // counter's name: a value in an arm named for the counter, the clash the scan refuses. Here the two
+  // hold one value, so the lift past the gate is right (the gate is DEFENSIVE); a scan of the body
+  // alone never sees #10, and the `for` lifts with every table in place
+  const ir = srFor(STRIDE)
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %6 {target="k"}\n  %51: s32 = call %50 {target="m"}')
+    .replace('cond_br %33, ^bb11(), ^bb10()', 'cond_br %33, ^bb11(), ^bb10(%5)')
+    .replace('^bb10():', '^bb10(%50: s32):');
+  const t = tallying(FOR_PLAN_IV_GATES);
+  expect(() => lift(ir, { forPlanIvGates: t.gates })).toThrow(LOOP_EXIT);
+  expect(t.refusals().map(([id]) => id)).toEqual(['stride-name-shared']);
+  const r = lift(ir, dropping('stride-name-shared'));
+  expect(r.src).toMatch(/k\(v0 \+ 3\);\s*m\(v0\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
+test('stride-name-shared leaves an exit arm that reads no stride unscanned', () => {
+  // the same arm param named for the counter, but #10 reads the counter, not the stride, so it renders
+  // no G and its name is as free as the code's past the loop: IDO's `case 7: while (gA[i] > 0) {
+  // k(gA[i]); i++; } break;`, which steps its own copy of `i` and writes it back on its way out
+  const ir = srFor(STRIDE)
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %5 {target="k"}\n  %51: s32 = call %50 {target="m"}')
+    .replace('cond_br %33, ^bb11(), ^bb10()', 'cond_br %33, ^bb11(), ^bb10(%5)')
+    .replace('^bb10():', '^bb10(%50: s32):');
+  const t = tallying(FOR_PLAN_IV_GATES);
+  const r = lift(ir, { forPlanIvGates: t.gates });
+  expect(t.refusals().map(([id]) => id)).not.toContain('stride-name-shared');
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.src).toMatch(/k\(v0\);\s*m\(v0\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
 test('without stride-escapes the code after the loop reads a stride never written', () => {
   // `for (i = 0; ..; i++)` with no guard (the first test folds): the header dominates the exit, and
   // the code there calls `exitv` on the stride itself, whose name the `for` never writes

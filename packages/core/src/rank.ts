@@ -506,7 +506,7 @@ interface TreeSource {
 
 /** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
  *  attempt `forPlanAt` makes, committed or not, and on loops the thrown refusal never reaches
- *  (`synthetic:sw_gotocase_inner:ido7.1` fires it and declines on a nested switch), so its firing
+ *  (`synthetic:sw_gotocase_inner:ido7.1` fires it and declines on its switches' cases), so its firing
  *  alone says nothing about the decline. The question is asked the one way that answers it: the
  *  same structuring with that rule off. Where that one structures, the refusal was the rule's, and
  *  the other pin, whose counter the rule admits, can take the loop; where it still throws, the

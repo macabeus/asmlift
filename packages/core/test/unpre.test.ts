@@ -4,7 +4,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { type Block, type Value, defOpMap, dominators } from '../src/ir/core';
+import { type Block, type Fn, type Value, defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
@@ -213,10 +213,44 @@ const latchIr = (secondBound = '%9: s32 = add %1, %8') => `fn f {
 }
 `;
 
+/** the block holding `latchIr`'s test, wherever the fold leaves it */
+const latchOf = (fn: Fn) => fn.blocks.find((b) => b.ops.some((op) => op.opcode === 'icmp_ne'))!;
+
 test("a loop's latch every arm hands the bound `hi + 1` recomputes it, and its test reads it inline", () => {
   const { n, fn } = fold(latchIr());
   expect(n).toBe(1);
-  expect(fn.blocks[4].params).toHaveLength(0);
+  expect(latchOf(fn).params).toHaveLength(0);
+});
+
+test("the arms' copies the latch fold leaves unread are deleted, and an arm left holding nothing is threaded", () => {
+  // KMC steps `gA[i]`'s pointer in the default arm, which falls into the latch, and in the slot of
+  // the branch into the latch's second entry (`synthetic:sw_gotocase2:gcc2.7.2kmc`): #2 held only its
+  // copy, so its edge now goes to the latch itself, and #3 keeps its call
+  const { n, fn } = fold(latchIr());
+  expect(n).toBe(1);
+  expect(fn.blocks.map((b) => b.ops.map((op) => op.opcode).join(' '))).toEqual([
+    'br',
+    'load const icmp_eq cond_br',
+    'call br',
+    'const add const add icmp_ne cond_br',
+    'ret',
+  ]);
+  const [taken, fall] = fn.blocks[1].ops.at(-1)!.successors;
+  expect(taken.block).toBe(latchOf(fn));
+  expect(fall.block).toBe(fn.blocks[2]);
+});
+
+test('an arm that keeps an op of its own is not threaded', () => {
+  // #2 calls before its copy: the sweep deletes the copy and leaves the call
+  const { n, fn } = fold(
+    latchIr().replace(
+      '  %6: s32 = const {value=1}\n',
+      '  %6: s32 = const {value=1}\n  %15: s32 = call %6 {target="side2"}\n',
+    ),
+  );
+  expect(n).toBe(1);
+  expect(fn.blocks).toHaveLength(6);
+  expect(fn.blocks[2].ops.map((op) => op.opcode)).toEqual(['const', 'call', 'br']);
 });
 
 test('the recomputed value takes the type of the parameter it replaces, not the arm op it was cloned from', () => {
@@ -226,7 +260,7 @@ test('the recomputed value takes the type of the parameter it replaces, not the 
   // (kleod's `sub_080240F4`)
   const { n, fn } = fold(latchIr().replace('^bb4(%11: s32):', '^bb4(%11: u32):'));
   expect(n).toBe(1);
-  const root = defOpMap(fn).get(fn.blocks[4].ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
+  const root = defOpMap(fn).get(latchOf(fn).ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
   expect(root.opcode).toBe('add');
   expect(root.results[0].type).toEqual({ kind: 'int', width: 32, signed: false });
 });
@@ -400,4 +434,46 @@ test('a base the caller does not place outside the loop is no stride', () => {
   const entry = fn.blocks[0].ops.at(-1)!.successors[0];
   const back = h.ops.at(-1)!.successors[1];
   expect(strideDerivedParams(defOpMap(fn), h, entry, back, () => false)).toHaveLength(0);
+});
+
+test('a pointer that is G of the counter and of a shifted sibling is read as G of the counter', () => {
+  // KMC's `for (i = lo; i <= hi; i++) .. gE[i].f .. gE[i].x ..`: the header takes `(i << 3,
+  // gE + (i << 3), i)`, the shift stepped by 8 as well. The pointer is `x + gE` of the shift too, but
+  // the `for` names the counter, so the shift is the sibling asked last
+  const fn = parse(`fn s {
+^bb0(%0: s32, %1: s32):
+  %3: s32 = gaddr {sym="gE"}
+  %4: s32 = shl %0 {imm=3}
+  %5: s32 = add %4, %3
+  br ^bb1(%4, %5, %0)
+^bb1(%6: s32, %7: s32, %8: s32):
+  %20: s32 = add %3, %6
+  %21: s32 = load %20 {off=5, signed=false, width=1}
+  %22: s32 = call %21 {target="use"}
+  %23: s32 = load %7 {off=0, signed=true, width=4}
+  %24: s32 = call %23 {target="use"}
+  %9: s32 = const {value=1}
+  %10: s32 = add %8, %9
+  %11: s32 = const {value=8}
+  %12: s32 = add %6, %11
+  %13: s32 = const {value=8}
+  %14: s32 = add %7, %13
+  %15: u32 = icmp_slt %1, %10
+  cond_br %15, ^bb2(), ^bb1(%12, %14, %10)
+^bb2():
+  ret
+}
+`);
+  verify(fn);
+  const h = fn.blocks[1];
+  const entry = fn.blocks[0].ops.at(-1)!.successors[0];
+  const back = h.ops.at(-1)!.successors[1];
+  const got = strideDerivedParams(defOpMap(fn), h, entry, back, (v) =>
+    fn.blocks[0].ops.some((o) => o.results.includes(v)),
+  );
+  expect(got.map(({ j, i }) => ({ j, i }))).toEqual([
+    { j: 0, i: 2 },
+    { j: 1, i: 2 },
+  ]);
+  expect(got[1].ops.map((o) => o.opcode)).toEqual(['shl', 'add']);
 });

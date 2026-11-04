@@ -33,8 +33,11 @@ export interface PreStructureFold {
  *  pointer walk unthread.ts names lift the same C wherever the fold sits, so `unthread.test.ts`
  *  pins its position, not a lift that needs it. The two parameter recomputes run last, the
  *  derived one (`derivedparam`) just ahead of `unpre`, because that is the one place each was
- *  measured: neither moves an edge, so no loop fold reads what they leave, and `unpre.test.ts` pins
- *  the places, not a lift that needs them. */
+ *  measured, and `unpre.test.ts` pins the places, not a lift that needs them. Both MOVE EDGES: a
+ *  block either one's orphan sweep leaves holding only its `br` is threaded out of the CFG
+ *  (`threadEmptied`, raise/unpre.ts), its in-edges retargeted and the block removed, so `unpre`
+ *  reads the CFG `derivedparam` left, and a loop fold moved after either would read a reshaped one
+ *  it was never measured on. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',

@@ -24,7 +24,12 @@
 // function of its leaves alone; and every leaf must be defined in a block that strictly dominates
 // the block, so it holds the same value there. C names need no argument of their own: the
 // recomputed expression is fresh SSA ops reading the leaves, and namecoalesce gives a leaf that is
-// live at the block a name no other live value shares.
+// live at the block a name no other live value shares. The edge ops the fold leaves unread are
+// deleted with whatever pure ops only they read, as the derived fold below deletes its own: KMC
+// steps `gA[i]`'s pointer in the default arm and in the slot of the branch into the latch's second
+// entry, and once the latch reads the step itself the default arm's dead copy would still be a body
+// (`synthetic:sw_gotocase2:gcc2.7.2kmc`), which the structurer reads as one more case it reaches.
+// A block the sweep leaves holding only its `br` is then threaded out of the CFG (`threadEmptied`).
 //
 // SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`):
 //  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, at least
@@ -102,6 +107,9 @@ import {
   type Value,
   defOpMap,
   dominators,
+  foldWriteOrder,
+  forwardingTarget,
+  isBodyless,
   mkValue,
   opShape,
 } from '../ir/core';
@@ -185,6 +193,8 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
   };
   /** structural congruence: one pure expression over the same leaves */
   const congruent = (a: Value, b: Value) => sameAtEntry(defs, a, b, { entry: new Map(), through });
+  /** the edge ops a fold stopped reading, swept once no sweep removes anything */
+  const orphaned: Op[] = [];
   let removed = 0;
   // A recomputed parameter can make a later block's arguments equal (a second case fallen into
   // whose argument reads the first's parameter), so sweep until a sweep removes nothing.
@@ -254,12 +264,19 @@ export function recomputeRedundantParams(fn: Fn, gates: readonly Gate<RedundantP
           defs.set(op.results[0], op);
           home.set(op.results[0], b);
         }
+        for (const s of incoming) {
+          const d = defs.get(s.args[k]);
+          if (d !== undefined) {
+            orphaned.push(d);
+          }
+        }
         retireParam(fn, b, k, value, incoming);
         removed++;
         changed = true;
       }
     }
   }
+  sweepOrphans(fn, orphaned);
   return removed;
 }
 
@@ -391,10 +408,59 @@ function sweepOrphans(fn: Fn, seeds: readonly Op[]): void {
       }
     }
   }
-  if (dead.size > 0) {
-    for (const b of fn.blocks) {
-      b.ops = b.ops.filter((op) => !dead.has(op));
+  if (dead.size === 0) {
+    return;
+  }
+  const emptied: Block[] = [];
+  for (const b of fn.blocks) {
+    const kept = b.ops.filter((op) => !dead.has(op));
+    if (kept.length < b.ops.length && b !== fn.blocks[0] && isBodyless({ params: b.params, ops: kept })) {
+      emptied.push(b);
     }
+    b.ops = kept;
+  }
+  threadEmptied(fn, emptied);
+}
+
+/** Splice out each of `emptied` that the sweep left a transparent forwarder (no params, a lone `br`
+ *  handing no value), every edge into it now going where it forwards.
+ *
+ *  THE PASS THAT EMPTIES A BLOCK THREADS IT. Such a block held nothing but the edge copies a fold
+ *  made redundant, so it stands for no code of the source: KMC's default arm that held only the
+ *  pointer step (`synthetic:sw_gotocase2:gcc2.7.2kmc`), and each arm of IDO's
+ *  `synthetic:forexit_old:ido7.1` that held only its copy of the latch's bound `hi + 1`. Left in the
+ *  CFG, the structurer reads it as one more sibling case every `continue` falls into, or one more
+ *  region on the way to the latch. An edge into it carries no args (it has no params) and its own
+ *  carries none, so retargeting changes no value on any path;
+ *  `foldExitTrampolines` (raise/latch.ts) folds the same block on a loop's exit, for its own scope,
+ *  and this one asks no scope because the fold made it, not the compiler. A forwarder whose chain
+ *  ends in a cycle of forwarders (`while (1);`) stays. */
+function threadEmptied(fn: Fn, emptied: readonly Block[]): void {
+  const forwards = (b: Block) => isBodyless(b) && b.ops[0].opcode === 'br' && b.ops[0].successors[0].args.length === 0;
+  const gone = new Set<Block>();
+  for (const b of emptied) {
+    const onward = forwardingTarget(b);
+    if (!forwards(b) || forwards(onward)) {
+      continue;
+    }
+    for (const p of fn.blocks) {
+      let repointed = false;
+      for (const op of p.ops) {
+        op.successors.forEach((s, i) => {
+          if (s.block === b) {
+            op.successors[i] = { block: onward, args: [] };
+            repointed = true;
+          }
+        });
+      }
+      if (repointed) {
+        foldWriteOrder(fn.writeOrder, b, p);
+      }
+    }
+    gone.add(b);
+  }
+  if (gone.size > 0) {
+    fn.blocks = fn.blocks.filter((b) => !gone.has(b));
   }
 }
 
@@ -475,41 +541,54 @@ export function strideDerivedParams(
     }
     return null;
   };
-  const out: StrideDerived[] = [];
-  header.params.forEach((pj, j) => {
-    const k = stepOf(back.args[j], pj);
-    if (k === null) {
-      return;
+  /** `j` as G of the sibling `i`, or null */
+  const fit = (j: number, i: number): StrideDerived | null => {
+    const k = stepOf(back.args[j], header.params[j]);
+    const d = i === j ? null : stepOf(back.args[i], header.params[i]);
+    if (k === null || d === null || d === 0) {
+      return null;
     }
-    for (let i = 0; i < header.params.length; i++) {
-      const d = i === j ? null : stepOf(back.args[i], header.params[i]);
-      if (d === null || d === 0) {
-        continue;
-      }
-      const x0 = entry.args[i];
-      const g = entry.args[j];
-      let found: { ops: Op[]; leaves: Value[]; k: number } | null = null;
-      const bare = term(g, x0, d);
-      if (bare !== null && bare.ops.length > 0) {
-        found = bare;
-      } else {
-        const add = defs.get(g);
-        if (add?.opcode === 'add' && add.operands.length === 2 && clonable(add)) {
-          for (const at of [0, 1]) {
-            const t = term(add.operands[at], x0, d);
-            const base = add.operands[1 - at];
-            if (t !== null && base !== x0 && outside(base)) {
-              found = { ops: [...t.ops, add], leaves: [...t.leaves, base], k: t.k };
-              break;
-            }
+    const x0 = entry.args[i];
+    const g = entry.args[j];
+    let found: { ops: Op[]; leaves: Value[]; k: number } | null = null;
+    const bare = term(g, x0, d);
+    if (bare !== null && bare.ops.length > 0) {
+      found = bare;
+    } else {
+      const add = defs.get(g);
+      if (add?.opcode === 'add' && add.operands.length === 2 && clonable(add)) {
+        for (const at of [0, 1]) {
+          const t = term(add.operands[at], x0, d);
+          const base = add.operands[1 - at];
+          if (t !== null && base !== x0 && outside(base)) {
+            found = { ops: [...t.ops, add], leaves: [...t.leaves, base], k: t.k };
+            break;
           }
         }
       }
-      if (found !== null && found.k === k && found.leaves.every(outside)) {
-        out.push({ j, i, ops: found.ops, x0, leaves: found.leaves });
-        return;
+    }
+    return found !== null && found.k === k && found.leaves.every(outside)
+      ? { j, i, ops: found.ops, x0, leaves: found.leaves }
+      : null;
+  };
+  const slots = header.params.map((_, x) => x);
+  // A sibling that is itself G of another is asked last. The one reader, structure.ts's `for`, drops
+  // every slot in `strides` from its copies, so no such slot is the counter its update writes, and it
+  // takes a stride only as G of that counter's param: asking the other slots first asks exactly the
+  // slots that can be the counter, and a pair asked later is one the `for` would refuse anyway, so the
+  // order turns no lift into a decline. (KMC strength-reduces both `i << 3` and `gE + (i << 3)` beside
+  // `i`, and the pointer is `x + gE` of the shift as well as G of `i`.)
+  const strides = new Set(slots.filter((j) => slots.some((i) => fit(j, i) !== null)));
+  const order = [...slots.filter((x) => !strides.has(x)), ...slots.filter((x) => strides.has(x))];
+  const out: StrideDerived[] = [];
+  for (const j of strides) {
+    for (const i of order) {
+      const sd = fit(j, i);
+      if (sd !== null) {
+        out.push(sd);
+        break;
       }
     }
-  });
+  }
   return out;
 }

@@ -34,9 +34,10 @@ test('a decline the counter rule caused is held, and no other unsigned setting r
 }, 60_000);
 
 test('a decline the counter rule did not cause aborts the row, though the rule fired', () => {
-  // the rule fires on this function's counted loop, but the decline is the nested switch's, which
-  // no pin changes: the row aborts at the unsigned default, as any other default decline does
+  // the rule fires on this function's counted loop, but the decline is the inner switch's case that
+  // leaves both switches for the loop's exit, which no pin changes: the row aborts at the unsigned
+  // default, as any other default decline does
   const e = enumerate('sw_gotocase_inner', 'ido71-swgotocaseinner');
-  expect(e.run).toThrow(/a case body leaves its switch from inside a nested switch/);
+  expect(e.run).toThrow(/a case body leaves its switch for a loop exit past the switch's end/);
   expect(e.threw).toEqual([]);
 }, 60_000);

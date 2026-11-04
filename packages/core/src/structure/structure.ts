@@ -1665,11 +1665,11 @@ export const FOR_PLAN_GATES: readonly Gate<ForPlanCandidate>[] = [
  *  `ForPlanCandidate` is. */
 export interface ForPlanIv {
   /** a stride's param or its stepped value reaches an edge but the back edge's own slot, an op
-   *  outside the loop, the test or the counter's update (A SIBLING'S STRIDE) */
+   *  outside the loop and its exit arms, the test or the counter's update (A SIBLING'S STRIDE) */
   readonly strideEscapes: boolean;
-  /** a stride is of a sibling other than the counter, or a body value other than the counter's
-   *  param and the latch's ops holds the counter's name, or one holds a stride's or a leaf's name
-   *  but that value itself */
+  /** a stride is of a sibling other than the counter, or a value of the body (or of its exit arms,
+   *  when one reads a stride) other than the counter's param and the latch's ops holds the counter's
+   *  name, or one holds a stride's or a leaf's name but that value itself */
   readonly strideNameShared: boolean;
   /** a leaf of a stride's G is neither named nor an operand-free op that reads no memory */
   readonly strideLeafReread: boolean;
@@ -1707,7 +1707,9 @@ export const FOR_PLAN_IV_GATES: readonly Gate<ForPlanIv>[] = [
   },
   {
     // DEFENSIVE: the naming walk names a header param and every body value apart, unless coalescing
-    // merges them, and no fixture or probe has brought a merged one here
+    // merges them, and the one merge a fixture brings here holds a single value under both names (an
+    // exit arm's param that is the counter, for-plan-gates.test.ts), so no refusal is known to save a
+    // wrong read
     id: 'stride-name-shared',
     why: 'a stride is read as G of the counter and of its leaves by name, so each name must hold that one value in the loop (defensive)',
     sound: false,
@@ -10358,11 +10360,18 @@ function structureRanked(
   //   • the param and its back-edge value are read by no edge but the back edge's own slot, by no op
   //     outside the loop, and not by the test or the counter's update (a pointer test is no counted
   //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
-  //     (`stride-escapes`);
-  //   • no value in the body but the counter's param and the latch's ops is named for the counter,
-  //     and none for a leaf of G or for the param (the latch is never rendered, and the update is the
-  //     one write of the counter in the `for`); a read of a NAMED leaf is then a read of that leaf
-  //     (`stride-name-shared`);
+  //     (`stride-escapes`). The param may also be read ON THE WAY OUT, in a block of an exit arm the
+  //     `for` writes inside its body ahead of its `break` or `return` (a `BreakArm`'s region, a
+  //     `LoopArm`'s owned blocks): `case 7: k(gA[i]); break;` leaving `for (..) switch (..)` (KMC's
+  //     `synthetic:sw_gotocase2:gcc2.7.2kmc`, which keeps `gA[i]` in a pointer it steps by 4). Every
+  //     path into such a block leaves the header without passing the update, so the counter's name
+  //     holds what it held there, which is what the param is G of; the next rule holds the arm's
+  //     values off the names too. Past the loop the param is still refused: the code after it is
+  //     written outside the `for`, where nothing renders G;
+  //   • no value in the body or in those exit arms (when one reads a stride) but the counter's param
+  //     and the latch's ops is named for the counter, and none for a leaf of G or for the param (the
+  //     latch is never rendered, and the update is the one write of the counter in the `for`); a read
+  //     of a NAMED leaf is then a read of that leaf (`stride-name-shared`);
   //   • every leaf is named, or an operand-free op that reads no memory (a constant, a symbol's
   //     address). Any other is spelled as its own expression at each read, so evaluated again there:
   //     IDO keeps `b = gP` of `struct E *b = gP; for (..) .. b[i] ..` in a register, unnamed, and G
@@ -10378,6 +10387,7 @@ function structureRanked(
     lterm: Op,
     cond: Value,
     body: ReadonlySet<Block>,
+    arms: ReadonlySet<Block>,
   ): boolean => {
     const p = h.params[sd.j];
     const stepped = back.args[sd.j] as Value;
@@ -10402,7 +10412,7 @@ function structureRanked(
     return (
       !onEdges(p) &&
       !onEdges(stepped, back) &&
-      readers(p).every((u) => body.has(u.blk)) &&
+      readers(p).every((u) => body.has(u.blk) || arms.has(u.blk)) &&
       readers(stepped).length === 0 &&
       lterm.successors.includes(back) &&
       opBlock.get(defs.get(stepped)!) === latch &&
@@ -10419,6 +10429,7 @@ function structureRanked(
     iv: string,
     latch: Block,
     body: ReadonlySet<Block>,
+    arms: ReadonlySet<Block>,
   ): boolean => {
     if (strides.some((sd) => h.params[sd.i] !== ivParam)) {
       return false;
@@ -10435,7 +10446,7 @@ function structureRanked(
     if (owners.has(iv)) {
       return false;
     }
-    for (const b of body) {
+    for (const b of [...body, ...arms]) {
       for (const v of [...b.params, ...b.ops.flatMap((o) => o.results)]) {
         const name = varName.get(v);
         if (name === undefined) {
@@ -10858,6 +10869,48 @@ function structureRanked(
             fl.body,
             varType.get(iv),
           ).find((t) => !differs(t)) ?? null));
+    // A SIBLING'S STRIDE read on the way out (see above): the blocks of the loop's exit arms — a
+    // `break` that runs code first, an early return — that the `for` writes inside its body. No
+    // filter is needed: `codeBreakArm`'s region stops at the loop's exit and admits no block the
+    // exit's forward path runs, and `LoopArm.owned` holds none of the exit path's tails, so the latch
+    // reaches none of these past its step without passing the header. A block the header does not
+    // dominate (a tail shared with an `else` ahead of the loop) cannot read the header's params, so it
+    // leaves `strideEscapes` as it is and only widens `stridesNamed`'s scan, which can refuse more,
+    // never less.
+    let armBlocks: Set<Block> | undefined;
+    const exitArms = (): ReadonlySet<Block> =>
+      (armBlocks ??= new Set(
+        [...fl.breakArms.flatMap((a) => [...a.region]), ...fl.arms.flatMap((a) => [...a.owned])].filter(
+          (x) => !fl.body.has(x),
+        ),
+      ));
+    // `stridesNamed` scans those arms only where one renders G: when no op of any arm reads a stride's
+    // param, as an operand or an edge's argument, directly or through a value of the body or the arms,
+    // the arms render no G, so a write of the counter's name there is as harmless as one past the
+    // loop. IDO's `case 7: while (gA[i] > 0) { k(gA[i]); i++; } break;` steps its own copy of `i` and
+    // writes it back to `i` on its way out, and the switch has no reading but the `for`
+    const namedArms = (): ReadonlySet<Block> => {
+      const arms = exitArms();
+      const params = new Set(strides.map((sd) => h.params[sd.j]));
+      const seen = new Set<Value>();
+      const reaches = (v: Value): boolean => {
+        if (params.has(v)) {
+          return true;
+        }
+        if (seen.has(v)) {
+          return false;
+        }
+        seen.add(v);
+        const d = defs.get(v);
+        const at = d === undefined ? undefined : opBlock.get(d);
+        return d !== undefined && at !== undefined && (fl.body.has(at) || arms.has(at)) && d.operands.some(reaches);
+      };
+      return [...arms].some((b) =>
+        b.ops.some((o) => [...o.operands, ...o.successors.flatMap((sc) => sc.args)].some(reaches)),
+      )
+        ? arms
+        : new Set();
+    };
     // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
     const rereadable = (v: Value): boolean => {
       const d = defs.get(v);
@@ -10876,10 +10929,10 @@ function structureRanked(
     if (
       firstRejection(hooks.forPlanIvGates ?? FOR_PLAN_IV_GATES, {
         get strideEscapes() {
-          return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body));
+          return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body, exitArms()));
         },
         get strideNameShared() {
-          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body);
+          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body, namedArms());
         },
         get strideLeafReread() {
           return strides.some((sd) => !sd.leaves.every(rereadable));
