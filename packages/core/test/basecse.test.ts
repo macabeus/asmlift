@@ -533,13 +533,23 @@ describe('leaf-base hoisting', () => {
       expect(hoistBaseLocals(guarded(deeper)).locals).toEqual([]);
     });
 
-    test('is hoisted when one access is outside the operand, or under a second connective', () => {
+    test('is hoisted when one access is outside every guarded operand', () => {
       expect(hoistBaseLocals(guarded(three(), idx('gS', c(1)))).locals).toHaveLength(1);
-      const twoGuards = fn([
-        { k: 'if', cond: { k: 'bin', op: '||', l: { k: 'var', name: 'y' }, r: idx('gS', c(0)) }, then: [], else: [] },
-        { k: 'if', cond: { k: 'bin', op: '&&', l: { k: 'var', name: 'y' }, r: idx('gS', c(3)) }, then: [], else: [] },
+    });
+
+    // agbcc loads `&gS` once under EACH guard: `(gY != 5 || (gS.a | gS.d)) && (gA != 1 || (gS.c |
+    // gS.b))` scores 9/39 inline and 15/39 hoisted, and the same two connectives as two `if`s 9/39
+    // against 19/40. Keyed on one operand, both hoisted.
+    test('stays inline when its accesses sit under two different guarded operands', () => {
+      const y = { k: 'var', name: 'y' } as const;
+      const twoIfs = fn([
+        { k: 'if', cond: { k: 'bin', op: '||', l: y, r: idx('gS', c(0)) }, then: [], else: [] },
+        { k: 'if', cond: { k: 'bin', op: '&&', l: y, r: idx('gS', c(3)) }, then: [], else: [] },
       ]);
-      expect(hoistBaseLocals(twoGuards).locals).toHaveLength(1);
+      expect(hoistBaseLocals(twoIfs).locals).toEqual([]);
+      const oneCond = guarded(idx('gS', c(3)), { k: 'bin', op: '||', l: y, r: idx('gS', c(0)) });
+      expect(hoistBaseLocals(oneCond).locals).toEqual([]);
+      expect(hoistBaseLocals(twoIfs, without(BASECSE_GATES, 'guarded-operand')).locals).toHaveLength(1);
     });
 
     test('`/livebase` ablates it with the other placement rules, so the hoisted spelling stays a candidate', () => {

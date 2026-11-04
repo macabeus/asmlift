@@ -203,16 +203,16 @@ interface Collected {
    *  pass has rebuilt one node and dropped the stamp, and requiring all of them makes that a
    *  refusal rather than a half-homed base. */
   ordered: Map<string, boolean>;
-  /** per key, the outermost connective right operand EVERY access so far sits under — `null` once
-   *  one access is under none, or under a different one (the input to `guardedOperand`) */
-  guard: Map<string, Expr | null>;
+  /** per key, whether EVERY access so far sits under some connective's right operand — `false`
+   *  once one access is under none (the input to `guardedOperand`) */
+  guard: Map<string, boolean>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
  *  first-appearance order (so the hoisted assignments emit in the order the bases are first used,
  *  matching the compiler's pool-load order). `loop` marks uses nested in a while/do-while/for. */
 function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
-  const visitExpr = (e: Expr, inLoop: boolean, guard: Expr | null): void => {
+  const visitExpr = (e: Expr, inLoop: boolean, guard: boolean): void => {
     if (e.k === 'index' && isHoistableBase(e.base)) {
       const k = keyOf(e.base, e.width, e.signed);
       if (!c.count.has(k)) {
@@ -235,11 +235,11 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
         c.operandOff.add(k);
       }
       c.ordered.set(k, (c.ordered.get(k) ?? true) && e.baseOrdered === true);
-      c.guard.set(k, c.guard.has(k) && c.guard.get(k) !== guard ? null : guard);
+      c.guard.set(k, (c.guard.get(k) ?? true) && guard);
     }
     const rhs = e.k === 'bin' && (e.op === '&&' || e.op === '||') ? e.r : null;
     for (const ch of exprChildren(e)) {
-      visitExpr(ch, inLoop, guard ?? (ch === rhs ? ch : null));
+      visitExpr(ch, inLoop, guard || ch === rhs);
     }
   };
   for (const s of stmts) {
@@ -247,7 +247,7 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
     // there is loop-invariant just like a body use — visit it with `nested`, not the outer flag.
     const nested = loop || isLoop(s);
     for (const e of stmtExprs(s)) {
-      visitExpr(e, nested, null);
+      visitExpr(e, nested, false);
     }
     collect(stmtChildren(s), c, nested);
   }
@@ -385,12 +385,13 @@ export interface BaseKey {
    *  false for every base a compiler that has not opted in produced, which is what keeps the variation
    *  off those targets. */
   orderLicensed: boolean;
-  /** EVERY access sits in the right operand of ONE `&&`/`||` — the half C evaluates only when the
+  /** EVERY access sits in the right operand of some `&&`/`||` — the half C evaluates only when the
    *  left one did not decide. A head hoist puts the base's load above that guard, where the compiler
    *  loaded it inside the operand: `if (gY != 5 || (gS.a | gS.d | gS.c) != 0)` reads `&gS` into a
-   *  register after the `gY` test, while `p0 = &gS;` ahead of the `if` loads it first. The innermost
-   *  operand is not the unit — `a || (gS.x && gS.y)` holds `gS.y` deeper than `gS.x` and is still one
-   *  guard — so the OUTERMOST right operand an access is under is what is compared. */
+   *  register after the `gY` test, while `p0 = &gS;` ahead of the `if` loads it first. Not one
+   *  operand: accesses under two different guards (`(gY != 5 || gS.a) && (gA != 1 || gS.c)`, or the
+   *  two in separate `if`s) are each loaded under their own, so a hoist above both moves every load
+   *  (agbcc 15/39 and 19/40 hoisted, 9/39 inline). */
   guardedOperand: boolean;
 }
 
@@ -768,7 +769,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         unfoldedOffset: c.operandOff.has(k),
         castBase: c.meta.get(k)!.base.k === 'cast',
         orderLicensed: c.ordered.get(k) === true,
-        guardedOperand: (c.guard.get(k) ?? null) !== null,
+        guardedOperand: c.guard.get(k) === true,
       }) === null
     );
   });
