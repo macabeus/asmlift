@@ -170,57 +170,114 @@ function generateSharedTailFn(seed: number): Fn {
  *  `< -2 / 0 / 2` tests take both sides. */
 const RUNS = [0, 9, 83, 511, 4095, 1234, 3001];
 
-test('the sink and the follow change no observable, on the shapes they were built for', async () => {
-  const SEEDS = 20000;
-  let sunk = 0;
-  let followed = 0;
-  let sunkAndFollowed = 0;
-  let declined = 0;
-  for (let seed = 1; seed <= SEEDS; seed++) {
-    if (seed % BREATHE_EVERY === 0) {
+/** THE SEEDS. Each arm sweeps a FIXED range — seeds 1..20000 and 1..6000 — so every run judges the
+ *  same functions and a failure reproduces. The range is cut into tests of {@link CHUNK} seeds:
+ *  run whole, the first arm took 104.8 s of its 120 s budget alone on a quiet laptop (2026-11-04)
+ *  and timed out beside a neighbour's bench (126-128 s, 2 runs in 2, beside 8 busy-loop
+ *  neighbours at load ~10). A chunk takes ~5 s alone and 11.8 s at that load, a tenth of its
+ *  budget. Nothing is dropped: the floors below count every chunk, and assert that every seed ran.
+ *
+ *  `ASMLIFT_SHARED_TAIL_SEEDS` overrides the range for a repro — a list such as `4711` or
+ *  `7,12,100-140` — and both arms then run exactly those seeds, in one test each, without the
+ *  floors (which price the full ranges). A seed that fails says so, and names that variable. */
+const CHUNK = 1000;
+const SEEDS_ENV = 'ASMLIFT_SHARED_TAIL_SEEDS';
+const OVERRIDE = ((spec: string | undefined): number[] | undefined => {
+  if (spec === undefined || spec.trim() === '') {
+    return undefined;
+  }
+  return spec.split(',').flatMap((part) => {
+    const m = /^\s*(\d+)(?:\s*-\s*(\d+))?\s*$/.exec(part);
+    if (!m) {
+      throw new Error(`${SEEDS_ENV}: '${part}' is neither a seed nor a range a-b`);
+    }
+    const [lo, hi] = [Number(m[1]), Number(m[2] ?? m[1])];
+    return Array.from({ length: hi - lo + 1 }, (_, n) => lo + n);
+  });
+})(process.env[SEEDS_ENV]);
+
+/** The tests one arm runs: its range in chunks, or the override whole. */
+const chunksOf = (last: number): { title: string; seeds: number[] }[] =>
+  OVERRIDE
+    ? [{ title: `${SEEDS_ENV}=${process.env[SEEDS_ENV]}`, seeds: OVERRIDE }]
+    : Array.from({ length: Math.ceil(last / CHUNK) }, (_, c) => {
+        const lo = c * CHUNK + 1;
+        const hi = Math.min(last, (c + 1) * CHUNK);
+        return { title: `seeds ${lo}..${hi}`, seeds: Array.from({ length: hi - lo + 1 }, (_, n) => lo + n) };
+      });
+
+/** Run `body` on every seed, breathing between stretches, and name the seed in whatever it throws —
+ *  an assertion names its seed already, a throw out of `verify` or `structure` did not. */
+async function sweep(seeds: readonly number[], body: (seed: number) => void): Promise<void> {
+  for (let n = 0; n < seeds.length; n++) {
+    if (n > 0 && n % BREATHE_EVERY === 0) {
       await breathe();
     }
-    const lifted = generateSharedTailFn(seed);
-    verify(lifted);
-    const want = RUNS.map((r) => irTraceOf(lifted, r));
-    const run = (fn: Fn): number => {
-      let fired = 0;
-      let tree;
-      try {
-        tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
-      } catch (e) {
-        if (!(e instanceof StructureError)) {
-          throw e;
-        }
-        declined++;
-        return 0;
+    try {
+      body(seeds[n]);
+    } catch (e) {
+      if (e instanceof Error) {
+        e.message = `seed ${seeds[n]} (rerun it alone: ${SEEDS_ENV}=${seeds[n]}): ${e.message}`;
       }
-      RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed}, run ${r}`).toEqual(want[i]));
-      // and after the committed L3 rewrites (tail-merge, dead stores, base locals) and contracts
-      const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
-      RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} checked, run ${r}`).toEqual(want[i]));
-      return fired;
-    };
-    // The follow alone, on the lifted function.
-    followed += run(lifted) > 0 ? 1 : 0;
-    // The sink, then the follow.
-    const fn = generateSharedTailFn(seed);
-    if (sinkStoreTails(fn)) {
-      sunk++;
-      verify(fn);
-      RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} sunk, run ${r}`).toEqual(want[i]));
-      sunkAndFollowed += run(fn) > 0 ? 1 : 0;
+      throw e;
     }
   }
-  // The sweep is not vacuous. At 20000 seeds it sinks 15866 functions, follows 9391 and does both
-  // on 3662, declining none; the floors sit well under all three, so a generator tweak cannot turn
-  // this green by quietly generating nothing the transform touches.
+}
+
+const PLAIN_SEEDS = 20000;
+const plain = { seeds: 0, sunk: 0, followed: 0, sunkAndFollowed: 0, declined: 0 };
+
+for (const { title, seeds } of chunksOf(PLAIN_SEEDS)) {
+  test(`the sink and the follow change no observable, on the shapes they were built for: ${title}`, async () => {
+    await sweep(seeds, (seed) => {
+      const lifted = generateSharedTailFn(seed);
+      verify(lifted);
+      const want = RUNS.map((r) => irTraceOf(lifted, r));
+      const run = (fn: Fn): number => {
+        let fired = 0;
+        let tree;
+        try {
+          tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
+        } catch (e) {
+          if (!(e instanceof StructureError)) {
+            throw e;
+          }
+          plain.declined++;
+          return 0;
+        }
+        RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed}, run ${r}`).toEqual(want[i]));
+        // and after the committed L3 rewrites (tail-merge, dead stores, base locals) and contracts
+        const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+        RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} checked, run ${r}`).toEqual(want[i]));
+        return fired;
+      };
+      // The follow alone, on the lifted function.
+      plain.followed += run(lifted) > 0 ? 1 : 0;
+      // The sink, then the follow.
+      const fn = generateSharedTailFn(seed);
+      if (sinkStoreTails(fn)) {
+        plain.sunk++;
+        verify(fn);
+        RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} sunk, run ${r}`).toEqual(want[i]));
+        plain.sunkAndFollowed += run(fn) > 0 ? 1 : 0;
+      }
+      plain.seeds++;
+    });
+  });
+}
+
+test.runIf(!OVERRIDE)('the sink-and-follow sweep is not vacuous', () => {
+  // At 20000 seeds it sinks 15866 functions, follows 9391 and does both on 3662, declining none;
+  // the floors sit well under all three, so a generator tweak cannot turn this green by quietly
+  // generating nothing the transform touches. `seeds` counts the seeds that ran to the end, so a
+  // chunk that failed or was filtered out fails this too.
   console.log(
-    `[shared-tail-fuzz] seeds=${SEEDS} sunk=${sunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
+    `[shared-tail-fuzz] seeds=${plain.seeds} sunk=${plain.sunk} followed=${plain.followed} sunk+followed=${plain.sunkAndFollowed} declined=${plain.declined}`,
   );
-  expect(sunk).toBeGreaterThan(1500);
-  expect(followed).toBeGreaterThan(8000);
-  expect(sunkAndFollowed).toBeGreaterThan(1500);
+  expect(plain.seeds).toBe(PLAIN_SEEDS);
+  expect(plain.sunk).toBeGreaterThan(1500);
+  expect(plain.followed).toBeGreaterThan(8000);
+  expect(plain.sunkAndFollowed).toBeGreaterThan(1500);
 });
 
 /** A store tail — stores, then a void `ret` — that reads a block parameter of some OTHER non-entry
@@ -235,66 +292,72 @@ const readsForeignParam = (fn: Fn): boolean =>
       b.ops.some((o) => o.operands.some((v) => fn.blocks.some((x, i) => i > 0 && x !== b && x.params.includes(v)))),
   );
 
-test('the same, on the fn the raise spine hands rank.ts', async () => {
-  // rank.ts sinks the RAISED fn, and raise reshapes what the generator built: a tail whose one
-  // predecessor is a forwarder loses its parameter and reads the forwarder's. Hand-built IR never
-  // reaches that, so this arm runs the generator's functions through `raiseRecovered` first, and
-  // takes the raised fn's own run as the oracle. The follow is asked where rank.ts asks it.
-  const SEEDS = 6000;
-  let foreign = 0;
-  let sunk = 0;
-  let foreignSunk = 0;
-  let followed = 0;
-  let sunkAndFollowed = 0;
-  let declined = 0;
-  for (let seed = 1; seed <= SEEDS; seed++) {
-    if (seed % BREATHE_EVERY === 0) {
-      await breathe();
-    }
-    const fn = generateSharedTailFn(seed);
-    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 3, returnsVoid: true }, { shortCircuit: { foldTreeOwned: false } });
-    const want = RUNS.map((r) => irTraceOf(fn, r));
-    const run = (label: string): number => {
-      let fired = 0;
-      let tree;
-      try {
-        tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
-      } catch (e) {
-        if (!(e instanceof StructureError)) {
-          throw e;
+const RAISED_SEEDS = 6000;
+const raised = { seeds: 0, foreign: 0, sunk: 0, foreignSunk: 0, followed: 0, sunkAndFollowed: 0, declined: 0 };
+
+for (const { title, seeds } of chunksOf(RAISED_SEEDS)) {
+  test(`the same, on the fn the raise spine hands rank.ts: ${title}`, async () => {
+    // rank.ts sinks the RAISED fn, and raise reshapes what the generator built: a tail whose one
+    // predecessor is a forwarder loses its parameter and reads the forwarder's. Hand-built IR never
+    // reaches that, so this arm runs the generator's functions through `raiseRecovered` first, and
+    // takes the raised fn's own run as the oracle. The follow is asked where rank.ts asks it.
+    await sweep(seeds, (seed) => {
+      const fn = generateSharedTailFn(seed);
+      raiseRecovered(
+        fn,
+        ARMV4T_AGBCC,
+        {},
+        { params: 3, returnsVoid: true },
+        { shortCircuit: { foldTreeOwned: false } },
+      );
+      const want = RUNS.map((r) => irTraceOf(fn, r));
+      const run = (label: string): number => {
+        let fired = 0;
+        let tree;
+        try {
+          tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
+        } catch (e) {
+          if (!(e instanceof StructureError)) {
+            throw e;
+          }
+          raised.declined++;
+          return 0;
         }
-        declined++;
-        return 0;
-      }
-      RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed} ${label}, run ${r}`).toEqual(want[i]));
-      const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
-      RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} ${label} checked, run ${r}`).toEqual(want[i]));
-      return fired;
-    };
-    if (hasDivergentSharedRet(fn)) {
-      followed += run('raised') > 0 ? 1 : 0;
-    }
-    const isForeign = readsForeignParam(fn);
-    foreign += isForeign ? 1 : 0;
-    if (sinkStoreTails(fn)) {
-      sunk++;
-      foreignSunk += isForeign ? 1 : 0;
-      verify(fn);
-      RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} raised+sunk, run ${r}`).toEqual(want[i]));
+        RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed} ${label}, run ${r}`).toEqual(want[i]));
+        const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+        RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} ${label} checked, run ${r}`).toEqual(want[i]));
+        return fired;
+      };
       if (hasDivergentSharedRet(fn)) {
-        sunkAndFollowed += run('raised+sunk') > 0 ? 1 : 0;
+        raised.followed += run('raised') > 0 ? 1 : 0;
       }
-    }
-  }
+      const isForeign = readsForeignParam(fn);
+      raised.foreign += isForeign ? 1 : 0;
+      if (sinkStoreTails(fn)) {
+        raised.sunk++;
+        raised.foreignSunk += isForeign ? 1 : 0;
+        verify(fn);
+        RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} raised+sunk, run ${r}`).toEqual(want[i]));
+        if (hasDivergentSharedRet(fn)) {
+          raised.sunkAndFollowed += run('raised+sunk') > 0 ? 1 : 0;
+        }
+      }
+      raised.seeds++;
+    });
+  });
+}
+
+test.runIf(!OVERRIDE)('the raised sweep is not vacuous', () => {
   // The shape this arm exists for really occurs: 318 of the raised functions carry a foreign-
   // parameter tail and all 318 are sunk (sunk 4779, followed 2780, both 1100, declined 0), which is
   // what the first floor holds. With the copy substituting the tail's own parameters alone, seed 1
   // already throws in `verify`.
   console.log(
-    `[shared-tail-fuzz raised] seeds=${SEEDS} foreignParamTail=${foreign} sunk=${sunk} sunkForeign=${foreignSunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
+    `[shared-tail-fuzz raised] seeds=${raised.seeds} foreignParamTail=${raised.foreign} sunk=${raised.sunk} sunkForeign=${raised.foreignSunk} followed=${raised.followed} sunk+followed=${raised.sunkAndFollowed} declined=${raised.declined}`,
   );
-  expect(foreignSunk).toBeGreaterThan(150);
-  expect(sunk).toBeGreaterThan(2000);
-  expect(followed).toBeGreaterThan(1200);
-  expect(sunkAndFollowed).toBeGreaterThan(500);
+  expect(raised.seeds).toBe(RAISED_SEEDS);
+  expect(raised.foreignSunk).toBeGreaterThan(150);
+  expect(raised.sunk).toBeGreaterThan(2000);
+  expect(raised.followed).toBeGreaterThan(1200);
+  expect(raised.sunkAndFollowed).toBeGreaterThan(500);
 });

@@ -917,6 +917,15 @@ describe('the block hoist is WIRED into enumeration', () => {
       prototypes: { [sym]: { returnsVoid: true } },
     });
   const cands = candsFor('mixpoll');
+  // `sizebound` enumerates 800 candidates, 1.5-2.1 s alone on a quiet laptop core. The two tests
+  // below read ONE enumeration between them: /nearbase once enumerated it three times itself, and
+  // beside 8 busy-loop neighbours (load 10-12, 2026-11-04) it took 7.9-10.6 s and timed out 10
+  // runs in 10 against vitest's 5 s default. Sharing it, whichever test runs first pays one
+  // enumeration, which took 3.9-5.05 s in 20 runs at that load — twice past 5 s — so both carry
+  // SIZEBOUND_BUDGET, six times the worst of those.
+  let sizeboundCands: ReturnType<typeof candsFor> | undefined;
+  const sizebound = () => (sizeboundCands ??= candsFor('sizebound'));
+  const SIZEBOUND_BUDGET = 30_000;
 
   test('the narrower hoist reaches the candidate list, plain and volatile', () => {
     // the roster's own four candidates — the pairings that ride on them are their own tests' business
@@ -1039,39 +1048,49 @@ describe('the block hoist is WIRED into enumeration', () => {
     );
   });
 
-  test('every /livebase PAIRING runs over the roster, and one of them is reachable no other way', () => {
-    // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
-    // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
-    // /nearbase no neighbour cells to cluster; only the narrow one leaves it inline, so the
-    // pairing exists on `-block` alone.
-    const names = candsFor('sizebound').map((x) => x.variations);
-    expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
-    expect(
-      names.filter((v) => hasVariations(v.slice(0, 2), ['signed', 'livebase']) && hasVariation(v.slice(2), 'nearbase')),
-    ).toEqual([]);
-  });
+  test(
+    'every /livebase PAIRING runs over the roster, and one of them is reachable no other way',
+    () => {
+      // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
+      // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
+      // /nearbase no neighbour cells to cluster; only the narrow one leaves it inline, so the
+      // pairing exists on `-block` alone.
+      const names = sizebound().map((x) => x.variations);
+      expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
+      expect(
+        names.filter(
+          (v) => hasVariations(v.slice(0, 2), ['signed', 'livebase']) && hasVariation(v.slice(2), 'nearbase'),
+        ),
+      ).toEqual([]);
+    },
+    SIZEBOUND_BUDGET,
+  );
 
-  test('/nearbase rides at BOTH orderings, so nothing commits its placement uncontested', () => {
-    // `l3/nearbase.ts` places its cluster inits above the run already there, on the strength of
-    // one row and no compiler fact. The sunk sibling is the other ordering; without it that
-    // choice decides `synthetic:dmafield`'s match with no candidate beside it to lose to.
-    const names = candsFor('sizebound').map((x) => x.variations);
-    expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
-    expect(names).toContainEqual([
-      'signed',
-      'defsite',
-      'loop-entry',
-      'livebase-block',
-      'volatile',
-      'nearbase',
-      'sinkinit',
-    ]);
-    // and the sunk one is a DIFFERENT candidate, not a relabelled duplicate
-    const src = (l: string) => candsFor('sizebound').find((x) => joinVariations(x.variations) === l)!.source;
-    expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
-      src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
-    );
-  });
+  test(
+    '/nearbase rides at BOTH orderings, so nothing commits its placement uncontested',
+    () => {
+      // `l3/nearbase.ts` places its cluster inits above the run already there, on the strength of
+      // one row and no compiler fact. The sunk sibling is the other ordering; without it that
+      // choice decides `synthetic:dmafield`'s match with no candidate beside it to lose to.
+      const names = sizebound().map((x) => x.variations);
+      expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
+      expect(names).toContainEqual([
+        'signed',
+        'defsite',
+        'loop-entry',
+        'livebase-block',
+        'volatile',
+        'nearbase',
+        'sinkinit',
+      ]);
+      // and the sunk one is a DIFFERENT candidate, not a relabelled duplicate
+      const src = (l: string) => sizebound().find((x) => joinVariations(x.variations) === l)!.source;
+      expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
+        src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
+      );
+    },
+    SIZEBOUND_BUDGET,
+  );
 });
 
 // ── the reinterpret-cast base ─────────────────────────────────────────────────────────────────
