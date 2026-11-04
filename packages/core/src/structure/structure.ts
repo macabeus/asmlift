@@ -1128,7 +1128,11 @@ export class StructureError extends Error {
  *  copies this bounds, enter more than 4 regions per block, and they peak at 9. The `--fan` sweep
  *  of the same tree, which ran out of heap partway through the real tier, found nothing more. That
  *  census measured the return-tail copies as the default; the default has since read the join past
- *  early returns, which only enters fewer, and the copies are the `copyReturnTails` candidate. */
+ *  early returns, and the copies are the `copyReturnTails` candidate. The join is not always the
+ *  smaller of the two: it copies a return tail into each early return, so where the paths that do
+ *  not return meet at a block few of them reach it can write more (sa3 sub_809A808, 119 lines
+ *  against the copies' 54), and each reading falls to the other at the bound
+ *  (`structureWithinBudget`). */
 export const COPY_BUDGET = 64;
 /** The floor under it, so a small function's legitimate copies never reach it. */
 export const COPY_BUDGET_FLOOR = 4096;
@@ -3828,7 +3832,7 @@ interface ForRanking {
  *  The first run's refusal stands if every rerun declines too, where the first run is the last
  *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
  *  known to stand, so a site is reported once: by the structuring that is returned, or by the
- *  first run where none is. */
+ *  run whose refusal stands where none is (`structureWithinBudget`). */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
@@ -3841,19 +3845,25 @@ export function structure(
 /** THE TWO RUNGS ABOVE THE WHOLE LADDER: the copy budget, and the copies.
  *
  *  THE COPY BUDGET. A structuring that enters more regions than `COPY_BUDGET` allows is stopped
- *  where it crosses the bound, and the function declines with a `StructureError` naming the block
- *  copied most: a structure decline, never an exponential tree published or an internal overflow in
- *  the printer. The default already reads the join past early returns, which writes the code below
- *  each divergent `if` or switch outside a loop once, so no cheaper reading is left to rerun it with.
+ *  where it crosses the bound: a structure decline, never an exponential tree published or an
+ *  internal overflow in the printer. The join past early returns writes the code below each
+ *  divergent `if` or switch outside a loop once, where the copies write it into every arm, once
+ *  more per link of a chain; but the join copies a return tail into each early return in its turn,
+ *  and where the paths that do not return meet at a block few of them reach, every other path is an
+ *  early return taking its own copy of the tail (a decision tree whose leaves fall into one long
+ *  tail, two of them through a shared block first). Neither reading is bounded by the other, so
+ *  each falls to the other at the bound, as at a refusal below.
  *
- *  THE COPIES, where the join REFUSES. The join moves where a branch's arms end, and some shapes
- *  every rung declines at that end are structured at the CFG's: a jump table whose arms then fall
- *  into one, a case that leaves its switch for a loop exit past the switch's end, a two-level loop
- *  exit past the region's end. So a default whose join declines is run again reading the copies
- *  (`JoinReading.copies`, not the option, so the default-accepts guard does not take the rerun for
- *  the `/ret-copy` variation), and that is the tree it publishes: the reading it had before the join
- *  was the default, rather than a decline. Where the copies decline too, their refusal stands, the
- *  default's refusal before the join was; where they cross the copy budget instead, the join's does.
+ *  THE COPIES, where the join REFUSES or crosses the budget. The join moves where a branch's arms
+ *  end, and some shapes every rung declines at that end are structured at the CFG's: a jump table
+ *  whose arms then fall into one, a case that leaves its switch for a loop exit past the switch's
+ *  end, a two-level loop exit past the region's end. So a default whose join declines is run again
+ *  reading the copies (`JoinReading.copies`, not the option, so the default-accepts guard does not
+ *  take the rerun for the `/ret-copy` variation), and that is the tree it publishes: the reading it
+ *  had before the join was the default, rather than a decline. The rerun is of the whole function:
+ *  a refusal is not traced to the branch whose join caused it, so every branch reads the copies.
+ *  Where the copies decline too, their refusal stands, the default's refusal before the join was;
+ *  where they cross the copy budget instead, the join's refusal (or its budget decline) does.
  *  Only a run that ASKED the join somewhere is rerun: one that never did is the copies' run already,
  *  and running it again would read state the refused run left behind — a volatile read the first
  *  run stamped is no longer "stamped late" on the second, and its decline would not fire.
@@ -3862,40 +3872,47 @@ export function structure(
  *
  *  A structuring under the bound is the ladder's own, byte for byte, and on the corpus none comes
  *  near it (the census at `COPY_BUDGET`). The hooks a stopped run fired without holding them
- *  (`onCounterSignRefused`) have fired; the held ones are dropped with the run, so a rerun that
- *  reads the copies reports no join past early returns. */
+ *  (`onCounterSignRefused`) have fired; the held ones are dropped with the run. A refused run's held
+ *  hooks fire only where its refusal is the one that stands, so a join run the copies replace
+ *  reports no join past early returns. */
 function structureWithinBudget(
   fn: Fn,
   opts: StructureOptions,
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
 ): SFn {
-  const overBudget = (error: CopyBudgetExceeded): never => {
-    throw new StructureError(
+  const overBudget = (error: CopyBudgetExceeded): StructureError =>
+    new StructureError(
       `cannot structure '${fn.name}': block #${error.block} is written ${error.copies} times, ` +
         `past the copy budget of ${error.limit} region entries`,
     );
+  // a declining run: its error as `structure()` throws it, and the held hooks of its refusal
+  const declined = (error: unknown, held: readonly (() => void)[]): unknown => {
+    if (error instanceof CopyBudgetExceeded) {
+      return overBudget(error);
+    }
+    held.forEach((f) => f());
+    return error;
   };
   const reading: JoinReading = {
     copies: opts.copyReturnTails === true || opts.spellEarlyReturns === false,
     asked: false,
   };
-  let joinRefused: StructureError;
+  const joinHeld: (() => void)[] = [];
+  let joinDeclined: unknown;
   try {
-    return structureLadder(fn, opts, hooks, memo, reading);
+    return structureLadder(fn, opts, hooks, memo, reading, joinHeld);
   } catch (error) {
-    if (error instanceof CopyBudgetExceeded) {
-      overBudget(error);
+    if (reading.copies || !reading.asked || !(error instanceof StructureError || error instanceof CopyBudgetExceeded)) {
+      throw declined(error, joinHeld);
     }
-    if (reading.copies || !reading.asked || !(error instanceof StructureError)) {
-      throw error;
-    }
-    joinRefused = error;
+    joinDeclined = error;
   }
+  const copiesHeld: (() => void)[] = [];
   try {
-    return structureLadder(fn, opts, hooks, memo, { copies: true, asked: false });
+    return structureLadder(fn, opts, hooks, memo, { copies: true, asked: false }, copiesHeld);
   } catch (error) {
-    throw error instanceof CopyBudgetExceeded ? joinRefused : error;
+    throw error instanceof CopyBudgetExceeded ? declined(joinDeclined, joinHeld) : declined(error, copiesHeld);
   }
 }
 
@@ -3912,6 +3929,9 @@ function structureLadder(
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
   reading: JoinReading,
+  // where a declining ladder leaves the held hooks of the refusal it throws, for
+  // `structureWithinBudget` to fire if that refusal stands
+  refusedHeld: (() => void)[],
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
   const attempt = (
@@ -4043,7 +4063,7 @@ function structureLadder(
   if (sfn !== null) {
     return sfn;
   }
-  refused!.held.forEach((f) => f());
+  refusedHeld.push(...refused!.held);
   throw refused!.error;
 }
 
