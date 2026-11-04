@@ -143,16 +143,17 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-11-04**, taken at `2701f77`
-(`match-ret-join-top-level-default` on `575057b`, which reads the join past early returns as the default structuring
+Summed out of the committed artifact of **2026-11-04**, taken at `9af00ee`
+(`match-ret-join-top-level-default-v2` on `ef42279`, which reads the join past early returns as the default structuring
 and keeps the return-tail copies as the ranked `/ret-copy`), on a Linux x86_64 host at `--jobs 2` with its 32-bit
-compilers native, under the shared heavy-job lock, its candidate cache and load average not read during it: the ranked
-pass alone is **3,261 s over 302 real rows** and **2,880 s over 2127 synthetic rows**; wall clock was 1,998.8 s and
-2,034.7 s on tiers that overlap, and 4,034.2 s end to end. Against `main` it is 173 field changes and 0 added; fan
-179,841 → 179,841 (1.00×) over 2,429 comparable rows, and its ranked pass reads 5,965.1 s → 6,140.3 s (1.03×). The
-dearest real row is **809 s** on `kleod:PauseMenuScreenHandler:agbcc`, **25% of the tier**, on its fan of 27,680;
-`kleod:AthleticChallengeScrollUpdate:agbcc` reads 486.4 s, and `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`
-(fan=24864 rank=556.3s) and `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n` 11.9 s.
+compilers native, under the shared heavy-job lock, on a candidate cache earlier runs in the same worktree had warmed,
+its load average not read during it: the ranked pass alone is **3,336 s over 302 real rows** and **2,644 s over 2127
+synthetic rows**; wall clock was 1,789.1 s and 1,463.0 s on tiers that overlap, and 3,253.2 s end to end. Against
+`main` it is 173 field changes and 0 added; fan 179,841 → 179,841 (1.00×) over 2,429 comparable rows, and its ranked
+pass reads 5,965.1 s → 5,979.2 s (1.00×). The dearest real row is **843 s** on `kleod:PauseMenuScreenHandler:agbcc`,
+**25% of the tier**, on its fan of 27,680; `kleod:AthleticChallengeScrollUpdate:agbcc` reads 490.5 s, and
+`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` (fan=24864 rank=567.5s) and
+`pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n` 11.5 s.
 
 The one before that, also of 2026-11-04, taken at `1db3860`
 (`match-d188-residual-tail-copies` on `a555cd6`, which folds a connective whose second test reads one address several
