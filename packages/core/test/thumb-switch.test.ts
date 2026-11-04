@@ -138,6 +138,13 @@ testCopies('falling into an arm that takes a value from the switch edge DECLINES
   // sideB is declared: a guessed arity would also read r3, which the dispatch left the table's address
   const sideB = { sideB: { params: 1, returns: 's32' } };
   expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: sideB })).toThrow(/takes a value from the switch edge/);
+  // The default reads the join past the early return instead: the arms meet at the call below the
+  // switch, so each sets the value it hands it and nothing falls through to re-run a copy.
+  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: sideB }).source;
+  expect(joined).toMatch(
+    /case 0:\s*v0 = 7;\s*break;\s*case 1:\s*v0 = 5;\s*break;\s*default:\s*return a0;\s*\}\s*return sideB\(v0\);/,
+  );
+  expect(count(joined, 'sideB(')).toBe(1);
 });
 
 // agbcc -O2 for `for (i = 0; i < n; i++) switch (gId[i]) { case 0: f(i); break; case 1: g(i); break;
@@ -176,7 +183,8 @@ test('a switch-edge value the falling arm computes for itself (gcse PRE) is reco
 
 // `case 0:` falls into `case 1:`, and both it and the dispatch compute r2 for `case 1:` the same way
 // (`dispatch`, `arm0`). Each fixture below leaves the switch edge a copy into `case 1:` that the
-// fall path must not re-run, so the structurer still refuses it.
+// fall path must not re-run, so the copies still refuse it. The default's lift of both, at the
+// join past the early return, is pinned in join-past-returns.test.ts.
 const recompute = (dispatch: string, arm0: string) =>
   `f:\n\tpush\t{lr}\n${dispatch}\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr3, r1, #0x2\n\tldr\tr1, .Lp\n` +
   '\tadd\tr3, r3, r1\n\tldr\tr3, [r3]\n\tmov\tpc, r3\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
@@ -258,12 +266,21 @@ testCopies('overlaps C cannot spell DECLINE instead of being silently closed or 
   // The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a `return`, which
   // legitimately removes the second exit — these fixtures need the exit to survive as an edge.
   const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
-  const sw = (arms: string[]) => () => lift(conv(arms, tail));
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
   // (c) reaches two different siblings.
-  expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
+  const reachesTwo = conv(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC], tail);
+  expect(() => lift(reachesTwo)).toThrow(/reaches several sibling cases/);
+  // The default reads the join past early returns: case 1 and the default reach only the return
+  // tail (sideZ's call), so they return, and the join is case 2's body, below the switch. Case 0's
+  // two targets are then a `break` to the join and a fall into case 1, both of which C spells.
+  const joined = decompileJoined('f', reachesTwo, ARMV4T_AGBCC, { prototypes: SIDES }).source;
+  expect(joined).toMatch(
+    /case 2:\s*break;\s*case 0:\s*if \(a2 != 0\) break;\s*case 1:\s*sideB\(\);\s*default:\s*return sideZ\(\);\s*\}\s*sideC\(\);\s*return sideZ\(\);/,
+  );
+  expect(count(joined, 'sideB(')).toBe(1);
+  expect(count(joined, 'sideC(')).toBe(1);
 });
 
 testCopies('an arm reaching a sibling on one path and the switch END on another breaks on that path', () => {
@@ -915,7 +932,7 @@ testCopies('the retry still refuses to end the switch at a case arm the default 
   // on their own. The end the anchored reading derives is case 1's ENTRY, an arm that is not the
   // default edge's target. Ending the switch there lifts, but as `case 1: break;` with case 1's body
   // moved after the switch (measured with the guard removed) — the spelling the retry refuses. The
-  // holes rule above does not reach it, so the stop reading's decline stands.
+  // holes rule above does not reach it, so under the copies the stop reading's decline stands.
   const asm =
     'f:\n\tcmp\tr0, #0x3\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
     '\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n\t.word\t.Lc2\n\t.word\t.Lc3\n' +
@@ -924,6 +941,14 @@ testCopies('the retry still refuses to end the switch at a case arm the default 
   // declared, as in the source (see the retry above)
   const protos = Object.fromEntries(['a', 'b', 'd'].map((n) => [n, { params: 0, returns: 'void' }]));
   expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: protos })).toThrow(/case arms do not linearize/);
+  // The default's join past early returns reaches that spelling by its own route: the join is the
+  // block every arm that does not return reaches, case 1's entry, and the refusal is the retry's,
+  // asked only inside the copies (structure.ts, NEVER AT A CASE ARM). The C is the same program.
+  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: protos }).source;
+  expect(joined).toMatch(
+    /case 0:\s*a\(\);\s*break;\s*case 2:\s*return 2;\s*case 3:\s*return 3;\s*default:\s*d\(\);\s*break;\s*case 1:\s*break;\s*\}\s*b\(\);\s*return 0;/,
+  );
+  expect(count(joined, 'b();')).toBe(1);
 });
 
 // AN ELIDED DISPATCH'S IDIOM WRITES ITS REGISTERS ON THE CASE EDGES. The idiom below leaves r1 holding

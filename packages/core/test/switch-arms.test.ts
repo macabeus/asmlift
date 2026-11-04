@@ -1306,15 +1306,21 @@ testCopies('TWO arms falling into ONE decline — C reaches an arm from above on
   // A cross-jump makes exactly this shape out of `case 2: *p = 3; *p = 2; break;`, and Regime B
   // reads it back as copies. Regime A does not: `chainArms` refuses, and if-recovery lifts it,
   // so a copy reading here would trade one lift for another (switch-recover.ts, NO COPIES HERE).
-  const out = of(
-    threeCase(
-      '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
-      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
-      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
-    ),
+  const asm = threeCase(
+    '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
+    '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
   );
+  const out = of(asm);
   expect(armOrder(out)).not.toContain(1);
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+  // The default reads the join past early returns: the default arm reaches only the return tail,
+  // so the join is case 1's body, below the switch, and the two arms that ran into it each `break`.
+  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(joined).toMatch(
+    /case 0:\s*\*a1 = 1;\s*break;\s*case 1:\s*break;\s*case 2:\s*\*a1 = 3;\s*break;\s*default:\s*\*\(s32 \*\)\(128 << 19\) = \(s32\)a1;\s*return;\s*\}\s*\*a1 = 2;/,
+  );
+  expect(count(joined, '*a1 = 2;')).toBe(1);
 });
 
 testCopies('a comparison tree agbcc cross-jumped two arms of stays with if-recovery', () => {
@@ -1349,15 +1355,22 @@ testCopies('a comparison tree agbcc cross-jumped two arms of stays with if-recov
 });
 
 testCopies('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {
-  const out = of(
-    threeCase(
-      '\tcmp\tr1, #0\n\tbeq\t.Lc1\t@cond_branch\n\tb\t.Lc2\n',
-      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
-      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
-    ),
+  const asm = threeCase(
+    '\tcmp\tr1, #0\n\tbeq\t.Lc1\t@cond_branch\n\tb\t.Lc2\n',
+    '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
   );
+  const out = of(asm);
   expect(armOrder(out)).not.toContain(1);
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+  // The default reads the join past early returns: case 1 and the default reach only the return
+  // tail, so the join is case 2's body, below the switch, and case 0's two targets are a `break` to
+  // it and a fall into case 1.
+  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(joined).toMatch(
+    /case 2:\s*break;\s*case 0:\s*if \(a1 != 0\) break;\s*case 1:\s*\*a1 = 2;\s*default:\s*\*\(s32 \*\)\(128 << 19\) = \(s32\)a1;\s*return;\s*\}\s*\*a1 = 3;/,
+  );
+  expect(count(joined, '*a1 = 2;')).toBe(1);
 });
 
 test('a body reaching a sibling CASE on one path and the switch END on another breaks on that path', () => {
