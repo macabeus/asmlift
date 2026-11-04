@@ -1127,12 +1127,11 @@ export class StructureError extends Error {
  *  structurings): only `synthetic:retchain` and `synthetic:retchain_xj`, whose 32 tails are the
  *  copies this bounds, enter more than 4 regions per block, and they peak at 9. The `--fan` sweep
  *  of the same tree, which ran out of heap partway through the real tier, found nothing more. That
- *  census measured the return-tail copies as the default; the default has since read the join past
- *  early returns, and the copies are the `copyReturnTails` candidate. The join is not always the
- *  smaller of the two: it copies a return tail into each early return, so where the paths that do
- *  not return meet at a block few of them reach it can write more (sa3 sub_809A808, 119 lines
- *  against the copies' 54), and each reading falls to the other at the bound
- *  (`structureWithinBudget`). */
+ *  census read the return-tail copies, the `copyReturnTails` candidate, not the default join past
+ *  early returns. The join is not always the smaller of the two: it copies a return tail into each
+ *  early return, so where the paths that do not return meet at a block few of them reach it can
+ *  write more (sa3 sub_809A808, 119 lines against the copies' 54), and a join past the bound falls
+ *  to the copies (`structureWithinBudget`). */
 export const COPY_BUDGET = 64;
 /** The floor under it, so a small function's legitimate copies never reach it. */
 export const COPY_BUDGET_FLOOR = 4096;
@@ -2992,8 +2991,8 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
   );
 }
 // THE JOIN PAST EARLY RETURNS (the default; off under `copyReturnTails`). A divergent `if` whose
-// arms share no `ret` the compiler left apart has no follow above: agbcc and gcc2.7.2 cross-jump identical
-// `k(x); gT = x; return;` arms into one return tail, and every toolchain merges the early returns
+// arms share no `ret` the compiler left apart has no follow above: agbcc and gcc2.7.2 cross-jump
+// identical `k(x); gT = x; return;` arms into one return tail, and every toolchain merges the early returns
 // and the function's end into one epilogue, so the only `ret` every arm reaches is the one the
 // tail reaches too, and the follow lands on it (`synthetic:retchain_xj`). Read instead the block
 // `j` the paths that do not return meet at, where every path from `b` that never reaches `j`
@@ -3810,16 +3809,16 @@ interface ForRanking {
  *  ANY of those runs — the loop tail-copy, past-exit and outward reruns as well as the first — met
  *  one of three jump-table refusals (`wantFor`), so the published refusal, which is the first
  *  run's, need not be one of them: a function that declines on "unrecovered back-edge" can lift
- *  here because a later rung reached the jump table. Any structure decline in a function with a `while (1)` loop
- *  holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
+ *  here because a later rung reached the jump table. Any structure decline in a function with a
+ *  `while (1)` loop holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
  *  `jumpSharedFallTargets`) write the case-label goto L3 holds, and the default writes one only where
  *  every goto-free reading of its ladder declines (THE COPIES, BELOW ALL OF IT). One switch's
  *  ladder sees only its own rungs, not the whole-function reruns above: a `while (1)` jump table
- *  whose copies decline in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
- *  the first run adopts them there and never makes that rerun. So every run above is made with the
+ *  whose copies decline in the first run can lift goto-free once the `for` rerun asks its loop, and
+ *  asking the jumps in the first run adopts them there and never makes that rerun. So every run above is made with the
  *  jump rungs unasked, and only where all of them decline, the `for` reruns included, and some
  *  switch's jump rung would have read it, are they all made again with rungs asked (`JumpRanking`)
  *  — PER SWITCH: only at the switches whose jump rung read them and that no run spelled goto-free.
@@ -3838,9 +3837,9 @@ interface ForRanking {
  *  goto-free reading" mean the join's: a function whose join lifts only with a flag rung or a
  *  case-label jump publishes that, even where the copies would lift without one. Both are verified
  *  readings of the asm, so the order moves a spelling, never a decline into wrong C, and the scorer
- *  still weighs the copies as `/ret-copy`. On the corpus measured when the join became the default
- *  no function is in that reach: the join raises no `goto` or `while (1)` count over the functions
- *  it re-spells.
+ *  still weighs the copies as `/ret-copy`. CENSUS (2026-11-04, the 6,001 real functions): no
+ *  function is in that reach: the join raises no `goto` or `while (1)` count over the functions it
+ *  re-spells.
  *
  *  The first run's refusal stands if every rerun declines too, where the first run is the last
  *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
@@ -3865,18 +3864,18 @@ export function structure(
  *  and where the paths that do not return meet at a block few of them reach, every other path is an
  *  early return taking its own copy of the tail (a decision tree whose leaves fall into one long
  *  tail, two of them through a shared block first). Neither reading is bounded by the other, so
- *  each falls to the other at the bound, as at a refusal below.
+ *  the join falls to the copies at the bound, as at a refusal below.
  *
  *  THE COPIES, where the join REFUSES or crosses the budget. The join moves where a branch's arms
  *  end, and some shapes every rung declines at that end are structured at the CFG's: a jump table
  *  whose arms then fall into one, a case that leaves its switch for a loop exit past the switch's
  *  end, a two-level loop exit past the region's end. So a default whose join declines is run again
  *  reading the copies (`JoinReading.copies`, not the option, so the default-accepts guard does not
- *  take the rerun for the `/ret-copy` variation), and that is the tree it publishes: the reading it
- *  had before the join was the default, rather than a decline. The rerun is of the whole function:
- *  a refusal is not traced to the branch whose join caused it, so every branch reads the copies.
- *  Where the copies decline too, their refusal stands, the default's refusal before the join was;
- *  where they cross the copy budget instead, the join's refusal (or its budget decline) does.
+ *  take the rerun for the `/ret-copy` variation), and that is the tree it publishes rather than a
+ *  decline. The rerun is of the whole function: a refusal is not traced to the branch whose join
+ *  caused it, so every branch reads the copies. Where the copies decline too, their refusal
+ *  stands; where they cross the copy budget instead, the join's refusal (or its budget decline)
+ *  does.
  *  Only a run that ASKED the join somewhere is rerun: one that never did is the copies' run already,
  *  and running it again would read state the refused run left behind — a volatile read the first
  *  run stamped is no longer "stamped late" on the second, and its decline would not fire.
@@ -8355,8 +8354,8 @@ function structureRanked(
   const unspelledRets = unspelledEpilogues(fn);
 
   /** THE JOIN PAST EARLY RETURNS, as every branch that can take it asks it: an `if`, a jump table
-   *  and a comparison tree. Asked unless the structuring reads the copies (`JoinReading`), outside loop
-   *  bodies only (inside one, `clampToLoop` owns the question), and only where the CFG's join is
+   *  and a comparison tree. Asked unless the structuring reads the copies (`JoinReading`), outside
+   *  loop bodies only (inside one, `clampToLoop` owns the question), and only where the CFG's join is
    *  EXIT or a return tail (`joinPastReturnsAsked`). The join itself is `joinPastReturnsAt` — over
    *  the branch's successors, or a comparison tree's case blocks — which the caller asks, since only
    *  it knows which arms to ask it over.
@@ -8574,8 +8573,7 @@ function structureRanked(
       // PAST the loop and every reading declines there, THE LOOP CLAMP below reads the body's own.
       //
       // THE JOIN PAST EARLY RETURNS is asked here as at the `if` (unless `copyReturnTails`), for
-      // the same no-join shape: a chain of switches each with a `case` that
-      // `return`s early writes the code below every one of them into its arms, once more per
+      // the same no-join shape: a chain of switches each with a `case` that `return`s early writes the code below every one of them into its arms, once more per
       // switch, exactly as a chain of `if`s does. Same precedence and same `stop` rule as there, and
       // adopted only where the arms read at it decline nothing (below): it turns copies into one
       // tail, never a switch that spells into a decline.
@@ -9717,8 +9715,8 @@ function structureRanked(
     // tree before if-recovery claims the diamonds. Declines (null) fall through to plain if-recovery.
     //
     // A comparison tree is a jump table to the join past early returns (unless `copyReturnTails`):
-    // its end is asked over the tree's case and default blocks, as the
-    // `switch_br`'s over its successors, and taken only where the tree recovers at it; where it does
+    // its end is asked over the tree's case and default blocks, as the `switch_br`'s over its
+    // successors, and taken only where the tree recovers at it; where it does
     // not, the tree is read again at the CFG's merge, as without the reading.
     const asSwitch = handedThroughSwitch(() => {
       const { asked, cfgJoin } = askJoinPastReturns(b, stop);
