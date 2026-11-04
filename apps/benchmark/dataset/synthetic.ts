@@ -17443,6 +17443,84 @@ export const SYNTHETIC: SynthSpec[] = [
       'void scbase_pfar(struct T *p);',
     proto: { scbase_pfar: { params: 1, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
+  //      scbase_lit is scbase over a LITERAL address, `#define gL (*(struct S *)0x03005220)`: agbcc
+  //      loads the constant from the pool once and reads all three members off it, so the shared
+  //      value is a `const` rather than a symbol's address.
+  //      scbase_lidx reads two members through VARIABLE indices off a pointer LOADED from a global
+  //      (`p = gTP; p->pad2[b & 7] | p->pad2[c & 3]`): the shared value is `p + 0x36`, constant
+  //      offsets over a root an earlier statement read, which every test reads only as an address.
+  ...(
+    [
+      [
+        'scbase_lit',
+        'void',
+        '    if (gY != 5 || (gL.a | gL.d | gL.c) != 0) {\n',
+        '#define gL (*(struct S *)0x03005220)\n',
+      ],
+      [
+        'scbase_lidx',
+        's32 a, s32 b, s32 c',
+        '    struct T *p = gTP;\n    if (a != 3 || (p->pad2[b & 7] | p->pad2[c & 3]) != 0) {\n',
+        '',
+      ],
+    ] as const
+  ).map(([sym, params, head, macro]): SynthSpec => {
+    const decls =
+      'struct S { u8 a; u8 b; u8 c; s8 d; };\n' +
+      'struct T { u8 pad[0x35]; u8 a; u8 pad2[7]; u8 c; u8 pad3[0x19]; s8 d; };\n' +
+      'extern struct S gS;\n' +
+      'extern struct T *gTP;\n' +
+      'extern u16 gY;\n' +
+      'extern s32 gA, gB, gC;\n' +
+      'void k(s32 x);\n';
+    return {
+      sym,
+      src:
+        decls +
+        macro +
+        `void ${sym}(${params}) {\n` +
+        head +
+        '        if (gA == 1) { gB = 0; return; }\n' +
+        '        k(1);\n' +
+        '    }\n' +
+        '    k(2); gC = gC + 1; k(3);\n' +
+        '}',
+      features: ['branch', 'global'],
+      toolchains: FIVE,
+      ctx: decls + `void ${sym}(${params});`,
+      proto: {
+        [sym]: { ...(params === 'void' ? {} : { params: 3 }), returnsVoid: true },
+        k: { params: 1, returnsVoid: true },
+      },
+    };
+  }),
+  //      scbase_2g holds the struct's members under TWO guarded operands of one condition, so the
+  //      compiler loads `&gS` once under each guard and a base hoisted above the `if` moves both.
+  {
+    sym: 'scbase_2g',
+    src:
+      'struct S { u8 a; u8 b; u8 c; s8 d; };\n' +
+      'extern struct S gS;\n' +
+      'extern u16 gY;\n' +
+      'extern s32 gA, gC;\n' +
+      'void k(s32 x);\n' +
+      'void scbase_2g(void) {\n' +
+      '    if ((gY != 5 || (gS.a | gS.d) != 0) && (gA != 1 || (gS.c | gS.b) != 0)) {\n' +
+      '        k(1);\n' +
+      '    }\n' +
+      '    k(2); gC = gC + 1;\n' +
+      '}',
+    features: ['branch', 'global'],
+    toolchains: FIVE,
+    ctx:
+      'struct S { u8 a; u8 b; u8 c; s8 d; };\n' +
+      'extern struct S gS;\n' +
+      'extern u16 gY;\n' +
+      'extern s32 gA, gC;\n' +
+      'void k(s32 x);\n' +
+      'void scbase_2g(void);',
+    proto: { scbase_2g: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  },
   // A SCALAR GLOBAL THE CONTEXT DECLARES AT ANOTHER WIDTH OR SIGNEDNESS THAN ITS ONE ACCESS. The
   // usage inference reads a global accessed only at offset 0 at one width as a scalar of that
   // width, and the bare name is that scalar only where the declaration agrees: `return gN;` over
