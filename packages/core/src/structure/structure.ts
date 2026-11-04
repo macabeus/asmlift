@@ -8870,7 +8870,9 @@ function structureRanked(
       // second arm's ENTRY. Ending the switch there spells `case 1:` as an empty arm and moves its
       // body after the switch — the same program, but a spelling no source writes and the one the
       // `stop` reading's own refusal is the honest answer for. So the retry ends the switch only
-      // at the default block or past every arm.
+      // at the default block or past every arm. The refusal is this retry's, asked only under the
+      // copies: the default join past early returns ends such a switch at that same entry, since it
+      // is the block every arm that does not return reaches (thumb-switch.test.ts pins both).
       //
       // THE DEFAULT BLOCK STAYS ELIGIBLE WHEN THE TABLE'S HOLES MAKE IT AN ARM. A slot no `case`
       // names holds the default edge's target, so on a table with a hole that block is an arm by
