@@ -426,12 +426,12 @@ function sweepOrphans(fn: Fn, seeds: readonly Op[]): void {
  *  handing no value), every edge into it now going where it forwards.
  *
  *  THE PASS THAT EMPTIES A BLOCK THREADS IT. Such a block held nothing but the edge copies a fold
- *  made redundant, so it stands for no code of the source: KMC's default arm of `for (..) switch
- *  (..)` held only the step of the pointer the loop strides, which the latch now reads itself
- *  (`synthetic:sw_gotocase2:gcc2.7.2kmc`), and IDO's arms of `forexit_old` each held only their
- *  copy of the latch's bound. Left in the CFG, the structurer reads it as one more sibling case
- *  every `continue` falls into, or one more region on the way to the latch. An edge into it carries
- *  no args (it has no params) and its own carries none, so retargeting changes no value on any path;
+ *  made redundant, so it stands for no code of the source: KMC's default arm that held only the
+ *  pointer step (`synthetic:sw_gotocase2:gcc2.7.2kmc`), and each arm of IDO's
+ *  `synthetic:forexit_old:ido7.1` that held only its copy of the latch's bound `hi + 1`. Left in the
+ *  CFG, the structurer reads it as one more sibling case every `continue` falls into, or one more
+ *  region on the way to the latch. An edge into it carries no args (it has no params) and its own
+ *  carries none, so retargeting changes no value on any path;
  *  `foldExitTrampolines` (raise/latch.ts) folds the same block on a loop's exit, for its own scope,
  *  and this one asks no scope because the fold made it, not the compiler. A forwarder whose chain
  *  ends in a cycle of forwarders (`while (1);`) stays. */
@@ -577,7 +577,7 @@ export function strideDerivedParams(
   // takes a stride only as G of that counter's param: asking the other slots first asks exactly the
   // slots that can be the counter, and a pair asked later is one the `for` would refuse anyway, so the
   // order turns no lift into a decline. (KMC strength-reduces both `i << 3` and `gE + (i << 3)` beside
-  // `i`; in index order the pointer was found as `x + gE` of the shift.)
+  // `i`, and the pointer is `x + gE` of the shift as well as G of `i`.)
   const strides = new Set(slots.filter((j) => slots.some((i) => fit(j, i) !== null)));
   const order = [...slots.filter((x) => !strides.has(x)), ...slots.filter((x) => strides.has(x))];
   const out: StrideDerived[] = [];

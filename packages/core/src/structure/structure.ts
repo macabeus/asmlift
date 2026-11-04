@@ -10362,8 +10362,7 @@ function structureRanked(
   //     loop's; IDO tests the pointer only where the counter is dead, and none is invented here)
   //     (`stride-escapes`). The param may also be read ON THE WAY OUT, in a block of an exit arm the
   //     `for` writes inside its body ahead of its `break` or `return` (a `BreakArm`'s region, a
-  //     `LoopArm`'s owned blocks) that the header dominates and the latch reaches only through the
-  //     header: `case 7: k(gA[i]); break;` leaving `for (..) switch (..)` (KMC's
+  //     `LoopArm`'s owned blocks): `case 7: k(gA[i]); break;` leaving `for (..) switch (..)` (KMC's
   //     `synthetic:sw_gotocase2:gcc2.7.2kmc`, which keeps `gA[i]` in a pointer it steps by 4). Every
   //     path into such a block leaves the header without passing the update, so the counter's name
   //     holds what it held there, which is what the param is G of; the next rule holds the arm's
@@ -10871,13 +10870,13 @@ function structureRanked(
             varType.get(iv),
           ).find((t) => !differs(t)) ?? null));
     // A SIBLING'S STRIDE read on the way out (see above): the blocks of the loop's exit arms — a
-    // `break` that runs code first, an early return — that the `for` writes inside its body. Every
-    // such block runs before the update, by construction: `codeBreakArm`'s region stops at the
-    // loop's exit and admits no block the exit's forward path runs, and `LoopArm.owned` holds none
-    // of the exit path's tails. So no block here is one the latch reaches past its step without
-    // passing the header, and none needs a test for it. A block the header does not dominate (a tail
-    // shared with an `else` ahead of the loop) cannot read the header's params at all, so it leaves
-    // `strideEscapes` as it is; it only widens `stridesNamed`'s scan, which can refuse more, never less.
+    // `break` that runs code first, an early return — that the `for` writes inside its body. No
+    // filter is needed: `codeBreakArm`'s region stops at the loop's exit and admits no block the
+    // exit's forward path runs, and `LoopArm.owned` holds none of the exit path's tails, so the latch
+    // reaches none of these past its step without passing the header. A block the header does not
+    // dominate (a tail shared with an `else` ahead of the loop) cannot read the header's params, so it
+    // leaves `strideEscapes` as it is and only widens `stridesNamed`'s scan, which can refuse more,
+    // never less.
     let armBlocks: Set<Block> | undefined;
     const exitArms = (): ReadonlySet<Block> =>
       (armBlocks ??= new Set(
@@ -10889,8 +10888,7 @@ function structureRanked(
     // param, as an operand or an edge's argument, directly or through a value of the body or the arms,
     // the arms render no G, so a write of the counter's name there is as harmless as one past the
     // loop. IDO's `case 7: while (gA[i] > 0) { k(gA[i]); i++; } break;` steps its own copy of `i` and
-    // writes it back to `i` on its way out, and refusing the `for` for that write left the switch with
-    // no reading at all
+    // writes it back to `i` on its way out, and the switch has no reading but the `for`
     const namedArms = (): ReadonlySet<Block> => {
       const arms = exitArms();
       const params = new Set(strides.map((sd) => h.params[sd.j]));
