@@ -14496,7 +14496,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      On the MIPS gcc lanes brk2sw_one's switch is the function's tail, so the arm's merge ends
   //      in `ret` and the loop's hit edge into it reads as a do-while copying that tail as an early
   //      `return`, which emission cannot spell from inside the switch arm. The structuring is run
-  //      again with that copy behind every `while (1)` reading (structure.ts `RetCopyRanking`), and
+  //      again with that copy behind every `while (1)` reading (structure.ts `LoopTailCopyRanking`), and
   //      the two-level reading takes the loop there too.
   //      agbcc, gcc2.7.2kmc and gcc2.7.2: both lift. ido7.1: brk2sw_one lifts; brk2sw declines
   //      at the flag's `break` ("sits in a case body, where `break` would leave only the switch",
