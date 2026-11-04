@@ -352,7 +352,14 @@ Four things this gate does not catch by itself:
   `gate:` lines**. Both `test:root` and `test:matching` run through `scripts/gate-vitest.sh`,
   which exits 0 only when every collected file and test passed and vitest exited 0 — vitest alone
   exits 0 on a run that skipped files and 1 on a green run that hit a load timeout, and a gate read
-  off its exit status alone has been wrong both ways. It runs 3 workers; that was the faster run on
+  off its exit status alone has been wrong both ways. A skip still FAILS it, except one
+  `scripts/gate-skips.ts` lists for a host condition that really holds here (on Linux: the
+  macOS-only tests, the old-SDK clang one, the GCC 15 `#embed` ones, the bash `sh` one, and GCC
+  2.7.2's container suite where it runs natively); the PASS line counts those, and a FAIL names any
+  skip off the list, a listed one whose condition does not hold, and a stale entry. **A `test:root`
+  FAIL is a FAIL** — there is no known-skip FAIL to explain away any more. When a test gains a
+  host-only gate that no toolchain here can lift, add it to that list with the gate's own probe,
+  in the same commit. It runs 3 workers; that was the faster run on
   this machine, not only the quieter one (the script's header has the measurement). Do NOT also
   run `test:offline`, `vitest run apps/benchmark/test` or `vitest run apps/web/test` locally: all
   three read the same root config — same `env`, `globalSetup` and `setupFiles` — and
