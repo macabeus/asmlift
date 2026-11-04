@@ -25,7 +25,9 @@ mistaken for a passing one.
    `apps/benchmark/test` and `apps/web/test`, CI's other two vitest steps — so running it here
    too only runs those files twice.
 5. **`pnpm test` — the FULL suite, including the toolchain-backed matching tests.** It fails on a
-   skipped file or test (`scripts/gate-vitest.sh`), so it needs every toolchain, the Docker drive,
+   skipped file or test that `scripts/gate-skips.ts` does not expect on this host
+   (`scripts/gate-vitest.sh`; that list holds only skips no toolchain can lift here, such as the
+   macOS-only tests on Linux, each with its condition checked), so it needs every toolchain, the Docker drive,
    the project checkouts `pnpm bench setup` materializes, and the hand-cloned klonoa checkout whose
    remedy `packages/cli/test/matching/checkout-gate.ts` prints.
 6. `pnpm bench run && pnpm bench merge`, then BOTH comparisons — they answer different
