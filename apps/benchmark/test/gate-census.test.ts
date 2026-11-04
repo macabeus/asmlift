@@ -50,6 +50,7 @@ describe('the gate census seam', () => {
       'unmerge',
       'case-end-goto',
       'arm-reread',
+      'shared-value',
       'truncload',
       'displaced',
       'paramwidth',

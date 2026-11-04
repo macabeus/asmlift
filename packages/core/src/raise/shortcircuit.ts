@@ -40,7 +40,7 @@
 // is NEGATABLE whenever the orientation inverts it — an icmp by opcode swap or a `logic_and`/`logic_or` by
 // De Morgan, both via `negateCondOps`, which the control-flow form below shares. Any deviation falls
 // through untouched (a miss, never a miscompile).
-import { disjointConstSlots } from '../ir/alias';
+import { constDisplacementOf, disjointConstSlots } from '../ir/alias';
 import {
   type AttrVal,
   Block,
@@ -59,8 +59,15 @@ import {
   replaceAllUsesWith,
   successorsOf,
 } from '../ir/core';
-import { effectful, forgetHelperPlacement, orderSensitive, placedAt, speculationUnsafe } from '../ir/discipline';
-import { NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
+import {
+  effectful,
+  forgetHelperPlacement,
+  orderSensitive,
+  placedAt,
+  reevalUnsafe,
+  speculationUnsafe,
+} from '../ir/discipline';
+import { MEM_BASE_OPS, NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
@@ -371,11 +378,14 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     (`af:adds:ido7.1` and the `divv`/`gcd`/`modv` rows).
 //   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
 //     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
-//   - a value defined in ^g is used more than once inside ^g. Then the structurer MATERIALIZES it
-//     into a local, which renders as a statement BEFORE the `if` — turning `b`'s conditional
-//     computation into an unconditional one. Single-use-and-local is precisely the shape
-//     analysis.ts inlines into the connective's right operand, where C's own short-circuit
-//     re-guards it. This is what keeps a load in `b` from being hoisted across the guard in `a`.
+//   - a value defined in ^g is used more than once inside ^g, and `SHARED_VALUE_GATES` refuses it.
+//     Such a value the structurer MATERIALIZES into a local, which renders as a statement BEFORE
+//     the `if` — turning `b`'s conditional computation into an unconditional one. Single-use-and-
+//     local is precisely the shape analysis.ts inlines into the connective's right operand, where
+//     C's own short-circuit re-guards it. The table is what keeps a load in `b` from being hoisted
+//     across the guard in `a`; what it admits is an ADDRESS (`&gS`, `&gS + k`), which reads nothing,
+//     so wherever it is spelled it runs nothing the source did not (l3/basecse.ts's
+//     `guarded-operand` keeps the default spelling inline under the operand).
 //   - a value defined in ^g is ALSO read past ^g, and a rule in `ARM_REREAD_GATES` refuses
 //     re-deriving it in the arm. A read past ^g is otherwise not a refusal: on verified IR it can
 //     only sit under the arm ^g's non-shared edge enters (^g dominates nothing else — the shared
@@ -545,6 +555,9 @@ export interface BranchShortCircuitOptions {
    *  in {@link ARM_REREAD_GATES} reads — `read-behind-effect`. Threaded by raise/pre-recovery.ts from
    *  the target it already holds, the way `narrowlocal`'s `hoistsSingleSetArm` is. Absent ⇒ false. */
   reloadsLocalReread?: boolean;
+  /** The USE-COUNT refusals — {@link SHARED_VALUE_GATES} when absent. A parameter for the same two
+   *  readers as `armReread`: a census (`bench gates --pass shared-value`) and a test's ablation. */
+  sharedValue?: readonly Gate<SharedValueSite>[];
 }
 
 export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOptions = {}): boolean {
@@ -640,7 +653,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // `r0` values. The verdict is a conjunction of pure tests, so the order moves no fold. And
         // BEFORE tree ownership, so `onTreeOwned` keeps its meaning — the one thing in the way.
         const reread = armRereadCone(fn, g, otherEdge.block, preds, opts);
-        if (!reread || !definedValuesStayLocal(fn, g, reread)) {
+        if (!reread || !definedValuesStayLocal(fn, g, reread, defs, opts.sharedValue ?? SHARED_VALUE_GATES)) {
           continue;
         }
         // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in the
@@ -1391,9 +1404,10 @@ function rereadInArm(fn: Fn, g: Block, arm: Block, { copy, drop }: ArmReread): v
   g.ops = g.ops.filter((op) => !drop.has(op));
 }
 
-/** True when every value `g` defines is read at most once, and any read is inside `g` or is one
- *  `armRereadCone` answered for — reads outside `g` move to the arm's copy, and reads BY a
- *  dropped original leave with it. The use-count half is the residue ARM_REREAD_GATES names.
+/** True when no value `g` defines escapes it un-re-derived, and every value `g` reads more than
+ *  once itself passes {@link SHARED_VALUE_GATES} (or `gates`) — reads outside `g` move to the arm's
+ *  copy, and reads BY a dropped original leave with it. The use-count half is the residue
+ *  ARM_REREAD_GATES names, and the table below is that half.
  *
  *  The VALUE form above needs no such check, and the asymmetry is real rather than drift: its feeder
  *  ends in `br M`, so the feeder has no successor of its own to dominate and every value it defines
@@ -1406,7 +1420,13 @@ function rereadInArm(fn: Fn, g: Block, arm: Block, { copy, drop }: ArmReread): v
  *  'the ENTRY block is never folded away' for the branch form. They are deliberately NOT routed
  *  through one shared `isEntry` helper — a helper enforces nothing, and it is the two tests that
  *  hold each fold to the refusal. When changing either fold, check the other. */
-function definedValuesStayLocal(fn: Fn, g: Block, { copy, drop }: ArmReread): boolean {
+function definedValuesStayLocal(
+  fn: Fn,
+  g: Block,
+  { copy, drop }: ArmReread,
+  defs: ReadonlyMap<Value, Op>,
+  gates: readonly Gate<SharedValueSite>[],
+): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
   if (defined.size === 0) {
     return true;
@@ -1433,10 +1453,141 @@ function definedValuesStayLocal(fn: Fn, g: Block, { copy, drop }: ArmReread): bo
     }
   }
   // ZERO uses is fine — a dead op renders nothing at all, so it cannot escape the short circuit.
-  // TWO or more is not: analysis.ts materializes a multi-consumer value into a local, which is a
-  // statement, and a statement lands before the `if`.
-  return [...defined].every((v) => (uses.get(v) ?? 0) <= 1);
+  // ONE inlines into the connective's operand. TWO or more is the table's question.
+  const defOf = new Map<Value, Op>(g.ops.flatMap((op) => op.results.map((r): [Value, Op] => [r, op])));
+  return [...defined].every(
+    (value) => (uses.get(value) ?? 0) <= 1 || firstRejection(gates, { g, value, defOf, defs }) === null,
+  );
 }
+
+/** One value ^g reads more than once itself — what analysis.ts would otherwise spell as a local. */
+export interface SharedValueSite {
+  /** ^g, the second condition block the fold would merge into ^h */
+  readonly g: Block;
+  /** the value, defined in ^g and read there 2+ times */
+  readonly value: Value;
+  /** the op in ^g defining each value ^g defines */
+  readonly defOf: ReadonlyMap<Value, Op>;
+  /** the defining op of every value in the function — an address's symbol and offsets are often
+   *  defined ABOVE ^g, where GVN numbered them with an earlier use */
+  readonly defs: ReadonlyMap<Value, Op>;
+}
+
+/** The part of `v`'s operand cone ^g computes — the ops a hoisted local would carry above the `if`. */
+function gConeOf(c: SharedValueSite): Op[] {
+  const out = new Set<Op>();
+  for (const work = [c.value]; work.length;) {
+    const d = c.defOf.get(work.pop()!);
+    if (d && !out.has(d)) {
+      out.add(d);
+      work.push(...d.operands);
+    }
+  }
+  return [...out];
+}
+
+/** Is `v` constant offsets over a symbol or frame address (`&gS + 0x35`), or over a literal address
+ *  or a value ^g did not compute (`p - 0x35` off a pointer parameter) that ^g reads only as a
+ *  memory ADDRESS? The chain is ir/alias.ts `constDisplacementOf`, the one reading of address
+ *  arithmetic, so Thumb's `sub r0, r0, #0x35` for a negative member offset ends where `add` does.
+ *  Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an
+ *  earlier block loaded is GVN's one `gaddr` (`sub_0800D188`'s site). A root ^g did not compute (a
+ *  parameter, an earlier block's result) is, by dominance, already computed when the first test
+ *  runs, so the cone spelled above the guard (as a local, or l3/basecse.ts's hoisted base) adds only
+ *  `± k` arithmetic, which reads nothing and cannot trap. That root is admitted only when `v` is
+ *  read as an address alone (`readAsAddress`): the pointer-parameter base is measured (agbcc's
+ *  `add r0, r4, #0x35; ldrb; add r0, r0, #0x22` off `struct T *p` folds to the target's bytes,
+ *  synthetic:scbase_pfar), while a counter's `i + 1` read twice by a latch's compare is not an
+ *  address, and folding it turns synthetic:retpost_notail on gcc2.7.2 and gcc2.7.2kmc into a
+ *  structure decline. */
+function constOffsetCone(c: SharedValueSite): boolean {
+  const disp = constDisplacementOf(c.defs, c.value);
+  const root = disp?.root ?? c.value;
+  const leaf = c.defs.get(root);
+  if (leaf?.opcode === 'gaddr' || leaf?.opcode === 'laddr') {
+    return true;
+  }
+  return (readsNothing(leaf) || (disp !== null && !c.defOf.has(root))) && readAsAddress(c.g, c.value);
+}
+
+/** Is `leaf` an operand-free op that reads nothing and cannot trap — a value spelled the same at
+ *  any program point? The property the root argument above rests on, asked of the op rather than
+ *  of a list of opcodes: agbcc's `ldr r0, =0x03005220` under `#define gL (*(struct S *)0x03005220)`
+ *  is a `const` the second test reads three members off, exactly as it reads them off `&gS`. Unlike
+ *  a symbol it is admitted only where read as an address (`readAsAddress`): a mask or a compare
+ *  constant read twice is not a base, and its spelling is unmeasured. */
+function readsNothing(leaf: Op | undefined): boolean {
+  return leaf !== undefined && leaf.operands.length === 0 && !reevalUnsafe(leaf);
+}
+
+/** Does every read ^g makes of `v` end in a memory access's ADDRESS: the base of a load or store,
+ *  or the pointer side of `v + x` / `v - x` whose result is in turn read only that way? An index
+ *  may be a variable (`p->arr[i]` is `add(p + 0x35, i)`), since it is the sum, not `v`, that it
+ *  joins. A SUCCESSOR ARGUMENT is a value read — a loop-carried `p + 1` is the next iteration's
+ *  pointer, a latch's `i + 1` its counter — and so is a compare, a mask, or a stored value. */
+function readAsAddress(g: Block, v: Value): boolean {
+  return g.ops.every((op) => {
+    if (!readsOf(op).includes(v)) {
+      return true;
+    }
+    if (op.successors.some((s) => s.args.includes(v))) {
+      return false;
+    }
+    const [first, ...rest] = op.operands;
+    if (MEM_BASE_OPS.has(op.opcode)) {
+      return first === v && !rest.includes(v);
+    }
+    const once = op.operands.length === 2 && op.operands.filter((x) => x === v).length === 1;
+    if (once && (op.opcode === 'add' || (op.opcode === 'sub' && first === v))) {
+      return op.results.every((r) => readAsAddress(g, r));
+    }
+    return false;
+  });
+}
+
+// ── THE USE-COUNT REFUSALS, AS DATA ──────────────────────────────────────────────────────────
+//
+// A value ^g reads twice itself is one analysis.ts materializes into a local, and a local is a
+// statement BEFORE the `if`: `b`'s computation runs whether or not `a` decided the branch. Taken as
+// an OPTIONAL parameter (`BranchShortCircuitOptions.sharedValue`) and censused from outside core by
+// `pnpm bench gates --pass shared-value`, through the same `PRE_RECOVERY_PASSES` seam as
+// `arm-reread`. Asked once per such value, below every other refusal of the fold but tree ownership.
+//
+// What the table ADMITS is a shared ADDRESS: agbcc loads `&gS` into one register and reads three
+// members off it (`(gS.a | gS.d | gS.c) != 0`), so the address is the one value with three readers.
+// Refused, the `||` splits into a nest and the structurer copies the shared arm AND everything after
+// it into both branches, once per such site (kleod's `sub_0800D188`, whose `&gUnk_03005220 + 0x35`
+// is the shape synthetic:scbase_far pins). The base may also be a literal address, a pointer
+// parameter (`p->a | p->d`) or another value computed before ^g, when ^g reads it only as an
+// address: a constant-offset cone over it reads nothing and cannot trap, so hoisting it changes no
+// behaviour.
+//
+// RESIDUE, not in the table: the ESCAPE half of `definedValuesStayLocal` (a value read past ^g that
+// the arm does not re-derive). `armRereadCone` copies the cone of every outside read, so on the
+// inputs it accepts that half has nothing left to see; it stays as the check that keeps it so.
+export const SHARED_VALUE_GATES: readonly Gate<SharedValueSite>[] = [
+  {
+    // `if (p == 0 || (*p | *p >> 4) != 0)`: the read, materialized, runs above the null test.
+    // `if (b == 0 || (q = a / b) + q != 0)`: so does the divide, on the path the test kept it off.
+    // A named local is an UNCONDITIONAL statement, so the predicate is `reevalUnsafe` (effects,
+    // reads AND traps), not `orderSensitive`, which has no trap half.
+    id: 'shared-read',
+    why: 'a read or trapping op the second test makes twice would be spelled as a local, run before the first test',
+    sound: true,
+    guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a READ the second test consumes twice would run above the first',
+    rejects: (c) => gConeOf(c).some(reevalUnsafe),
+  },
+  {
+    // A pure, non-trapping value that is not an address `constOffsetCone` admits — `(x * x) != 0`
+    // over a computed `x`. Hoisting it is correct C; what the target spells there is unmeasured, so
+    // it keeps the nest. A pure SPELLING rule: disjoint from `shared-read` (a read or a trap in the cone
+    // is that rule's), so each ablates alone and ablating this one admits nothing unsafe.
+    id: 'shared-pure',
+    why: 'a computed value the second test reuses is kept in the nest until its spelling is measured',
+    sound: false,
+    rejects: (c) => !constOffsetCone(c) && !gConeOf(c).some(reevalUnsafe),
+  },
+];
 
 /** Two successor argument lists that a fold may collapse into one: same values, same order. */
 function sameArgs(a: Value[], b: Value[]): boolean {

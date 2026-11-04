@@ -509,6 +509,55 @@ describe('leaf-base hoisting', () => {
     expect(out.locals).toEqual([]);
   });
 
+  // `if (gY != 5 || (gS.a | gS.d | gS.c) != 0)` on agbcc (synthetic:scbase): the struct's address
+  // is loaded AFTER the first test, inside the operand, and a head hoist moves that load above it.
+  describe('a base read only under the second half of a condition', () => {
+    const guarded = (rhs: Expr, lhs: Expr = { k: 'bin', op: '!=', l: { k: 'var', name: 'y' }, r: c(5) }): SFn =>
+      fn([{ k: 'if', cond: { k: 'bin', op: '||', l: lhs, r: rhs }, then: [{ k: 'return' } as Stmt], else: [] }]);
+    const orOf = (...xs: Expr[]): Expr => xs.reduce((l, r) => ({ k: 'bin', op: '|', l, r }));
+    const three = (): Expr => ({
+      k: 'bin',
+      op: '!=',
+      l: orOf(idx('gS', c(0)), idx('gS', c(3)), idx('gS', c(2))),
+      r: c(0),
+    });
+
+    test('stays inline under the operand', () => {
+      const body = guarded(three());
+      expect(hoistBaseLocals(body)).toBe(body);
+      expect(hoistBaseLocals(body, without(BASECSE_GATES, 'guarded-operand')).locals).toHaveLength(1);
+    });
+
+    test('is still one guard when its accesses sit at different depths of that operand', () => {
+      const deeper: Expr = { k: 'bin', op: '&&', l: idx('gS', c(0)), r: idx('gS', c(3)) };
+      expect(hoistBaseLocals(guarded(deeper)).locals).toEqual([]);
+    });
+
+    test('is hoisted when one access is outside every guarded operand', () => {
+      expect(hoistBaseLocals(guarded(three(), idx('gS', c(1)))).locals).toHaveLength(1);
+    });
+
+    // agbcc loads `&gS` once under EACH guard: `(gY != 5 || (gS.a | gS.d)) && (gA != 1 || (gS.c |
+    // gS.b))` scores 9/39 inline and 15/39 hoisted, and the same two connectives as two `if`s 9/39
+    // against 19/40.
+    test('stays inline when its accesses sit under two different guarded operands', () => {
+      const y = { k: 'var', name: 'y' } as const;
+      const twoIfs = fn([
+        { k: 'if', cond: { k: 'bin', op: '||', l: y, r: idx('gS', c(0)) }, then: [], else: [] },
+        { k: 'if', cond: { k: 'bin', op: '&&', l: y, r: idx('gS', c(3)) }, then: [], else: [] },
+      ]);
+      expect(hoistBaseLocals(twoIfs).locals).toEqual([]);
+      const oneCond = guarded(idx('gS', c(3)), { k: 'bin', op: '||', l: y, r: idx('gS', c(0)) });
+      expect(hoistBaseLocals(oneCond).locals).toEqual([]);
+      expect(hoistBaseLocals(twoIfs, without(BASECSE_GATES, 'guarded-operand')).locals).toHaveLength(1);
+    });
+
+    test('`/livebase` ablates it with the other placement rules, so the hoisted spelling stays a candidate', () => {
+      expect(LIVEBASE_GATES.some((g) => g.id === 'guarded-operand')).toBe(false);
+      expect(hoistBaseLocals(guarded(three()), LIVEBASE_GATES).locals).toHaveLength(1);
+    });
+  });
+
   test('same global at DIFFERENT widths is not merged (distinct pointer types)', () => {
     // gTable read as u8 once and as a u16 once → neither key reaches 2, nothing hoists.
     const out = hoistBaseLocals(

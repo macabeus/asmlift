@@ -24,7 +24,12 @@ import {
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { tallying, without } from '../src/l3/gates';
-import { ARM_REREAD_GATES, recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
+import {
+  ARM_REREAD_GATES,
+  SHARED_VALUE_GATES,
+  recognizeBranchShortCircuit,
+  recognizeShortCircuit,
+} from '../src/raise/shortcircuit';
 
 const blk = (ops: Op[], params: Value[] = []): Block => ({ params, ops });
 
@@ -686,6 +691,232 @@ describe('refusals', () => {
     const local = fn.blocks[1].ops[1].results[0];
     fn.blocks[1].ops.splice(2, 0, mkOp('neg', { operands: [local], results: [mkValue(T.unk(32))] }));
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  /** `chain` whose second condition ORs three bytes read off ONE base — `(gS.a | gS.d | gS.c) != 0`
+   *  as agbcc leaves it: the base defined once in ^g and read by all three loads. `base` picks what
+   *  that shared value is: the struct's address, the address plus a constant, a READ, or a pointer
+   *  PARAMETER of the function plus a constant (`p->a | p->d | p->c` past the ldrb displacement), or
+   *  a LITERAL address (`(*(struct S *)0x03005220).a`, one pool load). */
+  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k' | 'param-k' | 'param+k+i' | 'literal'): Fn {
+    const param = mkValue(T.ptr(T.u(8)));
+    /** the variable indices `param+k+i` reads two of its members through */
+    const index = [mkValue(T.s(32)), mkValue(T.s(32))];
+    const onParam = base.startsWith('param');
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const sym = mkValue(T.ptr(T.u(8)));
+        const ops: Op[] = onParam
+          ? []
+          : [
+              base === 'literal'
+                ? mkOp('const', { results: [sym], attrs: { value: 0x03005220 } })
+                : mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } }),
+            ];
+        let p = onParam ? param : sym;
+        if (base !== 'gaddr' && base !== 'literal') {
+          p = mkValue(T.ptr(T.u(8)));
+          const k = mkValue(T.unk(32));
+          ops.push(
+            ...(base === 'load'
+              ? [mkOp('load', { operands: [sym], results: [p], attrs: { off: 0, width: 4, signed: false } })]
+              : [
+                  mkOp('const', { results: [k], attrs: { value: 4 } }),
+                  mkOp(base === 'param-k' ? 'sub' : 'add', { operands: [onParam ? param : sym, k], results: [p] }),
+                ]),
+          );
+        }
+        const bytes = [0, 3, 2].map((off, n) => {
+          const v = mkValue(T.u(8));
+          let at = p;
+          if (base === 'param+k+i' && n > 0) {
+            at = mkValue(T.ptr(T.u(8)));
+            ops.push(mkOp('add', { operands: [p, index[n - 1]], results: [at] }));
+          }
+          ops.push(mkOp('load', { operands: [at], results: [v], attrs: { off, width: 1, signed: false } }));
+          return v;
+        });
+        const o1 = mkValue(T.unk(32));
+        const o2 = mkValue(T.unk(32));
+        const zero = mkValue(T.unk(32));
+        ops.push(
+          mkOp('or', { operands: [bytes[0], bytes[1]], results: [o1] }),
+          mkOp('or', { operands: [o1, bytes[2]], results: [o2] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [o2, zero], results: [out] }),
+        );
+        return ops;
+      },
+    });
+    if (onParam) {
+      fn.blocks[0].params = base === 'param+k+i' ? [param, ...index] : [param];
+    }
+    return fn;
+  }
+
+  test.each(['gaddr', 'gaddr+k', 'param+k', 'param-k', 'param+k+i', 'literal'] as const)(
+    'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
+    (base) => {
+      // Refused, the `||` splits into a nest that writes the arm and the tail twice (synthetic:scbase).
+      // `param-k` is Thumb's `sub r0, r0, #0x35` for a negative member offset, the chain
+      // ir/alias.ts `constDisplacementOf` reads; `param+k+i` reads two members through a variable
+      // index, `add(p + 4, i)`, still only as an address; `literal` is agbcc's one pool load of
+      // `0x03005220` under a `#define`d struct, a root that reads nothing just as `&gS` does.
+      const fn = sharedBase(base);
+      expect(recognizeBranchShortCircuit(fn)).toBe(true);
+      expect(connective(fn)).toBe('logic_or');
+      verify(fn);
+    },
+  );
+
+  test('an ADDRESS whose symbol and offset an EARLIER block defined is re-derived too', () => {
+    // agbcc's `add r0, r2, #0x35` off an `&gS` loaded above the condition: GVN's one `gaddr` and
+    // `const` live in the head, and only the sum, read twice, is ^g's (sub_0800D188's site).
+    const fn = sharedBase('gaddr+k');
+    const [head, g] = fn.blocks;
+    const leaves = g.ops.filter((o) => o.opcode === 'gaddr' || (o.opcode === 'const' && o.attrs.value === 4));
+    g.ops = g.ops.filter((o) => !leaves.includes(o));
+    head.ops.splice(0, 0, ...leaves);
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+  });
+
+  test('REFUSED: a READ the second test consumes twice would run above the first', () => {
+    // `if (a || (*p | *p >> 4) != 0)`: a value read twice is materialized as a local, a statement
+    // ahead of the `if`, so the load would run before the first test decided anything.
+    expect(recognizeBranchShortCircuit(sharedBase('load'))).toBe(false);
+    expect(
+      recognizeBranchShortCircuit(sharedBase('load'), { sharedValue: without(SHARED_VALUE_GATES, 'shared-read') }),
+    ).toBe(true);
+  });
+
+  test('a PARAMETER plus a constant that the second test reads as a VALUE, not an address, keeps the nest', () => {
+    // `if (a || ((i + 1) ^ (i + 1) >> 4) != 0)`: a counter's `i + 1` read twice by arithmetic. The
+    // pointer-parameter base is measured; this spelling is not (folding it declines
+    // synthetic:retpost_notail on gcc2.7.2), so it is the spelling rule's.
+    const i = mkValue(T.s(32));
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const one = mkValue(T.unk(32));
+        const n = mkValue(T.s(32));
+        const four = mkValue(T.unk(32));
+        const hi = mkValue(T.s(32));
+        const x = mkValue(T.s(32));
+        const zero = mkValue(T.unk(32));
+        return [
+          mkOp('const', { results: [one], attrs: { value: 1 } }),
+          mkOp('add', { operands: [i, one], results: [n] }),
+          mkOp('const', { results: [four], attrs: { value: 4 } }),
+          mkOp('shr_u', { operands: [n, four], results: [hi] }),
+          mkOp('xor', { operands: [n, hi], results: [x] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [x, zero], results: [out] }),
+        ];
+      },
+    });
+    fn.blocks[0].params = [i];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
+  test('a CONSTANT the second test reads twice as a VALUE, not an address, keeps the nest', () => {
+    // `if (a || ((x & 0xF0) | (y & 0xF0)) != 0)` with GVN's one `0xF0`: a literal is admitted as a
+    // root only where it is read as an address; a mask's spelling is unmeasured.
+    const [x, y] = [mkValue(T.s(32)), mkValue(T.s(32))];
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const [mask, mx, my, o, zero] = [0, 1, 2, 3, 4].map(() => mkValue(T.unk(32)));
+        return [
+          mkOp('const', { results: [mask], attrs: { value: 0xf0 } }),
+          mkOp('and', { operands: [x, mask], results: [mx] }),
+          mkOp('and', { operands: [y, mask], results: [my] }),
+          mkOp('or', { operands: [mx, my], results: [o] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [o, zero], results: [out] }),
+        ];
+      },
+    });
+    fn.blocks[0].params = [x, y];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
+  test('a PARAMETER plus a constant that ^g also passes on as a SUCCESSOR ARGUMENT keeps the nest', () => {
+    // `do { k(*p); } while (b-- != 0 && *++p != 0)`: the `p + 1` the load reads is the next
+    // iteration's pointer too. A block argument is a value read, the same as a latch's `i + 1`.
+    const fn = sharedBase('param+k');
+    const g = fn.blocks[1];
+    const p = g.ops.find((o) => o.opcode === 'add')!.results[0];
+    const term = g.ops[g.ops.length - 1];
+    const other = term.successors[1];
+    const carried = mkValue(T.ptr(T.u(8)));
+    other.block.params = [carried];
+    other.args = [p];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
+  test('REFUSED: a DIVIDE the second test consumes twice would run above the first, by the SOUND rule', () => {
+    // `if (b == 0 || (q = a / b) + q != 0)`: the named quotient is an unconditional statement
+    // ahead of the `if`, so it would divide by the zero the first test guards against. The sound
+    // rule refuses it on its own, so ablating the spelling rule `shared-pure` admits nothing unsafe.
+    const divide = (opcode: 'sdiv' | 'mul'): Fn => {
+      const a = mkValue(T.s(32));
+      const b = mkValue(T.s(32));
+      const fn = chain({
+        gOnTaken: false,
+        sharedOnGTaken: true,
+        gBody: (out) => {
+          const q = mkValue(T.s(32));
+          const sum = mkValue(T.s(32));
+          const zero = mkValue(T.unk(32));
+          return [
+            mkOp(opcode, { operands: [a, b], results: [q] }),
+            mkOp('add', { operands: [q, q], results: [sum] }),
+            mkOp('const', { results: [zero], attrs: { value: 0 } }),
+            mkOp('icmp_ne', { operands: [sum, zero], results: [out] }),
+          ];
+        },
+      });
+      fn.blocks[0].params = [a, b];
+      return fn;
+    };
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(divide('sdiv'), { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-read', 1]]);
+    expect(
+      recognizeBranchShortCircuit(divide('sdiv'), { sharedValue: without(SHARED_VALUE_GATES, 'shared-pure') }),
+    ).toBe(false);
+    // the same cone with a multiply, which cannot trap, is only the spelling rule's
+    const pure = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(divide('mul'), { sharedValue: pure.gates })).toBe(false);
+    expect(pure.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
+  test('the use-count refusals are REPORTED: a census names the rule that refused each value', () => {
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(sharedBase('load'), { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-read', 1]]);
+    const pure = tallying(SHARED_VALUE_GATES);
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
+    const local = fn.blocks[1].ops[1].results[0];
+    fn.blocks[1].ops.splice(2, 0, mkOp('neg', { operands: [local], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: pure.gates })).toBe(false);
+    expect(pure.refusals()).toEqual([['shared-pure', 1]]);
+    // an address is admitted, and nothing is counted
+    const quiet = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(sharedBase('gaddr'), { sharedValue: quiet.gates })).toBe(true);
+    expect(quiet.refusals()).toEqual([]);
   });
 
   test('DIFFERENT args on the two edges into the shared block: only one edge survives', () => {

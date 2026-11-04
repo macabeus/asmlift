@@ -203,13 +203,16 @@ interface Collected {
    *  pass has rebuilt one node and dropped the stamp, and requiring all of them makes that a
    *  refusal rather than a half-homed base. */
   ordered: Map<string, boolean>;
+  /** per key, whether EVERY access so far sits under some connective's right operand — `false`
+   *  once one access is under none (the input to `guardedOperand`) */
+  guard: Map<string, boolean>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
  *  first-appearance order (so the hoisted assignments emit in the order the bases are first used,
  *  matching the compiler's pool-load order). `loop` marks uses nested in a while/do-while/for. */
 function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
-  const visitExpr = (e: Expr, inLoop: boolean): void => {
+  const visitExpr = (e: Expr, inLoop: boolean, guard: boolean): void => {
     if (e.k === 'index' && isHoistableBase(e.base)) {
       const k = keyOf(e.base, e.width, e.signed);
       if (!c.count.has(k)) {
@@ -232,9 +235,11 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
         c.operandOff.add(k);
       }
       c.ordered.set(k, (c.ordered.get(k) ?? true) && e.baseOrdered === true);
+      c.guard.set(k, (c.guard.get(k) ?? true) && guard);
     }
+    const rhs = e.k === 'bin' && (e.op === '&&' || e.op === '||') ? e.r : null;
     for (const ch of exprChildren(e)) {
-      visitExpr(ch, inLoop);
+      visitExpr(ch, inLoop, guard || ch === rhs);
     }
   };
   for (const s of stmts) {
@@ -242,7 +247,7 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
     // there is loop-invariant just like a body use — visit it with `nested`, not the outer flag.
     const nested = loop || isLoop(s);
     for (const e of stmtExprs(s)) {
-      visitExpr(e, nested);
+      visitExpr(e, nested, false);
     }
     collect(stmtChildren(s), c, nested);
   }
@@ -380,6 +385,14 @@ export interface BaseKey {
    *  false for every base a compiler that has not opted in produced, which is what keeps the variation
    *  off those targets. */
   orderLicensed: boolean;
+  /** EVERY access sits in the right operand of some `&&`/`||` — the half C evaluates only when the
+   *  left one did not decide. A head hoist puts the base's load above that guard, where the compiler
+   *  loaded it inside the operand: `if (gY != 5 || (gS.a | gS.d | gS.c) != 0)` reads `&gS` into a
+   *  register after the `gY` test, while `p0 = &gS;` ahead of the `if` loads it first. Not one
+   *  operand: accesses under two different guards (`(gY != 5 || gS.a) && (gA != 1 || gS.c)`, or the
+   *  two in separate `if`s) are each loaded under their own, so a hoist above both moves every load
+   *  (agbcc 15/39 and 19/40 hoisted, 9/39 inline). */
+  guardedOperand: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -441,6 +454,16 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },
+  {
+    // `if (gY != 5 || (gS.a | gS.d | gS.c) != 0) { … }` on agbcc: the inline spelling MATCHES and
+    // `p0 = (u8 *)&gS;` above the `if` does not (7 points over 44), because the literal load moves
+    // ahead of the first test. A placement prediction like the two above, ablated with them for
+    // `/livebase`, so a hoisted base before a connective stays a candidate the differ can pick.
+    id: 'guarded-operand',
+    why: 'a base read only under the second half of a condition is loaded there, after the first half',
+    sound: false,
+    rejects: (c) => c.guardedOperand,
+  },
 ];
 
 /** `/basefold`'s admission (rank.ts): the default rules with `single-use` EXEMPTING a base whose
@@ -473,15 +496,15 @@ export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(BASECSE_GATES, 'single-use'),
 ];
 
-/** The `/livebase` variation's admission (rank.ts): the default rules with both PLACEMENT heuristics
- *  ablated, keeping only `single-use`. `loop` and `repeated-const-offset` predict which spelling
- *  the compiler chose, and both predictions have a counterexample — an MMIO poll (`p[2] = go;
- *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
- *  time. Neither gate is `sound`, so ablating them can only change which spelling wins, never
+/** The `/livebase` variation's admission (rank.ts): the default rules with the PLACEMENT heuristics
+ *  ablated, keeping only `single-use`. `loop`, `repeated-const-offset` and `guarded-operand` predict
+ *  which spelling the compiler chose, and the first two have a counterexample — an MMIO poll
+ *  (`p[2] = go; while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register
+ *  the whole time. None of the three is `sound`, so ablating them can only change which spelling wins, never
  *  what a candidate means; the differ referees. */
 export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
-  ablateHeuristic(BASECSE_GATES, 'loop'),
-  'repeated-const-offset',
+  ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'loop'), 'repeated-const-offset'),
+  'guarded-operand',
 );
 
 /** `/livebase-block`'s admission (rank.ts): `/livebase` plus `single-cell`. The two tables differ
@@ -725,6 +748,7 @@ function collectFrom(sfn: SFn): Collected {
     varIndexed: new Set(),
     operandOff: new Set(),
     ordered: new Map(),
+    guard: new Map(),
   };
   collect(sfn.body, c, false);
   return c;
@@ -745,6 +769,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         unfoldedOffset: c.operandOff.has(k),
         castBase: c.meta.get(k)!.base.k === 'cast',
         orderLicensed: c.ordered.get(k) === true,
+        guardedOperand: c.guard.get(k) === true,
       }) === null
     );
   });
