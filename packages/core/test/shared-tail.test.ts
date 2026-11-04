@@ -22,10 +22,16 @@ import { verify } from '../src/ir/verify';
 import { raiseRecovered } from '../src/pipeline';
 import { sinkStoreTails } from '../src/raise/tailsink';
 import { enumerateCandidates } from '../src/rank';
-import { hasDivergentSharedRet, structure } from '../src/structure/structure';
+import { hasDivergentSharedRet, structure as structureJoined } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
-import { count, irTraceOf, traceOf } from './helpers';
+import { count, irTraceOf, testCopies, traceOf, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 const emit = (fn: Fn, followEarlyReturns: boolean) =>
   cBackend.emit(structure(fn, { returnsVoid: true, followEarlyReturns }));
@@ -81,7 +87,7 @@ const LEFT_RETURNING = `fn g {
 }
 `;
 
-test('a region both arms of a divergent `if` reach is its follow, and the other `ret` an early return', () => {
+testCopies('a region both arms of a divergent `if` reach is its follow, and the other `ret` an early return', () => {
   const fn = parse(LEFT_RETURNING);
   verify(fn);
   expect(hasDivergentSharedRet(fn)).toBe(true);
@@ -100,7 +106,7 @@ test('an `if` whose returning arms share nothing keeps them divergent', () => {
   expect(emit(fn, true)).toBe(emit(fn, false));
 });
 
-test('the gate sees the same join as the follow when one arm runs into a loop no edge leaves', () => {
+testCopies('the gate sees the same join as the follow when one arm runs into a loop no edge leaves', () => {
   // `^bb3` is a `while (1)`: it reaches no `ret`. structure() ends paths at its header, so `^bb1`
   // has no join and its `ret` arm and `^bb2`'s share `^bb4`, which the follow writes once. The gate
   // must read that same post-dominance; with plain post-dominance the exitless cycle hands `^bb1`
@@ -130,7 +136,7 @@ test('the gate sees the same join as the follow when one arm runs into a loop no
   expect(count(spell(true), 'return v0;')).toBe(1);
 });
 
-test("the enclosing region's follow is never emitted inside an arm", () => {
+testCopies("the enclosing region's follow is never emitted inside an arm", () => {
   // Inside the else side, `^bb2`'s arms share `^bb6` — but `^bb5` also reaches `^bb7`, the OUTER
   // `if`'s follow, without passing `^bb6`. Taking `^bb6` as `^bb2`'s follow would structure that
   // path into `^bb7` inside the arm; the refusal keeps `^bb7` once, after the outer `if`.
@@ -177,7 +183,7 @@ test("the enclosing region's follow is never emitted inside an arm", () => {
   expect(count(on, '[1] = 9;')).toBe(1);
 });
 
-test('each divergent `if` gets the follow of its OWN shared `ret`s', () => {
+testCopies('each divergent `if` gets the follow of its OWN shared `ret`s', () => {
   // `^bb0`'s arms share `^bb7` and `^bb8`, so its follow is `^bb4`; `^bb4`'s share only `^bb8`, so
   // its follow is `^bb8` — two deletion sets, where one function-wide set answers only the first.
   const fn = parse(`fn k {
@@ -266,7 +272,7 @@ test('a cross-jumped store tail is copied into every path that branches to it, a
   expect(count(emit(fn, true), '[1] = 9;')).toBe(1);
 });
 
-test('the two terms are one capability: sunk without the follow, the tail is written on every path', () => {
+testCopies('the two terms are one capability: sunk without the follow, the tail is written on every path', () => {
   const fn = parse(CROSS_JUMPED);
   expect(count(emit(fn, true), '[1] = v')).toBe(1); // unsunk: one merged store, whatever the option
   sinkStoreTails(fn);
@@ -374,13 +380,17 @@ const THUMB_LEFT =
   '\tmov\tr3, #7\n\tstr\tr3, [r2, #4]\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
   '\tstr\tr3, [r2, #4]\n.L6:\n\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
 
-test('rank.ts enumerates `/shared-ret` where an arm the compiler left returning shares the rest', () => {
+test('where an arm the compiler left returning shares the rest, the default join writes it once', () => {
+  // The follow's tree here is the default's join past early returns, so the `/shared-ret` twin is a
+  // duplicate of a default candidate, and the copies are `/ret-copy`'s.
   const cands = enumerateCandidates('f', THUMB_LEFT, ARMV4T_AGBCC, { prototypes: P });
-  const alternative = cands.filter((c) => hasVariation(c.variations, 'shared-ret'));
-  expect(alternative.length).toBeGreaterThan(0);
   expect(cands.filter((c) => hasVariation(c.variations, 'shared-tail'))).toEqual([]); // nothing to sink
-  expect(alternative.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
-  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned' && count(c.source, ' = 9;') === 2)).toBe(true);
+  const once = cands.filter((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source));
+  expect(once.some((c) => joinVariations(c.variations) === 'unsigned')).toBe(true);
+  expect(cands.filter((c) => hasVariation(c.variations, 'shared-ret'))).toEqual([]);
+  expect(
+    cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-copy' && count(c.source, ' = 9;') === 2),
+  ).toBe(true);
 });
 
 // The cross-jumped tail, which only the sink turns into early returns.
@@ -394,8 +404,12 @@ test('rank.ts enumerates `/shared-tail` on a cross-jumped tail, beside the unsun
   const alternative = cands.filter((c) => hasVariation(c.variations, 'shared-tail'));
   expect(alternative.length).toBeGreaterThan(0);
   expect(alternative.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
-  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned' && c.source.includes('[1] = v0;'))).toBe(true);
-  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/unmerge')).toBe(true);
+  // the unsunk merged store is the copies' reading: the default join writes the store tail into the
+  // early return
+  expect(
+    cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-copy' && c.source.includes('[1] = v0;')),
+  ).toBe(true);
+  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-copy/unmerge')).toBe(true);
 });
 
 // `THUMB_LEFT` with the both-sides tail storing the parameter `r1`: a store tail that is already the
@@ -414,9 +428,10 @@ test('where the sink deletes the follow, rank.ts still enumerates the follow alo
     prototypes: P,
     onEnumerationError: (v, e) => errors.push(`${v.join('/')}: ${e}`),
   });
+  // the follow alone's tree is the default's join past early returns here
   const once = cands.filter((c) => count(c.source, '[1] = a1;') === 1);
-  expect(once.length).toBeGreaterThan(0);
-  expect(once.every((c) => hasVariation(c.variations, 'shared-ret') && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(once.some((c) => joinVariations(c.variations) === 'unsigned')).toBe(true);
+  expect(once.every((c) => /= 7;\s+return;/.test(c.source))).toBe(true);
   expect(cands.filter((c) => hasVariation(c.variations, 'shared-tail'))).toEqual([]);
   expect(errors).toEqual([]);
 });

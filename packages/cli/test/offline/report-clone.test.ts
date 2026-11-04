@@ -51,6 +51,7 @@ const emit = (fn: Parameters<typeof raiseRecovered>[0]) => {
       ...structureOptionsFor(ARMV4T_AGBCC, false),
       spellSwitchFallthrough: cBackend.spellsSwitchFallthrough,
       spellSwitchBreak: cBackend.spellsSwitchBreak,
+      spellEarlyReturns: cBackend.spellsEarlyReturn,
     }),
   );
 };

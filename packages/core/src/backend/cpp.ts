@@ -139,6 +139,7 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
     id: 'cpp',
     spellsSwitchFallthrough: true,
     spellsSwitchBreak: true,
+    spellsEarlyReturn: true,
     emit(fn: SFn): string {
       // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
       // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.

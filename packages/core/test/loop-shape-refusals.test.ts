@@ -66,8 +66,14 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
-import { irTraceOf, traceOf, tracesDiffer } from './helpers';
+import { structure as structureJoined } from '../src/structure/structure';
+import { irTraceOf, testCopies, traceOf, tracesDiffer, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 const lift = (ir: string): string => {
   const fn = parse(ir);
@@ -185,13 +191,16 @@ test('a loop with several latches is left to the `while (1)` recognizer', () => 
   }
 });
 
-test('a guarded self-loop entered from TWO predecessors is a `while` on one arm and a do-while on the other', () => {
-  // Read by hand: `a0 < a1` is the latch test on both arms; `^bb2` enters under it (`while`), `^bb1`
-  // only where `a1 >= a0` already holds it (do-while).
-  const c = lift(GUARDED_SELFLOOP);
-  expect(c).toMatch(/if \(a0 >= a1\) \{\n\s+while \(a0 < a1\) \{\n\s+f0\(a0\);/);
-  expect(c).toMatch(/if \(a1 >= a0\) \{\n\s+do \{\n\s+f0\(a0\);\n\s+\} while \(a0 < a1\);/);
-});
+testCopies(
+  'a guarded self-loop entered from TWO predecessors is a `while` on one arm and a do-while on the other',
+  () => {
+    // Read by hand: `a0 < a1` is the latch test on both arms; `^bb2` enters under it (`while`), `^bb1`
+    // only where `a1 >= a0` already holds it (do-while).
+    const c = lift(GUARDED_SELFLOOP);
+    expect(c).toMatch(/if \(a0 >= a1\) \{\n\s+while \(a0 < a1\) \{\n\s+f0\(a0\);/);
+    expect(c).toMatch(/if \(a1 >= a0\) \{\n\s+do \{\n\s+f0\(a0\);\n\s+\} while \(a0 < a1\);/);
+  },
+);
 
 test('the same shape on a loop that TERMINATES, refereed by the oracle', () => {
   const fn = parse(GSL2);

@@ -3,10 +3,17 @@ import { expect, test } from 'vitest';
 
 import { type AsmData, parseAsmData } from '../src/frontend/asmdata';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { decompile } from '../src/pipeline';
+import { decompile as decompileJoined } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 import { hasVariation } from '../src/variation-tokens';
+import { testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (...lines: string[]) =>
@@ -292,7 +299,7 @@ const fallsIntoScaled = (c0: string) =>
     '34:\tli\tv0,-1',
   );
 
-test('a case another falls into reads the scaled index both paths bring, on IDO as on gcc', () => {
+testCopies('a case another falls into reads the scaled index both paths bring, on IDO as on gcc', () => {
   for (const t of [MIPS_IDO, MIPS_GCC]) {
     const out = decompile('f', fallsIntoScaled('sw\ta0,0(a1)'), t, { asmData: fallTable }).source;
     expect(out).toMatch(/case 0:\s*\n\s*\*a1 = a0;\s*\n\s*case 1:\s*\n\s*return \(a0 << 2\) \+ 1;/);

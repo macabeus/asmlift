@@ -1,4 +1,4 @@
-// THE JOIN PAST EARLY RETURNS — `structure()`'s `joinPastReturns`.
+// THE JOIN PAST EARLY RETURNS — `structure()`'s default, and the copies `copyReturnTails` keeps.
 //
 // The source shape is a chain of `if`s, each holding an early `return;` in one arm, then a tail
 // written once (`synthetic:retchain`, `synthetic:retchain_xj`; sub_0800D188's tile-collision chain):
@@ -8,7 +8,8 @@
 //     tail();
 //
 // Every such `if` reaches EXIT on one path without passing the next, so post-dominance gives it no
-// join, and the default writes everything below it into both arms: 2^n tails. The compilers lay
+// join, and the copies (`copyReturnTails`) write everything below it into both arms: 2^n tails; the
+// default reads the join past them and writes it once. The compilers lay
 // the early returns out three ways, and each fixture flavor below is one of them:
 //   - `own`: each early return keeps its own `ret`;
 //   - `epilogue`: every early return and the tail branch to one epilogue `ret` (ido7.1, mwcc,
@@ -25,8 +26,9 @@ import { cBackend } from '../src/backend/c';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
-import { hasJoinPastReturns, structure } from '../src/structure/structure';
+import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
 import { count } from './helpers';
@@ -107,15 +109,15 @@ function chain(n: number, flavor: Flavor, innerIf = false): Fn {
   return fn;
 }
 
-const emit = (fn: Fn, opts: { joinPastReturns?: boolean; followEarlyReturns?: boolean }) =>
+const emit = (fn: Fn, opts: { copyReturnTails?: boolean; followEarlyReturns?: boolean }) =>
   cBackend.emit(structure(fn, { returnsVoid: true, ...opts }));
 
 describe('a chain of divergent `if`s with early returns', () => {
   for (const flavor of ['own', 'epilogue', 'crossjumped'] as const) {
-    test(`${flavor}: the default writes the tail 2^n times, the join writes it once`, () => {
+    test(`${flavor}: the copies write the tail 2^n times, the default join writes it once`, () => {
       const fn = chain(4, flavor);
-      expect(count(emit(fn, {}), 'tail(')).toBe(16);
-      const once = emit(fn, { joinPastReturns: true });
+      expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(16);
+      const once = emit(fn, {});
       expect(count(once, 'tail(')).toBe(1);
       // every early return is still written, once each, and the tail ends in the last `return;`
       expect(count(once, 'k(')).toBe(4);
@@ -126,8 +128,8 @@ describe('a chain of divergent `if`s with early returns', () => {
 
   test('branchyxj: a cross-jumped return tail that branches is copied into each early return', () => {
     const fn = chain(4, 'branchyxj');
-    expect(count(emit(fn, {}), 'tail(')).toBe(16);
-    const once = emit(fn, { joinPastReturns: true });
+    expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(16);
+    const once = emit(fn, {});
     expect(count(once, 'tail(')).toBe(1);
     // the return tail, written in each of the 4 early returns and after the tail
     expect(count(once, 'y(')).toBe(5);
@@ -137,7 +139,7 @@ describe('a chain of divergent `if`s with early returns', () => {
 
   test('crossjumped: the shared-ret follow lands on the return tail and still copies', () => {
     const fn = chain(4, 'crossjumped');
-    expect(count(emit(fn, { followEarlyReturns: true }), 'tail(')).toBeGreaterThan(1);
+    expect(count(emit(fn, { followEarlyReturns: true, copyReturnTails: true }), 'tail(')).toBeGreaterThan(1);
   });
 
   for (const flavor of ['own', 'epilogue'] as const) {
@@ -146,8 +148,8 @@ describe('a chain of divergent `if`s with early returns', () => {
       // other arm reaches it only through the epilogue; it fails because that arm runs into the real
       // join, which both arms reach
       const fn = chain(3, flavor, true);
-      expect(count(emit(fn, {}), 'tail(')).toBe(8);
-      const once = emit(fn, { joinPastReturns: true });
+      expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(8);
+      const once = emit(fn, {});
       expect(count(once, 'tail(')).toBe(1);
       expect(count(once, 'x(')).toBe(3);
     });
@@ -172,9 +174,9 @@ describe('a chain of divergent `if`s with early returns', () => {
     lines.push(`^bb${1 + 4 * n}():`, `  %${v++}: s32 = call %0 {target="tail"}`, '  ret', '}', '');
     const fn = parse(lines.join('\n'));
     verify(fn);
-    expect(count(emit(fn, {}), 'tail(')).toBe(1);
+    expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(1);
     // only the last link's `T` is a return tail, a straight one
-    expect(count(emit(fn, { joinPastReturns: true }), 'tail(')).toBe(2);
+    expect(count(emit(fn, {}), 'tail(')).toBe(2);
   });
 
   test('an `if` that already has a join is unchanged', () => {
@@ -195,7 +197,7 @@ describe('a chain of divergent `if`s with early returns', () => {
 }
 `);
     verify(fn);
-    expect(emit(fn, { joinPastReturns: true })).toBe(emit(fn, {}));
+    expect(emit(fn, { copyReturnTails: true })).toBe(emit(fn, {}));
   });
 });
 
@@ -275,14 +277,14 @@ function treeChain(n: number): Fn {
 describe('a chain of comparison-tree switches with a `case` that returns early', () => {
   test('the join writes the tail once, and the trees stay switches', () => {
     const fn = treeChain(3);
-    expect(count(emit(fn, {}), 'tail(')).toBe(27);
-    const once = emit(fn, { joinPastReturns: true });
+    expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(27);
+    const once = emit(fn, {});
     expect(count(once, 'tail(')).toBe(1);
     expect(count(once, 'switch (')).toBe(3);
     expect(count(once, 'y(')).toBe(3);
   });
 
-  test('past the copy budget it lifts with the tail written once', () => {
+  test('a chain whose copies are past the copy budget lifts with the tail written once', () => {
     const src = emit(treeChain(8), {});
     expect(count(src, 'tail(')).toBe(1);
     expect(count(src, 'switch (')).toBe(8);
@@ -291,72 +293,74 @@ describe('a chain of comparison-tree switches with a `case` that returns early',
 
 describe('a chain of jump tables with a `case` that returns early', () => {
   for (const flavor of ['own', 'epilogue'] as const) {
-    test(`${flavor}: the default writes the tail 3^n times, the join writes it once`, () => {
+    test(`${flavor}: the copies write the tail 3^n times, the default join writes it once`, () => {
       const fn = switchChain(3, flavor);
-      expect(count(emit(fn, {}), 'tail(')).toBe(27);
-      const once = emit(fn, { joinPastReturns: true });
+      expect(count(emit(fn, { copyReturnTails: true }), 'tail(')).toBe(27);
+      const once = emit(fn, {});
       expect(count(once, 'tail(')).toBe(1);
       expect(count(once, 'switch (')).toBe(3);
       expect(count(once, 'k(')).toBe(3);
       expect(count(once, 'm(')).toBe(3);
     });
 
-    test(`${flavor}: past the copy budget it lifts with the tail written once`, () => {
+    test(`${flavor}: a chain whose copies are past the copy budget lifts with the tail written once`, () => {
       const src = emit(switchChain(8, flavor), {});
       expect(count(src, 'tail(')).toBe(1);
       expect(count(src, 'switch (')).toBe(8);
     });
   }
 
-  test('the gate answers for a jump table', () => {
-    expect(hasJoinPastReturns(switchChain(1, 'own'))).toBe(true);
-    expect(hasJoinPastReturns(switchChain(1, 'epilogue'))).toBe(true);
+  test('the default reports the join it took for a jump table', () => {
+    for (const flavor of ['own', 'epilogue'] as const) {
+      let took = 0;
+      structure(switchChain(1, flavor), { returnsVoid: true }, { onJoinPastReturns: () => took++ });
+      expect(took).toBeGreaterThan(0);
+    }
   });
 });
 
 describe('the copy budget', () => {
-  test('a chain past the budget lifts with the tail written once, with nothing asked', () => {
+  test('a chain whose copies are past the budget lifts with the tail written once, and its copies decline', () => {
     // 2^12 tails: far past `COPY_BUDGET` region entries per block, so `structure()` stops the
-    // default and reruns it with `joinPastReturns`
+    // copies and declines them; the default join never comes near it
     for (const flavor of ['own', 'epilogue', 'crossjumped', 'branchyxj'] as const) {
       const fn = chain(12, flavor);
       const src = emit(fn, {});
       expect(count(src, 'tail(')).toBe(1);
       expect(count(src, 'k3(')).toBe(12);
-      expect(src).toBe(emit(fn, { joinPastReturns: true }));
+      expect(() => structure(fn, { returnsVoid: true, copyReturnTails: true })).toThrow(
+        /cannot structure 'f': block #\d+ is written \d+ times, past the copy budget of \d+ region entries/,
+      );
     }
   });
 
-  test('the rerun reports the reading it took, so rank.ts names its tree `/ret-join`', () => {
-    let over = 0;
-    structure(chain(12, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => over++ });
-    expect(over).toBeGreaterThan(0);
-    let under = 0;
-    structure(chain(4, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => under++ });
-    expect(under).toBe(0);
+  test('the default reports the join it took, so rank.ts structures `/ret-copy` for it', () => {
+    let took = 0;
+    structure(chain(4, 'own'), { returnsVoid: true }, { onJoinPastReturns: () => took++ });
+    expect(took).toBeGreaterThan(0);
+    let copies = 0;
+    structure(chain(4, 'own'), { returnsVoid: true, copyReturnTails: true }, { onJoinPastReturns: () => copies++ });
+    expect(copies).toBe(0);
   });
 
-  test("a shared-tail pass past the budget is dropped, not crossed with the rerun's join", () => {
+  test('every candidate past the budget is the join: its copies and shared-tail passes are dropped', () => {
     // agbcc -O2 of twelve `if (gA > i) { if (gB == i) { k(9); if (gC) k(8); gT = 1; return; } k(); }
-    // else k();` links, then `gOut = gOut + 1;` and the same return tail: past the budget, where the
-    // `/shared-tail` pass's rerun builds a sink-plus-join tree no setting under the budget is given
+    // else k();` links, then `gOut = gOut + 1;` and the same return tail: the copies, and the
+    // follow and sink that keep them, are past the budget
     const asm = readFileSync(joinPath(import.meta.dirname, 'corpus', 'agbcc-retbudget.s'), 'utf8');
     const cands = enumerateCandidates('retbudget', asm, ARMV4T_AGBCC, {
       prototypes: { retbudget: { params: 0, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
     });
-    const join = cands.filter((c) => hasVariation(c.variations, 'ret-join'));
-    expect(join.length).toBeGreaterThan(0);
-    expect(join.every((c) => count(c.source, 'gOut = ') === 1)).toBe(true);
-    const crossed = cands.filter(
-      (c) =>
-        hasVariation(c.variations, 'ret-join') &&
-        (hasVariation(c.variations, 'shared-tail') || hasVariation(c.variations, 'shared-ret')),
+    expect(cands.length).toBeGreaterThan(0);
+    expect(cands.every((c) => count(c.source, 'gOut = ') === 1)).toBe(true);
+    const copied = cands.filter((c) =>
+      ['ret-copy', 'shared-tail', 'shared-ret'].some((v) => hasVariation(c.variations, v)),
     );
-    expect(crossed.map((c) => joinVariations(c.variations))).toEqual([]);
-  }, 90_000); // ~5 s alone: every setting structures to the budget before its rerun
+    expect(copied.map((c) => joinVariations(c.variations))).toEqual([]);
+  }, 90_000); // every copies setting structures to the budget before it declines
 
-  test('a chain under the budget keeps the default copies', () => {
-    expect(count(emit(chain(4, 'own'), {}), 'tail(')).toBe(16);
+  test('a chain under the budget keeps its copies under `copyReturnTails`', () => {
+    expect(count(emit(chain(4, 'own'), { copyReturnTails: true }), 'tail(')).toBe(16);
   });
 
   test('a chain the join cannot read declines with a structure refusal naming the copied block', () => {
@@ -367,15 +371,15 @@ describe('the copy budget', () => {
       /cannot structure 'f': block #\d+ is written \d+ times, past the copy budget of \d+ region entries/,
     );
     const small = chain(3, 'tangled');
-    expect(count(emit(small, { joinPastReturns: true }), 'tail(')).toBe(8);
+    expect(count(emit(small, {}), 'tail(')).toBe(8);
   });
 });
 
-describe('the `/ret-join` variation', () => {
+describe('the `/ret-copy` variation', () => {
   // agbcc -O2 of two links of `synthetic:retchain_xj`, then `m(gA); m(gB);`: the early returns
   // `k(11); gT = 1; return;` and `k(21); gT = 2; return;` cross-jump into one `bl k; str; b .L2`
-  // tail, which the epilogue `.L2` follows, so the follow lands on it and the default and
-  // `/shared-ret` both write the tail twice
+  // tail, which the epilogue `.L2` follows, so the follow lands on it and `/ret-copy` and
+  // `/shared-ret` both write the tail twice; the default writes it once
   const THUMB =
     'f:\n\tpush\t{r4, lr}\n\tldr\tr0, .L10\n\tldr\tr0, [r0]\n\tcmp\tr0, #0x1\n\tble\t.L3\n' +
     '\tldr\tr0, .L10+0x4\n\tldr\tr4, [r0]\n\tcmp\tr4, #0x1\n\tbne\t.L4\n\tmov\tr0, #0xb\n' +
@@ -394,14 +398,18 @@ describe('the `/ret-join` variation', () => {
     m: { params: 1, returnsVoid: true },
   };
 
-  test('is enumerated beside the copies, and writes the tail once', () => {
+  test('is enumerated beside the join, and writes the tail into each early return', () => {
     const cands = enumerateCandidates('f', THUMB, ARMV4T_AGBCC, { prototypes: P });
-    const join = cands.filter((c) => hasVariation(c.variations, 'ret-join'));
-    expect(join.length).toBeGreaterThan(0);
+    const copies = cands.filter((c) => hasVariation(c.variations, 'ret-copy'));
+    expect(copies.length).toBeGreaterThan(0);
     const tail = (src: string) => count(src, 'm(');
-    expect(join.every((c) => tail(c.source) === 2 && count(c.source, 'return;') === 2)).toBe(true);
-    expect(cands.filter((c) => !hasVariation(c.variations, 'ret-join')).every((c) => tail(c.source) > 2)).toBe(true);
+    expect(copies.every((c) => tail(c.source) > 2)).toBe(true);
+    const joined = cands.filter(
+      (c) => !hasVariation(c.variations, 'ret-copy') && !hasVariation(c.variations, 'shared-ret'),
+    );
+    expect(joined.every((c) => tail(c.source) === 2 && count(c.source, 'return;') === 2)).toBe(true);
     expect(cands.some((c) => joinVariations(c.variations) === 'unsigned')).toBe(true);
+    expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-copy')).toBe(true);
   });
 
   test('is not enumerated where no `if` lacks a join', () => {
@@ -412,12 +420,38 @@ describe('the `/ret-join` variation', () => {
       prototypes: { f: { params: 1, returnsVoid: true } },
     });
     expect(cands.length).toBeGreaterThan(0);
-    expect(cands.filter((c) => hasVariation(c.variations, 'ret-join'))).toEqual([]);
+    expect(cands.filter((c) => hasVariation(c.variations, 'ret-copy'))).toEqual([]);
+  });
+});
+
+// A SWITCH WHOSE DEFAULT RETURNS EARLY has its CFG join at the epilogue, so its arms read at the join
+// past early returns end in a `break` where the copies' arms run into one another. Each fixture below
+// is one the copies DECLINE (thumb-switch.test.ts pins those refusals under `/ret-copy`): the falling
+// arm hands its successor a value the switch edge hands it too, or reaches two siblings. At the join
+// the arms meet at the code below the switch, so no arm falls into another and nothing is re-run.
+describe('the switch shapes whose copies decline are read at the join', () => {
+  const recompute = (dispatch: string, arm0: string) =>
+    `f:\n\tpush\t{lr}\n${dispatch}\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr3, r1, #0x2\n\tldr\tr1, .Lp\n` +
+    '\tadd\tr3, r3, r1\n\tldr\tr3, [r3]\n\tmov\tpc, r3\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    `.Lc0:\n${arm0}.Lc1:\n\tadd\tr1, r2, #0\n\tbl\tside2\n.Lend:\n\tpop\t{r0}\n\tbx\tr0\n`;
+  const SIDE2 = { prototypes: { side2: { params: 2, returns: 'void' }, f: { params: 2, returns: 'void' } } } as const;
+  const lift = (asm: string, copyReturnTails = false) =>
+    decompile('f', asm, ARMV4T_AGBCC, { ...SIDE2, copyReturnTails }).source;
+
+  test('a falling arm that overwrites the register the next one reads: each arm sets it, then one call', () => {
+    // `case 0:` computes `a0 + 1` and sets r0 = 9; `case 1:` takes r0 = a0 from the switch edge
+    const asm = recompute('\tadd\tr2, r0, #0x1\n', '\tadd\tr2, r0, #0x1\n\tmov\tr0, #0x9\n');
+    expect(() => lift(asm, true)).toThrow(/takes a value from the switch edge/);
+    const src = lift(asm);
+    expect(src).toMatch(/case 0:\s*v0 = 9;\s*break;\s*case 1:\s*v0 = a0;\s*break;\s*default:\s*return;\s*\}/);
+    expect(count(src, 'side2(v0, a0 + 1);')).toBe(1);
   });
 
-  test('the gate answers for the chain fixtures', () => {
-    expect(hasJoinPastReturns(chain(2, 'own'))).toBe(true);
-    expect(hasJoinPastReturns(chain(2, 'epilogue'))).toBe(true);
-    expect(hasJoinPastReturns(chain(2, 'crossjumped'))).toBe(true);
+  test('a falling arm that stores to what the next one loaded: each arm keeps its own load', () => {
+    const asm = recompute('\tldr\tr2, [r0]\n', '\tldr\tr2, [r0]\n\tmov\tr3, #0x9\n\tstr\tr3, [r0]\n');
+    expect(() => lift(asm, true)).toThrow(/takes a value from the switch edge/);
+    const src = lift(asm);
+    expect(src).toMatch(/case 0:\s*v0 = \*a0;\s*\*a0 = 9;\s*break;\s*case 1:\s*v0 = \*a0;\s*break;/);
+    expect(count(src, 'side2(a0, v0);')).toBe(1);
   });
 });

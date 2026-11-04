@@ -8,12 +8,20 @@ import { expect, test } from 'vitest';
 
 import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
-import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile as decompileJoined, raiseRecovered } from '../src/pipeline';
 import { type FnProto, declaresVoidReturn } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
-import { structure } from '../src/structure/structure';
+import { structure as structureJoined } from '../src/structure/structure';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
-import { count } from './helpers';
+import { count, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 // The dispatch idiom, shared by every case below: bounds guard → `lsl #2` → pool load of the table
 // pointer → indexed load → `mov pc`. `ptr` is the operand of the pointer load, `bounds` the guard.
@@ -106,7 +114,7 @@ test('a switch whose default is just the end of the switch is not a fall-through
   expect(src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${TABLE}`)).toContain('default:');
 });
 
-test('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
+testCopies('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
   // .Lc0 has no terminator of its own: control drops into .Lc1. That is `case 0:` with no `break;`,
   // and it is the only shape of overlap C spells natively.
   const out = convSrc([CALL_A, '\tbl\tsideB\n' + LEAVE]);
@@ -117,7 +125,7 @@ test('an arm that runs into the NEXT arm is recovered as C fall-through', () => 
   expect(out.match(/sideB\(/g)).toHaveLength(1);
 });
 
-test('falling into an arm that takes a value from the switch edge DECLINES', () => {
+testCopies('falling into an arm that takes a value from the switch edge DECLINES', () => {
   // The arm fallen into opens with the copies that hand it its block parameters from the DISPATCH.
   // On the fall-through path those would re-run and overwrite what the falling arm just computed:
   // `case 0: v = 7; case 1: v = 5; sideB(v);` calls sideB(5) where the asm calls sideB(7) — ordinary
@@ -175,7 +183,7 @@ const recompute = (dispatch: string, arm0: string) =>
   `.Lc0:\n${arm0}.Lc1:\n\tadd\tr1, r2, #0\n\tbl\tside2\n.Lend:\n\tpop\t{r0}\n\tbx\tr0\n`;
 const SIDE2 = { prototypes: { side2: { params: 2, returns: 'void' }, f: { params: 2, returns: 'void' } } };
 
-test('a switch-edge re-run that would read a name the falling arm overwrote DECLINES', () => {
+testCopies('a switch-edge re-run that would read a name the falling arm overwrote DECLINES', () => {
   // `case 0:` computes `a0 + 1` and then sets r0 = 9, and r0 at `case 1:` is that arm's parameter.
   // raise/unpre.ts recomputes the `a0 + 1` both edges hand r2 inside `case 1:`, where it reads `a0`
   // beside that parameter, so the parameter takes a name of its own — and the switch edge's copy
@@ -185,14 +193,14 @@ test('a switch-edge re-run that would read a name the falling arm overwrote DECL
   expect(() => decompile('f', asm, ARMV4T_AGBCC, SIDE2)).toThrow(/takes a value from the switch edge/);
 });
 
-test('a switch-edge value read from memory the falling arm then writes DECLINES', () => {
+testCopies('a switch-edge value read from memory the falling arm then writes DECLINES', () => {
   // Both edges hand `case 1:` a load of *a0, but `case 0:` stores to *a0 after its own load: a re-run
   // `v0 = *a0;` would read the 9 the arm just stored.
   const asm = recompute('\tldr\tr2, [r0]\n', '\tldr\tr2, [r0]\n\tmov\tr3, #0x9\n\tstr\tr3, [r0]\n');
   expect(() => decompile('f', asm, ARMV4T_AGBCC, SIDE2)).toThrow(/takes a value from the switch edge/);
 });
 
-test('the LAST case may fall into a default that has a body — C emits the default last', () => {
+testCopies('the LAST case may fall into a default that has a body — C emits the default last', () => {
   // `default:` is the arm below the last case, so falling into it is ordinary C, not a goto.
   const withDefault = (arms: string[], def: string) =>
     `f:\n\tcmp\tr1, #0x${(arms.length - 1).toString(16)}\n\tbhi\t.Ldef\n` +
@@ -244,7 +252,7 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
 });
 
-test('overlaps C cannot spell DECLINE instead of being silently closed or duplicated', () => {
+testCopies('overlaps C cannot spell DECLINE instead of being silently closed or duplicated', () => {
   // Emitting these as ordinary `break` arms would drop a real control-flow edge — the output would
   // look entirely normal and run the wrong code, which is the whole hazard of a recovered table.
   // The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a `return`, which
@@ -258,7 +266,7 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
   expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
 });
 
-test('an arm reaching a sibling on one path and the switch END on another breaks on that path', () => {
+testCopies('an arm reaching a sibling on one path and the switch END on another breaks on that path', () => {
   // `case 0: if (c) { sideA(); break; } case 1: sideB(); break;` — the arm's own `break;` leaves
   // the SWITCH on the path that reaches its end, and the other path falls into case 1. agbcc and
   // gcc 2.7.2 cross-jump `if (c) f(); break;` into this very shape, so it is also how those come
@@ -331,7 +339,7 @@ const withExtra = (extra: string) =>
   `${extra}\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n` +
   '.Lc0:\n\tmov\tr0, r2\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, r2\n\tbx\tlr\n';
 
-test('code PRE put inside the dispatch is lifted on the dispatched path only', () => {
+testCopies('code PRE put inside the dispatch is lifted on the dispatched path only', () => {
   const out = decompile('f', withExtra('\tadd\tr1, r3, #0\n\tsub\tr2, r1, #0x5\n'), ARMV4T_AGBCC).source;
   expect(out).toContain('switch (a0)');
   expect(out).toMatch(/case 0:\s*\n\s*return a3 - 5;/);
@@ -378,7 +386,7 @@ test('dispatch code that is not a register computation, or that disturbs the dis
   expect(refused('\tadd\tr0, r3, #0x5\n')).toThrow(/writes the register the dispatch needs, 'r0'/);
 });
 
-test('a case may fall into the default when the dispatch code writes what the default reads', () => {
+testCopies('a case may fall into the default when the dispatch code writes what the default reads', () => {
   // The default edge of a kept dispatch is never taken, so the copies it carries (here r2 = a3, which
   // the default reads) never run: they are neither emitted nor a reason to refuse the fall-through.
   const fallInto = (extra: string) =>
@@ -395,7 +403,7 @@ test('a case may fall into the default when the dispatch code writes what the de
   expect(out).toMatch(/else \{\s*\n\s*a3 = a2;\s*\n\s*v0 = a2 << 1;/);
 });
 
-test('a case falling into a table hole that names the default leaves no dead default arm', () => {
+testCopies('a case falling into a table hole that names the default leaves no dead default arm', () => {
   // The hole (slot 0) names .Ldef, so that block is case 0's arm, and case 2 falling into it lands
   // under `case 0:`. The default edge is never taken, so the `default:` label would head a dead copy.
   const holeFall = (ents: string[]) =>
@@ -424,7 +432,7 @@ test('every data-processing op that writes only its destination is admitted, rot
   expect(decompile('f', withExtra('\tror\tr2, r3\n'), ARMV4T_AGBCC).source).toContain('switch (a0)');
 });
 
-test('dispatch code may overwrite the scrutinee: the switch reads it as the dispatch was entered', () => {
+testCopies('dispatch code may overwrite the scrutinee: the switch reads it as the dispatch was entered', () => {
   // agbcc's own shape: the scrutinee r1 is also the table-pointer register, so the idiom has already
   // overwritten it, and PRE then reuses r1 for its value. The cases read that value.
   const asm =
@@ -475,7 +483,7 @@ test('a table entry naming a dispatch block DECLINES — it jumps through a code
   expect(() => decompile('f', entering(''), ARMV4T_AGBCC)).toThrow(why);
 });
 
-test("a table entry naming the long-jump form's `b DEF` relay is an edge to the default", () => {
+testCopies("a table entry naming the long-jump form's `b DEF` relay is an edge to the default", () => {
   // The relay is not a dispatch block: entering it runs the default, with or without dispatch code.
   const relay = (extra: string) =>
     withExtra(extra)
@@ -682,7 +690,7 @@ test('a jump-table arm that returns on its own leaves the other arms an end', ()
   expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.indexOf('return 1;'));
 });
 
-test('an arm that returns on its own does not re-spell a switch the stop reading already spells', () => {
+testCopies('an arm that returns on its own does not re-spell a switch the stop reading already spells', () => {
   // The retry is read only where the `stop` reading DECLINES. A real fall-through into the shared
   // tail's default (one arm, so it linearizes) keeps the stop reading's spelling: the arm runs on
   // into the default, which carries the tail.
@@ -807,7 +815,7 @@ test('a default arm that returns on its own does not name where the switch ends'
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
 });
 
-test('a default arm that returns on its own does not name the end beside one `break` either', () => {
+testCopies('a default arm that returns on its own does not name the end beside one `break` either', () => {
   // KMC's output for `switch(x){case 0:p[0]=1;break; case 1:p[1]=2;return 1; case 2:p[2]=3;return 2;
   // case 3:p[3]=7;return 5; case 4:p[4]=5;return 4; default: p[3]=7; return 5;} return 0;`,
   // transliterated block for block (case 3 cross-jumped into the default). The graph is the one
@@ -901,7 +909,7 @@ test('a table whose holes name the default block still ends the switch there', (
   expect(count(out, '[6] = 4;')).toBe(1);
 });
 
-test('the retry still refuses to end the switch at a case arm the default edge only runs into', () => {
+testCopies('the retry still refuses to end the switch at a case arm the default edge only runs into', () => {
   // `switch(x){case 0: a(); goto c1; case 2: return 2; case 3: return 3; default: d(); case 1: b();}
   // return 0;` in block form: case 0 and the default arm both reach case 1, and cases 2 and 3 return
   // on their own. The end the anchored reading derives is case 1's ENTRY, an arm that is not the
@@ -1082,7 +1090,7 @@ test('two jump-table arms entering one case body: the LAYOUT neighbour falls, th
   expect(count(out, 'gOut = a1;')).toBe(2);
 });
 
-test('two jump-table arms entering the HOLE arm, with no entrant above it, both own a copy', () => {
+testCopies('two jump-table arms entering the HOLE arm, with no entrant above it, both own a copy', () => {
   // The default block is also the table's hole (case 4), so it is a case arm; cases 2 and 3 jump
   // into it, and the arm laid out above it is case 5, which does not. Nobody falls.
   const out = decompile(
