@@ -118,8 +118,10 @@ test('a fall-through switch comes back as the if-recovery for Pascal, not as a s
   const { asm } = compileMipsTarget(c, 'swf', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
   const prototypes = { swf: { params: 2, returnsVoid: true } };
   // THE CONTROL: the same assembly, for C, is one `switch` whose `case 1` runs on into `case 2`
-  // with no `break;` between them.
-  const cOut = decompile('swf', asm, MIPS_IDO, { prototypes }).source;
+  // with no `break;` between them — read with the return-tail copies, as rank.ts's `/ret-copy` and
+  // Pascal's own structuring read it (`spellsEarlyReturn`): the C default's join past early returns
+  // ends `case 2` at the switch's end instead, since `case 3` leaves through the epilogue.
+  const cOut = decompile('swf', asm, MIPS_IDO, { prototypes, copyReturnTails: true }).source;
   expect(cOut).toContain('switch (');
   expect(cOut).toMatch(/case 1:(?![\s\S]*?\b(?:break|return)\b[\s\S]*?case 2:)[\s\S]*?\n\s*case 2:/);
 
