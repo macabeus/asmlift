@@ -539,7 +539,7 @@ describe('leaf-base hoisting', () => {
 
     // agbcc loads `&gS` once under EACH guard: `(gY != 5 || (gS.a | gS.d)) && (gA != 1 || (gS.c |
     // gS.b))` scores 9/39 inline and 15/39 hoisted, and the same two connectives as two `if`s 9/39
-    // against 19/40. Keyed on one operand, both hoisted.
+    // against 19/40.
     test('stays inline when its accesses sit under two different guarded operands', () => {
       const y = { k: 'var', name: 'y' } as const;
       const twoIfs = fn([

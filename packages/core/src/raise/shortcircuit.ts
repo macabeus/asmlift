@@ -1486,9 +1486,9 @@ function gConeOf(c: SharedValueSite): Op[] {
   return [...out];
 }
 
-/** Is `v` constant offsets over a symbol or frame address, or over a literal address or a value ^g
- *  did not compute that ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p - 0x35` off a pointer parameter — and
- *  nothing else? The chain is ir/alias.ts `constDisplacementOf`, the one reading of address
+/** Is `v` constant offsets over a symbol or frame address (`&gS + 0x35`), or over a literal address
+ *  or a value ^g did not compute (`p - 0x35` off a pointer parameter) that ^g reads only as a
+ *  memory ADDRESS? The chain is ir/alias.ts `constDisplacementOf`, the one reading of address
  *  arithmetic, so Thumb's `sub r0, r0, #0x35` for a negative member offset ends where `add` does.
  *  Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an
  *  earlier block loaded is GVN's one `gaddr` (`sub_0800D188`'s site). A root ^g did not compute (a
@@ -1498,8 +1498,8 @@ function gConeOf(c: SharedValueSite): Op[] {
  *  read as an address alone (`readAsAddress`): the pointer-parameter base is measured (agbcc's
  *  `add r0, r4, #0x35; ldrb; add r0, r0, #0x22` off `struct T *p` folds to the target's bytes,
  *  synthetic:scbase_pfar), while a counter's `i + 1` read twice by a latch's compare is not an
- *  address, and folding it lost retpost_notail's gcc2.7.2 and gcc2.7.2kmc lifts to a structure
- *  decline. */
+ *  address, and folding it turns synthetic:retpost_notail on gcc2.7.2 and gcc2.7.2kmc into a
+ *  structure decline. */
 function constOffsetCone(c: SharedValueSite): boolean {
   const disp = constDisplacementOf(c.defs, c.value);
   const root = disp?.root ?? c.value;
@@ -1557,9 +1557,10 @@ function readAsAddress(g: Block, v: Value): boolean {
 // members off it (`(gS.a | gS.d | gS.c) != 0`), so the address is the one value with three readers.
 // Refused, the `||` splits into a nest and the structurer copies the shared arm AND everything after
 // it into both branches, once per such site (kleod's `sub_0800D188`, whose `&gUnk_03005220 + 0x35`
-// is the shape synthetic:scbase_far pins). The base may as well be a pointer parameter (`p->a | p->d`),
-// or anything computed before ^g: a constant-offset cone over it reads nothing and cannot trap, so
-// hoisting it changes no behaviour.
+// is the shape synthetic:scbase_far pins). The base may also be a literal address, a pointer
+// parameter (`p->a | p->d`) or another value computed before ^g, when ^g reads it only as an
+// address: a constant-offset cone over it reads nothing and cannot trap, so hoisting it changes no
+// behaviour.
 //
 // RESIDUE, not in the table: the ESCAPE half of `definedValuesStayLocal` (a value read past ^g that
 // the arm does not re-derive). `armRereadCone` copies the cone of every outside read, so on the
@@ -1577,9 +1578,9 @@ export const SHARED_VALUE_GATES: readonly Gate<SharedValueSite>[] = [
     rejects: (c) => gConeOf(c).some(reevalUnsafe),
   },
   {
-    // A pure, non-trapping value that is not constant offsets — `(x * x) != 0` over a computed `x`.
-    // Hoisting it is correct C; what the target spells there is unmeasured, so it keeps the nest
-    // main produced. A pure SPELLING rule: disjoint from `shared-read` (a read or a trap in the cone
+    // A pure, non-trapping value that is not an address `constOffsetCone` admits — `(x * x) != 0`
+    // over a computed `x`. Hoisting it is correct C; what the target spells there is unmeasured, so
+    // it keeps the nest. A pure SPELLING rule: disjoint from `shared-read` (a read or a trap in the cone
     // is that rule's), so each ablates alone and ablating this one admits nothing unsafe.
     id: 'shared-pure',
     why: 'a computed value the second test reuses is kept in the nest until its spelling is measured',

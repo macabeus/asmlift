@@ -498,9 +498,9 @@ export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
 
 /** The `/livebase` variation's admission (rank.ts): the default rules with the PLACEMENT heuristics
  *  ablated, keeping only `single-use`. `loop`, `repeated-const-offset` and `guarded-operand` predict
- *  which spelling the compiler chose, and the first two have a counterexample — an MMIO poll (`p[2] = go;
- *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
- *  time. Neither gate is `sound`, so ablating them can only change which spelling wins, never
+ *  which spelling the compiler chose, and the first two have a counterexample — an MMIO poll
+ *  (`p[2] = go; while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register
+ *  the whole time. None of the three is `sound`, so ablating them can only change which spelling wins, never
  *  what a candidate means; the differ referees. */
 export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
   ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'loop'), 'repeated-const-offset'),

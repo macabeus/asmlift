@@ -759,7 +759,7 @@ describe('refusals', () => {
   test.each(['gaddr', 'gaddr+k', 'param+k', 'param-k', 'param+k+i', 'literal'] as const)(
     'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
     (base) => {
-      // sub_0800D188 wrote 6,338 of its 17,132 lines twice behind this one refusal (synthetic:scbase).
+      // Refused, the `||` splits into a nest that writes the arm and the tail twice (synthetic:scbase).
       // `param-k` is Thumb's `sub r0, r0, #0x35` for a negative member offset, the chain
       // ir/alias.ts `constDisplacementOf` reads; `param+k+i` reads two members through a variable
       // index, `add(p + 4, i)`, still only as an address; `literal` is agbcc's one pool load of
@@ -795,8 +795,8 @@ describe('refusals', () => {
 
   test('a PARAMETER plus a constant that the second test reads as a VALUE, not an address, keeps the nest', () => {
     // `if (a || ((i + 1) ^ (i + 1) >> 4) != 0)`: a counter's `i + 1` read twice by arithmetic. The
-    // pointer-parameter base is measured; this spelling is not (folding it lost
-    // synthetic:retpost_notail's gcc2.7.2 lifts), so it is the spelling rule's.
+    // pointer-parameter base is measured; this spelling is not (folding it declines
+    // synthetic:retpost_notail on gcc2.7.2), so it is the spelling rule's.
     const i = mkValue(T.s(32));
     const fn = chain({
       gOnTaken: false,

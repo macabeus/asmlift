@@ -17344,14 +17344,13 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: `extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\nvoid k(s32 x);\nvoid m(s32 x);\nvoid ${sym}(void);`,
     proto: { [sym]: { returnsVoid: true }, k: { params: 1, returnsVoid: true }, m: { params: 1, returnsVoid: true } },
   })),
-  //  38. scbase / scbase_and / scbase_ctl (sub_0800D188's `y != sp1C || (unk35 | unk57 | unk3D) != 0`,
-  //      which wrote 6,338 of its 17,132 lines twice). A connective whose second operand ORs three
-  //      members of ONE struct: the compiler loads the struct's address once and reads all three off
-  //      that register, so the address is a value the second test reads three times. The branch fold
-  //      refused any such value, the `||` split into a nest, and the structurer copied the guarded
-  //      body and everything after it into both arms. scbase is the `||`, scbase_and its `&&` dual,
-  //      scbase_ctl the same `||` over three separate globals — one read per address, which folded
-  //      already.
+  //  38. scbase / scbase_and / scbase_ctl (sub_0800D188's `y != sp1C || (unk35 | unk57 | unk3D) != 0`).
+  //      A connective whose second operand ORs three members of ONE struct: the compiler loads the
+  //      struct's address once and reads all three off that register, so the address is a value the
+  //      second test reads three times. Where the branch fold refuses such a value, the `||` splits
+  //      into a nest and the structurer copies the guarded body and everything after it into both
+  //      arms. scbase is the `||`, scbase_and its `&&` dual, scbase_ctl the same `||` over three
+  //      separate globals — one read per address, which the use-count rule never refused.
   ...(
     [
       ['scbase', '||', '(gS.a | gS.d | gS.c) != 0'],
@@ -17416,8 +17415,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { scbase_far: { returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   },
   //      scbase_pfar is scbase_far with a pointer PARAMETER as the base: the shared sum is
-  //      `p + 0x35`, a constant offset over a value the function was handed rather than a symbol.
-  //      Admitting only a symbol or frame-address leaf refused it, and the tail was written twice.
+  //      `p + 0x35`, a constant offset over a value the function was handed rather than a symbol,
+  //      admitted only because the second test reads it as an address alone.
   {
     sym: 'scbase_pfar',
     src:
