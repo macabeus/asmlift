@@ -3703,8 +3703,10 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
 }
 
 /** Where a loop reading that copies a ret tail with an effect into the body (`retCopyingReadings`)
- *  ranks, and whether a structuring committed one. */
-interface RetCopyRanking {
+ *  ranks, and whether a structuring committed one: the loop tail copy, a rung of one loop's ladder,
+ *  not the whole-function return-tail copies the `/ret-copy` variation and the copies rerun read
+ *  (`structureWithinBudget`). */
+interface LoopTailCopyRanking {
   /** Behind every `while (1)` reading that copies no loop, the two-level one included, and ahead of
    *  the last rung's readings that copy one in a tail they share (`ForeverAsk.cycles`). Otherwise it
    *  ranks as the other `while` and `do-while` readings do, save for a tail code around the loop
@@ -3768,7 +3770,7 @@ interface ForRanking {
  *  in the body ("unrecovered back-edge"), and on gcc2.7.2 the same loop in a switch arm whose merge
  *  is the function's `t(); return` reaches that merge from inside the loop, which no `break;` spells
  *  (`switchBreakAt`). Such a structuring is run again with every such reading last
- *  (`RetCopyRanking.last`), where `while (1)` spells the loop.
+ *  (`LoopTailCopyRanking.last`), where `while (1)` spells the loop.
  *
  *  AN EXIT PAST THE LOOP, LIKEWISE. Where `while (1)` takes an exit inside the loop's span and an
  *  exit past its body would fit once an arm copies a return tail a path from outside the loop also
@@ -3781,10 +3783,10 @@ interface ForRanking {
  *  A GOTO OUT OF BOTH LOOPS, LAST OF ALL. The outward flag (`TwoLevelExit.outward`) is a variable
  *  the asm does not hold, and one loop's ladder cannot see whether the readings of its partner
  *  would have structured the nest without it: on mwcc_242_81, `for (i…) { k(i); for (j…) if (a(j))
- *  goto out; } out: gOut += i;` lifts with the hit copying the ret tail once the ret copies rank last,
- *  where asking the outward rung there hands the flag out instead. So every run above is made with
- *  the rung unasked, and only where all of them decline and some loop's rung would have read it are
- *  they made again with it asked (`LAST_RESORT_RUNGS`).
+ *  goto out; } out: gOut += i;` lifts with the hit copying the ret tail once the loop tail copies
+ *  rank last, where asking the outward rung there hands the flag out instead. So every run above is
+ *  made with the rung unasked, and only where all of them decline and some loop's rung would have
+ *  read it are they made again with it asked (`LAST_RESORT_RUNGS`).
  *
  *  A HIT THAT RUNS CODE FIRST, BEHIND THE DECLINES. A two-level exit whose hit runs code of its own
  *  on the way to its second target (`hitArmOf`, `BreakArm.exit`) reads loops every other
@@ -3805,18 +3807,18 @@ interface ForRanking {
  *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Where every run above declines, they
  *  are made again with each `while (1)` loop spelled `for` where `forPlanAt` reads one
  *  (`ForRanking`), once more for each loop that run adds. The loops asked are the ones where
- *  ANY of those runs — the ret-copy, past-exit and outward reruns as well as the first — met one of
- *  three jump-table refusals (`wantFor`), so the published refusal, which is the first run's, need
- *  not be one of them: a function that declines on "unrecovered back-edge" can lift here because a
- *  later rung reached the jump table. Any structure decline in a function with a `while (1)` loop
+ *  ANY of those runs — the loop tail-copy, past-exit and outward reruns as well as the first — met
+ *  one of three jump-table refusals (`wantFor`), so the published refusal, which is the first
+ *  run's, need not be one of them: a function that declines on "unrecovered back-edge" can lift
+ *  here because a later rung reached the jump table. Any structure decline in a function with a `while (1)` loop
  *  holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
  *  `jumpSharedFallTargets`) write the case-label goto L3 holds, and the default writes one only where
- *  every goto-free reading declines. One switch's ladder sees only
- *  its own rungs, not the whole-function reruns above: a `while (1)` jump table whose copies decline
- *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
+ *  every goto-free reading of its ladder declines (THE COPIES, BELOW ALL OF IT). One switch's
+ *  ladder sees only its own rungs, not the whole-function reruns above: a `while (1)` jump table
+ *  whose copies decline in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
  *  the first run adopts them there and never makes that rerun. So every run above is made with the
  *  jump rungs unasked, and only where all of them decline, the `for` reruns included, and some
  *  switch's jump rung would have read it, are they all made again with rungs asked (`JumpRanking`)
@@ -3828,6 +3830,17 @@ interface ForRanking {
  *  function the per-switch passes decline is one asking every switch lifts.
  *  The ranked `/case-goto` variation (`jumpToSharedCases`) is the other producer, and the scorer
  *  weighs it against the copies.
+ *
+ *  THE COPIES, BELOW ALL OF IT. Every run above reads a divergent branch outside a loop one way:
+ *  the join past early returns, by default (`JoinReading`). The whole-function return-tail copies
+ *  are not a rung of this ladder but a second run of all of it (`structureWithinBudget`), made only
+ *  where the join's ladder declines or crosses the copy budget. So "every run above" and "every
+ *  goto-free reading" mean the join's: a function whose join lifts only with a flag rung or a
+ *  case-label jump publishes that, even where the copies would lift without one. Both are verified
+ *  readings of the asm, so the order moves a spelling, never a decline into wrong C, and the scorer
+ *  still weighs the copies as `/ret-copy`. On the corpus measured when the join became the default
+ *  no function is in that reach: the join raises no `goto` or `while (1)` count over the functions
+ *  it re-spells.
  *
  *  The first run's refusal stands if every rerun declines too, where the first run is the last
  *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
@@ -3842,7 +3855,7 @@ export function structure(
   return structureWithinBudget(fn, opts, hooks, memo);
 }
 
-/** THE TWO RUNGS ABOVE THE WHOLE LADDER: the copy budget, and the copies.
+/** THE TWO RUNGS AROUND THE WHOLE LADDER: the copy budget, and the copies behind every rung of it.
  *
  *  THE COPY BUDGET. A structuring that enters more regions than `COPY_BUDGET` allows is stopped
  *  where it crosses the bound: a structure decline, never an exponential tree published or an
@@ -3938,7 +3951,7 @@ function structureLadder(
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
   const attempt = (
-    retCopy: RetCopyRanking,
+    loopTailCopy: LoopTailCopyRanking,
     pastExit: PastExitRanking,
     lastResort: LastResortRungs,
     forRank: ForRanking,
@@ -3964,7 +3977,7 @@ function structureLadder(
           onJoinPastReturns: hooks.onJoinPastReturns && hold(hooks.onJoinPastReturns),
         },
         memo,
-        retCopy,
+        loopTailCopy,
         pastExit,
         lastResort,
         forRank,
@@ -3982,9 +3995,9 @@ function structureLadder(
     }
   };
   const ranked = (lastResort: LastResortRungs, forRank: ForRanking, jumps: JumpRanking): SFn | null => {
-    const first: RetCopyRanking = { last: false, took: false };
+    const first: LoopTailCopyRanking = { last: false, took: false };
     const inSpan: PastExitRanking = { first: false, could: false };
-    const past: RetCopyRanking = { last: false, took: false };
+    const past: LoopTailCopyRanking = { last: false, took: false };
     return (
       attempt(first, inSpan, lastResort, forRank, jumps) ??
       (first.took ? attempt({ last: true, took: false }, inSpan, lastResort, forRank, jumps) : null) ??
@@ -4075,7 +4088,7 @@ function structureRanked(
   opts: StructureOptions,
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
-  retCopy: RetCopyRanking,
+  loopTailCopy: LoopTailCopyRanking,
   pastExit: PastExitRanking,
   lastResort: LastResortRungs,
   forRank: ForRanking,
@@ -5029,7 +5042,7 @@ function structureRanked(
     // copy where the flag would add `v = 1; break;` the source never wrote. A tail only the loop's
     // own paths reach is the arms' to copy (`a pure tail only the arms of a \`do-while\` enter`).
     // Classification cannot tell whether emission spells the copy, so a structuring that committed
-    // one and declined is run again with every such reading last of all (`RetCopyRanking`).
+    // one and declined is run again with every such reading last of all (`LoopTailCopyRanking`).
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
@@ -5091,11 +5104,11 @@ function structureRanked(
               arms,
             });
     const commit = () => {
-      retCopy.took ||= copiesEffect;
+      loopTailCopy.took ||= copiesEffect;
       reading();
     };
     // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
-    if (copiesEffect && (shared || retCopy.last)) {
+    if (copiesEffect && (shared || loopTailCopy.last)) {
       retCopyingReadings.set(h, commit);
     } else if (plain === null) {
       copyingReadings.set(h, commit);
@@ -5275,8 +5288,8 @@ function structureRanked(
   // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
   // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
   // that every other reading declines. A structuring run again because emission refused such a
-  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy. Behind it the same rung
-  // asks again with `outward`, where a `goto` out of both loops is handed out
+  // copy (`LoopTailCopyRanking.last`) asks the two-level exit before the copy. Behind it the same
+  // rung asks again with `outward`, where a `goto` out of both loops is handed out
   // (`TwoLevelExit.outward`) — only on a run every structuring without it declined
   // (`LAST_RESORT_RUNGS`) — and right behind that `while (1)` with every copy, where an arm also
   // copies a return tail a path that bypasses the loop enters, under an exit inside the loop's span
@@ -5364,7 +5377,7 @@ function structureRanked(
       const copied = shape ?? first.copied();
       if (copied !== null) {
         foreverLoops.set(h, copied);
-      } else if (retCopying !== undefined && !retCopy.last) {
+      } else if (retCopying !== undefined && !loopTailCopy.last) {
         retCopying();
       } else {
         const flagged = fromFlagged(true);
