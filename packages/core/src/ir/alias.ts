@@ -160,8 +160,9 @@ export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): 
  * `p`. Null when `addr` is not such a link. `sub` is not commutative, so `K - p` stops the walk; a
  * link whose two operands are both constants stops it too (that is a literal address,
  * {@link constAddressOf}'s question). The one reading of address arithmetic that raise/structs.ts
- * (which accesses share a base) and raise/offsetnames.ts (which named global an address stands on)
- * both ask, so the two cannot disagree about where a chain ends.
+ * (which accesses share a base), raise/offsetnames.ts (which named global an address stands on) and
+ * raise/shortcircuit.ts (which root a shared address the fold hoists stands on) all ask, so they
+ * cannot disagree about where a chain ends.
  *
  * `constOf` is what counts as a constant operand: a `const` def by default, which is where those
  * two readers want a chain to end. raise/offsetnames.ts `cellSpelledTwice`, which must place an
@@ -169,7 +170,7 @@ export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): 
  * folds constant subtrees too.
  */
 export function constDisplacementOf(
-  defs: Map<Value, Op>,
+  defs: ReadonlyMap<Value, Op>,
   addr: Value,
   constOf: (x: Value) => number | null = (x) => {
     const d = defs.get(x);

@@ -40,7 +40,7 @@
 // is NEGATABLE whenever the orientation inverts it — an icmp by opcode swap or a `logic_and`/`logic_or` by
 // De Morgan, both via `negateCondOps`, which the control-flow form below shares. Any deviation falls
 // through untouched (a miss, never a miscompile).
-import { disjointConstSlots } from '../ir/alias';
+import { constDisplacementOf, disjointConstSlots } from '../ir/alias';
 import {
   type AttrVal,
   Block,
@@ -67,7 +67,7 @@ import {
   reevalUnsafe,
   speculationUnsafe,
 } from '../ir/discipline';
-import { NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
+import { MEM_BASE_OPS, NEGATED_FCMP, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
@@ -1487,56 +1487,52 @@ function gConeOf(c: SharedValueSite): Op[] {
 }
 
 /** Is `v` constant offsets over a symbol or frame address, or over a value ^g did not compute that
- *  ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p + 0x35 + 0x22` off a pointer parameter —
- *  and nothing else? Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35`
- *  off an `&gS` an earlier block loaded is GVN's one `gaddr` (`sub_0800D188`'s site). A leaf ^g did
- *  not compute (a parameter, an earlier block's result) is, by dominance, already computed when
- *  the first test runs, so the cone spelled above the guard (as a local, or l3/basecse.ts's
- *  hoisted base) adds only `+ k` arithmetic, which reads nothing and cannot trap. That leaf is
- *  admitted only when every ^g read of `v` is a load's address or a further `+ k` that is: the
- *  pointer-parameter base is measured (agbcc's `add r0, r4, #0x35; ldrb; add r0, r0, #0x22` off
- *  `struct T *p` folds to the target's bytes, synthetic:scbase_pfar), while a counter's `i + 1`
- *  read twice by a latch's compare is not an address, and folding it lost retpost_notail's
- *  gcc2.7.2 and gcc2.7.2kmc lifts to a structure decline. */
+ *  ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p - 0x35` off a pointer parameter — and
+ *  nothing else? The chain is ir/alias.ts `constDisplacementOf`, the one reading of address
+ *  arithmetic, so Thumb's `sub r0, r0, #0x35` for a negative member offset ends where `add` does.
+ *  Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an
+ *  earlier block loaded is GVN's one `gaddr` (`sub_0800D188`'s site). A root ^g did not compute (a
+ *  parameter, an earlier block's result) is, by dominance, already computed when the first test
+ *  runs, so the cone spelled above the guard (as a local, or l3/basecse.ts's hoisted base) adds only
+ *  `± k` arithmetic, which reads nothing and cannot trap. That root is admitted only when `v` is
+ *  read as an address alone (`readAsAddress`): the pointer-parameter base is measured (agbcc's
+ *  `add r0, r4, #0x35; ldrb; add r0, r0, #0x22` off `struct T *p` folds to the target's bytes,
+ *  synthetic:scbase_pfar), while a counter's `i + 1` read twice by a latch's compare is not an
+ *  address, and folding it lost retpost_notail's gcc2.7.2 and gcc2.7.2kmc lifts to a structure
+ *  decline. */
 function constOffsetCone(c: SharedValueSite): boolean {
-  const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
-  /** every ^g read of `v` is a load's address, or `v + k` read only that way. A SUCCESSOR ARGUMENT
-   *  is a value read: a loop-carried `p + 1` is the next iteration's pointer, as a latch's `i + 1`
-   *  is its counter. */
-  const readAsAddress = (v: Value): boolean =>
-    c.g.ops.every((op) => {
-      if (!readsOf(op).includes(v)) {
-        return true;
-      }
-      if (op.successors.some((s) => s.args.includes(v))) {
-        return false;
-      }
-      if (op.opcode === 'load') {
-        return true; // its one operand is the address
-      }
-      if (op.opcode === 'add' && op.operands.length === 2 && op.operands.some(isConst)) {
-        return op.results.every(readAsAddress);
-      }
-      return false;
-    });
-  const ok = (v: Value, top: boolean): boolean => {
-    const d = c.defs.get(v);
-    if (d?.opcode === 'gaddr' || d?.opcode === 'laddr') {
+  const disp = constDisplacementOf(c.defs, c.value);
+  const root = disp?.root ?? c.value;
+  const leaf = c.defs.get(root)?.opcode;
+  if (leaf === 'gaddr' || leaf === 'laddr') {
+    return true;
+  }
+  return disp !== null && !c.defOf.has(root) && readAsAddress(c.g, c.value);
+}
+
+/** Does every read ^g makes of `v` end in a memory access's ADDRESS: the base of a load or store,
+ *  or the pointer side of `v + x` / `v - x` whose result is in turn read only that way? An index
+ *  may be a variable (`p->arr[i]` is `add(p + 0x35, i)`), since it is the sum, not `v`, that it
+ *  joins. A SUCCESSOR ARGUMENT is a value read — a loop-carried `p + 1` is the next iteration's
+ *  pointer, a latch's `i + 1` its counter — and so is a compare, a mask, or a stored value. */
+function readAsAddress(g: Block, v: Value): boolean {
+  return g.ops.every((op) => {
+    if (!readsOf(op).includes(v)) {
       return true;
     }
-    if (!top && !c.defOf.has(v)) {
-      return readAsAddress(c.value); // computed before ^g: a parameter, an earlier block's value
+    if (op.successors.some((s) => s.args.includes(v))) {
+      return false;
     }
-    if (!d) {
-      return false; // not reached: every value ^g defines has a def
+    const [first, ...rest] = op.operands;
+    if (MEM_BASE_OPS.has(op.opcode)) {
+      return first === v && !rest.includes(v);
     }
-    if (d.opcode === 'add') {
-      const [a, b] = d.operands;
-      return (isConst(b) && ok(a, false)) || (isConst(a) && ok(b, false));
+    const once = op.operands.length === 2 && op.operands.filter((x) => x === v).length === 1;
+    if (once && (op.opcode === 'add' || (op.opcode === 'sub' && first === v))) {
+      return op.results.every((r) => readAsAddress(g, r));
     }
     return false;
-  };
-  return ok(c.value, true);
+  });
 }
 
 // ── THE USE-COUNT REFUSALS, AS DATA ──────────────────────────────────────────────────────────

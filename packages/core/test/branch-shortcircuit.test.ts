@@ -697,15 +697,18 @@ describe('refusals', () => {
    *  as agbcc leaves it: the base defined once in ^g and read by all three loads. `base` picks what
    *  that shared value is: the struct's address, the address plus a constant, a READ, or a pointer
    *  PARAMETER of the function plus a constant (`p->a | p->d | p->c` past the ldrb displacement). */
-  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k'): Fn {
+  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k' | 'param-k' | 'param+k+i'): Fn {
     const param = mkValue(T.ptr(T.u(8)));
+    /** the variable indices `param+k+i` reads two of its members through */
+    const index = [mkValue(T.s(32)), mkValue(T.s(32))];
+    const onParam = base.startsWith('param');
     const fn = chain({
       gOnTaken: false,
       sharedOnGTaken: true,
       gBody: (out) => {
         const sym = mkValue(T.ptr(T.u(8)));
-        const ops: Op[] = base === 'param+k' ? [] : [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
-        let p = base === 'param+k' ? param : sym;
+        const ops: Op[] = onParam ? [] : [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
+        let p = onParam ? param : sym;
         if (base !== 'gaddr') {
           p = mkValue(T.ptr(T.u(8)));
           const k = mkValue(T.unk(32));
@@ -714,13 +717,18 @@ describe('refusals', () => {
               ? [mkOp('load', { operands: [sym], results: [p], attrs: { off: 0, width: 4, signed: false } })]
               : [
                   mkOp('const', { results: [k], attrs: { value: 4 } }),
-                  mkOp('add', { operands: [base === 'param+k' ? param : sym, k], results: [p] }),
+                  mkOp(base === 'param-k' ? 'sub' : 'add', { operands: [onParam ? param : sym, k], results: [p] }),
                 ]),
           );
         }
-        const bytes = [0, 3, 2].map((off) => {
+        const bytes = [0, 3, 2].map((off, n) => {
           const v = mkValue(T.u(8));
-          ops.push(mkOp('load', { operands: [p], results: [v], attrs: { off, width: 1, signed: false } }));
+          let at = p;
+          if (base === 'param+k+i' && n > 0) {
+            at = mkValue(T.ptr(T.u(8)));
+            ops.push(mkOp('add', { operands: [p, index[n - 1]], results: [at] }));
+          }
+          ops.push(mkOp('load', { operands: [at], results: [v], attrs: { off, width: 1, signed: false } }));
           return v;
         });
         const o1 = mkValue(T.unk(32));
@@ -735,16 +743,19 @@ describe('refusals', () => {
         return ops;
       },
     });
-    if (base === 'param+k') {
-      fn.blocks[0].params = [param];
+    if (onParam) {
+      fn.blocks[0].params = base === 'param+k+i' ? [param, ...index] : [param];
     }
     return fn;
   }
 
-  test.each(['gaddr', 'gaddr+k', 'param+k'] as const)(
+  test.each(['gaddr', 'gaddr+k', 'param+k', 'param-k', 'param+k+i'] as const)(
     'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
     (base) => {
       // sub_0800D188 wrote 6,338 of its 17,132 lines twice behind this one refusal (synthetic:scbase).
+      // `param-k` is Thumb's `sub r0, r0, #0x35` for a negative member offset, the chain
+      // ir/alias.ts `constDisplacementOf` reads; `param+k+i` reads two members through a variable
+      // index, `add(p + 4, i)`, still only as an address.
       const fn = sharedBase(base);
       expect(recognizeBranchShortCircuit(fn)).toBe(true);
       expect(connective(fn)).toBe('logic_or');
