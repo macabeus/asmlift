@@ -410,6 +410,23 @@ test('stride-name-shared scans the exit arms as well as the body', () => {
   expect(r.agreement.disagree).toBe(0);
 });
 
+test('stride-name-shared leaves an exit arm that reads no stride unscanned', () => {
+  // the same arm param named for the counter, but #10 reads the counter, not the stride, so it renders
+  // no G and its name is as free as the code's past the loop: IDO's `case 7: while (gA[i] > 0) {
+  // k(gA[i]); i++; } break;`, which steps its own copy of `i` and writes it back on its way out
+  const ir = srFor(STRIDE)
+    .replace('%34: s32 = call %5 {target="k"}', '%34: s32 = call %5 {target="k"}\n  %51: s32 = call %50 {target="m"}')
+    .replace('cond_br %33, ^bb11(), ^bb10()', 'cond_br %33, ^bb11(), ^bb10(%5)')
+    .replace('^bb10():', '^bb10(%50: s32):');
+  const t = tallying(FOR_PLAN_IV_GATES);
+  const r = lift(ir, { forPlanIvGates: t.gates });
+  expect(t.refusals().map(([id]) => id)).not.toContain('stride-name-shared');
+  expect(r.src).toMatch(/for \(v0 = a0; a1 >= v0; v0 = v0 \+ 1\)/);
+  expect(r.src).toMatch(/k\(v0\);\s*m\(v0\);\s*break;/);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.agreement.disagree).toBe(0);
+});
+
 test('without stride-escapes the code after the loop reads a stride never written', () => {
   // `for (i = 0; ..; i++)` with no guard (the first test folds): the header dominates the exit, and
   // the code there calls `exitv` on the stride itself, whose name the `for` never writes

@@ -1668,9 +1668,9 @@ export interface ForPlanIv {
   /** a stride's param or its stepped value reaches an edge but the back edge's own slot, an op
    *  outside the loop and its exit arms, the test or the counter's update (A SIBLING'S STRIDE) */
   readonly strideEscapes: boolean;
-  /** a stride is of a sibling other than the counter, or a body value other than the counter's
-   *  param and the latch's ops holds the counter's name, or one holds a stride's or a leaf's name
-   *  but that value itself */
+  /** a stride is of a sibling other than the counter, or a value of the body (or of its exit arms,
+   *  when one reads a stride) other than the counter's param and the latch's ops holds the counter's
+   *  name, or one holds a stride's or a leaf's name but that value itself */
   readonly strideNameShared: boolean;
   /** a leaf of a stride's G is neither named nor an operand-free op that reads no memory */
   readonly strideLeafReread: boolean;
@@ -10385,10 +10385,10 @@ function structureRanked(
   //     holds what it held there, which is what the param is G of; the next rule holds the arm's
   //     values off the names too. Past the loop the param is still refused: the code after it is
   //     written outside the `for`, where nothing renders G;
-  //   • no value in the body or in those exit arms but the counter's param and the latch's ops is
-  //     named for the counter, and none for a leaf of G or for the param (the latch is never
-  //     rendered, and the update is the one write of the counter in the `for`); a read of a NAMED
-  //     leaf is then a read of that leaf (`stride-name-shared`);
+  //   • no value in the body or in those exit arms (when one reads a stride) but the counter's param
+  //     and the latch's ops is named for the counter, and none for a leaf of G or for the param (the
+  //     latch is never rendered, and the update is the one write of the counter in the `for`); a read
+  //     of a NAMED leaf is then a read of that leaf (`stride-name-shared`);
   //   • every leaf is named, or an operand-free op that reads no memory (a constant, a symbol's
   //     address). Any other is spelled as its own expression at each read, so evaluated again there:
   //     IDO keeps `b = gP` of `struct E *b = gP; for (..) .. b[i] ..` in a register, unnamed, and G
@@ -10901,6 +10901,34 @@ function structureRanked(
           (x) => !fl.body.has(x),
         ),
       ));
+    // `stridesNamed` scans those arms only where one renders G: when no op of any arm reads a stride's
+    // param, as an operand or an edge's argument, directly or through a value of the body or the arms,
+    // the arms render no G, so a write of the counter's name there is as harmless as one past the
+    // loop. IDO's `case 7: while (gA[i] > 0) { k(gA[i]); i++; } break;` steps its own copy of `i` and
+    // writes it back to `i` on its way out, and refusing the `for` for that write left the switch with
+    // no reading at all
+    const namedArms = (): ReadonlySet<Block> => {
+      const arms = exitArms();
+      const params = new Set(strides.map((sd) => h.params[sd.j]));
+      const seen = new Set<Value>();
+      const reaches = (v: Value): boolean => {
+        if (params.has(v)) {
+          return true;
+        }
+        if (seen.has(v)) {
+          return false;
+        }
+        seen.add(v);
+        const d = defs.get(v);
+        const at = d === undefined ? undefined : opBlock.get(d);
+        return d !== undefined && at !== undefined && (fl.body.has(at) || arms.has(at)) && d.operands.some(reaches);
+      };
+      return [...arms].some((b) =>
+        b.ops.some((o) => [...o.operands, ...o.successors.flatMap((sc) => sc.args)].some(reaches)),
+      )
+        ? arms
+        : new Set();
+    };
     // A SIBLING'S STRIDE's leaves: each read again at every read of the stride
     const rereadable = (v: Value): boolean => {
       const d = defs.get(v);
@@ -10922,7 +10950,7 @@ function structureRanked(
           return strides.some((sd) => !strideStaysInLoop(sd, h, back, latch, lterm, cond, fl.body, exitArms()));
         },
         get strideNameShared() {
-          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body, exitArms());
+          return strides.length > 0 && !stridesNamed(strides, h, ivParam, iv, latch, fl.body, namedArms());
         },
         get strideLeafReread() {
           return strides.some((sd) => !sd.leaves.every(rereadable));
