@@ -10,6 +10,9 @@ agent ran an unquoted heredoc, and a backticked bench ran in the frozen main che
 A rule that is not true for this agent is still copied: say in **Scope** what replaces it and why.
 A new rule goes into **Hard rules** here, in a PR, never into one brief.
 
+A form below replaces the **Task**, **Gates** and **Finish** fields for one kind of agent; the
+rest of the block, **Hard rules** included, is copied as for any other.
+
 ---
 
 ```markdown
@@ -61,4 +64,42 @@ findings verbatim, PR numbers. Hypotheses are labelled as hypotheses.>
     merge agent the coordinator briefs as one merges, and only the PR it was given.
 11. **Do not write the memory directory.** What you learn goes to the board as a post.
 12. **Never kill a process you did not start.** Report it.
+```
+
+---
+
+## Form: awaiting-base ship continuation
+
+For the agent that answers an `awaiting-base` message, once every PR it names as ahead has merged,
+closed or been held. The rule is in `.claude/commands/parallel-match-function.md`, Phase 3:
+**A ship waits for the PR ahead of it**. Its brief carries the message verbatim and the round's slot body, from the
+round's `slot` result.
+
+```markdown
+## Task
+Finish shipping PR <pr> (branch `<branch>`, pushed at <head sha>) for round <HANDLE>, which stopped
+behind PR <ahead> and filed <awaiting-base message filename>, quoted below. That PR is now
+<MERGED at <sha> | CLOSED | HELD>. Owed: <the message's owed list, verbatim>.
+
+1. `git fetch origin`; rebase onto `origin/main`. A conflict in
+   `apps/benchmark/results/results.json` is resolved by taking one side whole and regenerating in
+   step 2 (Hard rule 9). A conflict resolved by editing code is listed in your answer as code no
+   reviewer read.
+2. Regenerate the artifact when `scripts/check-artifact-provenance.sh` says one is owed: ONE full
+   bench, under the heavy lock (Hard rule 4), as the last commit on the branch.
+3. Gates: typecheck, lint, format:check, test:root and test:matching, each under the lock, then the
+   provenance check again.
+4. Push. The branch was pushed before, so a rebased push is a rewrite: republish on
+   `<branch>-v2` and open a new PR that names the old one, then close the old one (Hard rule 3).
+5. `scripts/pr-wait.sh <the PR>` until its verdict.
+
+## Gates
+Each gate's verdict line, the bench's tier lines, and the provenance verdict.
+
+## Finish
+On a green verdict, file `<board>/queue/<stamp>-<HANDLE>-merge-slot.md` with the slot body below
+verbatim, plus the new PR number and head, and any code no reviewer read. Do not merge.
+
+<the round's slot body>
+<the awaiting-base message>
 ```

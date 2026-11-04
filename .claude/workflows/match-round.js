@@ -257,7 +257,11 @@ DECLINED or NOT-REPRODUCED.${handoff('Findings', findings)}${context}`,
 phase('Ship')
 const shipped = await agent(
   `${PREAMBLE}
-You own **Phases 6 and 7** of the spec, and the end of Phase 4 that follows a rebase: audit the
+You own **Phases 6 and 7** of the spec, and the end of Phase 4 that follows a rebase. First read
+"A ship waits for the PR ahead of it" in ${PARALLEL_SPEC} and \`${board}/MERGE-QUEUE.md\`: with a PR
+ahead of yours, audit the comments, push, open or update the PR, file the \`awaiting-base\` message
+that section describes, and stop — no rebase, no regeneration, no \`pr-wait\` — with \`blocked\`
+beginning \`awaiting-base\` and naming the message. Otherwise: audit the
 comments this branch added, rebase on a freshly fetched \`origin/main\`, re-run the gates, regenerate
 the artifact if \`scripts/check-artifact-provenance.sh\` says one is owed (last commit on the branch),
 push, open the PR, and run \`scripts/pr-wait.sh\` on it. Stop at its verdict: a later agent files the
@@ -302,9 +306,11 @@ Change no file in the worktree; scratch goes outside it. Report only findings yo
       `${PREAMBLE}
 You own the **remediation** after the final breaker. Reproduce each finding below before judging it;
 fix every confirmed one as a new commit, re-run the gates the spec's Phase 3 names and the scoped
-bench on the rows it touches; then, as the ship agent did, rebase if \`origin/main\` moved, regenerate
+bench on the rows it touches; then, as the ship agent did (when its \`blocked\` below begins
+\`awaiting-base\`, push only and add the fix commits to that message's owed list), rebase if \`origin/main\` moved, regenerate
 the artifact if \`scripts/check-artifact-provenance.sh\` says one is owed, push, and re-run
-\`scripts/pr-wait.sh\` on PR ${shipped.pr}. Record every finding in the ledger.${handoff('Findings', findings)}`,
+\`scripts/pr-wait.sh\` on PR ${shipped.pr}. Record every finding in the ledger.
+The ship agent's \`blocked\`: ${shipped.blocked || 'none'}${handoff('Findings', findings)}`,
       { label: `${handle}: final remediation`, phase: 'Final review', schema: TRIAGE, agentType: 'general-purpose' },
     )
     if (!triage) return died('Final review (remediation)')
@@ -341,7 +347,10 @@ const slot = /^none\b/i.test(shipped.pr)
   ? { mergeSlot: `none — the round shipped no PR: ${shipped.pr}` }
   : await agent(
     `${PREAMBLE}
-Run \`scripts/pr-wait.sh ${shipped.pr}\`. On a green verdict, file the \`merge-slot\` message for PR
+The ship agent's \`blocked\`: ${shipped.blocked || 'none'}
+When that begins \`awaiting-base\`, file nothing: return "none — awaiting-base", the message's name,
+and the body below verbatim, which the coordinator hands to the ship continuation. Otherwise run
+\`scripts/pr-wait.sh ${shipped.pr}\`. On a green verdict, file the \`merge-slot\` message for PR
 ${shipped.pr}, as the board's README describes, with the body below verbatim, and stop; otherwise
 file nothing and return "none" and the verdict.
 

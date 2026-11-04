@@ -982,3 +982,30 @@ describe('the fourth Phase-0 case is a command a round can run', () => {
     ).toEqual(SCORING_PATHS);
   });
 });
+
+// The hand-written brief template carries the rules every agent of a parallel run is held to, and
+// the awaiting-base rule ("a second ship waits for the first merge") is stated once, in the
+// command's Phase 3. Both are references other files lean on, so a rename breaks them silently.
+describe('the agent brief template and the awaiting-base rule', () => {
+  const template = readFileSync(join(TEMPLATES_DIR, 'agent-brief.md'), 'utf8');
+  const command = readFileSync(join(COMMANDS_DIR, 'parallel-match-function.md'), 'utf8');
+  const workflow = readFileSync(join(WORKFLOWS_DIR, 'match-round.js'), 'utf8');
+  const RULE = 'A ship waits for the PR ahead of it';
+
+  it('the template has its Hard rules and the awaiting-base ship continuation form', () => {
+    expect(template).toContain('## Hard rules');
+    expect(template).toContain('## Form: awaiting-base ship continuation');
+    expect(template).toContain(RULE);
+  });
+
+  it('the rule has exactly one home, and the command, the ship prompt and the queue kinds point at it', () => {
+    expect(command.split(`### ${RULE}`).length - 1).toBe(1);
+    expect(command).toContain('- **`awaiting-base`**');
+    expect(workflow).toContain(RULE);
+    expect(workflow).toContain('MERGE-QUEUE.md');
+  });
+
+  it('the command points every round and every hand-written brief at the template', () => {
+    expect(command.split('(../templates/agent-brief.md)').length - 1).toBeGreaterThanOrEqual(3);
+  });
+});
