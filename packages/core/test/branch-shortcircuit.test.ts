@@ -806,6 +806,22 @@ describe('refusals', () => {
     expect(t.refusals()).toEqual([['shared-pure', 1]]);
   });
 
+  test('a PARAMETER plus a constant that ^g also passes on as a SUCCESSOR ARGUMENT keeps the nest', () => {
+    // `do { k(*p); } while (b-- != 0 && *++p != 0)`: the `p + 1` the load reads is the next
+    // iteration's pointer too. A block argument is a value read, the same as a latch's `i + 1`.
+    const fn = sharedBase('param+k');
+    const g = fn.blocks[1];
+    const p = g.ops.find((o) => o.opcode === 'add')!.results[0];
+    const term = g.ops[g.ops.length - 1];
+    const other = term.successors[1];
+    const carried = mkValue(T.ptr(T.u(8)));
+    other.block.params = [carried];
+    other.args = [p];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
   test('REFUSED: a DIVIDE the second test consumes twice would run above the first, by the SOUND rule', () => {
     // `if (b == 0 || (q = a / b) + q != 0)`: the named quotient is an unconditional statement
     // ahead of the `if`, so it would divide by the zero the first test guards against. The sound

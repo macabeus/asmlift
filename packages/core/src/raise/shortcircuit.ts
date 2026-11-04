@@ -1500,11 +1500,16 @@ function gConeOf(c: SharedValueSite): Op[] {
  *  gcc2.7.2 and gcc2.7.2kmc lifts to a structure decline. */
 function constOffsetCone(c: SharedValueSite): boolean {
   const isConst = (x: Value) => c.defs.get(x)?.opcode === 'const';
-  /** every ^g read of `v` is a load's address, or `v + k` read only that way */
+  /** every ^g read of `v` is a load's address, or `v + k` read only that way. A SUCCESSOR ARGUMENT
+   *  is a value read: a loop-carried `p + 1` is the next iteration's pointer, as a latch's `i + 1`
+   *  is its counter. */
   const readAsAddress = (v: Value): boolean =>
     c.g.ops.every((op) => {
-      if (!op.operands.includes(v)) {
+      if (!readsOf(op).includes(v)) {
         return true;
+      }
+      if (op.successors.some((s) => s.args.includes(v))) {
+        return false;
       }
       if (op.opcode === 'load') {
         return true; // its one operand is the address
