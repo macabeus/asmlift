@@ -696,8 +696,9 @@ describe('refusals', () => {
   /** `chain` whose second condition ORs three bytes read off ONE base — `(gS.a | gS.d | gS.c) != 0`
    *  as agbcc leaves it: the base defined once in ^g and read by all three loads. `base` picks what
    *  that shared value is: the struct's address, the address plus a constant, a READ, or a pointer
-   *  PARAMETER of the function plus a constant (`p->a | p->d | p->c` past the ldrb displacement). */
-  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k' | 'param-k' | 'param+k+i'): Fn {
+   *  PARAMETER of the function plus a constant (`p->a | p->d | p->c` past the ldrb displacement), or
+   *  a LITERAL address (`(*(struct S *)0x03005220).a`, one pool load). */
+  function sharedBase(base: 'gaddr' | 'gaddr+k' | 'load' | 'param+k' | 'param-k' | 'param+k+i' | 'literal'): Fn {
     const param = mkValue(T.ptr(T.u(8)));
     /** the variable indices `param+k+i` reads two of its members through */
     const index = [mkValue(T.s(32)), mkValue(T.s(32))];
@@ -707,9 +708,15 @@ describe('refusals', () => {
       sharedOnGTaken: true,
       gBody: (out) => {
         const sym = mkValue(T.ptr(T.u(8)));
-        const ops: Op[] = onParam ? [] : [mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } })];
+        const ops: Op[] = onParam
+          ? []
+          : [
+              base === 'literal'
+                ? mkOp('const', { results: [sym], attrs: { value: 0x03005220 } })
+                : mkOp('gaddr', { results: [sym], attrs: { sym: 'gS' } }),
+            ];
         let p = onParam ? param : sym;
-        if (base !== 'gaddr') {
+        if (base !== 'gaddr' && base !== 'literal') {
           p = mkValue(T.ptr(T.u(8)));
           const k = mkValue(T.unk(32));
           ops.push(
@@ -749,13 +756,14 @@ describe('refusals', () => {
     return fn;
   }
 
-  test.each(['gaddr', 'gaddr+k', 'param+k', 'param-k', 'param+k+i'] as const)(
+  test.each(['gaddr', 'gaddr+k', 'param+k', 'param-k', 'param+k+i', 'literal'] as const)(
     'an ADDRESS (%s) the second test reads three times is re-derived at each use, and the condition folds',
     (base) => {
       // sub_0800D188 wrote 6,338 of its 17,132 lines twice behind this one refusal (synthetic:scbase).
       // `param-k` is Thumb's `sub r0, r0, #0x35` for a negative member offset, the chain
       // ir/alias.ts `constDisplacementOf` reads; `param+k+i` reads two members through a variable
-      // index, `add(p + 4, i)`, still only as an address.
+      // index, `add(p + 4, i)`, still only as an address; `literal` is agbcc's one pool load of
+      // `0x03005220` under a `#define`d struct, a root that reads nothing just as `&gS` does.
       const fn = sharedBase(base);
       expect(recognizeBranchShortCircuit(fn)).toBe(true);
       expect(connective(fn)).toBe('logic_or');
@@ -812,6 +820,31 @@ describe('refusals', () => {
       },
     });
     fn.blocks[0].params = [i];
+    const t = tallying(SHARED_VALUE_GATES);
+    expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['shared-pure', 1]]);
+  });
+
+  test('a CONSTANT the second test reads twice as a VALUE, not an address, keeps the nest', () => {
+    // `if (a || ((x & 0xF0) | (y & 0xF0)) != 0)` with GVN's one `0xF0`: a literal is admitted as a
+    // root only where it is read as an address; a mask's spelling is unmeasured.
+    const [x, y] = [mkValue(T.s(32)), mkValue(T.s(32))];
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const [mask, mx, my, o, zero] = [0, 1, 2, 3, 4].map(() => mkValue(T.unk(32)));
+        return [
+          mkOp('const', { results: [mask], attrs: { value: 0xf0 } }),
+          mkOp('and', { operands: [x, mask], results: [mx] }),
+          mkOp('and', { operands: [y, mask], results: [my] }),
+          mkOp('or', { operands: [mx, my], results: [o] }),
+          mkOp('const', { results: [zero], attrs: { value: 0 } }),
+          mkOp('icmp_ne', { operands: [o, zero], results: [out] }),
+        ];
+      },
+    });
+    fn.blocks[0].params = [x, y];
     const t = tallying(SHARED_VALUE_GATES);
     expect(recognizeBranchShortCircuit(fn, { sharedValue: t.gates })).toBe(false);
     expect(t.refusals()).toEqual([['shared-pure', 1]]);

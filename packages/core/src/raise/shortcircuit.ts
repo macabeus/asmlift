@@ -1486,8 +1486,8 @@ function gConeOf(c: SharedValueSite): Op[] {
   return [...out];
 }
 
-/** Is `v` constant offsets over a symbol or frame address, or over a value ^g did not compute that
- *  ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p - 0x35` off a pointer parameter — and
+/** Is `v` constant offsets over a symbol or frame address, or over a literal address or a value ^g
+ *  did not compute that ^g reads only as a memory ADDRESS — `&gS + 0x35`, `p - 0x35` off a pointer parameter — and
  *  nothing else? The chain is ir/alias.ts `constDisplacementOf`, the one reading of address
  *  arithmetic, so Thumb's `sub r0, r0, #0x35` for a negative member offset ends where `add` does.
  *  Asked over the WHOLE function's defs, not ^g's: agbcc's `add r0, r2, #0x35` off an `&gS` an
@@ -1503,11 +1503,21 @@ function gConeOf(c: SharedValueSite): Op[] {
 function constOffsetCone(c: SharedValueSite): boolean {
   const disp = constDisplacementOf(c.defs, c.value);
   const root = disp?.root ?? c.value;
-  const leaf = c.defs.get(root)?.opcode;
-  if (leaf === 'gaddr' || leaf === 'laddr') {
+  const leaf = c.defs.get(root);
+  if (leaf?.opcode === 'gaddr' || leaf?.opcode === 'laddr') {
     return true;
   }
-  return disp !== null && !c.defOf.has(root) && readAsAddress(c.g, c.value);
+  return (readsNothing(leaf) || (disp !== null && !c.defOf.has(root))) && readAsAddress(c.g, c.value);
+}
+
+/** Is `leaf` an operand-free op that reads nothing and cannot trap — a value spelled the same at
+ *  any program point? The property the root argument above rests on, asked of the op rather than
+ *  of a list of opcodes: agbcc's `ldr r0, =0x03005220` under `#define gL (*(struct S *)0x03005220)`
+ *  is a `const` the second test reads three members off, exactly as it reads them off `&gS`. Unlike
+ *  a symbol it is admitted only where read as an address (`readAsAddress`): a mask or a compare
+ *  constant read twice is not a base, and its spelling is unmeasured. */
+function readsNothing(leaf: Op | undefined): boolean {
+  return leaf !== undefined && leaf.operands.length === 0 && !reevalUnsafe(leaf);
 }
 
 /** Does every read ^g makes of `v` end in a memory access's ADDRESS: the base of a load or store,
@@ -1546,8 +1556,8 @@ function readAsAddress(g: Block, v: Value): boolean {
 // What the table ADMITS is a shared ADDRESS: agbcc loads `&gS` into one register and reads three
 // members off it (`(gS.a | gS.d | gS.c) != 0`), so the address is the one value with three readers.
 // Refused, the `||` splits into a nest and the structurer copies the shared arm AND everything after
-// it into both branches — kleod's `sub_0800D188` writes 6,338 of its 17,132 lines twice from one such
-// site, and refuses here at 33 heads. The base may as well be a pointer parameter (`p->a | p->d`),
+// it into both branches, once per such site (kleod's `sub_0800D188`, whose `&gUnk_03005220 + 0x35`
+// is the shape synthetic:scbase_far pins). The base may as well be a pointer parameter (`p->a | p->d`),
 // or anything computed before ^g: a constant-offset cone over it reads nothing and cannot trap, so
 // hoisting it changes no behaviour.
 //
