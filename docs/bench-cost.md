@@ -3525,3 +3525,22 @@ workers held ~7.6 GB, so the budget held. A `bench fan` is budgeted as one shard
 `bench fidelity` script, because the asmlift script re-ranks its row. On 2026-10-20, run with
 `--only AthleticChallengeScrollUpdate --jobs 1`, that script peaked at 1.53 GB (24 s) and then
 exited 127 in this host's shell after building its target. That figure is a floor, not a peak.
+
+### One row against node's heap: `scripts/heap-check.sh`
+
+The admission check prices a shard at `SHARD_BYTES`; it does not see one row outgrow the V8 heap
+its shard runs on. On **2026-11-02** a structure variation crossed into the table raised
+`kleod:sub_0803F68C:agbcc`'s enumeration peak from 2.11 GB to 2.44 GB
+(`/usr/bin/time -v pnpm bench fan kleod:sub_0803F68C:agbcc --enumerate`, maximum resident set, same
+tree with and without the table entry), with no ON setting structured and the fan count unchanged.
+Its shard died with `JavaScript heap out of memory` in two full real-tier runs, the row reported as
+"neither measured nor skipped", and `--resume` died the same way, while `--tier real --only` passed:
+a scoped rerun hides it.
+
+So `scripts/lane-setup.sh` records the lane's budget in its `.envrc.local`
+(`ASMLIFT_LANE_HEAP_LIMIT_BYTES`, node's `heap_size_limit` in the lane's environment;
+`ASMLIFT_LANE_MEM_TOTAL_BYTES`, the host's RAM), and `sh scripts/heap-check.sh <time -v log>`
+compares a measured peak with it: `OK`, `NEAR` from 90%, `OVER` (exit 1) at the limit. A round that
+adds a variation, or widens what one crosses, runs the command above on the real row nearest the
+limit, on its branch and on `origin/main`, and reports an `OVER` before its full bench. It is
+report-only: nothing refuses a job on it.

@@ -66,6 +66,7 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const COMMANDS_DIR = join(ROOT, '.claude', 'commands');
 const WORKFLOWS_DIR = join(ROOT, '.claude', 'workflows');
+const TEMPLATES_DIR = join(ROOT, '.claude', 'templates');
 const DOCS_DIR = join(ROOT, 'docs');
 const BENCH_COST_DOC = join(DOCS_DIR, 'bench-cost.md');
 const DISCIPLINE_DOC = join(DOCS_DIR, 'measurement-discipline.md');
@@ -668,12 +669,12 @@ describe('docs/bench-cost.md', () => {
 });
 
 /** Everything under `.claude/` an agent or a brief author reads: the four command files, the
- *  workflow brief generator and its ledger. Deliberately NOT a walk of all of `.claude/` — that
+ *  workflow brief generator and its ledger, and the hand-written brief template. Deliberately NOT a walk of all of `.claude/` — that
  *  includes the gitignored `.claude/worktrees/`, which would make a committed gate's verdict depend
  *  on untracked local content and let CI and a developer machine disagree. */
 function claudeFiles(): string[] {
   const out: string[] = [];
-  for (const dir of [COMMANDS_DIR, WORKFLOWS_DIR]) {
+  for (const dir of [COMMANDS_DIR, WORKFLOWS_DIR, TEMPLATES_DIR]) {
     if (!existsSync(dir)) {
       continue;
     }
@@ -979,5 +980,32 @@ describe('the fourth Phase-0 case is a command a round can run', () => {
       'the `sed`/`grep` derivation docs/baseline-freshness.md §3 hands a round no longer yields SCORING_PATHS. ' +
         'Fix the doc rather than let it print a pathspec that matches nothing — in zsh that reads as "go ahead".',
     ).toEqual(SCORING_PATHS);
+  });
+});
+
+// The hand-written brief template carries the rules every agent of a parallel run is held to, and
+// the awaiting-base rule ("a second ship waits for the first merge") is stated once, in the
+// command's Phase 3. Both are references other files lean on, so a rename breaks them silently.
+describe('the agent brief template and the awaiting-base rule', () => {
+  const template = readFileSync(join(TEMPLATES_DIR, 'agent-brief.md'), 'utf8');
+  const command = readFileSync(join(COMMANDS_DIR, 'parallel-match-function.md'), 'utf8');
+  const workflow = readFileSync(join(WORKFLOWS_DIR, 'match-round.js'), 'utf8');
+  const RULE = 'A ship waits for the PR ahead of it';
+
+  it('the template has its Hard rules and the awaiting-base ship continuation form', () => {
+    expect(template).toContain('## Hard rules');
+    expect(template).toContain('## Form: awaiting-base ship continuation');
+    expect(template).toContain(RULE);
+  });
+
+  it('the rule has exactly one home, and the command, the ship prompt and the queue kinds point at it', () => {
+    expect(command.split(`### ${RULE}`).length - 1).toBe(1);
+    expect(command).toContain('- **`awaiting-base`**');
+    expect(workflow).toContain(RULE);
+    expect(workflow).toContain('MERGE-QUEUE.md');
+  });
+
+  it('the command points every round and every hand-written brief at the template', () => {
+    expect(command.split('(../templates/agent-brief.md)').length - 1).toBeGreaterThanOrEqual(3);
   });
 });

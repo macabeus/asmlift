@@ -136,7 +136,8 @@ every other open PR — so depth in the merge queue costs more than depth in the
   however many are idle. A PR held in `MERGE-QUEUE.md` on a runnable release condition waits on
   that condition, not on the queue, and counting it idles a lane for as long as the hold lasts —
   the 2026-09-23 run held one for a harness fix. A held PR is still an open branch for every
-  Phase 3 consistency read.
+  Phase 3 consistency read. An `AWAITING-BASE` PR (Phase 3, **A ship waits for the PR ahead of
+  it**) is not held: it counts.
 - **Never exceed two running rounds** on this 10-core machine. The 2026-09-23 run ran three, and
   the bench register serialises full benches only: the other heavy jobs three rounds run — ranked
   runs, `bench fan`, gate suites — starved Docker under the benches, and a starved bench is not a
@@ -199,7 +200,7 @@ edit it here, never in the script. Each round is held to:
   freshly fetched `origin/main`;
 - read [`/match-function`](./match-function.md) **from that worktree, by absolute path** — the rule
   and the incident behind it are `docs/measurement-discipline.md` §0 — and follow it without
-  exception, save for the one override below;
+  exception, save for the overrides below;
 - read `<board>/README.md` first and `<board>/INDEX.md` at the start of every phase;
 - **not merge its own PR.** This overrides `docs/measurement-discipline.md` §8 for the duration of
   this command, and it is the single most important line in the brief: that table's "green and
@@ -207,22 +208,27 @@ edit it here, never in the script. Each round is held to:
   round that merges itself bypasses the whole of Phase 3 on a base that may already have moved.
   `match-round`'s preamble says it in so many words, and must keep saying it — every agent reads
   the table, and the table says merge.
-- **resolve an artifact conflict by regenerating, never by editing.**
-  `apps/benchmark/results/results.json` is a tracked multi-megabyte JSON file and the repo has no
-  `.gitattributes`, so git will line-merge it and a hand-merged artifact publishes per-row numbers
-  no run ever produced — passing `bench regression`, `bench diff` and the provenance check, all of
-  which are blind to it. The only legal resolution is to take one side whole and re-run the bench.
-- **never pass `--no-lock` for the duration of this command.** It is a sanctioned door and this is
-  the one configuration it was not designed for.
+- follow every rule under **Hard rules** in
+  [`.claude/templates/agent-brief.md`](../templates/agent-brief.md), read from that worktree. That
+  section is the one copy of the rules every agent of this run is held to, round or not. Two of
+  them override [`/match-function`](./match-function.md): rule 10 overrides
+  `docs/measurement-discipline.md` §8's merge, as above, and rule 11 overrides Phase 7's memory
+  update, since concurrent rounds would race on the same files there — the write-back goes to the
+  board as `facts/`, `traps/` and `rounds/` posts, and Phase 4 below promotes it per merge.
+- **ship behind a PR ahead of it** as Phase 3's **A ship waits for the PR ahead of it** says:
+  read `<board>/MERGE-QUEUE.md` before rebasing, and with a PR ahead, push, file `awaiting-base`
+  and return instead of regenerating;
 - expect other branches to be open, expect conflicts, and **never degrade the code to dodge one**;
-- never `git stash` — the stack is shared with every other worktree and with the user's checkout,
-  so a bare `stash`/`pop` can take another agent's work. Use a WIP commit.
-- **not write the memory directory.** [`/match-function`](./match-function.md) Phase 7 asks for a
-  memory update, and concurrent rounds would race on the same files there; the write-back goes to
-  the board as `facts/`, `traps/` and `rounds/` posts, and Phase 4 below promotes it per merge.
 - treat its own brief as a hypothesis, and **report a refuted brief as soon as it is refuted**,
   rather than at the end. Every round in both recorded runs refuted its brief. A lane held by a
   round whose premise is already dead is the cheapest thing this command can free.
+
+**Every agent you brief by hand is briefed from the template.** A merge agent (Phase 3), a fix
+agent, a ship continuation, a lane that is not a round: copy the block in
+[`.claude/templates/agent-brief.md`](../templates/agent-brief.md) whole, from a worktree on
+`origin/main`, into the brief file, and fill its fields. Never write a brief freehand, and never
+trim its **Hard rules**: on 2026-11-01 a freehand fix-agent brief left the quoted-heredoc rule out,
+and its agent ran a bench in the frozen main checkout.
 
 Give each round a short stable handle (`CRC`, `SIO`, `LLFROM`) and use it as the author on every
 post and every message. **Pass the absolute board path in `args`** — never the literal string
@@ -267,8 +273,9 @@ failed pass**; re-run the pass immediately rather than noting it.
 Only two events in this system are observable to you, so only two trigger a pass, and the brief
 above is written to make them the same event:
 
-1. **A round returns.** Because a round files its `merge-slot` and *then* returns, a returning
-   round is both "a lane freed" and "a message was filed". This is why the brief forbids a round
+1. **A round returns.** Because a round files its `merge-slot` (or, behind a PR ahead of it, its
+   `awaiting-base` message, Phase 3) and *then* returns, a returning round is both "a lane freed"
+   and "a message was filed". This is why the brief forbids a round
    from blocking on its merge. **Read the round's whole return** — `diagnosis`, `build`, `ledger`,
    `shipped`, `finalReview`, `slot` — not only the slot it filed: the slot is the round's summary of
    itself, and what a summary leaves out cannot be seen from the summary.
@@ -287,8 +294,9 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
    messages and then acts on four has no way to know which two it dropped.
 2. **Advance the merge queue** (Phase 3).
 3. **Fill a lane**, if the open-PR rule allows one. **Fix lanes for open PRs always go first**:
-   while any fix lane is waiting — for a held PR (Phase 3), or for a PR whose branch went back to a
-   lane — every lane that frees goes to it, oldest waiting fix first, and no pending target opens.
+   while any fix lane is waiting — for a held PR (Phase 3), for a PR whose branch went back to a
+   lane, or an awaiting-base ship continuation whose PR ahead has landed — every lane that frees
+   goes to it, oldest waiting fix first, and no pending target opens.
    Only when no fix is waiting, choose from the pending list on two counts: least
    expected file-surface overlap with what the running rounds have claimed, and least likely to
    want the bench at the same moment. If every pending target collides badly, **hold** — write the
@@ -331,6 +339,38 @@ open with nobody sequencing them. One row per open PR: number, branch, position,
 condition that releases it, written as something a reader can run.** "Waiting on the 64-bit PR" is
 a note; "release when `git grep <symbol> packages/core/src` hits on `main`" is a condition the
 blocked round can check without asking, and that you cannot forget the meaning of.
+
+### A ship waits for the PR ahead of it
+
+This is the one statement of the rule; everything else that mentions it links here.
+
+A PR is **ahead** of a lane when its row in `MERGE-QUEUE.md` is not the lane's own and its `state`
+does not begin with `MERGED`, `CLOSED`, `HELD` or `AWAITING-BASE`. You write a PR's row when its
+`merge-slot` is filed (or, under this rule, its `awaiting-base` message), so a PR ahead filed its
+slot first and is still on its way to `main`.
+
+**A ship agent reads `<board>/MERGE-QUEUE.md` before it rebases.** When no PR is ahead it ships as
+[`/match-function`](./match-function.md) says. When one is, its merge will move `main` under this
+branch, and an artifact regenerated now owes a second regeneration then
+(`scripts/check-artifact-provenance.sh` verdict 3). In the 2026-10-30 run about 11 ship benches over
+9 ships were spent that way, and three PRs were republished by fix agents. So it does **not**
+rebase or regenerate. It pushes its code with the gates it has already passed, opens or updates its
+PR, files `queue/<stamp>-<HANDLE>-awaiting-base.md`, and returns. The message carries: the PR, the
+head sha, one `ahead: #<pr>` line per PR ahead, each gate already green with its verdict line, and
+what is owed (rebase onto the new `main`, regenerate, the gates again). The round files no
+`merge-slot`; its `slot` result carries the slot body for the continuation. You add the PR's row
+with `state` `AWAITING-BASE`.
+
+**A HELD PR is never ahead.** It waits on a release condition or on a user decision (a
+measurement-first lane), which can take arbitrarily long, and a lane waiting on it idles for as long.
+The PR behind it ships now, and the held PR rebases onto it when it is released.
+
+**You answer the message once every PR it names as ahead is `MERGED`, `CLOSED` or `HELD`**, and the
+only answer is to launch ONE ship continuation, briefed from the *awaiting-base ship continuation*
+form of [`.claude/templates/agent-brief.md`](../templates/agent-brief.md), with the round's slot
+body in it. The reply file names that agent and is written when it is launched, not before, so
+`bin/pass-check.sh` keeps the message unhandled until then. A continuation takes the next free lane
+ahead of every pending target, as a fix lane does, and counts as a running round.
 
 ### A slot that carries a silent wrong is held, and its fix becomes a lane
 
@@ -376,18 +416,20 @@ the order it was held.
 A silent wrong the PR's own commits introduce is not this case: that round's work is not finished,
 and its branch goes back to a lane of its own instead of to a fix lane.
 
-**Delegate each merge to a fresh subagent.** Give it the PR number, `MERGE-QUEUE.md`, and the list
-of other open branches; it returns a verdict and merges on green. This is not ceremony: the agent
-that feels an idle lane is the wrong agent to decide whether the expensive consistency read can be
-skipped, and this repo already separates implementer from reviewer for the same reason. It also
-keeps the read out of your context, which is the measured bottleneck.
+**Delegate each merge to a fresh subagent**, briefed from the template (Phase 1). Give it the PR
+number, `MERGE-QUEUE.md`, and the list of other open branches; it returns a verdict and merges on
+green. This is not ceremony: the agent that feels an idle lane is the wrong agent to decide whether
+the expensive consistency read can be skipped, and this repo already separates implementer from
+reviewer for the same reason. It also keeps the read out of your context, which is the measured
+bottleneck.
 
 The merge, in order:
 
 1. **Rebase, re-gate, regenerate, push.** Not "CI was green when it ran" — if `main` has moved
    under this branch at all, the order [`/match-function`](./match-function.md) fixes applies again,
    and `scripts/check-artifact-provenance.sh` is what says whether the artifact is owed. Read that
-   script's verdict; do not predict it.
+   script's verdict; do not predict it. A rebased branch that was already pushed is republished on
+   a new branch with a new PR, never force-pushed (the template's Hard rule 3).
 
    **Code the merge agent changes gets a breaker before it merges.** A conflict resolved by editing
    code, a gate fixed, a hunk re-spelled against the new `main`: run one Phase 5 Agent A (the
@@ -534,7 +576,7 @@ reads. `bin/pass-check.sh` counts the index against the posts for exactly this r
 
 What is left of a request channel after every kind with a working fallback was removed. A message
 is `queue/<stamp>-<AUTHOR>-<kind>.md`; its reply is **`queue/<same stem>.reply.md`**, which is what
-makes "unhandled" mechanical rather than remembered. Three kinds:
+makes "unhandled" mechanical rather than remembered. Four kinds:
 
 - **`merge-slot`** — "my PR is ready, here is its number." A round files this and returns; it never
   merges itself. The slot also lists, each written out and "none" when empty: every
@@ -542,6 +584,10 @@ makes "unhandled" mechanical rather than remembered. Three kinds:
   `bench diff` shows leaving `declined` for `nonmatch`/`noncompile`/`failed`, and every confirmed
   finding of severity `silent-wrong`; and any code no reviewer read. A slot that says only "ready"
   hands the merge agent a PR whose open defects it has to rediscover.
+- **`awaiting-base`** — "my PR is pushed and gated, and a PR ahead of it will move `main` under it."
+  Filed by a ship agent instead of rebasing; answered only by launching its ship continuation. The
+  rule, what the message carries, and when it is answered: Phase 3, **A ship waits for the PR ahead
+  of it**.
 - **`blocked-external`** — "something outside my worktree is wrong and I cannot fix it from here."
   Rare, and worth the whole channel: the recorded instances are a duplicate agent launched into a
   live worktree, and a landed correction that a later rebase had silently reverted.
@@ -570,8 +616,25 @@ Plain shell over the board directory, and it must:
   `INDEX.md`, and report a mismatch as a failure. A lost index line is a silently unpublished post.
 - **report `--stats`** — messages filed, messages answered, and the longest gap between a message's
   stamp and its reply's.
+- **report orphan processes** — run `scripts/orphan-check.sh` as `origin/main` has it, so a main
+  checkout behind `main` still runs the current check, without writing anything there:
+  `git -C <main checkout> show origin/main:scripts/orphan-check.sh | sh -s -- --repo <main checkout> --root <board>`,
+  behind a `git cat-file -e` of the same blob that prints `orphan-check: CANNOT CHECK` when it is
+  missing: an empty script piped to `sh` exits 0 and reads as a clean host. It lists every process
+  older than 24 h whose cwd or open files are under the checkout, a worktree, a removed lane's
+  path, this project's Claude Code scratchpads or the board, and kills nothing. Print its output
+  whole. Its findings are a **warning, not a failure**: the check cannot tell an orphan from the
+  user's own terminal or session in the checkout, which it lists the same way (with its tty), and
+  a failure only the user can clear would fail every pass after it, with no move left to the
+  coordinator, who never kills a process. So the pass report quotes every `ORPHAN` line, and any
+  `CANNOT CHECK` line, to the user, who decides.
+- **hold an `awaiting-base` message against its PRs ahead.** `--list` lists it while it has no
+  reply, like any message. The default run counts it as a failure only once every `ahead: #<pr>`
+  line it carries names a `MERGE-QUEUE.md` row whose `state` begins `MERGED`, `CLOSED` or `HELD`,
+  or names no row at all; until then it prints `pass-check: AWAITING-BASE <message> (#<pr> ahead)`
+  and passes, because no move of the coordinator's can answer it yet.
 - **exit non-zero while anything is unanswered or the index does not reconcile**, and exit 0
-  otherwise.
+  otherwise. Orphans and an orphan check that cannot run do not change the exit status.
 
 Quote every path expansion. An unquoted variable that expands to nothing is the exact shape of the
 false negative this script exists to prevent.

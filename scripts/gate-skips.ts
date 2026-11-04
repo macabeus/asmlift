@@ -131,4 +131,13 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
       'reads the image of a compile with no pool container off the tag alone, and the runtime that executes it',
     ].map((t) => `${GCC272_IN_CONTAINER} > ${t}`),
   },
+  {
+    file: 'apps/benchmark/test/orphan-check.test.ts',
+    when: 'the host is not Linux (the live cases read /proc, and a removed cwd reads `(deleted)` only there)',
+    holds: () => platform() !== 'linux',
+    tests: [
+      'orphan-check on this host > finds a live child by its cwd, a removed cwd included, and leaves it running',
+      'orphan-check on this host > does not report its own caller chain',
+    ],
+  },
 ];
