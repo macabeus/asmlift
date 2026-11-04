@@ -22,10 +22,17 @@ import { frontendFor } from '../src/frontend/registry';
 import type { Value } from '../src/ir/core';
 import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { type Gate, without } from '../src/l3/gates';
-import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile as decompileJoined, raiseRecovered } from '../src/pipeline';
 import { mergeShapes } from '../src/raise/narrowlocal';
 import { FALL_IN_GATES, type FallInCandidate, SELECT_GATES, sinkReturns } from '../src/raise/retsink';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
 
 /** A two-condition chain converging on a shared `return 0` arm, with a store between the
  *  conditions so the two are not fused into one `logic_and`. `.Lend` also keeps a `cond_br`
@@ -110,7 +117,7 @@ test('a chain of two conditions converging on one early exit is still sunk', () 
   expect(out).not.toMatch(/return v\d+;/); // no merge variable
 });
 
-test('the same shape with a VOID exit keeps its one exit too', () => {
+testCopies('the same shape with a VOID exit keeps its one exit too', () => {
   // `synthetic:sw_fallmem:agbcc`. Keeping this merge leaves the switch two default candidates —
   // the bare `b .L3` leaf and `.L3` itself — which is what `resolveDefault` (switch-recover.ts)
   // joins back into one.
@@ -119,7 +126,7 @@ test('the same shape with a VOID exit keeps its one exit too', () => {
   expect(out.match(/return;/g)).toHaveLength(1);
 });
 
-test('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
+testCopies('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
   // `.L6` (case 1's body) has two predecessors — the dispatch's `beq .L6` and `.L5` running on —
   // which counting PREDECESSORS reads as the shared early exit of a chain. It is not: only ONE of
   // the two is a condition. Sinking here duplicates the switch's single `return r;` into five
@@ -145,7 +152,7 @@ const TWO_ARMS =
   '.L6:\n\tmov\tr0, #0x0\n' +
   '.L5:\n\tbx\tlr\n';
 
-test('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
+testCopies('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
   // The discriminator is what a predecessor IS, not what it computed. Reading "computed something
   // and ran on" as the fall-in signal refuses this — the pass's own reason to exist — and halves
   // its reach over the real corpus.
@@ -170,7 +177,7 @@ const SWITCH_EMPTY_ARM =
   '.L6:\n\tadd\tr1, r1, #0x1\n' +
   '.L3:\n\tadd\tr0, r1, #0x0\n\tbx\tlr\n';
 
-test('an EMPTY fall-through arm is still an arm, and the shared return still survives', () => {
+testCopies('an EMPTY fall-through arm is still an arm, and the shared return still survives', () => {
   // `.L5` binds the accumulator and hands it on; only its BODY is empty. Counting a one-op
   // predecessor as an arrival duplicates the shared `return r;` again — the same defect, on the
   // shape a proxy for "computes nothing" cannot see (`ir/core.ts isBodyless` is the parameter-aware

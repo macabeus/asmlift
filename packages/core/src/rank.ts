@@ -105,7 +105,6 @@ import {
   FOR_BOUND_GATES,
   StructureError,
   hasDivergentSharedRet,
-  hasJoinPastReturns,
 } from './structure/structure';
 import {
   type SymbolInfo,
@@ -570,6 +569,7 @@ export function enumerateCandidates(
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     spellSwitchBreak: backend.spellsSwitchBreak,
+    spellEarlyReturns: backend.spellsEarlyReturn,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
   };
@@ -2278,14 +2278,21 @@ export function enumerateCandidates(
           reportThrow(settingVariations, e);
           continue;
         }
-        // THE JOIN PAST EARLY RETURNS, `/ret-join`: the same raised fn, structured again with
-        // `joinPastReturns`, in its own pass between the follow and the sink, on the fn as raised. A
-        // chain of `if`s each holding an early `return;` has no CFG join (`synthetic:retchain`), and
-        // where the early returns cross-jump into one return tail the follow lands on that tail
-        // (`synthetic:retchain_xj`); both copy the code below every such `if` into its arms, and a
-        // switch with a `case` that returns early likewise. Gated on `hasJoinPastReturns`, so a
-        // function with no such branch pays no candidate. Not the
-        // default, so a row whose copies are the bytes keeps them where they score.
+        // THE RETURN-TAIL COPIES, `/ret-copy`: the same raised fn, structured again with
+        // `copyReturnTails`, in its own pass between the follow and the sink, on the fn as raised.
+        // The default reads the join past early returns: a chain of `if`s each holding an early
+        // `return;` has no CFG join (`synthetic:retchain`), and where the early returns cross-jump
+        // into one return tail the follow lands on that tail (`synthetic:retchain_xj`); without the
+        // join both copy the code below every such `if` into its arms, and a switch with a `case`
+        // that returns early likewise. The copies are kept as a candidate because some rows' bytes
+        // are them (`ac-decomp:mMck_strlen:mwcc_242_81`, `synthetic:sw_fall:ido7.1`). Structured
+        // only for a setting whose default-pass structuring took the join somewhere
+        // (`onJoinPastReturns`): under any other the copies ARE the default tree, so a function
+        // with no such branch pays no candidate.
+        //
+        // The shared-tail passes below structure with the copies too: their follow and sink were
+        // ranked against the copies, their winners hold those trees, and crossing them with the join
+        // is a reading nothing has measured.
         //
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
         // in two passes after the default one.
@@ -2329,13 +2336,16 @@ export function enumerateCandidates(
         // `droppedDefault` is the DEFAULT pass's drops. Each shared-tail pass reads it and keeps its
         // own drops in a copy, so one pass's structuring failure never removes the other's candidate.
         const droppedDefault = new Set<string>();
+        // The DEFAULT pass's settings whose structuring took the join past early returns: the only
+        // ones the `/ret-copy` pass structures.
+        const joinedDefault = new Set<string>();
         // What `assertDefaultAccepts` learned about this fn, shared by every setting structured from it.
         let acceptsMemo = new DefaultAcceptsMemo(fn);
-        for (const pass of ['default', 'follow', 'join', 'sink'] as const) {
+        for (const pass of ['default', 'follow', 'copies', 'sink'] as const) {
           if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
             continue;
           }
-          if (pass === 'join' && !hasJoinPastReturns(fn)) {
+          if (pass === 'copies' && joinedDefault.size === 0) {
             continue;
           }
           if (pass === 'sink') {
@@ -2361,8 +2371,8 @@ export function enumerateCandidates(
           const liftVariations: readonly Variation[] =
             pass === 'follow'
               ? [...liftSetting.variations, 'shared-ret']
-              : pass === 'join'
-                ? [...liftSetting.variations, 'ret-join']
+              : pass === 'copies'
+                ? [...liftSetting.variations, 'ret-copy']
                 : pass === 'sink'
                   ? [...liftSetting.variations, 'shared-tail']
                   : liftSetting.variations;
@@ -2391,6 +2401,9 @@ export function enumerateCandidates(
             if (alternative && droppedDefault.has(key)) {
               continue;
             }
+            if (pass === 'copies' && !joinedDefault.has(key)) {
+              continue;
+            }
             // THE OFF-SIBLING WITNESS (`StructureVariation.offWitness`): a setting whose variation's
             // OFF sibling structured without firing the witness would rebuild that sibling's tree, so
             // it is skipped and reported as the tree dedup it is. A sibling not structured in this
@@ -2399,16 +2412,22 @@ export function enumerateCandidates(
             // A setting skipped HERE builds its sibling's structuring, so it fires the hooks the
             // sibling fired, and it is recorded with the sibling's set. Without that the gate does
             // not compose: a setting carrying two witnessed variations (`tail-copies/for-continue`)
-            // finds each sibling unrecorded and is structured however inert both are.
+            // finds each sibling unrecorded and is structured however inert both are. The default
+            // pass records the sibling's join past early returns for it too, so the `/ret-copy`
+            // pass asks the setting what it would have asked the sibling.
             const sameAs = STRUCTURE_VARIATIONS.flatMap((variation) => {
               if (variation.offWitness === undefined || !s[variation.flag]) {
                 return [];
               }
-              const seen = witnessed.get(s.variations.filter((v) => v !== variation.name).join('/'));
-              return seen !== undefined && !seen.has(variation.offWitness) ? [seen] : [];
+              const sibling = s.variations.filter((v) => v !== variation.name).join('/');
+              const seen = witnessed.get(sibling);
+              return seen !== undefined && !seen.has(variation.offWitness) ? [{ seen, sibling }] : [];
             });
             if (sameAs.length > 0) {
-              witnessed.set(key, sameAs[0]);
+              witnessed.set(key, sameAs[0].seen);
+              if (pass === 'default' && joinedDefault.has(sameAs[0].sibling)) {
+                joinedDefault.add(key);
+              }
               opts.onTreeDeduped?.();
               continue;
             }
@@ -2457,7 +2476,11 @@ export function enumerateCandidates(
                 (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
                 {},
               ),
-              ...(pass === 'join' ? { joinPastReturns: true } : alternative ? { followEarlyReturns: true } : {}),
+              ...(pass === 'copies'
+                ? { copyReturnTails: true }
+                : alternative
+                  ? { followEarlyReturns: true, copyReturnTails: true }
+                  : {}),
             };
             try {
               sfn = structureChecked(
@@ -2475,21 +2498,8 @@ export function enumerateCandidates(
                 acceptsMemo,
               );
               witnessed.set(key, fired);
-              // THE `/ret-join` PASS'S STOP: `hasJoinPastReturns` is a superset (it asks no region's
-              // `stop` and no switch arm's own join), and where the reading changed nothing in the
-              // first setting it structured, that tree is the default pass's and so is every other
-              // setting's, which the tree dedup below would drop one by one after paying for each.
-              if (pass === 'join' && !joinRead) {
-                break;
-              }
-              // A SHARED-TAIL PASS'S SETTING PAST THE COPY BUDGET is dropped, not published as the
-              // budget rerun's tree: that tree crosses the follow or the sink with the join past
-              // early returns, a reading no setting under the budget is given, and the `/ret-join`
-              // pass holds the join's own tree for the setting. The crossing would more than double
-              // an over-budget fan (a 12-link kmc chain: 10,824 candidates, 6,456 crossed).
-              if (alternative && pass !== 'join' && joinRead) {
-                dropped.add(key);
-                continue;
+              if (pass === 'default' && joinRead) {
+                joinedDefault.add(key);
               }
             } catch (e) {
               if (e instanceof DefaultAcceptsMemoMisuse) {
@@ -2664,13 +2674,9 @@ export function enumerateCandidates(
                 }
                 continue;
               }
-              // a tree the copy budget's rerun gave the join past early returns is that reading's (only
-              // the default pass gets here with one: the shared-tail passes drop theirs above)
-              const rerunRead: readonly Variation[] = joinRead && pass === 'default' ? ['ret-join'] : [];
               const variations: readonly Variation[] = [
                 cand.variation,
                 ...liftVariations,
-                ...rerunRead,
                 ...s.variations,
                 ...sp.variations,
                 ...symbolSetting.variations,

@@ -345,6 +345,7 @@ function traceTower(
     ...structureOptionsFor(target, returnsVoid, prototypes),
     spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
     spellSwitchBreak: (opts.backend ?? cBackend).spellsSwitchBreak,
+    spellEarlyReturns: (opts.backend ?? cBackend).spellsEarlyReturn,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),

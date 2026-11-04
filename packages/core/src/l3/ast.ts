@@ -611,6 +611,12 @@ export interface LanguageBackend {
    *  spells without one, by copying the code the arm meets at into each path, which Pascal prints.
    *  The structurer reads it through `StructureOptions.spellSwitchBreak`. */
   readonly spellsSwitchBreak: boolean;
+  /** Can this language spell a `return` before the end of the function? C and C++ can; Pascal
+   *  cannot, and its backend loud-fails one. Asked for the same reason again: the join past early
+   *  returns ends each arm that leaves early in a `return`, and the same branch also spells by
+   *  copying the code below it into each arm (the return-tail copies), which Pascal prints. The
+   *  structurer reads it through `StructureOptions.spellEarlyReturns`. */
+  readonly spellsEarlyReturn: boolean;
   emit(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm

@@ -109,6 +109,9 @@ export interface DecompileOptions {
   calleeBodies?: CalleeBodies;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
+  /** structure with the return-tail copies (`StructureOptions.copyReturnTails`, rank.ts's
+   *  `/ret-copy`) instead of the default join past early returns. Absent ⇒ the join. */
+  copyReturnTails?: boolean;
 }
 
 export interface DecompileResult {
@@ -269,6 +272,8 @@ function runTower(
     // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     spellSwitchBreak: backend.spellsSwitchBreak,
+    spellEarlyReturns: backend.spellsEarlyReturn,
+    ...(opts.copyReturnTails ? { copyReturnTails: true } : {}),
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),

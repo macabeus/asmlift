@@ -30,10 +30,17 @@ vi.mock('../src/pipeline', async (importOriginal) => {
       const fn = args[0];
       const opts = args[1] ?? {};
       const text = print(fn);
-      if (!opts.followEarlyReturns) {
+      // the `/ret-copy` pass structures the default's fn with the copies and no follow: neither twin
+      const pass = opts.followEarlyReturns
+        ? defaultFns.has(text)
+          ? 'sharedRet'
+          : 'sharedTail'
+        : opts.copyReturnTails
+          ? 'copies'
+          : 'default';
+      if (pass === 'default') {
         defaultFns.add(text);
       }
-      const pass = !opts.followEarlyReturns ? 'default' : defaultFns.has(text) ? 'sharedRet' : 'sharedTail';
       if (
         opts.anchorConstCopies &&
         ((pass === 'default' && fail.default) || (pass === 'sharedRet' && fail.sharedRet))
@@ -53,12 +60,9 @@ const THUMB =
   'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
   '\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n.L6:\n\tstr\tr3, [r2, #4]\n' +
   '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
-// `shared-tail.test.ts`'s arm the compiler left returning, where only the follow runs.
-const THUMB_LEFT =
-  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
-  '\tmov\tr3, #7\n\tstr\tr3, [r2, #4]\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
-  '\tstr\tr3, [r2, #4]\n.L6:\n\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
-// `shared-tail.test.ts`'s `THUMB_FLAT`, where both twins run.
+// `shared-tail.test.ts`'s `THUMB_FLAT`, where both twins run. (Its `THUMB_LEFT`, where only the
+// follow runs, writes the follow's tree as the default's join past early returns, so the
+// `/shared-ret` twin there is a duplicate of a default candidate and nothing of its own is left.)
 const THUMB_FLAT =
   'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
   '\tcmp\tr0, #5\n\tbeq\t.L7\n\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
@@ -78,7 +82,7 @@ const run = (asm: string, failing: typeof fail) => {
 
 test.each([
   ['/shared-tail', THUMB],
-  ['/shared-ret', THUMB_LEFT],
+  ['/shared-ret', THUMB_FLAT],
 ])('the %s alternative skips every setting its default sibling dropped, and keeps the rest', (suffix, asm) => {
   const { errors, cands } = run(asm, { default: true, sharedRet: false });
   expect(

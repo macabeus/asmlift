@@ -187,6 +187,7 @@ function probedSource(
       ...structureOptionsFor(target, returnsVoid, prototypes),
       spellSwitchFallthrough: backend.spellsSwitchFallthrough,
       spellSwitchBreak: backend.spellsSwitchBreak,
+      spellEarlyReturns: backend.spellsEarlyReturn,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
       ...(contextGlobals ? { contextGlobals } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),

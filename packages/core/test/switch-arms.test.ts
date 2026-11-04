@@ -17,9 +17,9 @@ import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile as decompileJoined, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
-import { structure } from '../src/structure/structure';
+import { structure as structureJoined } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
 import {
   type ArmExit,
@@ -28,7 +28,15 @@ import {
   __testing as switchRangesForTest,
 } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
-import { count } from './helpers';
+import { count, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
 // shape that matters: the balanced comparison tree, four one-instruction bodies, a merge that
@@ -153,7 +161,7 @@ const defaultThroughJump = (hi: string) =>
   '.Lc1:\n\tadd\tr2, r2, #0x1\n' +
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
 
-test('a default reached through a bare jump that CARRIES its value is one default', () => {
+testCopies('a default reached through a bare jump that CARRIES its value is one default', () => {
   const out = defaultThroughJump('');
   expect(of(out)).toContain('switch (a0)');
   expect(armOrder(of(out))).toEqual([3, 2, 1]); // the falling chain, in layout order
@@ -664,7 +672,7 @@ test('a default the table also reaches as a CASE has that arm\u2019s index, not 
 // wrong fixture for reading arm ORDER off.
 const liveFall = '\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x13\n\tstr\tr2, [r3]\n';
 
-test('a jump-table arm that FALLS THROUGH is chained, like a comparison tree\u2019s', () => {
+testCopies('a jump-table arm that FALLS THROUGH is chained, like a comparison tree\u2019s', () => {
   // Drop case 3's `b .L3` and it falls into case 0. Both regimes read the arm-order policy for the
   // chain HEADS and let the chain place the rest — ONE definition (`chainArms`), so a jump table is
   // no longer strictly behind a tree on the same shape. Here layout order already puts case 0 right
@@ -676,7 +684,7 @@ test('a jump-table arm that FALLS THROUGH is chained, like a comparison tree\u20
   expect(out).toContain('*(s32 *)(128 << 19) = a1;'); // the falling arm's own effect, emitted once
 });
 
-test('\u2026and on a compiler with no layout rule the CHAIN re-threads the table order', () => {
+testCopies('\u2026and on a compiler with no layout rule the CHAIN re-threads the table order', () => {
   // Table order is ascending — 0, 1, 2, 3, 4 — which writes case 3 BELOW the arm it falls into.
   // The chain forces 3 directly above 0 and the untouched arms keep their policy positions, so the
   // emitted order is 1, 2, 3, 0, 4: the re-threading branch, on a jump table.
@@ -696,7 +704,7 @@ const twoIntoOne = table('', 5, liveFall).replace(
   '.L6:\n' + liveFall + '\tb\t.L5\n',
 );
 
-test('TWO jump-table arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
+testCopies('TWO jump-table arms entering ONE closed arm: the arm above it falls, the other owns a copy', () => {
   // Read as written it is two fall-throughs into one arm, which `chainArms` refuses. The arm-order
   // policy (agbcc's layout) puts case 3 directly above case 0, so case 3 keeps the fall-through and
   // case 4 gets case 0's body written out under its own label (`copySharedFallTargets`).
@@ -706,7 +714,7 @@ test('TWO jump-table arms entering ONE closed arm: the arm above it falls, the o
   expect(out).toMatch(/case 4:\s+\*\(s32 \*\)\(128 << 19\) = a1;\s+v0 = a1 \+ 1;\s+break;/);
 });
 
-test('…and on a compiler with no layout rule the arm above is the TABLE order’s', () => {
+testCopies('…and on a compiler with no layout rule the arm above is the TABLE order’s', () => {
   // Table order is 0, 1, 2, 3, 4: no entrant sits directly above case 0, so both entrants copy.
   const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
   delete undeclared.compilerBehaviors.switchArmsFollowLayout;
@@ -1192,7 +1200,7 @@ const fallChain =
   '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n' +
   '.L3:\n\tbx\tlr\n';
 
-test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted once', () => {
+testCopies('a chain of falling arms is ONE switch, and the fallen-into arm is emitted once', () => {
   const out = of(fallChain);
   expect(out).toContain('switch (a0)');
   expect(out).not.toContain('else'); // not the if-recovery fallback
@@ -1206,7 +1214,7 @@ test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted 
   expect(count(out, 'break;')).toBe(1);
 });
 
-test('the CHAIN orders the arms, not the case values, on a compiler with no layout rule', () => {
+testCopies('the CHAIN orders the arms, not the case values, on a compiler with no layout rule', () => {
   // Ascending case value is the neutral order for a compiler that has not declared
   // `switchArmsFollowLayout`, and it would emit 1, 2, 3 — which reverses the chain and makes
   // `case 3` fall into `case 2` by writing it BELOW it. The order is forced by the exits.
@@ -1230,7 +1238,7 @@ const fallIntoDefault =
   '.L7:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n' +
   '.L10:\n\tstr\tr0, [r1]\n\tbx\tlr\n';
 
-test('an arm falling into the DEFAULT is emitted directly above it', () => {
+testCopies('an arm falling into the DEFAULT is emitted directly above it', () => {
   // C prints `default:` where `defaultAt` says, and an arm falling into it needs it directly
   // below — so the chain that ends in the default takes the LAST position and the label keeps C's
   // conventional one. `case 1` closes in the middle, which is what makes the placement observable.
@@ -1260,7 +1268,7 @@ const defaultAmongClosed =
   '.L7:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n' +
   '.L10:\n\tstr\tr0, [r1]\n\tbx\tlr\n';
 
-test('a chain elsewhere does not delete the evidence for where `default:` was written', () => {
+testCopies('a chain elsewhere does not delete the evidence for where `default:` was written', () => {
   // Where the label goes is a POSITION, and the two arms it sits between are both closed — it
   // diverts nothing. Withholding it for any switch that carries a chain anywhere is a per-SWITCH
   // predicate answering a per-POSITION question; measured against this row's own object, the label
@@ -1294,7 +1302,7 @@ const threeCase = (c0: string, c1: string, c2: string) =>
   // still falls through on the other and is not the shape that fixture wants.
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
 
-test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
+testCopies('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
   // A cross-jump makes exactly this shape out of `case 2: *p = 3; *p = 2; break;`, and Regime B
   // reads it back as copies. Regime A does not: `chainArms` refuses, and if-recovery lifts it,
   // so a copy reading here would trade one lift for another (switch-recover.ts, NO COPIES HERE).
@@ -1309,7 +1317,7 @@ test('TWO arms falling into ONE decline — C reaches an arm from above only onc
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
 });
 
-test('a comparison tree agbcc cross-jumped two arms of stays with if-recovery', () => {
+testCopies('a comparison tree agbcc cross-jumped two arms of stays with if-recovery', () => {
   // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix for `case 1: g(v); gOut = v; break;
   // case 5: gOut = v; break; case 9: h(v); gOut = v; break;`: case 1 jumps into case 5's store and
   // case 9, laid out directly above it, runs into it. Two arms entering one: no switch, the lift
@@ -1340,7 +1348,7 @@ test('a comparison tree agbcc cross-jumped two arms of stays with if-recovery', 
   expect(out).toMatch(/h\(a1\);/);
 });
 
-test('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {
+testCopies('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {
   const out = of(
     threeCase(
       '\tcmp\tr1, #0\n\tbeq\t.Lc1\t@cond_branch\n\tb\t.Lc2\n',
@@ -1368,7 +1376,7 @@ test('a body reaching a sibling CASE on one path and the switch END on another b
   expect(count(out, '*a1 = 2;')).toBe(1);
 });
 
-test('…and so does one that breaks or falls into the DEFAULT arm', () => {
+testCopies('…and so does one that breaks or falls into the DEFAULT arm', () => {
   // `case 1: if (c) break; default: B;` is a `switch` as much as falling into a case is, and
   // if-recovery would copy B into the arm.
   const asm =
@@ -1881,7 +1889,7 @@ test('an arm that breaks twice before it falls joins after each guard rather tha
   expect(out).not.toContain('else');
 });
 
-test('an arm that breaks or falls into the `default:` arm is a switch on agbcc', () => {
+testCopies('an arm that breaks or falls into the `default:` arm is a switch on agbcc', () => {
   const out = ifBreakLift('intodefault');
   expect(out).toMatch(/case 1:\s*\n\s*if \(a0 == gA\) break;\s*\n\s*default:\s*\n\s*f\(a0\);/);
   expect(count(out, 'f(a0)')).toBe(1);
