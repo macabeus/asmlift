@@ -29,6 +29,7 @@
 // steps `gA[i]`'s pointer in the default arm and in the slot of the branch into the latch's second
 // entry, and once the latch reads the step itself the default arm's dead copy would still be a body
 // (`synthetic:sw_gotocase2:gcc2.7.2kmc`), which the structurer reads as one more case it reaches.
+// A block the sweep leaves holding only its `br` is then threaded out of the CFG (`threadEmptied`).
 //
 // SCOPE, not soundness (the gates the precondition does not need, tabled as `UNPRE_GATES`):
 //  • THE BLOCK IS A JOIN OF ONE SWITCH (`not-switch-join`): one in-edge is a `switch_br`'s, at least
@@ -106,6 +107,9 @@ import {
   type Value,
   defOpMap,
   dominators,
+  foldWriteOrder,
+  forwardingTarget,
+  isBodyless,
   mkValue,
   opShape,
 } from '../ir/core';
@@ -404,10 +408,59 @@ function sweepOrphans(fn: Fn, seeds: readonly Op[]): void {
       }
     }
   }
-  if (dead.size > 0) {
-    for (const b of fn.blocks) {
-      b.ops = b.ops.filter((op) => !dead.has(op));
+  if (dead.size === 0) {
+    return;
+  }
+  const emptied: Block[] = [];
+  for (const b of fn.blocks) {
+    const kept = b.ops.filter((op) => !dead.has(op));
+    if (kept.length < b.ops.length && b !== fn.blocks[0] && isBodyless({ params: b.params, ops: kept })) {
+      emptied.push(b);
     }
+    b.ops = kept;
+  }
+  threadEmptied(fn, emptied);
+}
+
+/** Splice out each of `emptied` that the sweep left a transparent forwarder (no params, a lone `br`
+ *  handing no value), every edge into it now going where it forwards.
+ *
+ *  THE PASS THAT EMPTIES A BLOCK THREADS IT. Such a block held nothing but the edge copies a fold
+ *  made redundant, so it stands for no code of the source: KMC's default arm of `for (..) switch
+ *  (..)` held only the step of the pointer the loop strides, which the latch now reads itself
+ *  (`synthetic:sw_gotocase2:gcc2.7.2kmc`), and IDO's arms of `forexit_old` each held only their
+ *  copy of the latch's bound. Left in the CFG, the structurer reads it as one more sibling case
+ *  every `continue` falls into, or one more region on the way to the latch. An edge into it carries
+ *  no args (it has no params) and its own carries none, so retargeting changes no value on any path;
+ *  `foldExitTrampolines` (raise/latch.ts) folds the same block on a loop's exit, for its own scope,
+ *  and this one asks no scope because the fold made it, not the compiler. A forwarder whose chain
+ *  ends in a cycle of forwarders (`while (1);`) stays. */
+function threadEmptied(fn: Fn, emptied: readonly Block[]): void {
+  const forwards = (b: Block) => isBodyless(b) && b.ops[0].opcode === 'br' && b.ops[0].successors[0].args.length === 0;
+  const gone = new Set<Block>();
+  for (const b of emptied) {
+    const onward = forwardingTarget(b);
+    if (!forwards(b) || forwards(onward)) {
+      continue;
+    }
+    for (const p of fn.blocks) {
+      let repointed = false;
+      for (const op of p.ops) {
+        op.successors.forEach((s, i) => {
+          if (s.block === b) {
+            op.successors[i] = { block: onward, args: [] };
+            repointed = true;
+          }
+        });
+      }
+      if (repointed) {
+        foldWriteOrder(fn.writeOrder, b, p);
+      }
+    }
+    gone.add(b);
+  }
+  if (gone.size > 0) {
+    fn.blocks = fn.blocks.filter((b) => !gone.has(b));
   }
 }
 

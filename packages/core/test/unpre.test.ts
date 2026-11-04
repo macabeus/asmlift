@@ -4,7 +4,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { type Block, type Value, defOpMap, dominators } from '../src/ir/core';
+import { type Block, type Fn, type Value, defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
@@ -213,19 +213,44 @@ const latchIr = (secondBound = '%9: s32 = add %1, %8') => `fn f {
 }
 `;
 
+/** the block holding `latchIr`'s test, wherever the fold leaves it */
+const latchOf = (fn: Fn) => fn.blocks.find((b) => b.ops.some((op) => op.opcode === 'icmp_ne'))!;
+
 test("a loop's latch every arm hands the bound `hi + 1` recomputes it, and its test reads it inline", () => {
   const { n, fn } = fold(latchIr());
   expect(n).toBe(1);
-  expect(fn.blocks[4].params).toHaveLength(0);
+  expect(latchOf(fn).params).toHaveLength(0);
 });
 
-test("the arms' copies the latch fold leaves unread are deleted, so an arm holding only its copy is bodyless", () => {
+test("the arms' copies the latch fold leaves unread are deleted, and an arm left holding nothing is threaded", () => {
   // KMC steps `gA[i]`'s pointer in the default arm, which falls into the latch, and in the slot of
-  // the branch into the latch's second entry (`synthetic:sw_gotocase2:gcc2.7.2kmc`)
+  // the branch into the latch's second entry (`synthetic:sw_gotocase2:gcc2.7.2kmc`): #2 held only its
+  // copy, so its edge now goes to the latch itself, and #3 keeps its call
   const { n, fn } = fold(latchIr());
   expect(n).toBe(1);
-  expect(fn.blocks[2].ops.map((op) => op.opcode)).toEqual(['br']);
-  expect(fn.blocks[3].ops.map((op) => op.opcode)).toEqual(['call', 'br']);
+  expect(fn.blocks.map((b) => b.ops.map((op) => op.opcode).join(' '))).toEqual([
+    'br',
+    'load const icmp_eq cond_br',
+    'call br',
+    'const add const add icmp_ne cond_br',
+    'ret',
+  ]);
+  const [taken, fall] = fn.blocks[1].ops.at(-1)!.successors;
+  expect(taken.block).toBe(latchOf(fn));
+  expect(fall.block).toBe(fn.blocks[2]);
+});
+
+test('an arm that keeps an op of its own is not threaded', () => {
+  // #2 calls before its copy: the sweep deletes the copy and leaves the call
+  const { n, fn } = fold(
+    latchIr().replace(
+      '  %6: s32 = const {value=1}\n',
+      '  %6: s32 = const {value=1}\n  %15: s32 = call %6 {target="side2"}\n',
+    ),
+  );
+  expect(n).toBe(1);
+  expect(fn.blocks).toHaveLength(6);
+  expect(fn.blocks[2].ops.map((op) => op.opcode)).toEqual(['const', 'call', 'br']);
 });
 
 test('the recomputed value takes the type of the parameter it replaces, not the arm op it was cloned from', () => {
@@ -235,7 +260,7 @@ test('the recomputed value takes the type of the parameter it replaces, not the 
   // (kleod's `sub_080240F4`)
   const { n, fn } = fold(latchIr().replace('^bb4(%11: s32):', '^bb4(%11: u32):'));
   expect(n).toBe(1);
-  const root = defOpMap(fn).get(fn.blocks[4].ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
+  const root = defOpMap(fn).get(latchOf(fn).ops.find((op) => op.opcode === 'icmp_ne')!.operands[0])!;
   expect(root.opcode).toBe('add');
   expect(root.results[0].type).toEqual({ kind: 'int', width: 32, signed: false });
 });

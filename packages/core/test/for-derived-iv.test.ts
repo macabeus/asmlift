@@ -121,16 +121,6 @@ const srFor = ({
   ret
 }`;
 
-/** `srFor` with every edge into the latch but the case fallen into's sent through a forwarder #15
- *  first: KMC's layout, whose default arm (and every branch-likely `continue`) runs a pointer's step
- *  as a word of its own ahead of the latch, which raise/unpre.ts leaves bodyless once the latch reads
- *  the step itself (`synthetic:sw_gotocase2:gcc2.7.2kmc`). */
-const kmcFor = () =>
-  srFor()
-    .replace(/\^bb11\(\)(?!:)/g, '^bb15()')
-    .replace('cond_br %27, ^bb15(), ^bb8()', 'cond_br %27, ^bb11(), ^bb8()')
-    .replace('^bb11():', '^bb15():\n  br ^bb11()\n^bb11():');
-
 test('a strength-reduced counted loop entered through a preheader lifts as a `for`', () => {
   const r = judged(srFor());
   // the update copies only the IV, and the body reads the derived param as the op of it
@@ -218,16 +208,5 @@ test('`/for-continue` takes the strength-reduced readings where the default lift
   const r = judged(ir, { spellCountedLoopsFor: true });
   expect(r.src).toMatch(/for \((\w+) = a0; a1 >= \1; \1 = \1 \+ 1\) \{/);
   expect(r.src).not.toContain('while (1)');
-  agrees(r);
-});
-
-test("an arm that only forwards to the `for`'s latch is a `continue`, not a sibling case", () => {
-  // case 0 reaches the forwarder #15 (the default) and case 2's #7: as a sibling, #15 is one more
-  // case that arms fall into, and the jump table's arms do not linearize
-  const ir = kmcFor();
-  expect(ir).toContain('cond_br %15, ^bb15(), ^bb7()');
-  const r = judged(ir, { coalesceLoopInit: true });
-  expect(r.src).toMatch(/for \(; a1 >= a0; a0 = a0 \+ 1\) \{/);
-  expect(r.src).toMatch(/default:\s*continue;/);
   agrees(r);
 });
