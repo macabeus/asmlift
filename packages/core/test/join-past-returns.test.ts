@@ -373,6 +373,105 @@ describe('the copy budget', () => {
     const small = chain(3, 'tangled');
     expect(count(emit(small, {}), 'tail(')).toBe(8);
   });
+
+  test('a join past the budget falls to the copies, which write a long tail once', () => {
+    // `if (a == 1) leaf(); else if (a == 2) leaf(); ...` with every leaf falling into one straight
+    // tail of `n` calls, the first and the last through `two()` first: the join meets at `two()`,
+    // and every other leaf is an early return taking its own copy of the tail, n times n entries,
+    // past the budget, where the copies write the tail once below the `if`s
+    const n = 215;
+    const lines = ['fn f {', '^bb0(%0: s32):', '  br ^bb1()'];
+    const [two, tail] = [2 * n + 2, 2 * n + 3];
+    let v = 1;
+    for (let i = 1; i <= n; i++) {
+      const [k, c] = [v++, v++];
+      lines.push(`^bb${i}():`, `  %${k}: s32 = const {value=${i}}`, `  %${c}: u32 = icmp_eq %0, %${k}`);
+      lines.push(`  cond_br %${c}, ^bb${n + i}(), ^bb${i < n ? i + 1 : 2 * n + 1}()`);
+    }
+    for (let i = 1; i <= n + 1; i++) {
+      lines.push(`^bb${n + i}():`, `  %${v++}: s32 = call %0 {target="leaf"}`);
+      lines.push(`  br ^bb${i === 1 || i === n + 1 ? two : tail}()`);
+    }
+    lines.push(`^bb${two}():`, `  %${v++}: s32 = call %0 {target="two"}`, `  br ^bb${tail}()`);
+    for (let i = 0; i < n; i++) {
+      lines.push(`^bb${tail + i}():`, `  %${v++}: s32 = call %0 {target="tl"}`);
+      lines.push(i + 1 < n ? `  br ^bb${tail + i + 1}()` : '  ret');
+    }
+    const fn = parse([...lines, '}', ''].join('\n'));
+    verify(fn);
+    let joins = 0;
+    const src = cBackend.emit(structure(fn, { returnsVoid: true }, { onJoinPastReturns: () => joins++ }));
+    expect(count(src, 'tl(')).toBe(n);
+    expect(count(src, 'two(')).toBe(2);
+    expect(joins).toBe(0); // the join the copies replaced is not reported
+  }, 60_000);
+});
+
+describe('a join that refuses falls to the copies', () => {
+  // A `retchain` link ahead of a switch whose case leaves it from inside a nested switch: the join
+  // past the link's early return reads the switch at its own end, where that case declines, so the
+  // whole function is structured again reading the copies (case-goto.test.ts's `gn`).
+  const IR = `fn gn2 {
+^bb0(%0: s32, %1: s32):
+  %k9: s32 = const {value=9}
+  %c0: u32 = icmp_eq %1, %k9
+  cond_br %c0, ^bbA(), ^bbC()
+^bbA():
+  %k8: s32 = const {value=8}
+  %c8: u32 = icmp_eq %0, %k8
+  cond_br %c8, ^bbR(), ^bbB()
+^bbR():
+  %ra: s32 = call %0 {target="A"}
+  ret
+^bbB():
+  %rb: s32 = call %0 {target="B"}
+  br ^bbM()
+^bbC():
+  %rc: s32 = call %0 {target="C"}
+  br ^bbM()
+^bbM():
+  %rx: s32 = call %0 {target="X"}
+  switch_br %0, ^bb10(), ^bb1(), ^bbL(), ^bb3(), ^bb2(), ^bb7() {cases=[0;1;2;3;5]}
+^bb10():
+  %r0: s32 = call %0 {target="a"}
+  switch_br %1, ^bb11(), ^bb12(), ^bb13() {cases=[0;1]}
+^bb11():
+  %r11: s32 = call %0 {target="p"}
+  br ^bb14()
+^bb12():
+  %r12: s32 = call %0 {target="q"}
+  br ^bbL()
+^bb13():
+  %r13: s32 = call %0 {target="r"}
+  br ^bb14()
+^bb14():
+  %r14: s32 = call %0 {target="w"}
+  br ^bb7()
+^bb1():
+  %r1: s32 = call %0 {target="b"}
+  %z1: s32 = const {value=0}
+  %cc1: u32 = icmp_slt %1, %z1
+  cond_br %cc1, ^bb7(), ^bbL()
+^bb2():
+  %r2: s32 = call %0 {target="c"}
+  br ^bbL()
+^bbL():
+  %rL: s32 = call %0 {target="s"}
+  br ^bb3()
+^bb3():
+  %r3: s32 = call %0 {target="t"}
+  br ^bb7()
+^bb7():
+  ret
+}`;
+
+  test('the tree is the copies, and the hooks report no join past early returns', () => {
+    let joins = 0;
+    const src = cBackend.emit(structure(parse(IR), { returnsVoid: true }, { onJoinPastReturns: () => joins++ }));
+    expect(src).toBe(cBackend.emit(structure(parse(IR), { returnsVoid: true, copyReturnTails: true })));
+    expect(count(src, 'X(')).toBe(2);
+    expect(joins).toBe(0);
+  });
 });
 
 describe('the `/ret-copy` variation', () => {
