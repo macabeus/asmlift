@@ -2519,11 +2519,10 @@ export function enumerateCandidates(
                 const copiesBarred = stripped(copiesDropped);
                 const read = structureReturnTailReading(
                   fn,
-                  structOpts,
+                  { ...structOpts, joinPastReturns: copiesBarred },
                   (t) => backend.emit(t),
                   hooks,
                   acceptsMemo,
-                  copiesBarred,
                 );
                 sfn = read.sfn;
                 if (read.unpublished === undefined) {

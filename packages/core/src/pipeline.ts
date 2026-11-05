@@ -1164,8 +1164,8 @@ export interface ReturnTailReading {
   /** the tree this structuring publishes */
   readonly sfn: SFn;
   /** the other reading of the same structuring, where the published one was a choice between two:
-   *  absent where no divergent branch took the join past early returns, where a reading was forced,
-   *  or where the copies were barred (`copiesBarred`) */
+   *  absent where no divergent branch took the join past early returns, or where a reading was
+   *  forced */
   readonly unpublished?: UnpublishedReading;
 }
 
@@ -1184,7 +1184,10 @@ export interface ReturnTailReading {
  *  tie goes to the join.
  *    - Whole function, not per branch: these are the two whole-function readings the ranked fan
  *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
- *      is always one of them; a per-branch mix would be a third tree no candidate spells.
+ *      is always one of them. A per-branch unit only differs where the join fires at two or more
+ *      branches: on 196 of those 620 (165 where the join is the shorter, 26 the longer, 5 level),
+ *      and what it would gain there is not measured. It reaches at most one of the losses: of the 4
+ *      functions that score a MATCH only with the copies, 3 take the join at a single branch.
  *    - Emitted, not the structured tree: `readabilityRewrites` runs after `structure()` and can fold
  *      copied tails back together (`mergeCommonTails`), so a size read inside `structure()` is not
  *      the size published.
@@ -1204,8 +1207,8 @@ export interface ReturnTailReading {
  *    - the copies are structured only once the join has lifted, and where they decline, fail a
  *      boundary contract, or the backend cannot emit one of the two, the join stands;
  *    - a forced reading (`copyReturnTails`, `joinPastReturns`), or a language with no early `return`
- *      (`spellEarlyReturns: false`), is structured once, as asked; so is a setting whose copies are
- *      barred (`copiesBarred`: rank.ts's closure over a stripped sibling whose copies were dropped).
+ *      (`spellEarlyReturns: false`), is structured once, as asked. rank.ts forces the join this way
+ *      for a setting whose stripped sibling dropped its copies.
  *
  *  HOOKS. The caller's hooks fire for both structurings, so an observer reads the union of what the
  *  two runs saw. That is what keeps rank.ts's off-sibling witness sound: a setting is a tree dedup
@@ -1217,7 +1220,6 @@ export function structureReturnTailReading(
   emit: (sfn: SFn) => string,
   hooks: Parameters<typeof structure>[2] = {},
   memo?: Parameters<typeof structure>[3],
-  copiesBarred = false,
 ): ReturnTailReading {
   const { joinPastReturns, ...structOpts } = opts;
   if (structOpts.copyReturnTails === true || structOpts.spellEarlyReturns === false) {
@@ -1236,7 +1238,7 @@ export function structureReturnTailReading(
     },
     memo,
   );
-  if (!joined || joinPastReturns === true || copiesBarred) {
+  if (!joined || joinPastReturns === true) {
     return { sfn: join };
   }
   let copies: SFn;
