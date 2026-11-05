@@ -26,7 +26,8 @@ import { cBackend } from '../src/backend/c';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { decompile } from '../src/pipeline';
+import type { SFn } from '../src/l3/ast';
+import { decompile, structureReturnTailReading } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -552,5 +553,127 @@ describe('the switch shapes whose copies decline are read at the join', () => {
     const src = lift(asm);
     expect(src).toMatch(/case 0:\s*v0 = \*a0;\s*\*a0 = 9;\s*break;\s*case 1:\s*v0 = \*a0;\s*break;/);
     expect(count(src, 'side2(a0, v0);')).toBe(1);
+  });
+});
+
+// THE DEFAULT IS BOUNDED BY SIZE (pipeline.ts `structureReturnTailReading`): where the join past
+// early returns spells the whole function LONGER than the return-tail copies, decompile() and the
+// ranked default publish the copies, and rank.ts enumerates the join as `/ret-join`; where it is
+// not longer (ties included), the join stands and the copies are `/ret-copy`. `structure()` itself
+// still reads the join: the bound is on the emitted source, after the readability rewrites.
+describe('the return-tail reading bounded by size', () => {
+  // `if (a == 1) leaf(); else if (a == 2) leaf(); ... else leaf();` with every leaf falling into one
+  // tail of `tailLen` calls, the first and the last through `two()` first (sa3 sub_809A808's shape):
+  // the join meets at `two()`, and every other leaf is an early return taking its own copy of the tail
+  function decisionTree(n: number, tailLen: number): Fn {
+    const lines = ['fn f {', '^bb0(%0: s32):', '  br ^bb1()'];
+    const [two, tail] = [2 * n + 2, 2 * n + 3];
+    let v = 1;
+    for (let i = 1; i <= n; i++) {
+      const [k, c] = [v++, v++];
+      lines.push(`^bb${i}():`, `  %${k}: s32 = const {value=${i}}`, `  %${c}: u32 = icmp_eq %0, %${k}`);
+      lines.push(`  cond_br %${c}, ^bb${n + i}(), ^bb${i < n ? i + 1 : 2 * n + 1}()`);
+    }
+    for (let i = 1; i <= n + 1; i++) {
+      lines.push(`^bb${n + i}():`, `  %${v++}: s32 = call %0 {target="leaf"}`);
+      lines.push(`  br ^bb${i === 1 || i === n + 1 ? two : tail}()`);
+    }
+    lines.push(`^bb${two}():`, `  %${v++}: s32 = call %0 {target="two"}`, `  br ^bb${tail}()`);
+    for (let i = 0; i < tailLen; i++) {
+      lines.push(`^bb${tail + i}():`, `  %${v++}: s32 = call %0 {target="tl"}`);
+      lines.push(i + 1 < tailLen ? `  br ^bb${tail + i + 1}()` : '  ret');
+    }
+    const fn = parse([...lines, '}', ''].join('\n'));
+    verify(fn);
+    return fn;
+  }
+  const OPTS = { returnsVoid: true } as const;
+  const emitC = (t: SFn) => cBackend.emit(t);
+
+  test('where the join is longer, the copies are published and the join is the unpublished reading', () => {
+    const fn = decisionTree(3, 4);
+    const join = emit(fn, {});
+    const copies = emit(fn, { copyReturnTails: true });
+    expect(count(join, 'tl(')).toBe(12); // structure() alone still reads the join
+    expect(count(copies, 'tl(')).toBe(4);
+    const read = structureReturnTailReading(fn, OPTS, emitC);
+    expect(emitC(read.sfn)).toBe(copies);
+    expect(read.unpublished?.reading).toBe('join');
+    expect(read.unpublished && 'sfn' in read.unpublished ? emitC(read.unpublished.sfn) : '').toBe(join);
+    // forced, the join stands and nothing is unpublished
+    const forced = structureReturnTailReading(fn, { ...OPTS, joinPastReturns: true }, emitC);
+    expect(emitC(forced.sfn)).toBe(join);
+    expect(forced.unpublished).toBeUndefined();
+  });
+
+  test('where the join is shorter, it is published and the copies are the unpublished reading', () => {
+    const fn = chain(4, 'own');
+    const read = structureReturnTailReading(fn, OPTS, emitC);
+    expect(count(emitC(read.sfn), 'tail(')).toBe(1);
+    expect(read.unpublished?.reading).toBe('copies');
+    expect(read.unpublished && 'sfn' in read.unpublished ? count(emitC(read.unpublished.sfn), 'tail(') : 0).toBe(16);
+  });
+
+  test('a tie, or a backend that cannot spell one reading, leaves the join standing', () => {
+    const fn = decisionTree(3, 4);
+    const join = emit(fn, {});
+    expect(emitC(structureReturnTailReading(fn, OPTS, () => 'one line').sfn)).toBe(join);
+    const refusing = (t: SFn) => {
+      if (count(cBackend.emit(t), 'tl(') === 4) {
+        throw new Error('cannot spell the copies');
+      }
+      return cBackend.emit(t);
+    };
+    expect(emitC(structureReturnTailReading(fn, OPTS, refusing).sfn)).toBe(join);
+  });
+
+  test('copies that decline leave the join standing, with their refusal as the unpublished reading', () => {
+    const fn = chain(12, 'own'); // the copies are past the copy budget
+    const read = structureReturnTailReading(fn, OPTS, emitC);
+    expect(count(emitC(read.sfn), 'tail(')).toBe(1);
+    expect(read.unpublished && 'error' in read.unpublished ? String(read.unpublished.error) : '').toMatch(
+      /past the copy budget/,
+    );
+  });
+
+  test('a structuring that never took the join is structured once, with nothing unpublished', () => {
+    const fn = parse(
+      [
+        'fn f {',
+        '^bb0(%0: s32):',
+        '  %1: s32 = const {value=3}',
+        '  %2: u32 = icmp_slt %1, %0',
+        '  cond_br %2, ^bb1(), ^bb2()',
+        '^bb1():',
+        '  %3: s32 = call %0 {target="b"}',
+        '  br ^bb3()',
+        '^bb2():',
+        '  %4: s32 = call %0 {target="c"}',
+        '  br ^bb3()',
+        '^bb3():',
+        '  ret',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(structureReturnTailReading(fn, OPTS, emitC).unpublished).toBeUndefined();
+  });
+
+  // The decision tree in agbcc's layout, hand-written: `if (a == 1) A(); else if (a == 2 || a == 3)
+  // A(); else A();` where the first and the last arm cross-jump into one `bl B` before the tail
+  // `X(); Y(); Z(); W();`, so the join writes that tail into the early return of the middle arm
+  const TREE =
+    'f:\n\tpush\t{lr}\n\tcmp\tr0, #0x1\n\tbne\t.L3\n\tbl\tA\n\tb\t.L8\n.L3:\n\tcmp\tr0, #0x2\n\tbeq\t.L9\n' +
+    '\tcmp\tr0, #0x3\n\tbne\t.L7\n.L9:\n\tbl\tA\n\tb\t.L4\n.L7:\n\tbl\tA\n.L8:\n\tbl\tB\n.L4:\n' +
+    '\tbl\tX\n\tbl\tY\n\tbl\tZ\n\tbl\tW\n\tpop\t{r0}\n\tbx\tr0\n';
+  const V0 = { params: 0, returnsVoid: true } as const;
+  const P = { f: { params: 1, returnsVoid: true }, A: V0, B: V0, X: V0, Y: V0, Z: V0, W: V0 };
+
+  test('decompile() publishes the copies where the join is longer, and spells the join when forced', () => {
+    const copies = decompile('f', TREE, ARMV4T_AGBCC, { prototypes: P }).source;
+    expect(copies).toBe(decompile('f', TREE, ARMV4T_AGBCC, { prototypes: P, copyReturnTails: true }).source);
+    expect(count(copies, 'W(')).toBe(1);
+    const join = decompile('f', TREE, ARMV4T_AGBCC, { prototypes: P, joinPastReturns: true }).source;
+    expect(count(join, 'W(')).toBe(2);
   });
 });

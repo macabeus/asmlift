@@ -50,7 +50,7 @@ import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from '.
 import { PRE_STRUCTURE_FOLDS, type PreStructureFold } from './raise/pre-structure';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
-import { StructureError, structure } from './structure/structure';
+import { DefaultAcceptsMemoMisuse, StructureError, structure } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -109,9 +109,14 @@ export interface DecompileOptions {
   calleeBodies?: CalleeBodies;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
-  /** structure with the return-tail copies (`StructureOptions.copyReturnTails`, rank.ts's
-   *  `/ret-copy`) instead of the default join past early returns. Absent ⇒ the join. */
+  /** force the return-tail copies (`StructureOptions.copyReturnTails`, rank.ts's `/ret-copy`).
+   *  Absent ⇒ the shorter of the copies and the join past early returns, ties to the join
+   *  (`structureReturnTailReading`). */
   copyReturnTails?: boolean;
+  /** force the join past early returns wherever the structuring takes it, however long it spells
+   *  the function (rank.ts's `/ret-join` where the copies are the shorter). Absent ⇒ the shorter,
+   *  as above. Ignored under `copyReturnTails`. */
+  joinPastReturns?: boolean;
 }
 
 export interface DecompileResult {
@@ -265,21 +270,26 @@ function runTower(
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
-  const sfn = structureChecked(fn, {
-    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
-    // What the EMITTED LANGUAGE can say is a structuring input wherever two recoveries of one
-    // shape are behaviourally identical and only one of them is printable (switch fall-through
-    // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
-    spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-    spellSwitchBreak: backend.spellsSwitchBreak,
-    spellEarlyReturns: backend.spellsEarlyReturn,
-    ...(opts.copyReturnTails ? { copyReturnTails: true } : {}),
-    onGap,
-    ...(mapSymbols ? { symbols: mapSymbols } : {}),
-    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
-    ...(inferredSymbols.size ? { inferredSymbols } : {}),
-    ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-  });
+  const { sfn } = structureReturnTailReading(
+    fn,
+    {
+      ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
+      // What the EMITTED LANGUAGE can say is a structuring input wherever two recoveries of one
+      // shape are behaviourally identical and only one of them is printable (switch fall-through
+      // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
+      spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+      spellSwitchBreak: backend.spellsSwitchBreak,
+      spellEarlyReturns: backend.spellsEarlyReturn,
+      ...(opts.copyReturnTails ? { copyReturnTails: true } : {}),
+      ...(opts.joinPastReturns ? { joinPastReturns: true } : {}),
+      onGap,
+      ...(mapSymbols ? { symbols: mapSymbols } : {}),
+      ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
+      ...(inferredSymbols.size ? { inferredSymbols } : {}),
+      ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
+    },
+    (t) => backend.emit(t),
+  );
 
   // (5) lower + print: neutral AST → target language
   const source = backend.emit(sfn);
@@ -1136,6 +1146,113 @@ export function structureChecked(
   // merges arms or drops statements must not be able to lose or duplicate a call.
   assertEffectsPreserved(fn, sfn);
   return sfn;
+}
+
+/** Non-blank lines in an emitted source: what the return-tail reading below is bounded by, and
+ *  rank.ts's compactness tie-break, counted exactly as the report counts `lines`
+ *  (apps/benchmark/src/eval/quality.ts). Deterministic, and total on any string. */
+export function sourceLineCount(source: string): number {
+  return source.split('\n').filter((l) => l.trim().length > 0).length;
+}
+
+/** The reading a {@link structureReturnTailReading} did not publish, for rank.ts's alternative
+ *  candidate: its tree and which reading it is, or why the copies have none. */
+export type UnpublishedReading =
+  { readonly reading: 'copies' | 'join'; readonly sfn: SFn } | { readonly reading: 'copies'; readonly error: unknown };
+
+export interface ReturnTailReading {
+  /** the tree this structuring publishes */
+  readonly sfn: SFn;
+  /** the other reading of the same structuring, where the published one was a choice between two:
+   *  absent where no divergent branch took the join past early returns, where a reading was forced,
+   *  or where the copies were barred (`copiesBarred`) */
+  readonly unpublished?: UnpublishedReading;
+}
+
+/** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE: `structureChecked`, and where that structuring
+ *  took the join past early returns somewhere, the same structuring again reading the return-tail
+ *  copies (`copyReturnTails`), with the copies published only where they spell the function SHORTER.
+ *
+ *  WHY A BOUND. The join writes the code below a divergent branch once where the copies write it
+ *  into every arm; but the join copies a return tail into each early return in its turn, so neither
+ *  reading is the shorter in general (structure.ts `structureWithinBudget`). Where the join is the
+ *  longer, it is the reading that duplicates code. Measured with the real compilers over the 620
+ *  real functions the unbounded join re-spells (2026-11-05): the 180 it makes longer score further
+ *  from their bytes than the copies on 89 and closer on 10 (MATCH 23 → 16).
+ *
+ *  THE UNIT IS THE WHOLE FUNCTION'S EMITTED SOURCE, in non-blank lines (`sourceLineCount`), and a
+ *  tie goes to the join.
+ *    - Whole function, not per branch: these are the two whole-function readings the ranked fan
+ *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
+ *      is always one of them; a per-branch mix would be a third tree no candidate spells.
+ *    - Emitted, not the structured tree: `readabilityRewrites` runs after `structure()` and can fold
+ *      copied tails back together (`mergeCommonTails`), so a size read inside `structure()` is not
+ *      the size published.
+ *    - Lines, not statements: on those 620 the final tree's statement count disagrees with the line
+ *      class on 49, and it ties the mwcc jump-table window (cli
+ *      test/matching/jump-table-window.test.ts) at 17 statements where the copies are 30 lines and
+ *      byte-exact, the join 32.
+ *
+ *  REFUSALS. Never a decline turned into a lift, either way:
+ *    - a join that declines or crosses the copy budget already falls to the copies inside
+ *      `structure()` (`structureWithinBudget`), and that tree is published as it was;
+ *    - the copies are structured only once the join has lifted, and where they decline, fail a
+ *      boundary contract, or the backend cannot emit one of the two, the join stands;
+ *    - a forced reading (`copyReturnTails`, `joinPastReturns`), or a language with no early `return`
+ *      (`spellEarlyReturns: false`), is structured once, as asked; so is a setting whose copies are
+ *      barred (`copiesBarred`: rank.ts's closure over a stripped sibling whose copies were dropped).
+ *
+ *  HOOKS. The caller's hooks fire for both structurings, so an observer reads the union of what the
+ *  two runs saw. That is what keeps rank.ts's off-sibling witness sound: a setting is a tree dedup
+ *  of its sibling only where neither reading of the sibling fired the witness. A
+ *  `DefaultAcceptsMemoMisuse` is a defect and is rethrown, never an unpublished reading. */
+export function structureReturnTailReading(
+  fn: Fn,
+  opts: Parameters<typeof structure>[1] & { joinPastReturns?: boolean },
+  emit: (sfn: SFn) => string,
+  hooks: Parameters<typeof structure>[2] = {},
+  memo?: Parameters<typeof structure>[3],
+  copiesBarred = false,
+): ReturnTailReading {
+  const { joinPastReturns, ...structOpts } = opts;
+  if (structOpts.copyReturnTails === true || structOpts.spellEarlyReturns === false) {
+    return { sfn: structureChecked(fn, structOpts, hooks, memo) };
+  }
+  let joined = false;
+  const join = structureChecked(
+    fn,
+    structOpts,
+    {
+      ...hooks,
+      onJoinPastReturns: () => {
+        joined = true;
+        hooks.onJoinPastReturns?.();
+      },
+    },
+    memo,
+  );
+  if (!joined || joinPastReturns === true || copiesBarred) {
+    return { sfn: join };
+  }
+  let copies: SFn;
+  try {
+    copies = structureChecked(fn, { ...structOpts, copyReturnTails: true }, hooks, memo);
+  } catch (error) {
+    if (error instanceof DefaultAcceptsMemoMisuse) {
+      throw error;
+    }
+    return { sfn: join, unpublished: { reading: 'copies', error } };
+  }
+  let shorter = false;
+  try {
+    shorter = sourceLineCount(emit(copies)) < sourceLineCount(emit(join));
+  } catch {
+    // a backend that cannot spell one of the two leaves the join standing; the caller's own emit of
+    // the join reports its refusal where it has one
+  }
+  return shorter
+    ? { sfn: copies, unpublished: { reading: 'join', sfn: join } }
+    : { sfn: join, unpublished: { reading: 'copies', sfn: copies } };
 }
 
 // ── annotate-mode support ─────────────────────────────────────────────────────────────────

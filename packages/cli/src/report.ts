@@ -12,7 +12,7 @@
 import { cBackend } from '@asmlift/core/backend/c';
 import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
+import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
@@ -183,15 +183,19 @@ function probedSource(
     // `gSym[i]`, and without the MAP it scores the reverse and worse: on a map-ful function the
     // probe would spell a bare `gSym[i]` whose meaning rests on a derived `extern u16 gSym[]`
     // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
-    const sfn = structureChecked(clone, {
-      ...structureOptionsFor(target, returnsVoid, prototypes),
-      spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-      spellSwitchBreak: backend.spellsSwitchBreak,
-      spellEarlyReturns: backend.spellsEarlyReturn,
-      ...(mapSymbols ? { symbols: mapSymbols } : {}),
-      ...(contextGlobals ? { contextGlobals } : {}),
-      ...(inferredSymbols.size ? { inferredSymbols } : {}),
-    });
+    const { sfn } = structureReturnTailReading(
+      clone,
+      {
+        ...structureOptionsFor(target, returnsVoid, prototypes),
+        spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+        spellSwitchBreak: backend.spellsSwitchBreak,
+        spellEarlyReturns: backend.spellsEarlyReturn,
+        ...(mapSymbols ? { symbols: mapSymbols } : {}),
+        ...(contextGlobals ? { contextGlobals } : {}),
+        ...(inferredSymbols.size ? { inferredSymbols } : {}),
+      },
+      (t) => backend.emit(t),
+    );
     return backend.emit(sfn);
   } catch {
     return undefined;
