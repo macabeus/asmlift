@@ -6,15 +6,8 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { PpcUnsupportedError, lift } from '../src/frontend/ppc';
-import { decompile as decompileJoined } from '../src/pipeline';
+import { decompile } from '../src/pipeline';
 import { PPC_MWCC, PPC_MWCC_233, targetFor } from '../src/target';
-import { testCopies, withCopies } from './helpers';
-
-// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
-// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
-// returns by default, which join-past-returns.test.ts pins.
-const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
-  decompileJoined(name, asm, target, withCopies(opts));
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 /** `dis` on a target that claims no start offset past which it never loads its outgoing area. */
@@ -1672,11 +1665,11 @@ describe('the scaled index at a case target other edges also enter', () => {
     decompile('swm', a, PPC_MWCC, { asmData: asmData(cases) }).source;
   const stale = /a case of the elided jump table reads r5, which the unlifted dispatch idiom wrote/;
 
-  testCopies('a case fallen into reads the scaled index the falling case kept', () => {
+  test('a case fallen into reads the scaled index the falling case kept', () => {
     expect(lift(fall('stw     r7,0(r6)'))).toMatch(/case 0:\s*\n\s*\*a3 = 1;\s*\n\s*case 1:\s*\n\s*return a3\[a0\];/);
   });
 
-  testCopies('…and the shift is of the scrutinee the switch read, not the one the falling case left', () => {
+  test('…and the shift is of the scrutinee the switch read, not the one the falling case left', () => {
     const out = lift(
       asm('40', [
         '  20:\taddi    r3,r3,1',

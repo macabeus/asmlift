@@ -114,7 +114,7 @@ test('a switch whose default is just the end of the switch is not a fall-through
   expect(src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${TABLE}`)).toContain('default:');
 });
 
-testCopies('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
+test('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
   // .Lc0 has no terminator of its own: control drops into .Lc1. That is `case 0:` with no `break;`,
   // and it is the only shape of overlap C spells natively.
   const out = convSrc([CALL_A, '\tbl\tsideB\n' + LEAVE]);

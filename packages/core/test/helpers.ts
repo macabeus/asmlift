@@ -795,11 +795,14 @@ export const NO_HIT_CODE: StructureHooks = {
   ],
 };
 
-// THE RETURN-TAIL COPIES, AS A TEST ASKS THEM. The default structuring reads the join past early
-// returns; the copies (`copyReturnTails`) are rank.ts's `/ret-copy` candidate, and the recovery a
-// fixture with an early-returning arm reaches is the copies' one there. A test written against that
-// recovery is declared with `testCopies`, and the file routes its `decompile`/`structure` calls
-// through `withCopies`, so the option is on for that test's calls and off for every other test.
+// THE RETURN-TAIL COPIES, AS A TEST ASKS THEM. `structure()` reads the join past early returns, and
+// so does decompile() save where the join spells the function longer, where it publishes the copies
+// (`copyReturnTails`; pipeline.ts `structureReturnTailReading`). Elsewhere the copies are rank.ts's
+// `/ret-copy` candidate, and the recovery a fixture with an early-returning arm reaches is the
+// copies' one there. A test written against that recovery is declared with `testCopies`, and the
+// file routes its `decompile`/`structure` calls through `withCopies`, so the option is on for that
+// test's calls and off for every other test. A test whose fixture decompile() already publishes the
+// copies for is a plain `test`, so it pins that size bound as well.
 let readingCopies = false;
 export function testCopies(name: string, body: () => unknown, timeout?: number): void {
   test(

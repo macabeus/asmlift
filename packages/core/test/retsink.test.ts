@@ -117,7 +117,7 @@ test('a chain of two conditions converging on one early exit is still sunk', () 
   expect(out).not.toMatch(/return v\d+;/); // no merge variable
 });
 
-testCopies('the same shape with a VOID exit keeps its one exit too', () => {
+test('the same shape with a VOID exit keeps its one exit too', () => {
   // `synthetic:sw_fallmem:agbcc`. Keeping this merge leaves the switch two default candidates —
   // the bare `b .L3` leaf and `.L3` itself — which is what `resolveDefault` (switch-recover.ts)
   // joins back into one.
@@ -126,7 +126,7 @@ testCopies('the same shape with a VOID exit keeps its one exit too', () => {
   expect(out.match(/return;/g)).toHaveLength(1);
 });
 
-testCopies('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
+test('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
   // `.L6` (case 1's body) has two predecessors — the dispatch's `beq .L6` and `.L5` running on —
   // which counting PREDECESSORS reads as the shared early exit of a chain. It is not: only ONE of
   // the two is a condition. Sinking here duplicates the switch's single `return r;` into five
@@ -177,7 +177,7 @@ const SWITCH_EMPTY_ARM =
   '.L6:\n\tadd\tr1, r1, #0x1\n' +
   '.L3:\n\tadd\tr0, r1, #0x0\n\tbx\tlr\n';
 
-testCopies('an EMPTY fall-through arm is still an arm, and the shared return still survives', () => {
+test('an EMPTY fall-through arm is still an arm, and the shared return still survives', () => {
   // `.L5` binds the accumulator and hands it on; only its BODY is empty. Counting a one-op
   // predecessor as an arrival duplicates the shared `return r;` again — the same defect, on the
   // shape a proxy for "computes nothing" cannot see (`ir/core.ts isBodyless` is the parameter-aware
