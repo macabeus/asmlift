@@ -1192,6 +1192,11 @@ export interface ReturnTailReading {
  *      class on 49, and it ties the mwcc jump-table window (cli
  *      test/matching/jump-table-window.test.ts) at 17 statements where the copies are 30 lines and
  *      byte-exact, the join 32.
+ *    - Lines alone, not rank.ts `compareScored`'s goto and cast counts ahead of them: on those 620
+ *      neither reading spells a `goto`, and the two orders part only on casts against lines, on 17,
+ *      where the lines choice scores the closer on 5, the cast-first one on 3, and neither changes
+ *      a MATCH. The ranked fan holds both readings, so where the default is ranked `compareScored`
+ *      still orders them.
  *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
