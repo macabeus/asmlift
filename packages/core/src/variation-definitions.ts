@@ -434,9 +434,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the copies spell the whole function in fewer lines than the join, they are the default instead, ' +
       'and the join is offered as `ret-join`. Past the copy budget the copies are not offered.',
     offeredWhen: {
-      when:
-        'The default structuring gave some `if` or `switch` outside every loop a join past its early returns, ' +
-        'and the copies spell the function in no fewer lines.',
+      when: 'Some `if` or `switch` outside every loop took a join past early returns no longer than the copies.',
       decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {
@@ -459,9 +457,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the return-tail copies, the copies are the default and this is the join, offered beside them, which ' +
       'is the source some functions were written as.',
     offeredWhen: {
-      when:
-        'The default structuring gave some `if` or `switch` outside every loop a join past its early returns, ' +
-        'and the copies spell the function in fewer lines.',
+      when: 'Some `if` or `switch` outside every loop took a join past early returns longer than the copies.',
       decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {

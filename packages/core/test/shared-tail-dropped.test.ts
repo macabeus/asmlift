@@ -6,7 +6,7 @@
 // a boundary contract. Both are sound, and that is why only the enumeration can refuse it: each
 // shared-tail pass's setting reads the default pass's dropped set. And each keeps its OWN drops apart,
 // so a follow the unsunk fn cannot carry does not take the sunk fn's candidate with it.
-// `structureChecked` is mocked to fail chosen `/defsite` points and to mark every other one, because
+// The structuring is mocked to fail chosen `/defsite` points and to mark every other one, because
 // no committed disassembly makes a contract fail on one of these passes and pass on another — the
 // closure is a property of the loop, not of any row.
 import { expect, test, vi } from 'vitest';
@@ -26,25 +26,26 @@ vi.mock('../src/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/pipeline')>();
   return {
     ...actual,
+    // the default pass structures through the size-bounded return-tail reading, which calls the
+    // module's own `structureChecked`, out of the mock's reach: it is the primary pass
+    structureReturnTailReading: (...args: Parameters<typeof actual.structureReturnTailReading>) => {
+      const [fn, opts] = args;
+      defaultFns.add(print(fn));
+      if (opts.anchorConstCopies && fail.default) {
+        throw new Error('mocked contract failure');
+      }
+      const read = actual.structureReturnTailReading(...args);
+      return opts.anchorConstCopies
+        ? { ...read, sfn: { ...read.sfn, locals: [...read.sfn.locals, { name: 'zzDefsite', type: T.s(32) }] } }
+        : read;
+    },
     structureChecked: (...args: Parameters<typeof actual.structureChecked>) => {
       const fn = args[0];
       const opts = args[1] ?? {};
       const text = print(fn);
-      // the `/ret-copy` pass structures the default's fn with the copies and no follow: neither twin
-      const pass = opts.followEarlyReturns
-        ? defaultFns.has(text)
-          ? 'sharedRet'
-          : 'sharedTail'
-        : opts.copyReturnTails
-          ? 'copies'
-          : 'default';
-      if (pass === 'default') {
-        defaultFns.add(text);
-      }
-      if (
-        opts.anchorConstCopies &&
-        ((pass === 'default' && fail.default) || (pass === 'sharedRet' && fail.sharedRet))
-      ) {
+      // the twins, and any other caller: the default pass is `structureReturnTailReading`'s above
+      const pass = opts.followEarlyReturns ? (defaultFns.has(text) ? 'sharedRet' : 'sharedTail') : 'other';
+      if (opts.anchorConstCopies && pass === 'sharedRet' && fail.sharedRet) {
         throw new Error('mocked contract failure');
       }
       const sfn = actual.structureChecked(...args);
