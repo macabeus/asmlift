@@ -1184,12 +1184,11 @@ export interface ReturnTailReading {
  *  tie goes to the join.
  *    - Whole function, not per branch: these are the two whole-function readings the ranked fan
  *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
- *      is always one of them. A per-branch unit only differs where the join fires at two or more
- *      branches: on 196 of those 620 (165 where the join is the shorter, 26 the longer, 5 level),
- *      and what it would gain there is not measured. Of the 13 that score a MATCH only with the
- *      copies (all sa3 agbcc), this bound publishes the copies on 9; on the other 4 the join is the
- *      shorter, so it stands, and 3 of those 4 take it at a single branch, where a per-branch unit
- *      decides as this one does. So a per-branch unit could recover at most 1 of the 4.
+ *      is always one of them. A per-branch unit differs only where the join fires at two or more
+ *      branches (196 of those 620), and its gain there is not measured. Of the 13 that MATCH only
+ *      with the copies (all sa3 agbcc) this bound publishes the copies on 9; on the other 4 the
+ *      join is the shorter, and 3 of them take it at a single branch, so a per-branch unit could
+ *      recover at most 1.
  *    - Emitted, not the structured tree: `readabilityRewrites` runs after `structure()` and can fold
  *      copied tails back together (`mergeCommonTails`), so a size read inside `structure()` is not
  *      the size published.
@@ -1198,10 +1197,9 @@ export interface ReturnTailReading {
  *      test/matching/jump-table-window.test.ts) at 17 statements where the copies are 30 lines and
  *      byte-exact, the join 32.
  *    - Lines alone, not rank.ts `compareScored`'s goto and cast counts ahead of them: on those 620
- *      neither reading spells a `goto`, and the two orders part only on casts against lines, on 17,
- *      where the lines choice scores the closer on 5, the cast-first one on 3, and neither changes
- *      a MATCH. The ranked fan holds both readings, so where the default is ranked `compareScored`
- *      still orders them.
+ *      neither reading spells a `goto`, and casts-first parts from lines on 17, where lines scores
+ *      the closer on 5 and casts on 3, with no MATCH between them. The ranked fan holds both
+ *      readings, so where the default is ranked `compareScored` still orders them.
  *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
