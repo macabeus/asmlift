@@ -676,4 +676,16 @@ describe('the return-tail reading bounded by size', () => {
     const join = decompile('f', TREE, ARMV4T_AGBCC, { prototypes: P, joinPastReturns: true }).source;
     expect(count(join, 'W(')).toBe(2);
   });
+
+  test('rank.ts enumerates the join as `/ret-join` where the default is the copies, and no `/ret-copy`', () => {
+    const cands = enumerateCandidates('f', TREE, ARMV4T_AGBCC, { prototypes: P });
+    const joined = cands.filter((c) => hasVariation(c.variations, 'ret-join'));
+    expect(joined.length).toBeGreaterThan(0);
+    expect(joined.every((c) => count(c.source, 'W(') === 2)).toBe(true);
+    expect(cands.filter((c) => !hasVariation(c.variations, 'ret-join')).every((c) => count(c.source, 'W(') === 1)).toBe(
+      true,
+    );
+    expect(cands.filter((c) => hasVariation(c.variations, 'ret-copy'))).toEqual([]);
+    expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-join')).toBe(true);
+  });
 });

@@ -264,6 +264,7 @@ export interface VariationDefinition {
 const CALLS =
   'void A(); void B(); void C(); void D(); void X(); void Y(); void P(); void Q(); s32 f(); s32 g(); s32 h(); void use();\n';
 
+const PIPELINE = 'packages/core/src/pipeline.ts';
 const RANK = 'packages/core/src/rank.ts';
 const RANK_VARIATIONS = 'packages/core/src/rank-variations.ts';
 const SYMBOLS = 'packages/core/src/symbols.ts';
@@ -429,11 +430,14 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`return`; that also reads early returns the compiler merged into the epilogue or cross-jumped ' +
       'into one return tail, and a `switch` with a `case` that returns early. This structures the same ' +
       'raised function again with no such join: everything below the `if` is written into each arm, ' +
-      'once more per such `if` of a chain, which is the source some functions were written as. Past ' +
-      'the copy budget the copies are not offered.',
+      'once more per such `if` of a chain, which is the source some functions were written as. Where ' +
+      'the copies spell the whole function in fewer lines than the join, they are the default instead, ' +
+      'and the join is offered as `ret-join`. Past the copy budget the copies are not offered.',
     offeredWhen: {
-      when: 'The default structuring gave some `if` or `switch` outside every loop a join past its early returns.',
-      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+      when:
+        'The default structuring gave some `if` or `switch` outside every loop a join past its early returns, ' +
+        'and the copies spell the function in no fewer lines.',
+      decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {
       compiler: 'agbcc',
@@ -443,7 +447,33 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       note: 'the shape of `synthetic:retchain_one`',
     },
     implementedIn: STRUCTURE,
-    seeAlso: ['shared-ret'],
+    seeAlso: ['shared-ret', 'ret-join'],
+  },
+  'ret-join': {
+    title: 'Join past early returns, where it is longer',
+    summary: 'the join past early returns, where it writes a return tail into early returns',
+    detail:
+      'The join past early returns writes the code below a divergent `if` once, but where the paths that ' +
+      'do not return meet at a block only some of them reach, every other path becomes an early `return` ' +
+      'that takes its own copy of the tail below. Where that spells the whole function in more lines than ' +
+      'the return-tail copies, the copies are the default and this is the join, offered beside them, which ' +
+      'is the source some functions were written as.',
+    offeredWhen: {
+      when:
+        'The default structuring gave some `if` or `switch` outside every loop a join past its early returns, ' +
+        'and the copies spell the function in fewer lines.',
+      decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a) { @ }',
+      before: 'if (a == 1) { A(); B(); } else if (a == 2 || a == 3) { A(); } else { A(); B(); } X(); Y(); C();',
+      after:
+        'if (a == 1) { A(); } else { if (a == 2 || a == 3) { A(); X(); Y(); C(); return; } A(); } B(); X(); Y(); C();',
+      note: 'the shape of sa3 `sub_809A808`',
+    },
+    implementedIn: PIPELINE,
+    seeAlso: ['ret-copy'],
   },
   'shared-tail': {
     title: 'Store tail copied back',
