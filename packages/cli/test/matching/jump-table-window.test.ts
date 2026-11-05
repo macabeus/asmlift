@@ -111,13 +111,12 @@ const BUDGET = 300_000;
 describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainId[])(
   'a scheduled-around PowerPC jump table recompiles byte-exact: %s',
   (id) => {
-    const run = (s: { sym: string; head: string; c: string }, copyReturnTails = false) => {
+    const run = (s: { sym: string; head: string; c: string }) => {
       const { obj, asm } = compilePpcTarget(id, s.head + s.c, s.sym, PPC_FLAGS);
       const prototypes = prototypesFromContext(s.head + s.c.slice(0, s.c.indexOf('{')) + ';', 'c');
       const source = decompile(s.sym, asm, PPC_MWCC, {
         asmData: extractAsmData(obj, PPC_MWCC, s.sym),
         prototypes,
-        copyReturnTails,
       }).source;
       expect(source).toContain('switch (');
       expect(scoreObjects(obj, compileCandPpc(id, s.head + source, PPC_FLAGS), s.sym).score, source).toBe(0);
@@ -134,10 +133,7 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
       },
       BUDGET,
     );
-    // `FALL`'s default returns, so the default join past early returns reads `case 3:`'s body as the
-    // code below the switch (`case 3: break;` before a tail compiles to the same edges); mwcc's bytes
-    // are the fall-through, which the return-tail copies spell (rank.ts's `/ret-copy`)
-    test.runIf(gated)('a bgtlr bound', () => expect(run(FALL, true).asm).toMatch(/\tbgtlr/), BUDGET);
+    test.runIf(gated)('a bgtlr bound', () => expect(run(FALL).asm).toMatch(/\tbgtlr/), BUDGET);
     test.runIf(gated)(
       'with no declaration, a default returning the only argument, which the body never reads',
       () => {
