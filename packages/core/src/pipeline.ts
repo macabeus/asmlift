@@ -1186,8 +1186,10 @@ export interface ReturnTailReading {
  *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
  *      is always one of them. A per-branch unit only differs where the join fires at two or more
  *      branches: on 196 of those 620 (165 where the join is the shorter, 26 the longer, 5 level),
- *      and what it would gain there is not measured. It reaches at most one of the losses: of the 4
- *      functions that score a MATCH only with the copies, 3 take the join at a single branch.
+ *      and what it would gain there is not measured. Of the 13 that score a MATCH only with the
+ *      copies (all sa3 agbcc), this bound publishes the copies on 9; on the other 4 the join is the
+ *      shorter, so it stands, and 3 of those 4 take it at a single branch, where a per-branch unit
+ *      decides as this one does. So a per-branch unit could recover at most 1 of the 4.
  *    - Emitted, not the structured tree: `readabilityRewrites` runs after `structure()` and can fold
  *      copied tails back together (`mergeCommonTails`), so a size read inside `structure()` is not
  *      the size published.
