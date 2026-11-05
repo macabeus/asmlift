@@ -294,9 +294,11 @@ kleod `sub_0800D188`). It has two producers, both over `jumpSharedFallTargets` i
 structuring of the whole function under its default reading, the join past early returns,
 declines, its `for`, outward and loop tail-copy reruns included, and only in a switch none of them
 spelled goto-free (`JumpRanking` in `structure.ts`). The whole-function return-tail copies (the
-rerun `structureWithinBudget` makes where the join declines, and the ranked `/ret-copy`) come
-after that whole ladder, not inside it, so a function whose join needs the goto publishes it even
-where the copies would lift without one (THE COPIES, BELOW ALL OF IT, above `structure()`); and
+rerun `structureWithinBudget` makes where the join declines, the second structuring
+`structureReturnTailReading` in `pipeline.ts` makes to publish the copies where the join spells the
+function longer, and the ranked `/ret-copy`) come after that whole ladder, not inside it, so a
+function whose join needs the goto publishes it even where the copies would lift without one,
+unless they are also the shorter (THE COPIES, BELOW ALL OF IT, above `structure()`); and
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
 already leaves gets no jump, and neither does the arm laid out directly above the target case,

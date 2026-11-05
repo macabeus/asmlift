@@ -1131,7 +1131,8 @@ export class StructureError extends Error {
  *  early returns. The join is not always the smaller of the two: it copies a return tail into each
  *  early return, so where the paths that do not return meet at a block few of them reach it can
  *  write more (sa3 sub_809A808, 119 lines against the copies' 54), and a join past the bound falls
- *  to the copies (`structureWithinBudget`). */
+ *  to the copies (`structureWithinBudget`). Under the bound, where the join is the longer, the
+ *  pipeline publishes the copies instead (pipeline.ts `structureReturnTailReading`). */
 export const COPY_BUDGET = 64;
 /** The floor under it, so a small function's legitimate copies never reach it. */
 export const COPY_BUDGET_FLOOR = 4096;
@@ -2526,9 +2527,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   // return tail, so everything below it is written into each arm, once more per such branch of a
   // chain: THE RETURN-TAIL COPIES. Absent (the default), such a branch is given the block its
   // non-returning paths meet at as its join (`joinsPastReturns` below) and the code from there is
-  // written once. rank.ts enumerates the copies as the `/ret-copy` twin, since a row whose copies
-  // are the bytes keeps them where they score; a copies structuring past the copy budget
-  // (`COPY_BUDGET`) declines, since the join that would bound it is the default's own tree.
+  // written once. Where that join was taken, the pipeline structures again with this on and
+  // publishes whichever reading spells the function in fewer lines, ties to the join (pipeline.ts
+  // `structureReturnTailReading`), and rank.ts enumerates the other as `/ret-copy` or `/ret-join`;
+  // a copies structuring past the copy budget (`COPY_BUDGET`) declines, and the join stands.
   copyReturnTails?: boolean;
   // Can the emitted language spell a `return` before the end of the function? Absent = yes. The
   // join past early returns writes one in each arm that leaves early, where the copies end every
@@ -2671,8 +2673,8 @@ export interface StructureHooks {
   /** Fired each time an `if` or a jump table takes the join past early returns (the default, off
    *  under `copyReturnTails`) where its CFG join differs: the one place the reading changes a tree.
    *  Held, like the other observation hooks, until the run that fired it is the one returned.
-   *  rank.ts's `/ret-copy` pass structures only the settings whose default-pass structuring fired
-   *  it: under one that never did, the copies are the default's tree. */
+   *  pipeline.ts `structureReturnTailReading` structures the copies only for a structuring that
+   *  fired it: under one that never did, the copies are its tree already. */
   onJoinPastReturns?: () => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
    *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
@@ -3837,7 +3839,8 @@ interface ForRanking {
  *  goto-free reading" mean the join's: a function whose join lifts only with a flag rung or a
  *  case-label jump publishes that, even where the copies would lift without one. Both are verified
  *  readings of the asm, so the order moves a spelling, never a decline into wrong C, and the scorer
- *  still weighs the copies as `/ret-copy`. CENSUS (2026-11-04, the 6,001 real functions): no
+ *  still weighs the copies, as the default where they are the shorter (pipeline.ts
+ *  `structureReturnTailReading`) and as `/ret-copy` where they are not. CENSUS (2026-11-04, the 6,001 real functions): no
  *  function is in that reach: the join raises no `goto` or `while (1)` count over the functions it
  *  re-spells.
  *
