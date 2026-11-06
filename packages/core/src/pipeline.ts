@@ -1208,7 +1208,8 @@ export interface ReturnTailReading {
  *  the copies into the CFG the join reads, with one copy of the tail. So the join is the shorter
  *  reading of those copies, and the bound alone publishes it. What the copies leave instead is a
  *  mark in the layout at a site the join took: the surviving tail ends in a jump over an arm laid
- *  out after it, or identical arms stayed separate blocks (structure/cross-jumped-tail.ts). Where
+ *  out after it, identical arms stayed separate blocks, or a call at the join was cut from the
+ *  argument setup each arm kept (structure/cross-jumped-tail.ts). Where
  *  any site the published join run took shows a mark, the copies are published whatever their size.
  *    - Read only where the target declares the merge. ido7.1 lays a tail out mid-construct with no
  *      cross-jump, and there the same layout fact is not evidence of the copies.
@@ -1220,8 +1221,12 @@ export interface ReturnTailReading {
  *    - MEASURED over those 620 functions, each reading really compiled: the bound with the layout
  *      gives MATCH 44 (copies everywhere 35, the bound alone 40), and loses none of the copies'
  *      matches. The bound alone loses 4, all sa3 agbcc: three where the tail is left mid-construct,
- *      and one where identical case bodies stayed apart. The marks were chosen on those 620, so
- *      the probe pairs (cross-jumped-tail.test.ts) are their held-out check.
+ *      and one where identical case bodies stayed apart. The first two marks were chosen on those
+ *      620; the third, and the split tail of the first, on held-out generated sources written with
+ *      the copies, where the bound with the first two still lost matches the copies make (agbcc 7,
+ *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; now 2, 3, 1). Their numbers are in
+ *      structure/cross-jumped-tail.ts. So, held out, this default still loses some of the copies'
+ *      matches; the 620 and the full bench lose none.
  *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
  *      too, and leaves the same marks under a join-written source (structure/cross-jumped-tail.ts).
  *      So a mark moves which verified reading is the default, never what is lifted.

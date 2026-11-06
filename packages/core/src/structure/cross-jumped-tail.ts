@@ -7,7 +7,7 @@
 // that copy sits and in WHICH arms became one block, because `do_cross_jump` keeps the copy of
 // the LATER jumping arm and jumps the earlier one to a new label before it. That label stops
 // further merging (`INSN_UID (JUMP_LABEL (insn)) < max_uid`). So the copies spelling leaves one of
-// two marks in the object:
+// three marks in the object:
 //
 //   (A) THE TAIL IS NOT LAST. The surviving copy ends in an unconditional jump (A1), and a block of
 //       the construct that never reaches the tail is laid out after it (A2). That is an arm that
@@ -47,9 +47,17 @@
 //
 // MEASURED. Over the 620 real functions where the join re-spells the default (2026-11-05), each
 // reading really compiled: the bound plus (A1 & A2) | B gives MATCH 44, against 35 for the copies
-// everywhere and 40 for the size bound alone, with no match lost. The rule was chosen on those 620,
-// so the probe pairs in cross-jumped-tail.test.ts are the held-out check of each mark and of each
-// shape that is no mark.
+// everywhere and 40 for the size bound alone, with no match lost. A and B were chosen on those 620.
+// The split tail of A1 and mark C were read off held-out sources instead: 160 generated functions
+// written WITH the copies, early returns between the arms (2026-11-06). There the size bound with A
+// and B alone loses 7 of the copies' matches on agbcc, 9 on gcc2.7.2kmc and 2 on gcc2.7.2; with the
+// split tail and C it loses 2, 3 and 1, and gains as many as before (5, 5, 2). Over 300 paired
+// functions, half written each way, the two lose no match; 3 join-written ones on each GCC 2.7.2
+// lane move to the copies and score further. On the 620 they move 3 functions, all to the copies'
+// own spelling: 2 closer, 1 further, MATCH still 44. What no layout read recovers: a tie the two
+// spellings leave in the same layout, where only the register allocation differs, and a call merged
+// across arms that pass it different arguments. The probe pairs in cross-jumped-tail.test.ts check
+// each mark and each shape that is no mark.
 //
 // Read only from the frontend's layout record (ir/core.ts `AsmLayout`). A block with no entry, such
 // as one a raise pass made up, is no evidence either way. A function with no record (parsed IR)
