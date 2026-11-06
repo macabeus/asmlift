@@ -3105,7 +3105,20 @@ export function abiSortEntryParams(
   assertTrueEntry(entryHasPreds);
   const rank = (v: Value): number => slots.slotOf(paramReg.get(v) ?? '') ?? NOT_AN_ARGUMENT;
   entry.params.sort((x, y) => rank(x) - rank(y));
+  for (const v of entry.params) {
+    const r = rank(v);
+    if (r !== NOT_AN_ARGUMENT) {
+      argRanks.set(v, r);
+    }
+  }
 }
+
+/** The ABI argument rank each entry parameter arrived in, as {@link abiSortEntryParams} ranked it. */
+const argRanks = new WeakMap<Value, number>();
+
+/** The argument rank (registers counted, then incoming stack words) entry parameter `v` arrived in,
+ *  or undefined for a live-in that is no argument slot, or a value no entry sort ranked. */
+export const entryArgRank = (v: Value): number | undefined => argRanks.get(v);
 
 function assertTrueEntry(entryHasPreds: boolean): void {
   if (entryHasPreds) {

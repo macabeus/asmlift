@@ -430,7 +430,7 @@ describe('an undeclared call whose callee’s body loads its incoming stack word
     call: name,
     callee: name,
     declared: null,
-    bodyReads: n,
+    bodyReads: () => n,
   });
 
   test('staged exactly [0, 4n) on every path, it is licensed at the body’s n words', () => {

@@ -52,10 +52,12 @@ export interface StackArgsCall<C> {
   /** The parameters the declaration lists, for the refusal messages — fewer than its words when a
    *  64-bit parameter takes two or a hidden struct-return pointer takes one. Absent, one per word. */
   readonly params?: number;
-  /** Where nothing declares the call: how many words of its incoming stack area the callee's own
-   *  body is proven to load (frontend/thumb-entry.ts), a LOWER bound on its stack words. Absent or 0,
-   *  the body proves nothing. See "THE CALLEE'S BODY" below for the licence it takes part in. */
-  readonly bodyReads?: number;
+  /** Where nothing declares the call: one past the highest word of its incoming stack area the
+   *  callee's own body is proven to load (frontend/callee-body.ts `CalleeStackWords`), a LOWER bound
+   *  on its stack words — asked, since it may lift the callee, only of a function whose code has
+   *  the signature of an outgoing block (see "THE CALLEE'S BODY" below). Absent, or answering 0 or
+   *  nothing, the body proves nothing. */
+  readonly bodyReads?: () => number | undefined;
 }
 
 /** One basic block's events. Where control goes afterwards is read out of `preds`, so a block is
@@ -238,9 +240,26 @@ export function analyzeOutgoingArgs<C>({
   loadedWordBound: bound,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
-  // the block the callee's body proves it reads into, for an undeclared call (`bodyReads`)
-  const bodyBlock = (ev: StackArgsCall<C>): number[] =>
-    ev.declared === null && (ev.bodyReads ?? 0) > 0 ? Array.from({ length: ev.bodyReads! }, (_, i) => 4 * i) : [];
+  // the block the callee's body proves it reads into, for an undeclared call (`bodyReads`), asked
+  // only where [sp,#0] is stored and never loaded: every block a licence names starts there, and
+  // a load of it puts the loaded-word bound at 0, so no word reaches any call beneath it. A fact of
+  // the code, not of the dataflow, so the fixpoint below never decides which calls ask.
+  const events = asmBlocks.flatMap((ab) => ab.events);
+  const asksBodies =
+    events.some((e) => e.kind === 'store' && e.off === 0) && !events.some((e) => e.kind === 'load' && e.off === 0);
+  const bodyWords = new Map<StackArgsCall<C>, number[]>();
+  const bodyBlock = (ev: StackArgsCall<C>): number[] => {
+    if (ev.declared !== null || ev.bodyReads === undefined || !asksBodies) {
+      return [];
+    }
+    if (!bodyWords.has(ev)) {
+      bodyWords.set(
+        ev,
+        Array.from({ length: ev.bodyReads() ?? 0 }, (_, i) => 4 * i),
+      );
+    }
+    return bodyWords.get(ev)!;
+  };
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
   // dataflow below never finds its block and it refuses — which is the verdict it had before
   // consumption existed. An unreachable `bl` is not evidence about the frame either way, and

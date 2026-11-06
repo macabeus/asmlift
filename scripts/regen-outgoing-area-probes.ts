@@ -17,11 +17,12 @@
 //     [sp,#0] only with no outgoing word and above the area otherwise; `qh5`/`a2`/`a3` are the
 //     residue, a by-value struct argument's block-copy base, and stage every outgoing word in
 //     ascending offset order around it. Read by `packages/core/test/frame-escape-probes.test.ts`.
-//   agbcc-entry-stack.s — a callee loads its incoming stack words in its straight-line entry
-//     (frontend/thumb-entry.ts), which bounds the stack words an undeclared call to it takes from
-//     below: `nine`/`narrow9`/`fifth`/`seventh`/`owns`/`kr` are callees, `call9`/`loop9` stage the
+//   agbcc-entry-stack.s — the incoming stack words a callee loads bound the stack words an
+//     undeclared call to it takes from below (frontend/callee-body.ts `CalleeStackWords`):
+//     `nine`/`narrow9`/`fifth`/`seventh`/`owns`/`kr` load theirs in the straight-line entry
+//     (frontend/thumb-entry.ts) and `br5` on one branch only; `call9`/`loop9`/`call_br` stage the
 //     block their callee reads, and `krmore`/`krfewer` stage more and fewer words than `kr` reads.
-//     Read by `packages/core/test/thumb-entry.test.ts`.
+//     Read by `packages/core/test/thumb-entry.test.ts` and `callee-stack-words.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
 //

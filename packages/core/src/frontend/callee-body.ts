@@ -82,6 +82,7 @@ import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
 import type { Reloc } from './asmdata';
+import { entryArgRank } from './ssa';
 import { thumbEntryWordsFromHalfwords } from './thumb-entry';
 
 /** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
@@ -121,9 +122,32 @@ export function asksCalleeBody(entry: FnProto | undefined): boolean {
   return !declaresParams(entry) && entry?.variadicParams === undefined;
 }
 
-/** The bound, read off each callee's body as a call to it is first lowered and kept for the rest.
+/** What each callee's body says, read as a call to it first asks and kept for the rest: the
+ *  register bound, and the incoming stack words it loads (`CalleeStackWords` below), off ONE lift.
  *  `lift` lifts one function of a text (the input, or a body in `external`) under a table, with no
- *  bound of its own: one level of bodies is read, never the callee's callees'. */
+ *  bound of its own: one level of bodies is read, never the callee's callees'. `entry` is the
+ *  target frontend's entry scan (`Frontend.entryStackWords`), asked only of a body that does not
+ *  lift. */
+export function calleeBodyReads(
+  self: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  lift: CalleeLift,
+  external?: CalleeBodies,
+  entry?: EntryStackWords,
+): { bound: CalleeBodyBound; stackWords: CalleeStackWords } {
+  const memo = new Map<string, BodyReads>();
+  const read = (callee: string): BodyReads => {
+    if (!memo.has(callee)) {
+      memo.set(callee, bodyReads(self, callee, asm, target, prototypes, lift, external, entry));
+    }
+    return memo.get(callee)!;
+  };
+  return { bound: (callee) => read(callee).bound, stackWords: (callee) => read(callee).stack };
+}
+
+/** {@link calleeBodyReads}'s register bound alone. */
 export function calleeBodyBounds(
   self: string,
   asm: string,
@@ -132,13 +156,7 @@ export function calleeBodyBounds(
   lift: CalleeLift,
   external?: CalleeBodies,
 ): CalleeBodyBound {
-  const memo = new Map<string, number | undefined>();
-  return (callee) => {
-    if (!memo.has(callee)) {
-      memo.set(callee, bodyBound(self, callee, asm, target, prototypes, lift, external));
-    }
-    return memo.get(callee);
-  };
+  return calleeBodyReads(self, asm, target, prototypes, lift, external).bound;
 }
 
 /** Whether `text` defines a label named `callee`: a `name:` line, an objdump `<name>:` header or a
@@ -180,7 +198,14 @@ const returnOnly = (p: FnProto | undefined): FnProto => {
   return out;
 };
 
-function bodyBound(
+/** What one callee's body answers: `bound`, the argument words it reads at most, and `stack`, the
+ *  incoming stack words it loads (`CalleeStackWords`); each undefined where the body proves none. */
+interface BodyReads {
+  readonly bound?: number;
+  readonly stack?: number;
+}
+
+function bodyReads(
   self: string,
   callee: string,
   asm: string,
@@ -188,41 +213,51 @@ function bodyBound(
   prototypes: Prototypes,
   lift: CalleeLift,
   external: CalleeBodies | undefined,
-): number | undefined {
+  entry: EntryStackWords | undefined,
+): BodyReads {
   if (callee === self || declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
-    return undefined;
+    return {};
   }
+  // a body that lifts answers both; one that does not answers its entry's loads, and no bound
+  const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
+    const got = liftedReads(callee, text, target, prototypes, lift, relocs);
+    return got ?? { stack: entry?.(callee, text) };
+  };
   if (definesLabel(asm, callee)) {
-    return weakNames(asm).has(callee) ? undefined : liftedBound(callee, asm, target, prototypes, lift);
+    return weakNames(asm).has(callee) ? {} : lifted(asm);
   }
   const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
   if (body?.kind === 'thumb') {
-    return undefined;
+    return { stack: scansArgumentsOf(target) ? thumbEntryWordsFromHalfwords(body.halfwords) : undefined };
   }
   if (body?.kind === 'arm') {
     return scansArgumentsOf(target)
-      ? armArgumentWords(
-          body.words,
-          !declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined),
-        )
-      : undefined;
+      ? {
+          bound: armArgumentWords(
+            body.words,
+            !declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined),
+          ),
+        }
+      : {};
   }
   if (body === undefined || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
-    return undefined;
+    return {};
   }
-  return liftedBound(callee, body.text, target, prototypes, lift, body.relocs);
+  return lifted(body.text, body.relocs);
 }
 
 /** The entry parameters a lift of `callee` out of `text` counts, once every call in it nothing lays
- *  out is taken at every argument register; undefined where no lift proves it. */
-function liftedBound(
+ *  out is taken at every argument register, and one past the highest incoming stack word among them
+ *  (`entryArgRank`): an argument slot past the registers is minted only below a stack word the body
+ *  loads, so that count is a word it reads. Undefined where no lift proves it. */
+function liftedReads(
   callee: string,
   text: string,
   target: TargetDescription,
   prototypes: Prototypes,
   lift: CalleeLift,
   relocs?: readonly Reloc[],
-): number | undefined {
+): BodyReads | undefined {
   const helpers = helperPrototypes(target);
   const table: Prototypes = { ...prototypes, [callee]: returnOnly(prototypes[callee]) };
   const forced = new Set<string>();
@@ -260,7 +295,11 @@ function liftedBound(
       }
       const passesFirst =
         target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
-      return Math.max(params.length, passesFirst ? 1 : 0);
+      const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
+      return {
+        bound: Math.max(params.length, passesFirst ? 1 : 0),
+        stack: Math.max(0, top - target.argRegs.length),
+      };
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
     // too, so the call is taken at the incoming values rather than at what the guess counted
@@ -287,58 +326,15 @@ function returnsUntouched(fn: Fn): boolean {
   return [...callFree].some((b) => b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0));
 }
 
-/** The incoming stack words callee `callee`'s own body is proven to load, or `undefined` where it
- *  proves none (frontend/stackargs.ts `StackArgsCall.bodyReads`). */
+/** WHAT A CALLEE'S BODY SAYS OF ITS STACK ARGUMENTS: one past the highest incoming stack word it is
+ *  proven to load, a LOWER bound on the words a call to it takes (frontend/stackargs.ts, "THE
+ *  CALLEE'S BODY"), or `undefined` where it proves none. Read under the rules of the register bound
+ *  and answering nothing where they do. Where the body lifts it is the lift's count (the whole body,
+ *  every path); where it does not, the frontend's scan of its straight-line entry
+ *  (`Frontend.entryStackWords`, or a Thumb body's halfwords: frontend/thumb-entry.ts), which sees
+ *  only the words loaded before the first branch, and so says less. */
 export type CalleeStackWords = (callee: string) => number | undefined;
 
 /** Reads the incoming stack words the straight-line entry of `callee` in a text of the frontend's
  *  input format loads (`Frontend.entryStackWords`). */
 export type EntryStackWords = (callee: string, text: string) => number | undefined;
-
-/** WHAT A CALLEE'S BODY SAYS OF ITS STACK ARGUMENTS: how many incoming stack words its entry loads,
- *  a LOWER bound on the words a call to it takes (frontend/stackargs.ts, "THE CALLEE'S BODY").
- *  Read under the rules of the register bound above, and answering nothing where they do: the
- *  callee is the function being lifted, its entry declares a struct or union return (the hidden
- *  pointer moves every argument a word), the text defines no label of it, the text marks it
- *  `.weak`, or a body handed in is one the target's frontend cannot scan. It needs no lift: a
- *  callee's stack arguments are loaded first thing, so a pass over its entry says it, from the text
- *  (`entry`, the frontend's own) or from a Thumb body's halfwords (frontend/thumb-entry.ts). A frontend
- *  that reads no entry, or a target whose compiler stages no outgoing area at the frame bottom
- *  (`compilerBehaviors.stagesOutgoingArgsInFrame`), answers nothing. */
-export function calleeStackWords(
-  self: string,
-  asm: string,
-  target: TargetDescription,
-  prototypes: Prototypes,
-  entry: EntryStackWords | undefined,
-  external?: CalleeBodies,
-): CalleeStackWords {
-  const memo = new Map<string, number | undefined>();
-  const read = (callee: string): number | undefined => {
-    if (
-      entry === undefined ||
-      target.compilerBehaviors.stagesOutgoingArgsInFrame !== true ||
-      callee === self ||
-      declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-    ) {
-      return undefined;
-    }
-    if (definesLabel(asm, callee)) {
-      return weakNames(asm).has(callee) ? undefined : entry(callee, asm);
-    }
-    const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
-    if (body?.kind === 'thumb') {
-      return thumbEntryWordsFromHalfwords(body.halfwords);
-    }
-    if (body?.kind !== 'listing' || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
-      return undefined;
-    }
-    return entry(callee, body.text);
-  };
-  return (callee) => {
-    if (!memo.has(callee)) {
-      memo.set(callee, read(callee));
-    }
-    return memo.get(callee);
-  };
-}

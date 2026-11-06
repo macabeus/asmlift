@@ -36,8 +36,8 @@ export interface Frontend {
     options?: LiftOptions,
   ): Fn;
   /** how many incoming stack words the straight-line entry of a callee, in a text of this
-   *  frontend's input format, loads (frontend/callee-body.ts `calleeStackWords`); absent where this
-   *  frontend reads no entry */
+   *  frontend's input format, loads (frontend/callee-body.ts `CalleeStackWords`), asked of a callee
+   *  whose body does not lift; absent where this frontend reads no entry */
   entryStackWords?: EntryStackWords;
 }
 
@@ -100,7 +100,7 @@ export interface LiftOptions {
    *  `liftStamped` supplies it on every lift; absent, nothing is bounded. */
   calleeBodyBound?: CalleeBodyBound;
   /** The incoming stack words a callee's own body, in the input or handed in, is proven to load
-   *  (frontend/callee-body.ts `calleeStackWords`), asked of a call no declaration lays out that
+   *  (frontend/callee-body.ts `CalleeStackWords`), asked of a call no declaration lays out that
    *  stages words in the outgoing area. pipeline.ts `liftStamped` supplies it on every lift. */
   calleeStackWords?: CalleeStackWords;
   /** The callees whose calls are taken at every argument register that may still hold this

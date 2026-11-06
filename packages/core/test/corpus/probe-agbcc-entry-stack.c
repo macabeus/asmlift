@@ -24,3 +24,5 @@ void loop9(int *p, int n) {
 int krmore(int x) { return kr(x, 2, 3, 4, 5, 6); }
 int krfewer(int x) { return kr(x, 2, 3, 4); }
 int calls5(int x, int y) { return fifth(1, 2, 3, x, y) + sink(x); }
+int br5(int a, int b, int c, int d, int e) { if (a) return sink(b) + e; return b; }
+void call_br(int *p) { br5(p[0], p[1], p[2], p[3], p[4]); }

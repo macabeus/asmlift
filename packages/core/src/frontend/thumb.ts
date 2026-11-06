@@ -3454,7 +3454,8 @@ function measureThumbFrame({
    *  leaves the operand in place. */
   dropsVoidReturn: boolean;
   /** the incoming stack words a callee nothing declares loads, off its own body
-   *  (`LiftOptions.calleeStackWords`): the outgoing-argument analysis's `bodyReads` */
+   *  (`LiftOptions.calleeStackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
+   *  only where the code stages a block */
   stackWordsOf?: CalleeStackWords;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
@@ -4011,7 +4012,7 @@ function measureThumbFrame({
             params: declared?.params,
             // where nothing declares a named call, what its callee's body loads of the stack words
             ...(declared === null && calleeRegister(ins, target) === null && stagesOutgoing
-              ? { bodyReads: stackWordsOf?.(callee) }
+              ? { bodyReads: () => stackWordsOf?.(callee) }
               : {}),
           },
         ];

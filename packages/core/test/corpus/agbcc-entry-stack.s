@@ -273,3 +273,44 @@ calls5:
 	bx	r1
 .Lfe11:
 	.size	 calls5,.Lfe11-calls5
+	.align	2, 0
+	.globl	br5
+	.type	 br5,function
+	.thumb_func
+br5:
+	push	{lr}
+	cmp	r0, #0
+	bne	.L21	@cond_branch
+	add	r0, r1, #0
+	b	.L22
+.L21:
+	add	r0, r1, #0
+	bl	sink
+	ldr	r1, [sp, #0x4]
+	add	r0, r0, r1
+.L22:
+	pop	{r1}
+	bx	r1
+.Lfe12:
+	.size	 br5,.Lfe12-br5
+	.align	2, 0
+	.globl	call_br
+	.type	 call_br,function
+	.thumb_func
+call_br:
+	push	{r4, lr}
+	add	sp, sp, #-0x4
+	ldr	r4, [r0]
+	ldr	r1, [r0, #0x4]
+	ldr	r2, [r0, #0x8]
+	ldr	r3, [r0, #0xc]
+	ldr	r0, [r0, #0x10]
+	str	r0, [sp]
+	add	r0, r4, #0
+	bl	br5
+	add	sp, sp, #0x4
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.Lfe13:
+	.size	 call_br,.Lfe13-call_br

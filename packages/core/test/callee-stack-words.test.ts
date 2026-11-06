@@ -2,15 +2,17 @@
 //
 // agbcc stages arguments 5+ at [sp,#0] upward, and a call nothing declares declines there, because
 // the code alone cannot say where its block ends (stack-args.test.ts). Where the callee's body is in
-// the input, or handed in, its straight-line entry says how many incoming stack words it loads
-// (frontend/thumb-entry.ts), a lower bound; a caller that stages exactly that many words on every
-// path is then lifted at every argument register and those words (frontend/stackargs.ts, "THE
-// CALLEE'S BODY"). The shapes are agbcc's own output: corpus/agbcc-entry-stack.s.
+// the input, or handed in, its body says how many incoming stack words it loads, a lower bound:
+// its lift where it lifts, its straight-line entry where it does not (frontend/callee-body.ts
+// `CalleeStackWords`, frontend/thumb-entry.ts). A caller that stages exactly that many words on
+// every path is then lifted at every argument register and those words (frontend/stackargs.ts,
+// "THE CALLEE'S BODY"). The shapes are agbcc's own output: corpus/agbcc-entry-stack.s.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import type { CalleeBodies } from '../src/frontend/callee-body';
+import { thumbEntryWordsFromText } from '../src/frontend/thumb-entry';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -48,6 +50,14 @@ describe('the callee in the input sizes the call', () => {
 
   test('a call beside another the body bounds lifts too', () => {
     expect(src('calls5', fn('fifth') + fn('calls5'))).toMatch(/v0 = fifth\(1, 2, 3, a0, a1\);/);
+  });
+
+  test('a callee that loads its stack word only on one branch is sized by its lift, not its entry', () => {
+    // br5 loads [sp,#4] after `bne`, past the straight-line entry, and lifts with five parameters
+    expect(thumbEntryWordsFromText('br5', fn('br5'))).toBeUndefined();
+    expect(src('call_br', fn('br5') + fn('call_br'))).toBe(
+      'void call_br(s32 *a0) {\n    br5(*a0, a0[1], a0[2], a0[3], a0[4]);\n}\n',
+    );
   });
 
   test('the whole probe as one input: the same answer', () => {

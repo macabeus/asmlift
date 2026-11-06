@@ -6,11 +6,14 @@
 // |argRegs|+k, so a body that loads word n-1 takes at least n stack words. That LOWER bound is
 // `StackArgsCall.bodyReads`, and the caller's staged words close it from above.
 //
-// The callee is not lifted: a body is often one this frontend cannot lift (a `bl` to a label of its
-// own, a computed jump), and a lift would answer nothing for it. Its stack arguments are loaded
-// first thing, so one pass over its ENTRY says it: the sp delta through `push`, `sub sp, #k` and
-// `add sp, #-k`, and a word load `ldr rD, [sp, #k]` with k at or past the delta, of a word nothing
-// earlier in the pass stored, is incoming word (k - delta) / 4.
+// A callee that lifts answers by its lift, which reads every path (frontend/callee-body.ts). This
+// pass is for one that does not (a `bl` to a label of its own, a computed jump), and for a Thumb
+// body handed in as halfwords. It reads the ENTRY only: the sp delta through `push`, `sub sp, #k`
+// and `add sp, #-k`, and a word load `ldr rD, [sp, #k]` with k at or past the delta, of a word
+// nothing earlier in the pass stored, is incoming word (k - delta) / 4. agbcc loads a stack
+// argument used on every path there, but one used on a single branch inside that branch (`br5` in
+// corpus/agbcc-entry-stack.s loads [sp,#4] past a `bne`), so the pass may answer fewer words than
+// the body loads, or none: a smaller lower bound, which the caller's staged words then contradict.
 //
 // THE PASS STOPS, keeping what it read, at the first instruction after which "the next instruction
 // runs with this sp, on every call" or "this frame word holds the caller's word" may no longer hold:
