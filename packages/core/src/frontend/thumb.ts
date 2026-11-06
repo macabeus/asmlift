@@ -5704,7 +5704,12 @@ function thumbFillOf(
     cfg.asmBlocks.map((ab) => {
       const xfer = ab.instrs.length ? classifyXfer(ab.instrs[ab.instrs.length - 1]) : null;
       const branch = xfer === 'uncond' || xfer === 'cond';
-      return { body: branch ? ab.instrs.slice(0, -1) : ab.instrs, endsInJump: xfer === 'uncond' };
+      return {
+        body: branch ? ab.instrs.slice(0, -1) : ab.instrs,
+        endsInJump: xfer === 'uncond',
+        // a far-jump relay wears `bl` and is a branch (`classifyXfer`)
+        isCall: (ins) => (ins.mnemonic === 'bl' && !(ins as Instr).farJump) || ins.mnemonic === 'blx',
+      };
     }),
   );
   const statics = makeLocalStatics();

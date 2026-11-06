@@ -1605,7 +1605,13 @@ function liftOnce(
   ssa.fn.asmLayout = recordAsmLayout(
     irBlocks,
     blocks.map((b) =>
-      b.synthReturn ? undefined : { body: b.body, endsInJump: b.branch !== null && isUncond(b.branch) },
+      b.synthReturn
+        ? undefined
+        : {
+            body: b.body,
+            endsInJump: b.branch !== null && isUncond(b.branch),
+            isCall: (ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'bctrl' || ins.mnemonic === 'blrl',
+          },
     ),
   );
 

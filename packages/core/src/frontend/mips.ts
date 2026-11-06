@@ -1665,6 +1665,7 @@ function liftOnce(
     blocks.map((b) => ({
       body: b.delay ? [...b.body, b.delay] : b.body,
       endsInJump: b.branch !== null && isUncond(b.branch),
+      isCall: (ins) => isCallInstr(ins as Instr),
     })),
   );
   const RET = target.returnReg;

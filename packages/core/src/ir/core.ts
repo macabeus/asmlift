@@ -73,6 +73,9 @@ export interface AsmBlockLayout {
    *  operands do not name (frontend/ssa.ts `recordAsmLayout`). A MIPS delay slot is part of the
    *  block it runs in. */
   readonly body: readonly string[];
+  /** the positions in `body` of the instructions that make a call, as the frontend's ISA reads them
+   *  (Thumb `bl`/`blx` but not a far-jump relay, MIPS `jal`/`jalr`/`bal`, PPC `bl`/`bctrl`/`blrl`) */
+  readonly calls: readonly number[];
   /** the block ends in an unconditional jump to a label: neither a fall-through, nor a return,
    *  nor a conditional or indirect branch */
   readonly endsInJump: boolean;

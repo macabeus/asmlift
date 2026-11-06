@@ -667,6 +667,8 @@ export interface AsmBlockText {
     readonly reloc?: { readonly sym: string; readonly addend: number };
   }[];
   readonly endsInJump: boolean;
+  /** which instructions of `body` make a call, which only the frontend's ISA knows */
+  readonly isCall: (ins: AsmBlockText['body'][number]) => boolean;
 }
 
 /** One instruction of {@link AsmBlockText} as the layout record spells it: `mnemonic op,op`, then the
@@ -697,6 +699,7 @@ export function recordAsmLayout(
       layout.set(irBlocks[i], {
         index: index++,
         body: ab.body.map(layoutText),
+        calls: ab.body.flatMap((ins, at) => (ab.isCall(ins) ? [at] : [])),
         endsInJump: ab.endsInJump,
       });
     }
