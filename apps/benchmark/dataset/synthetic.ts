@@ -4407,7 +4407,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //   stkbody9: `nine` is defined K&R in the same unit and loads five incoming words; the loop
   //     stages them before each call, and the row lifts the nine-argument call.
   //   stkbody_br: `br6` loads its one stack word read only on one branch, past its straight-line
-  //     entry (agbcc loads it inside that branch), so only its lift sizes the six-argument call.
+  //     entry (agbcc loads it inside that branch), so only its lift sizes the six-argument call. On
+  //     O32 it stays declined: `br6` reads a2 and a3 only as `sink`'s, which proves no read there,
+  //     and O32 may skip a register for an 8-aligned argument (frontend/callee-body.ts
+  //     `readsEveryArgReg`).
+  //   stkbody_two: `nine` then `six` from one frame: `nine`'s higher words still sit in the area
+  //     at `six`, and the call that took them ends them, so each call takes its own block.
+  //   stkbody_pair: `ts` takes a struct holding a `long long` after three words; O32 passes it at
+  //     16(sp) and leaves a3 empty, which no caller writes, so the row stays declined there
+  //     (control); agbcc splits it across r3 and [sp,#0], and lifts.
   //   stkbody_more: a K&R `kr` that loads one incoming word, called with six arguments (two staged):
   //     the body's bound is short of what is staged, so the row stays declined (control).
   //   stkbody_none: `nine` declared K&R and defined nowhere in the unit: no body, no bound, so the
@@ -4439,6 +4447,31 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'int sink(int);\nint br6();\nint stkbody_br(int *p);',
     proto: { sink: { params: 1 }, br6: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_two',
+    src:
+      'int nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i; { return a + b + c + d + e + f + g + h + i; }\n' +
+      'int six(a, b, c, d, e, f) int a, b, c, d, e, f; { return a + b + c + d + e + f; }\n' +
+      'int stkbody_two(int *p, int *q) {\n' +
+      '    nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '    return six(q[0], q[1], q[2], q[3], q[4], q[5]);\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int nine();\nint six();\nint stkbody_two(int *p, int *q);',
+    proto: { nine: { returns: 'int' }, six: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_pair',
+    src:
+      'struct L { long long v; };\n' +
+      'int ts(int a, int b, int c, struct L s) { return a + b + c + (int)s.v; }\n' +
+      'int stkbody_pair(int a, struct L *p) { return ts(a, 5, 6, *p); }',
+    features: ['multi-arg', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct L { long long v; };\nint ts();\nint stkbody_pair(int a, struct L *p);',
+    proto: { ts: { returns: 'int' } },
   },
   {
     sym: 'stkbody_more',
