@@ -1805,10 +1805,16 @@ function liftOnce(
   const outgoingWordState: Map<number, 'stored' | 'taken'>[] = blocks.map(() => new Map());
   // Whether the state of word `off` some path brings into this point of block `b` is `want`: the
   // walk `ssa.hasReachingDef` makes, over this state, so a block not filled yet is passed through.
-  const outgoingWordReaches = (off: number, b: number, want: 'stored' | 'taken'): boolean => {
+  // `here` is `b`'s state at this point (its state so far, by default); met again round a loop, `b`
+  // is its state at its end, which a back edge brings.
+  const outgoingWordReaches = (
+    off: number,
+    b: number,
+    want: 'stored' | 'taken',
+    here: ReadonlyMap<number, 'stored' | 'taken'> = outgoingWordState[b],
+  ): boolean => {
     const seen = new Set<number>();
-    const walk = (at: number): boolean => {
-      const own = outgoingWordState[at].get(off);
+    const walk = (at: number, own: 'stored' | 'taken' | undefined): boolean => {
       if (own !== undefined) {
         return own === want;
       }
@@ -1816,10 +1822,20 @@ function liftOnce(
         return false;
       }
       seen.add(at);
-      return preds[at].some(walk);
+      return preds[at].some((p) => walk(p, outgoingWordState[p].get(off)));
     };
-    return walk(b);
+    return walk(b, here.get(off));
   };
+  // EACH CALL ITS CALLEE'S BODY LICENSED, judged again once every block is filled: while a call is
+  // lowered, a block not filled yet — a loop's latch, or the call's own block met round a back
+  // edge — holds no state, so a word the call itself takes is not seen reaching its loop head and a
+  // word staged once before the loop passes for every iteration's. Judged again on the finished
+  // state (frontend/stackargs.ts reaches the same answer by its fixpoint), a word of the block some
+  // path brings in taken, or a word past it some path brings in stored, refuses the lift.
+  const bodyLicences = new Map<
+    Instr,
+    { bi: number; here: ReadonlyMap<number, 'stored' | 'taken'>; n: number; callee: string }
+  >();
   const restores = new Map<Value, { reg: string; addr: number }>();
   // Each `lw` that restores a save, and the register it restores: a save holds only while every path
   // restores it after its last write (`refuseSavedRegisterLeaks`).
@@ -2935,6 +2951,8 @@ function liftOnce(
     // argument k ≥ 4 lives, and the guess that cannot see past a3.
     const lowerJal = (ins: Instr) => {
       const at = `0x${ins.addr.toString(16)}`;
+      // this block's outgoing words as the call is reached, before it takes any
+      const wordsHere = new Map(outgoingWordState[bi]);
       const callee = jalCallee(ins, splat);
       if (callee?.startsWith('.')) {
         throw new FrontendUnsupportedError(
@@ -2973,7 +2991,8 @@ function liftOnce(
       // the refusals below.
       // A word an earlier call took as its stack argument is pending for no later one until it is
       // stored again (`outgoingWordState`), as frontend/stackargs.ts's dataflow ends it at the call
-      // whose block held it.
+      // whose block held it. A block not filled yet holds no state, so each licence is judged again
+      // once every block is (`bodyLicences`).
       const licensedStackWords = (): number | undefined => {
         if (frame !== null || !asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
           return undefined;
@@ -2984,7 +3003,7 @@ function liftOnce(
             off < frameSize &&
             off < loadedWordBound &&
             ssa.hasReachingDef(stackSlot(off), bi) &&
-            outgoingWordReaches(off, bi, 'stored'),
+            outgoingWordReaches(off, bi, 'stored', wordsHere),
         );
         if (reaching.length === 0) {
           return undefined;
@@ -3003,9 +3022,9 @@ function liftOnce(
           reaching.map((off) => off - STACK_ARGS_AT),
           (o) =>
             ssa.writtenOnEveryPath(stackSlot(STACK_ARGS_AT + o), bi, () => false) &&
-            !outgoingWordReaches(STACK_ARGS_AT + o, bi, 'taken'),
+            !outgoingWordReaches(STACK_ARGS_AT + o, bi, 'taken', wordsHere),
         )
-          ? n
+          ? (bodyLicences.set(ins, { bi, here: wordsHere, n, callee }), n)
           : undefined;
       };
       calls.lower({
@@ -3255,6 +3274,24 @@ function liftOnce(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  for (const [ins, { bi, here, n, callee }] of bodyLicences) {
+    for (const off of valueSlots) {
+      if (off < STACK_ARGS_AT || off >= (frameSize ?? 0) || off >= loadedWordBound) {
+        continue;
+      }
+      const taken = off < STACK_ARGS_AT + 4 * n;
+      if (outgoingWordReaches(off, bi, taken ? 'taken' : 'stored', here)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the call to '${callee}' at 0x${ins.addr.toString(16)} takes the ${n} stack ` +
+            `word(s) its callee's body loads, but ${
+              taken
+                ? `the word at ${off}(sp) reaches it on some path already taken by a call and not stored again`
+                : `the word at ${off}(sp), past them, reaches it stored on some path`
+            } — the block staged for it is not the same on every path, so its arguments are not known`,
+        );
+      }
+    }
+  }
   refuseSavedRegisterLeaks(
     name,
     blocks.map((b) => ({

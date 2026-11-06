@@ -231,3 +231,133 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
     });
   });
 });
+
+// A WORD STAGED ONCE BEFORE A LOOP is staged for its first iteration's call only: the call takes it,
+// and nothing stores it again round the back edge. Hand-written (no compiler restages this way
+// that the probes found), as is `f5w`, a callee that loads its stack word and writes it back. While
+// the call is lowered, its own block met round the back edge holds no state yet, so the licence is
+// judged again on the finished state (frontend/mips.ts `bodyLicences`), as frontend/stackargs.ts's
+// fixpoint judges it on Thumb.
+describe('O32: a stack word staged once before a loop', () => {
+  const text = `
+00000000 <f5w>:
+   0:	addiu	sp,sp,-8
+   4:	lw	v0,24(sp)
+   8:	addiu	v1,v0,1
+   c:	sw	v1,24(sp)
+  10:	addu	a0,a0,a1
+  14:	addu	a0,a0,a2
+  18:	addu	a0,a0,a3
+  1c:	addu	v0,a0,v0
+  20:	jr	ra
+  24:	addiu	sp,sp,8
+
+00000028 <loopstalew>:
+  28:	addiu	sp,sp,-32
+  2c:	sw	ra,24(sp)
+  30:	sw	s1,20(sp)
+  34:	move	s1,a1
+  38:	sw	a0,16(sp)
+  3c:	li	a0,1
+  40:	li	a1,2
+  44:	li	a2,3
+  48:	jal	0 <f5w>
+  4c:	li	a3,4
+  50:	addiu	s1,s1,-1
+  54:	bnez	s1,3c <loopstalew+0x14>
+  58:	nop
+  5c:	lw	ra,24(sp)
+  60:	lw	s1,20(sp)
+  64:	jr	ra
+  68:	addiu	sp,sp,32
+
+0000006c <loopfresh>:
+  6c:	addiu	sp,sp,-32
+  70:	sw	ra,24(sp)
+  74:	sw	s1,20(sp)
+  78:	sw	s0,28(sp)
+  7c:	move	s0,a0
+  80:	move	s1,a1
+  84:	sw	s0,16(sp)
+  88:	li	a0,1
+  8c:	li	a1,2
+  90:	li	a2,3
+  94:	jal	0 <f5w>
+  98:	li	a3,4
+  9c:	addiu	s1,s1,-1
+  a0:	bnez	s1,84 <loopfresh+0x18>
+  a4:	nop
+  a8:	lw	ra,24(sp)
+  ac:	lw	s1,20(sp)
+  b0:	lw	s0,28(sp)
+  b4:	jr	ra
+  b8:	addiu	sp,sp,32
+000000bc <looprot>:
+  bc:	addiu	sp,sp,-32
+  c0:	sw	ra,24(sp)
+  c4:	sw	s1,20(sp)
+  c8:	sw	s0,28(sp)
+  cc:	move	s0,a0
+  d0:	move	s1,a1
+  d4:	sw	s0,16(sp)
+  d8:	li	a0,1
+  dc:	li	a1,2
+  e0:	li	a2,3
+  e4:	jal	0 <f5w>
+  e8:	li	a3,4
+  ec:	addiu	s1,s1,-1
+  f0:	beqz	s1,100 <looprot+0x44>
+  f4:	nop
+  f8:	b	d8 <looprot+0x1c>
+  fc:	sw	s0,16(sp)
+ 100:	lw	ra,24(sp)
+ 104:	lw	s1,20(sp)
+ 108:	lw	s0,28(sp)
+ 10c:	jr	ra
+ 110:	addiu	sp,sp,32
+
+00000114 <loopstale2>:
+ 114:	addiu	sp,sp,-32
+ 118:	sw	ra,24(sp)
+ 11c:	sw	s1,20(sp)
+ 120:	move	s1,a1
+ 124:	sw	a0,16(sp)
+ 128:	li	a0,1
+ 12c:	li	a1,2
+ 130:	li	a2,3
+ 134:	jal	0 <f5w>
+ 138:	li	a3,4
+ 13c:	addiu	s1,s1,-1
+ 140:	beqz	s1,150 <loopstale2+0x3c>
+ 144:	nop
+ 148:	b	128 <loopstale2+0x14>
+ 14c:	nop
+ 150:	lw	ra,24(sp)
+ 154:	lw	s1,20(sp)
+ 158:	jr	ra
+ 15c:	addiu	sp,sp,32
+`;
+  const dump = `\nprobe.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 g     F .text\t00000028 f5w\n00000028 g     F .text\t00000044 loopstalew\n0000006c g     F .text\t00000050 loopfresh\n000000bc g     F .text\t00000058 looprot\n00000114 g     F .text\t0000004c loopstale2\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000048 R_MIPS_26         f5w\n00000094 R_MIPS_26         f5w\n000000e4 R_MIPS_26         f5w\n00000134 R_MIPS_26         f5w\n\n\n`;
+  describe.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s', (t) => {
+    const lift = (sym: string): string => {
+      try {
+        return decompile(sym, text, TOOLCHAIN_TARGETS[t].description, {
+          asmData: parseAsmData(dump, dump, dump, true),
+        }).source;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    };
+    test("is not every iteration's argument: the call keeps a decline", () => {
+      expect(lift('loopstalew')).toMatch(
+        /the call to 'f5w' at 0x48 takes the 1 stack word\(s\) its callee's body loads, but the word at 16\(sp\) reaches it on some path already taken/,
+      );
+      expect(lift('loopstale2')).toMatch(/the undeclared call to 'f5w' at 0x134 fills a0..a3/);
+    });
+    test('stored again in the loop, before the call or on the back edge, it is', () => {
+      for (const sym of ['loopfresh', 'looprot']) {
+        expect(lift(sym)).toMatch(/do \{\n {8}v0 = f5w\(1, 2, 3, 4, a0\);/);
+      }
+    });
+  });
+});
