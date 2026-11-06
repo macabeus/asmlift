@@ -1224,7 +1224,7 @@ export interface ReturnTailReading {
  *      and one where identical case bodies stayed apart. The first two marks were chosen on those
  *      620; the third, and the split tail of the first, on held-out generated sources written with
  *      the copies, where the bound with the first two still lost matches the copies make (agbcc 7,
- *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; now 2, 3, 1). Their numbers are in
+ *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; with all three, 2, 3, 1). Their numbers are in
  *      structure/cross-jumped-tail.ts. So, held out, this default still loses some of the copies'
  *      matches; the 620 and the full bench lose none.
  *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
@@ -1288,8 +1288,6 @@ export function structureReturnTailReading(
   const crossJumped = opts.crossJumpsReturnTails === true && sites.some((site) => crossJumpedTail(fn, site));
   let publishCopies = false;
   try {
-    // Both are emitted whatever the layout says, so a backend that cannot spell one of them leaves
-    // the join standing exactly as it does without the layout.
     const [copyLines, joinLines] = [sourceLineCount(emit(copies)), sourceLineCount(emit(join))];
     publishCopies = crossJumped || copyLines < joinLines;
   } catch {

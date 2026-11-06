@@ -1268,11 +1268,13 @@ export interface TargetDescription {
     //     `if (INSN_UID (JUMP_LABEL (insn)) < max_uid)`.
     //   - `do_cross_jump` keeps the LATER copy and jumps to a label before it. `get_label_before`
     //     creates that label, so a jump already redirected is never searched for siblings again.
-    // So the copies spelling leaves two shapes in the object:
+    // So the copies spelling leaves three shapes in the object (structure/cross-jumped-tail.ts):
     //   - an arm that does not use the tail stays laid out after the surviving copy, and that copy
     //     ends in a jump over it;
     //   - identical arm bodies stay separate blocks, where the join's one original label would have
-    //     merged them.
+    //     merged them;
+    //   - `find_cross_jump` compares backward and stops at the first pair that differs, so a call
+    //     the tail opens with can be cut from the argument setup each arm keeps.
     // MEASURED on two probe pairs, `corpus/probe-rettail-{pa,pb}-{copies,join}.c`: a three-arm `if`
     // and a seven-case `switch`. Each is compiled at each toolchain's canonical flags by
     // `scripts/regen-rettail-probes.ts`, and cross-jumped-tail.test.ts reads the objects:

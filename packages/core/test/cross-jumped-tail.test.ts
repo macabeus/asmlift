@@ -1,6 +1,6 @@
 // A RETURN TAIL THE COMPILER CROSS-JUMPED, read off the asm layout.
 //
-// Two probe pairs, each compiled by scripts/regen-rettail-probes.ts at every toolchain's canonical
+// Six probe pairs, each compiled by scripts/regen-rettail-probes.ts at every toolchain's canonical
 // flags. In each pair the source writes one function twice: the return tail in every arm
 // (`-copies`), and the tail written once after the construct (`-join`).
 //   - `pa`: a three-arm `if` whose arms call `h(10, 0)`, `h(20, 0)` and `h(30, 0)`, the last arm

@@ -69,9 +69,9 @@ export interface AsmBlockLayout {
   /** the block's position among the function's blocks in the asm text, first block 0 */
   readonly index: number;
   /** the block's instructions without its control transfer, one string per instruction as the
-   *  asm spells it (`mnemonic op,op`), followed by `<sym>` where a relocation fills in a symbol the
-   *  operands do not name (frontend/ssa.ts `recordAsmLayout`). A MIPS delay slot is part of the
-   *  block it runs in. */
+   *  asm spells it (`mnemonic op,op`), followed by `<sym>` (`<sym+0xN>` with an addend) where a
+   *  relocation fills in a symbol the operands do not name (frontend/ssa.ts `recordAsmLayout`). A
+   *  MIPS delay slot is part of the block it runs in. */
   readonly body: readonly string[];
   /** the positions in `body` of the instructions that make a call, as the frontend's ISA reads them
    *  (Thumb `bl`/`blx` but not a far-jump relay, MIPS `jal`/`jalr`/`bal`, PPC `bl`/`bctrl`/`blrl`) */
