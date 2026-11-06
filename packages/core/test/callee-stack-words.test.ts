@@ -208,9 +208,12 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
       expect(lift('restaged_higher', { f5: { params: 5 } })).toMatch(
         /the undeclared call to 'g6' at 0x[0-9a-f]+ fills a0..a3/,
       );
-      expect(lift('restaged')).toBe(
-        's32 restaged(s32 a0) {\n    f5(1, 2, 3, 4, a0);\n    return f5(5, 6, 7, 8, a0);\n}\n',
-      );
+      // each compiler restages the word for every call, so a declared callee lifts the same
+      for (const prototypes of [{}, { f5: { params: 5 } }]) {
+        expect(lift('restaged', prototypes)).toBe(
+          's32 restaged(s32 a0) {\n    f5(1, 2, 3, 4, a0);\n    return f5(5, 6, 7, 8, a0);\n}\n',
+        );
+      }
     });
 
     // O32 skips a3 (a1) for an 8-aligned argument and passes it at 16(sp): the callee's lift mints
@@ -336,12 +339,73 @@ describe('O32: a stack word staged once before a loop', () => {
  154:	lw	s1,20(sp)
  158:	jr	ra
  15c:	addiu	sp,sp,32
+
+00000160 <thendecl>:
+ 160:	addiu	sp,sp,-32
+ 164:	sw	ra,24(sp)
+ 168:	sw	a0,16(sp)
+ 16c:	li	a0,1
+ 170:	li	a1,2
+ 174:	li	a2,3
+ 178:	jal	0 <f5w>
+ 17c:	li	a3,4
+ 180:	li	a0,1
+ 184:	li	a1,2
+ 188:	li	a2,3
+ 18c:	jal	400 <g5>
+ 190:	li	a3,4
+ 194:	lw	ra,24(sp)
+ 198:	jr	ra
+ 19c:	addiu	sp,sp,32
+
+000001a0 <decldecl>:
+ 1a0:	addiu	sp,sp,-32
+ 1a4:	sw	ra,24(sp)
+ 1a8:	sw	a0,16(sp)
+ 1ac:	li	a0,1
+ 1b0:	li	a1,2
+ 1b4:	li	a2,3
+ 1b8:	jal	500 <h5>
+ 1bc:	li	a3,4
+ 1c0:	li	a0,1
+ 1c4:	li	a1,2
+ 1c8:	li	a2,3
+ 1cc:	jal	400 <g5>
+ 1d0:	li	a3,4
+ 1d4:	lw	ra,24(sp)
+ 1d8:	jr	ra
+ 1dc:	addiu	sp,sp,32
+
+000001e0 <acrossbr>:
+ 1e0:	addiu	sp,sp,-32
+ 1e4:	sw	ra,24(sp)
+ 1e8:	sw	s0,20(sp)
+ 1ec:	move	s0,a1
+ 1f0:	sw	a0,16(sp)
+ 1f4:	li	a0,1
+ 1f8:	li	a1,2
+ 1fc:	li	a2,3
+ 200:	jal	0 <f5w>
+ 204:	li	a3,4
+ 208:	beqz	s0,228 <acrossbr+0x48>
+ 20c:	li	v0,0
+ 210:	li	a0,1
+ 214:	li	a1,2
+ 218:	li	a2,3
+ 21c:	jal	400 <g5>
+ 220:	li	a3,4
+ 224:	li	v0,0
+ 228:	lw	ra,24(sp)
+ 22c:	lw	s0,20(sp)
+ 230:	jr	ra
+ 234:	addiu	sp,sp,32
 `;
-  const dump = `\nprobe.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 g     F .text\t00000028 f5w\n00000028 g     F .text\t00000044 loopstalew\n0000006c g     F .text\t00000050 loopfresh\n000000bc g     F .text\t00000058 looprot\n00000114 g     F .text\t0000004c loopstale2\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000048 R_MIPS_26         f5w\n00000094 R_MIPS_26         f5w\n000000e4 R_MIPS_26         f5w\n00000134 R_MIPS_26         f5w\n\n\n`;
+  const dump = `\nprobe.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 g     F .text\t00000028 f5w\n00000028 g     F .text\t00000044 loopstalew\n0000006c g     F .text\t00000050 loopfresh\n000000bc g     F .text\t00000058 looprot\n00000114 g     F .text\t0000004c loopstale2\n00000160 g     F .text\t00000040 thendecl\n000001a0 g     F .text\t00000040 decldecl\n000001e0 g     F .text\t00000058 acrossbr\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000048 R_MIPS_26         f5w\n00000094 R_MIPS_26         f5w\n000000e4 R_MIPS_26         f5w\n00000134 R_MIPS_26         f5w\n00000178 R_MIPS_26         f5w\n0000018c R_MIPS_26         g5\n000001b8 R_MIPS_26         h5\n000001cc R_MIPS_26         g5\n00000200 R_MIPS_26         f5w\n0000021c R_MIPS_26         g5\n\n\n`;
   describe.each(['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'] as const)('%s', (t) => {
-    const lift = (sym: string): string => {
+    const lift = (sym: string, prototypes = {}): string => {
       try {
         return decompile(sym, text, TOOLCHAIN_TARGETS[t].description, {
+          prototypes,
           asmData: parseAsmData(dump, dump, dump, true),
         }).source;
       } catch (e) {
@@ -357,7 +421,26 @@ describe('O32: a stack word staged once before a loop', () => {
     test('stored again in the loop, before the call or on the back edge, it is', () => {
       for (const sym of ['loopfresh', 'looprot']) {
         expect(lift(sym)).toMatch(/do \{\n {8}v0 = f5w\(1, 2, 3, 4, a0\);/);
+        expect(lift(sym, { f5w: { params: 5 } })).toMatch(/do \{\n {8}v0 = f5w\(1, 2, 3, 4, a0\);/);
       }
+    });
+
+    // A DECLARED CALL TAKES ITS STACK WORDS BY THE SAME RULE: a word an earlier call took is that
+    // callee's, which `f5w` writes (a0 + 1), so the value stored there is not what the call is
+    // handed. Asked as the call is lowered, and again on the finished state for a word a loop
+    // brings round taken (frontend/mips.ts `declaredTakes`); Thumb refuses the same shapes.
+    const g5 = { g5: { params: ['int', 'int', 'int', 'int', 'int'], returnsVoid: true } };
+    const taken = (callee: string, at: string) =>
+      new RegExp(
+        `the call to '${callee}' at ${at} takes the word at 16\\(sp\\) as a stack argument, but it reaches the call on some path already taken by an earlier call`,
+      );
+    test('a word a licensed call took is no later declared call’s, in its block or past a branch', () => {
+      expect(lift('thendecl', g5)).toMatch(taken('g5', '0x18c'));
+      expect(lift('acrossbr', g5)).toMatch(taken('g5', '0x21c'));
+    });
+    test('…nor one a declared call took, after it or round a loop', () => {
+      expect(lift('decldecl', { ...g5, h5: { params: 5, returnsVoid: true } })).toMatch(taken('g5', '0x1cc'));
+      expect(lift('loopstalew', { f5w: { params: 5 } })).toMatch(taken('f5w', '0x48'));
     });
   });
 });

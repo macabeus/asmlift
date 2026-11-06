@@ -1836,6 +1836,23 @@ function liftOnce(
     Instr,
     { bi: number; here: ReadonlyMap<number, 'stored' | 'taken'>; n: number; callee: string }
   >();
+  // EACH CALL A DECLARATION SIZED, AND THE STACK WORDS IT TOOK, judged again the same way: its
+  // arity is the declaration's, so a word past its block says nothing, but a word it takes that
+  // some path brings in already taken by an earlier call — licensed or declared — is a word the
+  // earlier callee owned and may have written, not the value stored there (frontend/stackargs.ts
+  // ends a pending word at the call that takes it for either kind of call).
+  const declaredTakes = new Map<
+    Instr,
+    { bi: number; here: ReadonlyMap<number, 'stored' | 'taken'>; offs: number[]; callee: string }
+  >();
+  const refuseTakenWord = (callee: string, addr: number, off: number): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': outgoing stack arguments not modelled — the call to '${callee}' at ` +
+        `0x${addr.toString(16)} takes the word at ${off}(sp) as a stack argument, but it reaches the call on ` +
+        'some path already taken by an earlier call and not stored again, so what the earlier callee left there ' +
+        'is not known',
+    );
+  };
   const restores = new Map<Value, { reg: string; addr: number }>();
   // Each `lw` that restores a save, and the register it restores: a save holds only while every path
   // restores it after its last write (`refuseSavedRegisterLeaks`).
@@ -3027,6 +3044,7 @@ function liftOnce(
           ? (bodyLicences.set(ins, { bi, here: wordsHere, n, callee }), n)
           : undefined;
       };
+      const took: number[] = [];
       calls.lower({
         callee,
         ssa,
@@ -3051,6 +3069,12 @@ function liftOnce(
                 `${off}(sp), and no value stored there reaches the call`,
             );
           }
+          // a word an earlier call took is the earlier callee's, not the value stored there, on the
+          // blocks filled so far; the rest are judged once every block is (`declaredTakes`)
+          if (outgoingWordReaches(off, bi, 'taken', wordsHere)) {
+            refuseTakenWord(callee, ins.addr, off);
+          }
+          took.push(off);
           outgoingWordState[bi].set(off, 'taken');
           return readVar(stackSlot(off), bi);
         },
@@ -3118,6 +3142,9 @@ function liftOnce(
           },
         },
       });
+      if (took.length > 0 && !bodyLicences.has(ins)) {
+        declaredTakes.set(ins, { bi, here: wordsHere, offs: took, callee });
+      }
       // hi and lo are the callee's to overwrite
       divState = null;
       mulState = null;
@@ -3290,6 +3317,13 @@ function liftOnce(
                 : `the word at ${off}(sp), past them, reaches it stored on some path`
             } — the block staged for it is not the same on every path, so its arguments are not known`,
         );
+      }
+    }
+  }
+  for (const [ins, { bi, here, offs, callee }] of declaredTakes) {
+    for (const off of offs) {
+      if (outgoingWordReaches(off, bi, 'taken', here)) {
+        refuseTakenWord(callee, ins.addr, off);
       }
     }
   }
