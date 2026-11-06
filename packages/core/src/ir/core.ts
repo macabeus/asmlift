@@ -86,7 +86,15 @@ export interface AsmBlockLayout {
  *  cross-jumps return tails (target.ts `crossJumpsReturnTails`), the layout tells a tail the source
  *  wrote once from one it wrote into every arm, and the CFG cannot. Keyed by Block OBJECT, so a
  *  clone re-keys it (cli/src/report.ts `structuredCloneFn`). A block a pass created has no entry,
- *  and every reader takes a missing entry as "no evidence". */
+ *  and every reader takes a missing entry as "no evidence".
+ *
+ *  AN ENTRY DESCRIBES THE ASM BLOCK THE IR BLOCK WAS LIFTED FROM, whatever raising later did to the
+ *  IR block. A return sunk into it, or ops a fold absorbed (shortcircuit, tailsink, divpow2), leave
+ *  the entry as the frontend wrote it. So `endsInJump` and `body` say what the compiler emitted,
+ *  not what the block holds now: over the agbcc lifts of the 620 functions the join re-spells
+ *  (2026-11-05), 786 of 10520 blocks have an entry saying they end in a jump and no longer end in a
+ *  `br`. The return-tail chooser reads exactly that, the asm terminator. A reader of the current
+ *  block reads its ops. */
 export type AsmLayout = Map<Block, AsmBlockLayout>;
 
 /** Where a function-scope static lives, which decides how its definition is spelled: `rodata` is
