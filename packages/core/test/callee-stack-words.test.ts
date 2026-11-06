@@ -196,6 +196,21 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
       );
     });
 
+    // A call ends the words it took per STORE, not per value: a value `f5`/`f6` took and that is
+    // stored again for the next call is staged for that call. Ended by value, the store of `x` to
+    // 20(sp) for `g6` (which loads only 16(sp)) hid, and `g6` was licensed one word short.
+    test('a value one call took, stored again for the next, is staged for it', () => {
+      for (const sym of ['restaged_higher', 'restaged_same_word']) {
+        expect(lift(sym)).toMatch(/the undeclared call to 'g6' at 0x[0-9a-f]+ fills a0..a3/);
+      }
+      expect(lift('restaged_higher', { f5: { params: 5 } })).toMatch(
+        /the undeclared call to 'g6' at 0x[0-9a-f]+ fills a0..a3/,
+      );
+      expect(lift('restaged')).toBe(
+        's32 restaged(s32 a0) {\n    f5(1, 2, 3, 4, a0);\n    return f5(5, 6, 7, 8, a0);\n}\n',
+      );
+    });
+
     // O32 skips a3 (a1) for an 8-aligned argument and passes it at 16(sp): the callee's lift mints
     // the skipped register a parameter it never reads, and the caller never writes it (or parks a
     // temp there, on IDO). Licensed, the call would take that register as an argument.

@@ -17,3 +17,9 @@ int t1(int a, long long b, int c) { return a + (int)b + c; }
 int callt1(int a, long long *p) { return t1(a, *p, 7); }
 int ll4c(int a, int b, int c, long long d) { return sink(a) + (int)d; }
 int callllc(int *p) { return ll4c(p[0], p[1], p[2], *(long long *)(p + 4)); }
+int g6(int a, int b, int c, int d, int e, int z) { return a + b + c + d + e; }
+int f5(int a, int b, int c, int d, int e) { return sink(a + b + c + d + e); }
+int f6(int a, int b, int c, int d, int e, int z) { return sink(a + b + c + d + e + z); }
+int restaged(int x) { f5(1, 2, 3, 4, x); return f5(5, 6, 7, 8, x); }
+int restaged_higher(int x, int y) { f5(1, 2, 3, 4, x); return g6(5, 6, 7, 8, y, x); }
+int restaged_same_word(int x, int y, int z) { f6(1, 2, 3, 4, y, x); return g6(5, 6, 7, 8, z, x); }

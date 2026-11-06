@@ -5,7 +5,8 @@
 // stage the words their callee loads, `krmore` one more than `kr` loads; `wide_then_narrow` and
 // `wide_on_a_branch` call `nine` then `six`, so `nine`'s higher words still sit in the area at
 // `six`; `callts`, `callll`, `callllc` and `callt1` call a callee whose 8-aligned argument skips
-// a3 (or a1), `ll4c` handing its registers to a call nothing declares.
+// a3 (or a1), `ll4c` handing its registers to a call nothing declares; `restaged`,
+// `restaged_higher` and `restaged_same_word` store a value `f5`/`f6` took again for a later call.
 // Each compiler at its canonical flags.
 //
 //   ASMLIFT_IDO_CC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… npx tsx scripts/regen-o32-callee-stack-probes.ts

@@ -294,4 +294,122 @@ Disassembly of section .text:
  3e0:	addiu	sp,sp,32
  3e4:	jr	ra
  3e8:	nop
- 3ec:	nop
+
+000003ec <g6>:
+ 3ec:	addu	t6,a0,a1
+ 3f0:	lw	t9,16(sp)
+ 3f4:	addu	t7,t6,a2
+ 3f8:	addu	t8,t7,a3
+ 3fc:	jr	ra
+ 400:	addu	v0,t8,t9
+
+00000404 <f5>:
+ 404:	addiu	sp,sp,-24
+ 408:	addu	t7,a0,a1
+ 40c:	lw	t0,40(sp)
+ 410:	addu	t8,t7,a2
+ 414:	addu	t9,t8,a3
+ 418:	sw	ra,20(sp)
+ 41c:	sw	a0,24(sp)
+ 420:	jal	0 <nine>
+ 424:	addu	a0,t9,t0
+ 428:	lw	ra,20(sp)
+ 42c:	addiu	sp,sp,24
+ 430:	jr	ra
+ 434:	nop
+
+00000438 <f6>:
+ 438:	addiu	sp,sp,-24
+ 43c:	lw	t0,40(sp)
+ 440:	addu	t7,a0,a1
+ 444:	addu	t8,t7,a2
+ 448:	lw	t2,44(sp)
+ 44c:	addu	t9,t8,a3
+ 450:	sw	ra,20(sp)
+ 454:	sw	a0,24(sp)
+ 458:	addu	t1,t9,t0
+ 45c:	jal	0 <nine>
+ 460:	addu	a0,t1,t2
+ 464:	lw	ra,20(sp)
+ 468:	addiu	sp,sp,24
+ 46c:	jr	ra
+ 470:	nop
+
+00000474 <restaged>:
+ 474:	addiu	sp,sp,-32
+ 478:	sw	a0,32(sp)
+ 47c:	lw	t6,32(sp)
+ 480:	sw	ra,28(sp)
+ 484:	li	a0,1
+ 488:	li	a1,2
+ 48c:	li	a2,3
+ 490:	li	a3,4
+ 494:	jal	0 <nine>
+ 498:	sw	t6,16(sp)
+ 49c:	lw	t7,32(sp)
+ 4a0:	li	a0,5
+ 4a4:	li	a1,6
+ 4a8:	li	a2,7
+ 4ac:	li	a3,8
+ 4b0:	jal	0 <nine>
+ 4b4:	sw	t7,16(sp)
+ 4b8:	lw	ra,28(sp)
+ 4bc:	addiu	sp,sp,32
+ 4c0:	jr	ra
+ 4c4:	nop
+
+000004c8 <restaged_higher>:
+ 4c8:	addiu	sp,sp,-32
+ 4cc:	sw	a0,32(sp)
+ 4d0:	lw	t6,32(sp)
+ 4d4:	sw	ra,28(sp)
+ 4d8:	sw	a1,36(sp)
+ 4dc:	li	a1,2
+ 4e0:	li	a0,1
+ 4e4:	li	a2,3
+ 4e8:	li	a3,4
+ 4ec:	jal	0 <nine>
+ 4f0:	sw	t6,16(sp)
+ 4f4:	lw	t7,36(sp)
+ 4f8:	lw	t8,32(sp)
+ 4fc:	li	a0,5
+ 500:	li	a1,6
+ 504:	li	a2,7
+ 508:	li	a3,8
+ 50c:	sw	t7,16(sp)
+ 510:	jal	0 <nine>
+ 514:	sw	t8,20(sp)
+ 518:	lw	ra,28(sp)
+ 51c:	addiu	sp,sp,32
+ 520:	jr	ra
+ 524:	nop
+
+00000528 <restaged_same_word>:
+ 528:	addiu	sp,sp,-32
+ 52c:	sw	a0,32(sp)
+ 530:	sw	a1,36(sp)
+ 534:	lw	t6,36(sp)
+ 538:	lw	t7,32(sp)
+ 53c:	sw	ra,28(sp)
+ 540:	sw	a2,40(sp)
+ 544:	li	a2,3
+ 548:	li	a1,2
+ 54c:	li	a0,1
+ 550:	li	a3,4
+ 554:	sw	t6,16(sp)
+ 558:	jal	0 <nine>
+ 55c:	sw	t7,20(sp)
+ 560:	lw	t8,40(sp)
+ 564:	lw	t9,32(sp)
+ 568:	li	a0,5
+ 56c:	li	a1,6
+ 570:	li	a2,7
+ 574:	li	a3,8
+ 578:	sw	t8,16(sp)
+ 57c:	jal	0 <nine>
+ 580:	sw	t9,20(sp)
+ 584:	lw	ra,28(sp)
+ 588:	addiu	sp,sp,32
+ 58c:	jr	ra
+ 590:	nop
+	...

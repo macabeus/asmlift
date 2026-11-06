@@ -277,4 +277,115 @@ Disassembly of section .text:
  39c:	lw	ra,24(sp)
  3a0:	jr	ra
  3a4:	addiu	sp,sp,32
+
+000003a8 <g6>:
+ 3a8:	lw	v0,16(sp)
+ 3ac:	addu	a0,a0,a1
+ 3b0:	addu	a0,a0,a2
+ 3b4:	addu	a0,a0,a3
+ 3b8:	jr	ra
+ 3bc:	addu	v0,a0,v0
+
+000003c0 <f5>:
+ 3c0:	addiu	sp,sp,-24
+ 3c4:	lw	v0,40(sp)
+ 3c8:	addu	a0,a0,a1
+ 3cc:	addu	a0,a0,a2
+ 3d0:	addu	a0,a0,a3
+ 3d4:	sw	ra,16(sp)
+ 3d8:	jal	0 <nine>
+ 3dc:	addu	a0,a0,v0
+ 3e0:	lw	ra,16(sp)
+ 3e4:	jr	ra
+ 3e8:	addiu	sp,sp,24
+
+000003ec <f6>:
+ 3ec:	addiu	sp,sp,-24
+ 3f0:	lw	v0,40(sp)
+ 3f4:	lw	v1,44(sp)
+ 3f8:	addu	a0,a0,a1
+ 3fc:	addu	a0,a0,a2
+ 400:	addu	a0,a0,a3
+ 404:	sw	ra,16(sp)
+ 408:	addu	a0,a0,v0
+ 40c:	jal	0 <nine>
+ 410:	addu	a0,a0,v1
+ 414:	lw	ra,16(sp)
+ 418:	jr	ra
+ 41c:	addiu	sp,sp,24
+
+00000420 <restaged>:
+ 420:	addiu	sp,sp,-32
+ 424:	sw	s0,24(sp)
+ 428:	move	s0,a0
+ 42c:	li	a0,1
+ 430:	li	a1,2
+ 434:	li	a2,3
+ 438:	li	a3,4
+ 43c:	sw	ra,28(sp)
+ 440:	jal	3c0 <f5>
+ 444:	sw	s0,16(sp)
+ 448:	li	a0,5
+ 44c:	li	a1,6
+ 450:	li	a2,7
+ 454:	li	a3,8
+ 458:	jal	3c0 <f5>
+ 45c:	sw	s0,16(sp)
+ 460:	lw	ra,28(sp)
+ 464:	lw	s0,24(sp)
+ 468:	jr	ra
+ 46c:	addiu	sp,sp,32
+
+00000470 <restaged_higher>:
+ 470:	addiu	sp,sp,-40
+ 474:	sw	s0,24(sp)
+ 478:	move	s0,a0
+ 47c:	sw	s1,28(sp)
+ 480:	move	s1,a1
+ 484:	li	a0,1
+ 488:	li	a1,2
+ 48c:	li	a2,3
+ 490:	li	a3,4
+ 494:	sw	ra,32(sp)
+ 498:	jal	3c0 <f5>
+ 49c:	sw	s0,16(sp)
+ 4a0:	li	a0,5
+ 4a4:	li	a1,6
+ 4a8:	li	a2,7
+ 4ac:	li	a3,8
+ 4b0:	sw	s1,16(sp)
+ 4b4:	jal	3a8 <g6>
+ 4b8:	sw	s0,20(sp)
+ 4bc:	lw	ra,32(sp)
+ 4c0:	lw	s1,28(sp)
+ 4c4:	lw	s0,24(sp)
+ 4c8:	jr	ra
+ 4cc:	addiu	sp,sp,40
+
+000004d0 <restaged_same_word>:
+ 4d0:	addiu	sp,sp,-40
+ 4d4:	sw	s1,28(sp)
+ 4d8:	move	s1,a0
+ 4dc:	li	a0,1
+ 4e0:	sw	a1,16(sp)
+ 4e4:	li	a1,2
+ 4e8:	sw	s0,24(sp)
+ 4ec:	move	s0,a2
+ 4f0:	li	a2,3
+ 4f4:	li	a3,4
+ 4f8:	sw	ra,32(sp)
+ 4fc:	jal	3ec <f6>
+ 500:	sw	s1,20(sp)
+ 504:	li	a0,5
+ 508:	li	a1,6
+ 50c:	li	a2,7
+ 510:	li	a3,8
+ 514:	sw	s0,16(sp)
+ 518:	jal	3a8 <g6>
+ 51c:	sw	s1,20(sp)
+ 520:	lw	ra,32(sp)
+ 524:	lw	s1,28(sp)
+ 528:	lw	s0,24(sp)
+ 52c:	jr	ra
+ 530:	addiu	sp,sp,40
 	...

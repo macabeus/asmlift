@@ -1796,9 +1796,30 @@ function liftOnce(
   // epilogue restore in any block.
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
-  // the values each call lowered so far took as its outgoing stack arguments (`lowerJal`'s
-  // `stackWord`), which are pending for no later call
-  const consumedStackWords = new Set<Value>();
+  // WHETHER EACH OUTGOING-AREA WORD IS PENDING, per block, as lowered so far: a store to it
+  // (`emitStore`) makes it pending, and a call that took it as a stack argument (`lowerJal`'s
+  // `stackWord`) ends it, so it is pending for no later call until it is stored again. Kept per
+  // STORE, not per value: a value one call took and that is stored again for a later call, at the
+  // same word or another, is staged for that call all the same, and keyed by the value it would
+  // hide a word the call is handed (frontend/stackargs.ts ends its pending words per offset too).
+  const outgoingWordState: Map<number, 'stored' | 'taken'>[] = blocks.map(() => new Map());
+  // Whether the state of word `off` some path brings into this point of block `b` is `want`: the
+  // walk `ssa.hasReachingDef` makes, over this state, so a block not filled yet is passed through.
+  const outgoingWordReaches = (off: number, b: number, want: 'stored' | 'taken'): boolean => {
+    const seen = new Set<number>();
+    const walk = (at: number): boolean => {
+      const own = outgoingWordState[at].get(off);
+      if (own !== undefined) {
+        return own === want;
+      }
+      if (seen.has(at)) {
+        return false;
+      }
+      seen.add(at);
+      return preds[at].some(walk);
+    };
+    return walk(b);
+  };
   const restores = new Map<Value, { reg: string; addr: number }>();
   // Each `lw` that restores a save, and the register it restores: a save holds only while every path
   // restores it after its last write (`refuseSavedRegisterLeaks`).
@@ -2898,7 +2919,11 @@ function liftOnce(
         refuseMixedSlot(ins, mem, off, 'value');
         valueSlots.add(off);
         // an assignment to an incoming stack parameter is that parameter's SSA variable
-        writeVar(incomingStackKey(ins, off) ?? stackSlot(off), bi, read(srcReg));
+        const incoming = incomingStackKey(ins, off);
+        writeVar(incoming ?? stackSlot(off), bi, read(srcReg));
+        if (incoming === undefined) {
+          outgoingWordState[bi].set(off, 'stored');
+        }
         return;
       }
       ops.push(mkOp('store', { operands: [read(base), read(srcReg)], attrs: { off, width } }));
@@ -2946,19 +2971,20 @@ function liftOnce(
       // frame with a local area (`frame`) is not licensed, since that area is partitioned off the
       // DECLARED widest call before any call is lowered (`stackWordsOf` above), so such a call keeps
       // the refusals below.
-      // A word an earlier call took as its stack argument (`consumedStackWords`) is pending for no
-      // later one, as frontend/stackargs.ts's dataflow ends it at the call whose block held it.
+      // A word an earlier call took as its stack argument is pending for no later one until it is
+      // stored again (`outgoingWordState`), as frontend/stackargs.ts's dataflow ends it at the call
+      // whose block held it.
       const licensedStackWords = (): number | undefined => {
         if (frame !== null || !asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
           return undefined;
         }
-        const pending = (v: Value) => !consumedStackWords.has(v);
         const reaching = [...valueSlots].filter(
           (off) =>
             off >= STACK_ARGS_AT &&
             off < frameSize &&
             off < loadedWordBound &&
-            ssa.hasReachingDef(stackSlot(off), bi, pending),
+            ssa.hasReachingDef(stackSlot(off), bi) &&
+            outgoingWordReaches(off, bi, 'stored'),
         );
         if (reaching.length === 0) {
           return undefined;
@@ -2977,7 +3003,7 @@ function liftOnce(
           reaching.map((off) => off - STACK_ARGS_AT),
           (o) =>
             ssa.writtenOnEveryPath(stackSlot(STACK_ARGS_AT + o), bi, () => false) &&
-            !ssa.hasReachingDef(stackSlot(STACK_ARGS_AT + o), bi, (v) => !pending(v)),
+            !outgoingWordReaches(STACK_ARGS_AT + o, bi, 'taken'),
         )
           ? n
           : undefined;
@@ -3006,9 +3032,8 @@ function liftOnce(
                 `${off}(sp), and no value stored there reaches the call`,
             );
           }
-          const word = readVar(stackSlot(off), bi);
-          consumedStackWords.add(word);
-          return word;
+          outgoingWordState[bi].set(off, 'taken');
+          return readVar(stackSlot(off), bi);
         },
         // a pending `%hi` half and a table base are no argument
         placeholders,
