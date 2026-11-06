@@ -2620,9 +2620,6 @@ function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | undefin
   return body.map((s) => mapStmtExprs(s, stamp));
 }
 
-/** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
- *  one by spreading a target's `compilerBehaviors`, whose fields map 1:1 onto it, so a hook living
- *  there would be settable from a TargetDescription. */
 /** Where one `if`, comparison tree or jump table took the join past its early returns
  *  (`StructureHooks.onJoinPastReturns`): its branch block, the join, and which recovery took it. */
 export interface JoinPastReturnsSite {
@@ -2631,6 +2628,9 @@ export interface JoinPastReturnsSite {
   readonly kind: 'if' | 'tree' | 'switch';
 }
 
+/** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
+ *  one by spreading a target's `compilerBehaviors`, whose fields map 1:1 onto it, so a hook living
+ *  there would be settable from a TargetDescription. */
 export interface StructureHooks {
   /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
    *  the ablation as a value rather than as a flag compiled into the shipped path. */
