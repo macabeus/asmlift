@@ -4397,6 +4397,59 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int callee(int); int spill10(int k, int *p);',
     proto: { callee: { params: 1 } },
   },
+  // AN UNDECLARED CALLEE'S BODY SIZES ITS STACK ARGUMENTS (frontend/stackargs.ts, "THE CALLEE'S BODY";
+  // frontend/thumb-entry.ts). kl2dct's sub_08049A34 stages five words for `sub_08004060`, which nothing
+  // declares, and declined "the store to [sp,#0] is never reloaded and its lower slots are supplied":
+  // the code alone cannot say where an undeclared call's block ends. The callee's entry loads its
+  // incoming stack words first thing, a lower bound on what it takes, and the caller staging exactly
+  // those words on every path closes it from above.
+  //   stkbody9: `nine` is defined K&R in the same unit and loads five incoming words; the loop
+  //     stages [sp,#0..#0x10] before each call, and the row lifts the nine-argument call.
+  //   stkbody_more: a K&R `kr` that loads one incoming word, called with six arguments (two staged):
+  //     the body's bound is short of what is staged, so the row stays declined (control).
+  //   stkbody_none: `nine` declared K&R and defined nowhere in the unit: no body, no bound, so the
+  //     row stays declined (control).
+  {
+    sym: 'stkbody9',
+    src:
+      'extern int gv[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void stkbody9(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gv[];\nvoid nine();\nvoid stkbody9(int *p, int n);',
+    proto: { stkbody9: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_more',
+    src:
+      'int kr(a, b, c, d, e) int a, b, c, d, e; { return e - a; }\n' +
+      'int stkbody_more(int x) { return kr(x, 2, 3, 4, 5, 6); }',
+    features: ['multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'int kr();\nint stkbody_more(int x);',
+  },
+  {
+    sym: 'stkbody_none',
+    src:
+      'void nine();\n' +
+      'void stkbody_none(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
+    proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
