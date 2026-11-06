@@ -1231,9 +1231,9 @@ export function structureReturnTailReading(
     structOpts,
     {
       ...hooks,
-      onJoinPastReturns: () => {
+      onJoinPastReturns: (site) => {
         joined = true;
-        hooks.onJoinPastReturns?.();
+        hooks.onJoinPastReturns?.(site);
       },
     },
     memo,

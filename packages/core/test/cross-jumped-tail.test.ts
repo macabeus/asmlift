@@ -21,7 +21,9 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
+import { raiseRecovered } from '../src/pipeline';
+import { type JoinPastReturnsSite, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
@@ -106,5 +108,21 @@ describe('the frontend records where each block was laid out (ir/core.ts `AsmLay
 
   test('parsed IR has no layout', () => {
     expect(parse('fn f {\n^bb0():\n  ret\n}\n').asmLayout).toBeUndefined();
+  });
+});
+
+/** Every site the join run takes on the agbcc lift of `p`, raised as the pipeline raises it. */
+function sitesOf(p: Probe): { fn: Fn; sites: JoinPastReturnsSite[] } {
+  const fn = liftAgbcc(p);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, protosOf(p).f);
+  const sites: JoinPastReturnsSite[] = [];
+  structure(fn, structureOptionsFor(ARMV4T_AGBCC, true), { onJoinPastReturns: (site) => sites.push(site) });
+  return { fn, sites };
+}
+
+describe('the cross-jumped tail, read at each site the join was taken (structure/cross-jumped-tail.ts)', () => {
+  test('the hook names each site: the `pa` `if` and the `pb` jump table', () => {
+    expect(sitesOf('pa-copies').sites.map((s) => s.kind)).toContain('if');
+    expect(sitesOf('pb-copies').sites.map((s) => s.kind)).toEqual(['switch']);
   });
 });

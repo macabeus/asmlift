@@ -2622,6 +2622,14 @@ function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | undefin
 /** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
  *  one by spreading a target's `compilerBehaviors`, whose fields map 1:1 onto it, so a hook living
  *  there would be settable from a TargetDescription. */
+/** Where one `if`, comparison tree or jump table took the join past its early returns
+ *  (`StructureHooks.onJoinPastReturns`): its branch block, the join, and which recovery took it. */
+export interface JoinPastReturnsSite {
+  readonly branch: Block;
+  readonly join: Block;
+  readonly kind: 'if' | 'tree' | 'switch';
+}
+
 export interface StructureHooks {
   /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
    *  the ablation as a value rather than as a flag compiled into the shipped path. */
@@ -2674,8 +2682,10 @@ export interface StructureHooks {
    *  under `copyReturnTails`) where its CFG join differs: the one place the reading changes a tree.
    *  Held, like the other observation hooks, until the run that fired it is the one returned.
    *  pipeline.ts `structureReturnTailReading` structures the copies only for a structuring that
-   *  fired it: under one that never did, the copies are its tree already. */
-  onJoinPastReturns?: () => void;
+   *  fired it: under one that never did, the copies are its tree already. The site says where:
+   *  the branch block, the join taken past its early returns, and which recovery took it; the
+   *  chooser reads the target's asm layout there (structure/cross-jumped-tail.ts). */
+  onJoinPastReturns?: (site: JoinPastReturnsSite) => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
    *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
    *  what the structurer reads. A structuring with that option off that never fires it builds the
@@ -8833,7 +8843,8 @@ function structureRanked(
           merge = joined ?? stop;
           read = readArms(merge);
         } else {
-          hooks.onJoinPastReturns?.();
+          // `joined` differs from the CFG's follow only where it is the join past returns, never null
+          hooks.onJoinPastReturns?.({ branch: b, join: joined!, kind: 'switch' });
         }
       }
       // THE RETRY: A SWITCH WHOSE ARMS DO NOT ALL REACH THE CODE AFTER IT. When neither
@@ -9724,14 +9735,14 @@ function structureRanked(
     const asSwitch = handedThroughSwitch(() => {
       const { asked, cfgJoin } = askJoinPastReturns(b, stop);
       if (asked) {
-        let took = false;
+        let took: Block | null = null;
         const joined = recognizeSwitch(b, stop, (arms) => {
           const join = joinPastReturnsAt(b, stop, arms);
-          took = join !== null && join !== cfgJoin;
-          return took ? join! : undefined;
+          took = join !== null && join !== cfgJoin ? join : null;
+          return took ?? undefined;
         });
-        if (joined !== null && took) {
-          hooks.onJoinPastReturns?.();
+        if (joined !== null && took !== null) {
+          hooks.onJoinPastReturns?.({ branch: b, join: took, kind: 'tree' });
           return joined;
         }
         if (joined !== null) {
@@ -9757,7 +9768,7 @@ function structureRanked(
     const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
     if (pastReturns !== null && pastReturns !== cfgJoin) {
-      hooks.onJoinPastReturns?.();
+      hooks.onJoinPastReturns?.({ branch: b, join: pastReturns, kind: 'if' });
     }
     const ipd =
       pastReturns ?? cfgInRegion ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);
