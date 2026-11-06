@@ -122,9 +122,13 @@ function tailEndsInJump(layout: AsmLayout, join: Block): boolean {
 /** (C): the join's first instruction is a call, and two of its predecessors, each with the join as
  *  its only successor, hold a same instruction after their own last call.
  *
- *  BLIND TO WHERE IN THE ARM THAT INSTRUCTION SITS, on purpose. It fires on join-written arms that
- *  merely share a statement (`gB = c` opening both arms of `if (a) { gB = c; gA = 1; } else if (b)
- *  { gB = c; gC = b; } ... k();`), and publishes the copies there, which do not match. Counting only
+ *  BLIND TO WHERE IN THE ARM THAT INSTRUCTION SITS, and to what it computes, on purpose. The text
+ *  compared is the instruction as printed, so a shared statement is not needed: on MIPS the address
+ *  half of a relocated global (`lui at,0x0 <gT>`) and a store from a register that holds a different
+ *  value in each arm (`sw v0,0(at) <gT>`) read the same. So any two call-free arms that write one
+ *  global fire it when the join opens with a call (`if (a == 0) { gV = b; gT = 1; } else if (a ==
+ *  1) { gV = c; gT = 2; } ... k(a);`, 26 lines off as copies, 0 as the join, on both MIPS GCC lanes),
+ *  and it publishes the copies there, which do not match. Counting only
  *  an instruction that sets up a register the join reads (an argument of its call, or a saved
  *  register read past it) clears that case, and loses two matches the copies have: on
  *  `probe-rettail-pc-copies` the arms keep `gV = a` above the cut call, a store that sets up no

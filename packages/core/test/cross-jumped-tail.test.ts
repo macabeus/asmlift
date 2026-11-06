@@ -212,6 +212,9 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
         [
           ['pb-copies', true],
           ['pb-join', false],
+          // the arms keep `gV = a` after their last call, a store that sets up no register the cut
+          // call reads: only (C) marks it, and the copies match where the join does not
+          ['pc-copies', true],
           // without the relocation in the body, `gT = c` and `gW = c` would read as identical arms
           ['pc-join', false],
           ['pd-join', false],
