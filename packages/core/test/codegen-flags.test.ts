@@ -42,18 +42,21 @@ const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
 const CANONICAL_IDS = IDS.filter(isCanonicalToolchainId);
 
 describe('targetFor', () => {
-  // save a plain `char` sign the flags state against the compiler's default: KMC's `-funsigned-char`
-  // on gcc 2.7.2, whose description is gcc's
+  // save what the canonical flags themselves change: a plain `char` sign the flags state against the
+  // compiler's default (KMC's `-funsigned-char` on gcc 2.7.2, whose description is gcc's), and the
+  // taken-edge fold gcc's cse makes only at -O2 (gcc2.7.2's canonical -O1)
+  const FLAG_MADE: Partial<Record<ToolchainId, Partial<TargetDescription['compilerBehaviors']>>> = {
+    'gcc2.7.2kmc': { plainCharSigned: false },
+    'gcc2.7.2': { foldsBranchConstantOnTakenEdge: false },
+  };
   test.each(CANONICAL_IDS)('%s at its canonical flags is its description', (id) => {
     const { target } = targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
-    if (id !== 'gcc2.7.2kmc') {
+    const made = FLAG_MADE[id];
+    if (made === undefined) {
       expect(target).toBe(DESCRIPTIONS[id]);
       return;
     }
-    const { plainCharSigned, ...behaviors } = target.compilerBehaviors;
-    const { plainCharSigned: _default, ...described } = DESCRIPTIONS[id].compilerBehaviors;
-    expect(plainCharSigned).toBe(false);
-    expect(behaviors).toEqual(described);
+    expect(target.compilerBehaviors).toEqual({ ...DESCRIPTIONS[id].compilerBehaviors, ...made });
     expect({ ...target, compilerBehaviors: undefined }).toEqual({ ...DESCRIPTIONS[id], compilerBehaviors: undefined });
   });
 
