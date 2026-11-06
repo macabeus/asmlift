@@ -458,7 +458,7 @@ export function analyzeOutgoingArgs<C>({
     const clash = offs.find((o) => o >= lowestEscape);
     if (clash !== undefined) {
       return refuse(
-        `callee \`${ev.callee}\` is declared with ${declaredAs(ev, offs)}, so [sp,#${clash}] is its outgoing stack argument — ` +
+        `callee \`${ev.callee}\` ${ev.declared === null ? `loads ${offs.length} incoming stack words in its body` : `is declared with ${declaredAs(ev, offs)}`}, so [sp,#${clash}] is its outgoing stack argument — ` +
           `but the frame address [sp,#${lowestEscape}] escapes this function, so the words from there up are an object's, and the two name the same word`,
       );
     }
