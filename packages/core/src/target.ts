@@ -1313,6 +1313,29 @@ export interface TargetDescription {
     // elsewhere: agbcc at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no
     // value of this field says; ido7.1 and mwcc are unprobed.
     foldsBranchConstantOnTakenEdge?: boolean;
+    // DOES THE RETURN-TAIL CHOOSER DEFAULT TO THE COPIES HERE, whatever the size bound and the marks
+    // say? Not a compiler behaviour but a MEASURED DEFAULT, kept beside the behaviours because it is
+    // per compiler and read by the chooser they feed (pipeline.ts `structureReturnTailReading`).
+    // Where it is `true` the copies are published, as before the join past early returns was a
+    // default, and the join is still structured and kept in the ranked fan as `/ret-join`.
+    //
+    // MEASURED over held-out real functions, every function of a project outside the 620 the
+    // marks were chosen on, both readings really compiled against the project's own objects
+    // (2026-11-06). Where the size bound with the marks loses a match the copies have, and no mark
+    // read from the target separates the two spellings, this is `true`:
+    //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
+    //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
+    //     different arguments, and a third source spelling the copies happen to share.
+    //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
+    //     never cross-jumps, and two `sw zero,0(a3)` stay two blocks; but the frontend retargets a
+    //     `b T` whose delay slot copies the word at T-4 to that word (frontend/mips.ts
+    //     `normaliseBranchLikely`), and the emptied slot leaves the layout record a `nop`, so the
+    //     second copy is not readable where the chooser looks.
+    // The gains given up are the join's: agbcc 18 held out and 2 of the 620, ido7.1 18 and 7.
+    // ABSENT ⇒ the size bound and the marks decide: gcc2.7.2kmc (sbk2, 0 lost, 2 gained), mwcc
+    // (ac-decomp, Pikmin, Mario Party 4: 0 lost, 3 gained), and gcc2.7.2 (Mario Party 3: its one loss
+    // is the unfolded return `foldsBranchConstantOnTakenEdge` reads).
+    returnTailCopiesByDefault?: boolean;
   };
 }
 
@@ -1450,6 +1473,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchRequiresFrontLoadedTests: true,
     // MEASURED on the probe pairs at the field (gcc 2.x jump.c's cross-jump).
     crossJumpsReturnTails: true,
+    // MEASURED over held-out real functions, at the field: the join loses 9 of pokeemerald's matches.
+    returnTailCopiesByDefault: true,
     hoistsSingleSetArm: true,
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
@@ -1689,6 +1714,9 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED, the probes at the field: past the `addiu` reach every member access gets its own
     // `lui`/`addu`, and a held pointer shares one.
     farMemberBasePerAccess: { past: 32767 },
+    // MEASURED over held-out real functions, at the field: the join loses 4 of Animal Forest's
+    // matches.
+    returnTailCopiesByDefault: true,
   },
 };
 

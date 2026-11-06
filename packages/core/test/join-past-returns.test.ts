@@ -32,7 +32,7 @@ import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
-import { count } from './helpers';
+import { AGBCC_JOIN_DEFAULT, count } from './helpers';
 
 type Flavor = 'own' | 'epilogue' | 'crossjumped' | 'branchyxj' | 'tangled';
 
@@ -499,7 +499,7 @@ describe('the `/ret-copy` variation', () => {
   };
 
   test('is enumerated beside the join, and writes the tail into each early return', () => {
-    const cands = enumerateCandidates('f', THUMB, ARMV4T_AGBCC, { prototypes: P });
+    const cands = enumerateCandidates('f', THUMB, AGBCC_JOIN_DEFAULT, { prototypes: P });
     const copies = cands.filter((c) => hasVariation(c.variations, 'ret-copy'));
     expect(copies.length).toBeGreaterThan(0);
     const tail = (src: string) => count(src, 'm(');

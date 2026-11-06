@@ -1241,6 +1241,12 @@ export interface ReturnTailReading {
  *  `func_8010BD28_472F98_mgmode` (gcc2.7.2 -O1), the one held-out real function the join lost a
  *  match on there (2026-11-06): the copies match, the join is 1 line off.
  *
+ *  THE MEASURED DEFAULT. On a target that declares `returnTailCopiesByDefault` (agbcc, ido7.1) the
+ *  copies are published whatever the bound and the marks say, and the join is kept as the
+ *  unpublished reading, so the ranked fan holds both as before. There, over held-out real functions,
+ *  the bound with every mark loses matches the copies have and no mark read from the target
+ *  separates them (the field's note has the counts and the gains given up).
+ *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
  *      `structure()` (`structureWithinBudget`), and that tree is published as it was;
@@ -1260,6 +1266,7 @@ export function structureReturnTailReading(
     joinPastReturns?: boolean;
     crossJumpsReturnTails?: boolean;
     foldsBranchConstantOnTakenEdge?: boolean;
+    returnTailCopiesByDefault?: boolean;
   },
   emit: (sfn: SFn) => string,
   hooks: Parameters<typeof structure>[2] = {},
@@ -1296,6 +1303,9 @@ export function structureReturnTailReading(
       throw error;
     }
     return { sfn: join, unpublished: { reading: 'copies', error } };
+  }
+  if (opts.returnTailCopiesByDefault === true) {
+    return { sfn: copies, unpublished: { reading: 'join', sfn: join } };
   }
   // Read only where the compiler is one that merges return tails: elsewhere the same layout is no
   // evidence of the copies (ido7.1 lays a tail out mid-construct with no cross-jump at all).

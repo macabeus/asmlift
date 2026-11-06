@@ -59,6 +59,11 @@
 // across arms that pass it different arguments. The probe pairs in cross-jumped-tail.test.ts check
 // each mark and each shape that is no mark.
 //
+// NOT READ ON agbcc BY DEFAULT ANY MORE. Over held-out real functions (pokeemerald, 2026-11-06) the
+// size bound with these marks still loses 9 of the copies' matches, none of them marked, so agbcc
+// defaults to the copies outright (target.ts `returnTailCopiesByDefault`) and the marks decide the
+// default on the two GCC 2.7.2 lanes. agbcc's probe pairs still pin each mark.
+//
 // Read only from the frontend's layout record (ir/core.ts `AsmLayout`). A block with no entry, such
 // as one a raise pass made up, is no evidence either way. A function with no record (parsed IR)
 // has no mark.

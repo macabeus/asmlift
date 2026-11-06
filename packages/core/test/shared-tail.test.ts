@@ -25,7 +25,7 @@ import { enumerateCandidates } from '../src/rank';
 import { hasDivergentSharedRet, structure as structureJoined } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
-import { count, irTraceOf, testCopies, traceOf, withCopies } from './helpers';
+import { AGBCC_JOIN_DEFAULT, count, irTraceOf, testCopies, traceOf, withCopies } from './helpers';
 
 // The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
 // helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
@@ -383,7 +383,7 @@ const THUMB_LEFT =
 test('where an arm the compiler left returning shares the rest, the default join writes it once', () => {
   // The follow's tree here is the default's join past early returns, so the `/shared-ret` twin is a
   // duplicate of a default candidate, and the copies are `/ret-copy`'s.
-  const cands = enumerateCandidates('f', THUMB_LEFT, ARMV4T_AGBCC, { prototypes: P });
+  const cands = enumerateCandidates('f', THUMB_LEFT, AGBCC_JOIN_DEFAULT, { prototypes: P });
   expect(cands.filter((c) => hasVariation(c.variations, 'shared-tail'))).toEqual([]); // nothing to sink
   const once = cands.filter((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source));
   expect(once.some((c) => joinVariations(c.variations) === 'unsigned')).toBe(true);
@@ -400,7 +400,7 @@ const THUMB =
   '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
 
 test('rank.ts enumerates `/shared-tail` on a cross-jumped tail, beside the unsunk spellings', () => {
-  const cands = enumerateCandidates('f', THUMB, ARMV4T_AGBCC, { prototypes: P });
+  const cands = enumerateCandidates('f', THUMB, AGBCC_JOIN_DEFAULT, { prototypes: P });
   const alternative = cands.filter((c) => hasVariation(c.variations, 'shared-tail'));
   expect(alternative.length).toBeGreaterThan(0);
   expect(alternative.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
@@ -424,7 +424,7 @@ test('where the sink deletes the follow, rank.ts still enumerates the follow alo
   // candidate: a twin that tried the follow only behind the sink emits 0 spellings of the store
   // once on this shape.
   const errors: string[] = [];
-  const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, ARMV4T_AGBCC, {
+  const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, AGBCC_JOIN_DEFAULT, {
     prototypes: P,
     onEnumerationError: (v, e) => errors.push(`${v.join('/')}: ${e}`),
   });

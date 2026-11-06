@@ -18,6 +18,7 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { type StructureHooks, TWO_LEVEL_EXIT_GATES } from '../src/structure/structure';
+import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 /** `{ k: 'var' }` — the leaf every tree-building test needs most. */
 export const v = (name: string): Expr => ({ k: 'var', name });
@@ -805,6 +806,13 @@ export const NO_HIT_CODE: StructureHooks = {
 // test's calls and off for every other test. A test whose fixture decompile() already publishes the
 // copies for is a plain `test`, so it pins that size bound as well.
 let readingCopies = false;
+/** agbcc's description less its measured return-tail default (target.ts `returnTailCopiesByDefault`),
+ *  which publishes the copies outright: the join-past-returns default the GCC 2.7.2 lanes and mwcc
+ *  still run, read on agbcc's fixtures, and the fan naming the copies `/ret-copy`. */
+export const AGBCC_JOIN_DEFAULT: TargetDescription = (() => {
+  const { returnTailCopiesByDefault: _measured, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+  return { ...ARMV4T_AGBCC, compilerBehaviors: behaviors };
+})();
 export function testCopies(name: string, body: () => unknown, timeout?: number): void {
   test(
     name,

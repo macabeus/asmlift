@@ -28,7 +28,7 @@ import {
   __testing as switchRangesForTest,
 } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
-import { count, testCopies, withCopies } from './helpers';
+import { AGBCC_JOIN_DEFAULT, count, testCopies, withCopies } from './helpers';
 
 // The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
 // helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
@@ -1316,7 +1316,7 @@ testCopies('TWO arms falling into ONE decline — C reaches an arm from above on
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
   // The default reads the join past early returns: the default arm reaches only the return tail,
   // so the join is case 1's body, below the switch, and the two arms that ran into it each `break`.
-  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  const joined = decompileJoined('f', asm, AGBCC_JOIN_DEFAULT, { prototypes: { f: { returnsVoid: true } } }).source;
   expect(joined).toMatch(
     /case 0:\s*\*a1 = 1;\s*break;\s*case 1:\s*break;\s*case 2:\s*\*a1 = 3;\s*break;\s*default:\s*\*\(s32 \*\)\(128 << 19\) = \(s32\)a1;\s*return;\s*\}\s*\*a1 = 2;/,
   );
@@ -1366,7 +1366,7 @@ testCopies('a body reaching TWO sibling arms declines — C fall-through reaches
   // The default reads the join past early returns: case 1 and the default reach only the return
   // tail, so the join is case 2's body, below the switch, and case 0's two targets are a `break` to
   // it and a fall into case 1.
-  const joined = decompileJoined('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  const joined = decompileJoined('f', asm, AGBCC_JOIN_DEFAULT, { prototypes: { f: { returnsVoid: true } } }).source;
   expect(joined).toMatch(
     /case 2:\s*break;\s*case 0:\s*if \(a1 != 0\) break;\s*case 1:\s*\*a1 = 2;\s*default:\s*\*\(s32 \*\)\(128 << 19\) = \(s32\)a1;\s*return;\s*\}\s*\*a1 = 3;/,
   );

@@ -22,7 +22,9 @@
 //   3. the structurer reports each place it took the join past early returns, and
 //      structure/cross-jumped-tail.ts reads the layout there;
 //   4. the plain default publishes the copies where that layout shows the merge, on a target that
-//      declares it, and the size bound decides everywhere else.
+//      declares it, and the size bound decides everywhere else; except on a target that defaults to
+//      the copies outright (target.ts `returnTailCopiesByDefault`: agbcc, ido7.1), where the marks
+//      are read on agbcc's layouts through the description less that default.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -34,7 +36,14 @@ import { parse } from '../src/ir/parse';
 import { decompile, raiseRecovered } from '../src/pipeline';
 import { crossJumpedTail } from '../src/structure/cross-jumped-tail';
 import { type JoinPastReturnsSite, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription, structureOptionsFor } from '../src/target';
+import {
+  ARMV4T_AGBCC,
+  MIPS_IDO,
+  PPC_MWCC,
+  TOOLCHAIN_TARGETS,
+  type TargetDescription,
+  structureOptionsFor,
+} from '../src/target';
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
@@ -268,6 +277,12 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
   });
 });
 
+// agbcc's description defaults to the copies outright (target.ts `returnTailCopiesByDefault`, measured
+// over held-out real functions), so the marks' reading on agbcc's own layouts is read on the
+// description less that default: the chooser the GCC 2.7.2 lanes run.
+const { returnTailCopiesByDefault: _measured, ...agbccChooser } = ARMV4T_AGBCC.compilerBehaviors;
+const AGBCC_MARKS: TargetDescription = { ...ARMV4T_AGBCC, compilerBehaviors: agbccChooser };
+
 describe('the plain default publishes the copies where the layout shows the merge', () => {
   const reading = (p: Probe, target: TargetDescription, o: object = {}) =>
     decompile('f', fixture(`agbcc-rettail-${p}.s`), target, { prototypes: protosOf(p), ...o }).source;
@@ -278,7 +293,7 @@ describe('the plain default publishes the copies where the layout shows the merg
       const copies = reading(p, ARMV4T_AGBCC, { copyReturnTails: true });
       const join = reading(p, ARMV4T_AGBCC, { joinPastReturns: true });
       expect(join.split('\n').length).toBeLessThan(copies.split('\n').length);
-      expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
+      expect(reading(p, AGBCC_MARKS)).toBe(copies);
     },
   );
 
@@ -288,15 +303,58 @@ describe('the plain default publishes the copies where the layout shows the merg
     const join = reading(p, ARMV4T_AGBCC, { joinPastReturns: true });
     expect(join).not.toBe(copies);
     expect(join.split('\n').length).toBe(copies.split('\n').length);
-    expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
+    expect(reading(p, AGBCC_MARKS)).toBe(copies);
   });
 
   test.each(['pa-join', 'pb-join', 'pc-join', 'pd-join'] as const)(
     'agbcc %s: no mark, so the size bound keeps the join',
     (p) => {
-      expect(reading(p, ARMV4T_AGBCC)).toBe(reading(p, ARMV4T_AGBCC, { joinPastReturns: true }));
+      expect(reading(p, AGBCC_MARKS)).toBe(reading(p, AGBCC_MARKS, { joinPastReturns: true }));
     },
   );
+
+  // the measured default: every join written once is published as the copies too, and the join is
+  // still the reading the copies were chosen over
+  test.each(['pa-join', 'pb-join', 'pc-join', 'pd-join'] as const)(
+    'agbcc %s: the description defaults to the copies, unmarked',
+    (p) => {
+      const copies = reading(p, ARMV4T_AGBCC, { copyReturnTails: true });
+      expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
+      expect(reading(p, ARMV4T_AGBCC, { joinPastReturns: true })).not.toBe(copies);
+    },
+  );
+
+  // The shape of Animal Forest's func_80A42DB4_jp: two `*a3 = 0` arms, the first in the slot of a
+  // `b` whose target follows the second. The frontend retargets that `b` to the second store and
+  // empties its slot, so the join writes one store where ido, which never cross-jumps, kept two.
+  const AF_SHAPE = [
+    'glabel f',
+    '    /* 0 80000000 AFA40000 */  sw          $a0, 0x0($sp)',
+    '    /* 4 80000004 AFA50004 */  sw          $a1, 0x4($sp)',
+    '    /* 8 80000008 24010005 */  addiu       $at, $zero, 0x5',
+    '    /* C 8000000C 14C10003 */  bne         $a2, $at, .L8000001C',
+    '    /* 10 80000010 24020001 */   addiu      $v0, $zero, 0x1',
+    '    /* 14 80000014 10000005 */  b           .L8000002C',
+    '    /* 18 80000018 ACE00000 */   sw         $zero, 0x0($a3)',
+    '  .L8000001C:',
+    '    /* 1C 8000001C 24010007 */  addiu       $at, $zero, 0x7',
+    '    /* 20 80000020 14C10002 */  bne         $a2, $at, .L8000002C',
+    '    /* 24 80000024 00000000 */   nop',
+    '    /* 28 80000028 ACE00000 */  sw          $zero, 0x0($a3)',
+    '  .L8000002C:',
+    '    /* 2C 8000002C 03E00008 */  jr          $ra',
+    '    /* 30 80000030 00000000 */   nop',
+    'endlabel f',
+    '',
+  ].join('\n');
+  test('ido7.1: the description defaults to the copies, where the join writes one store for two', () => {
+    const read = (o: object) => decompile('f', AF_SHAPE, MIPS_IDO, { prototypes: { f: { params: 4 } }, ...o }).source;
+    expect(MIPS_IDO.compilerBehaviors.returnTailCopiesByDefault).toBe(true);
+    const [copies, join] = [read({ copyReturnTails: true }), read({ joinPastReturns: true })];
+    expect(copies.match(/= 0;/g)).toHaveLength(2);
+    expect(join.match(/= 0;/g)).toHaveLength(1);
+    expect(read({})).toBe(copies);
+  });
 
   test.each(GCC_LANES)(
     '$tc: the `pb` copies are the default, and every join written once keeps the join',
@@ -316,7 +374,7 @@ describe('the plain default publishes the copies where the layout shows the merg
   // The same layout on a target that does not declare the merge is no evidence: the bound decides.
   // ido7.1 lays a tail out mid-construct with no cross-jump at all, and mwcc's PPC_MWCC claims none.
   test.each(['pa-copies', 'pb-copies'] as const)('%s on a target claiming no cross-jump: the size bound', (p) => {
-    const { crossJumpsReturnTails: _, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const { crossJumpsReturnTails: _, ...behaviors } = AGBCC_MARKS.compilerBehaviors;
     const plain: TargetDescription = { ...ARMV4T_AGBCC, compilerBehaviors: behaviors };
     expect(reading(p, plain)).toBe(reading(p, plain, { joinPastReturns: true }));
   });
