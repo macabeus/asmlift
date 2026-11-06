@@ -11,10 +11,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { parseAsmData } from '../src/frontend/asmdata';
 import type { CalleeBodies } from '../src/frontend/callee-body';
 import { thumbEntryWordsFromText } from '../src/frontend/thumb-entry';
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-entry-stack.s'), 'utf8');
 /** One function of the probe, from its label to its `.size` line. */
@@ -123,5 +124,53 @@ describe('a body handed in from outside the input', () => {
     expect(src('call9', fn('call9'), { nine: { kind: 'listing', text: fn('nine') } })).toBe(
       src('call9', fn('nine') + fn('call9')),
     );
+  });
+});
+
+describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
+  // corpus/probe-o32-callee-stack.c on each O32 compiler (scripts/regen-o32-callee-stack-probes.ts)
+  const corpus = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+  const o32 =
+    (slug: string, t: 'ido7.1' | 'gcc2.7.2kmc' | 'gcc2.7.2') =>
+    (sym: string, prototypes = {}) => {
+      const dump = corpus(`${slug}-calleestack.txt`);
+      try {
+        return decompile(sym, corpus(`${slug}-calleestack.asm`), TOOLCHAIN_TARGETS[t].description, {
+          prototypes,
+          asmData: parseAsmData(dump, dump, dump, true),
+        }).source;
+      } catch (e) {
+        return (e as Error).message;
+      }
+    };
+  describe.each([
+    ['ido71', 'ido7.1'],
+    ['gcc272kmc', 'gcc2.7.2kmc'],
+    ['gcc272', 'gcc2.7.2'],
+  ] as const)('%s', (slug, t) => {
+    const lift = o32(slug, t);
+    test('five words staged at 16(sp) for a callee that loads five: a nine-argument call', () => {
+      expect(lift('call9')).toBe(
+        's32 call9(s32 *a0) {\n    return nine(*a0, a0[1], a0[2], a0[3], a0[4], a0[5], a0[6], a0[7], a0[8]);\n}\n',
+      );
+    });
+
+    test('a callee that loads its stack word on one branch only is sized by its lift', () => {
+      expect(lift('call_br')).toBe(
+        's32 call_br(s32 *a0) {\n    return br6(*a0, a0[1], a0[2], a0[3], a0[4], a0[5]);\n}\n',
+      );
+    });
+
+    test('a caller staging a word more than the callee loads (K&R) keeps its decline', () => {
+      expect(lift('krmore')).toMatch(
+        /the undeclared call to 'kr' at 0x[0-9a-f]+ fills a0..a3, and the word stored to 16\(sp\)/,
+      );
+    });
+
+    test('a declaration wins over the body: a stated arity is laid out as stated', () => {
+      expect(lift('call9', { nine: { params: 4 } })).toBe(
+        's32 call9(s32 *a0) {\n    return nine(*a0, a0[1], a0[2], a0[3]);\n}\n',
+      );
+    });
   });
 });

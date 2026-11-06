@@ -30,6 +30,7 @@ import type { SymbolMap } from '../symbols';
 import { O32_REGISTER_ALIASES, type TargetDescription } from '../target';
 import { type AsmData, readJumpTable, readU32, textRelocAt } from './asmdata';
 import { callDeclarations, foldByValueArgs } from './call-plan';
+import { asksCalleeBody } from './callee-body';
 import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
@@ -2930,12 +2931,49 @@ function liftOnce(
             'where its outgoing stack arguments end is not known',
         );
       }
+      // A CALL NOTHING DECLARES TAKES THE WORDS ITS CALLEE'S BODY LOADS, where exactly those reach
+      // it staged (frontend/stackargs.ts, "THE CALLEE'S BODY", is the rule this is O32's half of):
+      // the body loads incoming word n-1, so the call takes at least n stack words, and a word past
+      // them that nothing staged is no argument. Licensed only where the words `[16, 16+4n)` are
+      // written on every path to the call beneath the loaded-word bound and inside the frame, and
+      // no other word of the area there reaches it; asked only once a word does. KNOWN GAP: a
+      // frame with a local area (`frame`) is not licensed, since that area is partitioned off the
+      // DECLARED widest call before any call is lowered (`stackWordsOf` above), so such a call keeps
+      // the refusals below.
+      const licensedStackWords = (): number | undefined => {
+        if (frame !== null || !asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
+          return undefined;
+        }
+        const reaching = [...valueSlots]
+          .filter(
+            (off) =>
+              off >= STACK_ARGS_AT &&
+              off < frameSize &&
+              off < loadedWordBound &&
+              ssa.hasReachingDef(stackSlot(off), bi),
+          )
+          .sort((x, y) => x - y);
+        if (reaching.length === 0) {
+          return undefined;
+        }
+        const n = options.calleeStackWords?.(callee) ?? 0;
+        return n > 0 &&
+          reaching.length === n &&
+          reaching.every(
+            (off, k) => off === STACK_ARGS_AT + 4 * k && ssa.writtenOnEveryPath(stackSlot(off), bi, () => false),
+          )
+          ? n
+          : undefined;
+      };
       calls.lower({
         callee,
         ssa,
         bi,
         read,
         write,
+        get stackWords() {
+          return licensedStackWords();
+        },
         // ARGUMENT WORD k ≥ 4 travels in `16+4(k-4)(sp)`, inside the one frame this function pushed
         stackWord: (k) => {
           const off = STACK_ARGS_AT + 4 * (k - ARG_REGS.length);
