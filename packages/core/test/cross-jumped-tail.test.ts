@@ -1,0 +1,84 @@
+// A RETURN TAIL THE COMPILER CROSS-JUMPED, read off the asm layout.
+//
+// Two probe pairs, each compiled by scripts/regen-rettail-probes.ts at every toolchain's canonical
+// flags. In each pair the source writes one function twice: the return tail in every arm
+// (`-copies`), and the tail written once after the construct (`-join`).
+//   - `pa`: a three-arm `if` whose arms call `h(10, 0)`, `h(20, 0)` and `h(30, 0)`, the last arm
+//     falling into the function's end.
+//   - `pb`: a seven-case `switch` whose cases add 256, 512, 528 ×3, 512 and 256 to `p[3]`.
+// Four claims, one per layer:
+//   1. which compilers merge a return tail written into every arm (target.ts
+//      `crossJumpsReturnTails`), read from the objects themselves;
+//   2. the frontend records where each block was laid out (ir/core.ts `AsmLayout`);
+//   3. the structurer reports each place it took the join past early returns, and
+//      structure/cross-jumped-tail.ts reads the layout there;
+//   4. the plain default publishes the copies where that layout shows the merge, on a target that
+//      declares it, and the size bound decides everywhere else.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, test } from 'vitest';
+
+import { TOOLCHAIN_TARGETS } from '../src/target';
+
+const CORPUS = join(import.meta.dirname, 'corpus');
+const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
+type Probe = 'pa-copies' | 'pa-join' | 'pb-copies' | 'pb-join';
+
+/** The instruction lines of a committed fixture, without its provenance header. */
+const instructions = (file: string): string[] =>
+  fixture(file)
+    .split('\n')
+    .filter((l) => !/^[@#]/.test(l) && /^\s+(?:[0-9a-f]+:\s+)?[a-z]/.test(l))
+    .map((l) => l.replace(/^\s+[0-9a-f]+:\s+/, '').trim());
+
+const LANES = [
+  { tc: 'agbcc', file: (p: Probe) => `agbcc-rettail-${p}.s` },
+  { tc: 'gcc2.7.2', file: (p: Probe) => `gcc272-rettail-${p}.asm` },
+  { tc: 'gcc2.7.2kmc', file: (p: Probe) => `gcc272kmc-rettail-${p}.asm` },
+  { tc: 'ido7.1', file: (p: Probe) => `ido71-rettail-${p}.asm` },
+  { tc: 'mwcc_242_81', file: (p: Probe) => `mwcc242-rettail-${p}.asm` },
+] as const;
+
+// the tail of `pb`: the store back to `p[3]`, in each ISA's spelling
+const TAIL_STORE = /^(?:str\s+\w+, \[\w+, #0xc\]|sw\s+\w+,12\(\w+\)|stw\s+\w+,12\(\w+\))/;
+const CALL = /^(?:bl|jal)\s/;
+
+describe('which compilers cross-jump return tails (target.ts `crossJumpsReturnTails`)', () => {
+  test.each(LANES)('$tc: the declaration is what its own `pb` copies compile to', ({ tc, file }) => {
+    const stores = instructions(file('pb-copies')).filter((l) => TAIL_STORE.test(l)).length;
+    // seven `return`s each after its own store, or one store every case reaches
+    expect([1, 7]).toContain(stores);
+    expect(instructions(file('pb-join')).filter((l) => TAIL_STORE.test(l)).length).toBe(1);
+    const declared = TOOLCHAIN_TARGETS[tc].description.compilerBehaviors.crossJumpsReturnTails === true;
+    expect(declared).toBe(stores === 1);
+  });
+
+  test.each(LANES.filter((l) => l.tc !== 'ido7.1' && l.tc !== 'mwcc_242_81'))(
+    '$tc: the merged tail leaves identical case bodies apart, where the join merges them',
+    ({ file }) => {
+      // the case bodies are the blocks that jump to the tail, plus the one falling into it
+      const jumps = (p: Probe) => instructions(file(p)).filter((l) => /^(?:b|j)\s/.test(l)).length;
+      expect(jumps('pb-copies')).toBe(5);
+      expect(jumps('pb-join')).toBe(2);
+    },
+  );
+
+  test('agbcc: the `pa` copies keep the tail mid-construct, ending in a jump over the else arm', () => {
+    const copies = instructions('agbcc-rettail-pa-copies.s');
+    expect(copies.filter((l) => CALL.test(l))).toEqual(['bl\th', 'bl\th']);
+    const tail = copies.indexOf('bl\th');
+    expect(copies[tail + 1]).toMatch(/^b\s/);
+    expect(copies.slice(tail + 2, tail + 5)).toEqual(['mov\tr0, #0x1e', 'mov\tr1, #0x0', 'bl\th']);
+    // the join lays its tail out last, falling into the epilogue
+    const joined = instructions('agbcc-rettail-pa-join.s');
+    expect(joined[joined.lastIndexOf('bl\th') + 1]).toMatch(/^pop\s/);
+  });
+
+  test.each(['gcc272', 'gcc272kmc'])('%s: the `pa` copies and join compile to the same instructions', (slug) => {
+    expect(instructions(`${slug}-rettail-pa-copies.asm`)).toEqual(instructions(`${slug}-rettail-pa-join.asm`));
+  });
+
+  test.each(['ido71', 'mwcc242'])('%s: the `pa` copies keep a call in every arm', (slug) => {
+    expect(instructions(`${slug}-rettail-pa-copies.asm`).filter((l) => CALL.test(l))).toHaveLength(3);
+  });
+});

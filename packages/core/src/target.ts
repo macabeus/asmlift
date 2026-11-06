@@ -1251,6 +1251,44 @@ export interface TargetDescription {
     // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
     // refuses more.
     discardedReadMayFillArgRegister?: boolean;
+    // DOES THE COMPILER CROSS-JUMP RETURN TAILS? Where two arms end in the same code before the
+    // same return, does it keep ONE copy and jump the other arm into it? Where it does, the source
+    // may have written the tail into every arm (`h(10, 0); return;` in each) and the object still
+    // holds it once. So a join in the CFG is no evidence the source wrote one. What tells the two
+    // spellings apart is where the surviving copy sits, and which arms became one block. Read by
+    // the return-tail chooser (pipeline.ts `structureReturnTailReading`): it publishes the copies
+    // where the target's layout shows that merge (structure/cross-jumped-tail.ts), and never reads
+    // the layout where this is absent.
+    //
+    // gcc 2.x's jump2 pass does it: jump.c, in the `JUMP_CROSS_JUMP` run of `jump_optimize` that
+    // toplev.c makes at `optimize > 0`.
+    //   - An unconditional jump is first cross-jumped into the code before its own target label
+    //     (`find_cross_jump (insn, JUMP_LABEL (insn), 1)`).
+    //   - Only then is it tried against the other jumps to that label, and that search runs only
+    //     `if (INSN_UID (JUMP_LABEL (insn)) < max_uid)`.
+    //   - `do_cross_jump` keeps the LATER copy and jumps to a label before it. `get_label_before`
+    //     creates that label, so a jump already redirected is never searched for siblings again.
+    // So the copies spelling leaves two shapes in the object:
+    //   - an arm that does not use the tail stays laid out after the surviving copy, and that copy
+    //     ends in a jump over it;
+    //   - identical arm bodies stay separate blocks, where the join's one original label would have
+    //     merged them.
+    // MEASURED on two probe pairs, `corpus/probe-rettail-{pa,pb}-{copies,join}.c`: a three-arm `if`
+    // and a seven-case `switch`. Each is compiled at each toolchain's canonical flags by
+    // `scripts/regen-rettail-probes.ts`, and cross-jumped-tail.test.ts reads the objects:
+    //   - agbcc: the `pa` copies keep the tail mid-construct, ending in `b`, with the else arm laid
+    //     out after it. The `pb` copies hold the tail's store ONCE, in six case bodies; the join
+    //     has three bodies.
+    //   - gcc2.7.2 (-O1) and gcc2.7.2kmc (-O2): `pb` is the same, one store, six bodies against
+    //     three. The `pa` copies and join compile byte-identical, because the fall-through arm's
+    //     call merged too.
+    //   - ido7.1 and mwcc_242_81: NO. The `pb` copies keep all seven stores, each before its own
+    //     return, and the `pa` copies keep three calls.
+    // So `true` on ARMV4T_AGBCC and on MIPS_GCC. Each toolchain MIPS_GCC serves owes its own pair
+    // (the KEYED BY DESCRIPTION note at `spillSlotOrder`), and both are committed. ABSENT means no
+    // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
+    // unprobed, and PPC_MWCC claims nothing for them.
+    crossJumpsReturnTails?: boolean;
   };
 }
 
@@ -1386,6 +1424,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchBoundCase: 'taken',
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
+    // MEASURED on the probe pairs at the field (gcc 2.x jump.c's cross-jump).
+    crossJumpsReturnTails: true,
     hoistsSingleSetArm: true,
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
@@ -1738,6 +1778,8 @@ export const MIPS_GCC: TargetDescription = {
     // sub-trees a decline leaves, so a NESTED dispatch comes back as an `if` nest around a `switch`
     // over some of its arms.
     switchRequiresFrontLoadedTests: true,
+    // MEASURED on BOTH toolchains this description serves, the probe pairs at the field.
+    crossJumpsReturnTails: true,
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
