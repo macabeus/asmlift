@@ -4416,6 +4416,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //   stkbody_pair: `ts` takes a struct holding a `long long` after three words; O32 passes it at
   //     16(sp) and leaves a3 empty, which no caller writes, so the row stays declined there
   //     (control); agbcc splits it across r3 and [sp,#0], and lifts.
+  //   stkbody_entry: `nine` ends in a computed goto (`mov pc, r0`), which does not lift, so only
+  //     its straight-line entry (frontend/thumb-entry.ts), which loads all five incoming words,
+  //     sizes the call: kl2dct's `sub_08004060` is such a callee. agbcc only: no O32 frontend
+  //     scans an entry.
   //   stkbody_more: a K&R `kr` that loads one incoming word, called with six arguments (two staged):
   //     the body's bound is short of what is staged, so the row stays declined (control).
   //   stkbody_none: `nine` declared K&R and defined nowhere in the unit: no body, no bound, so the
@@ -4472,6 +4476,29 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'struct L { long long v; };\nint ts();\nint stkbody_pair(int a, struct L *p);',
     proto: { ts: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_entry',
+    src:
+      'extern int gv[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{\n' +
+      '    static void *t[] = { &&l0, &&l1 };\n' +
+      '    gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i;\n' +
+      '    goto *t[a & 1];\n' +
+      'l0: gv[5] = 1;\n' +
+      'l1: ;\n' +
+      '}\n' +
+      'void stkbody_entry(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gv[];\nvoid nine();\nvoid stkbody_entry(int *p, int n);',
+    proto: { stkbody_entry: { returnsVoid: true }, nine: { returnsVoid: true } },
   },
   {
     sym: 'stkbody_more',
