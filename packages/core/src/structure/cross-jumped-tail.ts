@@ -120,7 +120,17 @@ function tailEndsInJump(layout: AsmLayout, join: Block): boolean {
 }
 
 /** (C): the join's first instruction is a call, and two of its predecessors, each with the join as
- *  its only successor, hold a same instruction after their own last call. */
+ *  its only successor, hold a same instruction after their own last call.
+ *
+ *  BLIND TO WHERE IN THE ARM THAT INSTRUCTION SITS, on purpose. It fires on join-written arms that
+ *  merely share a statement (`gB = c` opening both arms of `if (a) { gB = c; gA = 1; } else if (b)
+ *  { gB = c; gC = b; } ... k();`), and publishes the copies there, which do not match. Counting only
+ *  an instruction that sets up a register the join reads (an argument of its call, or a saved
+ *  register read past it) clears that case, and loses two matches the copies have: on
+ *  `probe-rettail-pc-copies` the arms keep `gV = a` above the cut call, a store that sets up no
+ *  register, and the join then scores 23 lines off on gcc2.7.2 and 30 on gcc2.7.2kmc, really
+ *  compiled (2026-11-06). A mark that fires wrongly publishes the copies, the default before the
+ *  join, and one that misses can lose a match the copies had; so C stays wide. */
 function callCutFromArguments(fn: Fn, layout: AsmLayout, join: Block): boolean {
   if (layout.get(join)?.calls[0] !== 0) {
     return false;
