@@ -52,6 +52,7 @@ import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { crossJumpedTail } from './structure/cross-jumped-tail';
 import { DefaultAcceptsMemoMisuse, type JoinPastReturnsSite, StructureError, structure } from './structure/structure';
+import { unfoldedBranchConstant } from './structure/unfolded-branch-constant';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -1231,6 +1232,15 @@ export interface ReturnTailReading {
  *      too, and leaves the same marks under a join-written source (structure/cross-jumped-tail.ts).
  *      So a mark moves which verified reading is the default, never what is lifted.
  *
+ *  THE UNFOLDED RETURN. Where the target's cse folds a branch-proven constant only into the branch's
+ *  fall-through arm (target.ts `foldsBranchConstantOnTakenEdge` false: gcc 2.x at -O1), an early
+ *  return of the very value its branch tested equal to a constant, left unfolded in the object, was
+ *  the jump-target (`else`) arm in the source, and the join cannot spell it: `if (x == 0) return x;`
+ *  compiles to `return 0` (structure/unfolded-branch-constant.ts). Where any site shows one, the
+ *  copies are published whatever their size, as for a layout mark. MEASURED on Mario Party 3's
+ *  `func_8010BD28_472F98_mgmode` (gcc2.7.2 -O1), the one held-out real function the join lost a
+ *  match on there (2026-11-06): the copies match, the join is 1 line off.
+ *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
  *      `structure()` (`structureWithinBudget`), and that tree is published as it was;
@@ -1246,7 +1256,11 @@ export interface ReturnTailReading {
  *  `DefaultAcceptsMemoMisuse` is a defect and is rethrown, never an unpublished reading. */
 export function structureReturnTailReading(
   fn: Fn,
-  opts: Parameters<typeof structure>[1] & { joinPastReturns?: boolean; crossJumpsReturnTails?: boolean },
+  opts: Parameters<typeof structure>[1] & {
+    joinPastReturns?: boolean;
+    crossJumpsReturnTails?: boolean;
+    foldsBranchConstantOnTakenEdge?: boolean;
+  },
   emit: (sfn: SFn) => string,
   hooks: Parameters<typeof structure>[2] = {},
   memo?: Parameters<typeof structure>[3],
@@ -1286,10 +1300,14 @@ export function structureReturnTailReading(
   // Read only where the compiler is one that merges return tails: elsewhere the same layout is no
   // evidence of the copies (ido7.1 lays a tail out mid-construct with no cross-jump at all).
   const crossJumped = opts.crossJumpsReturnTails === true && sites.some((site) => crossJumpedTail(fn, site));
+  // Read only where the target's cse leaves the taken edge unfolded (gcc 2.x at -O1): elsewhere a
+  // return of the tested value says nothing about which arm the source wrote it in.
+  const unfolded =
+    opts.foldsBranchConstantOnTakenEdge === false && sites.some((site) => unfoldedBranchConstant(fn, site));
   let publishCopies = false;
   try {
     const [copyLines, joinLines] = [sourceLineCount(emit(copies)), sourceLineCount(emit(join))];
-    publishCopies = crossJumped || copyLines < joinLines;
+    publishCopies = crossJumped || unfolded || copyLines < joinLines;
   } catch {
     // a backend that cannot spell one of the two leaves the join standing; the caller's own emit of
     // the join reports its refusal where it has one
