@@ -457,8 +457,7 @@ export function liftStamped(
   const bytes = ownReturn?.register === true ? undefined : ownReturn?.type.size;
   // what each callee whose body is in this input, or handed in, reads of its arguments, lifted from
   // that body as a call to it is first lowered (frontend/callee-body.ts); the callee's own lift reads
-  // no bodies
-  // (and, off the same lift, what each one loads of its incoming stack words)
+  // no bodies, and, off the same lift, what each one loads of its incoming stack words
   const read =
     liftOptions.calleeBodyBound === undefined || liftOptions.calleeStackWords === undefined
       ? bodyReadsIn(name, asm, target, prototypes, ownContext, table, asmData, symbols, contextGlobals, calleeBodies)

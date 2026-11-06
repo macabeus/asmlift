@@ -4399,14 +4399,14 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // AN UNDECLARED CALLEE'S BODY SIZES ITS STACK ARGUMENTS (frontend/stackargs.ts, "THE CALLEE'S BODY";
   // frontend/callee-body.ts `CalleeStackWords`). kl2dct's sub_08049A34 stages five words for
-  // `sub_08004060`, which nothing declares, and declined "the store to [sp,#0] is never reloaded and
-  // its lower slots are supplied": the code alone cannot say where an undeclared call's block ends.
+  // `sub_08004060`, which nothing declares; unsized, it declines "the store to [sp,#0] is never
+  // reloaded and its lower slots are supplied": the code alone cannot say where that block ends.
   // The incoming stack words the callee's body loads (its lift, or its entry where it does not lift)
   // are a lower bound on what it takes, and the caller staging exactly those words on every path
   // closes it from above. The O32 frontends take the same licence past a0..a3 at 16(sp).
   //   stkbody9: `nine` is defined K&R in the same unit and loads five incoming words; the loop
   //     stages them before each call, and the row lifts the nine-argument call.
-  //   stkbody_br: `br6` loads its one stack word read only on one branch, past its straight-line
+  //   stkbody_br: `br6` loads its one stack word only on one branch, past its straight-line
   //     entry (agbcc loads it inside that branch), so only its lift sizes the six-argument call. On
   //     O32 it stays declined: `br6` reads a2 and a3 only as `sink`'s, which proves no read there,
   //     and O32 may skip a register for an 8-aligned argument (frontend/callee-body.ts

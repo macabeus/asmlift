@@ -54,9 +54,8 @@ export interface StackArgsCall<C> {
   readonly params?: number;
   /** Where nothing declares the call: one past the highest word of its incoming stack area the
    *  callee's own body is proven to load (frontend/callee-body.ts `CalleeStackWords`), a LOWER bound
-   *  on its stack words — asked, since it may lift the callee, only of a function whose code has
-   *  the signature of an outgoing block (see "THE CALLEE'S BODY" below). Absent, or answering 0 or
-   *  nothing, the body proves nothing. */
+   *  on its stack words — asked, since it may lift the callee, only where [sp,#0] is stored and never
+   *  loaded (`analyzeOutgoingArgs`). Absent, or answering 0 or nothing, the body proves nothing. */
   readonly bodyReads?: () => number | undefined;
 }
 
@@ -229,7 +228,7 @@ export function loadedWordBound<C>(
 // argument word of a call, so a word past the body's reads that it does not stage is no argument.
 // Anything else is the call it was before the witness existed: unlicensed, and refused by (a) or
 // (b) wherever they refused it — so the witness only ever turns a decline into a lift, and only at
-// a call where 0 reached it staged, which (b) refused.
+// a call [sp,#0] reached staged, which (b) refused.
 /** THE BODY'S LICENCE, the one rule both ISAs that stage stack arguments decide by (this file's
  *  dataflow for Thumb, frontend/mips.ts `lowerJal` for O32 over its SSA reaching definitions): a
  *  call nothing declares, whose callee's body loads `n` incoming stack words, takes exactly those

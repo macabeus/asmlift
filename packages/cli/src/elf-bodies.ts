@@ -72,8 +72,8 @@ const MAX_RANGE = 0x10000;
 /** The most ARM words handed in behind a veneer: the scan answers nothing for a body that has not
  *  returned by then. */
 const MAX_ARM_WORDS = 256;
-/** The most halfwords of a Thumb body handed in: a compiled entry loads its stack arguments first,
- *  after only the prologue's saves and frame reservation. */
+/** The most halfwords of a Thumb body handed in: the entry scan reads only the straight-line code
+ *  after the prologue's saves and frame reservation, and stops at the first branch. */
 const MAX_THUMB_HALFWORDS = 64;
 
 interface ElfSymbol {

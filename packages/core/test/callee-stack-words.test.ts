@@ -6,7 +6,9 @@
 // its lift where it lifts, its straight-line entry where it does not (frontend/callee-body.ts
 // `CalleeStackWords`, frontend/thumb-entry.ts). A caller that stages exactly that many words on
 // every path is then lifted at every argument register and those words (frontend/stackargs.ts,
-// "THE CALLEE'S BODY"). The shapes are agbcc's own output: corpus/agbcc-entry-stack.s.
+// "THE CALLEE'S BODY"); O32 takes the same licence past a0..a3 at 16(sp) (frontend/mips.ts
+// `lowerJal`). The shapes are the compilers' own output: corpus/agbcc-entry-stack.s and the
+// `*-calleestack` O32 listings.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -198,7 +200,7 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
 
     // A call ends the words it took per STORE, not per value: a value `f5`/`f6` took and that is
     // stored again for the next call is staged for that call. Ended by value, the store of `x` to
-    // 20(sp) for `g6` (which loads only 16(sp)) hid, and `g6` was licensed one word short.
+    // 20(sp) for `g6` (which loads only 16(sp)) would be hidden, licensing `g6` one word short.
     test('a value one call took, stored again for the next, is staged for it', () => {
       for (const sym of ['restaged_higher', 'restaged_same_word']) {
         expect(lift(sym)).toMatch(/the undeclared call to 'g6' at 0x[0-9a-f]+ fills a0..a3/);
