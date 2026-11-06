@@ -7,22 +7,38 @@
 // that copy sits and in WHICH arms became one block, because `do_cross_jump` keeps the copy of
 // the LATER jumping arm and jumps the earlier one to a new label before it. That label stops
 // further merging (`INSN_UID (JUMP_LABEL (insn)) < max_uid`). So the copies spelling leaves one of
-// two marks in the object, and the join spelling leaves neither:
+// two marks in the object:
 //
 //   (A) THE TAIL IS NOT LAST. The surviving copy ends in an unconditional jump (A1), and a block of
 //       the construct that never reaches the tail is laid out after it (A2). That is an arm that
 //       did not use the tail, left where the source wrote it. The join writes the tail after the
 //       whole construct, where it falls into what follows it. A bare return block does not count
 //       for A2: the epilogue an early `return` reaches is laid out last under either spelling.
-//   (B) IDENTICAL ARMS STAYED APART. Two arms that reach the tail and nothing else have the same
-//       instructions. Under the join, each arm jumps to the join's one original label, and jump2
-//       merges identical bodies before it. Under the copies, the first cross-jump made a new label,
-//       and the merge never ran.
+//   (B) IDENTICAL ARMS STAYED APART. Two arms that reach the tail and nothing else, each by an
+//       unconditional jump, have the same instructions. Under the join, each such arm jumps to the
+//       join's one original label, and jump2's search of the other jumps to that label merges
+//       identical bodies. Under the copies, the first cross-jump made a new label, and that search
+//       never ran. An arm that FALLS into the join is not one of them: it is tried only against
+//       the code before the label, which a call ending it defeats (flow.c's use-nop), so agbcc
+//       keeps a falling `g(2)` apart from a jumping `g(2)` under the join too
+//       (`probe-rettail-pd-join.c`).
 //
-// MEASURED, not derived. Over the 620 real functions where the join re-spells the default
-// (2026-11-05), the bound plus (A1 & A2) | B gave MATCH 44, against 35 for the copies everywhere and
-// 40 for the size bound alone, with no match lost. That was a simulation from the two readings'
-// scores. The probe pairs in cross-jumped-tail.test.ts show each mark on agbcc.
+// Bodies are compared as the frontend recorded them, the relocated symbol included
+// (frontend/ssa.ts `recordAsmLayout`): in a relocatable MIPS object `gT = c` and `gW = c` are the
+// same two instructions, and only the relocation names the global (`probe-rettail-pc-join.c`).
+//
+// A MARK IS EVIDENCE, NOT PROOF. jump2 cross-jumps any shared code, not only a return tail: two
+// identical arms of a join-written `if`, or a call both arms end in, merge the same way, and leave
+// the merged block ending in a jump with an early-return arm laid out after it (A). Both readings
+// of such a site are verified readings of the asm, and on the hand probes neither matches. So a
+// mark moves which reading is the DEFAULT, never what is lifted, and its worth is measured, not
+// derived.
+//
+// MEASURED. Over the 620 real functions where the join re-spells the default (2026-11-05), each
+// reading really compiled: the bound plus (A1 & A2) | B gives MATCH 44, against 35 for the copies
+// everywhere and 40 for the size bound alone, with no match lost. The rule was chosen on those 620,
+// so the probe pairs in cross-jumped-tail.test.ts are the held-out check of each mark and of each
+// shape that is no mark.
 //
 // Read only from the frontend's layout record (ir/core.ts `AsmLayout`). A block with no entry, such
 // as one a raise pass made up, is no evidence either way. A function with no record (parsed IR)
@@ -83,15 +99,16 @@ function armLaidOutAfter(fn: Fn, layout: AsmLayout, site: JoinPastReturnsSite, j
   return false;
 }
 
-/** (B): two predecessors of the join, each with the join as its only successor, whose asm bodies are
- *  the same non-empty instructions. */
+/** (B): two predecessors of the join, each with the join as its only successor and each ending in an
+ *  unconditional jump to it, whose asm bodies are the same non-empty instructions. */
 function identicalArms(fn: Fn, layout: AsmLayout, join: Block): boolean {
   const seen = new Set<string>();
   for (const p of predecessors(fn).get(join) ?? []) {
-    const body = layout.get(p)?.body;
-    if (body === undefined || body.length === 0 || succsOf(p).length !== 1) {
+    const at = layout.get(p);
+    if (at === undefined || !at.endsInJump || at.body.length === 0 || succsOf(p).length !== 1) {
       continue;
     }
+    const body = at.body;
     const key = body.join('\n');
     if (seen.has(key)) {
       return true;

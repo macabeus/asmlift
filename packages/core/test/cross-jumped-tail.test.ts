@@ -176,6 +176,8 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
     ['pb-copies', true],
     ['pb-join', false],
     ['pc-join', false],
+    // the two `g(2)` arms are identical, but only one of them jumps to the tail
+    ['pd-join', false],
   ] as const)('agbcc %s: %s', (p, want) => {
     const { fn, sites } = sitesOf(p);
     expect(sites.length).toBeGreaterThan(0);
@@ -256,9 +258,12 @@ describe('the plain default publishes the copies where the layout shows the merg
     },
   );
 
-  test.each(['pa-join', 'pb-join', 'pc-join'] as const)('agbcc %s: no mark, so the size bound keeps the join', (p) => {
-    expect(reading(p, ARMV4T_AGBCC)).toBe(reading(p, ARMV4T_AGBCC, { joinPastReturns: true }));
-  });
+  test.each(['pa-join', 'pb-join', 'pc-join', 'pd-join'] as const)(
+    'agbcc %s: no mark, so the size bound keeps the join',
+    (p) => {
+      expect(reading(p, ARMV4T_AGBCC)).toBe(reading(p, ARMV4T_AGBCC, { joinPastReturns: true }));
+    },
+  );
 
   test.each(GCC_LANES)(
     '$tc: the `pb` copies are the default, and every join written once keeps the join',
