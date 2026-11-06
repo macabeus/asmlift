@@ -17,7 +17,10 @@
 //
 // THE PASS STOPS, keeping what it read, at the first instruction after which "the next instruction
 // runs with this sp, on every call" or "this frame word holds the caller's word" may no longer hold:
-//   - a branch, a call, a `bx`, a `pop`, a write of pc, a label, a directive, or the end of the text;
+//   - a branch, a call, a `bx`, a `pop`, a write of pc, a directive, or the end of the text;
+//   - a label anything outside the debug sections names, which control may reach from elsewhere. A
+//     label only debug information names (agbcc -g's `.LFB14:` and `.LM82:`, which `.4byte` lines
+//     under `.section .debug*` point at) is followed past;
 //   - a frame address copied or added into a register (`mov rD, sp`, `add rD, sp, #k`, `add rD,
 //     sp`): the words above it may then be written through that register;
 //   - (halfwords) any encoding the decoder below does not model.
@@ -222,21 +225,51 @@ export function thumbEntryWordsFromText(callee: string, text: string): number | 
     return undefined;
   }
   const rest = head.exec(lines[at].replace(/@.*$/, ''))![1].trim();
+  const named = labelsNamed(lines);
   function* steps(): Generator<Step> {
     for (const raw of [rest, ...lines.slice(at + 1)]) {
-      const line = raw.replace(/@.*$/, '').trim();
+      let line = raw.replace(/@.*$/, '').trim();
+      // labels only the debug sections name are no join; the line after one is read as any other
+      for (let m = LABEL.exec(line); m !== null; m = LABEL.exec(line)) {
+        if (named.has(m[1])) {
+          yield { kind: 'stop' };
+          return;
+        }
+        line = line.slice(m[0].length).trim();
+      }
       if (line === '') {
         continue;
-      }
-      if (/^[\w.$]+\s*:/.test(line)) {
-        yield { kind: 'stop' };
-        return;
       }
       yield textStep(line);
     }
     yield { kind: 'stop' };
   }
   return incomingWords(steps());
+}
+
+/** A label at the start of a line: its name, then the rest of the line. */
+const LABEL = /^([\w.$]+)\s*:/;
+
+/** Every name an instruction or a directive outside a debug section (`.debug*`, `.stab*`, `.line`)
+ *  spells, which a label of that name may be reached through. */
+function labelsNamed(lines: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  let debug = false;
+  for (const raw of lines) {
+    const line = raw.replace(/@.*$/, '').replace(LABEL, '').trim();
+    const section = /^\.(?:section\s+([\w.$]+)|(text|data|bss)\b)/.exec(line);
+    if (section !== null) {
+      debug = /^\.(?:debug|stab|line)/.test(section[1] ?? '');
+      continue;
+    }
+    if (debug || /^\.stab/.test(line)) {
+      continue;
+    }
+    for (const m of line.matchAll(/[\w.$]+/g)) {
+      out.add(m[0]);
+    }
+  }
+  return out;
 }
 
 /** One Thumb halfword of the prologue subset, read as a step: every format but the branches, the

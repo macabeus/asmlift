@@ -54,6 +54,23 @@ describe('the incoming stack words an agbcc callee loads, from its text and from
   });
 });
 
+describe('agbcc -g: the labels only debug information names', () => {
+  // `nine` of corpus/probe-agbcc-entry-stack.c at -O2 -g, as agbcc lays it out: `.LFB1:` and `.LM1:`
+  // before the prologue, and each named only by a `.4byte` under `.section .debug*`
+  const g =
+    'nine:\n.LFB1:\n.LM1:\n\n\tpush\t{r4, r5, r6, r7, lr}\n\tldr\tr4, [sp, #0x14]\n.LM2:\n\tldr\tr5, [sp, #0x24]\n' +
+    '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.LFE1:\n\t.section\t.debug_line\n\t.4byte\t.LM1\n\t.4byte\t.LM2\n' +
+    '\t.section\t.debug\n\t.4byte\t.LFB1\n';
+
+  test('are followed past, so the entry reads as without -g', () => {
+    expect(thumbEntryWordsFromText('nine', g)).toBe(5);
+  });
+
+  test('…while one the code names still stops it', () => {
+    expect(thumbEntryWordsFromText('nine', `${g}\t.text\n\tb\t.LM2\n`)).toBe(1);
+  });
+});
+
 describe('where the pass stops, and where it refuses', () => {
   const text = (...lines: string[]) => ['f:', ...lines.map((l) => `\t${l}`)].join('\n');
 
@@ -68,10 +85,14 @@ describe('where the pass stops, and where it refuses', () => {
     expect(thumbEntryWordsFromText('f', text('push {r4, lr}', 'ldr r0, [sp, #4]', 'bx lr'))).toBeUndefined();
   });
 
-  test('a load past a branch, a call or a label is not read', () => {
+  test('a load past a branch, a call or a label the code names is not read', () => {
     expect(thumbEntryWordsFromText('f', text('cmp r0, #0', 'beq .L1', 'ldr r0, [sp]', 'bx lr'))).toBeUndefined();
     expect(thumbEntryWordsFromText('f', text('ldr r1, [sp]', 'bl g', 'ldr r1, [sp, #4]'))).toBe(1);
-    expect(thumbEntryWordsFromText('f', 'f:\n\tldr r1, [sp]\n.L1:\n\tldr r1, [sp, #8]\n')).toBe(1);
+    expect(thumbEntryWordsFromText('f', 'f:\n\tldr r1, [sp]\n.L1:\n\tldr r1, [sp, #8]\n\tb .L1\n')).toBe(1);
+    // …a label a jump table names is one too, in whichever section the table sits
+    expect(
+      thumbEntryWordsFromText('f', 'f:\n\tldr r1, [sp]\n.L1:\n\tldr r1, [sp, #8]\n\t.section .rodata\n\t.word .L1\n'),
+    ).toBe(1);
     expect(thumbEntryWordsFromHalfwords([0x9800, 0xd000, 0x9802])).toBe(1);
   });
 
