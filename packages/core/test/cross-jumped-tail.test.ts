@@ -22,6 +22,7 @@ import { frontendFor } from '../src/frontend/registry';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { raiseRecovered } from '../src/pipeline';
+import { crossJumpedTail } from '../src/structure/cross-jumped-tail';
 import { type JoinPastReturnsSite, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 
@@ -124,5 +125,55 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
   test('the hook names each site: the `pa` `if` and the `pb` jump table', () => {
     expect(sitesOf('pa-copies').sites.map((s) => s.kind)).toContain('if');
     expect(sitesOf('pb-copies').sites.map((s) => s.kind)).toEqual(['switch']);
+  });
+
+  test.each([
+    ['pa-copies', true],
+    ['pa-join', false],
+    ['pb-copies', true],
+    ['pb-join', false],
+  ] as const)('%s: %s', (p, want) => {
+    const { fn, sites } = sitesOf(p);
+    expect(sites.length).toBeGreaterThan(0);
+    expect(sites.some((s) => crossJumpedTail(fn, s))).toBe(want);
+  });
+
+  // `if (a) { x(); return; } y(); z();`, the early return with a `ret` of its own. Laid out with the
+  // `x` arm after the join `z()`, which ends in a jump to its epilogue: the mark. Laid out with the
+  // `x` arm first, the only block of the construct after the join is the early return's bare `ret`,
+  // which is laid out last under either spelling: no mark.
+  const EPILOGUE = [
+    'fn f {',
+    '^bb0(%0: s32):',
+    '  %1: s32 = const {value=0}',
+    '  %2: u32 = icmp_eq %0, %1',
+    '  cond_br %2, ^bb1(), ^bb2()',
+    '^bb1():',
+    '  %3: s32 = call %0 {target="x"}',
+    '  br ^bb4()',
+    '^bb2():',
+    '  %4: s32 = call %0 {target="y"}',
+    '  br ^bb3()',
+    '^bb3():',
+    '  %5: s32 = call %0 {target="z"}',
+    '  br ^bb5()',
+    '^bb4():',
+    '  ret',
+    '^bb5():',
+    '  ret',
+    '}',
+    '',
+  ].join('\n');
+  test('a bare return laid out after the join is no mark, and neither is a missing layout', () => {
+    const fn = parse(EPILOGUE);
+    const [b0, b1, b2, b3, b4, b5] = fn.blocks;
+    const site: JoinPastReturnsSite = { branch: b0, join: b3, kind: 'if' };
+    expect(crossJumpedTail(fn, site)).toBe(false); // parsed: no layout at all
+    const laidOut = (order: typeof fn.blocks) =>
+      new Map(order.map((b, index) => [b, { index, body: [`bl ${index}`], endsInJump: b === b3 }]));
+    fn.asmLayout = laidOut([b0, b2, b3, b5, b1, b4]);
+    expect(crossJumpedTail(fn, site)).toBe(true);
+    fn.asmLayout = laidOut([b0, b1, b2, b3, b5, b4]);
+    expect(crossJumpedTail(fn, site)).toBe(false);
   });
 });
