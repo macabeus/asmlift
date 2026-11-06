@@ -65,7 +65,15 @@ import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
-import { applyIdiomPatterns, liftStamped, offsetNameBehaviorsFor, raiseRecovered, structureChecked } from './pipeline';
+import {
+  applyIdiomPatterns,
+  liftStamped,
+  offsetNameBehaviorsFor,
+  raiseRecovered,
+  sourceLineCount,
+  structureChecked,
+  structureReturnTailReading,
+} from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
@@ -105,7 +113,6 @@ import {
   FOR_BOUND_GATES,
   StructureError,
   hasDivergentSharedRet,
-  hasJoinPastReturns,
 } from './structure/structure';
 import {
   type SymbolInfo,
@@ -570,6 +577,7 @@ export function enumerateCandidates(
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     spellSwitchBreak: backend.spellsSwitchBreak,
+    spellEarlyReturns: backend.spellsEarlyReturn,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
     ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
   };
@@ -2278,14 +2286,29 @@ export function enumerateCandidates(
           reportThrow(settingVariations, e);
           continue;
         }
-        // THE JOIN PAST EARLY RETURNS, `/ret-join`: the same raised fn, structured again with
-        // `joinPastReturns`, in its own pass between the follow and the sink, on the fn as raised. A
-        // chain of `if`s each holding an early `return;` has no CFG join (`synthetic:retchain`), and
-        // where the early returns cross-jump into one return tail the follow lands on that tail
-        // (`synthetic:retchain_xj`); both copy the code below every such `if` into its arms, and a
-        // switch with a `case` that returns early likewise. Gated on `hasJoinPastReturns`, so a
-        // function with no such branch pays no candidate. Not the
-        // default, so a row whose copies are the bytes keeps them where they score.
+        // THE OTHER RETURN-TAIL READING, `/ret-copy` or `/ret-join`, in its own `reading` pass
+        // between the follow and the sink. The default pass structures each setting with the join
+        // past early returns and, where that took the join somewhere (`onJoinPastReturns`), with
+        // the return-tail copies (`copyReturnTails`) too, and publishes the copies only where they
+        // spell the function in fewer lines or the layout shows a cross-jumped return tail
+        // (pipeline.ts `structureReturnTailReading`). This pass
+        // enumerates the tree it did not publish, so neither reading is structured twice:
+        //   - `/ret-copy`, the copies, where the join was published. A chain of `if`s each holding
+        //     an early `return;` has no CFG join (`synthetic:retchain`), and where the early returns
+        //     cross-jump into one return tail the follow lands on that tail
+        //     (`synthetic:retchain_xj`); without the join both copy the code below every such `if`
+        //     into its arms, and a switch with a `case` that returns early likewise. The copies are
+        //     kept as a candidate because some rows' bytes are them (`synthetic:sw_fall:ido7.1`);
+        //   - `/ret-join`, the join, where the copies were published: the join copies a return tail
+        //     into each early return in its turn, and where that is the longer spelling it is kept
+        //     as a candidate beside the copies.
+        // A setting whose structuring never took the join has one reading, and pays no candidate.
+        // With both in the fan, the bound moves a ranked score nowhere: `compareScored` orders a
+        // score tie by goto, cast and line counts before enumeration order.
+        //
+        // The shared-tail passes below structure with the copies too: their follow and sink were
+        // ranked against the copies, their winners hold those trees, and crossing them with the join
+        // is a reading nothing has measured.
         //
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
         // in two passes after the default one.
@@ -2329,13 +2352,22 @@ export function enumerateCandidates(
         // `droppedDefault` is the DEFAULT pass's drops. Each shared-tail pass reads it and keeps its
         // own drops in a copy, so one pass's structuring failure never removes the other's candidate.
         const droppedDefault = new Set<string>();
+        // Per DEFAULT-pass setting whose structuring was a choice between the join past early
+        // returns and the return-tail copies (pipeline.ts `structureReturnTailReading`), the reading
+        // it did not publish: the only trees the `reading` pass enumerates, as `/ret-copy` where the
+        // join was published and `/ret-join` where the copies were.
+        const unpublishedDefault = new Map<string, { readonly reading: 'copies' | 'join'; readonly sfn: SFn }>();
+        // DEFAULT-pass settings whose copies were dropped (they declined or failed a boundary
+        // contract) or barred: the strip closure over them, as `dropped` is over whole settings, so
+        // `X/merge-names` never publishes or offers the copies where `X`'s copies failed.
+        const copiesDropped = new Set<string>();
         // What `assertDefaultAccepts` learned about this fn, shared by every setting structured from it.
         let acceptsMemo = new DefaultAcceptsMemo(fn);
-        for (const pass of ['default', 'follow', 'join', 'sink'] as const) {
+        for (const pass of ['default', 'follow', 'reading', 'sink'] as const) {
           if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
             continue;
           }
-          if (pass === 'join' && !hasJoinPastReturns(fn)) {
+          if (pass === 'reading' && unpublishedDefault.size === 0) {
             continue;
           }
           if (pass === 'sink') {
@@ -2361,11 +2393,9 @@ export function enumerateCandidates(
           const liftVariations: readonly Variation[] =
             pass === 'follow'
               ? [...liftSetting.variations, 'shared-ret']
-              : pass === 'join'
-                ? [...liftSetting.variations, 'ret-join']
-                : pass === 'sink'
-                  ? [...liftSetting.variations, 'shared-tail']
-                  : liftSetting.variations;
+              : pass === 'sink'
+                ? [...liftSetting.variations, 'shared-tail']
+                : liftSetting.variations;
           // the per-lift gates, on THIS lift's fn — see the table doc
           const offForThisLift = STRUCTURE_VARIATIONS.filter(
             (variation) => variation.perLiftGate !== undefined && !variation.perLiftGate(fn),
@@ -2391,6 +2421,17 @@ export function enumerateCandidates(
             if (alternative && droppedDefault.has(key)) {
               continue;
             }
+            // THE OTHER RETURN-TAIL READING: the tree the default pass structured and did not publish,
+            // enumerated as it is. It is the same setting's, so the witness and the strip closure
+            // below already answered for it there.
+            const otherReading = pass === 'reading' ? unpublishedDefault.get(key) : undefined;
+            if (pass === 'reading' && otherReading === undefined) {
+              continue;
+            }
+            const settingLiftVariations: readonly Variation[] =
+              otherReading === undefined
+                ? liftVariations
+                : [...liftSetting.variations, otherReading.reading === 'copies' ? 'ret-copy' : 'ret-join'];
             // THE OFF-SIBLING WITNESS (`StructureVariation.offWitness`): a setting whose variation's
             // OFF sibling structured without firing the witness would rebuild that sibling's tree, so
             // it is skipped and reported as the tree dedup it is. A sibling not structured in this
@@ -2399,12 +2440,16 @@ export function enumerateCandidates(
             // A setting skipped HERE builds its sibling's structuring, so it fires the hooks the
             // sibling fired, and it is recorded with the sibling's set. Without that the gate does
             // not compose: a setting carrying two witnessed variations (`tail-copies/for-continue`)
-            // finds each sibling unrecorded and is structured however inert both are.
+            // finds each sibling unrecorded and is structured however inert both are. A setting
+            // skipped here in the default pass has no reading of its own in the `reading` pass:
+            // the sibling's fired set is the union of both its readings' (`structureReturnTailReading`),
+            // so both of this setting's readings are the sibling's trees, which the sibling enumerates.
             const sameAs = STRUCTURE_VARIATIONS.flatMap((variation) => {
-              if (variation.offWitness === undefined || !s[variation.flag]) {
+              if (otherReading !== undefined || variation.offWitness === undefined || !s[variation.flag]) {
                 return [];
               }
-              const seen = witnessed.get(s.variations.filter((v) => v !== variation.name).join('/'));
+              const sibling = s.variations.filter((v) => v !== variation.name).join('/');
+              const seen = witnessed.get(sibling);
               return seen !== undefined && !seen.has(variation.offWitness) ? [seen] : [];
             });
             if (sameAs.length > 0) {
@@ -2412,14 +2457,14 @@ export function enumerateCandidates(
               opts.onTreeDeduped?.();
               continue;
             }
-            if (
+            const stripped = (set: ReadonlySet<string>): boolean =>
               STRUCTURE_VARIATIONS.some(
                 (variation) =>
                   variation.strip &&
                   s[variation.flag] &&
-                  dropped.has(s.variations.filter((v) => v !== variation.name).join('/')),
-              )
-            ) {
+                  set.has(s.variations.filter((v) => v !== variation.name).join('/')),
+              );
+            if (otherReading === undefined && stripped(dropped)) {
               // A SKIPPED setting is recorded exactly like a dropped one, or the closure would not be
               // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
               // X/inplace/merge-names would find neither stripped key and run — shipping a
@@ -2440,7 +2485,6 @@ export function enumerateCandidates(
               ),
             );
             let counterSignRefused = false;
-            let joinRead = false;
             const structOpts = {
               ...symbolSettingOpts,
               ...(inferredSymbols.size ? { inferredSymbols } : {}),
@@ -2457,39 +2501,49 @@ export function enumerateCandidates(
                 (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
                 {},
               ),
-              ...(pass === 'join' ? { joinPastReturns: true } : alternative ? { followEarlyReturns: true } : {}),
+              ...(alternative ? { followEarlyReturns: true, copyReturnTails: true } : {}),
+            };
+            const hooks = {
+              ...witnessHooks,
+              onCounterSignRefused: () => {
+                counterSignRefused = true;
+              },
             };
             try {
-              sfn = structureChecked(
-                fn,
-                structOpts,
-                {
-                  ...witnessHooks,
-                  onCounterSignRefused: () => {
-                    counterSignRefused = true;
-                  },
-                  onJoinPastReturns: () => {
-                    joinRead = true;
-                  },
-                },
-                acceptsMemo,
-              );
-              witnessed.set(key, fired);
-              // THE `/ret-join` PASS'S STOP: `hasJoinPastReturns` is a superset (it asks no region's
-              // `stop` and no switch arm's own join), and where the reading changed nothing in the
-              // first setting it structured, that tree is the default pass's and so is every other
-              // setting's, which the tree dedup below would drop one by one after paying for each.
-              if (pass === 'join' && !joinRead) {
-                break;
-              }
-              // A SHARED-TAIL PASS'S SETTING PAST THE COPY BUDGET is dropped, not published as the
-              // budget rerun's tree: that tree crosses the follow or the sink with the join past
-              // early returns, a reading no setting under the budget is given, and the `/ret-join`
-              // pass holds the join's own tree for the setting. The crossing would more than double
-              // an over-budget fan (a 12-link kmc chain: 10,824 candidates, 6,456 crossed).
-              if (alternative && pass !== 'join' && joinRead) {
-                dropped.add(key);
-                continue;
+              if (otherReading !== undefined) {
+                sfn = otherReading.sfn;
+              } else if (pass === 'default') {
+                // THE RETURN-TAIL READING, bounded by size and read off the layout (pipeline.ts
+                // `structureReturnTailReading`): the join past early returns, or the copies where
+                // they spell this setting's function shorter or the asm layout shows a cross-jumped
+                // return tail. The losing tree is kept for the `reading` pass, so neither reading is
+                // structured twice.
+                const copiesBarred = stripped(copiesDropped);
+                const read = structureReturnTailReading(
+                  fn,
+                  { ...structOpts, joinPastReturns: copiesBarred },
+                  (t) => backend.emit(t),
+                  hooks,
+                  acceptsMemo,
+                );
+                sfn = read.sfn;
+                if (read.unpublished === undefined) {
+                  if (copiesBarred) {
+                    copiesDropped.add(key);
+                  }
+                } else if ('error' in read.unpublished) {
+                  copiesDropped.add(key);
+                  reportThrow(
+                    [...liftVariations, 'ret-copy', ...s.variations, ...symbolSetting.variations],
+                    read.unpublished.error,
+                  );
+                } else {
+                  unpublishedDefault.set(key, read.unpublished);
+                }
+                witnessed.set(key, fired);
+              } else {
+                sfn = structureChecked(fn, structOpts, hooks, acceptsMemo);
+                witnessed.set(key, fired);
               }
             } catch (e) {
               if (e instanceof DefaultAcceptsMemoMisuse) {
@@ -2664,13 +2718,9 @@ export function enumerateCandidates(
                 }
                 continue;
               }
-              // a tree the copy budget's rerun gave the join past early returns is that reading's (only
-              // the default pass gets here with one: the shared-tail passes drop theirs above)
-              const rerunRead: readonly Variation[] = joinRead && pass === 'default' ? ['ret-join'] : [];
               const variations: readonly Variation[] = [
                 cand.variation,
-                ...liftVariations,
-                ...rerunRead,
+                ...settingLiftVariations,
                 ...s.variations,
                 ...sp.variations,
                 ...symbolSetting.variations,
@@ -2914,10 +2964,9 @@ export function gotoCount(source: string): number {
 }
 
 /** Non-blank lines in a candidate's rendered source — the compactness tie-break above, counted
- *  exactly as `quality.ts` counts `lines`. Deterministic, and total on any string. */
-function lineCount(source: string): number {
-  return source.split('\n').filter((l) => l.trim().length > 0).length;
-}
+ *  exactly as `quality.ts` counts `lines`, and the one count the default's return-tail reading is
+ *  bounded by (pipeline.ts `sourceLineCount`). Deterministic, and total on any string. */
+const lineCount = sourceLineCount;
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
  *

@@ -59,7 +59,46 @@ export interface Fn {
   /** L1 SIDE DATA (see {@link LocalObjects}); set by a frontend that recovered one, `undefined` on
    *  every other `Fn`. REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is. */
   localObjects: LocalObjects | undefined;
+  /** L1 SIDE DATA (see {@link AsmLayout}); set by a frontend, `undefined` on parsed IR.
+   *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is. */
+  asmLayout: AsmLayout | undefined;
 }
+
+/** One block's place in the assembly a frontend lifted it from ({@link AsmLayout}). */
+export interface AsmBlockLayout {
+  /** the block's position among the function's blocks in the asm text, first block 0 */
+  readonly index: number;
+  /** the block's instructions without its control transfer, one string per instruction as the
+   *  asm spells it (`mnemonic op,op`), followed by `<sym>` (`<sym+0xN>` with an addend) where a
+   *  relocation fills in a symbol the operands do not name (frontend/ssa.ts `recordAsmLayout`). A
+   *  MIPS delay slot is part of the block it runs in. */
+  readonly body: readonly string[];
+  /** the positions in `body` of the instructions that make a call, as the frontend's ISA reads them
+   *  (Thumb `bl`/`blx` but not a far-jump relay, MIPS `jal`/`jalr`/`bal`, PPC `bl`/`bctrl`/`blrl`) */
+  readonly calls: readonly number[];
+  /** the block ends in an unconditional jump to a label: neither a fall-through, nor a return,
+   *  nor a conditional or indirect branch */
+  readonly endsInJump: boolean;
+}
+
+/** WHERE THE COMPILER PUT EACH BLOCK, and what it holds besides its branch: a measurement only the
+ *  frontend can make. The IR keeps the CFG and drops the order, since `fn.blocks` is a list passes
+ *  are free to rewrite (raise/reroll.ts moves a block ahead of another, and inserts one).
+ *
+ *  The reader is the return-tail chooser (structure/cross-jumped-tail.ts). Where the compiler
+ *  cross-jumps return tails (target.ts `crossJumpsReturnTails`), the layout tells a tail the source
+ *  wrote once from one it wrote into every arm, and the CFG cannot. Keyed by Block OBJECT, so a
+ *  clone re-keys it (cli/src/report.ts `structuredCloneFn`). A block a pass created has no entry,
+ *  and every reader takes a missing entry as "no evidence".
+ *
+ *  AN ENTRY DESCRIBES THE ASM BLOCK THE IR BLOCK WAS LIFTED FROM, whatever raising later did to the
+ *  IR block. A return sunk into it, or ops a fold absorbed (shortcircuit, tailsink, divpow2), leave
+ *  the entry as the frontend wrote it. So `endsInJump` and `body` say what the compiler emitted,
+ *  not what the block holds now: over the agbcc lifts of the 620 functions the join re-spells
+ *  (2026-11-05), 786 of 10520 blocks have an entry saying they end in a jump and no longer end in a
+ *  `br`. The return-tail chooser reads exactly that, the asm terminator. A reader of the current
+ *  block reads its ops. */
+export type AsmLayout = Map<Block, AsmBlockLayout>;
 
 /** Where a function-scope static lives, which decides how its definition is spelled: `rodata` is
  *  `const` with an initializer, `data` has an initializer, `bss` has none. */

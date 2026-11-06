@@ -320,6 +320,9 @@ export const pascalBackend: LanguageBackend = {
   // Nor has Pascal a `break`, so recovery must not mint a switch's mid-arm one either: a closed arm
   // that leaves early spells as nested `if`s that copy the arm's tail into each path.
   spellsSwitchBreak: false,
+  // Nor an early `return` (the `return` case below loud-fails one not in tail position), so
+  // structuring reads the return-tail copies rather than the join past early returns.
+  spellsEarlyReturn: false,
   emit(fn0: SFn): string {
     // The declaration list is put into the target's own frame order HERE, as the C family does it
     // in its shared assembler — owned by `emit`, never by a `.emit(` call site (l3/slotorder.ts).

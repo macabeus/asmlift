@@ -1126,7 +1126,13 @@ export class StructureError extends Error {
  *  CENSUS (2026-11-02, the default lift of every row of both tiers in both map modes, 5,438
  *  structurings): only `synthetic:retchain` and `synthetic:retchain_xj`, whose 32 tails are the
  *  copies this bounds, enter more than 4 regions per block, and they peak at 9. The `--fan` sweep
- *  of the same tree, which ran out of heap partway through the real tier, found nothing more. */
+ *  of the same tree, which ran out of heap partway through the real tier, found nothing more. That
+ *  census read the return-tail copies, the `copyReturnTails` candidate, not the default join past
+ *  early returns. The join is not always the smaller of the two: it copies a return tail into each
+ *  early return, so where the paths that do not return meet at a block few of them reach it can
+ *  write more (sa3 sub_809A808, 119 lines against the copies' 54), and a join past the bound falls
+ *  to the copies (`structureWithinBudget`). Under the bound, where the join is the longer, the
+ *  pipeline publishes the copies instead (pipeline.ts `structureReturnTailReading`). */
 export const COPY_BUDGET = 64;
 /** The floor under it, so a small function's legitimate copies never reach it. */
 export const COPY_BUDGET_FLOOR = 4096;
@@ -2517,12 +2523,22 @@ export interface StructureOptions extends ArithCompilerFacts {
   // non-returning paths share: `followOverReturns` below. Absent, such an `if` keeps its arms
   // divergent and a region both of them reach is emitted in each.
   followEarlyReturns?: boolean;
-  // Give a DIVERGENT `if` or switch outside every loop the block its non-returning paths meet at,
-  // ahead of the CFG's join where that is EXIT or a return tail: `joinsPastReturns` below. Absent,
-  // such a branch keeps its arms divergent and everything below it is written into each arm, once
-  // more per such branch of a chain. rank.ts enumerates it as the `/ret-join` twin; `structure()`
-  // also asks it, unranked, of a structuring over its copy budget (`COPY_BUDGET`).
-  joinPastReturns?: boolean;
+  // Keep a DIVERGENT `if` or switch outside every loop divergent where its CFG's join is EXIT or a
+  // return tail, so everything below it is written into each arm, once more per such branch of a
+  // chain: THE RETURN-TAIL COPIES. Absent (the default), such a branch is given the block its
+  // non-returning paths meet at as its join (`joinsPastReturns` below) and the code from there is
+  // written once. Where that join was taken, the pipeline structures again with this on and
+  // publishes whichever reading spells the function in fewer lines, ties to the join, or the copies
+  // where the target's layout shows a cross-jumped return tail (pipeline.ts
+  // `structureReturnTailReading`), and rank.ts enumerates the other as `/ret-copy` or `/ret-join`;
+  // a copies structuring past the copy budget (`COPY_BUDGET`) declines, and the join stands.
+  copyReturnTails?: boolean;
+  // Can the emitted language spell a `return` before the end of the function? Absent = yes. The
+  // join past early returns writes one in each arm that leaves early, where the copies end every
+  // arm at the function's end, so a language that cannot (Pascal, `LanguageBackend.spellsEarlyReturn`)
+  // is structured reading the copies, as `copyReturnTails` asks. A capability of the backend, like
+  // `spellSwitchFallthrough`, never a variation: the default-accepts guard does not reset it.
+  spellEarlyReturns?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -2604,6 +2620,14 @@ function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | undefin
   return body.map((s) => mapStmtExprs(s, stamp));
 }
 
+/** Where one `if`, comparison tree or jump table took the join past its early returns
+ *  (`StructureHooks.onJoinPastReturns`): its branch block, the join, and which recovery took it. */
+export interface JoinPastReturnsSite {
+  readonly branch: Block;
+  readonly join: Block;
+  readonly kind: 'if' | 'tree' | 'switch';
+}
+
 /** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
  *  one by spreading a target's `compilerBehaviors`, whose fields map 1:1 onto it, so a hook living
  *  there would be settable from a TargetDescription. */
@@ -2655,13 +2679,14 @@ export interface StructureHooks {
    *  domain of the shared-tail twins (that domain is `hasDivergentSharedRet`, which asks for a
    *  `cond_br`). */
   onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
-  /** Fired each time an `if` or a jump table takes the join past early returns (`joinPastReturns`,
-   *  or the copy budget's rerun) where its CFG join differs: the one place the reading changes a
-   *  tree. Held, like the other observation hooks, until the run that fired it is the one returned.
-   *  rank.ts's `/ret-join` pass stops after a structuring that never fired it, whose tree is the
-   *  default's; names a default-pass tree that fired it `/ret-join` (the budget's rerun); and drops
-   *  a shared-tail pass's setting that fired it, whose rerun crossed the follow or sink with it. */
-  onJoinPastReturns?: () => void;
+  /** Fired each time an `if` or a jump table takes the join past early returns (the default, off
+   *  under `copyReturnTails`) where its CFG join differs: the one place the reading changes a tree.
+   *  Held, like the other observation hooks, until the run that fired it is the one returned.
+   *  pipeline.ts `structureReturnTailReading` structures the copies only for a structuring that
+   *  fired it: under one that never did, the copies are its tree already. The site says where:
+   *  the branch block, the join taken past its early returns, and which recovery took it; the
+   *  chooser reads the target's asm layout there (structure/cross-jumped-tail.ts). */
+  onJoinPastReturns?: (site: JoinPastReturnsSite) => void;
   /** Fired each time a jump table's cross-jumped sibling is read with an entrant left FALLING into
    *  it (`copySharedFallTargets`' `onFallerKept`) — the one place `copyEveryTailEntrant` changes
    *  what the structurer reads. A structuring with that option off that never fires it builds the
@@ -2729,7 +2754,7 @@ function assertDefaultAccepts(
     anchorConstCopies: false,
     anchorLoopEntryConsts: false,
     followEarlyReturns: false,
-    joinPastReturns: false,
+    copyReturnTails: false,
     copyEveryTailEntrant: false,
     jumpToSharedCases: false,
     spellCountedLoopsFor: false,
@@ -2978,9 +3003,9 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
       b.ops[b.ops.length - 1]?.opcode === 'cond_br' && ipdom.get(b) === null && sharedRetsOf(b, reachFrom).length > 0,
   );
 }
-// THE JOIN PAST EARLY RETURNS (`joinPastReturns`). A divergent `if` whose arms share no `ret`
-// the compiler left apart has no follow above: agbcc and gcc2.7.2 cross-jump identical
-// `k(x); gT = x; return;` arms into one return tail, and every toolchain merges the early returns
+// THE JOIN PAST EARLY RETURNS (the default; off under `copyReturnTails`). A divergent `if` whose
+// arms share no `ret` the compiler left apart has no follow above: agbcc and gcc2.7.2 cross-jump
+// identical `k(x); gT = x; return;` arms into one return tail, and every toolchain merges the early returns
 // and the function's end into one epilogue, so the only `ret` every arm reaches is the one the
 // tail reaches too, and the follow lands on it (`synthetic:retchain_xj`). Read instead the block
 // `j` the paths that do not return meet at, where every path from `b` that never reaches `j`
@@ -3145,50 +3170,9 @@ function joinsPastReturns(
  *  join is EXIT or a return tail (an epilogue every early return and the tail branch to is a
  *  post-dominator, and merging there writes everything above it into each arm exactly as EXIT
  *  does). Any other CFG join is where the paths already meet. The one test the structurer's three
- *  sites (`askJoinPastReturns`) and the enumeration gate (`hasJoinPastReturns`) share. */
+ *  sites (`askJoinPastReturns`) ask. */
 function joinPastReturnsAsked(cfgJoin: Block | null, isReturnTail: (x: Block) => boolean): boolean {
   return cfgJoin === null || isReturnTail(cfgJoin);
-}
-
-/** Is there an `if` or a jump table outside every loop that `joinPastReturns` gives a join its CFG
- *  does not — its post-dominator EXIT or a return tail, and a block past early returns
- *  where its arms meet? The enumeration gate of the `/ret-join` twin (rank.ts); a superset, since it
- *  asks neither the enclosing region's `stop`, nor whether a switch arm's own join wins there, nor
- *  whether a jump table's arms read at the join decline.
- *
- *  KNOWN GAP: a comparison tree Regime A recovers as a `switch` is asked its join over the tree's
- *  case blocks, which only Regime A finds, so this answers for it only where another `if` or jump
- *  table of the function does. Such a chain is still read at its join past the copy budget. */
-export function hasJoinPastReturns(fn: Fn): boolean {
-  const ipdom = functionPostDominators(fn);
-  const inLoop = new Set([...analyzeLoops(fn, dominators(fn)).byHeader.values()].flatMap((nl) => [...nl.body]));
-  const reach = new Map<Block, Set<Block>>();
-  const reachFrom = (b: Block): Set<Block> => {
-    let out = reach.get(b);
-    if (out === undefined) {
-      out = new Set<Block>();
-      for (const stack = successorsOf(b); stack.length;) {
-        const x = stack.pop()!;
-        if (!out.has(x)) {
-          out.add(x);
-          stack.push(...successorsOf(x));
-        }
-      }
-      reach.set(b, out);
-    }
-    return out;
-  };
-  const { isReturnTail, joinOf } = joinsPastReturns(fn, reachFrom, ipdom);
-  return fn.blocks.some((b) => {
-    const op = b.ops[b.ops.length - 1]?.opcode;
-    if ((op !== 'cond_br' && op !== 'switch_br') || inLoop.has(b)) {
-      return false;
-    }
-    // a join that IS the CFG's (a guard around a loop that runs on into the epilogue) changes nothing
-    const cfgJoin = ipdom.get(b) ?? null;
-    const join = joinPastReturnsAsked(cfgJoin, isReturnTail) ? joinOf(b) : null;
-    return join !== null && join !== cfgJoin;
-  });
 }
 
 /** does a path from `from` reach `to` without passing through `avoid`? */
@@ -3731,8 +3715,10 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
 }
 
 /** Where a loop reading that copies a ret tail with an effect into the body (`retCopyingReadings`)
- *  ranks, and whether a structuring committed one. */
-interface RetCopyRanking {
+ *  ranks, and whether a structuring committed one: the loop tail copy, a rung of one loop's ladder,
+ *  not the whole-function return-tail copies the `/ret-copy` variation and the copies rerun read
+ *  (`structureWithinBudget`). */
+interface LoopTailCopyRanking {
   /** Behind every `while (1)` reading that copies no loop, the two-level one included, and ahead of
    *  the last rung's readings that copy one in a tail they share (`ForeverAsk.cycles`). Otherwise it
    *  ranks as the other `while` and `do-while` readings do, save for a tail code around the loop
@@ -3796,7 +3782,7 @@ interface ForRanking {
  *  in the body ("unrecovered back-edge"), and on gcc2.7.2 the same loop in a switch arm whose merge
  *  is the function's `t(); return` reaches that merge from inside the loop, which no `break;` spells
  *  (`switchBreakAt`). Such a structuring is run again with every such reading last
- *  (`RetCopyRanking.last`), where `while (1)` spells the loop.
+ *  (`LoopTailCopyRanking.last`), where `while (1)` spells the loop.
  *
  *  AN EXIT PAST THE LOOP, LIKEWISE. Where `while (1)` takes an exit inside the loop's span and an
  *  exit past its body would fit once an arm copies a return tail a path from outside the loop also
@@ -3809,10 +3795,10 @@ interface ForRanking {
  *  A GOTO OUT OF BOTH LOOPS, LAST OF ALL. The outward flag (`TwoLevelExit.outward`) is a variable
  *  the asm does not hold, and one loop's ladder cannot see whether the readings of its partner
  *  would have structured the nest without it: on mwcc_242_81, `for (i…) { k(i); for (j…) if (a(j))
- *  goto out; } out: gOut += i;` lifts with the hit copying the ret tail once the ret copies rank last,
- *  where asking the outward rung there hands the flag out instead. So every run above is made with
- *  the rung unasked, and only where all of them decline and some loop's rung would have read it are
- *  they made again with it asked (`LAST_RESORT_RUNGS`).
+ *  goto out; } out: gOut += i;` lifts with the hit copying the ret tail once the loop tail copies
+ *  rank last, where asking the outward rung there hands the flag out instead. So every run above is
+ *  made with the rung unasked, and only where all of them decline and some loop's rung would have
+ *  read it are they made again with it asked (`LAST_RESORT_RUNGS`).
  *
  *  A HIT THAT RUNS CODE FIRST, BEHIND THE DECLINES. A two-level exit whose hit runs code of its own
  *  on the way to its second target (`hitArmOf`, `BreakArm.exit`) reads loops every other
@@ -3833,19 +3819,19 @@ interface ForRanking {
  *  loop `break` C binds to the switch (`synthetic:sw_forjt`). Where every run above declines, they
  *  are made again with each `while (1)` loop spelled `for` where `forPlanAt` reads one
  *  (`ForRanking`), once more for each loop that run adds. The loops asked are the ones where
- *  ANY of those runs — the ret-copy, past-exit and outward reruns as well as the first — met one of
- *  three jump-table refusals (`wantFor`), so the published refusal, which is the first run's, need
- *  not be one of them: a function that declines on "unrecovered back-edge" can lift here because a
- *  later rung reached the jump table. Any structure decline in a function with a `while (1)` loop
- *  holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
+ *  ANY of those runs — the loop tail-copy, past-exit and outward reruns as well as the first — met
+ *  one of three jump-table refusals (`wantFor`), so the published refusal, which is the first
+ *  run's, need not be one of them: a function that declines on "unrecovered back-edge" can lift
+ *  here because a later rung reached the jump table. Any structure decline in a function with a
+ *  `while (1)` loop holding a jump table is in reach. Where the default lifts, the same `for` is the ranked
  *  `/for-continue` variation (`spellCountedLoopsFor`), which asks every loop on the first run.
  *
  *  A CASE-LABEL `goto`, AFTER EVERYTHING ELSE. The jump rungs of a jump table's ladder (THE JUMPS,
  *  `jumpSharedFallTargets`) write the case-label goto L3 holds, and the default writes one only where
- *  every goto-free reading declines. One switch's ladder sees only
- *  its own rungs, not the whole-function reruns above: a `while (1)` jump table whose copies decline
- *  in the first run can lift goto-free once the `for` rerun asks its loop, and asking the jumps in
- *  the first run adopts them there and never makes that rerun. So every run above is made with the
+ *  every goto-free reading of its ladder declines (THE COPIES, BELOW ALL OF IT). One switch's
+ *  ladder sees only its own rungs, not the whole-function reruns above: a `while (1)` jump table
+ *  whose copies decline in the first run can lift goto-free once the `for` rerun asks its loop, and
+ *  asking the jumps in the first run adopts them there and never makes that rerun. So every run above is made with the
  *  jump rungs unasked, and only where all of them decline, the `for` reruns included, and some
  *  switch's jump rung would have read it, are they all made again with rungs asked (`JumpRanking`)
  *  — PER SWITCH: only at the switches whose jump rung read them and that no run spelled goto-free.
@@ -3857,10 +3843,22 @@ interface ForRanking {
  *  The ranked `/case-goto` variation (`jumpToSharedCases`) is the other producer, and the scorer
  *  weighs it against the copies.
  *
+ *  THE COPIES, BELOW ALL OF IT. Every run above reads a divergent branch outside a loop one way:
+ *  the join past early returns, by default (`JoinReading`). The whole-function return-tail copies
+ *  are not a rung of this ladder but a second run of all of it (`structureWithinBudget`), made only
+ *  where the join's ladder declines or crosses the copy budget. So "every run above" and "every
+ *  goto-free reading" mean the join's: a function whose join lifts only with a flag rung or a
+ *  case-label jump publishes that, even where the copies would lift without one. Both are verified
+ *  readings of the asm, so the order moves a spelling, never a decline into wrong C, and the scorer
+ *  still weighs the copies, as the default where they are the shorter or the layout shows a
+ *  cross-jumped return tail (pipeline.ts `structureReturnTailReading`) and as `/ret-copy` where
+ *  they are not. CENSUS (2026-11-04, the 6,001 real functions): no function is in that reach: the
+ *  join raises no `goto` or `while (1)` count over the functions it re-spells.
+ *
  *  The first run's refusal stands if every rerun declines too, where the first run is the last
  *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
  *  known to stand, so a site is reported once: by the structuring that is returned, or by the
- *  first run where none is. */
+ *  run whose refusal stands where none is (`structureWithinBudget`). */
 export function structure(
   fn: Fn,
   opts: StructureOptions = {},
@@ -3870,48 +3868,88 @@ export function structure(
   return structureWithinBudget(fn, opts, hooks, memo);
 }
 
-/** THE COPY BUDGET'S RUNG, above the whole ladder. A structuring that enters more regions than
- *  `COPY_BUDGET` allows is stopped where it crosses the bound, and the ladder is run again asking
- *  the `joinPastReturns` reading (`overBudget`, not the option, so the default-accepts guard does
- *  not take the rerun for the `/ret-join` variation), which gives each divergent `if` or switch
- *  outside a loop the block its non-returning paths meet at, so the code below it is written once.
- *  Where that run crosses the bound too, the function declines with a `StructureError` naming the
- *  block copied most: a structure decline, never an exponential tree published or an internal
- *  overflow in the printer.
+/** THE TWO RUNGS AROUND THE WHOLE LADDER: the copy budget, and the copies behind every rung of it.
+ *
+ *  THE COPY BUDGET. A structuring that enters more regions than `COPY_BUDGET` allows is stopped
+ *  where it crosses the bound: a structure decline, never an exponential tree published or an
+ *  internal overflow in the printer. The join past early returns writes the code below each
+ *  divergent `if` or switch outside a loop once, where the copies write it into every arm, once
+ *  more per link of a chain; but the join copies a return tail into each early return in its turn,
+ *  and where the paths that do not return meet at a block few of them reach, every other path is an
+ *  early return taking its own copy of the tail (a decision tree whose leaves fall into one long
+ *  tail, two of them through a shared block first). Neither reading is bounded by the other, so
+ *  the join falls to the copies at the bound, as at a refusal below.
+ *
+ *  THE COPIES, where the join REFUSES or crosses the budget. The join moves where a branch's arms
+ *  end, and some shapes every rung declines at that end are structured at the CFG's: a jump table
+ *  whose arms then fall into one, a case that leaves its switch for a loop exit past the switch's
+ *  end, a two-level loop exit past the region's end. So a default whose join declines is run again
+ *  reading the copies (`JoinReading.copies`, not the option, so the default-accepts guard does not
+ *  take the rerun for the `/ret-copy` variation), and that is the tree it publishes rather than a
+ *  decline. The rerun is of the whole function: a refusal is not traced to the branch whose join
+ *  caused it, so every branch reads the copies. Where the copies decline too, their refusal
+ *  stands; where they cross the copy budget instead, the join's refusal (or its budget decline)
+ *  does.
+ *  Only a run that ASKED the join somewhere is rerun: one that never did is the copies' run already,
+ *  and running it again would read state the refused run left behind — a volatile read the first
+ *  run stamped is no longer "stamped late" on the second, and its decline would not fire.
+ *  A structuring that already reads the copies (`copyReturnTails`, or a language with no early
+ *  `return`) has no rung to fall to: its refusal and its budget are its own.
  *
  *  A structuring under the bound is the ladder's own, byte for byte, and on the corpus none comes
- *  near it (the census at `COPY_BUDGET`). A rerun that took the join fires `onJoinPastReturns`,
- *  which rank.ts reads to name its tree `/ret-join`. The hooks a stopped run fired without holding
- *  them (`onCounterSignRefused`) have fired; the held ones are dropped with the run. */
+ *  near it (the census at `COPY_BUDGET`). The hooks a stopped run fired without holding them
+ *  (`onCounterSignRefused`) have fired; the held ones are dropped with the run. A refused run's held
+ *  hooks fire only where its refusal is the one that stands, so a join run the copies replace
+ *  reports no join past early returns. */
 function structureWithinBudget(
   fn: Fn,
   opts: StructureOptions,
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
 ): SFn {
-  let over: CopyBudgetExceeded;
+  // the budget decline, thrown where `declined` is: the throw keeps the message where the decline
+  // harvest (apps/web/test/declines.test.ts) reads it
+  const overBudget = (error: CopyBudgetExceeded): never => {
+    throw new StructureError(
+      `cannot structure '${fn.name}': block #${error.block} is written ${error.copies} times, ` +
+        `past the copy budget of ${error.limit} region entries`,
+    );
+  };
+  // a declining run: its error as `structure()` throws it, having fired the held hooks of its refusal
+  const declined = (error: unknown, held: readonly (() => void)[]): unknown => {
+    if (error instanceof CopyBudgetExceeded) {
+      return overBudget(error);
+    }
+    held.forEach((f) => f());
+    return error;
+  };
+  const reading: JoinReading = {
+    copies: opts.copyReturnTails === true || opts.spellEarlyReturns === false,
+    asked: false,
+  };
+  const joinHeld: (() => void)[] = [];
+  let joinDeclined: unknown;
   try {
-    return structureLadder(fn, opts, hooks, memo, false);
+    return structureLadder(fn, opts, hooks, memo, reading, joinHeld);
   } catch (error) {
-    if (!(error instanceof CopyBudgetExceeded)) {
-      throw error;
+    if (reading.copies || !reading.asked || !(error instanceof StructureError || error instanceof CopyBudgetExceeded)) {
+      throw declined(error, joinHeld);
     }
-    over = error;
+    joinDeclined = error;
   }
-  if (opts.joinPastReturns !== true) {
-    try {
-      return structureLadder(fn, opts, hooks, memo, true);
-    } catch (error) {
-      if (!(error instanceof CopyBudgetExceeded)) {
-        throw error;
-      }
-      over = error;
-    }
+  const copiesHeld: (() => void)[] = [];
+  try {
+    return structureLadder(fn, opts, hooks, memo, { copies: true, asked: false }, copiesHeld);
+  } catch (error) {
+    throw error instanceof CopyBudgetExceeded ? declined(joinDeclined, joinHeld) : declined(error, copiesHeld);
   }
-  throw new StructureError(
-    `cannot structure '${fn.name}': block #${over.block} is written ${over.copies} times, ` +
-      `past the copy budget of ${over.limit} region entries`,
-  );
+}
+
+/** Which reading of a divergent branch outside a loop a structuring takes, and whether it asked the
+ *  join past early returns anywhere: unheld, so a refused run still says it (`structureWithinBudget`). */
+interface JoinReading {
+  readonly copies: boolean;
+  asked: boolean;
 }
 
 function structureLadder(
@@ -3919,11 +3957,14 @@ function structureLadder(
   opts: StructureOptions,
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
-  overBudget: boolean,
+  reading: JoinReading,
+  // where a declining ladder leaves the held hooks of the refusal it throws, for
+  // `structureWithinBudget` to fire if that refusal stands
+  refusedHeld: (() => void)[],
 ): SFn {
   let refused: { error: StructureError; held: (() => void)[] } | undefined;
   const attempt = (
-    retCopy: RetCopyRanking,
+    loopTailCopy: LoopTailCopyRanking,
     pastExit: PastExitRanking,
     lastResort: LastResortRungs,
     forRank: ForRanking,
@@ -3949,12 +3990,12 @@ function structureLadder(
           onJoinPastReturns: hooks.onJoinPastReturns && hold(hooks.onJoinPastReturns),
         },
         memo,
-        retCopy,
+        loopTailCopy,
         pastExit,
         lastResort,
         forRank,
         jumps,
-        overBudget,
+        reading,
       );
       held.forEach((f) => f());
       return sfn;
@@ -3967,9 +4008,9 @@ function structureLadder(
     }
   };
   const ranked = (lastResort: LastResortRungs, forRank: ForRanking, jumps: JumpRanking): SFn | null => {
-    const first: RetCopyRanking = { last: false, took: false };
+    const first: LoopTailCopyRanking = { last: false, took: false };
     const inSpan: PastExitRanking = { first: false, could: false };
-    const past: RetCopyRanking = { last: false, took: false };
+    const past: LoopTailCopyRanking = { last: false, took: false };
     return (
       attempt(first, inSpan, lastResort, forRank, jumps) ??
       (first.took ? attempt({ last: true, took: false }, inSpan, lastResort, forRank, jumps) : null) ??
@@ -4051,7 +4092,7 @@ function structureLadder(
   if (sfn !== null) {
     return sfn;
   }
-  refused!.held.forEach((f) => f());
+  refusedHeld.push(...refused!.held);
   throw refused!.error;
 }
 
@@ -4060,12 +4101,12 @@ function structureRanked(
   opts: StructureOptions,
   hooks: StructureHooks,
   memo: DefaultAcceptsMemo | undefined,
-  retCopy: RetCopyRanking,
+  loopTailCopy: LoopTailCopyRanking,
   pastExit: PastExitRanking,
   lastResort: LastResortRungs,
   forRank: ForRanking,
   jumpRank: JumpRanking,
-  overBudget: boolean,
+  reading: JoinReading,
 ): SFn {
   const {
     returnsVoid = false,
@@ -4113,7 +4154,7 @@ function structureRanked(
     coalesceMergeNames = false,
     freshParamMerge = false,
     followEarlyReturns = false,
-    joinPastReturns = false,
+    copyReturnTails = false,
     onGap = 'strict',
     symbols: mapSymbols,
     inferredSymbols,
@@ -4211,7 +4252,7 @@ function structureRanked(
     homeEscapingExtensions ||
     anchorConstCopies ||
     followEarlyReturns ||
-    joinPastReturns ||
+    copyReturnTails ||
     copyEveryTailEntrant ||
     jumpToSharedCases ||
     spellCountedLoopsFor
@@ -5014,7 +5055,7 @@ function structureRanked(
     // copy where the flag would add `v = 1; break;` the source never wrote. A tail only the loop's
     // own paths reach is the arms' to copy (`a pure tail only the arms of a \`do-while\` enter`).
     // Classification cannot tell whether emission spells the copy, so a structuring that committed
-    // one and declined is run again with every such reading last of all (`RetCopyRanking`).
+    // one and declined is run again with every such reading last of all (`LoopTailCopyRanking`).
     const readArms = (copyExitTail: boolean) => {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
@@ -5076,11 +5117,11 @@ function structureRanked(
               arms,
             });
     const commit = () => {
-      retCopy.took ||= copiesEffect;
+      loopTailCopy.took ||= copiesEffect;
       reading();
     };
     // a self-loop has no edge out but its exit, so `plain` is never null for a guarded one
-    if (copiesEffect && (shared || retCopy.last)) {
+    if (copiesEffect && (shared || loopTailCopy.last)) {
       retCopyingReadings.set(h, commit);
     } else if (plain === null) {
       copyingReadings.set(h, commit);
@@ -5260,8 +5301,8 @@ function structureRanked(
   // ret tail with an effect into the body (`retCopyingReadings`), and past all of them the two-level
   // exit (`TwoLevelExit`), which adds a variable the asm does not hold: it is taken only by a loop
   // that every other reading declines. A structuring run again because emission refused such a
-  // copy (`RetCopyRanking.last`) asks the two-level exit before the copy. Behind it the same rung
-  // asks again with `outward`, where a `goto` out of both loops is handed out
+  // copy (`LoopTailCopyRanking.last`) asks the two-level exit before the copy. Behind it the same
+  // rung asks again with `outward`, where a `goto` out of both loops is handed out
   // (`TwoLevelExit.outward`) — only on a run every structuring without it declined
   // (`LAST_RESORT_RUNGS`) — and right behind that `while (1)` with every copy, where an arm also
   // copies a return tail a path that bypasses the loop enters, under an exit inside the loop's span
@@ -5349,7 +5390,7 @@ function structureRanked(
       const copied = shape ?? first.copied();
       if (copied !== null) {
         foreverLoops.set(h, copied);
-      } else if (retCopying !== undefined && !retCopy.last) {
+      } else if (retCopying !== undefined && !loopTailCopy.last) {
         retCopying();
       } else {
         const flagged = fromFlagged(true);
@@ -8327,8 +8368,8 @@ function structureRanked(
   const unspelledRets = unspelledEpilogues(fn);
 
   /** THE JOIN PAST EARLY RETURNS, as every branch that can take it asks it: an `if`, a jump table
-   *  and a comparison tree. Asked under `joinPastReturns` or the copy budget's rerun, outside loop
-   *  bodies only (inside one, `clampToLoop` owns the question), and only where the CFG's join is
+   *  and a comparison tree. Asked unless the structuring reads the copies (`JoinReading`), outside
+   *  loop bodies only (inside one, `clampToLoop` owns the question), and only where the CFG's join is
    *  EXIT or a return tail (`joinPastReturnsAsked`). The join itself is `joinPastReturnsAt` — over
    *  the branch's successors, or a comparison tree's case blocks — which the caller asks, since only
    *  it knows which arms to ask it over.
@@ -8346,7 +8387,9 @@ function structureRanked(
     stop: Block | null,
   ): { asked: boolean; cfgJoin: Block | null; cfgInRegion: Block | null } => {
     const cfgJoin = ipdom.get(b) ?? null;
-    const asked = (joinPastReturns || overBudget) && loopCtx === null && joinPastReturnsAsked(cfgJoin, isReturnTail);
+    const asked = !reading.copies && loopCtx === null && joinPastReturnsAsked(cfgJoin, isReturnTail);
+    // asking moves the CFG's join in the region (`cfgInRegion`) whether or not a join is taken
+    reading.asked ||= asked;
     const cfgInRegion =
       asked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
         ? null
@@ -8543,9 +8586,8 @@ function structureRanked(
       // Neither reading knows about loops: inside a loop body, where post-dominance names a join
       // PAST the loop and every reading declines there, THE LOOP CLAMP below reads the body's own.
       //
-      // THE JOIN PAST EARLY RETURNS is asked here as at the `if` (`joinPastReturns`, or the copy
-      // budget's rerun), for the same no-join shape: a chain of switches each with a `case` that
-      // `return`s early writes the code below every one of them into its arms, once more per
+      // THE JOIN PAST EARLY RETURNS is asked here as at the `if` (unless `copyReturnTails`), for
+      // the same no-join shape: a chain of switches each with a `case` that `return`s early writes the code below every one of them into its arms, once more per
       // switch, exactly as a chain of `if`s does. Same precedence and same `stop` rule as there, and
       // adopted only where the arms read at it decline nothing (below): it turns copies into one
       // tail, never a switch that spells into a decline.
@@ -8802,7 +8844,8 @@ function structureRanked(
           merge = joined ?? stop;
           read = readArms(merge);
         } else {
-          hooks.onJoinPastReturns?.();
+          // `joined` differs from the CFG's follow only where it is the join past returns, never null
+          hooks.onJoinPastReturns?.({ branch: b, join: joined!, kind: 'switch' });
         }
       }
       // THE RETRY: A SWITCH WHOSE ARMS DO NOT ALL REACH THE CODE AFTER IT. When neither
@@ -8853,7 +8896,9 @@ function structureRanked(
       // second arm's ENTRY. Ending the switch there spells `case 1:` as an empty arm and moves its
       // body after the switch — the same program, but a spelling no source writes and the one the
       // `stop` reading's own refusal is the honest answer for. So the retry ends the switch only
-      // at the default block or past every arm.
+      // at the default block or past every arm. The refusal is this retry's, asked only under the
+      // copies: the default join past early returns ends such a switch at that same entry, since it
+      // is the block every arm that does not return reaches (thumb-switch.test.ts pins both).
       //
       // THE DEFAULT BLOCK STAYS ELIGIBLE WHEN THE TABLE'S HOLES MAKE IT AN ARM. A slot no `case`
       // names holds the default edge's target, so on a table with a hole that block is an arm by
@@ -9684,21 +9729,21 @@ function structureRanked(
     // `switch`. A pre-check here — mirroring the guard-fused-loop check above — so it sees the raw
     // tree before if-recovery claims the diamonds. Declines (null) fall through to plain if-recovery.
     //
-    // A comparison tree is a jump table to the join past early returns (`joinPastReturns`, or the
-    // copy budget's rerun): its end is asked over the tree's case and default blocks, as the
-    // `switch_br`'s over its successors, and taken only where the tree recovers at it; where it does
+    // A comparison tree is a jump table to the join past early returns (unless `copyReturnTails`):
+    // its end is asked over the tree's case and default blocks, as the `switch_br`'s over its
+    // successors, and taken only where the tree recovers at it; where it does
     // not, the tree is read again at the CFG's merge, as without the reading.
     const asSwitch = handedThroughSwitch(() => {
       const { asked, cfgJoin } = askJoinPastReturns(b, stop);
       if (asked) {
-        let took = false;
+        let took: Block | null = null;
         const joined = recognizeSwitch(b, stop, (arms) => {
           const join = joinPastReturnsAt(b, stop, arms);
-          took = join !== null && join !== cfgJoin;
-          return took ? join! : undefined;
+          took = join !== null && join !== cfgJoin ? join : null;
+          return took ?? undefined;
         });
-        if (joined !== null && took) {
-          hooks.onJoinPastReturns?.();
+        if (joined !== null && took !== null) {
+          hooks.onJoinPastReturns?.({ branch: b, join: took, kind: 'tree' });
           return joined;
         }
         if (joined !== null) {
@@ -9724,7 +9769,7 @@ function structureRanked(
     const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
     if (pastReturns !== null && pastReturns !== cfgJoin) {
-      hooks.onJoinPastReturns?.();
+      hooks.onJoinPastReturns?.({ branch: b, join: pastReturns, kind: 'if' });
     }
     const ipd =
       pastReturns ?? cfgInRegion ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);

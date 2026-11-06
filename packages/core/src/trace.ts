@@ -18,7 +18,7 @@ import {
   liftStamped,
   offsetNameBehaviorsFor,
   raiseRecovered,
-  structureChecked,
+  structureReturnTailReading,
   stubResult,
 } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
@@ -341,16 +341,21 @@ function traceTower(
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap option as decompile()
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
-  const sfn = structureChecked(fn, {
-    ...structureOptionsFor(target, returnsVoid, prototypes),
-    spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
-    spellSwitchBreak: (opts.backend ?? cBackend).spellsSwitchBreak,
-    onGap: opts.onGap ?? 'strict',
-    ...(mapSymbols ? { symbols: mapSymbols } : {}),
-    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
-    ...(inferredSymbols.size ? { inferredSymbols } : {}),
-    ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-  });
+  const { sfn } = structureReturnTailReading(
+    fn,
+    {
+      ...structureOptionsFor(target, returnsVoid, prototypes),
+      spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
+      spellSwitchBreak: (opts.backend ?? cBackend).spellsSwitchBreak,
+      spellEarlyReturns: (opts.backend ?? cBackend).spellsEarlyReturn,
+      onGap: opts.onGap ?? 'strict',
+      ...(mapSymbols ? { symbols: mapSymbols } : {}),
+      ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
+      ...(inferredSymbols.size ? { inferredSymbols } : {}),
+      ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
+    },
+    (t) => backend.emit(t),
+  );
   trace.push({
     id: 'stage:structure',
     title: 'Structuring (IR → neutral AST)',

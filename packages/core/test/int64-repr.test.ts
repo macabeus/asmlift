@@ -26,6 +26,7 @@ const fnOf = (blocks: Block[]): Fn => ({
   slotHomes: undefined,
   paramEvidence: undefined,
   localObjects: undefined,
+  asmLayout: undefined,
 });
 /** One block: the ops, then a `ret`. */
 const oneBlock = (params: Block['params'], ops: Block['ops']): Fn => fnOf([{ params, ops: [...ops, mkOp('ret')] }]);

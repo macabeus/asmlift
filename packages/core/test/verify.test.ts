@@ -16,6 +16,7 @@ const fnOf = (blocks: Block[]): Fn => ({
   slotHomes: undefined,
   paramEvidence: undefined,
   localObjects: undefined,
+  asmLayout: undefined,
 });
 
 test('rejects: block without a terminator', () => {

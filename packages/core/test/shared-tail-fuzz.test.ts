@@ -163,7 +163,31 @@ function generateSharedTailFn(seed: number): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
+}
+
+/** THE FOLLOW AS RANK.TS ASKS IT: its `/shared-ret` and `/shared-tail` passes keep the return-tail
+ *  copies (`copyReturnTails`), so the follow is the reading that gives a divergent `if` its tail. */
+const FOLLOW = { returnsVoid: true, followEarlyReturns: true, copyReturnTails: true } as const;
+
+/** The DEFAULT structuring, which reads the join past early returns, held to the same oracle:
+ *  1 where it took the join somewhere (`onJoinPastReturns`) and agreed with `want` on every run. */
+function joinedRuns(fn: Fn, want: ReturnType<typeof irTraceOf>[], label: string): number {
+  let took = 0;
+  let tree;
+  try {
+    tree = structure(fn, { returnsVoid: true }, { onJoinPastReturns: () => took++ });
+  } catch (e) {
+    if (!(e instanceof StructureError)) {
+      throw e;
+    }
+    return 0;
+  }
+  RUNS.forEach((r, i) => expect(traceOf(tree, r), `${label} joined, run ${r}`).toEqual(want[i]));
+  const checked = structureChecked(fn, { returnsVoid: true });
+  RUNS.forEach((r, i) => expect(traceOf(checked, r), `${label} joined checked, run ${r}`).toEqual(want[i]));
+  return took > 0 ? 1 : 0;
 }
 
 /** Parameter seeds for the two interpreters: each spreads the three parameters over -5..5, so the
@@ -225,7 +249,7 @@ async function sweep(seeds: readonly number[], body: (seed: number) => void): Pr
 }
 
 const PLAIN_SEEDS = 20000;
-const plain = { seeds: 0, sunk: 0, followed: 0, sunkAndFollowed: 0, declined: 0 };
+const plain = { seeds: 0, sunk: 0, followed: 0, sunkAndFollowed: 0, declined: 0, joined: 0 };
 
 for (const { title, seeds } of chunksOf(PLAIN_SEEDS)) {
   test(`the sink and the follow change no observable, on the shapes they were built for: ${title}`, async () => {
@@ -237,7 +261,7 @@ for (const { title, seeds } of chunksOf(PLAIN_SEEDS)) {
         let fired = 0;
         let tree;
         try {
-          tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
+          tree = structure(fn, FOLLOW, { onEarlyReturnFollow: () => fired++ });
         } catch (e) {
           if (!(e instanceof StructureError)) {
             throw e;
@@ -247,12 +271,14 @@ for (const { title, seeds } of chunksOf(PLAIN_SEEDS)) {
         }
         RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed}, run ${r}`).toEqual(want[i]));
         // and after the committed L3 rewrites (tail-merge, dead stores, base locals) and contracts
-        const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+        const checked = structureChecked(fn, FOLLOW);
         RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} checked, run ${r}`).toEqual(want[i]));
         return fired;
       };
       // The follow alone, on the lifted function.
       plain.followed += run(lifted) > 0 ? 1 : 0;
+      // The default, which reads the join past early returns these shapes are full of.
+      plain.joined += joinedRuns(lifted, want, `seed ${seed}`);
       // The sink, then the follow.
       const fn = generateSharedTailFn(seed);
       if (sinkStoreTails(fn)) {
@@ -267,14 +293,15 @@ for (const { title, seeds } of chunksOf(PLAIN_SEEDS)) {
 }
 
 test.runIf(!OVERRIDE)('the sink-and-follow sweep is not vacuous', () => {
-  // At 20000 seeds it sinks 15866 functions, follows 9391 and does both on 3662, declining none;
-  // the floors sit well under all three, so a generator tweak cannot turn this green by quietly
+  // At 20000 seeds it sinks 15866 functions, follows 9391 and does both on 3662, declining none,
+  // and the default takes the join past early returns on 10981; the floors sit well under all four, so a generator tweak cannot turn this green by quietly
   // generating nothing the transform touches. `seeds` counts the seeds that ran to the end, so a
   // chunk that failed or was filtered out fails this too.
   console.log(
-    `[shared-tail-fuzz] seeds=${plain.seeds} sunk=${plain.sunk} followed=${plain.followed} sunk+followed=${plain.sunkAndFollowed} declined=${plain.declined}`,
+    `[shared-tail-fuzz] seeds=${plain.seeds} sunk=${plain.sunk} followed=${plain.followed} sunk+followed=${plain.sunkAndFollowed} declined=${plain.declined} joined=${plain.joined}`,
   );
   expect(plain.seeds).toBe(PLAIN_SEEDS);
+  expect(plain.joined).toBeGreaterThan(9000);
   expect(plain.sunk).toBeGreaterThan(1500);
   expect(plain.followed).toBeGreaterThan(8000);
   expect(plain.sunkAndFollowed).toBeGreaterThan(1500);
@@ -293,7 +320,16 @@ const readsForeignParam = (fn: Fn): boolean =>
   );
 
 const RAISED_SEEDS = 6000;
-const raised = { seeds: 0, foreign: 0, sunk: 0, foreignSunk: 0, followed: 0, sunkAndFollowed: 0, declined: 0 };
+const raised = {
+  seeds: 0,
+  foreign: 0,
+  sunk: 0,
+  foreignSunk: 0,
+  followed: 0,
+  sunkAndFollowed: 0,
+  declined: 0,
+  joined: 0,
+};
 
 for (const { title, seeds } of chunksOf(RAISED_SEEDS)) {
   test(`the same, on the fn the raise spine hands rank.ts: ${title}`, async () => {
@@ -315,7 +351,7 @@ for (const { title, seeds } of chunksOf(RAISED_SEEDS)) {
         let fired = 0;
         let tree;
         try {
-          tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
+          tree = structure(fn, FOLLOW, { onEarlyReturnFollow: () => fired++ });
         } catch (e) {
           if (!(e instanceof StructureError)) {
             throw e;
@@ -324,13 +360,14 @@ for (const { title, seeds } of chunksOf(RAISED_SEEDS)) {
           return 0;
         }
         RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed} ${label}, run ${r}`).toEqual(want[i]));
-        const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+        const checked = structureChecked(fn, FOLLOW);
         RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} ${label} checked, run ${r}`).toEqual(want[i]));
         return fired;
       };
       if (hasDivergentSharedRet(fn)) {
         raised.followed += run('raised') > 0 ? 1 : 0;
       }
+      raised.joined += joinedRuns(fn, want, `seed ${seed} raised`);
       const isForeign = readsForeignParam(fn);
       raised.foreign += isForeign ? 1 : 0;
       if (sinkStoreTails(fn)) {
@@ -349,13 +386,15 @@ for (const { title, seeds } of chunksOf(RAISED_SEEDS)) {
 
 test.runIf(!OVERRIDE)('the raised sweep is not vacuous', () => {
   // The shape this arm exists for really occurs: 318 of the raised functions carry a foreign-
-  // parameter tail and all 318 are sunk (sunk 4779, followed 2780, both 1100, declined 0), which is
+  // parameter tail and all 318 are sunk (sunk 4779, followed 2780, both 1100, declined 0; the default
+  // joins past early returns on 3253), which is
   // what the first floor holds. With the copy substituting the tail's own parameters alone, seed 1
   // already throws in `verify`.
   console.log(
-    `[shared-tail-fuzz raised] seeds=${raised.seeds} foreignParamTail=${raised.foreign} sunk=${raised.sunk} sunkForeign=${raised.foreignSunk} followed=${raised.followed} sunk+followed=${raised.sunkAndFollowed} declined=${raised.declined}`,
+    `[shared-tail-fuzz raised] seeds=${raised.seeds} foreignParamTail=${raised.foreign} sunk=${raised.sunk} sunkForeign=${raised.foreignSunk} followed=${raised.followed} sunk+followed=${raised.sunkAndFollowed} declined=${raised.declined} joined=${raised.joined}`,
   );
   expect(raised.seeds).toBe(RAISED_SEEDS);
+  expect(raised.joined).toBeGreaterThan(2500);
   expect(raised.foreignSunk).toBeGreaterThan(150);
   expect(raised.sunk).toBeGreaterThan(2000);
   expect(raised.followed).toBeGreaterThan(1200);

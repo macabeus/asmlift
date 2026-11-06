@@ -95,7 +95,13 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns, unifyRegisterSpellings } from './ssa';
+import {
+  makeSsaBuilder,
+  recordAsmLayout,
+  refuseSavedRegisterLeaks,
+  registerLiveIns,
+  unifyRegisterSpellings,
+} from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1652,6 +1658,16 @@ function liftOnce(
     liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
+  // Where the compiler put each block (ir/core.ts `AsmLayout`). A delay slot runs in its branch's
+  // block, so it is part of the body; a branch-likely's slot is a block of its own already.
+  ssa.fn.asmLayout = recordAsmLayout(
+    irBlocks,
+    blocks.map((b) => ({
+      body: b.delay ? [...b.body, b.delay] : b.body,
+      endsInJump: b.branch !== null && isUncond(b.branch),
+      isCall: (ins) => isCallInstr(ins as Instr),
+    })),
+  );
   const RET = target.returnReg;
   // Whether this function's own declaration says its return fits one word (`v1MayHoldLowWord`):
   // void, or a scalar or pointer no wider than 32 bits. An aggregate says nothing here. A declared

@@ -10,9 +10,9 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
+import type { AsmLayout, Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
+import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
@@ -183,14 +183,19 @@ function probedSource(
     // `gSym[i]`, and without the MAP it scores the reverse and worse: on a map-ful function the
     // probe would spell a bare `gSym[i]` whose meaning rests on a derived `extern u16 gSym[]`
     // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
-    const sfn = structureChecked(clone, {
-      ...structureOptionsFor(target, returnsVoid, prototypes),
-      spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-      spellSwitchBreak: backend.spellsSwitchBreak,
-      ...(mapSymbols ? { symbols: mapSymbols } : {}),
-      ...(contextGlobals ? { contextGlobals } : {}),
-      ...(inferredSymbols.size ? { inferredSymbols } : {}),
-    });
+    const { sfn } = structureReturnTailReading(
+      clone,
+      {
+        ...structureOptionsFor(target, returnsVoid, prototypes),
+        spellSwitchFallthrough: backend.spellsSwitchFallthrough,
+        spellSwitchBreak: backend.spellsSwitchBreak,
+        spellEarlyReturns: backend.spellsEarlyReturn,
+        ...(mapSymbols ? { symbols: mapSymbols } : {}),
+        ...(contextGlobals ? { contextGlobals } : {}),
+        ...(inferredSymbols.size ? { inferredSymbols } : {}),
+      },
+      (t) => backend.emit(t),
+    );
     return backend.emit(sfn);
   } catch {
     return undefined;
@@ -261,6 +266,13 @@ export function structuredCloneFn(fn: Fn): Fn {
   const pe = fn.paramEvidence;
   const paramEvidence: ParamEvidence | undefined =
     pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));
+  // Re-keyed through `bmap`: the layout is keyed by the BLOCKS this clone replaced, so carrying the
+  // reference would leave every block without a place in the asm, and the return-tail chooser
+  // (core structure/cross-jumped-tail.ts) would read no evidence where the published path reads
+  // some. Each entry is immutable data, so it is shared.
+  const al = fn.asmLayout;
+  const asmLayout: AsmLayout | undefined =
+    al && new Map([...al].filter(([b]) => bmap.has(b)).map(([b, at]) => [bmap.get(b)!, at]));
   // The statics are plain data keyed by name, and no pass rewrites them: shared, not copied.
-  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence, localObjects: fn.localObjects };
+  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence, localObjects: fn.localObjects, asmLayout };
 }

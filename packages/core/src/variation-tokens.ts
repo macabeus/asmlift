@@ -69,6 +69,7 @@ const TOKENS = [
   { name: 'connective', variationKind: 'lift' },
   { name: 'narrow-param', variationKind: 'lift' },
   { name: 'shared-ret', variationKind: 'lift' },
+  { name: 'ret-copy', variationKind: 'lift' },
   { name: 'ret-join', variationKind: 'lift' },
   { name: 'shared-tail', variationKind: 'lift' },
   { name: 'kept-slot', variationKind: 'lift' },

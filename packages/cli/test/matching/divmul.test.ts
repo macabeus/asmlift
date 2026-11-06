@@ -197,6 +197,7 @@ describe('sdiv variadic invariant (verifier)', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
   test('1 operand WITH imm is valid', () => {

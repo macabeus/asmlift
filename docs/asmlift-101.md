@@ -291,10 +291,17 @@ switch. It is the source's own spelling where two arms run on into one case's bo
 fall-through reaches only one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`,
 kleod `sub_0800D188`). It has two producers, both over `jumpSharedFallTargets` in
 `structure/switch-recover.ts`: the structurer's default writes it only where every goto-free
-structuring of the whole function declines, its `for`, outward and ret-copy reruns included, and
-only in a switch none of them spelled goto-free (`JumpRanking` in `structure.ts`); and the ranked
-`/case-goto` variation spells with it the case bodies the goto-free copies write back into an
-entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
+structuring of the whole function under its default reading, the join past early returns,
+declines, its `for`, outward and loop tail-copy reruns included, and only in a switch none of them
+spelled goto-free (`JumpRanking` in `structure.ts`). The whole-function return-tail copies (the
+rerun `structureWithinBudget` makes where the join declines, the second structuring
+`structureReturnTailReading` in `pipeline.ts` makes to publish the copies where the join spells the
+function longer, and the ranked `/ret-copy`) come after that whole ladder, not inside it, so a
+function whose join needs the goto publishes it even where the copies would lift without one,
+unless they are also the shorter or the layout shows a cross-jumped return tail (THE COPIES, BELOW
+ALL OF IT, above `structure()`); and
+the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
+into an entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
 already leaves gets no jump, and neither does the arm laid out directly above the target case,
 whose fall-through already lands there.
 

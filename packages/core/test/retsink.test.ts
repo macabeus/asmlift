@@ -22,10 +22,17 @@ import { frontendFor } from '../src/frontend/registry';
 import type { Value } from '../src/ir/core';
 import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { type Gate, without } from '../src/l3/gates';
-import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile as decompileJoined, raiseRecovered } from '../src/pipeline';
 import { mergeShapes } from '../src/raise/narrowlocal';
 import { FALL_IN_GATES, type FallInCandidate, SELECT_GATES, sinkReturns } from '../src/raise/retsink';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
 
 /** A two-condition chain converging on a shared `return 0` arm, with a store between the
  *  conditions so the two are not fused into one `logic_and`. `.Lend` also keeps a `cond_br`
@@ -145,7 +152,7 @@ const TWO_ARMS =
   '.L6:\n\tmov\tr0, #0x0\n' +
   '.L5:\n\tbx\tlr\n';
 
-test('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
+testCopies('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
   // The discriminator is what a predecessor IS, not what it computed. Reading "computed something
   // and ran on" as the fall-in signal refuses this — the pass's own reason to exist — and halves
   // its reach over the real corpus.

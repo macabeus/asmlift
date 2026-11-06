@@ -21,8 +21,14 @@ import { type SFn, type Stmt, type SwitchCase, caseGotoViolation, reachesEnd } f
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { compareScored, gotoCount } from '../src/rank';
-import { structure } from '../src/structure/structure';
-import { irAgreement } from './helpers';
+import { structure as structureJoined } from '../src/structure/structure';
+import { irAgreement, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 const call = (fn: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn, args: [] } });
 const v = (name: string) => ({ k: 'var', name }) as const;
@@ -131,6 +137,7 @@ describe('assertEffectsPreserved over a goto', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
 
@@ -343,7 +350,7 @@ const withOption = (ir: string, jumpToSharedCases: boolean) => {
 };
 
 describe('/case-goto', () => {
-  test('spells the entrant the default gives a copy as a jump, and the OFF structuring witnesses it', () => {
+  testCopies('spells the entrant the default gives a copy as a jump, and the OFF structuring witnesses it', () => {
     const off = withOption(closedShared, false);
     expect(off.src).not.toContain('goto');
     expect(off.src.match(/s\(a0\);/g)?.length).toBe(2);

@@ -177,6 +177,7 @@ const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
       slotHomes: new Map(),
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     },
     a,
     b,
