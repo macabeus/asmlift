@@ -431,10 +431,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'into one return tail, and a `switch` with a `case` that returns early. This structures the same ' +
       'raised function again with no such join: everything below the `if` is written into each arm, ' +
       'once more per such `if` of a chain, which is the source some functions were written as. Where ' +
-      'the copies spell the whole function in fewer lines than the join, they are the default instead, ' +
-      'and the join is offered as `ret-join`. Past the copy budget the copies are not offered.',
+      'the copies spell the whole function in fewer lines than the join, or where the compiler is one that ' +
+      'cross-jumps return tails and the layout shows it did, they are the default instead, and the join is ' +
+      'offered as `ret-join`. Past the copy budget the copies are not offered.',
     offeredWhen: {
-      when: 'Some `if` or `switch` outside every loop took a join past early returns no longer than the copies.',
+      when: 'Some `if` or `switch` outside every loop took a join past early returns that the default kept.',
       decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {
@@ -448,16 +449,17 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     seeAlso: ['shared-ret', 'ret-join'],
   },
   'ret-join': {
-    title: 'Join past early returns, where it is longer',
+    title: 'Join past early returns, where the copies are the default',
     summary: 'the join past early returns, where it writes a return tail into early returns',
     detail:
       'The join past early returns writes the code below a divergent `if` once, but where the paths that ' +
       'do not return meet at a block only some of them reach, every other path becomes an early `return` ' +
       'that takes its own copy of the tail below. Where that spells the whole function in more lines than ' +
-      'the return-tail copies, the copies are the default and this is the join, offered beside them, which ' +
-      'is the source some functions were written as.',
+      'the return-tail copies, or where the layout shows the compiler cross-jumped a return tail the ' +
+      'source wrote into every arm, the copies are the default and this is the join, offered beside them, ' +
+      'which is the source some functions were written as.',
     offeredWhen: {
-      when: 'Some `if` or `switch` outside every loop took a join past early returns longer than the copies.',
+      when: 'Some `if` or `switch` outside every loop took a join past early returns that the default gave up for the copies.',
       decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {

@@ -2290,7 +2290,8 @@ export function enumerateCandidates(
         // between the follow and the sink. The default pass structures each setting with the join
         // past early returns and, where that took the join somewhere (`onJoinPastReturns`), with
         // the return-tail copies (`copyReturnTails`) too, and publishes the copies only where they
-        // spell the function in fewer lines (pipeline.ts `structureReturnTailReading`). This pass
+        // spell the function in fewer lines or the layout shows a cross-jumped return tail
+        // (pipeline.ts `structureReturnTailReading`). This pass
         // enumerates the tree it did not publish, so neither reading is structured twice:
         //   - `/ret-copy`, the copies, where the join was published. A chain of `if`s each holding
         //     an early `return;` has no CFG join (`synthetic:retchain`), and where the early returns

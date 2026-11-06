@@ -568,8 +568,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     the list for every conditional-return branch, wherever in the stream that branch sits. So
   //     its real blocks keep address order among themselves, and each synthetic one — a bare
   //     return, never a test — sorts after all of them;
-  //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
-  //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
+  //   - raising mostly REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}.ts
+  //     all `filter`), but not only: raise/reroll.ts moves a rerolled loop's new head ahead of the
+  //     old one and inserts a block of its own before it. So this order is the frontend's only
+  //     where no reroll fired. A reader that needs the asm's own order wherever a pass rewrote the
+  //     list reads the frontend's record instead (ir/core.ts `AsmLayout`, which the return-tail
+  //     chooser reads); this one has not been moved onto it.
   // TWO READERS, both target-gated, and they need DIFFERENT strengths of the compiler half:
   //   - `switchArmsFollowLayout` (arm ORDER, the sort below) needs the full claim — no block moved
   //     at all — because it PLACES the arms from the layout;

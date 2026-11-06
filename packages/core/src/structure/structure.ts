@@ -2528,7 +2528,8 @@ export interface StructureOptions extends ArithCompilerFacts {
   // chain: THE RETURN-TAIL COPIES. Absent (the default), such a branch is given the block its
   // non-returning paths meet at as its join (`joinsPastReturns` below) and the code from there is
   // written once. Where that join was taken, the pipeline structures again with this on and
-  // publishes whichever reading spells the function in fewer lines, ties to the join (pipeline.ts
+  // publishes whichever reading spells the function in fewer lines, ties to the join, or the copies
+  // where the target's layout shows a cross-jumped return tail (pipeline.ts
   // `structureReturnTailReading`), and rank.ts enumerates the other as `/ret-copy` or `/ret-join`;
   // a copies structuring past the copy budget (`COPY_BUDGET`) declines, and the join stands.
   copyReturnTails?: boolean;
