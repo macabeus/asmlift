@@ -422,3 +422,69 @@ describe('the fixpoint terminates and does not depend on block order', () => {
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });
 });
+
+describe('an undeclared call whose callee’s body loads its incoming stack words (`bodyReads`)', () => {
+  /** A call nothing declares, whose callee's body is proven to load `n` incoming stack words. */
+  const bodyCall = (name: string, n: number): Ev => ({
+    kind: 'call',
+    call: name,
+    callee: name,
+    declared: null,
+    bodyReads: n,
+  });
+
+  test('staged exactly [0, 4n) on every path, it is licensed at the body’s n words', () => {
+    const r = run(line([st(0), st(4), st(8), bodyCall('nine', 3)]), chain(1), 12);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('nine')).toEqual([0, 4, 8]);
+    expect(r.area).toBe(12);
+  });
+
+  test('…and the same call with no body witness declines, as it did', () => {
+    const r = run(line([st(0), st(4), st(8), call('nine', 0)]), chain(1), 12);
+    expect(r.blocker).toMatch(/never reloaded and its lower slots are supplied/);
+  });
+
+  test('a word staged past the body’s reads is one it may take unread, so it stays declined', () => {
+    const r = run(line([st(0), st(4), st(8), bodyCall('nine', 2)]), chain(1), 12);
+    expect(r.blocker).not.toBeNull();
+    expect(r.blocks.size).toBe(0);
+  });
+
+  test('fewer words staged than the body loads leaves the rest unsupplied, and declines', () => {
+    const r = run(line([st(0), bodyCall('nine', 2)]), chain(1), 8);
+    expect(r.blocker).toMatch(
+      /its body loads 2 incoming stack words, \[sp,#0\], \[sp,#4\], but the words staged for it are \[sp,#0\]/,
+    );
+  });
+
+  test('a word staged on one path only is missing on the other, and declines', () => {
+    const r = run([blk([st(0)]), blk([st(4)]), blk([]), blk([bodyCall('two', 2)])], [[], [0], [0], [1, 2]], 8);
+    expect(r.blocker).toMatch(/on every path \[sp,#0\]\)/);
+  });
+
+  test('a licensed call consumes its block, so a second call staging it anew is licensed too', () => {
+    const r = run(line([st(0), bodyCall('one', 1), st(0), bodyCall('one2', 1)]), chain(1), 4);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('one')).toEqual([0]);
+    expect(r.blocks.get('one2')).toEqual([0]);
+  });
+
+  test('a spill above the loaded-word bound is a local, and does not spoil the agreement', () => {
+    const r = run(line([st(0), st(8), bodyCall('one', 1), ld(8)]), chain(1), 12);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('one')).toEqual([0]);
+  });
+
+  test('a loop staging the block before each call is licensed at every iteration', () => {
+    const r = run([blk([]), blk([st(0), st(4), bodyCall('two', 2)]), blk([])], [[], [0, 1], [1]], 8);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('two')).toEqual([0, 4]);
+  });
+
+  test('nothing staged leaves the call as it was: it lifts, taking no stack word', () => {
+    const r = run(line([bodyCall('nine', 5)]), chain(1), 0);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.size).toBe(0);
+  });
+});

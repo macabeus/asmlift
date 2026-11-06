@@ -39,8 +39,9 @@ export interface StackArgsEscape {
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
  *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
- *  alone cannot say where a null declaration's block ENDS, so such a call is never handed a stack
- *  word; it lifts only when `loadedWordBound` clears every word that could open one. */
+ *  alone cannot say where a null declaration's block ENDS, so such a call is handed a stack word
+ *  only where its callee's body says where it starts (`bodyReads`); otherwise it lifts only when
+ *  `loadedWordBound` clears every word that could open one. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -51,6 +52,10 @@ export interface StackArgsCall<C> {
   /** The parameters the declaration lists, for the refusal messages — fewer than its words when a
    *  64-bit parameter takes two or a hidden struct-return pointer takes one. Absent, one per word. */
   readonly params?: number;
+  /** Where nothing declares the call: how many words of its incoming stack area the callee's own
+   *  body is proven to load (frontend/thumb-entry.ts), a LOWER bound on its stack words. Absent or 0,
+   *  the body proves nothing. See "THE CALLEE'S BODY" below for the licence it takes part in. */
+  readonly bodyReads?: number;
 }
 
 /** One basic block's events. Where control goes afterwards is read out of `preds`, so a block is
@@ -209,8 +214,20 @@ export function loadedWordBound<C>(
 //
 // A LICENSED CALL CONSUMES ITS BLOCK, which is what lets a function make several calls: the
 // callee reads those words, so they stop being pending after it, exactly as a reload would end
-// them. The deletion is driven by the DECLARATION alone, never by the licence, so the fixpoint
-// cannot depend on its own outcome.
+// them. The deletion is driven by the DECLARATION (or the body's reads, below) alone, never by the
+// licence, so the fixpoint cannot depend on its own outcome.
+//
+// THE CALLEE'S BODY STANDS IN FOR A MISSING DECLARATION, on one side only. A compiled callee loads
+// incoming stack word k only as its argument |argRegs|+k, so a body proven to load word n-1
+// (`bodyReads` n) takes at least n stack words — a LOWER bound, as a declaration is, and never an
+// upper one: a parameter it does not load, or one it loads past the straight-line entry it was
+// scanned over, is a word it takes all the same. The CODE closes the block from above: the call is
+// licensed only where what reaches it staged, on every path (must) and on some path (may, beneath
+// the loaded-word bound), is exactly `[0, 4n)` — by CONTIGUITY a conforming caller stores every
+// argument word of a call, so a word past the body's reads that it does not stage is no argument.
+// Anything else is the call it was before the witness existed: unlicensed, and refused by (a) or
+// (b) wherever they refused it — so the witness only ever turns a decline into a lift, and only at
+// a call where 0 reached it staged, which (b) refused.
 export function analyzeOutgoingArgs<C>({
   blocks: asmBlocks,
   preds,
@@ -221,6 +238,9 @@ export function analyzeOutgoingArgs<C>({
   loadedWordBound: bound,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
+  // the block the callee's body proves it reads into, for an undeclared call (`bodyReads`)
+  const bodyBlock = (ev: StackArgsCall<C>): number[] =>
+    ev.declared === null && (ev.bodyReads ?? 0) > 0 ? Array.from({ length: ev.bodyReads! }, (_, i) => 4 * i) : [];
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
   // dataflow below never finds its block and it refuses — which is the verdict it had before
   // consumption existed. An unreachable `bl` is not evidence about the frame either way, and
@@ -235,6 +255,7 @@ export function analyzeOutgoingArgs<C>({
     return { blocker: null, blocks: new Map(), area: 0 };
   }
   const say = (offs: readonly number[]) => offs.map((o) => `[sp,#${o}]`).join(', ');
+  const sayAll = (offs: readonly number[]) => (offs.length === 0 ? 'none' : say(offs));
   const declaredAs = (ev: StackArgsCall<C>, offs: readonly number[]) => {
     const words = argRegs + offs.length;
     return ev.params === undefined || ev.params === words
@@ -331,7 +352,7 @@ export function analyzeOutgoingArgs<C>({
           mayAt.set(ev, belowBound(may));
           mustAt.set(ev, new Set(must));
           storedAt.set(ev, new Set(stored));
-          for (const o of ev.declared ?? []) {
+          for (const o of ev.declared ?? bodyBlock(ev)) {
             may.delete(o);
             must.delete(o);
           }
@@ -392,6 +413,14 @@ export function analyzeOutgoingArgs<C>({
   for (const ev of calls) {
     const offs = ev.declared;
     if (offs === null) {
+      // the body's witness: licensed on exact agreement, else left to (a) and (b) as before
+      const body = bodyBlock(ev);
+      const may = asc(mayAt.get(ev) ?? []);
+      const must = mustAt.get(ev) ?? new Set<number>();
+      if (body.length > 0 && may.length === body.length && body.every((o, i) => may[i] === o && must.has(o))) {
+        blocks.set(ev.call, body);
+        area = Math.max(area, 4 * body.length);
+      }
       continue;
     }
     const may = mayAt.get(ev) ?? new Set<number>();
@@ -481,6 +510,33 @@ export function analyzeOutgoingArgs<C>({
       );
     }
   }
+  // (b)'s question, asked of one call (see (b) below): the refusal, or null where nothing staged
+  // there could open an argument block. A call the body's witness was asked of and did not license
+  // is asked it BEFORE (a), so its decline names both witnesses; (a) would refuse it anyway, or (b)
+  // would, so only the message moves.
+  const pendingAtUndeclared = (ev: StackArgsCall<C>): string | null => {
+    if (ev.declared !== null || blocks.has(ev.call)) {
+      return null;
+    }
+    const may = mayAt.get(ev) ?? new Set<number>();
+    const stored = storedAt.get(ev) ?? new Set<number>();
+    const body = bodyBlock(ev);
+    const why =
+      body.length === 0
+        ? ''
+        : ` (its body loads ${body.length} incoming stack word${body.length === 1 ? '' : 's'}, ${say(body)}, ` +
+          `but the words staged for it are ${sayAll(asc(may))}, on every path ${sayAll(asc(mustAt.get(ev) ?? []))})`;
+    const k = asc(may).find((o) => prefixStored(o, stored));
+    return k === undefined
+      ? null
+      : `the store to [sp,#${k}] reaches \`bl ${ev.callee}\` unread with its lower slots supplied — it may be that call's outgoing stack argument${why}`;
+  };
+  for (const ev of calls) {
+    const refusal = bodyBlock(ev).length > 0 ? pendingAtUndeclared(ev) : null;
+    if (refusal !== null) {
+      return refuse(refusal);
+    }
+  }
   // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
   // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
   // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
@@ -504,17 +560,9 @@ export function analyzeOutgoingArgs<C>({
   // histogram keys on, and scanning a Set in insertion order named whichever offset the code stored
   // FIRST instead (pokeemerald's `PickLotteryCornerTicket` stores [sp,#4] before [sp,#0]).
   for (const ev of calls) {
-    if (ev.declared !== null) {
-      continue;
-    }
-    const may = mayAt.get(ev) ?? new Set<number>();
-    const stored = storedAt.get(ev) ?? new Set<number>();
-    for (const k of asc(may)) {
-      if (prefixStored(k, stored)) {
-        return refuse(
-          `the store to [sp,#${k}] reaches \`bl ${ev.callee}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`,
-        );
-      }
+    const refusal = pendingAtUndeclared(ev);
+    if (refusal !== null) {
+      return refuse(refusal);
     }
   }
   // NOTHING LEFT OVER. The exclusion above is per OFFSET, so it would also excuse a store to a
