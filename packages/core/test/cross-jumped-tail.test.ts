@@ -324,6 +324,18 @@ describe('the plain default publishes the copies where the layout shows the merg
     },
   );
 
+  // pokeemerald's IsRequestedTradeInPlayerParty: the join past early returns refuses here (a
+  // boundary contract), and the copies lift. The measured default structures the copies first, so
+  // the function lifts as it did before the join was a default; the join's refusal costs only it.
+  test('agbcc: where the join refuses and the copies lift, the measured default lifts the copies', () => {
+    const asm = fixture('agbcc-retjoin-refused.s');
+    const read = (target: TargetDescription, o: object = {}) =>
+      decompile('IsRequestedTradeInPlayerParty', asm, target, o).source;
+    expect(() => read(ARMV4T_AGBCC, { joinPastReturns: true })).toThrow(/no path reaches/);
+    expect(() => read(AGBCC_MARKS)).toThrow(/no path reaches/);
+    expect(read(ARMV4T_AGBCC)).toBe(read(ARMV4T_AGBCC, { copyReturnTails: true }));
+  });
+
   // The shape of Animal Forest's func_80A42DB4_jp: two `*a3 = 0` arms, the first in the slot of a
   // `b` whose target follows the second. The frontend retargets that `b` to the second store and
   // empties its slot, so the join writes one store where ido, which never cross-jumps, kept two.

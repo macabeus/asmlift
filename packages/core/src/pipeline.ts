@@ -1280,18 +1280,23 @@ export function structureReturnTailReading(
     return { sfn: structureChecked(fn, structOpts, hooks, memo) };
   }
   const sites: JoinPastReturnsSite[] = [];
-  const join = structureChecked(
-    fn,
-    structOpts,
-    {
-      ...hooks,
-      onJoinPastReturns: (site) => {
-        sites.push(site);
-        hooks.onJoinPastReturns?.(site);
+  const structureJoin = () =>
+    structureChecked(
+      fn,
+      structOpts,
+      {
+        ...hooks,
+        onJoinPastReturns: (site) => {
+          sites.push(site);
+          hooks.onJoinPastReturns?.(site);
+        },
       },
-    },
-    memo,
-  );
+      memo,
+    );
+  if (opts.returnTailCopiesByDefault === true && joinPastReturns !== true) {
+    return copiesByDefault(fn, structOpts, structureJoin, sites, hooks, memo);
+  }
+  const join = structureJoin();
   if (sites.length === 0 || joinPastReturns === true) {
     return { sfn: join };
   }
@@ -1303,9 +1308,6 @@ export function structureReturnTailReading(
       throw error;
     }
     return { sfn: join, unpublished: { reading: 'copies', error } };
-  }
-  if (opts.returnTailCopiesByDefault === true) {
-    return { sfn: copies, unpublished: { reading: 'join', sfn: join } };
   }
   // Read only where the compiler is one that merges return tails: elsewhere the same layout is no
   // evidence of the copies (ido7.1 lays a tail out mid-construct with no cross-jump at all).
@@ -1325,6 +1327,48 @@ export function structureReturnTailReading(
   return publishCopies
     ? { sfn: copies, unpublished: { reading: 'join', sfn: join } }
     : { sfn: join, unpublished: { reading: 'copies', sfn: copies } };
+}
+
+/** THE MEASURED DEFAULT (`returnTailCopiesByDefault`): the copies, structured FIRST, as the default
+ *  before the join past early returns was one, so a function lifts and declines exactly where it did
+ *  then. The join is structured after them for the ranked fan, and its refusal costs only that
+ *  reading. Where the copies refuse, the join stands as everywhere else (never a lift turned into a
+ *  decline), and where both refuse, the copies' refusal is the one reported. */
+function copiesByDefault(
+  fn: Fn,
+  structOpts: Parameters<typeof structure>[1],
+  structureJoin: () => SFn,
+  sites: readonly JoinPastReturnsSite[],
+  hooks: Parameters<typeof structure>[2],
+  memo: Parameters<typeof structure>[3],
+): ReturnTailReading {
+  const refusal = (error: unknown) => {
+    if (error instanceof DefaultAcceptsMemoMisuse) {
+      throw error;
+    }
+    return error;
+  };
+  let copies: SFn | undefined;
+  let copiesError: unknown;
+  try {
+    copies = structureChecked(fn, { ...structOpts, copyReturnTails: true }, hooks, memo);
+  } catch (error) {
+    copiesError = refusal(error);
+  }
+  let join: SFn;
+  try {
+    join = structureJoin();
+  } catch (error) {
+    refusal(error);
+    if (copies === undefined) {
+      throw copiesError;
+    }
+    return { sfn: copies };
+  }
+  if (copies === undefined) {
+    return sites.length === 0 ? { sfn: join } : { sfn: join, unpublished: { reading: 'copies', error: copiesError } };
+  }
+  return sites.length === 0 ? { sfn: copies } : { sfn: copies, unpublished: { reading: 'join', sfn: join } };
 }
 
 // ── annotate-mode support ─────────────────────────────────────────────────────────────────
