@@ -21,10 +21,10 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
-import { raiseRecovered } from '../src/pipeline';
+import { decompile, raiseRecovered } from '../src/pipeline';
 import { crossJumpedTail } from '../src/structure/cross-jumped-tail';
 import { type JoinPastReturnsSite, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription, structureOptionsFor } from '../src/target';
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
@@ -175,5 +175,39 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
     expect(crossJumpedTail(fn, site)).toBe(true);
     fn.asmLayout = laidOut([b0, b1, b2, b3, b5, b4]);
     expect(crossJumpedTail(fn, site)).toBe(false);
+  });
+});
+
+describe('the plain default publishes the copies where the layout shows the merge', () => {
+  const reading = (p: Probe, target: TargetDescription, o: object = {}) =>
+    decompile('f', fixture(`agbcc-rettail-${p}.s`), target, { prototypes: protosOf(p), ...o }).source;
+
+  test.each(['pa-copies', 'pb-copies'] as const)(
+    'agbcc %s: the default is the copies, though the join is shorter',
+    (p) => {
+      const copies = reading(p, ARMV4T_AGBCC, { copyReturnTails: true });
+      const join = reading(p, ARMV4T_AGBCC, { joinPastReturns: true });
+      expect(join.split('\n').length).toBeLessThan(copies.split('\n').length);
+      expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
+    },
+  );
+
+  test.each(['pa-join', 'pb-join'] as const)('agbcc %s: no mark, so the size bound keeps the join', (p) => {
+    expect(reading(p, ARMV4T_AGBCC)).toBe(reading(p, ARMV4T_AGBCC, { joinPastReturns: true }));
+  });
+
+  // The same layout on a target that does not declare the merge is no evidence: the bound decides.
+  // ido7.1 lays a tail out mid-construct with no cross-jump at all, and mwcc's PPC_MWCC claims none.
+  test.each(['pa-copies', 'pb-copies'] as const)('%s on a target claiming no cross-jump: the size bound', (p) => {
+    const { crossJumpsReturnTails: _, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const plain: TargetDescription = { ...ARMV4T_AGBCC, compilerBehaviors: behaviors };
+    expect(reading(p, plain)).toBe(reading(p, plain, { joinPastReturns: true }));
+  });
+
+  test('mwcc_242_81 `pa` join: the bound reading, unchanged', () => {
+    const asm = fixture('mwcc242-rettail-pa-join.asm');
+    const read = (o: object) => decompile('f', asm, PPC_MWCC, { prototypes: PROTOS.pa, ...o }).source;
+    expect(PPC_MWCC.compilerBehaviors.crossJumpsReturnTails).toBeUndefined();
+    expect(read({})).toBe(read({ joinPastReturns: true }));
   });
 });

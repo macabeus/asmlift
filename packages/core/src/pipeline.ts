@@ -50,7 +50,8 @@ import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from '.
 import { PRE_STRUCTURE_FOLDS, type PreStructureFold } from './raise/pre-structure';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
-import { DefaultAcceptsMemoMisuse, StructureError, structure } from './structure/structure';
+import { crossJumpedTail } from './structure/cross-jumped-tail';
+import { DefaultAcceptsMemoMisuse, type JoinPastReturnsSite, StructureError, structure } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -1169,9 +1170,11 @@ export interface ReturnTailReading {
   readonly unpublished?: UnpublishedReading;
 }
 
-/** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE: `structureChecked`, and where that structuring
- *  took the join past early returns somewhere, the same structuring again reading the return-tail
- *  copies (`copyReturnTails`), with the copies published only where they spell the function SHORTER.
+/** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT: `structureChecked`,
+ *  and where that structuring took the join past early returns somewhere, the same structuring again
+ *  reading the return-tail copies (`copyReturnTails`). The copies are published where they spell the
+ *  function SHORTER, or where the target's asm layout shows that the compiler cross-jumped a tail
+ *  the source wrote into every arm (below).
  *
  *  WHY A BOUND. The join writes the code below a divergent branch once where the copies write it
  *  into every arm; but the join copies a return tail into each early return in its turn, so neither
@@ -1188,7 +1191,7 @@ export interface ReturnTailReading {
  *      branches (196 of those 620), and its gain there is not measured. Of the 13 that MATCH only
  *      with the copies (all sa3 agbcc) this bound publishes the copies on 9; on the other 4 the
  *      join is the shorter, and 3 of them take it at a single branch, so a per-branch unit could
- *      recover at most 1.
+ *      recover at most 1. The layout recovers all 4 (THE LAYOUT, below).
  *    - Emitted, not the structured tree: `readabilityRewrites` runs after `structure()` and can fold
  *      copied tails back together (`mergeCommonTails`), so a size read inside `structure()` is not
  *      the size published.
@@ -1200,6 +1203,21 @@ export interface ReturnTailReading {
  *      neither reading spells a `goto`, and casts-first parts from lines on 17, where lines scores
  *      the closer on 5 and casts on 3, with no MATCH between them. The ranked fan holds both
  *      readings, so where the default is ranked `compareScored` still orders them.
+ *
+ *  THE LAYOUT. A compiler that cross-jumps return tails (target.ts `crossJumpsReturnTails`) compiles
+ *  the copies into the CFG the join reads, with one copy of the tail. So the join is the shorter
+ *  reading of those copies, and the bound alone publishes it. What the copies leave instead is a
+ *  mark in the layout at a site the join took: the surviving tail ends in a jump over an arm laid
+ *  out after it, or identical arms stayed separate blocks (structure/cross-jumped-tail.ts). Where
+ *  any site the published join run took shows a mark, the copies are published whatever their size.
+ *    - Read only where the target declares the merge. ido7.1 lays a tail out mid-construct with no
+ *      cross-jump, and there the same layout fact is not evidence of the copies.
+ *    - Whole function, as the bound is: the two readings are still rank.ts's default and its
+ *      `/ret-copy` or `/ret-join` sibling, so the ranked fan holds the same two trees.
+ *    - MEASURED over those 620 functions, simulated from the two readings' scores: the bound with
+ *      the layout gives MATCH 44 (copies everywhere 35, the bound alone 40), and loses none of the
+ *      copies' matches. The bound alone loses 4, all sa3 agbcc: three where the tail is left
+ *      mid-construct, and one where identical case bodies stayed apart.
  *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
@@ -1216,29 +1234,32 @@ export interface ReturnTailReading {
  *  `DefaultAcceptsMemoMisuse` is a defect and is rethrown, never an unpublished reading. */
 export function structureReturnTailReading(
   fn: Fn,
-  opts: Parameters<typeof structure>[1] & { joinPastReturns?: boolean },
+  opts: Parameters<typeof structure>[1] & { joinPastReturns?: boolean; crossJumpsReturnTails?: boolean },
   emit: (sfn: SFn) => string,
   hooks: Parameters<typeof structure>[2] = {},
   memo?: Parameters<typeof structure>[3],
 ): ReturnTailReading {
+  // `crossJumpsReturnTails` rides along into `structure()`, which never reads it, as every compiler
+  // behaviour `structureOptionsFor` spreads does: stripped here, it would key this structuring's
+  // default-accepts memo apart from rank.ts's other passes over the same setting.
   const { joinPastReturns, ...structOpts } = opts;
   if (structOpts.copyReturnTails === true || structOpts.spellEarlyReturns === false) {
     return { sfn: structureChecked(fn, structOpts, hooks, memo) };
   }
-  let joined = false;
+  const sites: JoinPastReturnsSite[] = [];
   const join = structureChecked(
     fn,
     structOpts,
     {
       ...hooks,
       onJoinPastReturns: (site) => {
-        joined = true;
+        sites.push(site);
         hooks.onJoinPastReturns?.(site);
       },
     },
     memo,
   );
-  if (!joined || joinPastReturns === true) {
+  if (sites.length === 0 || joinPastReturns === true) {
     return { sfn: join };
   }
   let copies: SFn;
@@ -1250,14 +1271,20 @@ export function structureReturnTailReading(
     }
     return { sfn: join, unpublished: { reading: 'copies', error } };
   }
-  let shorter = false;
+  // Read only where the compiler is one that merges return tails: elsewhere the same layout is no
+  // evidence of the copies (ido7.1 lays a tail out mid-construct with no cross-jump at all).
+  const crossJumped = opts.crossJumpsReturnTails === true && sites.some((site) => crossJumpedTail(fn, site));
+  let publishCopies = false;
   try {
-    shorter = sourceLineCount(emit(copies)) < sourceLineCount(emit(join));
+    // Both are emitted whatever the layout says, so a backend that cannot spell one of them leaves
+    // the join standing exactly as it does without the layout.
+    const [copyLines, joinLines] = [sourceLineCount(emit(copies)), sourceLineCount(emit(join))];
+    publishCopies = crossJumped || copyLines < joinLines;
   } catch {
     // a backend that cannot spell one of the two leaves the join standing; the caller's own emit of
     // the join reports its refusal where it has one
   }
-  return shorter
+  return publishCopies
     ? { sfn: copies, unpublished: { reading: 'join', sfn: join } }
     : { sfn: join, unpublished: { reading: 'copies', sfn: copies } };
 }
