@@ -1,13 +1,14 @@
-// Regenerate the committed return-tail cross-jump fixtures read by
-// `packages/core/test/cross-jumped-tail.test.ts`.
+// Regenerate the committed return-tail fixtures read by `packages/core/test/cross-jumped-tail.test.ts`
+// and `packages/core/test/unfolded-branch-constant.test.ts`.
 //
-// One claim: `crossJumpsReturnTails` (target.ts), which compilers keep a return tail written into
-// every arm ONCE. It is a COMPILER claim about two SOURCE spellings of one function, the tail in
+// Two claims. `crossJumpsReturnTails` (target.ts), which compilers keep a return tail written into
+// every arm ONCE (`pa`-`pf`); and `foldsBranchConstantOnTakenEdge`, which compilers fold the constant
+// a branch proved into a return on its taken edge (`pg`). It is a COMPILER claim about two SOURCE spellings of one function, the tail in
 // every arm and the tail written once after the construct. So, as for
 // `scripts/regen-switch-spelling-probes.ts`, both spellings are compiled and the objects committed,
 // and this script is what makes the pair re-measurable rather than only re-readable.
 //
-// Six pairs (`corpus/probe-rettail-{pa,pb,pc,pd,pe,pf}-{copies,join}.c`), five toolchains, each at its
+// Seven pairs (`corpus/probe-rettail-{pa,pb,pc,pd,pe,pf,pg}-{copies,join}.c`), five toolchains, each at its
 // canonical flags taken from `@asmlift/core` and `@asmlift/toolchains` rather than retyped:
 //
 //   ASMLIFT_AGBCC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… ASMLIFT_MWCC_ROOT=… npx tsx scripts/regen-rettail-probes.ts
@@ -37,7 +38,10 @@ import {
 } from '../packages/toolchains/src/index';
 
 const CORPUS = join(import.meta.dirname, '..', 'packages', 'core', 'test', 'corpus');
-const READ_BY = 'packages/core/test/cross-jumped-tail.test.ts';
+const READ_BY = (probe: string) =>
+  probe.startsWith('pg-')
+    ? 'packages/core/test/unfolded-branch-constant.test.ts'
+    : 'packages/core/test/cross-jumped-tail.test.ts';
 const PROBES = [
   'pa-copies',
   'pa-join',
@@ -51,6 +55,8 @@ const PROBES = [
   'pe-join',
   'pf-copies',
   'pf-join',
+  'pg-copies',
+  'pg-join',
 ] as const;
 const SYMBOL = 'f';
 
@@ -106,7 +112,7 @@ for (const probe of PROBES) {
     `@ source    : packages/core/test/corpus/${src}\n` +
     `@ toolchain : ARMV4T_AGBCC (gcc 2.9-arm, Thumb), binary from $ASMLIFT_AGBCC\n` +
     `@ cc flags  : ${[...AGBCC_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags].join(' ')}\n` +
-    `@ read by   : ${READ_BY}\n`;
+    `@ read by   : ${READ_BY(probe)}\n`;
   const agbccOut = join(CORPUS, `agbcc-rettail-${probe}.s`);
   writeFileSync(agbccOut, agbccHeader + compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
   console.log(`wrote ${agbccOut}`);
@@ -119,7 +125,7 @@ for (const probe of PROBES) {
       `# toolchain : ${t.description}, binary from $${t.envVar}\n` +
       `# cc flags  : ${[...t.harness, ...t.cflags].join(' ')}\n` +
       `# objdump   : ${t.objdump}\n` +
-      `# read by   : ${READ_BY}\n`;
+      `# read by   : ${READ_BY(probe)}\n`;
     const out = join(CORPUS, `${t.slug}-rettail-${probe}.asm`);
     writeFileSync(out, header + body);
     console.log(`wrote ${out}`);

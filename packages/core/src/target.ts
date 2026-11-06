@@ -1291,6 +1291,28 @@ export interface TargetDescription {
     // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
     // unprobed, and PPC_MWCC claims nothing for them.
     crossJumpsReturnTails?: boolean;
+    // DOES THE COMPILER FOLD THE CONSTANT A BRANCH PROVED INTO A RETURN ON THE BRANCH'S TAKEN EDGE?
+    // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
+    // records the branch's equivalence on the NOT-taken edge of every jump (`record_jump_equiv
+    // (insn, 0)`, cse.c:7597), and on the taken edge only along a path it follows (`record_jump_equiv
+    // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps or -fcse-skip-blocks,
+    // which toplev.c:3606-3607 sets at `optimize >= 2`. (Line numbers are agbcc's gcc 2.9 tree; for
+    // 2.7.2 the probe below is the evidence.) So where this is `false`, a return of the tested value
+    // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
+    // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
+    // Read by the return-tail chooser (pipeline.ts `structureReturnTailReading`), which publishes the
+    // copies at such a return (structure/unfolded-branch-constant.ts). `false` only by the flags
+    // (`targetFor`), never declared.
+    //
+    // MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c`, the `return gB` after a
+    // `gB` tested against 0, compiled by scripts/regen-rettail-probes.ts. The `beqz`'s delay slot:
+    //   - gcc2.7.2 at -O1 (canonical): copies `nop`, join `move v0,zero`. With the arms of the
+    //     copies flipped (the return the then arm), and with `-O1 -fcse-follow-jumps`, `move v0,zero`.
+    //   - gcc2.7.2 at -O2, and gcc2.7.2kmc at -O2 (canonical): `move v0,zero` under every spelling.
+    // So `true` on MIPS_GCC, and `false` from the flags at level 1 without either switch. Absent
+    // elsewhere: agbcc at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no
+    // value of this field says; ido7.1 and mwcc are unprobed.
+    foldsBranchConstantOnTakenEdge?: boolean;
   };
 }
 
@@ -1782,6 +1804,9 @@ export const MIPS_GCC: TargetDescription = {
     switchRequiresFrontLoadedTests: true,
     // MEASURED on BOTH toolchains this description serves, the probe pairs at the field.
     crossJumpsReturnTails: true,
+    // MEASURED at -O2 on both toolchains this description serves, the probe pair at the field;
+    // gcc2.7.2's canonical -O1 clears it (`targetFor`).
+    foldsBranchConstantOnTakenEdge: true,
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
@@ -2139,6 +2164,9 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     const { enumBytes: _flagged, ...behaviors } = target.compilerBehaviors;
     target = { ...target, compilerBehaviors: behaviors };
   }
+  if (target.compilerBehaviors.foldsBranchConstantOnTakenEdge === true && !cseFollowsJumpsUnder(profile)) {
+    target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, foldsBranchConstantOnTakenEdge: false } };
+  }
   const charSigned = plainCharSignedUnder(t.family, profile.slots);
   if (charSigned !== 'default' && charSigned !== target.compilerBehaviors.plainCharSigned) {
     const { plainCharSigned: _default, ...behaviors } = target.compilerBehaviors;
@@ -2148,6 +2176,18 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     };
   }
   return { toolchain, cflags, target, profile };
+}
+
+/** Does gcc's cse follow jumps at these flags (`compilerBehaviors.foldsBranchConstantOnTakenEdge`)?
+ *  toplev.c:3606-3607 turns `flag_cse_follow_jumps` and `flag_cse_skip_blocks` on at `optimize >= 2`,
+ *  and either switch turns them on by name. Only level 1 is answered `false`: at -O0 cse does not
+ *  run, which is a different compiler again, and a level no table reads keeps the declaration. */
+function cseFollowsJumpsUnder(profile: CodegenProfile): boolean {
+  if (profile.family !== 'gcc' && profile.family !== 'agbcc') {
+    return true;
+  }
+  const on = (f: string) => profile.slots[f] === 'on';
+  return profile.slots.O !== '1' || on('-fcse-follow-jumps') || on('-fcse-skip-blocks');
 }
 
 /** What the flags say a plain `char` is (`compilerBehaviors.plainCharSigned`): `default` where they
