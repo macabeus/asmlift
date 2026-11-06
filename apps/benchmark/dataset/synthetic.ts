@@ -4434,6 +4434,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['multi-arg'],
     toolchains: ['agbcc'],
     ctx: 'int kr();\nint stkbody_more(int x);',
+    proto: { kr: { returns: 'int' } },
   },
   {
     sym: 'stkbody_none',
