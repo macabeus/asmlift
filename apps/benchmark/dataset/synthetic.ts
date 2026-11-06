@@ -4398,13 +4398,16 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { callee: { params: 1 } },
   },
   // AN UNDECLARED CALLEE'S BODY SIZES ITS STACK ARGUMENTS (frontend/stackargs.ts, "THE CALLEE'S BODY";
-  // frontend/thumb-entry.ts). kl2dct's sub_08049A34 stages five words for `sub_08004060`, which nothing
-  // declares, and declined "the store to [sp,#0] is never reloaded and its lower slots are supplied":
-  // the code alone cannot say where an undeclared call's block ends. The callee's entry loads its
-  // incoming stack words first thing, a lower bound on what it takes, and the caller staging exactly
-  // those words on every path closes it from above.
+  // frontend/callee-body.ts `CalleeStackWords`). kl2dct's sub_08049A34 stages five words for
+  // `sub_08004060`, which nothing declares, and declined "the store to [sp,#0] is never reloaded and
+  // its lower slots are supplied": the code alone cannot say where an undeclared call's block ends.
+  // The incoming stack words the callee's body loads (its lift, or its entry where it does not lift)
+  // are a lower bound on what it takes, and the caller staging exactly those words on every path
+  // closes it from above. The O32 frontends take the same licence past a0..a3 at 16(sp).
   //   stkbody9: `nine` is defined K&R in the same unit and loads five incoming words; the loop
-  //     stages [sp,#0..#0x10] before each call, and the row lifts the nine-argument call.
+  //     stages them before each call, and the row lifts the nine-argument call.
+  //   stkbody_br: `br6` loads its one stack word read only on one branch, past its straight-line
+  //     entry (agbcc loads it inside that branch), so only its lift sizes the six-argument call.
   //   stkbody_more: a K&R `kr` that loads one incoming word, called with six arguments (two staged):
   //     the body's bound is short of what is staged, so the row stays declined (control).
   //   stkbody_none: `nine` declared K&R and defined nowhere in the unit: no body, no bound, so the
@@ -4422,9 +4425,20 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '}',
     features: ['multi-arg', 'array'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'extern int gv[];\nvoid nine();\nvoid stkbody9(int *p, int n);',
     proto: { stkbody9: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_br',
+    src:
+      'int sink(int);\n' +
+      'int br6(a, b, c, d, e, f) int a, b, c, d, e, f; { if (a) return sink(b) + f; return b; }\n' +
+      'int stkbody_br(int *p) { return br6(p[0], p[1], p[2], p[3], p[4], p[5]); }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int sink(int);\nint br6();\nint stkbody_br(int *p);',
+    proto: { sink: { params: 1 }, br6: { returns: 'int' } },
   },
   {
     sym: 'stkbody_more',
