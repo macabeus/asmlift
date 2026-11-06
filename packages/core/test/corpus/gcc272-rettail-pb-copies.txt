@@ -1,0 +1,58 @@
+
+corpus.o:     file format elf32-tradbigmips
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 corpus.c
+00000000 l     O .text	00000000 gcc2_compiled.
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .rodata	00000000 .rodata
+00000000 l    d  .data	00000000 .data
+00000000 l    d  .bss	00000000 .bss
+00000000 l    d  .reginfo	00000000 .reginfo
+00000000 l    d  .note	00000000 .note
+00000000 l    d  .comment	00000000 .comment
+00000000 g     F .text	00000070 f
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+0000000c R_MIPS_HI16       .rodata
+00000014 R_MIPS_LO16       .rodata
+00000024 R_MIPS_26         .text
+00000030 R_MIPS_26         .text
+0000003c R_MIPS_26         .text
+00000048 R_MIPS_26         .text
+00000054 R_MIPS_26         .text
+
+
+RELOCATION RECORDS FOR [.rodata]:
+OFFSET   TYPE              VALUE
+00000000 R_MIPS_32         .text
+00000004 R_MIPS_32         .text
+00000008 R_MIPS_32         .text
+0000000c R_MIPS_32         .text
+00000010 R_MIPS_32         .text
+00000014 R_MIPS_32         .text
+00000018 R_MIPS_32         .text
+
+
+Contents of section .text:
+ 0000 2ca20007 10400018 00051080 3c010000  ,....@......<...
+ 0010 00220821 8c220000 00400008 00000000  .".!."...@......
+ 0020 8c82000c 08000019 24420200 8c82000c  ........$B......
+ 0030 08000019 24420210 8c82000c 08000019  ....$B..........
+ 0040 24420210 8c82000c 08000019 24420210  $B..........$B..
+ 0050 8c82000c 08000019 24420200 8c82000c  ........$B......
+ 0060 24420100 ac82000c 03e00008 00000000  $B..............
+Contents of section .reginfo:
+ 0000 80000036 00000000 00000000 00000000  ...6............
+ 0010 00000000 00000000                    ........        
+Contents of section .note:
+ 0000 00000008 00000000 00000001 30312e30  ............01.0
+ 0010 31000000                             1...            
+Contents of section .rodata:
+ 0000 0000005c 00000020 0000002c 00000038  ...\... ...,...8
+ 0010 00000044 00000050 0000005c 00000000  ...D...P...\....
+Contents of section .comment:
+ 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.
+ 0010 3200                                 2.              

@@ -1,0 +1,57 @@
+
+corpus.o:     file format elf32-tradbigmips
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 corpus.c
+00000000 l     O .text	00000000 gcc2_compiled.
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .data	00000000 .data
+00000000 l    d  .bss	00000000 .bss
+00000000 l    d  .reginfo	00000000 .reginfo
+00000000 l    d  .note	00000000 .note
+00000000 l    d  .comment	00000000 .comment
+00000000 g     F .text	0000007c f
+00000000         *UND*	00000000 gT
+00000000         *UND*	00000000 gV
+00000000         *UND*	00000000 gW
+00000000         *UND*	00000000 m
+00000000         *UND*	00000000 k
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+0000000c R_MIPS_HI16       gT
+00000010 R_MIPS_LO16       gT
+00000014 R_MIPS_HI16       gV
+00000018 R_MIPS_LO16       gV
+0000001c R_MIPS_26         .text
+00000030 R_MIPS_HI16       gW
+00000034 R_MIPS_LO16       gW
+00000038 R_MIPS_HI16       gV
+0000003c R_MIPS_LO16       gV
+00000040 R_MIPS_26         .text
+00000050 R_MIPS_26         m
+00000058 R_MIPS_26         .text
+00000060 R_MIPS_HI16       gV
+00000064 R_MIPS_LO16       gV
+00000068 R_MIPS_26         k
+
+
+Contents of section .text:
+ 0000 27bdffe8 14800007 afbf0010 3c010000  '...........<...
+ 0010 ac260000 3c010000 ac200000 0800001a  .&..<.... ......
+ 0020 00002021 24020001 14820007 24020002  .. !$.......$...
+ 0030 3c010000 ac260000 3c010000 ac240000  <....&..<....$..
+ 0040 0800001a 24040001 14820005 00000000  ....$...........
+ 0050 0c000000 24040002 0800001c 00000000  ....$...........
+ 0060 3c010000 ac240000 0c000000 00000000  <....$..........
+ 0070 8fbf0010 03e00008 27bd0018 00000000  ........'.......
+Contents of section .reginfo:
+ 0000 a0000056 00000000 00000000 00000000  ...V............
+ 0010 00000000 00000000                    ........        
+Contents of section .note:
+ 0000 00000008 00000000 00000001 30312e30  ............01.0
+ 0010 31000000                             1...            
+Contents of section .comment:
+ 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.
+ 0010 3200                                 2.              
