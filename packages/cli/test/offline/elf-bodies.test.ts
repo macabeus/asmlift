@@ -335,8 +335,8 @@ describe('PowerPC: a body read off the ELF names its calls in the listing, as `o
 // Each thunk_* is kleod's veneer shape, size 0 and ending at the `$a` mapping symbol of its `b`:
 // thunk_rnd enters kleod's GetRandomValue body (reads no argument), thunk_rd1 one reading r0,
 // thunk_br/_cond/_call one that branches, executes conditionally or calls, thunk_id one that returns
-// r0 as the caller left it; thunk_wk is weak and `plain` is a Thumb function that is no veneer. No
-// objdump is run on this path.
+// r0 as the caller left it; thunk_wk is weak, and `plain` and `stk2` are Thumb functions that are no
+// veneer, `stk2` loading two incoming stack words. No objdump is run on this path.
 // The one rule the CLI and the benchmark harness both read for which bodies a lift is handed: every
 // callee it guesses that the input does not define, none in a REL module; and the superset a reader
 // freezing bodies ahead of a lift reads, which no declaration narrows.
@@ -378,13 +378,25 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     const read = calleeBodiesFromElf(
       'x.elf',
       ARM_ELF,
-      ['thunk_rnd', 'thunk_rd1', 'thunk_br', 'thunk_cond', 'thunk_call', 'thunk_id', 'thunk_wk', 'plain', 'last'],
+      [
+        'thunk_rnd',
+        'thunk_rd1',
+        'thunk_br',
+        'thunk_cond',
+        'thunk_call',
+        'thunk_id',
+        'thunk_wk',
+        'plain',
+        'stk2',
+        'last',
+      ],
       TOOLCHAIN_TARGETS.agbcc.description,
       () => {
         throw new Error('no objdump on the ARM path');
       },
     );
-    // the weak veneer, a Thumb function that is none, and an ARM function called directly give none
+    // the weak veneer and an ARM function called directly give none; a Thumb function that is no
+    // veneer gives its halfwords, to the end of its range
     expect(Object.keys(read.bodies)).toEqual([
       'thunk_rnd',
       'thunk_rd1',
@@ -392,8 +404,12 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
       'thunk_cond',
       'thunk_call',
       'thunk_id',
+      'plain',
+      'stk2',
     ]);
     expect(read.bodies.thunk_rd1).toEqual({ kind: 'arm', words: [0xe2800001, 0xe12fff1e] });
+    expect(read.bodies.plain).toEqual({ kind: 'thumb', halfwords: [0x2001, 0x4770] });
+    expect(read.bodies.stk2).toEqual({ kind: 'thumb', halfwords: [0x9800, 0x9901, 0x1a40, 0x4770] });
   });
   // `extern int gp; f() { gp = 3; g(); }`: the store leaves its 3 in r0 and gp's address in r1
   const stored = (callee: string) =>
@@ -443,6 +459,19 @@ describe('CLI (agbcc): a guessed callee behind a Thumb->ARM veneer is bounded by
     expect(typed.stdout).toContain('thunk_rnd(3, &gp)');
     expect(typed.stderr).toContain('guessed from the argument registers: thunk_rnd —');
     expect(typed.stderr).not.toContain(NOTE);
+  });
+  // `stk2(1, 2, 3, 4, x, y)` to an undeclared `stk2`: two words staged at [sp,#0] and [sp,#4]
+  test('a call staging the stack words a Thumb body loads lifts with them, and declines with no ELF', async () => {
+    const asm =
+      '\t.code\t16\n\t.text\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n' +
+      '\tstr\tr1, [sp, #0x4]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tstk2\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    const lifted = await runCli([project(true, asm)]);
+    expect(lifted.code).toBe(0);
+    expect(lifted.stdout).toContain('return stk2(1, 2, 3, 4, a0, a1);');
+    const declined = await runCli([project(false, asm)]);
+    expect(declined.code).not.toBe(0);
+    expect(declined.stderr).toContain('lower slots are supplied');
   });
   // `u8 thunk_rnd(); void jt_rndsame(s32 i){ switch (i) { case 0: gH = 5; gA = thunk_rnd(); … } }`
   // (synthetic:jt_rndst:agbcc's shape, labelled jt_rndsame here, with the callee behind a veneer as
