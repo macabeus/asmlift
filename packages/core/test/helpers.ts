@@ -220,6 +220,7 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = f
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 

@@ -16,6 +16,7 @@
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
 import {
+  type AsmLayout,
   Block,
   Fn,
   Op,
@@ -655,6 +656,35 @@ export function clobberedByCall(target: {
   return target.callerSaved.filter((r) => r !== target.returnReg);
 }
 
+/** One asm block as {@link recordAsmLayout} reads it: its instructions without its control transfer,
+ *  and whether that transfer is an unconditional jump to a label. `undefined` for a block the
+ *  frontend made up, which has no place in the asm. */
+export interface AsmBlockText {
+  readonly body: readonly { readonly mnemonic: string; readonly ops: readonly string[] }[];
+  readonly endsInJump: boolean;
+}
+
+/** The layout record (ir/core.ts `AsmLayout`): asm block `i` is `irBlocks[i]`, which is how every
+ *  frontend's builder numbers them, and its index is its position among the blocks that have a
+ *  place in the asm. */
+export function recordAsmLayout(
+  irBlocks: readonly Block[],
+  asmBlocks: readonly (AsmBlockText | undefined)[],
+): AsmLayout {
+  const layout: AsmLayout = new Map();
+  let index = 0;
+  asmBlocks.forEach((ab, i) => {
+    if (ab !== undefined) {
+      layout.set(irBlocks[i], {
+        index: index++,
+        body: ab.body.map((ins) => (ins.ops.length ? `${ins.mnemonic} ${ins.ops.join(',')}` : ins.mnemonic)),
+        endsInJump: ab.endsInJump,
+      });
+    }
+  });
+  return layout;
+}
+
 export function makeSsaBuilder(
   name: string,
   blockCount: number,
@@ -715,6 +745,7 @@ export function makeSsaBuilder(
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());

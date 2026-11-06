@@ -77,6 +77,7 @@ import {
   assertScratchRegsPartitioned,
   makeSsaBuilder,
   mintArgSlotHoles,
+  recordAsmLayout,
   registerArgSlots,
   registerLiveIns,
   stackArgKey,
@@ -5695,6 +5696,16 @@ function thumbFillOf(
     () => ({ ...frame.partition, ...liveIns, saveSite: '`push` ahead of every use' }),
     undefined,
     liveIns.globalRegs,
+  );
+  // Where agbcc put each block (ir/core.ts `AsmLayout`), read off the text the CFG was cut from:
+  // the transfer `classifyXfer` names is the block's branch, and everything before it its body.
+  ssa.fn.asmLayout = recordAsmLayout(
+    ssa.irBlocks,
+    cfg.asmBlocks.map((ab) => {
+      const xfer = ab.instrs.length ? classifyXfer(ab.instrs[ab.instrs.length - 1]) : null;
+      const branch = xfer === 'uncond' || xfer === 'cond';
+      return { body: branch ? ab.instrs.slice(0, -1) : ab.instrs, endsInJump: xfer === 'uncond' };
+    }),
   );
   const statics = makeLocalStatics();
   const operands = thumbOperands({

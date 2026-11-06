@@ -71,6 +71,7 @@ describe('a float is its own kind, not an integer width', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     recoverTypes(fn);
     expect(a.type).toEqual(T.f32());

@@ -274,6 +274,7 @@ describe('a call names its callee or calls a value, never both', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     } as unknown as Parameters<typeof verify>[0];
   };
 

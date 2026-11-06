@@ -32,6 +32,7 @@ const irWith = (calls: string[], unreachable: string[] = []): Fn => {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 };
 
@@ -274,6 +275,7 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
   const at = (addr: Expr, volatile: boolean): Expr => ({
@@ -496,6 +498,7 @@ describe('assertEffectsPreserved — a read of a declared volatile object', () =
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
   const scalar: Expr = { k: 'var', name: 'gVolReg' };
@@ -592,6 +595,7 @@ describe('assertEffectsPreserved — a write to a declared volatile object', () 
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
   // `((volatile u16 *)&gVolReg)[1] = 1;`, or the same through `(u16 *)`

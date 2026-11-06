@@ -140,7 +140,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns } from './ssa';
+import { makeSsaBuilder, recordAsmLayout, refuseSavedRegisterLeaks, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1599,6 +1599,15 @@ function liftOnce(
     liveIns.globalRegs,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
+  // Where the compiler put each block (ir/core.ts `AsmLayout`). A conditional return's taken edge is
+  // a block this frontend made up and appended past the real ones (`synthReturn`), so it has no place
+  // in the asm and no entry.
+  ssa.fn.asmLayout = recordAsmLayout(
+    irBlocks,
+    blocks.map((b) =>
+      b.synthReturn ? undefined : { body: b.body, endsInJump: b.branch !== null && isUncond(b.branch) },
+    ),
+  );
 
   /** Where an r1 access of `width` bytes at `ins` lies in the local area: its post-push offset, or
    *  undefined for one outside it. An access across the area's edge refuses: half memory and half

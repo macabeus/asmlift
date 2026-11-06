@@ -245,6 +245,7 @@ describe('C7 — switch_br edges carry their phi copies', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
 

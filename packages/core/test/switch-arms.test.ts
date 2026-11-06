@@ -1544,6 +1544,7 @@ test('every withholding on the `default:` position, one call each', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     },
     defs: new Map(),
     dom: new Map(),

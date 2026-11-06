@@ -137,6 +137,7 @@ describe('assertEffectsPreserved over a goto', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
 

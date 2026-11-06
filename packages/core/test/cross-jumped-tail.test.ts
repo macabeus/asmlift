@@ -18,7 +18,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { TOOLCHAIN_TARGETS } from '../src/target';
+import { frontendFor } from '../src/frontend/registry';
+import type { Fn } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
@@ -80,5 +83,28 @@ describe('which compilers cross-jump return tails (target.ts `crossJumpsReturnTa
 
   test.each(['ido71', 'mwcc242'])('%s: the `pa` copies keep a call in every arm', (slug) => {
     expect(instructions(`${slug}-rettail-pa-copies.asm`).filter((l) => CALL.test(l))).toHaveLength(3);
+  });
+});
+
+const PROTOS = {
+  pa: { f: { params: 1, returnsVoid: true }, h: { params: 2, returnsVoid: true } },
+  pb: { f: { params: 2, returnsVoid: true } },
+} as const;
+const protosOf = (p: Probe) => PROTOS[p.startsWith('pa') ? 'pa' : 'pb'];
+const liftAgbcc = (p: Probe): Fn =>
+  frontendFor(ARMV4T_AGBCC).lift('f', fixture(`agbcc-rettail-${p}.s`), ARMV4T_AGBCC, protosOf(p));
+
+describe('the frontend records where each block was laid out (ir/core.ts `AsmLayout`)', () => {
+  test('every block of the agbcc `pa` copies lift has its place, its body and its jump', () => {
+    const fn = liftAgbcc('pa-copies');
+    const layout = fn.blocks.map((b) => fn.asmLayout?.get(b));
+    expect(layout.map((at) => at?.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // the surviving tail, its jump over the else arm, and the else arm with its own copy after it
+    expect(layout[4]).toEqual({ index: 4, body: ['mov r1,#0x0', 'bl h'], endsInJump: true });
+    expect(layout[5]).toEqual({ index: 5, body: ['mov r0,#0x1e', 'mov r1,#0x0', 'bl h'], endsInJump: false });
+  });
+
+  test('parsed IR has no layout', () => {
+    expect(parse('fn f {\n^bb0():\n  ret\n}\n').asmLayout).toBeUndefined();
   });
 });

@@ -158,6 +158,7 @@ function generate(seed: number, withLoop: boolean): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 

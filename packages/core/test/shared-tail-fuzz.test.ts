@@ -163,6 +163,7 @@ function generateSharedTailFn(seed: number): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 

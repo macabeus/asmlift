@@ -10,7 +10,7 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
+import type { AsmLayout, Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
@@ -266,6 +266,13 @@ export function structuredCloneFn(fn: Fn): Fn {
   const pe = fn.paramEvidence;
   const paramEvidence: ParamEvidence | undefined =
     pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));
+  // Re-keyed through `bmap`: the layout is keyed by the BLOCKS this clone replaced, so carrying the
+  // reference would leave every block without a place in the asm, and the return-tail chooser
+  // (core structure/cross-jumped-tail.ts) would read no evidence where the published path reads
+  // some. Each entry is immutable data, so it is shared.
+  const al = fn.asmLayout;
+  const asmLayout: AsmLayout | undefined =
+    al && new Map([...al].filter(([b]) => bmap.has(b)).map(([b, at]) => [bmap.get(b)!, at]));
   // The statics are plain data keyed by name, and no pass rewrites them: shared, not copied.
-  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence, localObjects: fn.localObjects };
+  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence, localObjects: fn.localObjects, asmLayout };
 }
