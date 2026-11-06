@@ -207,6 +207,26 @@ describe('guessedArityNote', () => {
       '',
     ]);
   });
+
+  // a call the lift sized off its callee's stack loads (core `DecompileResult.calleeStackSized`) is no guess
+  it('names a callee whose call its own body sized as that, not as a guess', () => {
+    const note = guessedArityNote(
+      LBG,
+      'LoadBGTilemapData',
+      ARMV4T_AGBCC,
+      undefined,
+      undefined,
+      undefined,
+      new Map([['thunk_HeapFree', 1]]),
+      new Map([['thunk_HeapFree', 5]]),
+    );
+    expect(note.split('\n')).toEqual([
+      'asmlift: [proto] 1 callee(s) have no declared arity, guessed from the argument registers: DecompressAlloc — pass --proto \'{"DecompressAlloc":{"params":N}}\' if a guess is wrong',
+      'asmlift: [proto] 1 callee(s) have no declared arity, each call sized by the incoming stack words its own ' +
+        'body loads, past every argument register: thunk_HeapFree (9 argument words) — pass --proto \'{"thunk_HeapFree":{"params":N}}\' to state it',
+      '',
+    ]);
+  });
 });
 
 // A `.s` declares its functions, and a `bl` to one is a callee whose arity is guessed, not a long

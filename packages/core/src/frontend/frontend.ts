@@ -103,6 +103,9 @@ export interface LiftOptions {
    *  (frontend/callee-body.ts `CalleeStackWords`), asked of a call no declaration lays out that
    *  stages words in the outgoing area. pipeline.ts `liftStamped` supplies it on every lift. */
   calleeStackWords?: CalleeStackWords;
+  /** Told of each call nothing declares that the lift laid out at every argument register and the
+   *  stack words its callee's body loads (`calleeStackWords`), with that word count. */
+  stackSized?: (callee: string, words: number) => void;
   /** The callees whose calls are taken at every argument register that may still hold this
    *  function's own incoming value at the call, where no declaration lays the call out: how
    *  frontend/callee-body.ts lifts a callee's body to bound what it reads. Absent, none is. */

@@ -61,6 +61,11 @@ describe('the callee in the input sizes the call', () => {
     );
   });
 
+  test('the result names the callee it sized, with the stack words it took (`calleeStackSized`)', () => {
+    expect(decompile('call9', fn('nine') + fn('call9'), ARMV4T_AGBCC).calleeStackSized).toEqual({ nine: 5 });
+    expect(decompile('krfewer', fn('kr') + fn('krfewer'), ARMV4T_AGBCC).calleeStackSized).toEqual({});
+  });
+
   test('the whole probe as one input: the same answer', () => {
     expect(src('call9', asm)).toBe(src('call9', fn('nine') + fn('call9')));
   });

@@ -172,6 +172,10 @@ export interface DecompileResult {
    *  entry states no parameter list (frontend/call-plan.ts `bodyWords`), so a body handed in that no
    *  call asked, or that answered nothing, is not here. Empty where no bodies were handed in. */
   calleeBodiesAsked: Record<string, number>;
+  /** WHICH CALLEES NOTHING DECLARES THE LIFT SIZED OFF THEIR OWN BODIES, with the stack words each was
+   *  laid out at past the argument registers (frontend/callee-body.ts `CalleeStackWords`): a call to
+   *  one takes every argument register and those words, no guess. Empty where none was. */
+  calleeStackSized: Record<string, number>;
 }
 
 export function decompile(
@@ -210,6 +214,7 @@ function runTower(
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const ownArityNotes: string[] = [];
   const bodiesAsked = new Map<string, number | undefined>();
+  const stacksSized = new Map<string, number>();
   const fn = liftStamped(
     name,
     asm,
@@ -218,7 +223,7 @@ function runTower(
     opts.asmData,
     opts.symbols,
     opts.contextGlobals,
-    { calleeBodies: opts.calleeBodies, bodiesAsked },
+    { calleeBodies: opts.calleeBodies, bodiesAsked, stacksSized },
     own.ownContextProto,
     ownArityNotes,
   );
@@ -297,6 +302,7 @@ function runTower(
     walkedNames,
     ownArityNotes,
     calleeBodiesAsked: answeredBodies(bodiesAsked, opts.calleeBodies),
+    calleeStackSized: Object.fromEntries(stacksSized),
   };
 }
 
@@ -314,10 +320,10 @@ function answeredBodies(
   return out;
 }
 
-/** The `calleeBodiesAsked` (`DecompileResult`) of one lift under `opts`, for a caller whose result
- *  carries none — the ranked path, whose every candidate lifts as this one does. Empty where no
- *  bodies were handed in, or where the lift fails: the run reports that failure itself. */
-export function calleeBodiesAskedOf(
+/** The `calleeBodiesAsked` and `calleeStackSized` (`DecompileResult`) of one lift under `opts`, for a
+ *  caller whose result carries none — the ranked path, whose every candidate lifts as this one does.
+ *  Empty where the lift fails: the run reports that failure itself. */
+export function calleeBodyNotesOf(
   name: string,
   asm: string,
   target: TargetDescription,
@@ -325,12 +331,10 @@ export function calleeBodiesAskedOf(
     DecompileOptions,
     'prototypes' | 'asmData' | 'symbols' | 'contextGlobals' | 'ownContextProto' | 'calleeBodies'
   >,
-): Record<string, number> {
-  if (opts.calleeBodies === undefined) {
-    return {};
-  }
+): Pick<DecompileResult, 'calleeBodiesAsked' | 'calleeStackSized'> {
   const own = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
   const asked = new Map<string, number | undefined>();
+  const stacksSized = new Map<string, number>();
   try {
     liftStamped(
       name,
@@ -340,13 +344,16 @@ export function calleeBodiesAskedOf(
       opts.asmData,
       opts.symbols,
       opts.contextGlobals,
-      { calleeBodies: opts.calleeBodies, bodiesAsked: asked },
+      { calleeBodies: opts.calleeBodies, bodiesAsked: asked, stacksSized },
       own.ownContextProto,
     );
   } catch {
-    return {};
+    return { calleeBodiesAsked: {}, calleeStackSized: {} };
   }
-  return answeredBodies(asked, opts.calleeBodies);
+  return {
+    calleeBodiesAsked: answeredBodies(asked, opts.calleeBodies),
+    calleeStackSized: Object.fromEntries(stacksSized),
+  };
 }
 
 /** The `[own-arity]` notes (`DecompileResult.ownArityNotes`) of one lift under `opts`, for a caller
@@ -416,6 +423,8 @@ export function offsetNameBehaviorsFor(
 export type StampedLiftOptions = LiftOptions & {
   calleeBodies?: CalleeBodies;
   bodiesAsked?: Map<string, number | undefined>;
+  /** each callee a call was sized at off its body, with its stack words (`DecompileResult.calleeStackSized`) */
+  stacksSized?: Map<string, number>;
 };
 
 /** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
@@ -436,7 +445,7 @@ export function liftStamped(
   ownContext?: FnProto,
   notes?: string[],
 ): Fn {
-  const { calleeBodies, bodiesAsked, ...liftOptions } = stampedOptions ?? {};
+  const { calleeBodies, bodiesAsked, stacksSized, ...liftOptions } = stampedOptions ?? {};
   // Its callers split the table already; split again here, where every lift passes, so that no
   // frontend is handed a marked context entry to read as a stated, hard bound.
   const split = splitOwnContext(prototypes, name, ownContext);
@@ -467,6 +476,9 @@ export function liftStamped(
     ...liftOptions,
     calleeBodyBound,
     calleeStackWords: liftOptions.calleeStackWords ?? read!.stackWords,
+    ...(stacksSized === undefined
+      ? {}
+      : { stackSized: (callee: string, words: number) => stacksSized.set(callee, words) }),
   };
   const fn = liftWithinContextBound(
     name,
@@ -1206,6 +1218,7 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     walkedNames: [],
     ownArityNotes: [],
     calleeBodiesAsked: {},
+    calleeStackSized: {},
   };
 }
 

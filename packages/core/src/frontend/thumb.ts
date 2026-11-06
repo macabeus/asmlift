@@ -2623,7 +2623,13 @@ function liftOnce(
   homesReleased: boolean,
   options: Pick<
     LiftOptions,
-    'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
+    | 'contextOwnWords'
+    | 'contextOwnProto'
+    | 'ownMemoryReturn'
+    | 'calleeBodyBound'
+    | 'calleeStackWords'
+    | 'stackSized'
+    | 'entryReadCalls'
   >,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options, homesReleased);
@@ -5647,6 +5653,7 @@ function thumbFillOf(
     ownMemoryReturn,
     calleeBodyBound,
     calleeStackWords,
+    stackSized,
     entryReadCalls,
   }: Pick<
     LiftOptions,
@@ -5655,6 +5662,7 @@ function thumbFillOf(
     | 'ownMemoryReturn'
     | 'calleeBodyBound'
     | 'calleeStackWords'
+    | 'stackSized'
     | 'entryReadCalls'
   > = {},
   homesReleased = false,
@@ -5673,6 +5681,7 @@ function thumbFillOf(
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
     calleeBodyBound,
     entryReadCalls,
+    stackSized,
   );
   const frame = measureThumbFrame({
     name,

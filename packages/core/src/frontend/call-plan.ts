@@ -271,6 +271,8 @@ export function callDeclarations(
   /** the callees taken at every argument register that may still hold its entry value
    *  (`LiftOptions.entryReadCalls`) */
   entryReadCalls?: ReadonlySet<string>,
+  /** told of each call laid out at the stack words its callee's body loads (`LiftOptions.stackSized`) */
+  stackSized?: (callee: string, words: number) => void,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -1052,6 +1054,9 @@ export function callDeclarations(
     // registers are staged only once every register is one, so the call takes all of them and the
     // block, one word each — what a count of that many words in a prototype would state.
     const licensed = unstated && (site.stackWords ?? 0) > 0 ? target.argRegs.length + site.stackWords! : undefined;
+    if (licensed !== undefined) {
+      stackSized?.(callee!, site.stackWords!);
+    }
     const widths =
       licensed !== undefined
         ? Array.from({ length: licensed }, () => 32)
