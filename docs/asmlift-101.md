@@ -298,7 +298,8 @@ rerun `structureWithinBudget` makes where the join declines, the second structur
 `structureReturnTailReading` in `pipeline.ts` makes to publish the copies where the join spells the
 function longer, and the ranked `/ret-copy`) come after that whole ladder, not inside it, so a
 function whose join needs the goto publishes it even where the copies would lift without one,
-unless they are also the shorter (THE COPIES, BELOW ALL OF IT, above `structure()`); and
+unless they are also the shorter or the layout shows a cross-jumped return tail (THE COPIES, BELOW
+ALL OF IT, above `structure()`); and
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
 already leaves gets no jump, and neither does the arm laid out directly above the target case,

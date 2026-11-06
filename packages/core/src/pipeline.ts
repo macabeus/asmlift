@@ -1213,11 +1213,18 @@ export interface ReturnTailReading {
  *    - Read only where the target declares the merge. ido7.1 lays a tail out mid-construct with no
  *      cross-jump, and there the same layout fact is not evidence of the copies.
  *    - Whole function, as the bound is: the two readings are still rank.ts's default and its
- *      `/ret-copy` or `/ret-join` sibling, so the ranked fan holds the same two trees.
- *    - MEASURED over those 620 functions, simulated from the two readings' scores: the bound with
- *      the layout gives MATCH 44 (copies everywhere 35, the bound alone 40), and loses none of the
- *      copies' matches. The bound alone loses 4, all sa3 agbcc: three where the tail is left
- *      mid-construct, and one where identical case bodies stayed apart.
+ *      `/ret-copy` or `/ret-join` sibling, so the ranked fan holds the same two trees. A mark at one
+ *      site re-spells every join the function took, marked or not (14 of the 116 agbcc functions
+ *      with a mark over those 620 have unmarked sites too); a per-site reading would add trees to
+ *      the fan, and is not built.
+ *    - MEASURED over those 620 functions, each reading really compiled: the bound with the layout
+ *      gives MATCH 44 (copies everywhere 35, the bound alone 40), and loses none of the copies'
+ *      matches. The bound alone loses 4, all sa3 agbcc: three where the tail is left mid-construct,
+ *      and one where identical case bodies stayed apart. The marks were chosen on those 620, so
+ *      the probe pairs (cross-jumped-tail.test.ts) are their held-out check.
+ *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
+ *      too, and leaves the same marks under a join-written source (structure/cross-jumped-tail.ts).
+ *      So a mark moves which verified reading is the default, never what is lifted.
  *
  *  REFUSALS. Never a decline turned into a lift, either way:
  *    - a join that declines or crosses the copy budget already falls to the copies inside

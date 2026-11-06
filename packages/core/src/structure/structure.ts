@@ -3850,10 +3850,10 @@ interface ForRanking {
  *  goto-free reading" mean the join's: a function whose join lifts only with a flag rung or a
  *  case-label jump publishes that, even where the copies would lift without one. Both are verified
  *  readings of the asm, so the order moves a spelling, never a decline into wrong C, and the scorer
- *  still weighs the copies, as the default where they are the shorter (pipeline.ts
- *  `structureReturnTailReading`) and as `/ret-copy` where they are not. CENSUS (2026-11-04, the
- *  6,001 real functions): no function is in that reach: the join raises no `goto` or `while (1)`
- *  count over the functions it re-spells.
+ *  still weighs the copies, as the default where they are the shorter or the layout shows a
+ *  cross-jumped return tail (pipeline.ts `structureReturnTailReading`) and as `/ret-copy` where
+ *  they are not. CENSUS (2026-11-04, the 6,001 real functions): no function is in that reach: the
+ *  join raises no `goto` or `while (1)` count over the functions it re-spells.
  *
  *  The first run's refusal stands if every rerun declines too, where the first run is the last
  *  pass's that asked the jumps when any did. Each run's observation hooks are held until it is
