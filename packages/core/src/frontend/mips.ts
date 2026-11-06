@@ -3282,7 +3282,8 @@ function liftOnce(
       const taken = off < STACK_ARGS_AT + 4 * n;
       if (outgoingWordReaches(off, bi, taken ? 'taken' : 'stored', here)) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the call to '${callee}' at 0x${ins.addr.toString(16)} takes the ${n} stack ` +
+          `cannot lift '${name}': outgoing stack arguments not modelled — the call to '${callee}' at ` +
+            `0x${ins.addr.toString(16)} takes the ${n} stack ` +
             `word(s) its callee's body loads, but ${
               taken
                 ? `the word at ${off}(sp) reaches it on some path already taken by a call and not stored again`
