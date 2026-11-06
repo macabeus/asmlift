@@ -658,10 +658,29 @@ export function clobberedByCall(target: {
 
 /** One asm block as {@link recordAsmLayout} reads it: its instructions without its control transfer,
  *  and whether that transfer is an unconditional jump to a label. `undefined` for a block the
- *  frontend made up, which has no place in the asm. */
+ *  frontend made up, which has no place in the asm. An instruction's `reloc` is the relocation that
+ *  fills it, where the operands do not name the symbol (disasm.ts `DisasmInstr.reloc`). */
 export interface AsmBlockText {
-  readonly body: readonly { readonly mnemonic: string; readonly ops: readonly string[] }[];
+  readonly body: readonly {
+    readonly mnemonic: string;
+    readonly ops: readonly string[];
+    readonly reloc?: { readonly sym: string; readonly addend: number };
+  }[];
   readonly endsInJump: boolean;
+}
+
+/** One instruction of {@link AsmBlockText} as the layout record spells it: `mnemonic op,op`, then the
+ *  symbol its relocation fills in, if any. In a relocatable object's disassembly the operands of a
+ *  global's load or store, or of a call, read the same whichever symbol it is: gcc 2.7.2's `lui
+ *  at,0x0` / `sw a2,0(at)` for `gT = c` and for `gW = c`, and `jal 0 <f>` for every callee. Spelled
+ *  without the symbol, two arms that store to different globals would read as identical bodies. */
+function layoutText(ins: AsmBlockText['body'][number]): string {
+  const text = ins.ops.length ? `${ins.mnemonic} ${ins.ops.join(',')}` : ins.mnemonic;
+  if (ins.reloc === undefined) {
+    return text;
+  }
+  const addend = ins.reloc.addend === 0 ? '' : `+0x${ins.reloc.addend.toString(16)}`;
+  return `${text} <${ins.reloc.sym}${addend}>`;
 }
 
 /** The layout record (ir/core.ts `AsmLayout`): asm block `i` is `irBlocks[i]`, which is how every
@@ -677,7 +696,7 @@ export function recordAsmLayout(
     if (ab !== undefined) {
       layout.set(irBlocks[i], {
         index: index++,
-        body: ab.body.map((ins) => (ins.ops.length ? `${ins.mnemonic} ${ins.ops.join(',')}` : ins.mnemonic)),
+        body: ab.body.map(layoutText),
         endsInJump: ab.endsInJump,
       });
     }

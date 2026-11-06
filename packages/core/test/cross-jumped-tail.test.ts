@@ -6,6 +6,11 @@
 //   - `pa`: a three-arm `if` whose arms call `h(10, 0)`, `h(20, 0)` and `h(30, 0)`, the last arm
 //     falling into the function's end.
 //   - `pb`: a seven-case `switch` whose cases add 256, 512, 528 ×3, 512 and 256 to `p[3]`.
+//   - `pc`: an `if` whose first two arms store one register to two different globals, `gT = c` and
+//     `gW = c`, before the tail `gV = a; k(a);`. In a relocatable MIPS object the two stores read the
+//     same; only the relocation names the global.
+//   - `pd`: an `if` nest with two identical `g(2)` arms before the tail `g(5)`. Written once, agbcc
+//     keeps the arms apart, one jumping to the tail and the other falling into it.
 // Four claims, one per layer:
 //   1. which compilers merge a return tail written into every arm (target.ts
 //      `crossJumpsReturnTails`), read from the objects themselves;
@@ -18,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { parseAsmData } from '../src/frontend/asmdata';
 import { frontendFor } from '../src/frontend/registry';
 import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
@@ -28,7 +34,7 @@ import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription, stru
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
-type Probe = 'pa-copies' | 'pa-join' | 'pb-copies' | 'pb-join';
+type Probe = `${'pa' | 'pb' | 'pc' | 'pd'}-${'copies' | 'join'}`;
 
 /** The instruction lines of a committed fixture, without its provenance header. */
 const instructions = (file: string): string[] =>
@@ -92,8 +98,10 @@ describe('which compilers cross-jump return tails (target.ts `crossJumpsReturnTa
 const PROTOS = {
   pa: { f: { params: 1, returnsVoid: true }, h: { params: 2, returnsVoid: true } },
   pb: { f: { params: 2, returnsVoid: true } },
+  pc: { f: { params: 3, returnsVoid: true }, m: { params: 1, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
+  pd: { f: { params: 2, returnsVoid: true }, g: { params: 1, returnsVoid: true } },
 } as const;
-const protosOf = (p: Probe) => PROTOS[p.startsWith('pa') ? 'pa' : 'pb'];
+const protosOf = (p: Probe) => PROTOS[p.slice(0, 2) as keyof typeof PROTOS];
 const liftAgbcc = (p: Probe): Fn =>
   frontendFor(ARMV4T_AGBCC).lift('f', fixture(`agbcc-rettail-${p}.s`), ARMV4T_AGBCC, protosOf(p));
 
@@ -107,17 +115,52 @@ describe('the frontend records where each block was laid out (ir/core.ts `AsmLay
     expect(layout[5]).toEqual({ index: 5, body: ['mov r0,#0x1e', 'mov r1,#0x0', 'bl h'], endsInJump: false });
   });
 
+  test.each(GCC_LANES)(
+    "$tc: a relocated store's body names its global, so two arms storing to two globals differ",
+    ({ tc, slug }) => {
+      const fn = liftMips(tc, slug, 'pc-join');
+      const bodies = fn.blocks.map((b) => fn.asmLayout?.get(b)?.body.join(' ; ') ?? '');
+      // the arms read `lui at,0x0` / `sw a2,0(at)` alike, and only the relocation tells them apart
+      expect(bodies.filter((b) => /sw a2,0\(at\)/.test(b))).toEqual([
+        expect.stringContaining('sw a2,0(at) <gT>'),
+        expect.stringContaining('sw a2,0(at) <gW>'),
+      ]);
+      // a call names its callee the same way, where `jal 0 <f>` names none
+      expect(bodies.some((b) => b.includes('<k>'))).toBe(true);
+    },
+  );
+
   test('parsed IR has no layout', () => {
     expect(parse('fn f {\n^bb0():\n  ret\n}\n').asmLayout).toBeUndefined();
   });
 });
 
-/** Every site the join run takes on the agbcc lift of `p`, raised as the pipeline raises it. */
-function sitesOf(p: Probe): { fn: Fn; sites: JoinPastReturnsSite[] } {
-  const fn = liftAgbcc(p);
-  raiseRecovered(fn, ARMV4T_AGBCC, {}, protosOf(p).f);
+// The GCC 2.7.2 lanes: a disassembly plus the object's `objdump -s -r -t`, which names the symbol
+// behind each relocated load, store and call, as the bench hands it over.
+const GCC_LANES = [
+  { tc: 'gcc2.7.2', slug: 'gcc272' },
+  { tc: 'gcc2.7.2kmc', slug: 'gcc272kmc' },
+] as const;
+const mipsInput = (slug: string, p: Probe) => {
+  const dump = fixture(`${slug}-rettail-${p}.txt`);
+  return { asm: fixture(`${slug}-rettail-${p}.asm`), asmData: parseAsmData(dump, dump, dump, true) };
+};
+const liftMips = (tc: (typeof GCC_LANES)[number]['tc'], slug: string, p: Probe): Fn => {
+  const target = TOOLCHAIN_TARGETS[tc].description;
+  const { asm, asmData } = mipsInput(slug, p);
+  return frontendFor(target).lift('f', asm, target, protosOf(p), asmData);
+};
+
+/** Every site the join run takes on the lift of `p`, raised as the pipeline raises it. */
+function sitesOf(
+  p: Probe,
+  target: TargetDescription = ARMV4T_AGBCC,
+  lifted?: Fn,
+): { fn: Fn; sites: JoinPastReturnsSite[] } {
+  const fn = lifted ?? liftAgbcc(p);
+  raiseRecovered(fn, target, {}, protosOf(p).f);
   const sites: JoinPastReturnsSite[] = [];
-  structure(fn, structureOptionsFor(ARMV4T_AGBCC, true), { onJoinPastReturns: (site) => sites.push(site) });
+  structure(fn, structureOptionsFor(target, true), { onJoinPastReturns: (site) => sites.push(site) });
   return { fn, sites };
 }
 
@@ -132,8 +175,29 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
     ['pa-join', false],
     ['pb-copies', true],
     ['pb-join', false],
-  ] as const)('%s: %s', (p, want) => {
+    ['pc-join', false],
+  ] as const)('agbcc %s: %s', (p, want) => {
     const { fn, sites } = sitesOf(p);
+    expect(sites.length).toBeGreaterThan(0);
+    expect(sites.some((s) => crossJumpedTail(fn, s))).toBe(want);
+  });
+
+  // `pa` compiles to the same instructions either way on these two, and takes no join past returns.
+  test.each(
+    GCC_LANES.flatMap(({ tc, slug }) =>
+      (
+        [
+          ['pb-copies', true],
+          ['pb-join', false],
+          // without the relocation in the body, `gT = c` and `gW = c` would read as identical arms
+          ['pc-join', false],
+          ['pd-join', false],
+        ] as const
+      ).map(([p, want]) => ({ tc, slug, p, want })),
+    ),
+  )('$tc $p: $want', ({ tc, slug, p, want }) => {
+    const target = TOOLCHAIN_TARGETS[tc].description;
+    const { fn, sites } = sitesOf(p, target, liftMips(tc, slug, p));
     expect(sites.length).toBeGreaterThan(0);
     expect(sites.some((s) => crossJumpedTail(fn, s))).toBe(want);
   });
@@ -192,9 +256,24 @@ describe('the plain default publishes the copies where the layout shows the merg
     },
   );
 
-  test.each(['pa-join', 'pb-join'] as const)('agbcc %s: no mark, so the size bound keeps the join', (p) => {
+  test.each(['pa-join', 'pb-join', 'pc-join'] as const)('agbcc %s: no mark, so the size bound keeps the join', (p) => {
     expect(reading(p, ARMV4T_AGBCC)).toBe(reading(p, ARMV4T_AGBCC, { joinPastReturns: true }));
   });
+
+  test.each(GCC_LANES)(
+    '$tc: the `pb` copies are the default, and every join written once keeps the join',
+    ({ tc, slug }) => {
+      const target = TOOLCHAIN_TARGETS[tc].description;
+      const read = (p: Probe, o: object = {}) => {
+        const { asm, asmData } = mipsInput(slug, p);
+        return decompile('f', asm, target, { prototypes: protosOf(p), asmData, ...o }).source;
+      };
+      expect(read('pb-copies')).toBe(read('pb-copies', { copyReturnTails: true }));
+      for (const p of ['pb-join', 'pc-join', 'pd-join'] as const) {
+        expect(read(p)).toBe(read(p, { joinPastReturns: true }));
+      }
+    },
+  );
 
   // The same layout on a target that does not declare the merge is no evidence: the bound decides.
   // ido7.1 lays a tail out mid-construct with no cross-jump at all, and mwcc's PPC_MWCC claims none.
