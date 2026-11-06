@@ -7,7 +7,7 @@
 // `scripts/regen-switch-spelling-probes.ts`, both spellings are compiled and the objects committed,
 // and this script is what makes the pair re-measurable rather than only re-readable.
 //
-// Four pairs (`corpus/probe-rettail-{pa,pb,pc,pd}-{copies,join}.c`), five toolchains, each at its
+// Six pairs (`corpus/probe-rettail-{pa,pb,pc,pd,pe,pf}-{copies,join}.c`), five toolchains, each at its
 // canonical flags taken from `@asmlift/core` and `@asmlift/toolchains` rather than retyped:
 //
 //   ASMLIFT_AGBCC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… ASMLIFT_MWCC_ROOT=… npx tsx scripts/regen-rettail-probes.ts
@@ -47,6 +47,10 @@ const PROBES = [
   'pc-join',
   'pd-copies',
   'pd-join',
+  'pe-copies',
+  'pe-join',
+  'pf-copies',
+  'pf-join',
 ] as const;
 const SYMBOL = 'f';
 

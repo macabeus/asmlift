@@ -11,6 +11,10 @@
 //     same; only the relocation names the global.
 //   - `pd`: an `if` nest with two identical `g(2)` arms before the tail `g(5)`. Written once, agbcc
 //     keeps the arms apart, one jumping to the tail and the other falling into it.
+//   - `pe`: an `if` chain whose tail `h(30, v); k(v);` agbcc leaves split over two blocks: another
+//     arm's `k(v)` enters it part-way, so the `h` call falls into the rest, which jumps.
+//   - `pf`: an `if` chain whose tail `h(30, v); gArr[v & 15] = a;` agbcc cuts from the call's
+//     argument setup, leaving `mov r0, #0x1e` in each arm.
 // Four claims, one per layer:
 //   1. which compilers merge a return tail written into every arm (target.ts
 //      `crossJumpsReturnTails`), read from the objects themselves;
@@ -34,7 +38,7 @@ import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription, stru
 
 const CORPUS = join(import.meta.dirname, 'corpus');
 const fixture = (file: string) => readFileSync(join(CORPUS, file), 'utf8');
-type Probe = `${'pa' | 'pb' | 'pc' | 'pd'}-${'copies' | 'join'}`;
+type Probe = `${'pa' | 'pb' | 'pc' | 'pd' | 'pe' | 'pf'}-${'copies' | 'join'}`;
 
 /** The instruction lines of a committed fixture, without its provenance header. */
 const instructions = (file: string): string[] =>
@@ -100,6 +104,13 @@ const PROTOS = {
   pb: { f: { params: 2, returnsVoid: true } },
   pc: { f: { params: 3, returnsVoid: true }, m: { params: 1, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
   pd: { f: { params: 2, returnsVoid: true }, g: { params: 1, returnsVoid: true } },
+  pe: {
+    f: { params: 3, returnsVoid: true },
+    h: { params: 2, returnsVoid: true },
+    k: { params: 1, returnsVoid: true },
+    m: { params: 1, returnsVoid: true },
+  },
+  pf: { f: { params: 3, returnsVoid: true }, h: { params: 2, returnsVoid: true }, k: { params: 1, returnsVoid: true } },
 } as const;
 const protosOf = (p: Probe) => PROTOS[p.slice(0, 2) as keyof typeof PROTOS];
 const liftAgbcc = (p: Probe): Fn =>
@@ -111,8 +122,13 @@ describe('the frontend records where each block was laid out (ir/core.ts `AsmLay
     const layout = fn.blocks.map((b) => fn.asmLayout?.get(b));
     expect(layout.map((at) => at?.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     // the surviving tail, its jump over the else arm, and the else arm with its own copy after it
-    expect(layout[4]).toEqual({ index: 4, body: ['mov r1,#0x0', 'bl h'], endsInJump: true });
-    expect(layout[5]).toEqual({ index: 5, body: ['mov r0,#0x1e', 'mov r1,#0x0', 'bl h'], endsInJump: false });
+    expect(layout[4]).toEqual({ index: 4, body: ['mov r1,#0x0', 'bl h'], calls: [1], endsInJump: true });
+    expect(layout[5]).toEqual({
+      index: 5,
+      body: ['mov r0,#0x1e', 'mov r1,#0x0', 'bl h'],
+      calls: [2],
+      endsInJump: false,
+    });
   });
 
   test.each(GCC_LANES)(
@@ -178,6 +194,11 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
     ['pc-join', false],
     // the two `g(2)` arms are identical, but only one of them jumps to the tail
     ['pd-join', false],
+    // the `h` call falls into the rest of the tail, and that rest jumps over the `gU = b` arm
+    ['pe-copies', true],
+    // `mov r0, #0x1e` is left in both arms that reach the `bl h` the join starts with
+    ['pf-copies', true],
+    ['pf-join', false],
   ] as const)('agbcc %s: %s', (p, want) => {
     const { fn, sites } = sitesOf(p);
     expect(sites.length).toBeGreaterThan(0);
@@ -236,7 +257,7 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
     const site: JoinPastReturnsSite = { branch: b0, join: b3, kind: 'if' };
     expect(crossJumpedTail(fn, site)).toBe(false); // parsed: no layout at all
     const laidOut = (order: typeof fn.blocks) =>
-      new Map(order.map((b, index) => [b, { index, body: [`bl ${index}`], endsInJump: b === b3 }]));
+      new Map(order.map((b, index) => [b, { index, body: [`bl ${index}`], calls: [], endsInJump: b === b3 }]));
     fn.asmLayout = laidOut([b0, b2, b3, b5, b1, b4]);
     expect(crossJumpedTail(fn, site)).toBe(true);
     fn.asmLayout = laidOut([b0, b1, b2, b3, b5, b4]);
@@ -257,6 +278,15 @@ describe('the plain default publishes the copies where the layout shows the merg
       expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
     },
   );
+
+  // a tie in size goes to the join, so only the mark publishes these copies
+  test.each(['pe-copies', 'pf-copies'] as const)('agbcc %s: the default is the copies, the size a tie', (p) => {
+    const copies = reading(p, ARMV4T_AGBCC, { copyReturnTails: true });
+    const join = reading(p, ARMV4T_AGBCC, { joinPastReturns: true });
+    expect(join).not.toBe(copies);
+    expect(join.split('\n').length).toBe(copies.split('\n').length);
+    expect(reading(p, ARMV4T_AGBCC)).toBe(copies);
+  });
 
   test.each(['pa-join', 'pb-join', 'pc-join', 'pd-join'] as const)(
     'agbcc %s: no mark, so the size bound keeps the join',

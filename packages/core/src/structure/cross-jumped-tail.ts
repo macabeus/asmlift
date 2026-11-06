@@ -14,6 +14,9 @@
 //       did not use the tail, left where the source wrote it. The join writes the tail after the
 //       whole construct, where it falls into what follows it. A bare return block does not count
 //       for A2: the epilogue an early `return` reaches is laid out last under either spelling.
+//       The copy can survive split over two blocks: an arm's own jump enters it part-way, so the
+//       join falls into the rest of the tail, and that rest ends in the jump. So A1 reads the end
+//       of the join's run of fall-throughs, not the join block alone.
 //   (B) IDENTICAL ARMS STAYED APART. Two arms that reach the tail and nothing else, each by an
 //       unconditional jump, have the same instructions. Under the join, each such arm jumps to the
 //       join's one original label, and jump2's search of the other jumps to that label merges
@@ -22,6 +25,14 @@
 //       the code before the label, which a call ending it defeats (flow.c's use-nop), so agbcc
 //       keeps a falling `g(2)` apart from a jumping `g(2)` under the join too
 //       (`probe-rettail-pd-join.c`).
+//   (C) A CALL CUT FROM ITS ARGUMENTS. The join starts with a call, and two predecessors that reach
+//       only the join each hold one same instruction after their own last call. `do_cross_jump`
+//       compares backward from each jump, one instruction at a time, and stops at the first pair
+//       that differs; arms that set the call's arguments in different orders, or where one arm
+//       finds an argument already in its register, differ just above the call. So the merge cuts
+//       the call from its argument setup, and leaves a copy of that setup in each arm. The join
+//       writes the setup once, after its label, and an instruction both arms hold in the same
+//       place would have been merged up into it.
 //
 // Bodies are compared as the frontend recorded them, the relocated symbol included
 // (frontend/ssa.ts `recordAsmLayout`): in a relocatable MIPS object `gT = c` and `gW = c` are the
@@ -72,7 +83,55 @@ export function crossJumpedTail(fn: Fn, site: JoinPastReturnsSite): boolean {
   if (layout === undefined || at === undefined) {
     return false;
   }
-  return (at.endsInJump && armLaidOutAfter(fn, layout, site, at.index)) || identicalArms(fn, layout, site.join);
+  return (
+    (tailEndsInJump(layout, site.join) && armLaidOutAfter(fn, layout, site, at.index)) ||
+    identicalArms(fn, layout, site.join) ||
+    callCutFromArguments(fn, layout, site.join)
+  );
+}
+
+/** (A1): the tail from the join, followed through its fall-throughs, ends in an unconditional jump. */
+function tailEndsInJump(layout: AsmLayout, join: Block): boolean {
+  const seen = new Set<Block>();
+  for (let b: Block = join; ;) {
+    const at = layout.get(b);
+    if (at === undefined || seen.has(b)) {
+      return false;
+    }
+    if (at.endsInJump) {
+      return true;
+    }
+    seen.add(b);
+    // a fall-through is the next block in the asm; anything else is no run of the tail
+    const next = succsOf(b);
+    if (next.length !== 1 || layout.get(next[0])?.index !== at.index + 1) {
+      return false;
+    }
+    b = next[0];
+  }
+}
+
+/** (C): the join's first instruction is a call, and two of its predecessors, each with the join as
+ *  its only successor, hold a same instruction after their own last call. */
+function callCutFromArguments(fn: Fn, layout: AsmLayout, join: Block): boolean {
+  if (layout.get(join)?.calls[0] !== 0) {
+    return false;
+  }
+  const seen = new Set<string>();
+  for (const p of predecessors(fn).get(join) ?? []) {
+    const at = layout.get(p);
+    if (at === undefined || succsOf(p).length !== 1) {
+      continue;
+    }
+    const setup = new Set(at.body.slice((at.calls[at.calls.length - 1] ?? -1) + 1));
+    if ([...setup].some((ins) => seen.has(ins))) {
+      return true;
+    }
+    for (const ins of setup) {
+      seen.add(ins);
+    }
+  }
+  return false;
 }
 
 /** (A2): a block of the construct, reached from its branch short of the join, that never reaches
