@@ -17,6 +17,11 @@
 //     [sp,#0] only with no outgoing word and above the area otherwise; `qh5`/`a2`/`a3` are the
 //     residue, a by-value struct argument's block-copy base, and stage every outgoing word in
 //     ascending offset order around it. Read by `packages/core/test/frame-escape-probes.test.ts`.
+//   agbcc-entry-stack.s — a callee loads its incoming stack words in its straight-line entry
+//     (frontend/thumb-entry.ts), which bounds the stack words an undeclared call to it takes from
+//     below: `nine`/`narrow9`/`fifth`/`seventh`/`owns`/`kr` are callees, `call9`/`loop9` stage the
+//     block their callee reads, and `krmore`/`krfewer` stage more and fewer words than `kr` reads.
+//     Read by `packages/core/test/thumb-entry.test.ts`.
 //
 //   ASMLIFT_AGBCC=… npx tsx scripts/regen-outgoing-area-probes.ts
 //
@@ -31,6 +36,7 @@ const CORPUS = join(import.meta.dirname, '..', 'packages', 'core', 'test', 'corp
 const PROBES = [
   { source: 'probe-agbcc-restage.c', out: 'agbcc-restage.s', readBy: 'outgoing-area-probes.test.ts' },
   { source: 'probe-agbcc-escape.c', out: 'agbcc-escape.s', readBy: 'frame-escape-probes.test.ts' },
+  { source: 'probe-agbcc-entry-stack.c', out: 'agbcc-entry-stack.s', readBy: 'thumb-entry.test.ts' },
 ];
 
 const flags = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
