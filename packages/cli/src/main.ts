@@ -18,7 +18,7 @@ import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { CalleeBodies } from '@asmlift/core/frontend/callee-body';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
-import { type OnGap, calleeBodiesAskedOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
+import { type OnGap, calleeBodyNotesOf, decompile, ownArityNotesOf } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import {
   type ContextGlobals,
@@ -791,8 +791,25 @@ export async function runCli(
   // A body is named in the note only where the lift ASKED it (core `DecompileResult.calleeBodiesAsked`):
   // a call asks only where a gate questions a register the caller did not set up for it, so a body
   // read off the ELF that no call asked decided nothing, and the note must not say it did.
-  const protoNote = (asked: Readonly<Record<string, number>>) =>
-    guessedArityNote(asm, name, unitTarget, prototypes, symbols, asmData?.relocs, new Map(Object.entries(asked)));
+  // …and a callee the lift sized off its own body's stack loads (`DecompileResult.calleeStackSized`)
+  // is no guess, and is named as what sized it
+  const protoNote = ({
+    calleeBodiesAsked: asked,
+    calleeStackSized: sized,
+  }: {
+    calleeBodiesAsked: Readonly<Record<string, number>>;
+    calleeStackSized: Readonly<Record<string, number>>;
+  }) =>
+    guessedArityNote(
+      asm,
+      name,
+      unitTarget,
+      prototypes,
+      symbols,
+      asmData?.relocs,
+      new Map(Object.entries(asked)),
+      new Map(Object.entries(sized)),
+    );
   // a note that names its own tag (`[own-return]`) carries it; every other one is the arity bound's
   const ownArityNote = (notes: readonly string[]) =>
     notes.map((n) => `asmlift: ${n.startsWith('[own-') ? '' : '[own-arity] '}${n}\n`).join('');
@@ -915,7 +932,7 @@ export async function runCli(
           stamp,
           protoNote:
             protoNote(
-              calleeBodiesAskedOf(name, asm, unitTarget, {
+              calleeBodyNotesOf(name, asm, unitTarget, {
                 prototypes,
                 asmData,
                 symbols,
@@ -985,7 +1002,7 @@ export async function runCli(
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       walkedNote +
-      protoNote(result.calleeBodiesAsked) +
+      protoNote(result) +
       ownArityNote(result.ownArityNotes);
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {

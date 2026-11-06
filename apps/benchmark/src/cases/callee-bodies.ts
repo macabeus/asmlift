@@ -27,7 +27,7 @@
 // changed. A listing body is objdump text, and objdump's release decides it: `objdump` records the
 // `--version` line of the one that read the listings without its package label
 // (callee-bodies-elf.ts `objdumpVersion`: the distribution's, not the release's), null where none
-// did (an agbcc project's bodies are ARM words out of the image), and the ELF's path in the
+// did (an agbcc project's bodies are ARM words and Thumb halfwords out of the image), and the ELF's path in the
 // listing's header line is written as decomp.yaml names it, never as this machine's.
 //
 // A REL module's row is handed none, as the CLI hands it none (`elfBodyCallees`).

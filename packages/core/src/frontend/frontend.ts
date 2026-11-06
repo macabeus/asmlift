@@ -8,7 +8,7 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import type { CalleeBodyBound } from './callee-body';
+import type { CalleeBodyBound, CalleeStackWords, EntryStackWords } from './callee-body';
 import type { AsmTextFormat } from './format';
 
 export interface Frontend {
@@ -35,6 +35,10 @@ export interface Frontend {
     context?: ContextGlobals,
     options?: LiftOptions,
   ): Fn;
+  /** how many incoming stack words the straight-line entry of a callee, in a text of this
+   *  frontend's input format, loads (frontend/callee-body.ts `CalleeStackWords`), asked of a callee
+   *  whose body does not lift; absent where this frontend reads no entry */
+  entryStackWords?: EntryStackWords;
 }
 
 /** THE FUNCTION'S OWN DECLARATION, as a call lowering reads it (frontend/call-plan.ts
@@ -95,6 +99,13 @@ export interface LiftOptions {
    *  (frontend/callee-body.ts), asked of a call whose arity no declaration states. pipeline.ts
    *  `liftStamped` supplies it on every lift; absent, nothing is bounded. */
   calleeBodyBound?: CalleeBodyBound;
+  /** The incoming stack words a callee's own body, in the input or handed in, is proven to load
+   *  (frontend/callee-body.ts `CalleeStackWords`), asked of a call no declaration lays out that
+   *  stages words in the outgoing area. pipeline.ts `liftStamped` supplies it on every lift. */
+  calleeStackWords?: CalleeStackWords;
+  /** Told of each call nothing declares that the lift laid out at every argument register and the
+   *  stack words its callee's body loads (`calleeStackWords`), with that word count. */
+  stackSized?: (callee: string, words: number) => void;
   /** The callees whose calls are taken at every argument register that may still hold this
    *  function's own incoming value at the call, where no declaration lays the call out: how
    *  frontend/callee-body.ts lifts a callee's body to bound what it reads. Absent, none is. */

@@ -33,6 +33,19 @@ plain:
 	mov	r0, #1
 	bx	lr
 
+	@ a Thumb function that is no veneer and loads two incoming stack words: agbcc's
+	@ `int stk2(int a, int b, int c, int d, int e, int f) { return e - f; }`
+	.align	2, 0
+	.globl	stk2
+	.type	stk2, %function
+	.thumb
+	.thumb_func
+stk2:
+	ldr	r0, [sp]
+	ldr	r1, [sp, #0x4]
+	sub	r0, r0, r1
+	bx	lr
+
 	.arm
 	.align	2, 0
 	.globl	rnd_arm
