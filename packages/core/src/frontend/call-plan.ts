@@ -1052,7 +1052,11 @@ export function callDeclarations(
         : undefined;
     // A STACK BLOCK THE CALLEE'S BODY LICENSED states the arity outright: arguments past the
     // registers are staged only once every register is one, so the call takes all of them and the
-    // block, one word each — what a count of that many words in a prototype would state.
+    // block, one word each — what a count of that many words in a prototype would state. That holds
+    // as stated on an ABI that never skips an argument register (agbcc's APCS). One that does
+    // (`evenWordAlignedArgs`: O32 leaves a3 empty before a `long long` passed at 16(sp)) licenses a
+    // block only where the frontend saw the call write every register and the callee's lift read
+    // each (frontend/mips.ts `licensedStackWords`, frontend/callee-body.ts `readsEveryArgReg`).
     const licensed = unstated && (site.stackWords ?? 0) > 0 ? target.argRegs.length + site.stackWords! : undefined;
     if (licensed !== undefined) {
       stackSized?.(callee!, site.stackWords!);

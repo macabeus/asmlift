@@ -101,3 +101,180 @@ Disassembly of section .text:
  134:	lw	ra,24(sp)
  138:	jr	ra
  13c:	addiu	sp,sp,32
+
+00000140 <six>:
+ 140:	lw	v1,16(sp)
+ 144:	lw	v0,20(sp)
+ 148:	addu	a0,a0,a1
+ 14c:	addu	a0,a0,a2
+ 150:	addu	a0,a0,a3
+ 154:	addu	a0,a0,v1
+ 158:	jr	ra
+ 15c:	addu	v0,a0,v0
+
+00000160 <wide_then_narrow>:
+ 160:	addiu	sp,sp,-48
+ 164:	move	v0,a0
+ 168:	sw	ra,44(sp)
+ 16c:	sw	s0,40(sp)
+ 170:	lw	v1,16(v0)
+ 174:	sw	v1,16(sp)
+ 178:	lw	v1,20(v0)
+ 17c:	sw	v1,20(sp)
+ 180:	lw	v1,24(v0)
+ 184:	sw	v1,24(sp)
+ 188:	lw	v1,28(v0)
+ 18c:	sw	v1,28(sp)
+ 190:	lw	v1,32(v0)
+ 194:	move	s0,a1
+ 198:	sw	v1,32(sp)
+ 19c:	lw	a0,0(v0)
+ 1a0:	lw	a1,4(v0)
+ 1a4:	lw	a2,8(v0)
+ 1a8:	jal	0 <nine>
+ 1ac:	lw	a3,12(v0)
+ 1b0:	lw	v0,16(s0)
+ 1b4:	sw	v0,16(sp)
+ 1b8:	lw	v0,20(s0)
+ 1bc:	sw	v0,20(sp)
+ 1c0:	lw	a0,0(s0)
+ 1c4:	lw	a1,4(s0)
+ 1c8:	lw	a2,8(s0)
+ 1cc:	jal	140 <six>
+ 1d0:	lw	a3,12(s0)
+ 1d4:	lw	ra,44(sp)
+ 1d8:	lw	s0,40(sp)
+ 1dc:	jr	ra
+ 1e0:	addiu	sp,sp,48
+
+000001e4 <wide_on_a_branch>:
+ 1e4:	addiu	sp,sp,-48
+ 1e8:	sw	s0,40(sp)
+ 1ec:	move	s0,a0
+ 1f0:	beqz	a1,234 <wide_on_a_branch+0x50>
+ 1f4:	sw	ra,44(sp)
+ 1f8:	lw	v0,16(s0)
+ 1fc:	sw	v0,16(sp)
+ 200:	lw	v0,20(s0)
+ 204:	sw	v0,20(sp)
+ 208:	lw	v0,24(s0)
+ 20c:	sw	v0,24(sp)
+ 210:	lw	v0,28(s0)
+ 214:	sw	v0,28(sp)
+ 218:	lw	v0,32(s0)
+ 21c:	sw	v0,32(sp)
+ 220:	lw	a0,0(s0)
+ 224:	lw	a1,4(s0)
+ 228:	lw	a2,8(s0)
+ 22c:	jal	0 <nine>
+ 230:	lw	a3,12(s0)
+ 234:	lw	v0,16(s0)
+ 238:	sw	v0,16(sp)
+ 23c:	lw	v0,20(s0)
+ 240:	sw	v0,20(sp)
+ 244:	lw	a0,0(s0)
+ 248:	lw	a1,4(s0)
+ 24c:	lw	a2,8(s0)
+ 250:	jal	140 <six>
+ 254:	lw	a3,12(s0)
+ 258:	lw	ra,44(sp)
+ 25c:	lw	s0,40(sp)
+ 260:	jr	ra
+ 264:	addiu	sp,sp,48
+
+00000268 <ts>:
+ 268:	lw	t0,16(sp)
+ 26c:	lw	t1,20(sp)
+ 270:	addu	v0,a0,a1
+ 274:	addu	v0,v0,a2
+ 278:	jr	ra
+ 27c:	addu	v0,t1,v0
+
+00000280 <callts>:
+ 280:	addiu	sp,sp,-32
+ 284:	sw	ra,24(sp)
+ 288:	lw	v0,0(a1)
+ 28c:	lw	v1,4(a1)
+ 290:	sw	v0,16(sp)
+ 294:	sw	v1,20(sp)
+ 298:	li	a1,5
+ 29c:	jal	268 <ts>
+ 2a0:	li	a2,6
+ 2a4:	lw	ra,24(sp)
+ 2a8:	jr	ra
+ 2ac:	addiu	sp,sp,32
+
+000002b0 <ll4>:
+ 2b0:	lw	t0,16(sp)
+ 2b4:	lw	t1,20(sp)
+ 2b8:	addu	v0,a0,a1
+ 2bc:	addu	v0,v0,a2
+ 2c0:	jr	ra
+ 2c4:	addu	v0,t1,v0
+
+000002c8 <callll>:
+ 2c8:	addiu	sp,sp,-32
+ 2cc:	move	a2,a0
+ 2d0:	sw	ra,24(sp)
+ 2d4:	lw	v0,16(a2)
+ 2d8:	lw	v1,20(a2)
+ 2dc:	sw	v0,16(sp)
+ 2e0:	sw	v1,20(sp)
+ 2e4:	lw	a0,0(a2)
+ 2e8:	lw	a1,4(a2)
+ 2ec:	jal	2b0 <ll4>
+ 2f0:	lw	a2,8(a2)
+ 2f4:	lw	ra,24(sp)
+ 2f8:	jr	ra
+ 2fc:	addiu	sp,sp,32
+
+00000300 <t1>:
+ 300:	lw	v0,16(sp)
+ 304:	addu	a0,a3,a0
+ 308:	jr	ra
+ 30c:	addu	v0,a0,v0
+
+00000310 <callt1>:
+ 310:	addiu	sp,sp,-32
+ 314:	sw	ra,24(sp)
+ 318:	lw	a2,0(a1)
+ 31c:	lw	a3,4(a1)
+ 320:	li	v0,7
+ 324:	jal	300 <t1>
+ 328:	sw	v0,16(sp)
+ 32c:	lw	ra,24(sp)
+ 330:	jr	ra
+ 334:	addiu	sp,sp,32
+
+00000338 <ll4c>:
+ 338:	addiu	sp,sp,-32
+ 33c:	sw	s1,20(sp)
+ 340:	sw	s0,16(sp)
+ 344:	lw	s0,48(sp)
+ 348:	lw	s1,52(sp)
+ 34c:	sw	ra,24(sp)
+ 350:	jal	0 <nine>
+ 354:	nop
+ 358:	addu	v0,s1,v0
+ 35c:	lw	ra,24(sp)
+ 360:	lw	s1,20(sp)
+ 364:	lw	s0,16(sp)
+ 368:	jr	ra
+ 36c:	addiu	sp,sp,32
+
+00000370 <callllc>:
+ 370:	addiu	sp,sp,-32
+ 374:	move	a2,a0
+ 378:	sw	ra,24(sp)
+ 37c:	lw	v0,16(a2)
+ 380:	lw	v1,20(a2)
+ 384:	sw	v0,16(sp)
+ 388:	sw	v1,20(sp)
+ 38c:	lw	a0,0(a2)
+ 390:	lw	a1,4(a2)
+ 394:	jal	338 <ll4c>
+ 398:	lw	a2,8(a2)
+ 39c:	lw	ra,24(sp)
+ 3a0:	jr	ra
+ 3a4:	addiu	sp,sp,32
+	...

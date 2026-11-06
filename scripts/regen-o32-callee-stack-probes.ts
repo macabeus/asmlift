@@ -2,8 +2,11 @@
 // undeclared `jal` whose callee's body, lifted from the same object, sizes its stack arguments
 // (frontend/callee-body.ts `CalleeStackWords`, the MIPS licence in frontend/mips.ts `lowerJal`).
 // `nine` loads five incoming words at entry, `br6` its one only on a branch; `call9`/`call_br`
-// stage the words their callee loads, `krmore` one more than `kr` loads. Each compiler at its
-// canonical flags.
+// stage the words their callee loads, `krmore` one more than `kr` loads; `wide_then_narrow` and
+// `wide_on_a_branch` call `nine` then `six`, so `nine`'s higher words still sit in the area at
+// `six`; `callts`, `callll`, `callllc` and `callt1` call a callee whose 8-aligned argument skips
+// a3 (or a1), `ll4c` handing its registers to a call nothing declares.
+// Each compiler at its canonical flags.
 //
 //   ASMLIFT_IDO_CC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… npx tsx scripts/regen-o32-callee-stack-probes.ts
 //

@@ -230,6 +230,19 @@ export function loadedWordBound<C>(
 // Anything else is the call it was before the witness existed: unlicensed, and refused by (a) or
 // (b) wherever they refused it — so the witness only ever turns a decline into a lift, and only at
 // a call where 0 reached it staged, which (b) refused.
+/** THE BODY'S LICENCE, the one rule both ISAs that stage stack arguments decide by (this file's
+ *  dataflow for Thumb, frontend/mips.ts `lowerJal` for O32 over its SSA reaching definitions): a
+ *  call nothing declares, whose callee's body loads `n` incoming stack words, takes exactly those
+ *  `n` where the words staged for it are exactly `[0, 4n)` from the start of the outgoing area —
+ *  `may` the words that reach it pending on SOME path (beneath the loaded-word bound), and `must`
+ *  whether a word reaches it pending on EVERY path. Pending means stored and not consumed since: a
+ *  load, or an earlier call whose block held the word, ends it. Offsets are relative to the area's
+ *  start (0 on agbcc, 16 on O32). */
+export function bodyBlockAgrees(n: number, may: Iterable<number>, must: (off: number) => boolean): boolean {
+  const staged = [...may].sort((x, y) => x - y);
+  return n > 0 && staged.length === n && staged.every((o, i) => o === 4 * i && must(o));
+}
+
 export function analyzeOutgoingArgs<C>({
   blocks: asmBlocks,
   preds,
@@ -434,9 +447,8 @@ export function analyzeOutgoingArgs<C>({
     if (offs === null) {
       // the body's witness: licensed on exact agreement, else left to (a) and (b) as before
       const body = bodyBlock(ev);
-      const may = asc(mayAt.get(ev) ?? []);
       const must = mustAt.get(ev) ?? new Set<number>();
-      if (body.length > 0 && may.length === body.length && body.every((o, i) => may[i] === o && must.has(o))) {
+      if (bodyBlockAgrees(body.length, mayAt.get(ev) ?? [], (o) => must.has(o))) {
         blocks.set(ev.call, body);
         area = Math.max(area, 4 * body.length);
       }

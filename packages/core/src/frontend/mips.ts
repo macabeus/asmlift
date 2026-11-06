@@ -97,6 +97,7 @@ import {
   stackSlotKey,
 } from './ssa';
 import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns, unifyRegisterSpellings } from './ssa';
+import { bodyBlockAgrees } from './stackargs';
 
 type Instr = DisasmInstr;
 
@@ -1795,6 +1796,9 @@ function liftOnce(
   // epilogue restore in any block.
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
+  // the values each call lowered so far took as its outgoing stack arguments (`lowerJal`'s
+  // `stackWord`), which are pending for no later call
+  const consumedStackWords = new Set<Value>();
   const restores = new Map<Value, { reg: string; addr: number }>();
   // Each `lw` that restores a save, and the register it restores: a save holds only while every path
   // restores it after its last write (`refuseSavedRegisterLeaks`).
@@ -2933,7 +2937,8 @@ function liftOnce(
         );
       }
       // A CALL NOTHING DECLARES TAKES THE WORDS ITS CALLEE'S BODY LOADS, where exactly those reach
-      // it staged (frontend/stackargs.ts, "THE CALLEE'S BODY", is the rule this is O32's half of):
+      // it staged (frontend/stackargs.ts, "THE CALLEE'S BODY": the same rule, `bodyBlockAgrees`,
+      // asked here of SSA's reaching definitions, which O32 has when its calls are lowered):
       // the body loads incoming word n-1, so the call takes at least n stack words, and a word past
       // them that nothing staged is no argument. Licensed only where the words `[16, 16+4n)` are
       // written on every path to the call beneath the loaded-word bound and inside the frame, and
@@ -2941,28 +2946,39 @@ function liftOnce(
       // frame with a local area (`frame`) is not licensed, since that area is partitioned off the
       // DECLARED widest call before any call is lowered (`stackWordsOf` above), so such a call keeps
       // the refusals below.
+      // A word an earlier call took as its stack argument (`consumedStackWords`) is pending for no
+      // later one, as frontend/stackargs.ts's dataflow ends it at the call whose block held it.
       const licensedStackWords = (): number | undefined => {
         if (frame !== null || !asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)) {
           return undefined;
         }
-        const reaching = [...valueSlots]
-          .filter(
-            (off) =>
-              off >= STACK_ARGS_AT &&
-              off < frameSize &&
-              off < loadedWordBound &&
-              ssa.hasReachingDef(stackSlot(off), bi),
-          )
-          .sort((x, y) => x - y);
+        const pending = (v: Value) => !consumedStackWords.has(v);
+        const reaching = [...valueSlots].filter(
+          (off) =>
+            off >= STACK_ARGS_AT &&
+            off < frameSize &&
+            off < loadedWordBound &&
+            ssa.hasReachingDef(stackSlot(off), bi, pending),
+        );
         if (reaching.length === 0) {
           return undefined;
         }
+        // O32 can skip an argument register for an 8-aligned argument, so the plan's count — every
+        // register, then the block — holds only where each register is one this call sets up: a
+        // register still at its entry value on some path may be the skipped word, and taken as an
+        // argument it is a parameter this function does not have. (The callee's half of the same
+        // proof is frontend/callee-body.ts `readsEveryArgReg`.)
+        if (ARG_REGS.some((r) => !ssa.writtenOnEveryPath(r, bi, () => false))) {
+          return undefined;
+        }
         const n = options.calleeStackWords?.(callee) ?? 0;
-        return n > 0 &&
-          reaching.length === n &&
-          reaching.every(
-            (off, k) => off === STACK_ARGS_AT + 4 * k && ssa.writtenOnEveryPath(stackSlot(off), bi, () => false),
-          )
+        return bodyBlockAgrees(
+          n,
+          reaching.map((off) => off - STACK_ARGS_AT),
+          (o) =>
+            ssa.writtenOnEveryPath(stackSlot(STACK_ARGS_AT + o), bi, () => false) &&
+            !ssa.hasReachingDef(stackSlot(STACK_ARGS_AT + o), bi, (v) => !pending(v)),
+        )
           ? n
           : undefined;
       };
@@ -2990,7 +3006,9 @@ function liftOnce(
                 `${off}(sp), and no value stored there reaches the call`,
             );
           }
-          return readVar(stackSlot(off), bi);
+          const word = readVar(stackSlot(off), bi);
+          consumedStackWords.add(word);
+          return word;
         },
         // a pending `%hi` half and a table base are no argument
         placeholders,

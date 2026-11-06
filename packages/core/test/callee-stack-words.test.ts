@@ -160,10 +160,10 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
       );
     });
 
-    test('a callee that loads its stack word on one branch only is sized by its lift', () => {
-      expect(lift('call_br')).toBe(
-        's32 call_br(s32 *a0) {\n    return br6(*a0, a0[1], a0[2], a0[3], a0[4], a0[5]);\n}\n',
-      );
+    // `br6` reads a2 and a3 only as `sink`'s, a call nothing declares and its lift takes at every
+    // register: no read, so a2/a3 could be words an 8-aligned argument skipped (`callllc` below)
+    test('a callee that reads a register only as an undeclared call’s licenses no block', () => {
+      expect(lift('call_br')).toMatch(/the undeclared call to 'br6' at 0x[0-9a-f]+ fills a0..a3/);
     });
 
     test('a caller staging a word more than the callee loads (K&R) keeps its decline', () => {
@@ -176,6 +176,41 @@ describe('O32: the same licence, past a0..a3 at 16(sp)', () => {
       expect(lift('call9', { nine: { params: 4 } })).toBe(
         's32 call9(s32 *a0) {\n    return nine(*a0, a0[1], a0[2], a0[3]);\n}\n',
       );
+    });
+
+    // `nine`'s words at 24..32(sp) are still in the area at `six`: the call that took them ends
+    // them, as frontend/stackargs.ts's dataflow does on Thumb (`bodyBlockAgrees`)
+    test('a wider call before a narrower one: each takes its own block', () => {
+      expect(lift('wide_then_narrow')).toBe(
+        's32 wide_then_narrow(s32 *a0, s32 *a1) {\n' +
+          '    nine(*a0, a0[1], a0[2], a0[3], a0[4], a0[5], a0[6], a0[7], a0[8]);\n' +
+          '    return six(*a1, a1[1], a1[2], a1[3], a1[4], a1[5]);\n}\n',
+      );
+    });
+
+    test('…and where the wider call is made on one branch only', () => {
+      expect(lift('wide_on_a_branch')).toBe(
+        's32 wide_on_a_branch(s32 *a0, s32 a1) {\n' +
+          '    if (a1 != 0) nine(*a0, a0[1], a0[2], a0[3], a0[4], a0[5], a0[6], a0[7], a0[8]);\n' +
+          '    return six(*a0, a0[1], a0[2], a0[3], a0[4], a0[5]);\n}\n',
+      );
+    });
+
+    // O32 skips a3 (a1) for an 8-aligned argument and passes it at 16(sp): the callee's lift mints
+    // the skipped register a parameter it never reads, and the caller never writes it (or parks a
+    // temp there, on IDO). Licensed, the call would take that register as an argument.
+    test('a callee whose 8-aligned argument skips a register licenses no block', () => {
+      for (const sym of ['callts', 'callt1']) {
+        expect(lift(sym)).toMatch(/has no prototype, a1 holds a value and a0 holds none/);
+      }
+      // KNOWN GAP, as on main: gcc reads `ll4(*a0, a0[1], a0[2])` there, dropping the stack words
+      // (the guess cannot see past a3 where a3 is unwritten); never the skipped a3 or a parked temp
+      for (const [sym, callee] of [
+        ['callll', 'll4'],
+        ['callllc', 'll4c'],
+      ]) {
+        expect(lift(sym)).not.toMatch(new RegExp(`${callee}\\([^)]*(a0\\[4\\]|\\ba3\\b)`));
+      }
     });
   });
 });

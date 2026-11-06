@@ -221,7 +221,9 @@ function bodyReads(
   // a body that lifts answers both; one that does not answers its entry's loads, and no bound
   const lifted = (text: string, relocs?: readonly Reloc[]): BodyReads => {
     const got = liftedReads(callee, text, target, prototypes, lift, relocs);
-    return got ?? { stack: entry?.(callee, text) };
+    // a scan of the entry's stack loads sees no register read, so where the ABI can skip an
+    // argument register (`evenWordAlignedArgs`) it cannot say the registers are all arguments
+    return got ?? { stack: target.evenWordAlignedArgs === true ? undefined : entry?.(callee, text) };
   };
   if (definesLabel(asm, callee)) {
     return weakNames(asm).has(callee) ? {} : lifted(asm);
@@ -296,9 +298,11 @@ function liftedReads(
       const passesFirst =
         target.returnReg === target.argRegs[0] && !declaresVoidReturn(table[callee]) && returnsUntouched(fn);
       const top = Math.max(0, ...params.map((p) => (entryArgRank(p) ?? -1) + 1));
+      const stack = Math.max(0, top - target.argRegs.length);
       return {
         bound: Math.max(params.length, passesFirst ? 1 : 0),
-        stack: Math.max(0, top - target.argRegs.length),
+        stack:
+          stack > 0 && target.evenWordAlignedArgs === true && !readsEveryArgReg(fn, target, forced) ? undefined : stack,
       };
     }
     // an entry whose parameter list nothing can lay out (an unsizable or variadic one) is dropped
@@ -308,6 +312,32 @@ function liftedReads(
       table[g] = returnOnly(Object.hasOwn(table, g) ? table[g] : undefined);
     }
   }
+}
+
+/** Whether the lifted body READS every argument register: each is an entry parameter some op or
+ *  edge uses. Below a stack word the body loads, every register slot is minted a parameter
+ *  (frontend/ssa.ts `mintArgSlotHoles`) whether or not it is read, which counts the slots right
+ *  only on an ABI that never skips one. Where an 8-aligned argument starts at an even word
+ *  (`evenWordAlignedArgs`: O32 `int f(int, int, int, long long)` leaves a3 empty and passes the
+ *  `long long` at 16(sp)), a minted register may be that skipped word, which no caller writes;
+ *  taken as an argument it hands the callee whatever the caller left there, and gives a caller
+ *  that never wrote it a parameter it does not have. So there the stack words count only where
+ *  every register below them is one the body reads. A call in `forced` (taken at every argument
+ *  register its incoming value may still sit in, for the register bound) is no read: it takes the
+ *  skipped register too. */
+function readsEveryArgReg(fn: Fn, target: TargetDescription, forced: ReadonlySet<string>): boolean {
+  const used = new Set<unknown>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'call' && typeof op.attrs.target === 'string' && forced.has(op.attrs.target)) {
+        continue;
+      }
+      op.operands.forEach((v) => used.add(v));
+      op.successors.forEach((e) => e.args.forEach((v) => used.add(v)));
+    }
+  }
+  const read = new Set(fn.blocks[0].params.filter((p) => used.has(p)).map((p) => entryArgRank(p)));
+  return target.argRegs.every((_, k) => read.has(k));
 }
 
 /** Whether some return of `fn` hands back nothing the lift names (a bare `ret`) on a path from the
