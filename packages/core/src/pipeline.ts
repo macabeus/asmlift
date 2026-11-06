@@ -14,7 +14,7 @@ import {
 } from './contracts';
 import type { AsmData, Reloc } from './frontend/asmdata';
 import { returnedStruct, structLocalType } from './frontend/call-plan';
-import { type CalleeBodies, type CalleeBodyBound, calleeBodyBounds } from './frontend/callee-body';
+import { type CalleeBodies, type CalleeBodyBound, calleeBodyBounds, calleeStackWords } from './frontend/callee-body';
 import { FrontendUnsupportedError } from './frontend/errors';
 import type { LiftOptions } from './frontend/frontend';
 import { liftOwnRegisterStruct, liftOwnStructReturn } from './frontend/own-struct-return';
@@ -455,7 +455,11 @@ export function liftStamped(
           bodiesAsked.set(callee, words);
           return words;
         };
-  const options = { ...liftOptions, calleeBodyBound };
+  // …and what each one's entry loads of its incoming stack words (frontend/callee-body.ts)
+  const stackWords =
+    liftOptions.calleeStackWords ??
+    calleeStackWords(name, asm, target, table, frontendFor(target).entryStackWords, calleeBodies);
+  const options = { ...liftOptions, calleeBodyBound, calleeStackWords: stackWords };
   const fn = liftWithinContextBound(
     name,
     asm,
@@ -540,7 +544,7 @@ function bodyBoundsIn(
         text === asm ? asmData : relocs === undefined ? undefined : relocsOnly(relocs, target),
         symbols,
         contextGlobals,
-        { calleeBodyBound: () => undefined, entryReadCalls },
+        { calleeBodyBound: () => undefined, calleeStackWords: () => undefined, entryReadCalls },
       ),
     calleeBodies,
   );

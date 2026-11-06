@@ -194,6 +194,10 @@ export interface CallSite {
   write(reg: string, v: Value): void;
   /** argument word `k` past the registers, where this ABI places it (`CallLowering.stackArgs`) */
   stackWord?(k: number): Value;
+  /** the stack words the frontend licensed for a call nothing declares, off its callee's body
+   *  (frontend/stackargs.ts `StackArgsCall.bodyReads`): the call then takes every argument register
+   *  and these words, and its arity is no guess. Absent or 0 where none was licensed. */
+  readonly stackWords?: number;
   /** how this frontend builds and splits a pair (`CallLowering.pairs`) */
   readonly pairs?: CallPairs;
   /** what this frontend defines registers with that is no value and so no argument — a pending
@@ -1044,7 +1048,16 @@ export function callDeclarations(
       unstated && entryReadCalls?.has(callee!) === true
         ? target.argRegs.reduce((n, r, k) => (ssa.writtenOnEveryPath(r, bi, () => false) ? n : k + 1), 0)
         : undefined;
-    const widths = entryWords !== undefined ? Array.from({ length: entryWords }, () => 32) : p.widths;
+    // A STACK BLOCK THE CALLEE'S BODY LICENSED states the arity outright: arguments past the
+    // registers are staged only once every register is one, so the call takes all of them and the
+    // block, one word each — what a count of that many words in a prototype would state.
+    const licensed = unstated && (site.stackWords ?? 0) > 0 ? target.argRegs.length + site.stackWords! : undefined;
+    const widths =
+      licensed !== undefined
+        ? Array.from({ length: licensed }, () => 32)
+        : entryWords !== undefined
+          ? Array.from({ length: entryWords }, () => 32)
+          : p.widths;
     const { returns } = p;
     // the gaps `decideGap` decided: the value that proved each, and the gap's own refusal, owed if
     // that proof fails once the function is lifted

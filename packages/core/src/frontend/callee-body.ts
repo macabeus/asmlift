@@ -82,15 +82,20 @@ import { helperPrototypes } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { armArgumentWords, scansArgumentsOf } from './arm-body';
 import type { Reloc } from './asmdata';
+import { thumbEntryWordsFromHalfwords } from './thumb-entry';
 
 /** A callee's body that the input does not hold, handed in by a driver that found it elsewhere
  *  (the linked ELF): `listing` is text in the target frontend's own input format holding the
  *  callee's label, with `relocs` the relocations an object of that text would carry in its side
  *  table (`AsmData.relocs`), for a frontend that reads them there and not in the text (MIPS);
  *  `arm` is the instruction words, from its entry, of the ARM body a Thumb caller enters through an
- *  interworking veneer, which no frontend here lifts and frontend/arm-body.ts scans instead. */
+ *  interworking veneer, which no frontend here lifts and frontend/arm-body.ts scans instead;
+ *  `thumb` is the first halfwords of a Thumb body, which bound nothing of its argument registers
+ *  and only say which incoming stack words its entry loads (frontend/thumb-entry.ts). */
 export type CalleeBody =
-  { kind: 'listing'; text: string; relocs?: readonly Reloc[] } | { kind: 'arm'; words: readonly number[] };
+  | { kind: 'listing'; text: string; relocs?: readonly Reloc[] }
+  | { kind: 'arm'; words: readonly number[] }
+  | { kind: 'thumb'; halfwords: readonly number[] };
 
 /** The bodies a driver found outside the input, keyed by callee (`DecompileOptions.calleeBodies`). */
 export type CalleeBodies = Readonly<Record<string, CalleeBody>>;
@@ -191,6 +196,9 @@ function bodyBound(
     return weakNames(asm).has(callee) ? undefined : liftedBound(callee, asm, target, prototypes, lift);
   }
   const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
+  if (body?.kind === 'thumb') {
+    return undefined;
+  }
   if (body?.kind === 'arm') {
     return scansArgumentsOf(target)
       ? armArgumentWords(
@@ -277,4 +285,60 @@ function returnsUntouched(fn: Fn): boolean {
     work.push(...successorsOf(b));
   }
   return [...callFree].some((b) => b.ops.some((o) => o.opcode === 'ret' && o.operands.length === 0));
+}
+
+/** The incoming stack words callee `callee`'s own body is proven to load, or `undefined` where it
+ *  proves none (frontend/stackargs.ts `StackArgsCall.bodyReads`). */
+export type CalleeStackWords = (callee: string) => number | undefined;
+
+/** Reads the incoming stack words the straight-line entry of `callee` in a text of the frontend's
+ *  input format loads (`Frontend.entryStackWords`). */
+export type EntryStackWords = (callee: string, text: string) => number | undefined;
+
+/** WHAT A CALLEE'S BODY SAYS OF ITS STACK ARGUMENTS: how many incoming stack words its entry loads,
+ *  a LOWER bound on the words a call to it takes (frontend/stackargs.ts, "THE CALLEE'S BODY").
+ *  Read under the rules of the register bound above, and answering nothing where they do: the
+ *  callee is the function being lifted, its entry declares a struct or union return (the hidden
+ *  pointer moves every argument a word), the text defines no label of it, the text marks it
+ *  `.weak`, or a body handed in is one the target's frontend cannot scan. It needs no lift: a
+ *  callee's stack arguments are loaded first thing, so a pass over its entry says it, from the text
+ *  (`entry`, the frontend's own) or from a Thumb body's halfwords (frontend/thumb-entry.ts). A frontend
+ *  that reads no entry, or a target whose compiler stages no outgoing area at the frame bottom
+ *  (`compilerBehaviors.stagesOutgoingArgsInFrame`), answers nothing. */
+export function calleeStackWords(
+  self: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  entry: EntryStackWords | undefined,
+  external?: CalleeBodies,
+): CalleeStackWords {
+  const memo = new Map<string, number | undefined>();
+  const read = (callee: string): number | undefined => {
+    if (
+      entry === undefined ||
+      target.compilerBehaviors.stagesOutgoingArgsInFrame !== true ||
+      callee === self ||
+      declaresAggregateReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
+    ) {
+      return undefined;
+    }
+    if (definesLabel(asm, callee)) {
+      return weakNames(asm).has(callee) ? undefined : entry(callee, asm);
+    }
+    const body = external !== undefined && Object.hasOwn(external, callee) ? external[callee] : undefined;
+    if (body?.kind === 'thumb') {
+      return thumbEntryWordsFromHalfwords(body.halfwords);
+    }
+    if (body?.kind !== 'listing' || !definesLabel(body.text, callee) || weakNames(body.text).has(callee)) {
+      return undefined;
+    }
+    return entry(callee, body.text);
+  };
+  return (callee) => {
+    if (!memo.has(callee)) {
+      memo.set(callee, read(callee));
+    }
+    return memo.get(callee);
+  };
 }
