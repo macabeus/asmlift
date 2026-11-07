@@ -21,10 +21,12 @@
 //     device may read, so a slot it cannot reach is not refused.
 //   • capabilities.blockTransferCalls → the same audit: a frame address handed to one of these
 //     as its SOURCE is read as far as the call's literal control word says, and never written.
-//   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
+//   • capabilities.deviceRegisters → six readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
-//     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
-//     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
+//     approximate: the numeric respell's `device-or-volatile` refusal to spell an address in the
+//     window through a map name (raise/offsetnames.ts `respellNumericThroughName`, through
+//     pipeline.ts `offsetNameBehaviorsFor`), the `/vol-store` variation's eligibility
+//     (l3/volstore.ts), rank.ts's volatility tie-break between two byte-identical spellings, the first half of `/unreduce`'s
 //     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device
 //     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), and the
 //     device pin (frontend/device-pins.ts), which spells every access in the window `volatile`

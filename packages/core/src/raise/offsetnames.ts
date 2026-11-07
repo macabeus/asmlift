@@ -865,7 +865,7 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *  {@link respellNumericThroughName} judges: a load or store whose address folds to a literal, and
  *  every access spelled through a map name whose bytes overlap it.
  *
- *  WHY THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. A disassembly that names only exact symbol
+ *  WHERE THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. A disassembly that names only exact symbol
  *  STARTS prints a relocated interior word as a number: agbcc compiles `((u8 *)&g)[0x39]`,
  *  `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39` (where `g.f39` is
  *  `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset` only inside a
@@ -881,8 +881,12 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *  which then orders and reloads them as the memory they share requires — agbcc `-O2` compiles
  *  `g.w = 5; ((u8 *)&g)[1] = 7; return g.w;` to `str; strb [r1, #1]; ldr r0, [r1]`, the reload the
  *  two-spelling C loses. So the respelled C reads what memory holds whichever spelling the source
- *  had; a source that did write the number costs a relocated pool word against a numeric one, a
- *  score and not a meaning. What one name does NOT make exact are the gates below. */
+ *  had, and the respell rests on that ORDERING argument alone, never on who chose the number: an
+ *  input that carries every relocation (an object's side table) can PROVE the number was the
+ *  source's — a MIPS `lui 0x8010; sb 0x39` with no relocation beside a relocated `%lo(g)` read is
+ *  `*(u8 *)0x80100039 = 1` in the source — and it is respelled all the same, because that source
+ *  costs a relocated address against a numeric one, a score and not a meaning. What one name does
+ *  NOT make exact are the gates below. */
 export interface NumericRespell {
   /** the numeric access */
   readonly op: Op;
@@ -1313,7 +1317,9 @@ export interface OffsetNamesSpelled {
   readonly walked: string[];
   /** a numeric address respelled through the one name this function also reaches its bytes by
    *  ({@link respellNumericThroughName}), each name once — the name's address and size in the
-   *  map are load-bearing, and so is the premise that the number was not the source's own */
+   *  map are load-bearing; the number may have been the source's own, which costs a score and
+   *  not a meaning, since one name keeps the accesses in the order memory requires
+   *  ({@link NumericRespell}) */
   readonly respelled: string[];
 }
 
