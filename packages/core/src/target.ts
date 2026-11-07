@@ -1295,8 +1295,9 @@ export interface TargetDescription {
     // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
     // records the branch's equivalence on the NOT-taken edge of every jump (`record_jump_equiv
     // (insn, 0)`, cse.c:7597), and on the taken edge only along a path it follows (`record_jump_equiv
-    // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps or -fcse-skip-blocks,
-    // which toplev.c:3606-3607 sets at `optimize >= 2`. (Line numbers are agbcc's gcc 2.9 tree; for
+    // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps, which toplev.c:3606-3607
+    // sets at `optimize >= 2` (-fcse-skip-blocks skips a block without recording the edge:
+    // `cseFollowsJumpsUnder`). (Line numbers are agbcc's gcc 2.9 tree; for
     // 2.7.2 the probe below is the evidence.) So where this is `false`, a return of the tested value
     // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
     // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
@@ -1309,9 +1310,10 @@ export interface TargetDescription {
     //   - gcc2.7.2 at -O1 (canonical): copies `nop`, join `move v0,zero`. With the arms of the
     //     copies flipped (the return the then arm), and with `-O1 -fcse-follow-jumps`, `move v0,zero`.
     //   - gcc2.7.2 at -O2, and gcc2.7.2kmc at -O2 (canonical): `move v0,zero` under every spelling.
-    // So `true` on MIPS_GCC, and `false` from the flags at level 1 without either switch. Absent
-    // elsewhere: agbcc at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no
-    // value of this field says; ido7.1 and mwcc are unprobed.
+    // So `true` on MIPS_GCC, and `false` from the flags where cse follows no jump (level 1 without
+    // -fcse-follow-jumps, or -fno-cse-follow-jumps: `cseFollowsJumpsUnder`). Absent elsewhere: agbcc
+    // at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no value of this field
+    // says; ido7.1 and mwcc are unprobed.
     foldsBranchConstantOnTakenEdge?: boolean;
     // DOES THE RETURN-TAIL CHOOSER DEFAULT TO THE COPIES HERE, whatever the size bound and the marks
     // say? Not a compiler behaviour but a MEASURED DEFAULT, kept beside the behaviours because it is
@@ -2207,15 +2209,27 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
 }
 
 /** Does gcc's cse follow jumps at these flags (`compilerBehaviors.foldsBranchConstantOnTakenEdge`)?
- *  toplev.c:3606-3607 turns `flag_cse_follow_jumps` and `flag_cse_skip_blocks` on at `optimize >= 2`,
- *  and either switch turns them on by name. Only level 1 is answered `false`: at -O0 cse does not
- *  run, which is a different compiler again, and a level no table reads keeps the declaration. */
+ *  Only a jump cse FOLLOWS gets its taken edge's equivalence: `cse_end_of_basic_block` marks a path
+ *  branch TAKEN only under `follow_jumps` (cse.c:8192-8211), and the branch around a block that
+ *  `skip_blocks` adds is AROUND, whose block is invalidated, not recorded (cse.c:8223, :8545-8548).
+ *  toplev.c:3606-3607 sets `flag_cse_follow_jumps` at `optimize >= 2`, and the switch sets or clears
+ *  it by name either way, the level's value standing where it is not given. -O0 is answered `true`:
+ *  cse does not run there, which is a different compiler again, and a level no table reads keeps
+ *  the declaration. (cse.c line numbers are agbcc's gcc 2.9 tree.)
+ *
+ *  MEASURED on `corpus/probe-rettail-pg` at gcc2.7.2, the copies' `beqz` delay slot: `nop` (unfolded)
+ *  at -O1, at `-O1 -fcse-skip-blocks`, at `-O2 -fno-cse-follow-jumps` and at `-O2
+ *  -fno-cse-follow-jumps -fno-cse-skip-blocks`; `move v0,zero` at -O2, at `-O2 -fno-cse-skip-blocks`
+ *  and at `-O1 -fcse-follow-jumps`. The join is `move v0,zero` under all seven. */
 function cseFollowsJumpsUnder(profile: CodegenProfile): boolean {
   if (profile.family !== 'gcc' && profile.family !== 'agbcc') {
     return true;
   }
-  const on = (f: string) => profile.slots[f] === 'on';
-  return profile.slots.O !== '1' || on('-fcse-follow-jumps') || on('-fcse-skip-blocks');
+  if (profile.slots.O === '0') {
+    return true;
+  }
+  const flag = profile.slots['-fcse-follow-jumps'];
+  return flag === 'on' ? true : flag === 'off' ? false : profile.slots.O !== '1';
 }
 
 /** What the flags say a plain `char` is (`compilerBehaviors.plainCharSigned`): `default` where they

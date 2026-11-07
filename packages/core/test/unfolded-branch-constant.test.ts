@@ -58,7 +58,10 @@ describe('which compilers fold a branch-proven constant on the taken edge (`fold
     expect(target.compilerBehaviors.foldsBranchConstantOnTakenEdge).toBe(lane.copies !== 'nop');
   });
 
-  test('gcc 2.x: only level 1 leaves the taken edge unfolded, and either cse switch folds it', () => {
+  // Only a jump cse follows records its taken edge (target.ts `cseFollowsJumpsUnder`): -O2 and
+  // -fcse-follow-jumps follow, -fno-cse-follow-jumps does not, and -fcse-skip-blocks records nothing.
+  // The probe pair compiled at each of these (gcc2.7.2), the copies' delay slot: `nop` where false.
+  test('gcc 2.x: the taken edge folds only where cse follows jumps, by level or by the switch', () => {
     const at = (flags: string[]) =>
       targetFor('gcc2.7.2', flags).target.compilerBehaviors.foldsBranchConstantOnTakenEdge;
     expect(at(['-O1'])).toBe(false);
@@ -67,8 +70,12 @@ describe('which compilers fold a branch-proven constant on the taken edge (`fold
     expect(at(['-O3'])).toBe(true);
     expect(at(['-Os'])).toBe(true);
     expect(at(['-O1', '-fcse-follow-jumps'])).toBe(true);
-    expect(at(['-O1', '-fcse-skip-blocks'])).toBe(true);
+    expect(at(['-O1', '-fcse-skip-blocks'])).toBe(false);
     expect(at(['-O1', '-fcse-follow-jumps', '-fno-cse-follow-jumps'])).toBe(false);
+    expect(at(['-O2', '-fno-cse-skip-blocks'])).toBe(true);
+    expect(at(['-O2', '-fno-cse-follow-jumps'])).toBe(false);
+    expect(at(['-O2', '-fno-cse-follow-jumps', '-fno-cse-skip-blocks'])).toBe(false);
+    expect(at(['-O0'])).toBe(true);
   });
 
   test('absent where no probe says either: agbcc, ido7.1 and mwcc, at any level', () => {
