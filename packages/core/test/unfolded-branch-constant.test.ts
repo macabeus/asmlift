@@ -98,18 +98,25 @@ const input = (slug: string, p: 'copies' | 'join') => {
 };
 
 describe('the unfolded return, read at each site the join was taken (structure/unfolded-branch-constant.ts)', () => {
-  const marks = (lane: (typeof GCC_LANES)[number], p: 'copies' | 'join') => {
+  const marks = (lane: (typeof GCC_LANES)[number], p: 'copies' | 'join', kind?: JoinPastReturnsSite['kind']) => {
     const { target } = targetFor(lane.tc, TOOLCHAIN_TARGETS[lane.tc].canonicalFlags);
     const { asm, asmData } = input(lane.slug, p);
     const fn = frontendFor(target).lift('f', asm, target, PROTOS, asmData);
     raiseRecovered(fn, target, {}, PROTOS.f);
     const sites: JoinPastReturnsSite[] = [];
     structure(fn, structureOptionsFor(target, false), { onJoinPastReturns: (site) => sites.push(site) });
-    return sites.map((site) => unfoldedBranchConstant(fn, site));
+    return sites.map((site) => unfoldedBranchConstant(fn, kind === undefined ? site : { ...site, kind }));
   };
 
   test('gcc2.7.2 (-O1): the copies leave `gB` returned as loaded, and the site shows it', () => {
     expect(marks(GCC_LANES[0], 'copies')).toEqual([true]);
+  });
+
+  // a case arm is a jump target whatever the source wrote, so the same return read at a switch's
+  // site says nothing (gcc2.7.2 -O1 keeps `move v0,a0` in a `case 0: return x;` jump's slot under
+  // the join too)
+  test.each(['tree', 'switch'] as const)('gcc2.7.2 (-O1): the same return at a `%s` site is no mark', (kind) => {
+    expect(marks(GCC_LANES[0], 'copies', kind)).toEqual([false]);
   });
 
   // folded on the taken edge too, the copies' `else` returns 0 and the structuring takes no join

@@ -18,6 +18,14 @@
 // copies `nop` in the `beqz`'s slot and the join `move v0,zero`. There the join loses the copies'
 // match (0 -> 1 line off, really compiled, 2026-11-06).
 //
+// AN `if` SITE ONLY. The premise is an `if`'s two arms, one of them the fall-through. A switch's case
+// arms, read as a switch (`tree`) or a jump table (`switch`), are each a jump target, a case label,
+// so no return in one folds the switch value at -O1 whatever the source wrote, and an unfolded one
+// says nothing. Compiled at gcc2.7.2 -O1: `switch (x) { case 0: return x; case 5: p[1] = 2; break; }`
+// followed by its tail, written with the join, keeps `move v0,a0` in the case-0 jump's slot, and
+// the join and the copies both compile byte-exact. A switch the structurer reads as `if`s (three
+// cases of that function) is still read, the residue of the rule: no reading of it is exact.
+//
 // A MARK IS EVIDENCE, NOT PROOF, as structure/cross-jumped-tail.ts says of its own: it moves which
 // verified reading is the default, never what is lifted. Read only where the target says its cse
 // leaves the taken edge unfolded; elsewhere (`true`, or absent) an unfolded return says nothing.
@@ -26,10 +34,14 @@ import type { JoinPastReturnsSite } from './structure';
 
 const succsOf = (b: Block): Block[] => [...new Set(b.ops[b.ops.length - 1]?.successors.map((s) => s.block) ?? [])];
 
-/** Does an early return of `site` give back, unfolded, the value its own branch tested equal to a
- *  constant? The return block holds only its `ret`, has one predecessor, and that predecessor's
- *  `cond_br` takes it on the equal side of an `icmp_eq`/`icmp_ne` of that value against a `const`. */
+/** Does an early return of the `if` site `site` give back, unfolded, the value its own branch tested
+ *  equal to a constant? The return block holds only its `ret`, has one predecessor, and that
+ *  predecessor's `cond_br` takes it on the equal side of an `icmp_eq`/`icmp_ne` of that value against
+ *  a `const`. */
 export function unfoldedBranchConstant(fn: Fn, site: JoinPastReturnsSite): boolean {
+  if (site.kind !== 'if') {
+    return false;
+  }
   const def = new Map<Value, Op>();
   const preds = new Map<Block, Block[]>(fn.blocks.map((b) => [b, []]));
   for (const b of fn.blocks) {
