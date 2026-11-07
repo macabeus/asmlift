@@ -2264,6 +2264,14 @@ function poolRef(
  *  A function whose pool names nothing external is therefore left alone (both spellings still
  *  enumerate, and the differ referees) rather than being read as evidence of anything.
  *
+ *  Nor does it hold for every asm that kept SOME symbols: a ROM disassembly that names only the
+ *  exact start of each symbol, and writes `name+offset` only inside a sized entry, prints agbcc's
+ *  relocated `.word g+0x39` (what `((u8 *)&g)[0x39]` compiles to) as a plain `0x...` beside the
+ *  bare `g` the rest of the pool holds. The veto still keeps such a word raw, which is the right
+ *  call HERE — this pass sees one word, not what else the function reaches — and the byte is
+ *  respelled through `g` later, where every access of the function is in view and the reason one
+ *  name is exact is stated (raise/offsetnames.ts `respellNumericThroughName`).
+ *
  *  Labels DEFINED in this same asm — the jump-table pointer word, a pret-style `_08012358` pool
  *  label — are not external symbols and never witness: they survive disassembly whether or not
  *  relocations did. "Defined here" is the union of all three label sets this pass builds, and
@@ -6583,7 +6591,10 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       //
       // VETOED when this asm's pool names other symbols (poolNamesASymbol): agbcc would
       // have emitted THIS word symbolically too had the source named it, so promoting it
-      // spells a name the source did not use.
+      // spells a name the source did not use — unless the disassembly printed a relocated
+      // `g+K` word as a number, which it does for an unsized `g`; then a byte the function
+      // also reaches through `g` is respelled through it after the lift
+      // (raise/offsetnames.ts `respellNumericThroughName`), not here.
       //
       // …but the veto is really about RELOCATION, not about naming. An `extern` name makes
       // the compiler emit a relocated pool word, which contradicts the numeric word the
