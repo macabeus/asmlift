@@ -969,6 +969,24 @@ describe('a numeric address the function also reaches through a name', () => {
     );
   });
 
+  test('an access through the name at a runtime index is an alias-set partner of unknown bytes', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `s32 v = g.b38; ((u32 *)&g)[i] = 5;
+    // *(vu16 *)0x03005258 = 7; return v + ((vu32 *)&g)[i];` (struct S { u8 pad[0x38]; u8 b38; u8
+    // b39; u8 r[0x1a]; }). Spelled through `g`, the halfword store sits beside a word store and
+    // reload at `[i]`, which agbcc forwards across (`str; strh; mov r0, #0x5` for the one-name C):
+    // 5 where the machine reads 7 at i == 14
+    const asm =
+      'f:\n\tldr\tr2, .L3\n\tadd\tr1, r2, #0\n\tadd\tr1, r1, #0x38\n\tldrb\tr3, [r1]\n\tlsl\tr0, r0, #0x2\n' +
+      '\tadd\tr0, r0, r2\n\tmov\tr1, #0x5\n\tstr\tr1, [r0]\n\tldr\tr2, .L3+0x4\n\tmov\tr1, #0x7\n\tstrh\tr1, [r2]\n' +
+      '\tldr\tr0, [r0]\n\tadd\tr3, r3, r0\n\tadd\tr0, r3, #0\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n' +
+      '\t.word\t0x3005258\n';
+    const g: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data' }]]]);
+    expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: g })).toThrow(
+      /byte 0x3005258 is reached as 'g' and as a numeric address/,
+    );
+    expect(respelledWithout('alias-sets-may-differ', asm, g)).toEqual(['g']);
+  });
+
   test('without `device-or-volatile` a device register store is respelled through a name', () => {
     // a numeric store inside the GBA I/O window may be a `REG_*` macro's volatile access, which a
     // name the map holds there carries no qualifier for

@@ -905,7 +905,8 @@ export interface NumericRespell {
   /** another map entry covers one of `op`'s bytes */
   readonly otherName: string | null;
   /** the widths of `op` and of each overlapping access spelled `name`, one pair per access, where
-   *  the pair holds a store */
+   *  the pair holds a store — an access through `name` whose bytes the map cannot place (a runtime
+   *  index off it) counted as overlapping, since nothing says it does not */
   readonly widthPairs: readonly (readonly [number, number])[];
   /** the widths of `op` and of each overlapping access renamed through `name` along with it, one
    *  pair per access, where the pair holds a store: both become casts the rewrite writes, whose
@@ -980,9 +981,11 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
   // unsigned twin, each pointer type has its own), and reorders a load past a store of another
   // set even on one object. Spelled through one name, the respelled cast and the name's own access
   // need not share a set unless one is char-wide, or both are one halfword-or-narrower type: a
-  // 4-byte cell may be declared a pointer, which a `u32` cast does not alias. Asked on every
-  // compiler: agbcc's is the one measured (`g = 5; ((u16 *)&g)[1] = 7; return g;` is `strh; mov r0,
-  // #0x5`), and a compiler that keeps no alias sets only declines a pair it could have lifted.
+  // 4-byte cell may be declared a pointer, which a `u32` cast does not alias. An access through the
+  // name at a runtime index is a partner of unknown bytes (agbcc forwards `((u32 *)&g)[i] = 5` past
+  // `((u16 *)&g)[28] = 7` to the `[i]` reload). Asked on every compiler: agbcc's is the one
+  // measured (`g = 5; ((u16 *)&g)[1] = 7; return g;` is `strh; mov r0, #0x5`), and a compiler that
+  // keeps no alias sets only declines a pair it could have lifted.
   // Two accesses one literal renames TOGETHER are two casts the rewrite writes, so one width is one
   // integer type there and only different widths neither char-wide may differ.
   {
@@ -1124,17 +1127,47 @@ function numericRespellSites(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBe
   return [...declined].map((op) => respellCase(op, undefined, census)!);
 }
 
-/** What {@link respellCase} reads off the whole function: its placed accesses and the map. */
+/** What {@link respellCase} reads off the whole function: its placed accesses, the map, and the
+ *  accesses through a name the map cannot place (`unplacedThrough`). */
 interface RespellCensus {
   readonly placed: readonly PlacedAccess[];
   readonly places: Map<string, Places>;
   readonly fold: (v: Value) => number | null;
   readonly symbols: SymbolMap;
   readonly behaviors: OffsetNameBehaviors;
+  /** each access whose address a `gaddr` of `name` reaches ({@link accessesReachedBy}) and which
+   *  {@link placeAccess} does not place — a runtime index off the name — with its width */
+  readonly unplacedThrough: (name: string) => readonly { readonly width: number; readonly writes: boolean }[];
 }
 
 function respellCensus(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors): RespellCensus {
-  return { ...placedAccesses(fn, symbols), symbols, behaviors };
+  const at = placedAccesses(fn, symbols);
+  const placedOps = new Set(at.placed.map((p) => p.op));
+  const memo = new Map<string, { width: number; writes: boolean }[]>();
+  const unplacedThrough = (name: string): { width: number; writes: boolean }[] => {
+    let out = memo.get(name);
+    if (out === undefined) {
+      const ops = new Set<Op>();
+      for (const b of fn.blocks) {
+        for (const op of b.ops) {
+          if (op.opcode === 'gaddr' && op.attrs.sym === name) {
+            for (const a of accessesReachedBy(fn, op)) {
+              if (!placedOps.has(a)) {
+                ops.add(a);
+              }
+            }
+          }
+        }
+      }
+      out = [...ops].map((a) => ({
+        width: (a.opcode === 'load' || a.opcode === 'store' ? a.attrs.width : a.attrs.elemSize) as number,
+        writes: a.opcode === 'store' || a.opcode === 'astore',
+      }));
+      memo.set(name, out);
+    }
+    return out;
+  };
+  return { ...at, symbols, behaviors, unplacedThrough };
 }
 
 /** The case the gates judge for the numeric access `op`, spelled through `through` — the name a
@@ -1189,9 +1222,14 @@ function respellCase(
     macro: name !== null && places.get(name)?.macro === true,
     writes: x.writes,
     otherName,
-    widthPairs: overlapping
-      .filter((y) => y.spelling === name)
-      .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
+    widthPairs: [
+      ...overlapping
+        .filter((y) => y.spelling === name)
+        .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
+      ...(name === null ? [] : census.unplacedThrough(name))
+        .filter((u) => x.writes || u.writes)
+        .map((u) => [hi - lo, u.width] as const),
+    ],
     castPairs: overlapping
       .filter((y) => y.spelling === null)
       .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),

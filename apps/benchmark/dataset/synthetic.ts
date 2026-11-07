@@ -17848,6 +17848,23 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: `s32 ${sym}(void);`,
     symbols: NUMPOOL_MAP,
   })),
+  // …and a word store at a RUNTIME index off the name beside the numeric halfword store and the
+  // `[i]` reload (`numpool_idx`): the indexed accesses' bytes are unknown, so they may be the
+  // halfword's, and agbcc forwards the indexed store past a halfword cast of the same object to the
+  // reload (`str; strh; mov r0, #0x5`), so spelled through the name it would read 5 where the
+  // machine reads 7 at `i == 14`. It keeps declining.
+  {
+    sym: 'numpool_idx',
+    src:
+      'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
+      'struct NumPool { u8 pad[0x38]; u8 b38; u8 b39; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\n' +
+      's32 numpool_idx(s32 i) {\n    s32 v = gNumPool.b38;\n    ((u32 *)&gNumPool)[i] = 5;\n' +
+      '    *(vu16 *)0x03005258 = 7;\n    return v + ((vu32 *)&gNumPool)[i];\n}',
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 's32 numpool_idx(s32 i);',
+    symbols: NUMPOOL_MAP,
+  },
   // …and its O32 twin: the name read through `%lo`, the byte stored through `lui 0x8010`, which
   // gcc 2.7.2 and KMC forward across as two spellings and reload as one name
   {
