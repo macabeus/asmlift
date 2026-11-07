@@ -75,6 +75,8 @@ import {
   foldExitTrampolines,
 } from '@asmlift/core/raise/latch';
 import {
+  NUMERIC_RESPELL_GATES,
+  type NumericRespell,
   OFFSET_NAME_GATES,
   OFFSET_NAME_PASS,
   type OffsetAddress,
@@ -309,12 +311,20 @@ export const PASSES: Record<string, CensusablePass> = {
     // raise/offsetnames.ts's `OFFSET_NAME_GATES` — which walked-to addresses the symbol map is
     // allowed to name. ONE table, asked once per site the walk resolves, and a site is only built
     // where the address already bottoms out at a `gaddr` plus a non-zero constant, so the rows with
-    // no symbol map and the rows whose arithmetic stands on a parameter contribute nothing.
-    tables: [['offset', OFFSET_NAME_GATES as readonly Gate<never>[]]],
+    // no symbol map and the rows whose arithmetic stands on a parameter contribute nothing. And
+    // `NUMERIC_RESPELL_GATES` — which numeric accesses are respelled through the name beside them —
+    // asked once per numeric access of a pair the pass would decline on, per respell round, and
+    // once more per access a respelled literal reaches; so a lift that never meets two spellings
+    // of one byte contributes nothing to it.
+    tables: [
+      ['offset', OFFSET_NAME_GATES as readonly Gate<never>[]],
+      ['respell', NUMERIC_RESPELL_GATES as readonly Gate<never>[]],
+    ],
     install: (w) => {
       const restore = OFFSET_NAME_PASS.run;
       const gates = w[0] as readonly Gate<OffsetAddress>[];
-      OFFSET_NAME_PASS.run = (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors, gates);
+      const respell = w[1] as readonly Gate<NumericRespell>[];
+      OFFSET_NAME_PASS.run = (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors, gates, respell);
       return () => {
         OFFSET_NAME_PASS.run = restore;
       };

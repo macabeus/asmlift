@@ -14,6 +14,7 @@ import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
 import { tallying } from '@asmlift/core/l3/gates';
 import { decompile } from '@asmlift/core/pipeline';
 import { emptyScaleRecord } from '@asmlift/core/raise/extscale';
+import { OFFSET_NAME_PASS } from '@asmlift/core/raise/offsetnames';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
@@ -195,6 +196,28 @@ describe('the gate census seam', () => {
     expect(FRAME_OBJECT_AUDIT.run).toBe(before);
     lift();
     expect(wrapped[0].refusals()).toEqual([['reaches-an-unaccounted-word', 1]]);
+  });
+
+  it('routes the numeric respell through the WRAPPED table, and the undo restores the record', () => {
+    // a word stored and reloaded through `gUnk`, its halfword stored through the number beside it:
+    // `alias-sets-may-differ`. Lifted from asm text, which needs no toolchain.
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tmovs\tr0, #7\n\tstrh\tr0, [r2]\n' +
+      '\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x030007c8\n.L2:\n\t.word\t0x030007ca\n';
+    const symbols = new Map([[0x030007c8, [{ name: 'gUnk', kind: 'data' as const }]]]);
+    const lift = () => expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols })).toThrow(/as a numeric address/);
+    const pass = PASSES.offsetnames;
+    expect(pass.tables.map(([name]) => name)).toEqual(['offset', 'respell']);
+    const wrapped = pass.tables.map(([, t]) => tallying(t));
+    const before = OFFSET_NAME_PASS.run;
+    const uninstall = pass.install(wrapped.map((w) => w.gates));
+    expect(OFFSET_NAME_PASS.run).not.toBe(before);
+    lift();
+    expect(wrapped[1].refusals()).toEqual([['alias-sets-may-differ', 1]]);
+    uninstall();
+    expect(OFFSET_NAME_PASS.run).toBe(before);
+    lift();
+    expect(wrapped[1].refusals()).toEqual([['alias-sets-may-differ', 1]]);
   });
 
   it('refuses a pass it cannot reach, rather than censusing zero', () => {
