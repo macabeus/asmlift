@@ -76,6 +76,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import {
+  DECLARED_VOLATILE,
   effectful,
   orderSensitive,
   placedAt,
@@ -3945,6 +3946,10 @@ function structureWithinBudget(
   }
 }
 
+/** The ops a structuring of each fn stamped declared-volatile that no raising pass had stamped
+ *  (`structureRanked`'s guarded-read decline), kept across every later structuring of that fn. */
+const STAMPED_LATE = new WeakMap<Fn, WeakSet<Op>>();
+
 /** Which reading of a divergent branch outside a loop a structuring takes, and whether it asked the
  *  join past early returns anywhere: unheld, so a refused run still says it (`structureWithinBudget`). */
 interface JoinReading {
@@ -4168,10 +4173,27 @@ function structureRanked(
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
   // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
   // branch, which is right only for one no fold could move, so this read declines instead.
-  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, {
+  //
+  // "First to place" is a fact about the raised function, not about this run: the stamp stays on the
+  // op, so a second structuring of the same fn (the other return-tail reading, a rerun, another
+  // ranked setting) would find nothing newly stamped and lift what the first declined. So every op
+  // a structuring stamps late is remembered on the fn, and each later one reads it as late too
+  // while it is still stamped.
+  const added = stampDeclaredVolatile(fn, mapSymbols, {
     volatileReadsExtendInRegister: opts.volatileReadsExtendInRegister,
     contextGlobals,
   });
+  let remembered = STAMPED_LATE.get(fn);
+  if (remembered === undefined) {
+    remembered = new WeakSet();
+    STAMPED_LATE.set(fn, remembered);
+  }
+  for (const op of added) {
+    remembered.add(op);
+  }
+  const stampedLate = fn.blocks.flatMap((b) =>
+    b.ops.filter((op) => op.attrs[DECLARED_VOLATILE] === true && remembered.has(op)),
+  );
   if (stampedLate.length > 0) {
     const defsNow = defOpMap(fn);
     const guarded = shortCircuitGuardedValues(fn, defsNow);
