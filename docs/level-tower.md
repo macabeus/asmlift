@@ -179,6 +179,23 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   flipping the constant trades one site for the other, and the field has to be decided from the
   assembly at each site.
 
+  **A MEASURED DEFAULT IS THE ONE EXCEPTION, AND IT IS NOT A BEHAVIOR.** Where the readings split
+  site by site, no signal read from the assembly separates the sites yet, and both readings stay in
+  the ranked fan, a per-compiler field may still choose which one is PUBLISHED, under the rule that
+  changing a default spelling loses no match: it is declared only on a compiler where held-out real
+  functions, every function of projects the change was not chosen on, really compiled against the
+  projects' own objects, show the new default losing none of the old one's matches, and it is left
+  out everywhere else. Its absent value is therefore the OLD default, applied by the caller, and not
+  the structurer's default: it inherits the past, never another compiler. `joinPastReturnsByDefault`
+  (target.ts, read by pipeline.ts `structureReturnTailReading`) is the one such field. On agbcc and
+  IDO 7.1 the join past early returns gains matches at some held-out sites and loses them at others,
+  and no layout mark separates the losses, so those leave it out and publish the copies, with the
+  join still ranked as `/ret-join`. The field's note carries the counts, lost and gained per compiler,
+  and the gains given up. It is re-measured, not inherited, whenever the chooser reads a new mark,
+  a toolchain gains a build or profile, or a held-out project is added, and it is deleted the day a
+  signal read from the assembly separates the sites: that signal is the answer this rule only
+  stands in for.
+
   A variation whose SIGN is base-dependent also cannot be a compiler behavior, but that is not a test you can run
   here: settling it needs two bases and therefore two rounds, where the criterion above is one you
   apply before building. It is really a rule about reading a PRICE, so it lives with the other

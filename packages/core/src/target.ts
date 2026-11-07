@@ -1321,6 +1321,8 @@ export interface TargetDescription {
     // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
     // join was a default, and the join is still structured and kept in the ranked fan as
     // `/ret-join`: a compiler the held-out measurement has not reached keeps the default it had.
+    // docs/level-tower.md (A MEASURED DEFAULT IS THE ONE EXCEPTION) says why a field whose readings
+    // split site by site may still be declared here, and what re-measures it.
     //
     // MEASURED over held-out real functions, every function of a project outside the 620 the marks
     // were chosen on, both readings really compiled against the project's own objects (2026-11-06).
