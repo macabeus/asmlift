@@ -2287,11 +2287,14 @@ export function enumerateCandidates(
           continue;
         }
         // THE OTHER RETURN-TAIL READING, `/ret-copy` or `/ret-join`, in its own `reading` pass
-        // between the follow and the sink. The default pass structures each setting with the join
-        // past early returns and, where that took the join somewhere (`onJoinPastReturns`), with
-        // the return-tail copies (`copyReturnTails`) too, and publishes the copies only where they
-        // spell the function in fewer lines or the layout shows a cross-jumped return tail
-        // (pipeline.ts `structureReturnTailReading`). This pass
+        // between the follow and the sink. The default pass structures each setting both ways where
+        // the join past early returns took a join somewhere (`onJoinPastReturns`), and publishes one
+        // (pipeline.ts `structureReturnTailReading`). On a target that declares the join its default
+        // (`joinPastReturnsByDefault`: MIPS GCC, mwcc 2.4.2) it structures the join first and publishes
+        // the copies (`copyReturnTails`) only where they spell the function in fewer lines, the layout
+        // shows a cross-jumped return tail, or an early return keeps a branch-proven constant
+        // unfolded. On every other target it structures the copies first and publishes them, and the
+        // join only where the copies refuse. This pass
         // enumerates the tree it did not publish, so neither reading is structured twice:
         //   - `/ret-copy`, the copies, where the join was published. A chain of `if`s each holding
         //     an early `return;` has no CFG join (`synthetic:retchain`), and where the early returns
@@ -2517,8 +2520,11 @@ export function enumerateCandidates(
                 // `structureReturnTailReading`): on a target that declares the join past early
                 // returns its default, the join, or the copies where they spell this setting's
                 // function shorter or the asm layout or an unfolded return marks them; on every other
-                // target the copies, whose refusal aborts the row as before. The losing tree is kept
-                // for the `reading` pass, so neither reading is structured twice.
+                // target the copies, structured first, and the join only where they refuse, with
+                // their refusal reported under `ret-copy` (the reading the fan then cannot hold). A
+                // setting fails only where both refuse, and that failure is handled below as any
+                // structuring failure. The losing tree is kept for the `reading` pass, so neither
+                // reading is structured twice.
                 const copiesBarred = stripped(copiesDropped);
                 const read = structureReturnTailReading(
                   fn,
