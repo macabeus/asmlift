@@ -17824,6 +17824,30 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { h: { params: 1, returnsVoid: true }, [sym]: { returnsVoid: true } },
     symbols,
   })),
+  // …and ONE numeric pool word reaching three accesses that renaming the word spells through the
+  // name together: a word store, a narrower store at +2 and a word reload, beside the walked read
+  // of `gNumPool.f39`. With the narrower store a halfword (`numpool_pun`), the one-name C has a
+  // u16 and a word cast of one object in two alias sets, which agbcc forwards across (`str; strh;
+  // add r0, r0, #0x5`) where the asm reloads, so it keeps declining. A byte store (`numpool_punb`)
+  // is char-wide, and that one-name C reloads, so it lifts through the name.
+  ...(
+    [
+      ['numpool_pun', 'vu16'],
+      ['numpool_punb', 'vu8'],
+    ] as const
+  ).map(([sym, narrow]): SynthSpec => ({
+    sym,
+    src:
+      'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
+      'typedef volatile unsigned char vu8;\n' +
+      'struct NumPool { u32 w; u8 pad[0x35]; u8 f39; };\nextern struct NumPool gNumPool;\n' +
+      `s32 ${sym}(void) {\n    s32 v0 = gNumPool.f39;\n    vu32 *p = (vu32 *)0x03005258;\n    *p = 5;\n` +
+      `    ((${narrow} *)p)[${narrow === 'vu16' ? 1 : 2}] = 7;\n    return v0 + *p;\n}`,
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: `s32 ${sym}(void);`,
+    symbols: NUMPOOL_MAP,
+  })),
   // …and its O32 twin: the name read through `%lo`, the byte stored through `lui 0x8010`, which
   // gcc 2.7.2 and KMC forward across as two spellings and reload as one name
   {
