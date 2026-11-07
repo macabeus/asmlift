@@ -80,6 +80,15 @@ export interface SynthSpec {
   candidateContext?: string;
 }
 
+// The maps the `numpool*` rows are fed: `gNumPool` unsized at its address, as a ROM's absolute
+// symbol carries it, and (`_2NM`) a second, sized entry over the byte the row stores through.
+const NUMPOOL_MAP: SymbolMap = new Map([[0x03005220, [{ name: 'gNumPool', kind: 'data' as const }]]]);
+const NUMPOOL_2NM_MAP: SymbolMap = new Map([
+  ...NUMPOOL_MAP,
+  [0x03005259, [{ name: 'gNumFlag', kind: 'data' as const, size: 1 }]],
+]);
+const NUMPOOL_M_MAP: SymbolMap = new Map([[0x80100000, [{ name: 'gNumPool', kind: 'data' as const }]]]);
+
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
 const FIVE: ToolchainId[] = [...ALL, 'gcc2.7.2'];
 // The CodeWarrior -O0,p set `framelist`, `deadloc` and `homecall` build at, and the dead-read rows
@@ -17773,6 +17782,46 @@ export const SYNTHETIC: SynthSpec[] = [
           }))),
     ];
   }),
+  // A NUMERIC ADDRESS THE FUNCTION ALSO REACHES THROUGH A NAME (core raise/offsetnames.ts
+  // `respellNumericThroughName`). agbcc compiles `((u8 *)&g)[0x39]` to the relocated pool word
+  // `.word g+0x39`, and a ROM disassembly that names only symbol starts prints it as a number beside
+  // the bare `g` (kl2dct `sub_0801E528`'s `0x03005259` beside `gUnk_03005220`); written here as the
+  // number itself, which is the same asm. The pool names `gNumPool`, so the Thumb pool veto keeps
+  // the word raw, and the store and the walked read are two spellings of one byte: declined until
+  // the store is spelled through the name. `numpool_2nm` and `numpool_w` keep declining: another
+  // map entry over the byte, and a halfword store over a word read (agbcc gives the two alias sets
+  // of their own and forwards across them on one object).
+  ...(
+    [
+      ['numpool', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_MAP],
+      ['numpool_2nm', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_2NM_MAP],
+      ['numpool_w', 'u8 pad[0x34]; u32 f39', '*(u16 *)0x0300525A = 1;', NUMPOOL_MAP],
+    ] as const
+  ).map(([sym, field, store, symbols]): SynthSpec => ({
+    sym,
+    src:
+      `struct NumPool { u32 w; ${field}; };\nextern struct NumPool gNumPool;\nvoid h(s32);\n` +
+      `void ${sym}(s32 a) {\n    if (a != 0) {\n        if (gNumPool.f39 <= 0x14) h(a);\n    } else {\n        ${store}\n    }\n}`,
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: `void h(s32);\nvoid ${sym}(s32 a);`,
+    proto: { h: { params: 1, returnsVoid: true }, [sym]: { returnsVoid: true } },
+    symbols,
+  })),
+  // …and its O32 twin: the name read through `%lo`, the byte stored through `lui 0x8010`, which
+  // gcc 2.7.2 and KMC forward across as two spellings and reload as one name
+  {
+    sym: 'numpool_m',
+    src:
+      'struct NumPool { u32 w; u8 pad[0x35]; u8 f39; };\nextern struct NumPool gNumPool;\nvoid h(s32);\n' +
+      'void numpool_m(s32 a) {\n    if (a != 0) {\n        if (gNumPool.f39 <= 0x14) h(a);\n    } else {\n' +
+      '        *(u8 *)0x80100039 = 1;\n    }\n}',
+    features: ['global', 'struct'],
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'void h(s32);\nvoid numpool_m(s32 a);',
+    proto: { h: { params: 1, returnsVoid: true }, numpool_m: { returnsVoid: true } },
+    symbols: NUMPOOL_M_MAP,
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
