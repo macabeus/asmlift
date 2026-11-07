@@ -704,6 +704,10 @@ export type OffsetNameBehaviors = StampBehaviors & {
    *  it may be a `volatile` register the source spelled by address, which no map name carries, so
    *  {@link respellNumericThroughName} leaves it as the asm has it */
   readonly deviceRegisters?: readonly [number, number];
+  /** the compiler reloads a cell of one object stored and read as two integer types
+   *  (`compilerBehaviors` `reloadsAcrossIntegerTypes`; absent ⇒ it may forward), which
+   *  {@link respellNumericThroughName}'s alias-set gate reads */
+  readonly reloadsAcrossIntegerTypes?: boolean;
 };
 
 /** ONE SPELLING PER CELL, AND ONE CELL PER SPELLING — the premise `ir/alias.ts` reads names on:
@@ -914,6 +918,9 @@ export interface NumericRespell {
   readonly castPairs: readonly (readonly [number, number])[];
   /** the target's device-register window, if it has one */
   readonly device: readonly [number, number] | undefined;
+  /** the compiler reloads across two integer types of one object (`compilerBehaviors`
+   *  `reloadsAcrossIntegerTypes`), so no width pair can forward */
+  readonly reloadsAcrossTypes: boolean;
 }
 
 /** The refusals, in attribution order: the access, then the name, then the bytes. Each leaves the
@@ -977,25 +984,25 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
     sound: false,
     rejects: (c) => c.otherName !== null,
   },
-  // agbcc gives each integer TYPE its own alias set (char is set 0, a type shares one with its
-  // unsigned twin, each pointer type has its own), and reorders a load past a store of another
-  // set even on one object. Spelled through one name, the respelled cast and the name's own access
-  // need not share a set unless one is char-wide, or both are one halfword-or-narrower type: a
-  // 4-byte cell may be declared a pointer, which a `u32` cast does not alias. An access through the
-  // name at a runtime index is a partner of unknown bytes (agbcc forwards `((u32 *)&g)[i] = 5` past
-  // `((u16 *)&g)[28] = 7` to the `[i]` reload). Asked on every compiler: agbcc's is the one
-  // measured (`g = 5; ((u16 *)&g)[1] = 7; return g;` is `strh; mov r0, #0x5`), and a compiler that
-  // keeps no alias sets only declines a pair it could have lifted.
-  // Two accesses one literal renames TOGETHER are two casts the rewrite writes, so one width is one
-  // integer type there and only different widths neither char-wide may differ.
+  // agbcc at -O2 gives each integer TYPE its own alias set (char is set 0, a type shares one with
+  // its unsigned twin, each pointer type has its own), and forwards a stored value past a store of
+  // another set even on one object. Spelled through one name, the respelled cast and the name's own
+  // access need not share a set unless one is char-wide, or both are one halfword-or-narrower type:
+  // a 4-byte cell may be declared a pointer, which a `u32` cast does not alias. An access through
+  // the name at a runtime index is a partner of unknown bytes (agbcc forwards `((u32 *)&g)[i] = 5`
+  // past `((u16 *)&g)[28] = 7` to the `[i]` reload). Two accesses one literal renames TOGETHER are
+  // two casts the rewrite writes, so one width is one integer type there and only different widths
+  // neither char-wide may differ. Asked only of a compiler not declared to reload across types
+  // (`reloadsAcrossIntegerTypes`, absent on agbcc), which is where the C could forward.
   {
     id: 'alias-sets-may-differ',
     why: 'a store and an overlapping access of other widths may sit in different alias sets on one object',
     sound: true,
     guardedBy: 'offset-names.test.ts: without `alias-sets-may-differ` a halfword store is respelled beside a word',
     rejects: (c) =>
-      c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)) ||
-      c.castPairs.some(([a, b]) => a !== 1 && b !== 1 && a !== b),
+      !c.reloadsAcrossTypes &&
+      (c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)) ||
+        c.castPairs.some(([a, b]) => a !== 1 && b !== 1 && a !== b)),
   },
 ];
 
@@ -1234,6 +1241,7 @@ function respellCase(
       .filter((y) => y.spelling === null)
       .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
     device: behaviors.deviceRegisters,
+    reloadsAcrossTypes: behaviors.reloadsAcrossIntegerTypes === true,
   };
 }
 

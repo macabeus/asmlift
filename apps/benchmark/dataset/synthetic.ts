@@ -17865,20 +17865,30 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 numpool_idx(s32 i);',
     symbols: NUMPOOL_MAP,
   },
-  // …and its O32 twin: the name read through `%lo`, the byte stored through `lui 0x8010`, which
-  // gcc 2.7.2 and KMC forward across as two spellings and reload as one name
-  {
-    sym: 'numpool_m',
+  // …and their O32 and PowerPC twins: the name read through `%lo` (`@l`), the store through `lui
+  // 0x8010` (`lis`), which gcc 2.7.2 and KMC forward across as two spellings, and every one of the
+  // four reloads as one name. The source writes the number, and an object's relocations prove it
+  // did (none on the store's `lui`): spelled through the name, it costs a score and not a meaning.
+  // `numpool_mw` is `numpool_w`'s twin, a halfword store over a word read, which these compilers
+  // reload across as two integer types of one object (target.ts `reloadsAcrossIntegerTypes`), so
+  // it lifts here where agbcc's declines.
+  ...(
+    [
+      ['numpool_m', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x80100039 = 1;'],
+      ['numpool_mw', 'u8 pad[0x34]; u32 f39', '*(u16 *)0x8010003A = 1;'],
+    ] as const
+  ).map(([sym, field, store]): SynthSpec => ({
+    sym,
     src:
-      'struct NumPool { u32 w; u8 pad[0x35]; u8 f39; };\nextern struct NumPool gNumPool;\nvoid h(s32);\n' +
-      'void numpool_m(s32 a) {\n    if (a != 0) {\n        if (gNumPool.f39 <= 0x14) h(a);\n    } else {\n' +
-      '        *(u8 *)0x80100039 = 1;\n    }\n}',
+      `struct NumPool { u32 w; ${field}; };\nextern struct NumPool gNumPool;\nvoid h(s32);\n` +
+      `void ${sym}(s32 a) {\n    if (a != 0) {\n        if (gNumPool.f39 <= 0x14) h(a);\n    } else {\n` +
+      `        ${store}\n    }\n}`,
     features: ['global', 'struct'],
-    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
-    ctx: 'void h(s32);\nvoid numpool_m(s32 a);',
-    proto: { h: { params: 1, returnsVoid: true }, numpool_m: { returnsVoid: true } },
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2', 'ido7.1', 'mwcc_242_81'],
+    ctx: `void h(s32);\nvoid ${sym}(s32 a);`,
+    proto: { h: { params: 1, returnsVoid: true }, [sym]: { returnsVoid: true } },
     symbols: NUMPOOL_M_MAP,
-  },
+  })),
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

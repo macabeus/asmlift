@@ -1200,6 +1200,23 @@ export interface TargetDescription {
     //
     // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
     reloadsAcrossSpellings?: boolean;
+    // Does this compiler RELOAD a cell of ONE object stored and read back as two integer types —
+    // a word member and a halfword cast over it, or a word cast at a runtime index beside a
+    // halfword cast at a constant one? COMPILED with each toolchain's canonical flags, `g.f = 5;
+    // ((u16 *)&g)[2] = 7; return g.f;` over `struct { u32 w; u32 f; } g`: ido7.1 (`sw; sh; lw`,
+    // also at -O1 and -O3), gcc2.7.2 (`sw; sh; lw`, also at -O2 and -O3), gcc2.7.2kmc (`sw; sh;
+    // lw`, also at -O3) and all three CodeWarrior builds (`stw; sth; lwz`; 2.4.2 also at -O3 and
+    // -O4,s) reload, and the runtime-index twin `((u32 *)&g)[i] = 5; ((u16 *)&g)[28] = 7; return
+    // ((u32 *)&g)[i];` reloads on every one of them; each keeps a word read placed before the
+    // halfword store before it. agbcc at -O2 forwards both (`str; strh; mov r0, #0x5`): it gives
+    // each integer type an alias set of its own (it reloads at -O1 and under
+    // `-fno-strict-aliasing`, which this flag-blind field does not say). Read by
+    // raise/offsetnames.ts `respellNumericThroughName`'s `alias-sets-may-differ` gate, which
+    // refuses to spell a numeric access through a name beside an access of another width only
+    // where the compiler may forward between them.
+    //
+    // ABSENT ⇒ false: the compiler may forward (or is unmeasured, which refuses the same respells).
+    reloadsAcrossIntegerTypes?: boolean;
     // Does this compiler, AT THESE FLAGS, keep a plain read whose value nothing uses? A FLAG fact,
     // never written in a description: `targetFor` sets it from the optimisation level
     // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
@@ -1574,6 +1591,8 @@ export const MIPS_IDO: TargetDescription = {
     reloadsLocalReread: false,
     // MEASURED: the probe at the field (`lw v0` after the byte store).
     reloadsAcrossSpellings: true,
+    // MEASURED: the probes at the field (`sw; sh; lw`).
+    reloadsAcrossIntegerTypes: true,
     // MEASURED: the probe at the field.
     narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 1,
@@ -1703,6 +1722,9 @@ export const MIPS_GCC: TargetDescription = {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
+    // MEASURED on both toolchains this description serves, gcc2.7.2 and gcc2.7.2kmc: the probes at
+    // the field (`sw; sh; lw`).
+    reloadsAcrossIntegerTypes: true,
     // DECLARED ON A PAIR FROM EACH TOOLCHAIN THIS DESCRIPTION SERVES, never inherited from agbcc's
     // and never from one sibling to the other. This description is keyed per DESCRIPTION while the
     // fact is per TOOLCHAIN (the note at `spillSlotOrder`), and `MIPS_GCC` serves two, so both owe
@@ -1839,6 +1861,9 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds in C: an integer, a pointer and a `u16 *` passed to an `s32 *`,
     // `u32` and `s32 *` parameter each fail to compile, and each compiles once cast (see the field).
     strictPointerConversions: true,
+    // MEASURED on all three builds (PPC_MWCC_233 inherits it): the probes at the field (`stw; sth;
+    // lwz`).
+    reloadsAcrossIntegerTypes: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,

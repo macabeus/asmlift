@@ -416,8 +416,9 @@ export function stampBehaviorsFor(
 
 /** What the offset-name pass reads besides the IR and the map: the stamp's behaviours (it re-stamps
  *  after naming), whether the compiler reloads across two spellings of one cell (its one-spelling
- *  check, raise/offsetnames.ts `cellSpelledTwice`), and the device-register window a numeric access
- *  is never respelled into a name inside (`respellNumericThroughName`). */
+ *  check, raise/offsetnames.ts `cellSpelledTwice`), and, for `respellNumericThroughName`, whether it
+ *  reloads across two integer types of one object and the device-register window a numeric access
+ *  is never respelled into a name inside. */
 export function offsetNameBehaviorsFor(
   target: TargetDescription,
   contextGlobals: ContextGlobals | undefined,
@@ -425,6 +426,7 @@ export function offsetNameBehaviorsFor(
   return {
     ...stampBehaviorsFor(target, contextGlobals),
     reloadsAcrossSpellings: target.compilerBehaviors.reloadsAcrossSpellings,
+    reloadsAcrossIntegerTypes: target.compilerBehaviors.reloadsAcrossIntegerTypes,
     deviceRegisters: target.capabilities.deviceRegisters,
   };
 }

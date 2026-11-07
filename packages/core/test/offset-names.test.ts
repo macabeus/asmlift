@@ -28,7 +28,7 @@ import {
 } from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, type TargetDescription, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -987,6 +987,18 @@ describe('a numeric address the function also reaches through a name', () => {
     expect(respelledWithout('alias-sets-may-differ', asm, g)).toEqual(['g']);
   });
 
+  test('a compiler that reloads across integer types respells a halfword beside a word', () => {
+    // gcc 2.7.2, KMC, IDO 7.1 and CodeWarrior compile `g.f = 5; ((u16 *)&g)[2] = 7; return g.f;`
+    // to a reload (`sw; sh; lw`, `stw; sth; lwz`): target.ts `reloadsAcrossIntegerTypes`
+    const asm = probe('0x030007ca', 'strh\tr0, [r2]').replace('f:', 'e5:');
+    const reloads: TargetDescription = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, reloadsAcrossIntegerTypes: true },
+    };
+    expect(decompile('e5', asm, reloads, { ...h, symbols: gUnk }).source).toContain('((u16 *)&gUnk_030007C8)[1] = 7;');
+    expect(() => lifted(asm, gUnk)).toThrow(/as a numeric address/);
+  });
+
   test('without `device-or-volatile` a device register store is respelled through a name', () => {
     // a numeric store inside the GBA I/O window may be a `REG_*` macro's volatile access, which a
     // name the map holds there carries no qualifier for
@@ -1035,5 +1047,33 @@ endlabel f
     const out = decompile('f', asm, MIPS_GCC, { symbols: d }).source;
     expect(out).toContain('((u8 *)&D_80100000)[57] = 1;');
     expect(out).not.toMatch(/-2146435015|0x80100039/i);
+  });
+
+  test('on MIPS, a numeric halfword over a named word is spelled through it where gcc reloads', () => {
+    // the word read through `%lo`, a halfword stored over it through `lui 0x8010`: gcc 2.7.2
+    // reloads across the two types of one object (`reloadsAcrossIntegerTypes`), agbcc would not
+    const asm = `glabel f
+    /* 0 80000200 10800005 */  beqz       $a0, .L80000218
+    /* 4 80000204 3C020000 */   lui       $v0, %hi(D_80100000)
+    /* 8 80000208 8C420038 */  lw         $v0, %lo(D_80100000+0x38)($v0)
+    /* C 8000020C 03E00008 */  jr         $ra
+    /* 10 80000210 2C420015 */   sltiu     $v0, $v0, 0x15
+    /* 14 80000214 00000000 */  nop
+.L80000218:
+    /* 18 80000218 3C038010 */  lui        $v1, 0x8010
+    /* 1C 8000021C 24020001 */  addiu      $v0, $zero, 1
+    /* 20 80000220 03E00008 */  jr         $ra
+    /* 24 80000224 A462003A */   sh        $v0, 0x3a($v1)
+endlabel f
+`;
+    const d: SymbolMap = new Map([[0x80100000, [{ name: 'D_80100000', kind: 'data' }]]]);
+    expect(decompile('f', asm, MIPS_GCC, { symbols: d }).source).toContain('((u16 *)&D_80100000)[29] = 1;');
+    const forwards: TargetDescription = {
+      ...MIPS_GCC,
+      compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, reloadsAcrossIntegerTypes: undefined },
+    };
+    expect(() => decompile('f', asm, forwards, { symbols: d })).toThrow(
+      /byte 0x8010003a is reached as 'D_80100000' and as a numeric address/,
+    );
   });
 });
