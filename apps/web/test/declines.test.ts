@@ -1265,6 +1265,7 @@ describe('a class may not outlive the message it classifies', () => {
       'packages/core/src/structure/structure.ts',
     ],
     ['local-image', "reads the compiler's anonymous constant", 'packages/core/src/structure/structure.ts'],
+    ['cell-spelled-twice', 'in one function — C the compiler would read as', 'packages/core/src/raise/offsetnames.ts'],
     ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'not a modelled branch form', 'packages/core/src/frontend/mips.ts'],
@@ -1337,9 +1338,8 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['frontend/register-struct-call.ts', 1],
     ['pipeline.ts', 1],
-    ['raise/offsetnames.ts', 1],
   ];
-  const RESIDUE_TOTAL = 114;
+  const RESIDUE_TOTAL = 113;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
