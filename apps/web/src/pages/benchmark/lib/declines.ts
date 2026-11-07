@@ -631,8 +631,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // ONE CELL, TWO SPELLINGS (`raise/offsetnames.ts` `cellSpelledTwice`): two accesses reach one
     // byte through two names, or a name and a numeric address, with a store among them, on a
     // compiler that forwards across two objects — or one name reaches two of the cells the map
-    // places it at. Its rows are `numpool_2nm` and `numpool_w` on agbcc, numeric stores that a
-    // second map entry and the alias sets keep from being spelled through the name beside them.
+    // places it at. Its rows are agbcc's `numpool_2nm`, `numpool_w`, `numpool_pun` and `numpool_idx`,
+    // numeric stores that a second map entry or the alias sets keep from being spelled through the
+    // name beside them.
     key: 'cell-spelled-twice',
     label: 'One byte reached under two spellings (two names, or a name and a numeric address)',
     pattern: /in one function — C the compiler would read as/,

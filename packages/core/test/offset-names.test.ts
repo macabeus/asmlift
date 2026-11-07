@@ -817,10 +817,11 @@ endlabel f
 // agbcc -O2 compiles `((u8 *)&g)[0x39]`, `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` to the
 // relocated pool word `.word g+0x39`, and `g.f39` to `.word g` plus `add #0x39`; a disassembly that
 // prints `name+offset` only inside a SIZED entry writes the first as a plain number beside the bare
-// `g` (kl2dct's `.4byte 0x03005259` beside `gUnk_03005220`). Spelled through one name the C is one
-// object, which every compiler here orders and reloads as memory requires — agbcc `g = 5; ((u8
-// *)&g)[1] = 7; return g;` is `str; strb [r1, #1]; ldr r0, [r1]`, gcc 2.7.2 and KMC `sw; sb v0,
-// g+1; lw v0, g` — where the two-spelling C is the forwarded 5 on all three.
+// `g` (kl2dct's `.4byte 0x03005259` beside `gUnk_03005220`). Spelled through one name, a byte store
+// over a word is one object to every compiler here, which reloads it — agbcc `g = 5; ((u8 *)&g)[1]
+// = 7; return g;` is `str; strb [r1, #1]; ldr r0, [r1]`, gcc 2.7.2 and KMC `sw; sb v0, g+1; lw v0,
+// g` — where the two-spelling C is the forwarded 5 on all three; two non-char widths are agbcc's
+// alias-set question, below.
 describe('a numeric address the function also reaches through a name', () => {
   // agbcc -O2 -mthumb-interwork, verbatim, of `if (a != 0) { if (gUnk_03005220.f39 <= 0x14) h(a); }
   // else { ((u8 *)&gUnk_03005220)[0x39] = 1; }` (struct S { u32 w; u8 pad[0x35]; u8 f39; }), its

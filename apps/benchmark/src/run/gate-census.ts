@@ -309,7 +309,7 @@ export const PASSES: Record<string, CensusablePass> = {
   },
   offsetnames: {
     // raise/offsetnames.ts's `OFFSET_NAME_GATES` — which walked-to addresses the symbol map is
-    // allowed to name. ONE table, asked once per site the walk resolves, and a site is only built
+    // allowed to name — asked once per site the walk resolves, and a site is only built
     // where the address already bottoms out at a `gaddr` plus a non-zero constant, so the rows with
     // no symbol map and the rows whose arithmetic stands on a parameter contribute nothing. And
     // `NUMERIC_RESPELL_GATES` — which numeric accesses are respelled through the name beside them —

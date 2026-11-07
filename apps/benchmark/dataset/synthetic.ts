@@ -17794,9 +17794,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // number itself, which is the same asm. The word stays raw — `gNumPool` is unsized here, and
   // interior attribution needs a size; for the sized `numpool_sib` map the Thumb pool veto keeps it
   // raw, the pool naming `gNumPool` — and the store and the walked read are two spellings of one
-  // byte: declined until the store is spelled through the name. `numpool_2nm` and `numpool_w` keep declining: another
-  // map entry over the byte, and a halfword store over a word read (agbcc gives the two alias sets
-  // of their own and forwards across them on one object). `numpool_sib` stores through ONE pool word
+  // byte: declined until the store is spelled through the name. `numpool_2nm` and `numpool_w` keep
+  // declining: another map entry over the byte, and a halfword store over a word read (agbcc gives
+  // the two alias sets of their own and forwards across them on one object). `numpool_sib` stores through ONE pool word
   // twice, `p[0]` and `p[4]` of `u8 *p = (u8 *)0x03005259`: `p[4]` is `gNumNext`'s byte, past
   // `gNumPool`'s size, so the first store is spelled through the name and the second keeps the number
   // rather than the word being renamed for both.

@@ -867,7 +867,7 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *
  *  WHERE THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. A disassembly that names only exact symbol
  *  STARTS prints a relocated interior word as a number: agbcc compiles `((u8 *)&g)[0x39]`,
- *  `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39` (where `g.f39` is
+ *  `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39` (while `g.f39` is
  *  `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset` only inside a
  *  sized entry prints that word as a plain number, `g`'s address plus 0x39, beside the bare `g`
  *  the rest of the pool holds. The lift keeps that word raw: for an unsized `g` because interior
@@ -1029,10 +1029,10 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
  *  admitted, because an access respelled may meet a second numeric one over a byte it now names.
  *  Returns the name once per respelled access.
  *
- *  It only ever rewrites an access in a pair {@link cellSpelledTwice} would decline on, so a
- *  function that lifts without it lifts without it unchanged; the caller asks
- *  {@link cellSpelledTwice} again afterwards, and any pair left — two names, a refused gate, a use
- *  of a respelled literal that now meets another spelling — still declines. */
+ *  Its caller runs it only on a function {@link cellSpelledTwice} declines, so a function that
+ *  lifts without it lifts unchanged; the caller asks {@link cellSpelledTwice} again afterwards,
+ *  and any pair left — two names, a refused gate, a use of a respelled literal that now meets
+ *  another spelling — still declines. */
 export function respellNumericThroughName(
   fn: Fn,
   symbols: SymbolMap,
