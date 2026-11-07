@@ -862,6 +862,29 @@ describe('a numeric address the function also reaches through a name', () => {
     expect(out).not.toMatch(/50352729/);
   });
 
+  test('a sibling access off the literal is judged at its own bytes before the literal is renamed', () => {
+    // agbcc -O2 of `u8 *p = (u8 *)0x03005259; p[0] = 1; p[4] = 1;`: one pool word for both stores.
+    // Renaming the literal would spell p[4] through gUnk_03005220, past its size, in gNext's byte
+    const sized: SymbolMap = new Map([
+      [0x03005220, [{ name: 'gUnk_03005220', kind: 'data', size: 0x3c }]],
+      [0x0300525c, [{ name: 'gNext', kind: 'data', size: 4 }]],
+    ]);
+    const out = lifted(E5('0x3005259', 'strb\tr0, [r1]\n\tstrb\tr0, [r1, #4]'), sized);
+    expect(out).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
+    expect(out).not.toContain('((u8 *)&gUnk_03005220)[61]');
+    expect(out).toContain('((u8 *)50352729)[4] = 1;');
+    // a sibling inside the name still takes the literal path
+    expect(lifted(E5('0x3005259', 'strb\tr0, [r1]\n\tstrb\tr0, [r1, #1]'), sized)).toContain(
+      '((u8 *)&gUnk_03005220)[58] = 1;',
+    );
+    // a device-register store reached off the literal through a constant added to it
+    // (`ldr r2, =0xffada7; add r1, r1, r2` lands on 0x04000000) keeps its numeric address
+    const io = `${E5('0x3005259', 'strb\tr0, [r1]\n\tldr\tr2, .L8+4\n\tadd\tr1, r1, r2\n\tstrh\tr0, [r1]')}\t.word\t0xffada7\n`;
+    const ioOut = lifted(io, unsized);
+    expect(ioOut).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
+    expect(ioOut).toContain('*(u16 *)67108864 = 1;');
+  });
+
   test('two names over the byte decline', () => {
     // `gW`, the asm's own relocation, reads the word the byte sits in: a second name the walk does
     // not reach it by

@@ -867,10 +867,10 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *  A disassembly that names only exact symbol STARTS breaks that premise: agbcc compiles
  *  `((u8 *)&g)[0x39]`, `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39`
  *  (where `g.f39` is `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset`
- *  only inside a sized entry prints that relocated word as the plain number `0x03005259` beside
- *  the bare `g` the rest of the pool holds. The lift then reaches one byte as `g + 0x39` and as a
- *  numeric address, and {@link cellSpelledTwice} declines it, correctly: as two spellings the C is
- *  two objects to a compiler that forwards across them.
+ *  only inside a sized entry prints that relocated word as a plain number, `g`'s address plus
+ *  0x39, beside the bare `g` the rest of the pool holds. The lift then reaches one byte as `g +
+ *  0x39` and as a numeric address, and {@link cellSpelledTwice} declines it, correctly: as two
+ *  spellings the C is two objects to a compiler that forwards across them.
  *
  *  WHY ONE NAME IS EXACT. Spelled through ONE name, both accesses are one object to the compiler,
  *  which then orders and reloads them as the memory they share requires — agbcc `-O2` compiles
@@ -994,8 +994,10 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
  *   • THE LITERAL ITSELF, where the access's address is one `const` (plus constant displacements)
  *     at or past the name's address: it becomes `gaddr name + K`, and every use of it with it — the
  *     asm loaded ONE pool word, which the C then spells once and the compiler loads once. Only when
- *     every access that literal addresses is either admitted here or in no pair at all, and none is
- *     a device register's or volatile: a use the gates refused must not be respelled through it.
+ *     the gates admit, through that name and at its own bytes, EVERY access the literal reaches
+ *     ({@link accessesReachedBy}), the ones in no pair included: renaming the literal renames them
+ *     all, and a sibling past the name's size, under another map name or in the device window
+ *     would otherwise take an owner the gates exist to refuse.
  *   • THE ACCESS, otherwise (an address folded from several literals, or one below the name): its
  *     address becomes `gaddr name + K` built beside it, its displacement folded into `K`, and what
  *     the literal fed elsewhere keeps its spelling.
@@ -1015,7 +1017,6 @@ export function respellNumericThroughName(
   gates: readonly Gate<NumericRespell>[] = NUMERIC_RESPELL_GATES,
 ): string[] {
   const out: string[] = [];
-  const device = behaviors.deviceRegisters;
   for (;;) {
     const judged = numericRespellSites(fn, symbols, behaviors).map((s) => ({ s, no: firstRejection(gates, s) }));
     const sites = judged.filter((j) => j.no === null).map((j) => j.s);
@@ -1029,24 +1030,14 @@ export function respellNumericThroughName(
       const d = defOf.get(constDisplacementOf(defOf, a)?.root ?? a);
       return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d : null;
     };
-    // every access each literal addresses, and whether one of them may not be respelled through it
-    const accessesOf = new Map<Op, Op[]>();
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        if (op.opcode === 'load' || op.opcode === 'store' || op.opcode === 'aload' || op.opcode === 'astore') {
-          const c = literalOf(op);
-          if (c !== null) {
-            (accessesOf.get(c) ?? accessesOf.set(c, []).get(c)!).push(op);
-          }
+    const census = respellCensus(fn, symbols, behaviors);
+    const keepsLiteral = (lit: Op, name: string): boolean => {
+      return accessesReachedBy(fn, lit).some((a) => {
+        if (refused.has(a) || a.opcode === 'aload' || a.opcode === 'astore') {
+          return true;
         }
-      }
-    }
-    const keepsLiteral = (op: Op): boolean => {
-      const value = (op.attrs.value as number) >>> 0;
-      return (accessesOf.get(op) ?? []).some((a) => {
-        const lo = (value + ((a.attrs.off as number | undefined) ?? 0)) >>> 0;
-        const inDevice = device !== undefined && lo < device[1] && lo + ((a.attrs.width as number) ?? 1) > device[0];
-        return refused.has(a) || a.attrs.volatile === true || inDevice || a.opcode === 'aload' || a.opcode === 'astore';
+        const c = respellCase(a, name, census);
+        return c === null || firstRejection(gates, c) !== null;
       });
     };
     const named = new Set<Op>();
@@ -1062,7 +1053,7 @@ export function respellNumericThroughName(
         continue;
       }
       const value = lit === null ? null : (lit.attrs.value as number) >>> 0;
-      if (lit !== null && value !== null && value >= at && !keepsLiteral(lit)) {
+      if (lit !== null && value !== null && value >= at && !keepsLiteral(lit, s.name!)) {
         named.add(lit);
         const block = fn.blocks.find((b) => b.ops.includes(lit))!;
         if (value === at) {
@@ -1114,48 +1105,117 @@ function numericRespellSites(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBe
   if (declined.size === 0) {
     return [];
   }
-  const { placed, places } = placedAccesses(fn, symbols);
-  const out: NumericRespell[] = [];
-  for (const op of declined) {
-    const mine = placed.filter((p) => p.op === op);
-    const x = mine[0];
-    const [lo, hi] = x.ranges[0];
-    const overlapping = placed.filter(
-      (y) =>
-        y.op !== op && y.spelling !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
-    );
-    const names = new Set(overlapping.map((y) => y.spelling!));
-    const name = names.size === 1 ? [...names][0] : null;
-    const addrs = name === null ? [] : (places.get(name)?.addrs ?? []);
-    const infos = addrs.length === 1 ? (symbols.get(addrs[0]) ?? []).filter((i) => i.name === name) : [];
-    let otherName: string | null = null;
-    for (const [a, entries] of symbols) {
-      for (const i of entries) {
-        if (i.name !== name && a < hi && lo < a + (i.size ?? 1)) {
-          otherName ??= i.name;
+  const census = respellCensus(fn, symbols, behaviors);
+  return [...declined].map((op) => respellCase(op, undefined, census)!);
+}
+
+/** What {@link respellCase} reads off the whole function: its placed accesses and the map. */
+interface RespellCensus {
+  readonly placed: readonly PlacedAccess[];
+  readonly places: Map<string, Places>;
+  readonly fold: (v: Value) => number | null;
+  readonly symbols: SymbolMap;
+  readonly behaviors: OffsetNameBehaviors;
+}
+
+function respellCensus(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors): RespellCensus {
+  return { ...placedAccesses(fn, symbols), symbols, behaviors };
+}
+
+/** The case the gates judge for the numeric access `op`, spelled through `through` — the name a
+ *  site's overlapping accesses give it when `through` is undefined, or the name a literal the
+ *  access shares with a site would give it ({@link accessesReachedBy}). Null when the map does not
+ *  place `op`. */
+function respellCase(op: Op, through: string | undefined, census: RespellCensus): NumericRespell | null {
+  const { placed, places, symbols, behaviors } = census;
+  const mine = placed.filter((p) => p.op === op);
+  const x = mine[0];
+  if (x === undefined) {
+    return null;
+  }
+  const [lo, hi] = x.ranges[0];
+  const overlapping = placed.filter(
+    (y) => y.op !== op && y.spelling !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
+  );
+  const names = new Set(overlapping.map((y) => y.spelling!));
+  if (through !== undefined) {
+    names.add(through);
+  }
+  const name = names.size === 1 ? [...names][0] : null;
+  const addrs = name === null ? [] : (places.get(name)?.addrs ?? []);
+  const infos = addrs.length === 1 ? (symbols.get(addrs[0]) ?? []).filter((i) => i.name === name) : [];
+  let otherName: string | null = null;
+  for (const [a, entries] of symbols) {
+    for (const i of entries) {
+      if (i.name !== name && a < hi && lo < a + (i.size ?? 1)) {
+        otherName ??= i.name;
+      }
+    }
+  }
+  return {
+    op,
+    placings: mine.length,
+    lo,
+    hi,
+    names,
+    partnerSeveral: overlapping.some((y) => y.objects.length !== 1),
+    name,
+    addrs,
+    infos,
+    macro: name !== null && places.get(name)?.macro === true,
+    writes: x.writes,
+    otherName,
+    widthPairs: overlapping
+      .filter((y) => y.spelling === name)
+      .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
+    device: behaviors.deviceRegisters,
+  };
+}
+
+/** Every access whose address the value of the literal `lit` reaches through arithmetic and joins:
+ *  what spelling the literal through a name respells along with it. One reached through a constant
+ *  displacement — a constant added to a constant among them (`ldr r2, =K; add r1, r1, r2`) — is
+ *  placed, and judged at its own bytes; one past a runtime index is not, and keeps the literal. A
+ *  use that is no address (a call argument, a stored value) is the pointer's VALUE, which spelling
+ *  it through the name does not move. */
+function accessesReachedBy(fn: Fn, lit: Op): Op[] {
+  const users = new Map<Value, Op[]>();
+  const params = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of op.operands) {
+        (users.get(v) ?? users.set(v, []).get(v)!).push(op);
+      }
+      for (const s of op.successors) {
+        if (s.block !== fn.blocks[0]) {
+          s.args.forEach((v, i) => {
+            if (i < s.block.params.length) {
+              (params.get(v) ?? params.set(v, []).get(v)!).push(s.block.params[i]);
+            }
+          });
         }
       }
     }
-    out.push({
-      op,
-      placings: mine.length,
-      lo,
-      hi,
-      names,
-      partnerSeveral: overlapping.some((y) => y.objects.length !== 1),
-      name,
-      addrs,
-      infos,
-      macro: name !== null && places.get(name)?.macro === true,
-      writes: x.writes,
-      otherName,
-      widthPairs: overlapping
-        .filter((y) => y.spelling === name)
-        .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
-      device: behaviors.deviceRegisters,
-    });
   }
-  return out;
+  const out = new Set<Op>();
+  const seen = new Set<Value>();
+  const work = [...lit.results];
+  for (let v = work.pop(); v !== undefined; v = work.pop()) {
+    if (seen.has(v)) {
+      continue;
+    }
+    seen.add(v);
+    work.push(...(params.get(v) ?? []));
+    for (const u of users.get(v) ?? []) {
+      const access = u.opcode === 'load' || u.opcode === 'store' || u.opcode === 'aload' || u.opcode === 'astore';
+      if (access && u.operands[0] === v) {
+        out.add(u);
+      } else if (!access && u.opcode !== 'call' && u.results.length === 1) {
+        work.push(u.results[0]);
+      }
+    }
+  }
+  return [...out];
 }
 
 /** Which rule refused each numeric access {@link respellNumericThroughName} would judge in `fn`
