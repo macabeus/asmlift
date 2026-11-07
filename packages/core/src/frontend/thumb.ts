@@ -2267,10 +2267,14 @@ function poolRef(
  *  Nor does it hold for every asm that kept SOME symbols: a ROM disassembly that names only the
  *  exact start of each symbol, and writes `name+offset` only inside a sized entry, prints agbcc's
  *  relocated `.word g+0x39` (what `((u8 *)&g)[0x39]` compiles to) as a plain `0x...` beside the
- *  bare `g` the rest of the pool holds. The veto still keeps such a word raw, which is the right
- *  call HERE — this pass sees one word, not what else the function reaches — and the byte is
- *  respelled through `g` later, where every access of the function is in view and the reason one
- *  name is exact is stated (raise/offsetnames.ts `respellNumericThroughName`).
+ *  bare `g` the rest of the pool holds. Such a word stays raw here, and the veto is NOT what keeps
+ *  it so: it is an interior word, and interior attribution (`symbols.ts` `lookupInterior`) skips
+ *  a name with no size, which is exactly the name the disassembler prints that way. The veto
+ *  decides only for a SIZED `g`, whose interior word it keeps raw where attribution would have
+ *  named it. Either way raw is the right call HERE — this pass sees one word, not what else the
+ *  function reaches — and the byte is respelled through `g` later, where every access of the
+ *  function is in view and the reason one name is exact is stated (raise/offsetnames.ts
+ *  `respellNumericThroughName`).
  *
  *  Labels DEFINED in this same asm — the jump-table pointer word, a pret-style `_08012358` pool
  *  label — are not external symbols and never witness: they survive disassembly whether or not
@@ -6591,10 +6595,12 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       //
       // VETOED when this asm's pool names other symbols (poolNamesASymbol): agbcc would
       // have emitted THIS word symbolically too had the source named it, so promoting it
-      // spells a name the source did not use — unless the disassembly printed a relocated
-      // `g+K` word as a number, which it does for an unsized `g`; then a byte the function
-      // also reaches through `g` is respelled through it after the lift
-      // (raise/offsetnames.ts `respellNumericThroughName`), not here.
+      // spells a name the source did not use. That premise fails where the disassembly
+      // printed a relocated `g+K` word as a number, which it does for an unsized `g` — and
+      // such a word is an INTERIOR one, which stays raw below whatever the veto says
+      // (`lookupInterior` needs a size). A byte the function also reaches through `g` is
+      // respelled through it after the lift (raise/offsetnames.ts
+      // `respellNumericThroughName`), not here.
       //
       // …but the veto is really about RELOCATION, not about naming. An `extern` name makes
       // the compiler emit a relocated pool word, which contradicts the numeric word the

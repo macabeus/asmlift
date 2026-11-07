@@ -17791,9 +17791,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // `respellNumericThroughName`). agbcc compiles `((u8 *)&g)[0x39]` to the relocated pool word
   // `.word g+0x39`, and a ROM disassembly that names only symbol starts prints it as a number beside
   // the bare `g` (kl2dct `sub_0801E528`'s `0x03005259` beside `gUnk_03005220`); written here as the
-  // number itself, which is the same asm. The pool names `gNumPool`, so the Thumb pool veto keeps
-  // the word raw, and the store and the walked read are two spellings of one byte: declined until
-  // the store is spelled through the name. `numpool_2nm` and `numpool_w` keep declining: another
+  // number itself, which is the same asm. The word stays raw — `gNumPool` is unsized here, and
+  // interior attribution needs a size; for the sized `numpool_sib` map the Thumb pool veto keeps it
+  // raw, the pool naming `gNumPool` — and the store and the walked read are two spellings of one
+  // byte: declined until the store is spelled through the name. `numpool_2nm` and `numpool_w` keep declining: another
   // map entry over the byte, and a halfword store over a word read (agbcc gives the two alias sets
   // of their own and forwards across them on one object). `numpool_sib` stores through ONE pool word
   // twice, `p[0]` and `p[4]` of `u8 *p = (u8 *)0x03005259`: `p[4]` is `gNumNext`'s byte, past

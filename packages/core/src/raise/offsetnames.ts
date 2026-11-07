@@ -861,16 +861,17 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *  {@link respellNumericThroughName} judges: a load or store whose address folds to a literal, and
  *  every access spelled through a map name whose bytes overlap it.
  *
- *  WHY THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. The Thumb pool promotion keeps a numeric word
- *  raw when the function's pool names any external symbol (frontend/thumb.ts `poolNamesASymbol`),
- *  on the premise that the compiler wrote that word symbolically had the source named an object.
- *  A disassembly that names only exact symbol STARTS breaks that premise: agbcc compiles
- *  `((u8 *)&g)[0x39]`, `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39`
- *  (where `g.f39` is `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset`
- *  only inside a sized entry prints that relocated word as a plain number, `g`'s address plus
- *  0x39, beside the bare `g` the rest of the pool holds. The lift then reaches one byte as `g +
- *  0x39` and as a numeric address, and {@link cellSpelledTwice} declines it, correctly: as two
- *  spellings the C is two objects to a compiler that forwards across them.
+ *  WHY THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. A disassembly that names only exact symbol
+ *  STARTS prints a relocated interior word as a number: agbcc compiles `((u8 *)&g)[0x39]`,
+ *  `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39` (where `g.f39` is
+ *  `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset` only inside a
+ *  sized entry prints that word as a plain number, `g`'s address plus 0x39, beside the bare `g`
+ *  the rest of the pool holds. The lift keeps that word raw: for an unsized `g` because interior
+ *  attribution needs a size (`symbols.ts` `lookupInterior`), for a sized one because the Thumb
+ *  pool promotion's veto (frontend/thumb.ts `poolNamesASymbol`) reads a numeric word beside a
+ *  symbolic one as the source's choice — a premise this disassembly breaks. The lift then reaches
+ *  one byte as `g + 0x39` and as a numeric address, and {@link cellSpelledTwice} declines it,
+ *  correctly: as two spellings the C is two objects to a compiler that forwards across them.
  *
  *  WHY ONE NAME IS EXACT. Spelled through ONE name, both accesses are one object to the compiler,
  *  which then orders and reloads them as the memory they share requires — agbcc `-O2` compiles
