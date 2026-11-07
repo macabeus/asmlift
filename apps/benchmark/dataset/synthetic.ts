@@ -17793,14 +17793,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // of their own and forwards across them on one object).
   ...(
     [
-      ['numpool', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_MAP],
-      ['numpool_2nm', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_2NM_MAP],
-      ['numpool_w', 'u8 pad[0x34]; u32 f39', '*(u16 *)0x0300525A = 1;', NUMPOOL_MAP],
+      ['numpool', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_MAP, ''],
+      ['numpool_2nm', 'u8 pad[0x35]; u8 f39', '*(u8 *)0x03005259 = 1;', NUMPOOL_2NM_MAP, 'extern u8 gNumFlag;\n'],
+      ['numpool_w', 'u8 pad[0x34]; u32 f39', '*(u16 *)0x0300525A = 1;', NUMPOOL_MAP, ''],
     ] as const
-  ).map(([sym, field, store, symbols]): SynthSpec => ({
+  ).map(([sym, field, store, symbols, also]): SynthSpec => ({
     sym,
     src:
-      `struct NumPool { u32 w; ${field}; };\nextern struct NumPool gNumPool;\nvoid h(s32);\n` +
+      `struct NumPool { u32 w; ${field}; };\nextern struct NumPool gNumPool;\n${also}void h(s32);\n` +
       `void ${sym}(s32 a) {\n    if (a != 0) {\n        if (gNumPool.f39 <= 0x14) h(a);\n    } else {\n        ${store}\n    }\n}`,
     features: ['global', 'struct'],
     toolchains: ['agbcc'],
