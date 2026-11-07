@@ -885,6 +885,27 @@ describe('a numeric address the function also reaches through a name', () => {
     expect(ioOut).toContain('*(u16 *)67108864 = 1;');
   });
 
+  test('the accesses one literal reaches are judged against each other as renamed together', () => {
+    // agbcc -O2 -mthumb-interwork, verbatim, of `s32 v0 = gUnk.f39; vu32 *p = (vu32 *)0x03005258;
+    // *p = 5; ((vu16 *)p)[1] = 7; return v0 + *p;`. Renaming the one pool word spells the word
+    // store, the u16 store and the word reload through gUnk together, which agbcc compiles to
+    // `str; strh; add r0, r0, #0x5`: the reload forwarded past a store of another alias set
+    const pun = (narrow: string): string =>
+      'f:\n\tldr\tr0, .L3\n\tadd\tr0, r0, #0x39\n\tldrb\tr0, [r0]\n\tldr\tr2, .L3+0x4\n\tmov\tr1, #0x5\n' +
+      `\tstr\tr1, [r2]\n\tmov\tr1, #0x7\n\t${narrow}\n\tldr\tr1, [r2]\n\tadd\tr0, r0, r1\n\tbx\tlr\n` +
+      '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgUnk\n\t.word\t0x3005258\n';
+    const g: SymbolMap = new Map([[0x03005220, [{ name: 'gUnk', kind: 'data' }]]]);
+    expect(() => decompile('f', pun('strh\tr1, [r2, #0x2]'), ARMV4T_AGBCC, { symbols: g })).toThrow(
+      /as a numeric address/,
+    );
+    // a byte store is char-wide, alias set 0, and two word casts the rewrite writes are one type,
+    // so the three still take the name (that C through agbcc reloads: `strb; ldr r1, [r2, #0x38]`)
+    const out = decompile('f', pun('strb\tr1, [r2, #0x2]'), ARMV4T_AGBCC, { symbols: g }).source;
+    expect(out).toContain('((s32 *)&gUnk)[14] = 5;');
+    expect(out).toContain('return v0 + ((s32 *)&gUnk)[14];');
+    expect(out).not.toMatch(/50352728/);
+  });
+
   test('two names over the byte decline', () => {
     // `gW`, the asm's own relocation, reads the word the byte sits in: a second name the walk does
     // not reach it by

@@ -906,6 +906,10 @@ export interface NumericRespell {
   /** the widths of `op` and of each overlapping access spelled `name`, one pair per access, where
    *  the pair holds a store */
   readonly widthPairs: readonly (readonly [number, number])[];
+  /** the widths of `op` and of each overlapping access renamed through `name` along with it, one
+   *  pair per access, where the pair holds a store: both become casts the rewrite writes, whose
+   *  type is the access's width (and a signedness twin shares its set) */
+  readonly castPairs: readonly (readonly [number, number])[];
   /** the target's device-register window, if it has one */
   readonly device: readonly [number, number] | undefined;
 }
@@ -978,12 +982,16 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
   // 4-byte cell may be declared a pointer, which a `u32` cast does not alias. Asked on every
   // compiler: agbcc's is the one measured (`g = 5; ((u16 *)&g)[1] = 7; return g;` is `strh; mov r0,
   // #0x5`), and a compiler that keeps no alias sets only declines a pair it could have lifted.
+  // Two accesses one literal renames TOGETHER are two casts the rewrite writes, so one width is one
+  // integer type there and only different widths neither char-wide may differ.
   {
     id: 'alias-sets-may-differ',
     why: 'a store and an overlapping access of other widths may sit in different alias sets on one object',
     sound: true,
     guardedBy: 'offset-names.test.ts: without `alias-sets-may-differ` a halfword store is respelled beside a word',
-    rejects: (c) => c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)),
+    rejects: (c) =>
+      c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)) ||
+      c.castPairs.some(([a, b]) => a !== 1 && b !== 1 && a !== b),
   },
 ];
 
@@ -1031,12 +1039,18 @@ export function respellNumericThroughName(
       return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d : null;
     };
     const census = respellCensus(fn, symbols, behaviors);
+    // The accesses the literal reaches are renamed TOGETHER, so each is judged with the others
+    // already spelled `name`: a pair among them (a word store, a halfword store and a word reload
+    // off one pool word) is a pair of one object's accesses after the rewrite, and the alias-set
+    // rule has to see it — the census alone holds them all numeric, and pairs none of them.
     const keepsLiteral = (lit: Op, name: string): boolean => {
-      return accessesReachedBy(fn, lit).some((a) => {
+      const reached = accessesReachedBy(fn, lit);
+      const together = new Set(reached);
+      return reached.some((a) => {
         if (refused.has(a) || a.opcode === 'aload' || a.opcode === 'astore') {
           return true;
         }
-        const c = respellCase(a, name, census);
+        const c = respellCase(a, name, census, together);
         return c === null || firstRejection(gates, c) !== null;
       });
     };
@@ -1124,9 +1138,15 @@ function respellCensus(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehavior
 
 /** The case the gates judge for the numeric access `op`, spelled through `through` — the name a
  *  site's overlapping accesses give it when `through` is undefined, or the name a literal the
- *  access shares with a site would give it ({@link accessesReachedBy}). Null when the map does not
- *  place `op`. */
-function respellCase(op: Op, through: string | undefined, census: RespellCensus): NumericRespell | null {
+ *  access shares with a site would give it ({@link accessesReachedBy}). `together` holds the
+ *  accesses renamed through `through` along with `op`, each counted as spelled `through`. Null
+ *  when the map does not place `op`. */
+function respellCase(
+  op: Op,
+  through: string | undefined,
+  census: RespellCensus,
+  together: ReadonlySet<Op> = new Set(),
+): NumericRespell | null {
   const { placed, places, symbols, behaviors } = census;
   const mine = placed.filter((p) => p.op === op);
   const x = mine[0];
@@ -1134,10 +1154,13 @@ function respellCase(op: Op, through: string | undefined, census: RespellCensus)
     return null;
   }
   const [lo, hi] = x.ranges[0];
+  const spellingOf = (y: PlacedAccess): string | null =>
+    y.spelling ?? (through !== undefined && together.has(y.op) ? through : null);
   const overlapping = placed.filter(
-    (y) => y.op !== op && y.spelling !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
+    (y) =>
+      y.op !== op && spellingOf(y) !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
   );
-  const names = new Set(overlapping.map((y) => y.spelling!));
+  const names = new Set(overlapping.map((y) => spellingOf(y)!));
   if (through !== undefined) {
     names.add(through);
   }
@@ -1167,6 +1190,9 @@ function respellCase(op: Op, through: string | undefined, census: RespellCensus)
     otherName,
     widthPairs: overlapping
       .filter((y) => y.spelling === name)
+      .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
+    castPairs: overlapping
+      .filter((y) => y.spelling === null)
       .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
     device: behaviors.deviceRegisters,
   };
