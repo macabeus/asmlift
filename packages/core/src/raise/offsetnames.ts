@@ -1180,7 +1180,7 @@ export function numericRespellRefusals(
  *
  *  It is also where the lift's names become FINAL, so it declines a function whose accesses reach
  *  one byte under two spellings ({@link cellSpelledTwice}), whichever pass named them — after
- *  respelling a numeric access of such a pair through the name beside it where that is exact
+ *  spelling a numeric access of such a pair through the name beside it where that is exact
  *  ({@link respellNumericThroughName}), whose names are returned too. */
 export function nameOffsetAddresses(
   fn: Fn,
