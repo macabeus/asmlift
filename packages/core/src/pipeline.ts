@@ -253,7 +253,8 @@ function runTower(
   // The pass is also where the lift's names become final, so it DECLINES the function — whether or
   // not it named anything — when two accesses reach one cell under two spellings, or one spelling
   // reaches two of the cells the map places a name at (raise/offsetnames.ts `cellSpelledTwice`,
-  // RaiseUnsupportedError). That check is no gate: `bench gates --pass offsetnames` tables the walk
+  // RaiseUnsupportedError), once it has respelled what numeric accesses of such pairs one name
+  // makes exact (`respellNumericThroughName`). That check is no gate: `bench gates --pass offsetnames` tables the walk
   // refusals only, and a decline from it reads as this stage's.
   const walkedNames = opts.symbols
     ? OFFSET_NAME_PASS.run(fn, opts.symbols, offsetNameBehaviorsFor(target, opts.contextGlobals))
@@ -405,8 +406,9 @@ export function stampBehaviorsFor(
 }
 
 /** What the offset-name pass reads besides the IR and the map: the stamp's behaviours (it re-stamps
- *  after naming) and whether the compiler reloads across two spellings of one cell (its one-spelling
- *  check, raise/offsetnames.ts `cellSpelledTwice`). */
+ *  after naming), whether the compiler reloads across two spellings of one cell (its one-spelling
+ *  check, raise/offsetnames.ts `cellSpelledTwice`), and the device-register window a numeric access
+ *  is never respelled into a name inside (`respellNumericThroughName`). */
 export function offsetNameBehaviorsFor(
   target: TargetDescription,
   contextGlobals: ContextGlobals | undefined,
@@ -414,6 +416,7 @@ export function offsetNameBehaviorsFor(
   return {
     ...stampBehaviorsFor(target, contextGlobals),
     reloadsAcrossSpellings: target.compilerBehaviors.reloadsAcrossSpellings,
+    deviceRegisters: target.capabilities.deviceRegisters,
   };
 }
 

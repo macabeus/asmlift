@@ -15,13 +15,15 @@ import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
-import { decompile, stampBehaviorsFor } from '../src/pipeline';
+import { decompile, offsetNameBehaviorsFor, stampBehaviorsFor } from '../src/pipeline';
 import { RaiseUnsupportedError } from '../src/raise/errors';
 import {
+  NUMERIC_RESPELL_GATES,
   OFFSET_NAME_GATES,
   OFFSET_NAME_PASS,
   cellSpelledTwice,
   nameOffsetAddresses,
+  numericRespellRefusals,
   offsetNameRefusals,
 } from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
@@ -587,13 +589,21 @@ describe('one spelling per cell', () => {
     }
   });
 
-  test('a numeric address beside a name for the same byte declines', () => {
-    // kleod's pointer-shaped `gUnk_030007C8` carries no size, so the byte stays a raw constant:
-    // `gUnk_030007C8 = 5; *(u8 *)50333641 = 7; return gUnk_030007C8;`
+  test('a numeric address beside a name for the same byte is spelled through the name', () => {
+    // kleod's pointer-shaped `gUnk_030007C8` carries no size, so the frontend leaves the byte a raw
+    // constant, and as the lift reaches it the C would be `gUnk_030007C8 = 5; *(u8 *)50333641 = 7;
+    // return gUnk_030007C8;` — which agbcc compiles to the forwarded `mov r0, #0x5`
     const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
-    expect(() => lifted(probe('0x030007c8', '0x030007c9'), unsized)).toThrow(
+    expect(cellSpelledTwice(lift('f', probe('0x030007c8', '0x030007c9'), unsized), unsized)).toMatch(
       /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
     );
+    // …so the byte is spelled through the name instead (respellNumericThroughName): one object,
+    // which agbcc -O2 compiles to `str r0, [r1]; strb r0, [r1, #0x1]; ldr r0, [r1]`, the reload
+    // the asm has
+    const out = lifted(probe('0x030007c8', '0x030007c9'), unsized);
+    expect(out).toContain('((u8 *)&gUnk_030007C8)[1] = 7;');
+    expect(out).toContain('return *(s32 *)&gUnk_030007C8;');
+    expect(out).not.toMatch(/50333641|0x30007c9/i);
   });
 
   test('two spellings that only READ the byte lift: there is no store to forward', () => {
@@ -624,12 +634,14 @@ endlabel f
     [0x80100004, [{ name: 'D_80100004', kind: 'data', size: 4, shape: 'scalar', signed: true }]],
   ]);
 
-  test('on MIPS, a walk the map names beside a numeric address declines where the compiler forwards', () => {
+  test('on MIPS, a numeric byte beside a walk the map names is spelled through that name', () => {
     // `addiu $at, $at, 4` off `D_80100000` is named `D_80100004` by this pass — asmlift's spelling
+    // — and the numeric byte store inside it is spelled through it in turn: gcc 2.7.2 -O2 compiles
+    // the two-spelling C to the forwarded `li v0, 5`, and one name to `sb v0, D+1; lw v0, D`
     const walked = mips('    /* 8 80000208 24210004 */  addiu      $at, $at, 4\n', '0', 5);
-    expect(() => decompile('f', walked, MIPS_GCC, { symbols: twoWords })).toThrow(
-      /byte 0x80100005 is reached as 'D_80100004' and as a numeric address/,
-    );
+    const gcc = decompile('f', walked, MIPS_GCC, { symbols: twoWords }).source;
+    expect(gcc).toContain('((u8 *)&D_80100004)[1] = 7;');
+    expect(gcc).toContain('return *(s32 *)&D_80100004;');
     // …and lifts where it reloads: IDO 7.1 -O2 compiles the same C to `sw t6, 0(v1); sb t7,
     // 5(t8); jr ra; lw v0, 0(v1)`, whoever chose the name
     const ido = decompile('f', walked, MIPS_IDO, { symbols: twoWords }).source;
@@ -638,17 +650,23 @@ endlabel f
     expect(ido).toContain('return D_80100004;');
   });
 
-  test('a byte the ASM spells two ways lifts where the compiler reloads, and declines where it forwards', () => {
+  test('a byte the ASM spells two ways lifts as-is where the compiler reloads, through one name where it forwards', () => {
     // nothing here was read off the map. IDO 7.1 -O2 reloads the word (`sb t7, 1(t8); jr ra; lw
     // v0, 0(v1)`), so the source's own two spellings made this asm; gcc 2.7.2 compiles the same C
     // to `sb v0, -2146435071; jr ra; li v0, 5`, so an asm that reloads was not those two spellings
     const own = mips('', '0', 1);
     const ido = decompile('f', own, MIPS_IDO, { symbols: twoWords }).source;
     expect(ido).toContain('D_80100000 = 5;');
-    expect(ido).toContain('[1] = 7;');
-    expect(() => decompile('f', own, MIPS_GCC, { symbols: twoWords })).toThrow(
+    expect(ido).toContain('((u8 *)-2146435072)[1] = 7;');
+    expect(cellSpelledTwice(frontendFor(MIPS_GCC).lift('f', own, MIPS_GCC, {}, undefined, twoWords), twoWords)).toMatch(
       /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
     );
+    // …and where it forwards the byte is spelled through the name: gcc 2.7.2 and KMC -O2 compile
+    // `*(s32 *)&D_80100000 = 5; ((u8 *)&D_80100000)[1] = 7; return *(s32 *)&D_80100000;` to
+    // `sw; sb v0, D_80100000+1; lw v0, D_80100000`, the reload the asm has
+    const gcc = decompile('f', own, MIPS_GCC, { symbols: twoWords }).source;
+    expect(gcc).toContain('((u8 *)&D_80100000)[1] = 7;');
+    expect(gcc).toContain('return *(s32 *)&D_80100000;');
   });
 
   test('on IDO, a read placed BEFORE a store through another spelling declines: IDO sinks it past the store', () => {
@@ -711,11 +729,14 @@ endlabel f
         /byte 0x20249c1 is reached as 'sRandCount' and as 'sUnknown'/,
       );
     }
-    // a name and a raw constant through the same join: `v0 = (u8 *)50333641; *v0 = 7;`
+    // a name and a raw constant through the same join: `v0 = (u8 *)50333641; *v0 = 7;` — placed,
+    // and then spelled through the name, the join's two loads of the one literal folding to it
     const unsized: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
-    expect(() => lifted(joined('0x030007c8', '0x030007c9', twoLoads, 'strb\tr3, [r2]'), unsized)).toThrow(
+    const viaJoin = joined('0x030007c8', '0x030007c9', twoLoads, 'strb\tr3, [r2]');
+    expect(cellSpelledTwice(lift('f', viaJoin, unsized), unsized)).toMatch(
       /byte 0x30007c9 is reached as 'gUnk_030007C8' and as a numeric address/,
     );
+    expect(lifted(viaJoin, unsized)).not.toMatch(/50333641/);
     // …and a join that reaches nothing the word is spelled through lifts
     expect(lifted(joined('0x020249c0', '0x020249bc', twoLoads, 'strb\tr3, [r2]'), perAddress)).toContain(
       'sUnknown = 7;',
@@ -742,7 +763,7 @@ endlabel f
       `f:\n${head}\tldr\tr1, .L2\n\tldr\tr2, .L3\n\tadds\tr1, r1, r2\n\tadds\tr1, #1\n\tmovs\tr0, #7\n` +
       '\tstrb\tr0, [r1]\n\tldr\tr0, [r3]\n\tbx\tlr\n' +
       '.L1:\n\t.word\t0x020249c0\n.L2:\n\t.word\t0x01000000\n.L3:\n\t.word\t0x010249c0\n';
-    expect(() => lifted(rawSum, perAddress)).toThrow(
+    expect(cellSpelledTwice(lift('f', rawSum, perAddress), perAddress)).toMatch(
       /byte 0x20249c1 is reached as 'sRandCount' and as a numeric address/,
     );
     // gcc 2.7.2: a literal moved up and back down still names the byte the plain pin declines on
@@ -753,9 +774,9 @@ endlabel f
       '    /* 16 80000216 25290010 */  addiu      $t1, $t1, 0x10\n' +
         '    /* 17 80000217 2529FFF0 */  addiu      $t1, $t1, -0x10\n',
     );
-    expect(() => decompile('f', movedBack, MIPS_GCC, { symbols: twoWords })).toThrow(
-      /byte 0x80100001 is reached as 'D_80100000' and as a numeric address/,
-    );
+    expect(
+      cellSpelledTwice(frontendFor(MIPS_GCC).lift('f', movedBack, MIPS_GCC, {}, undefined, twoWords), twoWords),
+    ).toMatch(/byte 0x80100001 is reached as 'D_80100000' and as a numeric address/);
   });
 
   test('one name read off the map at two of its addresses declines', () => {
@@ -789,5 +810,165 @@ endlabel f
     expect(cellSpelledTwice(lift('f', probe('0x040000b8', '0x040000b9'), named), named)).toMatch(
       /'gW' and as a numeric address/,
     );
+  });
+});
+
+// A NUMERIC ADDRESS THE SAME FUNCTION ALSO REACHES THROUGH A NAME (`respellNumericThroughName`).
+// agbcc -O2 compiles `((u8 *)&g)[0x39]`, `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` to the
+// relocated pool word `.word g+0x39`, and `g.f39` to `.word g` plus `add #0x39`; a disassembly that
+// prints `name+offset` only inside a SIZED entry writes the first as a plain number beside the bare
+// `g` (kl2dct's `.4byte 0x03005259` beside `gUnk_03005220`). Spelled through one name the C is one
+// object, which every compiler here orders and reloads as memory requires — agbcc `g = 5; ((u8
+// *)&g)[1] = 7; return g;` is `str; strb [r1, #1]; ldr r0, [r1]`, gcc 2.7.2 and KMC `sw; sb v0,
+// g+1; lw v0, g` — where the two-spelling C is the forwarded 5 on all three.
+describe('a numeric address the function also reaches through a name', () => {
+  // agbcc -O2 -mthumb-interwork, verbatim, of `if (a != 0) { if (gUnk_03005220.f39 <= 0x14) h(a); }
+  // else { ((u8 *)&gUnk_03005220)[0x39] = 1; }` (struct S { u32 w; u8 pad[0x35]; u8 f39; }), its
+  // `.word gUnk_03005220+0x39` written as the number the ROM disassembly prints
+  const E5 = (word = '0x3005259', store = 'strb\tr0, [r1]'): string =>
+    'e5:\n\tpush\t{lr}\n\tadd\tr1, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\n\tldr\tr0, .L6\n\tadd\tr0, r0, #0x39\n' +
+    '\tldrb\tr0, [r0]\n\tcmp\tr0, #0x14\n\tbhi\t.L5\n\tadd\tr0, r1, #0\n\tbl\th\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n' +
+    `.L6:\n\t.word\tgUnk_03005220\n.L3:\n\tldr\tr1, .L8\n\tmov\tr0, #0x1\n\t${store}\n.L5:\n\tpop\t{r0}\n\tbx\tr0\n` +
+    `.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t${word}\n`;
+  const unsized: SymbolMap = new Map([[0x03005220, [{ name: 'gUnk_03005220', kind: 'data' }]]]);
+  const h = { prototypes: { h: { params: 1, returnsVoid: true } } };
+  const lifted = (asm: string, symbols: SymbolMap): string =>
+    decompile('e5', asm, ARMV4T_AGBCC, { ...h, symbols }).source;
+  const judged = (asm: string, symbols: SymbolMap) => [
+    ...numericRespellRefusals(lift('e5', asm, symbols), symbols, offsetNameBehaviorsFor(ARMV4T_AGBCC, undefined)),
+  ];
+
+  test('the numeric pool word is spelled through the name the function walks to', () => {
+    // the frontend keeps the word raw (the pool names `gUnk_03005220`), so as lifted the store and
+    // the walked read are two spellings of byte 0x3005259
+    expect(cellSpelledTwice(lift('e5', E5(), unsized), unsized)).toMatch(
+      /byte 0x3005259 is reached as 'gUnk_03005220' and as a numeric address/,
+    );
+    expect(judged(E5(), unsized)).toEqual([['0x3005259', null]]);
+    const out = lifted(E5(), unsized);
+    expect(out).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
+    expect(out).not.toMatch(/50352729|0x3005259/i);
+    // the name is reported as one this pass spelled
+    expect(decompile('e5', E5(), ARMV4T_AGBCC, { ...h, symbols: unsized }).walkedNames).toContain('gUnk_03005220');
+  });
+
+  test('the literal is spelled once where it also feeds a call', () => {
+    // the asm loads ONE pool word for the store and the argument (`mov r0, r1; bl h`), and the C
+    // spells it once so the compiler loads it once
+    const asm = E5('0x3005259', 'strb\tr0, [r1]\n\tadd\tr0, r1, #0\n\tbl\th');
+    const out = lifted(asm, unsized);
+    expect(out).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
+    expect(out).toContain('h((u32)&gUnk_03005220 + 57)');
+    expect(out).not.toMatch(/50352729/);
+  });
+
+  test('two names over the byte decline', () => {
+    // `gW`, the asm's own relocation, reads the word the byte sits in: a second name the walk does
+    // not reach it by
+    const asm = `${E5('0x3005259', 'strb\tr0, [r1]\n\tldr\tr2, .L8+4\n\tldr\tr0, [r2]')}\t.word\tgW\n`;
+    const two: SymbolMap = new Map([...unsized, [0x03005258, [{ name: 'gW', kind: 'data' }]]]);
+    expect(judged(asm, two)).toEqual([['0x3005259', 'two-names-reach-the-byte']]);
+    expect(() => lifted(asm, two)).toThrow(RaiseUnsupportedError);
+  });
+
+  test('a byte the map gives another name declines', () => {
+    const named: SymbolMap = new Map([...unsized, [0x03005259, [{ name: 'gFlag', kind: 'data', size: 1 }]]]);
+    expect(judged(E5(), named)).toEqual([['0x3005259', 'map-names-another-object']]);
+    expect(() => lifted(E5(), named)).toThrow(/byte 0x3005259 is reached as 'gUnk_03005220' and as a numeric address/);
+  });
+
+  test('a name the map places at two addresses declines', () => {
+    const twice: SymbolMap = new Map([...unsized, [0x02000000, [{ name: 'gUnk_03005220', kind: 'data' }]]]);
+    expect(judged(E5(), twice)).toEqual([['0x3005259', 'name-placed-at-several']]);
+    expect(() => lifted(E5(), twice)).toThrow(RaiseUnsupportedError);
+  });
+
+  test('a store is not spelled through a const name', () => {
+    const ro: SymbolMap = new Map([[0x03005220, [{ name: 'gUnk_03005220', kind: 'data', const: true }]]]);
+    expect(judged(E5(), ro)).toEqual([['0x3005259', 'name-not-plain-data']]);
+  });
+
+  test('a byte past the name declared size declines', () => {
+    const small: SymbolMap = new Map([[0x03005220, [{ name: 'gUnk_03005220', kind: 'data', size: 0x20 }]]]);
+    expect(judged(E5(), small)).toEqual([['0x3005259', 'outside-the-name']]);
+  });
+
+  // the probe of `one spelling per cell`: a word stored and reloaded through the name, one cell of
+  // it stored through a numeric address
+  const probe = (byte: string, byteStore: string): string =>
+    `f:\n\tldr\tr1, .L1\n\tldr\tr2, .L2\n\tmovs\tr0, #5\n\tstr\tr0, [r1]\n\tmovs\tr0, #7\n\t${byteStore}\n` +
+    `\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x030007c8\n.L2:\n\t.word\t${byte}\n`;
+  const gUnk: SymbolMap = new Map([[0x030007c8, [{ name: 'gUnk_030007C8', kind: 'data' }]]]);
+  /** The pass on the frontend's lift with one respell rule removed: the names it spelled. */
+  const respelledWithout = (id: string, asm: string, symbols: SymbolMap): string[] =>
+    nameOffsetAddresses(
+      lift('f', asm, symbols),
+      symbols,
+      offsetNameBehaviorsFor(ARMV4T_AGBCC, undefined),
+      OFFSET_NAME_GATES,
+      without(NUMERIC_RESPELL_GATES, id),
+    );
+
+  test('without `alias-sets-may-differ` a halfword store is respelled beside a word', () => {
+    // agbcc -O2 compiles `*(s32 *)&g = 5; ((u16 *)&g)[1] = 7; return *(s32 *)&g;` to `str; strh
+    // r1, [r0, #0x2]; mov r0, #0x5` — a u16 store is another alias set than the word, on one object
+    const asm = probe('0x030007ca', 'strh\tr0, [r2]');
+    expect(judged(asm.replace('f:', 'e5:'), gUnk)).toEqual([['0x30007ca', 'alias-sets-may-differ']]);
+    expect(() => lifted(asm.replace('f:', 'e5:'), gUnk)).toThrow(/as a numeric address/);
+    expect(respelledWithout('alias-sets-may-differ', asm, gUnk)).toEqual(['gUnk_030007C8']);
+    // a byte store is char-wide, alias set 0, and is respelled
+    expect(lifted(probe('0x030007ca', 'strb\tr0, [r2]').replace('f:', 'e5:'), gUnk)).toContain(
+      '((u8 *)&gUnk_030007C8)[2] = 7;',
+    );
+  });
+
+  test('without `device-or-volatile` a device register store is respelled through a name', () => {
+    // a numeric store inside the GBA I/O window may be a `REG_*` macro's volatile access, which a
+    // name the map holds there carries no qualifier for
+    const io: SymbolMap = new Map([[0x04000200, [{ name: 'gIo', kind: 'data' }]]]);
+    const asm = probe('0x04000201', 'strb\tr0, [r2]').replace('0x030007c8', '0x04000200');
+    expect(judged(asm.replace('f:', 'e5:'), io)).toEqual([['0x4000201', 'device-or-volatile']]);
+    expect(() => lifted(asm.replace('f:', 'e5:'), io)).toThrow(/as a numeric address/);
+    expect(respelledWithout('device-or-volatile', asm, io)).toEqual(['gIo']);
+  });
+
+  test('without `not-one-literal-access` an access through a join of two literals is respelled', () => {
+    // the store's address is `c ? 0x030007c9 : 0x030007ca`: two cells, and a respell to one of them
+    // drops the other
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tmovs\tr3, #5\n\tstr\tr3, [r1]\n\tcmp\tr0, #0\n\tbeq\t.La\n\tldr\tr2, .L2\n\tb\t.Lb\n' +
+      '.La:\n\tldr\tr2, .L3\n.Lb:\n\tmovs\tr3, #7\n\tstrb\tr3, [r2]\n\tldr\tr0, [r1]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x030007c8\n.L2:\n\t.word\t0x030007c9\n.L3:\n\t.word\t0x030007ca\n';
+    expect(judged(asm, gUnk).map(([, why]) => why)).toEqual(['not-one-literal-access']);
+    expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: gUnk })).toThrow(/as a numeric address/);
+    expect(respelledWithout('not-one-literal-access', asm, gUnk)).toEqual(['gUnk_030007C8']);
+  });
+
+  test('on MIPS, the numeric byte of a named word is spelled through it on gcc 2.7.2', () => {
+    // gcc 2.7.2 -O2, of `if (a) { if (g.f39 <= 0x14) h(a); } else { *(u8 *)0x80100039 = 1; }`
+    // shaped by hand: the name read through `%lo`, the byte stored through `lui 0x8010`
+    const asm = `glabel f
+    /* 0 80000200 10800006 */  beqz       $a0, .L80000220
+    /* 4 80000204 3C020000 */   lui       $v0, %hi(D_80100000)
+    /* 8 80000208 90420039 */  lbu        $v0, %lo(D_80100000+0x39)($v0)
+    /* C 8000020C 00000000 */  nop
+    /* 10 80000210 2C420015 */  sltiu      $v0, $v0, 0x15
+    /* 14 80000214 03E00008 */  jr         $ra
+    /* 18 80000218 00000000 */   nop
+    /* 1C 8000021C 00000000 */  nop
+.L80000220:
+    /* 20 80000220 3C038010 */  lui        $v1, 0x8010
+    /* 24 80000224 24020001 */  addiu      $v0, $zero, 1
+    /* 28 80000228 03E00008 */  jr         $ra
+    /* 2C 8000022C A0620039 */   sb        $v0, 0x39($v1)
+endlabel f
+`;
+    const d: SymbolMap = new Map([[0x80100000, [{ name: 'D_80100000', kind: 'data' }]]]);
+    expect(cellSpelledTwice(frontendFor(MIPS_GCC).lift('f', asm, MIPS_GCC, {}, undefined, d), d)).toMatch(
+      /byte 0x80100039 is reached as 'D_80100000' and as a numeric address/,
+    );
+    const out = decompile('f', asm, MIPS_GCC, { symbols: d }).source;
+    expect(out).toContain('((u8 *)&D_80100000)[57] = 1;');
+    expect(out).not.toMatch(/-2146435015|0x80100039/i);
   });
 });

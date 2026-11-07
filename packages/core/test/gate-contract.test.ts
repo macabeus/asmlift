@@ -50,7 +50,7 @@ import {
 import { EXIT_TRAMPOLINE_GATES, LATCH_GATES } from '../src/raise/latch';
 import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
 import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
-import { OFFSET_NAME_GATES } from '../src/raise/offsetnames';
+import { NUMERIC_RESPELL_GATES, OFFSET_NAME_GATES } from '../src/raise/offsetnames';
 import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { REROLL_GATES, TOP_TEST_GATES } from '../src/raise/reroll';
 import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
@@ -129,6 +129,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   MEMBER_ARRAY_GATES: MEMBER_ARRAY_GATES as readonly Gate<never>[],
   NARROW_LOCAL_GATES: NARROW_LOCAL_GATES as readonly Gate<never>[],
   OFFSET_NAME_GATES: OFFSET_NAME_GATES as readonly Gate<never>[],
+  // raise/offsetnames.ts: a numeric access respelled through the name its function walks to
+  NUMERIC_RESPELL_GATES: NUMERIC_RESPELL_GATES as readonly Gate<never>[],
   PARAM_WIDTH_GATES: PARAM_WIDTH_GATES as readonly Gate<never>[],
   PARAM_READER_WIDTH_GATES: PARAM_READER_WIDTH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],

@@ -106,8 +106,12 @@
 // objects on — and declines the function when one is. A refusal above is one way to get there (a
 // walk left as `base + K` past the base's end spells its neighbour's byte through the base's
 // name), not the only one, which is why the question is asked of the accesses and not of the gates.
+// Before it declines, a NUMERIC access in such a pair is respelled through the one name the
+// function reaches its bytes by (`respellNumericThroughName`, gated by `NUMERIC_RESPELL_GATES`):
+// a relocated `g+K` pool word a disassembly printed as a number, which one name makes exact.
 import { constDisplacementOf } from '../ir/alias';
-import { type Block, type Fn, type Op, type Value, defOpMap, successorsOf } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, mkOp, mkValue, successorsOf } from '../ir/core';
+import { T } from '../ir/types';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
@@ -696,6 +700,10 @@ function placeAccess(
  *  `reloadsAcrossSpellings`; absent ⇒ it forwards). */
 export type OffsetNameBehaviors = StampBehaviors & {
   readonly reloadsAcrossSpellings?: boolean;
+  /** the target's device-register window (`capabilities.deviceRegisters`): a numeric access into
+   *  it may be a `volatile` register the source spelled by address, which no map name carries, so
+   *  {@link respellNumericThroughName} leaves it as the asm has it */
+  readonly deviceRegisters?: readonly [number, number];
 };
 
 /** ONE SPELLING PER CELL, AND ONE CELL PER SPELLING — the premise `ir/alias.ts` reads names on:
@@ -739,7 +747,24 @@ export type OffsetNameBehaviors = StampBehaviors & {
  *  parameter, a frame slot, a runtime index — is one it assumes may alias (agbcc reloads
  *  `sRandCount` after `((u8 *)&sUnknown)[a0] = 7`). */
 export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpellings = false): string | null {
-  const keptInOrder = reloadsAcrossSpellings ? keptInOrderOn(fn) : (): boolean => false;
+  for (const c of spellingConflicts(fn, symbols, reloadsAcrossSpellings)) {
+    return c.why;
+  }
+  return null;
+}
+
+/** One pair of accesses {@link cellSpelledTwice} declines on, with the reason it gives. */
+interface SpellingConflict {
+  readonly x: PlacedAccess;
+  readonly y: PlacedAccess;
+  readonly why: string;
+}
+
+/** Every access of `fn` the map lets {@link placeAccess} place, with the folder that placed them. */
+function placedAccesses(
+  fn: Fn,
+  symbols: SymbolMap,
+): { placed: PlacedAccess[]; places: Map<string, Places>; fold: (v: Value) => number | null } {
   const defOf = defOpMap(fn);
   const incoming = joinIncoming(fn);
   const places = placesByName(symbols);
@@ -750,6 +775,14 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
       placed.push(...placeAccess(op, defOf, incoming, places, fold));
     }
   }
+  return { placed, places, fold };
+}
+
+/** The pairs that break ONE SPELLING PER CELL or ONE CELL PER SPELLING, in the order
+ *  {@link cellSpelledTwice} meets them — at most one per pair of placed accesses. */
+function* spellingConflicts(fn: Fn, symbols: SymbolMap, reloadsAcrossSpellings: boolean): Generator<SpellingConflict> {
+  const keptInOrder = reloadsAcrossSpellings ? keptInOrderOn(fn) : (): boolean => false;
+  const { placed, places } = placedAccesses(fn, symbols);
   const spell = (s: string | null): string => (s === null ? 'a numeric address' : `'${s}'`);
   for (const [i, x] of placed.entries()) {
     for (const y of placed.slice(i + 1)) {
@@ -760,7 +793,7 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
         const oneObject = x.objects.length === 1 && y.objects.length === 1 && x.objects[0] === y.objects[0];
         const several = (places.get(x.spelling)?.addrs.length ?? 0) > 1;
         if (several && (x.fromMap || y.fromMap) && !oneObject) {
-          return `'${x.spelling}' names two of the cells the map places it at`;
+          yield { x, y, why: `'${x.spelling}' names two of the cells the map places it at` };
         }
         continue;
       }
@@ -770,16 +803,20 @@ export function cellSpelledTwice(fn: Fn, symbols: SymbolMap, reloadsAcrossSpelli
       if (keptInOrder(x.op, y.op)) {
         continue;
       }
-      for (const [xl, xh] of x.ranges) {
+      overlap: for (const [xl, xh] of x.ranges) {
         for (const [yl, yh] of y.ranges) {
           if (xl < yh && yl < xh) {
-            return `byte 0x${Math.max(xl, yl).toString(16)} is reached as ${spell(x.spelling)} and as ${spell(y.spelling)}`;
+            yield {
+              x,
+              y,
+              why: `byte 0x${Math.max(xl, yl).toString(16)} is reached as ${spell(x.spelling)} and as ${spell(y.spelling)}`,
+            };
+            break overlap;
           }
         }
       }
     }
   }
-  return null;
 }
 
 /** Whether a compiler that reloads across two spellings (`reloadsAcrossSpellings`) keeps the pair
@@ -820,6 +857,321 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
   };
 }
 
+/** A NUMERIC ADDRESS THE SAME FUNCTION ALSO REACHES THROUGH A NAME — one access
+ *  {@link respellNumericThroughName} judges: a load or store whose address folds to a literal, and
+ *  every access spelled through a map name whose bytes overlap it.
+ *
+ *  WHY THE NUMBER IS NO EVIDENCE OF A NUMERIC SOURCE. The Thumb pool promotion keeps a numeric word
+ *  raw when the function's pool names any external symbol (frontend/thumb.ts `poolNamesASymbol`),
+ *  on the premise that the compiler wrote that word symbolically had the source named an object.
+ *  A disassembly that names only exact symbol STARTS breaks that premise: agbcc compiles
+ *  `((u8 *)&g)[0x39]`, `(u8 *)&g + 0x39` and a held `u8 *p = &g.f39` alike to `.word g+0x39`
+ *  (where `g.f39` is `.word g` plus `add #0x39`), and a ROM disassembler that prints `name+offset`
+ *  only inside a sized entry prints that relocated word as the plain number `0x03005259` beside
+ *  the bare `g` the rest of the pool holds. The lift then reaches one byte as `g + 0x39` and as a
+ *  numeric address, and {@link cellSpelledTwice} declines it, correctly: as two spellings the C is
+ *  two objects to a compiler that forwards across them.
+ *
+ *  WHY ONE NAME IS EXACT. Spelled through ONE name, both accesses are one object to the compiler,
+ *  which then orders and reloads them as the memory they share requires — agbcc `-O2` compiles
+ *  `g.w = 5; ((u8 *)&g)[1] = 7; return g.w;` to `str; strb [r1, #1]; ldr r0, [r1]`, the reload the
+ *  two-spelling C loses. So the respelled C reads what memory holds whichever spelling the source
+ *  had; a source that did write the number costs a relocated pool word against a numeric one, a
+ *  score and not a meaning. What one name does NOT make exact are the gates below. */
+export interface NumericRespell {
+  /** the numeric access */
+  readonly op: Op;
+  /** how many spellings {@link placeAccess} placed `op` under: a join of several literals is more
+   *  than one, and no single address to rewrite */
+  readonly placings: number;
+  /** the bytes `op` touches */
+  readonly lo: number;
+  readonly hi: number;
+  /** every name an overlapping access is spelled through, paired with a store */
+  readonly names: ReadonlySet<string>;
+  /** an overlapping named access stands for more than one object (a join of two names' addresses) */
+  readonly partnerSeveral: boolean;
+  /** the one name, or null when `names` is not one */
+  readonly name: string | null;
+  /** every address the map places `name` at */
+  readonly addrs: readonly number[];
+  /** the entries the map carries `name` under at its address */
+  readonly infos: readonly SymbolInfo[];
+  /** the map spells `name` as an address-cast macro */
+  readonly macro: boolean;
+  /** `op` is a store */
+  readonly writes: boolean;
+  /** another map entry covers one of `op`'s bytes */
+  readonly otherName: string | null;
+  /** the widths of `op` and of each overlapping access spelled `name`, one pair per access, where
+   *  the pair holds a store */
+  readonly widthPairs: readonly (readonly [number, number])[];
+  /** the target's device-register window, if it has one */
+  readonly device: readonly [number, number] | undefined;
+}
+
+/** The refusals, in attribution order: the access, then the name, then the bytes. Each leaves the
+ *  numeric access as the asm has it, so {@link cellSpelledTwice} still declines the function. */
+export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
+  {
+    id: 'not-one-literal-access',
+    why: 'only a plain load or store whose address is one literal has one address to respell',
+    sound: true,
+    guardedBy:
+      'offset-names.test.ts: without `not-one-literal-access` an access through a join of two literals is respelled',
+    rejects: (c) => (c.op.opcode !== 'load' && c.op.opcode !== 'store') || c.placings !== 1,
+  },
+  {
+    id: 'device-or-volatile',
+    why: 'a numeric access to a device register or a volatile cell may be a qualified spelling no map name carries',
+    sound: true,
+    guardedBy: 'offset-names.test.ts: without `device-or-volatile` a device register store is respelled through a name',
+    rejects: (c) =>
+      c.op.attrs.volatile === true || (c.device !== undefined && c.lo < c.device[1] && c.hi > c.device[0]),
+  },
+  // NOT sound, and the four after it are not either: each refuses a respell the re-run of
+  // `cellSpelledTwice` would decline anyway (a second name over the byte meets the one chosen), or
+  // one whose address is still the machine's (a name the map places twice, one read off it at the
+  // partner's own address; a byte past a name's size, a const name a store would not compile
+  // through). What they buy is that the rewrite never PICKS an owner the map does not give. A name
+  // placed twice is asked first: the asm's own relocation of it stands for every address it is
+  // placed at, which is a second object to the rule after.
+  {
+    id: 'name-placed-at-several',
+    why: 'the map places the name at several addresses, so it names no one object here',
+    sound: false,
+    rejects: (c) => c.name !== null && c.addrs.length !== 1,
+  },
+  {
+    id: 'two-names-reach-the-byte',
+    why: 'two different names reach the byte, so no one name is the object the access belongs to',
+    sound: false,
+    rejects: (c) => c.name === null || c.partnerSeveral,
+  },
+  {
+    id: 'name-not-plain-data',
+    why: 'a macro, a function or a const-declared name is not an object the access may be spelled through',
+    sound: false,
+    rejects: (c) =>
+      c.macro || c.infos.length === 0 || c.infos.some((i) => i.kind === 'code' || (c.writes && i.const === true)),
+  },
+  {
+    id: 'outside-the-name',
+    why: 'the bytes lie before the name or past its declared size, so they are not its object',
+    sound: false,
+    rejects: (c) => {
+      const at = c.addrs[0];
+      const size = c.infos.find((i) => i.size !== undefined)?.size;
+      return at === undefined || c.lo < at || (size !== undefined && c.hi > at + size);
+    },
+  },
+  {
+    id: 'map-names-another-object',
+    why: 'the map places another name over the bytes, so the one this function walks to is not their only owner',
+    sound: false,
+    rejects: (c) => c.otherName !== null,
+  },
+  // agbcc gives each integer TYPE its own alias set (char is set 0, a type shares one with its
+  // unsigned twin, each pointer type has its own), and reorders a load past a store of another
+  // set even on one object. Spelled through one name, the respelled cast and the name's own access
+  // need not share a set unless one is char-wide, or both are one halfword-or-narrower type: a
+  // 4-byte cell may be declared a pointer, which a `u32` cast does not alias. Asked on every
+  // compiler: agbcc's is the one measured (`g = 5; ((u16 *)&g)[1] = 7; return g;` is `strh; mov r0,
+  // #0x5`), and a compiler that keeps no alias sets only declines a pair it could have lifted.
+  {
+    id: 'alias-sets-may-differ',
+    why: 'a store and an overlapping access of other widths may sit in different alias sets on one object',
+    sound: true,
+    guardedBy: 'offset-names.test.ts: without `alias-sets-may-differ` a halfword store is respelled beside a word',
+    rejects: (c) => c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)),
+  },
+];
+
+/** Respell each numeric access {@link cellSpelledTwice} declines on beside a name, through that
+ *  name, where {@link NUMERIC_RESPELL_GATES} admits it ({@link NumericRespell} says why that is
+ *  exact). In place, at the map's one address for the name, one of two ways:
+ *
+ *   • THE LITERAL ITSELF, where the access's address is one `const` (plus constant displacements)
+ *     at or past the name's address: it becomes `gaddr name + K`, and every use of it with it — the
+ *     asm loaded ONE pool word, which the C then spells once and the compiler loads once. Only when
+ *     every access that literal addresses is either admitted here or in no pair at all, and none is
+ *     a device register's or volatile: a use the gates refused must not be respelled through it.
+ *   • THE ACCESS, otherwise (an address folded from several literals, or one below the name): its
+ *     address becomes `gaddr name + K` built beside it, its displacement folded into `K`, and what
+ *     the literal fed elsewhere keeps its spelling.
+ *
+ *  Either way the value is the address the machine computed. Repeats until nothing more is
+ *  admitted, because an access respelled may meet a second numeric one over a byte it now names.
+ *  Returns the name once per respelled access.
+ *
+ *  It only ever rewrites an access in a pair {@link cellSpelledTwice} would decline on, so a
+ *  function that lifts without it lifts without it unchanged; the caller asks
+ *  {@link cellSpelledTwice} again afterwards, and any pair left — two names, a refused gate, a use
+ *  of a respelled literal that now meets another spelling — still declines. */
+export function respellNumericThroughName(
+  fn: Fn,
+  symbols: SymbolMap,
+  behaviors: OffsetNameBehaviors,
+  gates: readonly Gate<NumericRespell>[] = NUMERIC_RESPELL_GATES,
+): string[] {
+  const out: string[] = [];
+  const device = behaviors.deviceRegisters;
+  for (;;) {
+    const judged = numericRespellSites(fn, symbols, behaviors).map((s) => ({ s, no: firstRejection(gates, s) }));
+    const sites = judged.filter((j) => j.no === null).map((j) => j.s);
+    if (sites.length === 0) {
+      return out;
+    }
+    const refused = new Set(judged.filter((j) => j.no !== null).map((j) => j.s.op));
+    const defOf = defOpMap(fn);
+    const literalOf = (op: Op): Op | null => {
+      const a = op.operands[0];
+      const d = defOf.get(constDisplacementOf(defOf, a)?.root ?? a);
+      return d?.opcode === 'const' && typeof d.attrs.value === 'number' ? d : null;
+    };
+    // every access each literal addresses, and whether one of them may not be respelled through it
+    const accessesOf = new Map<Op, Op[]>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'load' || op.opcode === 'store' || op.opcode === 'aload' || op.opcode === 'astore') {
+          const c = literalOf(op);
+          if (c !== null) {
+            (accessesOf.get(c) ?? accessesOf.set(c, []).get(c)!).push(op);
+          }
+        }
+      }
+    }
+    const keepsLiteral = (op: Op): boolean => {
+      const value = (op.attrs.value as number) >>> 0;
+      return (accessesOf.get(op) ?? []).some((a) => {
+        const lo = (value + ((a.attrs.off as number | undefined) ?? 0)) >>> 0;
+        const inDevice = device !== undefined && lo < device[1] && lo + ((a.attrs.width as number) ?? 1) > device[0];
+        return refused.has(a) || a.attrs.volatile === true || inDevice || a.opcode === 'aload' || a.opcode === 'astore';
+      });
+    };
+    const named = new Set<Op>();
+    for (const s of sites) {
+      const at = s.addrs[0];
+      const gaddr = (g: Value): Op =>
+        mkOp('gaddr', { results: [g], attrs: { sym: s.name!, fromMap: true, mapAddr: at >>> 0 } });
+      const lit = literalOf(s.op);
+      if (lit !== null && named.has(lit)) {
+        // this round already spelled the literal through a name; the next round's
+        // `cellSpelledTwice` pair says whether it was this one
+        out.push(s.name!);
+        continue;
+      }
+      const value = lit === null ? null : (lit.attrs.value as number) >>> 0;
+      if (lit !== null && value !== null && value >= at && !keepsLiteral(lit)) {
+        named.add(lit);
+        const block = fn.blocks.find((b) => b.ops.includes(lit))!;
+        if (value === at) {
+          lit.opcode = 'gaddr';
+          lit.attrs = { sym: s.name!, fromMap: true, mapAddr: at >>> 0 };
+        } else {
+          const g = mkValue(T.unk(32));
+          const k = mkValue(T.unk(32));
+          block.ops.splice(
+            block.ops.indexOf(lit),
+            0,
+            gaddr(g),
+            mkOp('const', { results: [k], attrs: { value: value - at } }),
+          );
+          lit.opcode = 'add';
+          lit.operands = [g, k];
+          lit.attrs = {};
+        }
+        out.push(s.name!);
+        continue;
+      }
+      const block = fn.blocks.find((b) => b.ops.includes(s.op))!;
+      const g = mkValue(T.unk(32));
+      const ops = [gaddr(g)];
+      let addr = g;
+      if (s.lo !== at) {
+        const k = mkValue(T.unk(32));
+        addr = mkValue(T.unk(32));
+        ops.push(mkOp('const', { results: [k], attrs: { value: s.lo - at } }));
+        ops.push(mkOp('add', { operands: [g, k], results: [addr] }));
+      }
+      block.ops.splice(block.ops.indexOf(s.op), 0, ...ops);
+      s.op.operands = [addr, ...s.op.operands.slice(1)];
+      s.op.attrs = { ...s.op.attrs, off: 0 };
+      out.push(s.name!);
+    }
+  }
+}
+
+/** Every numeric access in a pair {@link cellSpelledTwice} declines on beside a name, with what
+ *  the gates read — what the rewrite and {@link numericRespellRefusals} both judge. */
+function numericRespellSites(fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors): NumericRespell[] {
+  const declined = new Set<Op>();
+  for (const c of spellingConflicts(fn, symbols, behaviors.reloadsAcrossSpellings === true)) {
+    if ((c.x.spelling === null) !== (c.y.spelling === null)) {
+      declined.add((c.x.spelling === null ? c.x : c.y).op);
+    }
+  }
+  if (declined.size === 0) {
+    return [];
+  }
+  const { placed, places } = placedAccesses(fn, symbols);
+  const out: NumericRespell[] = [];
+  for (const op of declined) {
+    const mine = placed.filter((p) => p.op === op);
+    const x = mine[0];
+    const [lo, hi] = x.ranges[0];
+    const overlapping = placed.filter(
+      (y) =>
+        y.op !== op && y.spelling !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
+    );
+    const names = new Set(overlapping.map((y) => y.spelling!));
+    const name = names.size === 1 ? [...names][0] : null;
+    const addrs = name === null ? [] : (places.get(name)?.addrs ?? []);
+    const infos = addrs.length === 1 ? (symbols.get(addrs[0]) ?? []).filter((i) => i.name === name) : [];
+    let otherName: string | null = null;
+    for (const [a, entries] of symbols) {
+      for (const i of entries) {
+        if (i.name !== name && a < hi && lo < a + (i.size ?? 1)) {
+          otherName ??= i.name;
+        }
+      }
+    }
+    out.push({
+      op,
+      placings: mine.length,
+      lo,
+      hi,
+      names,
+      partnerSeveral: overlapping.some((y) => y.objects.length !== 1),
+      name,
+      addrs,
+      infos,
+      macro: name !== null && places.get(name)?.macro === true,
+      writes: x.writes,
+      otherName,
+      widthPairs: overlapping
+        .filter((y) => y.spelling === name)
+        .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
+      device: behaviors.deviceRegisters,
+    });
+  }
+  return out;
+}
+
+/** Which rule refused each numeric access {@link respellNumericThroughName} would judge in `fn`
+ *  as it stands, as `[0x<first byte>, reason]` with `null` where it would be respelled. NOT on the
+ *  shipped path: the attribution a test or a census asks for, off the same sites. */
+export function numericRespellRefusals(
+  fn: Fn,
+  symbols: SymbolMap,
+  behaviors: OffsetNameBehaviors = { contextGlobals: undefined },
+  gates: readonly Gate<NumericRespell>[] = NUMERIC_RESPELL_GATES,
+): readonly (readonly [string, string | null])[] {
+  return numericRespellSites(fn, symbols, behaviors).map(
+    (s) => [`0x${s.lo.toString(16)}`, firstRejection(gates, s)] as const,
+  );
+}
+
 /** Rewrite every admitted site into the `gaddr` the map names, in place. Returns THE NAMES it
  *  spelled, in block order — what a caller has to be told, because a name this pass produced does
  *  not rest on the map alone the way a pool-loaded one does: it rests on `addr(base) + K` landing
@@ -827,12 +1179,15 @@ function keptInOrderOn(fn: Fn): (a: Op, b: Op) => boolean {
  *  carry it out; nothing else can tell from a result that a walk was named.
  *
  *  It is also where the lift's names become FINAL, so it declines a function whose accesses reach
- *  one byte under two spellings ({@link cellSpelledTwice}), whichever pass named them. */
+ *  one byte under two spellings ({@link cellSpelledTwice}), whichever pass named them — after
+ *  respelling a numeric access of such a pair through the name beside it where that is exact
+ *  ({@link respellNumericThroughName}), whose names are returned too. */
 export function nameOffsetAddresses(
   fn: Fn,
   symbols: SymbolMap,
   behaviors: OffsetNameBehaviors,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
+  respellGates: readonly Gate<NumericRespell>[] = NUMERIC_RESPELL_GATES,
 ): string[] {
   // Every site is judged against the PRE-REWRITE defs, so a chain's later links resolve through
   // the base they were lifted from and the answer does not depend on the order links are visited.
@@ -849,14 +1204,22 @@ export function nameOffsetAddresses(
     dce(fn); // the constants and the walked-off base the rewrite just orphaned
     verify(fn);
   }
-  const twice = cellSpelledTwice(fn, symbols, behaviors.reloadsAcrossSpellings === true);
+  const reloads = behaviors.reloadsAcrossSpellings === true;
+  let twice = cellSpelledTwice(fn, symbols, reloads);
+  const respelled = twice === null ? [] : respellNumericThroughName(fn, symbols, behaviors, respellGates);
+  if (respelled.length > 0) {
+    stampDeclaredVolatileUnder(fn, symbols, behaviors);
+    dce(fn); // the literals no access reads any more
+    verify(fn);
+    twice = cellSpelledTwice(fn, symbols, reloads);
+  }
   if (twice !== null) {
     throw new RaiseUnsupportedError(
       `cannot lift '${fn.name}': ${twice} in one function — C the compiler would read as ` +
         `${twice.startsWith('byte') ? 'two objects, forwarding a store through one past the other' : 'one object'}`,
     );
   }
-  return admitted.map((s) => s.addr.target!.name);
+  return [...admitted.map((s) => s.addr.target!.name), ...respelled];
 }
 
 /** Which rule refused each offset site this function builds — one entry per SITE, in block order,
