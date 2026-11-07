@@ -23,7 +23,7 @@
 //      structure/cross-jumped-tail.ts reads the layout there;
 //   4. the plain default publishes the copies where that layout shows the merge, on a target that
 //      declares it, and the size bound decides everywhere else; except on a target that defaults to
-//      the copies outright (target.ts `returnTailCopiesByDefault`: agbcc, ido7.1), where the marks
+//      the copies outright (target.ts `joinPastReturnsByDefault` left out: agbcc, ido7.1), where the marks
 //      are read on agbcc's layouts through the description less that default.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -277,11 +277,14 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
   });
 });
 
-// agbcc's description defaults to the copies outright (target.ts `returnTailCopiesByDefault`, measured
-// over held-out real functions), so the marks' reading on agbcc's own layouts is read on the
-// description less that default: the chooser the GCC 2.7.2 lanes run.
-const { returnTailCopiesByDefault: _measured, ...agbccChooser } = ARMV4T_AGBCC.compilerBehaviors;
-const AGBCC_MARKS: TargetDescription = { ...ARMV4T_AGBCC, compilerBehaviors: agbccChooser };
+// agbcc's description defaults to the copies outright (it leaves out target.ts
+// `joinPastReturnsByDefault`, measured over held-out real functions), so the marks' reading on agbcc's
+// own layouts is read on the description with the join declared the default: the chooser the GCC
+// 2.7.2 lanes run.
+const AGBCC_MARKS: TargetDescription = {
+  ...ARMV4T_AGBCC,
+  compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, joinPastReturnsByDefault: true },
+};
 
 describe('the plain default publishes the copies where the layout shows the merge', () => {
   const reading = (p: Probe, target: TargetDescription, o: object = {}) =>
@@ -361,7 +364,7 @@ describe('the plain default publishes the copies where the layout shows the merg
   ].join('\n');
   test('ido7.1: the description defaults to the copies, where the join writes one store for two', () => {
     const read = (o: object) => decompile('f', AF_SHAPE, MIPS_IDO, { prototypes: { f: { params: 4 } }, ...o }).source;
-    expect(MIPS_IDO.compilerBehaviors.returnTailCopiesByDefault).toBe(true);
+    expect(MIPS_IDO.compilerBehaviors.joinPastReturnsByDefault).toBeUndefined();
     const [copies, join] = [read({ copyReturnTails: true }), read({ joinPastReturns: true })];
     expect(copies.match(/= 0;/g)).toHaveLength(2);
     expect(join.match(/= 0;/g)).toHaveLength(1);

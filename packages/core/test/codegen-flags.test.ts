@@ -18,6 +18,7 @@ import {
   MIPS_IDO,
   PPC_MWCC,
   PPC_MWCC_233,
+  PPC_MWCC_247,
   TOOLCHAIN_TARGETS,
   type TargetDescription,
   type ToolchainId,
@@ -35,7 +36,7 @@ const DESCRIPTIONS: Record<ToolchainId, TargetDescription> = {
   'gcc2.7.2': MIPS_GCC,
   mwcc_242_81: PPC_MWCC,
   mwcc_233_163n: PPC_MWCC_233,
-  mwcc_247_107: PPC_MWCC,
+  mwcc_247_107: PPC_MWCC_247,
 };
 const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
 /** the toolchains that HAVE canonical flags — the questions below that are about a flag set */

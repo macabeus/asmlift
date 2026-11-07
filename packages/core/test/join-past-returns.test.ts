@@ -587,7 +587,9 @@ describe('the return-tail reading bounded by size', () => {
     verify(fn);
     return fn;
   }
-  const OPTS = { returnsVoid: true } as const;
+  // the bound is read where the target declares the join its default (target.ts
+  // `joinPastReturnsByDefault`); elsewhere the copies are published outright
+  const OPTS = { returnsVoid: true, joinPastReturnsByDefault: true } as const;
   const emitC = (t: SFn) => cBackend.emit(t);
 
   test('where the join is longer, the copies are published and the join is the unpublished reading', () => {

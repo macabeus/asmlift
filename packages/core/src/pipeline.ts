@@ -1171,11 +1171,13 @@ export interface ReturnTailReading {
   readonly unpublished?: UnpublishedReading;
 }
 
-/** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT: `structureChecked`,
- *  and where that structuring took the join past early returns somewhere, the same structuring again
- *  reading the return-tail copies (`copyReturnTails`). The copies are published where they spell the
- *  function SHORTER, or where the target's asm layout shows that the compiler cross-jumped a tail
- *  the source wrote into every arm (below).
+/** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT. On a target that
+ *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`: MIPS GCC
+ *  and mwcc_242_81), `structureChecked`, and where that structuring took the join somewhere, the
+ *  same structuring again reading the return-tail copies (`copyReturnTails`). The copies are
+ *  published where they spell the function SHORTER, or where the target's asm layout shows that the
+ *  compiler cross-jumped a tail the source wrote into every arm, or its cse left a return unfolded
+ *  (below). Every other target publishes the copies (THE MEASURED DEFAULT).
  *
  *  WHY A BOUND. The join writes the code below a divergent branch once where the copies write it
  *  into every arm; but the join copies a return tail into each early return in its turn, so neither
@@ -1226,8 +1228,11 @@ export interface ReturnTailReading {
  *      620; the third, and the split tail of the first, on held-out generated sources written with
  *      the copies, where the bound with the first two still lost matches the copies make (agbcc 7,
  *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; with all three, 2, 3, 1). Their numbers are in
- *      structure/cross-jumped-tail.ts. So, held out, this default still loses some of the copies'
- *      matches; the 620 and the full bench lose none.
+ *      structure/cross-jumped-tail.ts. So, held out, this reading still loses some of the copies'
+ *      matches; the 620 and the full bench lose none. Those 620 MATCH figures are of the bound with
+ *      the marks on every compiler; agbcc and ido7.1 now publish the copies (THE MEASURED DEFAULT),
+ *      so on agbcc the marks are read by the tests and by no default, and the join's gains there
+ *      are given up (agbcc 2 of the 620, ido7.1 7: the field's note).
  *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
  *      too, and leaves the same marks under a join-written source (structure/cross-jumped-tail.ts).
  *      So a mark moves which verified reading is the default, never what is lifted.
@@ -1241,17 +1246,22 @@ export interface ReturnTailReading {
  *  `func_8010BD28_472F98_mgmode` (gcc2.7.2 -O1), the one held-out real function the join lost a
  *  match on there (2026-11-06): the copies match, the join is 1 line off.
  *
- *  THE MEASURED DEFAULT. On a target that declares `returnTailCopiesByDefault` (agbcc, ido7.1) the
- *  copies are published whatever the bound and the marks say, and the join is kept as the
- *  unpublished reading, so the ranked fan holds both as before. There, over held-out real functions,
- *  the bound with every mark loses matches the copies have and no mark read from the target
- *  separates them (the field's note has the counts and the gains given up).
+ *  THE MEASURED DEFAULT. A target that does not declare `joinPastReturnsByDefault` (agbcc, ido7.1,
+ *  mwcc_233_163n, mwcc_247_107, and any description that leaves it out) publishes the copies
+ *  whatever the bound and the marks would say, and keeps the join as the unpublished reading, so
+ *  the ranked fan holds both as before (`copiesByDefault`). The join is declared only where the
+ *  held-out real functions show the bound with every mark losing none of the copies' matches; on
+ *  agbcc and ido7.1 it loses some no mark read from the target separates, and the other two mwcc
+ *  builds are unmeasured (the field's note has the counts and the gains given up).
  *
- *  REFUSALS. Never a decline turned into a lift, either way:
+ *  REFUSALS. Never a lift turned into a decline:
  *    - a join that declines or crosses the copy budget already falls to the copies inside
  *      `structure()` (`structureWithinBudget`), and that tree is published as it was;
- *    - the copies are structured only once the join has lifted, and where they decline, fail a
- *      boundary contract, or the backend cannot emit one of the two, the join stands;
+ *    - outside the measured default, the copies are structured only once the join has lifted, and
+ *      where they decline, fail a boundary contract, or the backend cannot emit one of the two, the
+ *      join stands;
+ *    - under the measured default the copies come first, and where they refuse the join stands, so
+ *      a function the old default declined can lift there (`copiesByDefault`);
  *    - a forced reading (`copyReturnTails`, `joinPastReturns`), or a language with no early `return`
  *      (`spellEarlyReturns: false`), is structured once, as asked. rank.ts forces the join this way
  *      for a setting whose stripped sibling dropped its copies.
@@ -1266,7 +1276,7 @@ export function structureReturnTailReading(
     joinPastReturns?: boolean;
     crossJumpsReturnTails?: boolean;
     foldsBranchConstantOnTakenEdge?: boolean;
-    returnTailCopiesByDefault?: boolean;
+    joinPastReturnsByDefault?: boolean;
   },
   emit: (sfn: SFn) => string,
   hooks: Parameters<typeof structure>[2] = {},
@@ -1293,7 +1303,7 @@ export function structureReturnTailReading(
       },
       memo,
     );
-  if (opts.returnTailCopiesByDefault === true && joinPastReturns !== true) {
+  if (opts.joinPastReturnsByDefault !== true && joinPastReturns !== true) {
     return copiesByDefault(fn, structOpts, structureJoin, sites, hooks, memo);
   }
   const join = structureJoin();
@@ -1329,11 +1339,21 @@ export function structureReturnTailReading(
     : { sfn: join, unpublished: { reading: 'copies', sfn: copies } };
 }
 
-/** THE MEASURED DEFAULT (`returnTailCopiesByDefault`): the copies, structured FIRST, as the default
- *  before the join past early returns was one, so a function lifts and declines exactly where it did
- *  then. The join is structured after them for the ranked fan, and its refusal costs only that
- *  reading. Where the copies refuse, the join stands as everywhere else (never a lift turned into a
- *  decline), and where both refuse, the copies' refusal is the one reported. */
+/** THE MEASURED DEFAULT (no `joinPastReturnsByDefault`): the copies, structured FIRST and
+ *  published wherever they lift, as the default before the join past early returns was one. The join
+ *  is structured after them for the ranked fan, and its refusal costs only that reading.
+ *
+ *  Where the copies REFUSE, the join is published: never a lift turned into a decline. The copies
+ *  here (`copyReturnTails`) are not that old default's structuring: its ladder had rungs of its own
+ *  that this branch moved into the join's reading (structure.ts THE COPIES, where the join refuses),
+ *  and a function they lifted on is one the copies alone decline (`synthetic:sw_gotocase2` on
+ *  ido7.1, a case that leaves its switch for a loop exit past the switch's end). So this default
+ *  also LIFTS some functions the old one declined, where only the join structures them (pokeemerald
+ *  `Task_ShowContestEntryMonPic`, agbcc, a jump table whose case arms the copies cannot linearize):
+ *  a decline turned into a lift, which the held-out sweep counts as moved, not as level. A refusal a
+ *  function's first structuring alone can see (a volatile read stamped late under a `&&`/`||`) is
+ *  remembered on the function (structure.ts `STAMPED_LATE`), so the join run after the copies
+ *  declines it as they did. Where both refuse, the copies' refusal is the one reported. */
 function copiesByDefault(
   fn: Fn,
   structOpts: Parameters<typeof structure>[1],

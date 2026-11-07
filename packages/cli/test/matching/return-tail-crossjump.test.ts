@@ -7,10 +7,10 @@
 // the size bound alone publishes it. On the copies objects the layout shows the cross-jump
 // (core structure/cross-jumped-tail.ts), and the marks' chooser publishes the copies. This file pins
 // that each of the chooser's readings recompiles to its own object, and that the join does not, on
-// the copies objects. agbcc's description itself defaults to the copies outright (target.ts
-// `returnTailCopiesByDefault`, measured over held-out real functions), so the chooser is read on the
-// description less that default, and the copies default's own price is pinned below: the join-written
-// probes then match only as the fan's `/ret-join` reading.
+// the copies objects. agbcc's description itself defaults to the copies outright (it leaves out
+// target.ts `joinPastReturnsByDefault`, measured over held-out real functions), so the chooser is
+// read on the description with the join declared the default, and the copies default's own price is
+// pinned below: the join-written probes then match only as the fan's `/ret-join` reading.
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
@@ -25,8 +25,10 @@ const PROTOS = {
   pb: { f: { params: 2, returnsVoid: true } },
 } as const;
 
-const { returnTailCopiesByDefault: _measured, ...chooser } = ARMV4T_AGBCC.compilerBehaviors;
-const AGBCC_JOIN_DEFAULT: TargetDescription = { ...ARMV4T_AGBCC, compilerBehaviors: chooser };
+const AGBCC_JOIN_DEFAULT: TargetDescription = {
+  ...ARMV4T_AGBCC,
+  compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, joinPastReturnsByDefault: true },
+};
 
 const score = (probe: string, o: object, target: TargetDescription = AGBCC_JOIN_DEFAULT) => {
   const asm = compileTargetAsm(readFileSync(join(CORPUS, `probe-rettail-${probe}.c`), 'utf8'), FLAGS);

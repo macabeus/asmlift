@@ -1315,29 +1315,35 @@ export interface TargetDescription {
     // at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no value of this field
     // says; ido7.1 and mwcc are unprobed.
     foldsBranchConstantOnTakenEdge?: boolean;
-    // DOES THE RETURN-TAIL CHOOSER DEFAULT TO THE COPIES HERE, whatever the size bound and the marks
-    // say? Not a compiler behaviour but a MEASURED DEFAULT, kept beside the behaviours because it is
-    // per compiler and read by the chooser they feed (pipeline.ts `structureReturnTailReading`).
-    // Where it is `true` the copies are published, as before the join past early returns was a
-    // default, and the join is still structured and kept in the ranked fan as `/ret-join`.
+    // IS THE JOIN PAST EARLY RETURNS THE DEFAULT READING HERE? Not a compiler behaviour but a MEASURED
+    // DEFAULT, kept beside the behaviours because it is per compiler and read by the chooser they
+    // feed (pipeline.ts `structureReturnTailReading`), which the size bound and the marks above
+    // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
+    // join was a default, and the join is still structured and kept in the ranked fan as
+    // `/ret-join`: a compiler the held-out measurement has not reached keeps the default it had.
     //
-    // MEASURED over held-out real functions, every function of a project outside the 620 the
-    // marks were chosen on, both readings really compiled against the project's own objects
-    // (2026-11-06). Where the size bound with the marks loses a match the copies have, and no mark
-    // read from the target separates the two spellings, this is `true`:
+    // MEASURED over held-out real functions, every function of a project outside the 620 the marks
+    // were chosen on, both readings really compiled against the project's own objects (2026-11-06).
+    // `true` only where the size bound with every mark loses no match the copies have:
+    //   - gcc2.7.2kmc (Snowboard Kids 2, 78 re-spelled): 0 lost, 2 gained;
+    //   - gcc2.7.2 (Mario Party 3, all 10019 functions, 150 re-spelled): 0 lost once the unfolded
+    //     return is read (`foldsBranchConstantOnTakenEdge`), which moves 14 to the copies: its one
+    //     loss back to a match, one closer, and 12 the join had brought closer given back;
+    //   - mwcc_242_81 (ac-decomp, and Pikmin and Mario Party 4 decompiled at this build; 207
+    //     re-spelled): 0 lost, 3 gained.
+    // So `true` on MIPS_GCC and on PPC_MWCC as mwcc_242_81 reads it; PPC_MWCC_233 and PPC_MWCC_247
+    // (mwcc_233_163n, mwcc_247_107) leave it out, unmeasured at their own builds. Left out where it
+    // loses, the copies' default given back with the join's gains:
     //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
     //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
-    //     different arguments, and a third source spelling the copies happen to share.
+    //     different arguments, and a third source spelling the copies happen to share. Given up:
+    //     18 held out and 2 of the 620.
     //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
     //     never cross-jumps, and two `sw zero,0(a3)` stay two blocks; but the frontend retargets a
     //     `b T` whose delay slot copies the word at T-4 to that word (frontend/mips.ts
     //     `normaliseBranchLikely`), and the emptied slot leaves the layout record a `nop`, so the
-    //     second copy is not readable where the chooser looks.
-    // The gains given up are the join's: agbcc 18 held out and 2 of the 620, ido7.1 18 and 7.
-    // ABSENT ⇒ the size bound and the marks decide: gcc2.7.2kmc (sbk2, 0 lost, 2 gained), mwcc
-    // (ac-decomp, Pikmin, Mario Party 4: 0 lost, 3 gained), and gcc2.7.2 (Mario Party 3: its one loss
-    // is the unfolded return `foldsBranchConstantOnTakenEdge` reads).
-    returnTailCopiesByDefault?: boolean;
+    //     second copy is not readable where the chooser looks. Given up: 18 held out and 7 of the 620.
+    joinPastReturnsByDefault?: boolean;
   };
 }
 
@@ -1473,10 +1479,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchBoundCase: 'taken',
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
-    // MEASURED on the probe pairs at the field (gcc 2.x jump.c's cross-jump).
+    // MEASURED on the probe pairs at the field (gcc 2.x jump.c's cross-jump). Read only where the join
+    // is the default (`joinPastReturnsByDefault`), which agbcc leaves out: the join loses 9 of
+    // pokeemerald's matches no mark separates.
     crossJumpsReturnTails: true,
-    // MEASURED over held-out real functions, at the field: the join loses 9 of pokeemerald's matches.
-    returnTailCopiesByDefault: true,
     hoistsSingleSetArm: true,
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
@@ -1716,9 +1722,6 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED, the probes at the field: past the `addiu` reach every member access gets its own
     // `lui`/`addu`, and a held pointer shares one.
     farMemberBasePerAccess: { past: 32767 },
-    // MEASURED over held-out real functions, at the field: the join loses 4 of Animal Forest's
-    // matches.
-    returnTailCopiesByDefault: true,
   },
 };
 
@@ -1837,6 +1840,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED at -O2 on both toolchains this description serves, the probe pair at the field;
     // gcc2.7.2's canonical -O1 clears it (`targetFor`).
     foldsBranchConstantOnTakenEdge: true,
+    // MEASURED over held-out real functions on BOTH toolchains this description serves, at the field.
+    joinPastReturnsByDefault: true,
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
@@ -2005,12 +2010,31 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds: the probes at the fields.
     forwardsStructReturnDestination: false,
     discardedReadMayFillArgRegister: true,
+    // MEASURED over held-out real functions at mwcc_242_81 only, at the field; the other two builds'
+    // descriptions leave it out.
+    joinPastReturnsByDefault: true,
   },
 };
 
+/** A description's behaviours less `joinPastReturnsByDefault`, for a build that shares the
+ *  description but was not measured for that default. */
+function withoutJoinDefault(d: TargetDescription): TargetDescription['compilerBehaviors'] {
+  const { joinPastReturnsByDefault: _measuredElsewhere, ...behaviors } = d.compilerBehaviors;
+  return behaviors;
+}
+
 /** CodeWarrior 2.3.3b163n (Pikmin): `PPC_MWCC` but for the one declaration a probe refuted there —
- *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one. */
-export const PPC_MWCC_233: TargetDescription = { ...PPC_MWCC, globalRegisterVariables: undefined };
+ *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one —
+ *  and the return-tail default no held-out function measured at this build. */
+export const PPC_MWCC_233: TargetDescription = {
+  ...PPC_MWCC,
+  globalRegisterVariables: undefined,
+  compilerBehaviors: withoutJoinDefault(PPC_MWCC),
+};
+
+/** CodeWarrior 2.4.7b107 (Mario Party 4's other build): `PPC_MWCC` less the return-tail default no
+ *  held-out function measured at this build (`joinPastReturnsByDefault`). */
+export const PPC_MWCC_247: TargetDescription = { ...PPC_MWCC, compilerBehaviors: withoutJoinDefault(PPC_MWCC) };
 
 /** A toolchain: one compiler binary, named as decomp.me names it. Several toolchains may share a
  *  description (`MIPS_GCC` serves two), and each keeps its own evidence. */
@@ -2102,7 +2126,7 @@ export const TOOLCHAIN_TARGETS = {
   },
   mwcc_247_107: {
     family: 'mwcc',
-    description: PPC_MWCC,
+    description: PPC_MWCC_247,
   },
 } as const satisfies Readonly<Record<string, ToolchainTarget>>;
 

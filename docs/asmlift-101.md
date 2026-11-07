@@ -291,15 +291,17 @@ switch. It is the source's own spelling where two arms run on into one case's bo
 fall-through reaches only one of them (`case 1: if (c) continue; goto L; case 2: … case 3: L: …`,
 kleod `sub_0800D188`). It has two producers, both over `jumpSharedFallTargets` in
 `structure/switch-recover.ts`: the structurer's default writes it only where every goto-free
-structuring of the whole function under its default reading, the join past early returns,
-declines, its `for`, outward and loop tail-copy reruns included, and only in a switch none of them
-spelled goto-free (`JumpRanking` in `structure.ts`). The whole-function return-tail copies (the
-rerun `structureWithinBudget` makes where the join declines, the second structuring
-`structureReturnTailReading` in `pipeline.ts` makes to publish the copies where the join spells the
-function longer, and the ranked `/ret-copy`) come after that whole ladder, not inside it, so a
-function whose join needs the goto publishes it even where the copies would lift without one,
-unless they are also the shorter or the layout shows a cross-jumped return tail (THE COPIES, BELOW
-ALL OF IT, above `structure()`); and
+structuring of the whole function under the reading it was asked (`structure()` reads the join past
+early returns, or the return-tail copies under `copyReturnTails`) declines, its `for`, outward and
+loop tail-copy reruns included, and only in a switch none of them spelled goto-free (`JumpRanking`
+in `structure.ts`). The whole-function readings are chosen above that ladder, not inside it
+(`structureReturnTailReading` in `pipeline.ts`). Where the target declares the join its default
+(`joinPastReturnsByDefault` in `target.ts`: MIPS GCC and mwcc_242_81), a function whose join needs
+the goto publishes it even where the copies would lift without one, unless the copies are the
+shorter, the layout shows a cross-jumped return tail, or cse left a return unfolded (THE COPIES,
+BELOW ALL OF IT, above `structure()`). Every other target, agbcc (`sub_0800D188` among its
+functions) and ido7.1 included, publishes the copies, structured first, and so the goto only where
+the copies' own ladder needs it (THE MEASURED DEFAULT, `pipeline.ts`); and
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring
 already leaves gets no jump, and neither does the arm laid out directly above the target case,

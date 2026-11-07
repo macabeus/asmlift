@@ -2514,10 +2514,11 @@ export function enumerateCandidates(
                 sfn = otherReading.sfn;
               } else if (pass === 'default') {
                 // THE RETURN-TAIL READING, bounded by size and read off the layout (pipeline.ts
-                // `structureReturnTailReading`): the join past early returns, or the copies where
-                // they spell this setting's function shorter or the asm layout shows a cross-jumped
-                // return tail. The losing tree is kept for the `reading` pass, so neither reading is
-                // structured twice.
+                // `structureReturnTailReading`): on a target that declares the join past early
+                // returns its default, the join, or the copies where they spell this setting's
+                // function shorter or the asm layout or an unfolded return marks them; on every other
+                // target the copies, whose refusal aborts the row as before. The losing tree is kept
+                // for the `reading` pass, so neither reading is structured twice.
                 const copiesBarred = stripped(copiesDropped);
                 const read = structureReturnTailReading(
                   fn,
