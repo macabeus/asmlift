@@ -996,12 +996,23 @@ export async function runCli(
         : `asmlift: [walked] ${result.walkedNames.length} name(s) reached by arithmetic off a named address, not ` +
           `read from a pool word — check the base addresses your map gives them:\n` +
           [...new Set(result.walkedNames)].map((n) => `  ${n}\n`).join('');
+    // …and THE NAMES A NUMERIC ADDRESS WAS RESPELLED THROUGH: the asm spells those bytes as a
+    // number, which asmlift spelled through the one name this function also reaches them by. The
+    // name's address AND SIZE in the map decide that, so they are what to check.
+    const respelledNote =
+      result.respelledNames.length === 0
+        ? ''
+        : `asmlift: [respelled] ${result.respelledNames.length} name(s) a numeric address was spelled through, ` +
+          `because this function reaches the same bytes by that name — check the address and size your map ` +
+          `gives them:\n` +
+          result.respelledNames.map((n) => `  ${n}\n`).join('');
     const stderr =
       runTrace +
       warn +
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       walkedNote +
+      respelledNote +
       protoNote(result) +
       ownArityNote(result.ownArityNotes);
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };

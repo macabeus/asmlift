@@ -1258,23 +1258,35 @@ export function numericRespellRefusals(
   );
 }
 
+/** The names {@link nameOffsetAddresses} spelled that no pool word of the asm spelled, in two
+ *  kinds because each rests on a different fact a reader checks. */
+export interface OffsetNamesSpelled {
+  /** reached by arithmetic: `addr(base) + K` landing on the map entry named, once per site in
+   *  block order — the BASE's address in the map is load-bearing */
+  readonly walked: string[];
+  /** a numeric address respelled through the one name this function also reaches its bytes by
+   *  ({@link respellNumericThroughName}), each name once — the name's address and size in the
+   *  map are load-bearing, and so is the premise that the number was not the source's own */
+  readonly respelled: string[];
+}
+
 /** Rewrite every admitted site into the `gaddr` the map names, in place. Returns THE NAMES it
- *  spelled, in block order — what a caller has to be told, because a name this pass produced does
- *  not rest on the map alone the way a pool-loaded one does: it rests on `addr(base) + K` landing
- *  on the map entry it names. `DecompileResult.walkedNames` and the trace's `stage:offsetnames`
- *  carry it out; nothing else can tell from a result that a walk was named.
+ *  spelled — what a caller has to be told, because a name this pass produced does not rest on the
+ *  map alone the way a pool-loaded one does ({@link OffsetNamesSpelled} says what each kind rests
+ *  on). `DecompileResult.walkedNames` / `respelledNames` and the trace's `stage:offsetnames` carry
+ *  them out; nothing else can tell from a result that a walk was named.
  *
  *  It is also where the lift's names become FINAL, so it declines a function whose accesses reach
  *  one byte under two spellings ({@link cellSpelledTwice}), whichever pass named them — after
  *  spelling a numeric access of such a pair through the name beside it where that is exact
- *  ({@link respellNumericThroughName}), whose names are returned too. */
+ *  ({@link respellNumericThroughName}). */
 export function nameOffsetAddresses(
   fn: Fn,
   symbols: SymbolMap,
   behaviors: OffsetNameBehaviors,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
   respellGates: readonly Gate<NumericRespell>[] = NUMERIC_RESPELL_GATES,
-): string[] {
+): OffsetNamesSpelled {
   // Every site is judged against the PRE-REWRITE defs, so a chain's later links resolve through
   // the base they were lifted from and the answer does not depend on the order links are visited.
   const admitted = offsetSites(fn, symbols).filter((s) => firstRejection(gates, s.addr) === null);
@@ -1305,7 +1317,7 @@ export function nameOffsetAddresses(
         `${twice.startsWith('byte') ? 'two objects, forwarding a store through one past the other' : 'one object'}`,
     );
   }
-  return [...admitted.map((s) => s.addr.target!.name), ...respelled];
+  return { walked: admitted.map((s) => s.addr.target!.name), respelled: [...new Set(respelled)] };
 }
 
 /** Which rule refused each offset site this function builds — one entry per SITE, in block order,
@@ -1339,7 +1351,7 @@ export function offsetNameRefusals(
  *  pass up, which three hand-written calls do not — so `offset-names.test.ts` supplies it by
  *  wrapping this record and asserting all three reach it. */
 export const OFFSET_NAME_PASS: {
-  run: (fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors) => string[];
+  run: (fn: Fn, symbols: SymbolMap, behaviors: OffsetNameBehaviors) => OffsetNamesSpelled;
 } = {
   run: (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors),
 };

@@ -159,6 +159,13 @@ export interface DecompileResult {
    *  `stage:offsetnames`), and it is also the only thing in a result that says a walk spelling
    *  stopped being enumerable here. Empty on every run with no symbol map. */
   walkedNames: string[];
+  /** THE NAMES A NUMERIC ADDRESS WAS RESPELLED THROUGH (raise/offsetnames.ts
+   *  `respellNumericThroughName`), each once: the asm spells those bytes as a number, and asmlift
+   *  spelled them through the one name the same function reaches them by, so the name's address
+   *  and size in the map decide what the reader sees — and a source that did write the number is
+   *  one relocated pool word away. Reported beside `walkedNames` (`main.ts`'s `[respelled]`
+   *  block, the trace's `stage:offsetnames`). Empty on every run with no symbol map. */
+  respelledNames: string[];
   /** WHERE THE LIFT WENT PAST ITS CONTEXT DECLARATION (`liftStamped`'s `[own-arity]` notes): each
    *  names the declaration and either the argument registers the body reads past it, kept as
    *  parameters, or the refusal that made the lift drop the bound. A note is no gap, but the
@@ -254,11 +261,12 @@ function runTower(
   // not it named anything — when two accesses reach one cell under two spellings, or one spelling
   // reaches two of the cells the map places a name at (raise/offsetnames.ts `cellSpelledTwice`,
   // RaiseUnsupportedError), once it has respelled what numeric accesses of such pairs one name
-  // makes exact (`respellNumericThroughName`). That check is no gate: `bench gates --pass offsetnames` tables the walk
-  // refusals only, and a decline from it reads as this stage's.
-  const walkedNames = opts.symbols
+  // makes exact (`respellNumericThroughName`). That check is no gate — `bench gates --pass
+  // offsetnames` tables the walk refusals and the respell's, not the decline — and a decline from
+  // it reads as this stage's.
+  const { walked: walkedNames, respelled: respelledNames } = opts.symbols
     ? OFFSET_NAME_PASS.run(fn, opts.symbols, offsetNameBehaviorsFor(target, opts.contextGlobals))
-    : [];
+    : { walked: [], respelled: [] };
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -301,6 +309,7 @@ function runTower(
     // does not have (raise/globalshape.ts `assumedShapes`).
     assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     walkedNames,
+    respelledNames,
     ownArityNotes,
     calleeBodiesAsked: answeredBodies(bodiesAsked, opts.calleeBodies),
     calleeStackSized: Object.fromEntries(stacksSized),
@@ -1218,6 +1227,7 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     // A stub spells no global, so it assumes nothing about one and walked to none.
     assumedSymbols: [],
     walkedNames: [],
+    respelledNames: [],
     ownArityNotes: [],
     calleeBodiesAsked: {},
     calleeStackSized: {},

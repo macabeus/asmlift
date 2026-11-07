@@ -848,8 +848,11 @@ describe('a numeric address the function also reaches through a name', () => {
     const out = lifted(E5(), unsized);
     expect(out).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
     expect(out).not.toMatch(/50352729|0x3005259/i);
-    // the name is reported as one this pass spelled
-    expect(decompile('e5', E5(), ARMV4T_AGBCC, { ...h, symbols: unsized }).walkedNames).toContain('gUnk_03005220');
+    // the name is reported as one a number was respelled through, and not as one walked to: no
+    // arithmetic reached it, so its base address is not what to check
+    const r = decompile('e5', E5(), ARMV4T_AGBCC, { ...h, symbols: unsized });
+    expect(r.respelledNames).toEqual(['gUnk_03005220']);
+    expect(r.walkedNames).toEqual([]);
   });
 
   test('the literal is spelled once where it also feeds a call', () => {
@@ -951,7 +954,7 @@ describe('a numeric address the function also reaches through a name', () => {
       offsetNameBehaviorsFor(ARMV4T_AGBCC, undefined),
       OFFSET_NAME_GATES,
       without(NUMERIC_RESPELL_GATES, id),
-    );
+    ).respelled;
 
   test('without `alias-sets-may-differ` a halfword store is respelled beside a word', () => {
     // agbcc -O2 compiles `*(s32 *)&g = 5; ((u16 *)&g)[1] = 7; return *(s32 *)&g;` to `str; strh

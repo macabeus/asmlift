@@ -295,6 +295,30 @@ test('CLI: a name reached by arithmetic is published as `[walked]`', async () =>
   expect(r.stderr).toContain('gNext');
 });
 
+// A NUMBER SPELLED THROUGH A NAME. The store's pool word is the number 0x03005259, inside the
+// `gUnk` the read reaches by `add #0x39` off its own pool word; the store is respelled through
+// `gUnk` (raise/offsetnames.ts `respellNumericThroughName`), which is no arithmetic off a base, so
+// it is published as `[respelled]` and not as `[walked]`.
+test('CLI: a numeric address respelled through a name is published as `[respelled]`', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'symbols.json'), JSON.stringify({ '0x03005220': [{ name: 'gUnk', kind: 'data' }] }));
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const file = join(root, 'f.s');
+  writeFileSync(
+    file,
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tldr\tr0, .L1\n\tadd\tr0, r0, #0x39\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr2, .L1+4\n\tmov\tr1, #0x1\n\tstrb\tr1, [r2]\n\tbx\tlr\n\t.align 2\n.L1:\n\t.word\tgUnk\n\t.word\t0x03005259\n',
+  );
+  const r = await runCli([file]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('((u8 *)&gUnk)[57] = 1;');
+  expect(r.stderr).toContain('[respelled] 1 name(s) a numeric address was spelled through');
+  expect(r.stderr).not.toContain('[walked]');
+});
+
 // The absence is the assertion: a line that is always there says nothing.
 test('CLI: a pool-loaded name alone prints no `[walked]` line', async () => {
   const root = tmp();

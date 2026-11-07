@@ -244,18 +244,19 @@ function traceTower(
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
   // runTower — and its one-spelling-per-cell decline, which throws from here (pipeline.ts's 1.6).
-  const named = opts.symbols
+  const { walked: named, respelled } = opts.symbols
     ? OFFSET_NAME_PASS.run(fn, opts.symbols, offsetNameBehaviorsFor(target, opts.contextGlobals))
-    : [];
+    : { walked: [], respelled: [] };
   trace.push({
     id: 'stage:offsetnames',
     title: 'Name a walked-to address the symbol map knows',
     irDump: irDump(fn),
     verified: true,
     note:
-      named.length === 0
+      (named.length === 0
         ? 'no address built off a named one lands on a symbol the map names'
-        : `${named.length} address${named.length === 1 ? '' : 'es'} named: ${named.join(', ')}`,
+        : `${named.length} address${named.length === 1 ? '' : 'es'} named: ${named.join(', ')}`) +
+      (respelled.length === 0 ? '' : `; numeric address respelled through ${respelled.join(', ')}`),
   });
 
   // (2) idiom fold (capability-gated), with an optional probed source per pattern boundary —
