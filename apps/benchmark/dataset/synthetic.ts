@@ -92,6 +92,27 @@ const NUMPOOL_SIB_MAP: SymbolMap = new Map([
   [0x03005220, [{ name: 'gNumPool', kind: 'data' as const, size: 0x3c }]],
   [0x0300525c, [{ name: 'gNumNext', kind: 'data' as const, size: 4 }]],
 ]);
+// (`_LAY`) `gNumPool` sized with a layout, as DWARF carries it: a `u8 *` member over the word the
+// `numpool_lay` row stores through. (`_GP`) a pointer global beside it, which `numpool_gp` indexes.
+const NUMPOOL_LAY_MAP: SymbolMap = new Map([
+  [
+    0x03005220,
+    [
+      {
+        name: 'gNumPool',
+        kind: 'data' as const,
+        size: 0x40,
+        shape: 'struct' as const,
+        structName: 'NumPool',
+        layout: [{ name: 'p38', offset: 0x38, size: 4, pointer: true, pointeeSize: 1 }],
+      },
+    ],
+  ],
+]);
+const NUMPOOL_GP_MAP: SymbolMap = new Map([
+  ...NUMPOOL_MAP,
+  [0x03007000, [{ name: 'gNumPtr', kind: 'data' as const, size: 4 }]],
+]);
 const NUMPOOL_M_MAP: SymbolMap = new Map([[0x80100000, [{ name: 'gNumPool', kind: 'data' as const }]]]);
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
@@ -17921,6 +17942,32 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { h: { params: 0, returnsVoid: true } },
     symbols: NUMPOOL_MAP,
   },
+  // …and a halfword store whose address has a runtime part off a base no constant names, between
+  // the numeric word store and its reload beside `gNumPool.b3a`: a pointer parameter's `p[i]`
+  // (`numpool_par`) and a pointer loaded from a global, `gNumPtr[i]` (`numpool_gp`). Its bytes are
+  // unknown, so they may be the word's, and spelled through the name the word's C forwards past the
+  // u16 store (`str; strh; add r4, r4, #0x5`), so both keep declining. `numpool_lay` stores a WORD
+  // at an index off another literal under a map whose layout has a `u8 *` member over the respelled
+  // word: it prints as `gNumPool.p38`, a pointer, which agbcc forwards past the `s32` cast's store
+  // (`str [r1, #0x38]; str [r0]; add r3, r3, #0x5`), so it keeps declining too.
+  ...(
+    [
+      ['numpool_par', 's32 i, vu16 *p', 'p[i] = 7;', NUMPOOL_MAP, '', 's32 i, volatile u16 *p'],
+      ['numpool_gp', 's32 i', 'gNumPtr[i] = 7;', NUMPOOL_GP_MAP, 'extern vu16 *gNumPtr;\n', 's32 i'],
+      ['numpool_lay', 's32 i', '((vu32 *)0x03005200)[i] = 7;', NUMPOOL_LAY_MAP, '', 's32 i'],
+    ] as const
+  ).map(([sym, params, store, symbols, also, ctxParams]): SynthSpec => ({
+    sym,
+    src:
+      'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
+      `struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\n${also}` +
+      `s32 ${sym}(${params}) {\n    s32 v0 = gNumPool.b3a;\n    *(vu32 *)0x03005258 = 5;\n` +
+      `    ${store}\n    return v0 + *(vu32 *)0x03005258;\n}`,
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: `s32 ${sym}(${ctxParams});`,
+    symbols,
+  })),
   // …and their O32 and PowerPC twins: the name read through `%lo` (`@l`), the store through `lui
   // 0x8010` (`lis`), which gcc 2.7.2 and KMC forward across as two spellings, and every one of the
   // four reloads as one name. The source writes the number, and an object's relocations prove it
