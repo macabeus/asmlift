@@ -706,7 +706,7 @@ export type OffsetNameBehaviors = StampBehaviors & {
   /** the target's device-register window (`capabilities.deviceRegisters`): a numeric access into
    *  it may be a `volatile` register the source spelled by address, which no map name carries, so
    *  {@link respellNumericThroughName} leaves it as the asm has it — and, since a store there may
-   *  start a transfer into ordinary memory, respells nothing beside a constant-address access in it
+   *  start a transfer into ordinary memory, respells no bytes two accesses of which one in it runs between
    *  (absent ⇒ any `volatile` or unmapped numeric access counts as one) */
   readonly deviceRegisters?: readonly [number, number];
   /** the compiler reloads a cell of one object stored and read as two integer types
@@ -926,9 +926,9 @@ export interface NumericRespell {
   readonly device: readonly [number, number] | undefined;
   /** another access of the function, at a constant address, may be a DEVICE access: in the
    *  target's device-register window, or — on a target that describes no window — `volatile`, or
-   *  at a numeric address no map entry covers. Its effect may write the respelled bytes (a DMA store
-   *  starts a transfer into them) where the compiler proves its constant address apart from the
-   *  name and forwards past it */
+   *  at a numeric address no map entry covers — between two accesses of the respelled bytes (one
+   *  may run before it, one after). Its effect may write them (a DMA store starts a transfer into
+   *  them) where the compiler proves its constant address apart from the name and forwards past it */
   readonly deviceBeside: boolean;
   /** the compiler reloads across two integer types of one object (`compilerBehaviors`
    *  `reloadsAcrossIntegerTypes`), so no width pair can forward */
@@ -965,11 +965,15 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
   // must cover every register a source reaches, so it is wide in the direction that declines, and
   // holds the narrower `deviceMemoryWriters`), any access in it, a read included; a target that
   // describes none is fail-closed: any `volatile` access, and any numeric address no map entry
-  // covers, may be a device's. A device access at a RUNTIME address is no such partner: agbcc
-  // reloads past `((vu32 *)0x040000D4)[i] = a0` (`str r4, [r1]; ldrb r1, [r3]`) as past any pointer.
+  // covers, may be a device's. Its effect is a write of unknown bytes AT its point, so it refuses
+  // where an access of the respelled bytes may run before it and one after it (a loop round it
+  // included): one run before every access, as a transfer into VRAM at the top of kl2dct's
+  // sub_0801E528 is, leaves no value of them to forward. A device access at a RUNTIME address is no
+  // such partner: agbcc reloads past `((vu32 *)0x040000D4)[i] = a0` (`str r4, [r1]; ldrb r1, [r3]`)
+  // as past any pointer.
   {
     id: 'device-access-beside',
-    why: 'another access at a constant address may be a device whose effect writes the respelled bytes',
+    why: 'an access at a constant address between two of the respelled bytes may be a device whose effect writes them',
     sound: true,
     guardedBy: 'offset-names.test.ts: without `device-access-beside` a word is respelled beside a DMA start',
     rejects: (c) => c.deviceBeside,
@@ -1191,6 +1195,41 @@ interface RespellCensus {
   /** the accesses an earlier round of {@link respellNumericThroughName} spelled through a name:
    *  casts the rewrite wrote, not the name's own accesses, however the census now spells them */
   readonly rewritten: ReadonlySet<Op>;
+  /** whether `b` may run after `a` in one call: later in `a`'s block, or in a block a path from
+   *  `a`'s block's successors reaches (`a`'s own block again round a cycle included) */
+  readonly reaches: (a: Op, b: Op) => boolean;
+}
+
+/** {@link RespellCensus.reaches} for `fn`, each block's successor closure walked once, on demand. */
+function reachesIn(fn: Fn): (a: Op, b: Op) => boolean {
+  const at = new Map<Op, { block: Block; index: number }>();
+  for (const block of fn.blocks) {
+    block.ops.forEach((op, index) => at.set(op, { block, index }));
+  }
+  const closure = new Map<Block, Set<Block>>();
+  const after = (b: Block): Set<Block> => {
+    let seen = closure.get(b);
+    if (seen === undefined) {
+      seen = new Set<Block>();
+      const work = b.ops.flatMap((o) => o.successors.map((s) => s.block));
+      for (let n = work.pop(); n !== undefined; n = work.pop()) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          work.push(...n.ops.flatMap((o) => o.successors.map((s) => s.block)));
+        }
+      }
+      closure.set(b, seen);
+    }
+    return seen;
+  };
+  return (a, b) => {
+    const pa = at.get(a);
+    const pb = at.get(b);
+    if (pa === undefined || pb === undefined) {
+      return true; // not in a block of `fn`: nothing says when it runs
+    }
+    return (pa.block === pb.block && pa.index < pb.index) || after(pa.block).has(pb.block);
+  };
 }
 
 function respellCensus(
@@ -1210,7 +1249,7 @@ function respellCensus(
       }
     }
   }
-  return { placed: at.placed, places: at.places, symbols, behaviors, unplaced, rewritten };
+  return { placed: at.placed, places: at.places, symbols, behaviors, unplaced, rewritten, reaches: reachesIn(fn) };
 }
 
 /** What an access is to the alias-set rule ({@link oneAliasSet}): its width, and a TYPE two
@@ -1310,13 +1349,15 @@ function respellCase(
       partners.push([me, { width: u.width, type: null }]);
     }
   }
-  // Any other access at a constant address that may be a device's, read or written, before or
-  // after: in the target's window, or — on a target that describes none — `volatile` (a register a
-  // source spells by address, or a read the lift keeps), or numeric where no map entry covers it.
+  // Any other access at a constant address that may be a device's, read or written: in the
+  // target's window, or — on a target that describes none — `volatile` (a register a source spells
+  // by address, or a read the lift keeps), or numeric where no map entry covers it. Its effect is a
+  // write of unknown bytes at its point, which a compiler can carry a value of the respelled bytes
+  // across only where an access of them may run before it and another after it.
   const window = behaviors.deviceRegisters;
   const mapped = (l: number, h: number): boolean =>
     [...symbols].some(([a, entries]) => entries.some((i) => a <= l && h <= a + (i.size ?? 1)));
-  const deviceBeside = placed.some(
+  const devices = placed.filter(
     (y) =>
       y.op !== op &&
       y.ranges.some(([l, h]) =>
@@ -1324,6 +1365,10 @@ function respellCase(
           ? l < window[1] && h > window[0]
           : y.op.attrs.volatile === true || (spellingOf(y) === null && !(l < hi && lo < h) && !mapped(l, h)),
       ),
+  );
+  const cell = devices.length === 0 ? [] : [x, ...placed.filter((y) => y.op !== op && overlaps(y))];
+  const deviceBeside = devices.some(
+    (d) => cell.some((a) => census.reaches(a.op, d.op)) && cell.some((b) => census.reaches(d.op, b.op)),
   );
   return {
     op,

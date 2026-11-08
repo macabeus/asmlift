@@ -882,11 +882,11 @@ describe('a numeric address the function also reaches through a name', () => {
       '((u8 *)&gUnk_03005220)[58] = 1;',
     );
     // a device-register store reached off the literal through a constant added to it
-    // (`ldr r2, =0xffada7; add r1, r1, r2` lands on 0x04000000) is never renamed with it, and its
-    // effect may write the byte, so nothing is respelled (`device-access-beside`)
+    // (`ldr r2, =0xffada7; add r1, r1, r2` lands on 0x04000000) keeps its numeric address
     const io = `${E5('0x3005259', 'strb\tr0, [r1]\n\tldr\tr2, .L8+4\n\tadd\tr1, r1, r2\n\tstrh\tr0, [r1]')}\t.word\t0xffada7\n`;
-    expect(judged(io, unsized)).toEqual([['0x3005259', 'device-access-beside']]);
-    expect(() => lifted(io, unsized)).toThrow(/byte 0x3005259 is reached as 'gUnk_03005220' and as a numeric address/);
+    const ioOut = lifted(io, unsized);
+    expect(ioOut).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
+    expect(ioOut).toContain('*(u16 *)67108864 = 1;');
   });
 
   test('the accesses one literal reaches are judged against each other as renamed together', () => {
@@ -1155,13 +1155,7 @@ describe('a numeric address the function also reaches through a name', () => {
     const asm = probe('0x04000201', 'strb\tr0, [r2]').replace('0x030007c8', '0x04000200');
     expect(judged(asm.replace('f:', 'e5:'), io)).toEqual([['0x4000201', 'device-or-volatile']]);
     expect(() => lifted(asm.replace('f:', 'e5:'), io)).toThrow(/as a numeric address/);
-    // the name's own accesses sit in the window too, so `device-access-beside` refuses it as well
-    expect(() => respelledWithout('device-or-volatile', asm, io)).toThrow(/as a numeric address/);
-    const neither = without(without(NUMERIC_RESPELL_GATES, 'device-or-volatile'), 'device-access-beside');
-    const behaviors = offsetNameBehaviorsFor(ARMV4T_AGBCC, undefined);
-    expect(nameOffsetAddresses(lift('f', asm, io), io, behaviors, OFFSET_NAME_GATES, neither).respelled).toEqual([
-      'gIo',
-    ]);
+    expect(respelledWithout('device-or-volatile', asm, io)).toEqual(['gIo']);
   });
 
   test('without `device-access-beside` a word is respelled beside a DMA start', () => {
@@ -1169,8 +1163,9 @@ describe('a numeric address the function also reaches through a name', () => {
     // DMA3SAD = src; DMA3DAD = 0x03005258; DMA3CNT = 0x84000001; return v0 + *(vu32 *)0x03005258;`:
     // the transfer writes the word, which the asm reloads. Spelled through `g`, the C has agbcc prove
     // the registers' constant addresses apart from `g` and forward the 5 (`add r0, r0, #0x5`), the
-    // byte twin `((u8 *)&g)[56]` alike — so no width saves it, and a target that describes no device
-    // window refuses the same numeric registers no map entry covers
+    // byte twin `((u8 *)&g)[58]` alike — so no width saves it, and a target that describes no device
+    // window refuses the same numeric registers no map entry covers. Only a device access BETWEEN two
+    // accesses of the bytes is one: run before them all, nothing it wrote can be forwarded past
     const dma = (store = 'str', load = 'ldr', device = true): string =>
       'f:\n\tadd\tr2, r0, #0\n\tldr\tr0, .L3\n\tadd\tr0, r0, #0x3a\n\tldrb\tr0, [r0]\n\tldr\tr3, .L3+0x4\n' +
       `\tmov\tr1, #0x5\n\t${store}\tr1, [r3]\n` +
@@ -1205,6 +1200,15 @@ describe('a numeric address the function also reaches through a name', () => {
       }
       expect(judged(dma().replace('f:', 'e5:'), g)).toEqual([['0x3005258', 'device-access-beside']]);
       expect(respelledWithout('device-access-beside', dma(), g)).toEqual(['g']);
+      // the transfer run BEFORE every access of the bytes: no value of them can be carried across it
+      const first =
+        'f:\n\tadd\tr2, r0, #0\n\tldr\tr3, .L3+0x4\n\tldr\tr1, .L3+0x8\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tstr\tr3, [r1]\n\tldr\tr2, .L3+0xc\n\tldr\tr1, .L3+0x10\n\tstr\tr1, [r2]\n\tldr\tr0, .L3\n' +
+        '\tadd\tr0, r0, #0x3a\n\tldrb\tr0, [r0]\n\tmov\tr1, #0x5\n\tstr\tr1, [r3]\n\tldr\tr1, [r3]\n\tadd\tr0, r0, r1\n' +
+        '\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n\t.word\t0x3005258\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n' +
+        '\t.word\t-0x7bffffff\n';
+      expect(decompile('f', first, ARMV4T_AGBCC, { symbols: g }).respelledNames).toEqual(['g']);
+      expect(judged(first.replace('f:', 'e5:'), g)).toEqual([['0x3005258', null]]);
     }
   });
 
