@@ -407,8 +407,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'written once after the `if`, and every other path leaves through an early `return`. On agbcc, ' +
       "this example's compiler, the copies are the default, so this is the step from them to the region " +
       'written once. Where the join past early returns is the default instead (MIPS GCC, CodeWarrior ' +
-      "2.4.2), it already writes this example's region once, since the paths that do not return meet at " +
-      'it: the variation is a reading of the copies, ranked beside them.',
+      "2.4.2 and 2.3.3), it already writes this example's region once, since the paths that do not " +
+      'return meet at it: the variation is a reading of the copies, ranked beside them.',
     offeredWhen: {
       when: 'Some `if` has arms that reach a common `return` block and no common block before it.',
       decidedBy: { symbol: 'hasDivergentSharedRet', file: STRUCTURE },
@@ -427,7 +427,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'code below an `if` whose arms only meet at the `return` is written into each arm',
     detail:
       'An `if` with an early `return` in one arm has no block both arms reach before the function ' +
-      'returns. Where the join past early returns is the default (MIPS GCC, and CodeWarrior 2.4.2, ' +
+      'returns. Where the join past early returns is the default (MIPS GCC, CodeWarrior 2.3.3, and 2.4.2, ' +
       "this example's compiler), asmlift gives it the block where the paths that do not return meet as its " +
       'join, so the code from there is written once and every other path leaves through its early ' +
       '`return`; that also reads early returns the compiler merged into the epilogue or cross-jumped ' +
@@ -437,9 +437,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the copies spell the whole function in fewer lines than the join, where the compiler is one that ' +
       'cross-jumps return tails and the layout shows it did, or where an early return keeps a constant ' +
       'its branch proved unfolded (gcc 2.x below -O2), they are the default instead, and the join is ' +
-      'offered as `ret-join`. On agbcc, IDO 7.1 and the other CodeWarrior builds the copies are the ' +
-      'default outright, measured against held-out functions where the join loses matches, and this ' +
-      'variation is never offered there. Past the copy budget the copies are not offered.',
+      'offered as `ret-join`. On agbcc and IDO 7.1, measured against held-out functions where the join ' +
+      'loses matches, and on CodeWarrior 2.4.7, where no held-out function was measured, the copies are ' +
+      'the default outright, and this variation is never offered there. Past the copy budget the copies ' +
+      'are not offered.',
     offeredWhen: {
       when: 'Some `if` or `switch` outside every loop took a join past early returns that the default kept.',
       decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
