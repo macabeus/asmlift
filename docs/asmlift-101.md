@@ -296,7 +296,7 @@ early returns, or the return-tail copies under `copyReturnTails`) declines, its 
 loop tail-copy reruns included, and only in a switch none of them spelled goto-free (`JumpRanking`
 in `structure.ts`). The whole-function readings are chosen above that ladder, not inside it
 (`structureReturnTailReading` in `pipeline.ts`). Where the target declares the join its default
-(`joinPastReturnsByDefault` in `target.ts`: MIPS GCC and mwcc_242_81), a function whose join needs
+(`joinPastReturnsByDefault` in `target.ts`: MIPS GCC, mwcc_242_81 and mwcc_233_163n), a function whose join needs
 the goto publishes it even where the copies would lift without one, unless the copies are the
 shorter, the layout shows a cross-jumped return tail, or cse left a return unfolded (THE COPIES,
 BELOW ALL OF IT, above `structure()`). Every other target, agbcc (`sub_0800D188` among its

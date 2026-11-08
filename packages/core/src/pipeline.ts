@@ -1172,8 +1172,8 @@ export interface ReturnTailReading {
 }
 
 /** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT. On a target that
- *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`: MIPS GCC
- *  and mwcc_242_81), `structureChecked`, and where that structuring took the join somewhere, the
+ *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`: MIPS GCC,
+ *  mwcc_242_81 and mwcc_233_163n), `structureChecked`, and where that structuring took the join somewhere, the
  *  same structuring again reading the return-tail copies (`copyReturnTails`). The copies are
  *  published where they spell the function SHORTER, or where the target's asm layout shows that the
  *  compiler cross-jumped a tail the source wrote into every arm, or its cse left a return unfolded
@@ -1247,12 +1247,12 @@ export interface ReturnTailReading {
  *  match on there (2026-11-06): the copies match, the join is 1 line off.
  *
  *  THE MEASURED DEFAULT. A target that does not declare `joinPastReturnsByDefault` (agbcc, ido7.1,
- *  mwcc_233_163n, mwcc_247_107, and any description that leaves it out) publishes the copies
+ *  mwcc_247_107, and any description that leaves it out) publishes the copies
  *  whatever the bound and the marks would say, and keeps the join as the unpublished reading, so
  *  the ranked fan holds both as before (`copiesByDefault`). The join is declared only where the
  *  held-out real functions show the bound with every mark losing none of the copies' matches; on
- *  agbcc and ido7.1 it loses some no mark read from the target separates, and the other two mwcc
- *  builds are unmeasured (the field's note has the counts and the gains given up).
+ *  agbcc and ido7.1 it loses some no mark read from the target separates, and mwcc_247_107 is
+ *  unmeasured (the field's note has the counts and the gains given up).
  *
  *  REFUSALS. Never a lift turned into a decline:
  *    - a join that declines or crosses the copy budget already falls to the copies inside

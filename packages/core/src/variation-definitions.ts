@@ -465,7 +465,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'source wrote into every arm, or where an early return keeps a constant its branch proved unfolded ' +
       '(gcc 2.x below -O2), the copies are the default and this is the join, offered beside them, which is ' +
       "the source some functions were written as. On agbcc, this example's compiler, and on IDO 7.1 and " +
-      'CodeWarrior 2.3.3 and 2.4.7, the copies are the default outright: the join is this variation ' +
+      'CodeWarrior 2.4.7, the copies are the default outright: the join is this variation ' +
       'wherever it is taken.',
     offeredWhen: {
       when: 'Some `if` or `switch` outside every loop took a join past early returns that the default gave up for the copies.',

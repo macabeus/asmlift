@@ -1331,11 +1331,13 @@ export interface TargetDescription {
     //   - gcc2.7.2 (Mario Party 3, all 10019 functions, 150 re-spelled): 0 lost once the unfolded
     //     return is read (`foldsBranchConstantOnTakenEdge`), which moves 14 to the copies: its one
     //     loss back to a match, one closer, and 12 the join had brought closer given back;
-    //   - mwcc_242_81 (ac-decomp, and Pikmin and Mario Party 4 decompiled at this build; 207
-    //     re-spelled): 0 lost, 3 gained.
-    // So `true` on MIPS_GCC and on PPC_MWCC as mwcc_242_81 reads it; PPC_MWCC_233 and PPC_MWCC_247
-    // (mwcc_233_163n, mwcc_247_107) leave it out, unmeasured at their own builds. Left out where it
-    // loses, the copies' default given back with the join's gains:
+    //   - mwcc_233_163n (Pikmin at its own flags, 2733 functions lifted, 66 re-spelled): 0 lost,
+    //     3 gained (two `actByEvent` methods 4/22 -> 0/20, `stickSlot__6PelletFi` 3/28 -> 0/26);
+    //   - mwcc_242_81 (ac-decomp and Mario Party 4, every unit compiled at this build although 9 of
+    //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained.
+    // So `true` on MIPS_GCC, PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107)
+    // leaves it out, no held-out unit measured at that build. Left out where it loses, the copies'
+    // default given back with the join's gains:
     //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
     //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
     //     different arguments, and a third source spelling the copies happen to share. Given up:
@@ -2012,8 +2014,8 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds: the probes at the fields.
     forwardsStructReturnDestination: false,
     discardedReadMayFillArgRegister: true,
-    // MEASURED over held-out real functions at mwcc_242_81 only, at the field; the other two builds'
-    // descriptions leave it out.
+    // MEASURED over held-out real functions at mwcc_242_81 and mwcc_233_163n, at the field;
+    // PPC_MWCC_247 leaves it out.
     joinPastReturnsByDefault: true,
   },
 };
@@ -2026,12 +2028,12 @@ function withoutJoinDefault(d: TargetDescription): TargetDescription['compilerBe
 }
 
 /** CodeWarrior 2.3.3b163n (Pikmin): `PPC_MWCC` but for the one declaration a probe refuted there —
- *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one —
- *  and the return-tail default no held-out function measured at this build. */
+ *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one.
+ *  The return-tail default is PPC_MWCC's, measured at this build over Pikmin
+ *  (`joinPastReturnsByDefault`). */
 export const PPC_MWCC_233: TargetDescription = {
   ...PPC_MWCC,
   globalRegisterVariables: undefined,
-  compilerBehaviors: withoutJoinDefault(PPC_MWCC),
 };
 
 /** CodeWarrior 2.4.7b107 (Mario Party 4's other build): `PPC_MWCC` less the return-tail default no
