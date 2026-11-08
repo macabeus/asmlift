@@ -17960,8 +17960,12 @@ export const SYNTHETIC: SynthSpec[] = [
     sym,
     src:
       'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
-      `struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\n${also}` +
-      `s32 ${sym}(${params}) {\n    s32 v0 = gNumPool.b3a;\n    *(vu32 *)0x03005258 = 5;\n` +
+      // the `numpool_lay` struct is the one its map lays out, `p38` over the word and `b3a` read raw
+      (sym === 'numpool_lay'
+        ? 'struct NumPool { u8 pad[0x38]; u8 *p38; u8 r[4]; };\n'
+        : 'struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\n') +
+      `extern struct NumPool gNumPool;\n${also}s32 ${sym}(${params}) {\n` +
+      `    s32 v0 = ${sym === 'numpool_lay' ? '((u8 *)&gNumPool)[0x3a]' : 'gNumPool.b3a'};\n    *(vu32 *)0x03005258 = 5;\n` +
       `    ${store}\n    return v0 + *(vu32 *)0x03005258;\n}`,
     features: ['global', 'struct'],
     toolchains: ['agbcc'],
