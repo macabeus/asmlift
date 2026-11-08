@@ -1029,11 +1029,70 @@ describe('a numeric address the function also reaches through a name', () => {
       );
       expect(respelledWithout('alias-sets-may-differ', asm, g)).toEqual(['g']);
     }
-    // a base in the device window is a register window, not memory a name holds: the word lifts
-    const device = decompile('f', asm.replace('0x3005200\n', '0x4000200\n'), ARMV4T_AGBCC, {
-      symbols: unsizedG,
-    }).source;
-    expect(device).toContain('return v0 + ((s32 *)&g)[14];');
+  });
+
+  test('an address with any runtime part is a partner of unknown bytes, whatever builds it', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim: `s32 v0 = g.b3a; *(vu32 *)0x03005258 = 5;
+    // <the halfword store>; return v0 + *(vu32 *)0x03005258;` (struct S as above). Each store's
+    // bytes are unknown; the one-name C compiles to `str; strh; add r3, r3, #0x5` (forwards) for all
+    // four, where the asm reloads
+    const head =
+      'f:\n\tldr\tr1, .L3\n\tadd\tr1, r1, #0x3a\n\tldrb\tr2, [r1]\n\tldr\tr3, .L3+0x4\n\tmov\tr1, #0x5\n' +
+      '\tstr\tr1, [r3]\n';
+    const tail =
+      '\tmov\tr1, #0x7\n\tstrh\tr1, [r0]\n\tldr\tr0, [r3]\n\tadd\tr2, r2, r0\n\tadd\tr0, r2, #0\n\tbx\tlr\n' +
+      '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n\t.word\t0x3005258\n';
+    const stores: Record<string, string> = {
+      // `*(vu16 *)(0x03005200 | (i << 1)) = 7`
+      orr: '\tlsl\tr0, r0, #0x1\n\tldr\tr1, .L3+0x8\n\torr\tr0, r0, r1\n' + tail + '\t.word\t0x3005200\n',
+      // `*(vu16 *)((0x03005200 + i) & ~1) = 7`
+      and:
+        '\tldr\tr1, .L3+0x8\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x2\n\tneg\tr1, r1\n\tand\tr0, r0, r1\n' +
+        tail +
+        '\t.word\t0x3005200\n',
+      // `gp[i] = 7`, `extern vu16 *gp`: a pointer loaded from a global
+      glob: '\tldr\tr1, .L3+0x8\n\tldr\tr1, [r1]\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n' + tail + '\t.word\tgp\n',
+      // `((vu16 *)0x04000000)[i] = 7`: an index off the device window reaches RAM (i == -8367588)
+      io: '\tlsl\tr0, r0, #0x1\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x13\n\tadd\tr0, r0, r1\n' + tail,
+    };
+    // `f(int i, vu16 *p)` with `p[i] = 7`: a pointer parameter
+    stores.param =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr2, .L3\n\tadd\tr2, r2, #0x3a\n\tldrb\tr3, [r2]\n\tldr\tr4, .L3+0x4\n' +
+      '\tmov\tr2, #0x5\n\tstr\tr2, [r4]\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x7\n\tstrh\tr1, [r0]\n' +
+      '\tldr\tr0, [r4]\n\tadd\tr3, r3, r0\n\tadd\tr0, r3, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\tg\n\t.word\t0x3005258\n';
+    const g: SymbolMap = new Map([
+      [0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]],
+      [0x03007000, [{ name: 'gp', kind: 'data', size: 4 }]],
+    ]);
+    for (const [shape, body] of Object.entries(stores)) {
+      const asm = shape === 'param' ? body : head + body;
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: g }), shape).toThrow(
+        /byte 0x300525a is reached as 'g' and as a numeric address/,
+      );
+      expect(respelledWithout('alias-sets-may-differ', asm, g), shape).toEqual(['g']);
+    }
+  });
+
+  test('under a layout the respelled word is the member it prints as, not a cast', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `s32 v0 = g.b3a; *(vu32 *)0x03005258 = 5;
+    // ((vu32 *)0x03005200)[i] = 7; return v0 + *(vu32 *)0x03005258;`. Under a map whose layout has a
+    // `u8 *p38` member there, the respelled word prints as `g.p38`, a pointer, beside the `s32` cast
+    // at an index off the literal: `g.p38 = 5; ((s32 *)50352640)[a0] = 7; return v0 + g.p38;`
+    // compiles to `str [r1, #0x38]; str [r0]; add r3, r3, #0x5` where the asm reloads
+    const asm =
+      'f:\n\tldr\tr1, .L3\n\tadd\tr1, r1, #0x3a\n\tldrb\tr2, [r1]\n\tldr\tr3, .L3+0x4\n\tmov\tr1, #0x5\n' +
+      '\tstr\tr1, [r3]\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L3+0x8\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x7\n' +
+      '\tstr\tr1, [r0]\n\tldr\tr0, [r3]\n\tadd\tr2, r2, r0\n\tadd\tr0, r2, #0\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\tg\n\t.word\t0x3005258\n\t.word\t0x3005200\n';
+    const layout = [{ name: 'p38', offset: 0x38, size: 4, pointer: true, pointeeSize: 1 }];
+    const laidOut: SymbolMap = new Map([
+      [0x03005220, [{ name: 'g', kind: 'data', size: 0x40, shape: 'struct', structName: 'S', declared: true, layout }]],
+    ]);
+    expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: laidOut })).toThrow(
+      /byte 0x300525a is reached as 'g' and as a numeric address/,
+    );
+    expect(respelledWithout('alias-sets-may-differ', asm, laidOut)).toEqual(['g']);
   });
 
   test('an access an earlier round respelled is judged as the cast the rewrite wrote', () => {
@@ -1055,6 +1114,15 @@ describe('a numeric address the function also reaches through a name', () => {
       expect(out).toContain('((s32 *)&g)[14] = 5;');
       expect(out).toContain('return ((s32 *)&g)[14];');
     }
+    // under a layout both respelled accesses print as the one member there, one type: `g.p38 = 5;
+    // ((u8 *)&g)[58] = 1; return g.p38;` compiles to `str [r1, #0x38]; strb; ldr [r1, #0x38]`
+    const layout = [{ name: 'p38', offset: 0x38, size: 4, pointer: true, pointeeSize: 1 }];
+    const laidOut: SymbolMap = new Map([
+      [0x03005220, [{ name: 'g', kind: 'data', size: 0x40, shape: 'struct', structName: 'S', declared: true, layout }]],
+    ]);
+    const member = decompile('f', asm, ARMV4T_AGBCC, { symbols: laidOut }).source;
+    expect(member).toContain('g.p38 = 5;');
+    expect(member).toContain('return g.p38;');
     // one literal, the access path (its `q[6]` lies past the sized `g`): `q[2] = 5; q[6] = 9;
     // g.b3a = 1; return q[2];` lifts to C that compiles to `str [r1]; str [r2]; strb [r1, #0x2];
     // ldr r0, [r1]`

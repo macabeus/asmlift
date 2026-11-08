@@ -111,6 +111,7 @@
 // a relocated `g+K` pool word a disassembly printed as a number, which one name makes exact.
 import { constDisplacementOf } from '../ir/alias';
 import { type Block, type Fn, type Op, type Value, defOpMap, mkOp, mkValue, successorsOf } from '../ir/core';
+import { MEM_BASE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -481,6 +482,8 @@ interface Spelled {
   /** the name is asmlift's reading of the map (`gaddr`'s `fromMap`), not the asm's own spelling —
    *  read by ONE CELL PER SPELLING only; whether two spellings forward is the compiler's fact */
   readonly fromMap: boolean;
+  /** the name is an address-cast macro, which prints as its body's type, not as a cast */
+  readonly macro?: boolean;
 }
 
 /** One access whose bytes the map lets this pass place, under ONE of the spellings its address may
@@ -622,7 +625,7 @@ function spellingsOf(
         return null;
       }
       const objects = typeof d.attrs.mapAddr === 'number' ? [d.attrs.mapAddr] : at.addrs;
-      return [{ spelling: at.macro ? null : sym, objects, k: kk, fromMap: d.attrs.fromMap === true }];
+      return [{ spelling: at.macro ? null : sym, objects, k: kk, fromMap: d.attrs.fromMap === true, macro: at.macro }];
     }
     const ins = d === undefined ? incoming.get(root) : undefined;
     if (ins === undefined) {
@@ -912,16 +915,11 @@ export interface NumericRespell {
   readonly writes: boolean;
   /** another map entry covers one of `op`'s bytes */
   readonly otherName: string | null;
-  /** the widths of `op` and of each overlapping access spelled `name`, one pair per access, where
-   *  the pair holds a store — an access through `name` whose bytes the map cannot place (a runtime
-   *  index off it) counted as overlapping, since nothing says it does not */
-  readonly widthPairs: readonly (readonly [number, number])[];
-  /** the widths of `op` and of each overlapping access renamed through `name` along with it or in
-   *  an earlier round, one pair per access, where the pair holds a store: both become casts the
-   *  rewrite writes, whose type is the access's width (and a signedness twin shares its set) — and
-   *  of each access at a runtime index off a numeric base outside the device window, a cast of
-   *  unknown bytes that may be `op`'s */
-  readonly castPairs: readonly (readonly [number, number])[];
+  /** `op` spelled through `name`, paired with every access that may share one of its bytes and
+   *  where the pair holds a store ({@link Lvalue}): FAIL-CLOSED, so only an access with constant
+   *  bytes outside `op`'s is left out — one at a runtime index, off a parameter, a loaded pointer,
+   *  the frame or a device window is a partner of unknown bytes and unknown type */
+  readonly partners: readonly (readonly [Lvalue, Lvalue])[];
   /** the target's device-register window, if it has one */
   readonly device: readonly [number, number] | undefined;
   /** the compiler reloads across two integer types of one object (`compilerBehaviors`
@@ -992,25 +990,20 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
   },
   // agbcc at -O2 gives each integer TYPE its own alias set (char is set 0, a type shares one with
   // its unsigned twin, each pointer type has its own), and forwards a stored value past a store of
-  // another set even on one object. Spelled through one name, the respelled cast and the name's own
-  // access need not share a set unless one is char-wide, or both are one halfword-or-narrower type:
-  // a 4-byte cell may be declared a pointer, which a `u32` cast does not alias. An access through
-  // the name at a runtime index is a partner of unknown bytes (agbcc forwards `((u32 *)&g)[i] = 5`
-  // past `((u16 *)&g)[28] = 7` to the `[i]` reload), and so is one at a runtime index off another
-  // literal (`((u16 *)0x03005200)[i] = 7` between the respelled word store and its reload: `str;
-  // strh; add r3, r3, #0x5`). Two accesses one literal renames TOGETHER, or one an earlier round
-  // renamed, are two casts the rewrite writes, and so is an index off a literal: one width is one
-  // integer type there and only different widths neither char-wide may differ. Asked only of a compiler not declared to reload across types
+  // another set even on one object — `g.p38 = 5` (a `u8 *` member) past `((s32 *)0x03005200)[i] = 7`,
+  // `((s32 *)&g)[14] = 5` past a `u16` store at an index off a literal, a parameter or a loaded
+  // pointer (`str; strh; add r3, r3, #0x5`). So the respelled access must share a set with EVERY
+  // access that may reach one of its bytes, judged on the type each PRINTS as ({@link Lvalue}) and
+  // not on how its address was built, and fail-closed: only constant bytes outside the respelled
+  // ones are proven apart, and an address with any runtime part reaches unknown bytes as an
+  // unknown type. Asked only of a compiler not declared to reload across integer types
   // (`reloadsAcrossIntegerTypes`, absent on agbcc), which is where the C could forward.
   {
     id: 'alias-sets-may-differ',
-    why: 'a store and an overlapping access of other widths may sit in different alias sets on one object',
+    why: 'a store and an access that may reach its bytes may sit in different alias sets on one object',
     sound: true,
     guardedBy: 'offset-names.test.ts: without `alias-sets-may-differ` a halfword store is respelled beside a word',
-    rejects: (c) =>
-      !c.reloadsAcrossTypes &&
-      (c.widthPairs.some(([a, b]) => a !== 1 && b !== 1 && (a !== b || a > 2)) ||
-        c.castPairs.some(([a, b]) => a !== 1 && b !== 1 && a !== b)),
+    rejects: (c) => !c.reloadsAcrossTypes && c.partners.some(([a, b]) => !oneAliasSet(a, b)),
   },
 ];
 
@@ -1155,21 +1148,18 @@ function numericRespellSites(
   return [...declined].map((op) => respellCase(op, undefined, census)!);
 }
 
-/** What {@link respellCase} reads off the whole function: its placed accesses, the map, and the
- *  accesses through a name the map cannot place (`unplacedThrough`). */
+/** What {@link respellCase} reads off the whole function: its placed accesses, the map, and every
+ *  access {@link placeAccess} does not place (`unplaced`). */
 interface RespellCensus {
   readonly placed: readonly PlacedAccess[];
   readonly places: Map<string, Places>;
-  readonly fold: (v: Value) => number | null;
   readonly symbols: SymbolMap;
   readonly behaviors: OffsetNameBehaviors;
-  /** each access whose address a `gaddr` of `name` reaches ({@link accessesReachedBy}) and which
-   *  {@link placeAccess} does not place — a runtime index off the name — with its width */
-  readonly unplacedThrough: (name: string) => readonly { readonly width: number; readonly writes: boolean }[];
-  /** each access {@link placeAccess} does not place whose address is built off a numeric base
-   *  outside the device window (a runtime index off a literal), with its width: its bytes are
-   *  unknown, so it may reach any name's — whatever a name's size, an index is unbounded */
-  readonly unplacedNumeric: readonly { readonly width: number; readonly writes: boolean }[];
+  /** each access whose address has a runtime part — any operator, off any base: a parameter, a
+   *  loaded pointer, a loop-carried register, the frame, a literal, a name, the device window —
+   *  with its width: its bytes are unknown, so it is a partner of every respelled byte, and what
+   *  type the C prints it as is unknown too */
+  readonly unplaced: readonly { readonly width: number; readonly writes: boolean }[];
   /** the accesses an earlier round of {@link respellNumericThroughName} spelled through a name:
    *  casts the rewrite wrote, not the name's own accesses, however the census now spells them */
   readonly rewritten: ReadonlySet<Op>;
@@ -1183,84 +1173,37 @@ function respellCensus(
 ): RespellCensus {
   const at = placedAccesses(fn, symbols);
   const placedOps = new Set(at.placed.map((p) => p.op));
-  const accessWidth = (a: Op): { width: number; writes: boolean } => ({
-    width: (a.opcode === 'load' || a.opcode === 'store' ? a.attrs.width : a.attrs.elemSize) as number,
-    writes: a.opcode === 'store' || a.opcode === 'astore',
-  });
-  const memo = new Map<string, { width: number; writes: boolean }[]>();
-  const unplacedThrough = (name: string): { width: number; writes: boolean }[] => {
-    let out = memo.get(name);
-    if (out === undefined) {
-      const ops = new Set<Op>();
-      for (const b of fn.blocks) {
-        for (const op of b.ops) {
-          if (op.opcode === 'gaddr' && op.attrs.sym === name) {
-            for (const a of accessesReachedBy(fn, op)) {
-              if (!placedOps.has(a)) {
-                ops.add(a);
-              }
-            }
-          }
-        }
-      }
-      out = [...ops].map(accessWidth);
-      memo.set(name, out);
-    }
-    return out;
-  };
-  const defOf = defOpMap(fn);
-  const incoming = joinIncoming(fn);
-  const unplacedNumeric: { width: number; writes: boolean }[] = [];
+  const unplaced: { width: number; writes: boolean }[] = [];
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      const access = op.opcode === 'load' || op.opcode === 'store' || op.opcode === 'aload' || op.opcode === 'astore';
-      if (access && !placedOps.has(op) && offNumericBase(op.operands[0], defOf, incoming, at.fold, behaviors)) {
-        unplacedNumeric.push(accessWidth(op));
+      if (MEM_BASE_OPS.has(op.opcode) && !placedOps.has(op)) {
+        const width = (op.opcode === 'load' || op.opcode === 'store' ? op.attrs.width : op.attrs.elemSize) as number;
+        unplaced.push({ width, writes: op.opcode === 'store' || op.opcode === 'astore' });
       }
     }
   }
-  return { ...at, symbols, behaviors, unplacedThrough, unplacedNumeric, rewritten };
+  return { placed: at.placed, places: at.places, symbols, behaviors, unplaced, rewritten };
 }
 
-/** Whether the address `v` is built off a numeric base: walking its sums back (`add`, the left of a
- *  `sub`, every in-edge of a join), some term folds to a constant outside the device window and no
- *  term is a `gaddr` (an index off a name is {@link RespellCensus} `unplacedThrough`'s). A device
- *  base is a register window, not memory a map name holds. A pointer that is no constant (a
- *  parameter, a loaded one) is not counted: the general unplaced-pointer case, not this pass's. */
-function offNumericBase(
-  v: Value,
-  defOf: Map<Value, Op>,
-  incoming: Map<Value, Value[]>,
-  fold: (v: Value) => number | null,
-  behaviors: OffsetNameBehaviors,
-): boolean {
-  const device = behaviors.deviceRegisters;
-  const seen = new Set<Value>();
-  const work = [v];
-  let numeric = false;
-  for (let x = work.pop(); x !== undefined; x = work.pop()) {
-    if (seen.has(x)) {
-      continue;
-    }
-    seen.add(x);
-    const k = fold(x);
-    if (k !== null) {
-      const u = k >>> 0;
-      numeric ||= device === undefined || u < device[0] || u >= device[1];
-      continue;
-    }
-    const d = defOf.get(x);
-    if (d === undefined) {
-      work.push(...(incoming.get(x) ?? []));
-    } else if (d.opcode === 'gaddr') {
-      return false;
-    } else if (d.opcode === 'add') {
-      work.push(...d.operands);
-    } else if (d.opcode === 'sub') {
-      work.push(d.operands[0]);
-    }
-  }
-  return numeric;
+/** What an access is to the alias-set rule ({@link oneAliasSet}): its width, and a TYPE two
+ *  accesses share only where the emitted C is known to print both as it: `int<width>` for a cast
+ *  the printer writes (a raw numeric address; bytes of a name the map gives no shape), `<name>@<lo>`
+ *  plus the width for bytes of a name the map gives a shape (they print as the declaration has them,
+ *  a pointer member included), and null where nothing says what the C prints (an access of the name
+ *  the asm itself spelled, a macro, an address with a runtime part). */
+export interface Lvalue {
+  readonly width: number;
+  readonly type: string | null;
+}
+
+/** Whether two overlapping accesses, one a store, are in one alias set on agbcc `-O2`: char is set
+ *  0 and aliases everything, an integer type shares one with its signedness twin (a halfword or
+ *  narrower is an integer type whatever spells it), and a word or wider is one set only where both
+ *  are known to print as one type — a 4-byte cell may be a pointer, which a `u32` does not alias. */
+function oneAliasSet(a: Lvalue, b: Lvalue): boolean {
+  return (
+    a.width === 1 || b.width === 1 || (a.width === b.width && (a.width <= 2 || (a.type !== null && a.type === b.type)))
+  );
 }
 
 /** The case the gates judge for the numeric access `op`, spelled through `through` — the name a
@@ -1283,9 +1226,9 @@ function respellCase(
   const [lo, hi] = x.ranges[0];
   const spellingOf = (y: PlacedAccess): string | null =>
     y.spelling ?? (through !== undefined && together.has(y.op) ? through : null);
+  const overlaps = (y: PlacedAccess): boolean => y.ranges.some(([l, h]) => l < hi && lo < h);
   const overlapping = placed.filter(
-    (y) =>
-      y.op !== op && spellingOf(y) !== null && (x.writes || y.writes) && y.ranges.some(([l, h]) => l < hi && lo < h),
+    (y) => y.op !== op && spellingOf(y) !== null && (x.writes || y.writes) && overlaps(y),
   );
   const names = new Set(overlapping.map((y) => spellingOf(y)!));
   if (through !== undefined) {
@@ -1302,6 +1245,43 @@ function respellCase(
       }
     }
   }
+  // The type each partner prints as. Bytes the rewrite spells through `name` print as a cast only
+  // where the map gives `name` no shape; otherwise as whatever the declaration has at those bytes,
+  // which is one type for one byte range of one name and nothing known beside anything else.
+  const shapeless = infos.length > 0 && infos.every((i) => i.shape === undefined);
+  const nameType = (l: number, w: number): Lvalue => ({ width: w, type: shapeless ? `int${w}` : `${name}@${l}+${w}` });
+  const me = nameType(lo, hi - lo);
+  const partners: (readonly [Lvalue, Lvalue])[] = [];
+  for (const y of placed) {
+    if (y.op === op || !(x.writes || y.writes)) {
+      continue;
+    }
+    for (const [l, h] of y.ranges) {
+      if (!(l < hi && lo < h)) {
+        continue; // constant bytes outside the respelled ones: proven disjoint
+      }
+      const w = h - l;
+      if (spellingOf(y) === name && (census.rewritten.has(y.op) || together.has(y.op))) {
+        partners.push([me, nameType(l, w)]);
+      } else if (spellingOf(y) === null) {
+        // A numeric partner over the bytes ends spelled through `name` too, or the function
+        // declines: `cellSpelledTwice` refuses a name and a number over one byte beside a store
+        // wherever the compiler forwards across spellings. Where it reloads across them the number
+        // may stay, and prints as its cast (a macro as its body's type, unknown here).
+        partners.push([me, nameType(l, w)]);
+        if (behaviors.reloadsAcrossSpellings === true) {
+          partners.push([me, { width: w, type: y.macro === true ? null : `int${w}` }]);
+        }
+      } else {
+        partners.push([me, { width: w, type: null }]); // the name's own access, or another name's
+      }
+    }
+  }
+  for (const u of census.unplaced) {
+    if (x.writes || u.writes) {
+      partners.push([me, { width: u.width, type: null }]);
+    }
+  }
   return {
     op,
     placings: mine.length,
@@ -1315,22 +1295,7 @@ function respellCase(
     macro: name !== null && places.get(name)?.macro === true,
     writes: x.writes,
     otherName,
-    widthPairs: [
-      ...overlapping
-        .filter((y) => y.spelling === name && !census.rewritten.has(y.op))
-        .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
-      ...(name === null ? [] : census.unplacedThrough(name))
-        .filter((u) => x.writes || u.writes)
-        .map((u) => [hi - lo, u.width] as const),
-    ],
-    castPairs: [
-      ...overlapping
-        .filter((y) => y.spelling === null || census.rewritten.has(y.op))
-        .flatMap((y) => y.ranges.map(([l, h]) => [hi - lo, h - l] as const)),
-      ...(name === null ? [] : census.unplacedNumeric)
-        .filter((u) => x.writes || u.writes)
-        .map((u) => [hi - lo, u.width] as const),
-    ],
+    partners,
     device: behaviors.deviceRegisters,
     reloadsAcrossTypes: behaviors.reloadsAcrossIntegerTypes === true,
   };
