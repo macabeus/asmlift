@@ -17967,7 +17967,7 @@ export const SYNTHETIC: SynthSpec[] = [
       `extern struct NumPool gNumPool;\n${also}s32 ${sym}(${params}) {\n` +
       `    s32 v0 = ${sym === 'numpool_lay' ? '((u8 *)&gNumPool)[0x3a]' : 'gNumPool.b3a'};\n    *(vu32 *)0x03005258 = 5;\n` +
       `    ${store}\n    return v0 + *(vu32 *)0x03005258;\n}`,
-    features: ['global', 'struct'],
+    features: sym === 'numpool_lay' ? ['global'] : ['global', 'struct'],
     toolchains: ['agbcc'],
     ctx: `s32 ${sym}(${ctxParams});`,
     symbols,
