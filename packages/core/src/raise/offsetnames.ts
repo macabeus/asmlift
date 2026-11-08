@@ -1025,8 +1025,9 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
  *     address becomes `gaddr name + K` built beside it, its displacement folded into `K`, and what
  *     the literal fed elsewhere keeps its spelling.
  *
- *  Either way the value is the address the machine computed. Repeats until nothing more is
- *  admitted, because an access respelled may meet a second numeric one over a byte it now names.
+ *  Either way the value is the address the machine computed. One site a round, re-judged off a
+ *  fresh census until nothing more is admitted, because an access respelled may meet a second
+ *  numeric one over a byte it now names — one reached by another literal included.
  *  Returns the name once per respelled access.
  *
  *  Its caller runs it only on a function {@link cellSpelledTwice} declines, so a function that
@@ -1069,21 +1070,18 @@ export function respellNumericThroughName(
         return c === null || firstRejection(gates, c) !== null;
       });
     };
-    const named = new Set<Op>();
-    for (const s of sites) {
+    // ONE site per round: the census and the gates' cases were read before this round's rewrite,
+    // so a second site judged off them would not see the first's accesses now spelled `name` — a
+    // word store renamed off one literal and a halfword store off ANOTHER literal over the same
+    // bytes would never meet as a pair under the alias-set rule. The next round's census does.
+    {
+      const s = sites[0];
       const at = s.addrs[0];
       const gaddr = (g: Value): Op =>
         mkOp('gaddr', { results: [g], attrs: { sym: s.name!, fromMap: true, mapAddr: at >>> 0 } });
       const lit = literalOf(s.op);
-      if (lit !== null && named.has(lit)) {
-        // this round already spelled the literal through a name; the next round's
-        // `cellSpelledTwice` pair says whether it was this one
-        out.push(s.name!);
-        continue;
-      }
       const value = lit === null ? null : (lit.attrs.value as number) >>> 0;
       if (lit !== null && value !== null && value >= at && !keepsLiteral(lit, s.name!)) {
-        named.add(lit);
         const block = fn.blocks.find((b) => b.ops.includes(lit))!;
         if (value === at) {
           lit.opcode = 'gaddr';

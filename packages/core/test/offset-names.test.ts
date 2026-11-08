@@ -988,6 +988,27 @@ describe('a numeric address the function also reaches through a name', () => {
     expect(respelledWithout('alias-sets-may-differ', asm, g)).toEqual(['g']);
   });
 
+  test('accesses off two literals over one byte are judged against each other, one site a round', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `s32 v0 = g.b3a; vu32 *p = (vu32
+    // *)0x03005258; *p = 5; *(vu16 *)0x0300525a = 7; return v0 + *p;` (struct S { u8 pad[0x3a];
+    // u8 b3a; u8 r[0x1a]; }). Both numeric stores overlap g.b3a; renamed in one round off one
+    // census, the u16 store off the second literal was never paired with the word store and reload
+    // off the first, and the one-name C compiles to `str; strh; add r0, r0, #0x5`
+    const asm =
+      'f:\n\tldr\tr0, .L3\n\tadd\tr0, r0, #0x3a\n\tldrb\tr0, [r0]\n\tldr\tr3, .L3+0x4\n\tmov\tr1, #0x5\n' +
+      '\tstr\tr1, [r3]\n\tldr\tr2, .L3+0x8\n\tmov\tr1, #0x7\n\tstrh\tr1, [r2]\n\tldr\tr1, [r3]\n' +
+      '\tadd\tr0, r0, r1\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n\t.word\t0x3005258\n\t.word\t0x300525a\n';
+    const unsizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data' }]]]);
+    const sizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]]]);
+    for (const g of [unsizedG, sizedG]) {
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: g })).toThrow(/as a numeric address/);
+    }
+    // a byte store off the second literal is char-wide, alias set 0: both literals still take the name
+    const byte = decompile('f', asm.replace('strh', 'strb'), ARMV4T_AGBCC, { symbols: unsizedG }).source;
+    expect(byte).toContain('((s32 *)&g)[14] = 5;');
+    expect(byte).not.toMatch(/5035272/);
+  });
+
   test('a compiler that reloads across integer types respells a halfword beside a word', () => {
     // gcc 2.7.2, KMC, IDO 7.1 and CodeWarrior compile `g.f = 5; ((u16 *)&g)[2] = 7; return g.f;`
     // to a reload (`sw; sh; lw`, `stw; sth; lwz`): target.ts `reloadsAcrossIntegerTypes`
