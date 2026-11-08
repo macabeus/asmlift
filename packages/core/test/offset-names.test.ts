@@ -1009,6 +1009,65 @@ describe('a numeric address the function also reaches through a name', () => {
     expect(byte).not.toMatch(/5035272/);
   });
 
+  test('an access at a runtime index off another literal is an alias-set partner of unknown bytes', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `s32 v0 = g.b3a; *(vu32 *)0x03005258 = 5;
+    // ((vu16 *)0x03005200)[i] = 7; return v0 + *(vu32 *)0x03005258;` (struct S { u8 pad[0x3a]; u8
+    // b3a; u8 r[0x1a]; }). The indexed halfword store's bytes are unknown, so they may be the word's
+    // (i == 44); spelled through `g`, the word store and reload are a cast beside a u16 cast, which
+    // agbcc forwards across: the one-name C `((s32 *)&g)[14] = 5; ((u16 *)50352640)[a0] = 7; return
+    // v0 + ((s32 *)&g)[14];` compiles to `str; strh; add r3, r3, #0x5` where the asm reloads
+    const asm =
+      'f:\n\tldr\tr1, .L3\n\tadd\tr1, r1, #0x3a\n\tldrb\tr2, [r1]\n\tldr\tr3, .L3+0x4\n\tmov\tr1, #0x5\n' +
+      '\tstr\tr1, [r3]\n\tlsl\tr0, r0, #0x1\n\tldr\tr1, .L3+0x8\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x7\n' +
+      '\tstrh\tr1, [r0]\n\tldr\tr0, [r3]\n\tadd\tr2, r2, r0\n\tadd\tr0, r2, #0\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\tg\n\t.word\t0x3005258\n\t.word\t0x3005200\n';
+    const unsizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data' }]]]);
+    const sizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]]]);
+    for (const g of [unsizedG, sizedG]) {
+      expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols: g })).toThrow(
+        /byte 0x300525a is reached as 'g' and as a numeric address/,
+      );
+      expect(respelledWithout('alias-sets-may-differ', asm, g)).toEqual(['g']);
+    }
+    // a base in the device window is a register window, not memory a name holds: the word lifts
+    const device = decompile('f', asm.replace('0x3005200\n', '0x4000200\n'), ARMV4T_AGBCC, {
+      symbols: unsizedG,
+    }).source;
+    expect(device).toContain('return v0 + ((s32 *)&g)[14];');
+  });
+
+  test('an access an earlier round respelled is judged as the cast the rewrite wrote', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `vu32 *q = (vu32 *)0x03005250; q[0] = 3;
+    // h(); *(vu32 *)0x03005258 = 5; g.b3a = 1; return q[2];` (struct S as above). The store off the
+    // second literal is respelled in one round, the first literal in the next, which met the store
+    // as `g`'s own word, where two 4-byte widths may be a pointer member and refuse. Both are `s32`
+    // casts the rewrite wrote, one type: the lifted `((s32 *)&g)[14] = 5; ((u8 *)&g)[58] = 1;
+    // return ((s32 *)&g)[14];` compiles to `str [r4, #0x8]; strb [r4, #0xa]; ldr [r4, #0x8]`
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tmov\tr0, #0x3\n\tstr\tr0, [r4]\n\tbl\th\n\tldr\tr1, .L3+0x4\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n\tldr\tr0, .L3+0x8\n\tadd\tr0, r0, #0x3a\n\tmov\tr1, #0x1\n' +
+      '\tstrb\tr1, [r0]\n\tldr\tr0, [r4, #0x8]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\t0x3005250\n\t.word\t0x3005258\n\t.word\tg\n';
+    const unsizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data' }]]]);
+    const sizedG: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]]]);
+    for (const g of [unsizedG, sizedG]) {
+      const out = decompile('f', asm, ARMV4T_AGBCC, { symbols: g }).source;
+      expect(out).toContain('((s32 *)&g)[14] = 5;');
+      expect(out).toContain('return ((s32 *)&g)[14];');
+    }
+    // one literal, the access path (its `q[6]` lies past the sized `g`): `q[2] = 5; q[6] = 9;
+    // g.b3a = 1; return q[2];` lifts to C that compiles to `str [r1]; str [r2]; strb [r1, #0x2];
+    // ldr r0, [r1]`
+    const one =
+      'f:\n\tldr\tr2, .L3\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x8]\n\tmov\tr0, #0x9\n\tstr\tr0, [r2, #0x18]\n' +
+      '\tldr\tr0, .L3+0x4\n\tadd\tr0, r0, #0x3a\n\tmov\tr1, #0x1\n\tstrb\tr1, [r0]\n\tldr\tr0, [r2, #0x8]\n' +
+      '\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x3005250\n\t.word\tg\n';
+    const out = decompile('f', one, ARMV4T_AGBCC, { symbols: sizedG }).source;
+    expect(out).toContain('((s32 *)&g)[14] = 5;');
+    expect(out).toContain('((s32 *)50352720)[6] = 9;');
+    expect(out).toContain('return ((s32 *)&g)[14];');
+  });
+
   test('a compiler that reloads across integer types respells a halfword beside a word', () => {
     // gcc 2.7.2, KMC, IDO 7.1 and CodeWarrior compile `g.f = 5; ((u16 *)&g)[2] = 7; return g.f;`
     // to a reload (`sw; sh; lw`, `stw; sth; lwz`): target.ts `reloadsAcrossIntegerTypes`
