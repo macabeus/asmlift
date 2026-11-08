@@ -2290,10 +2290,10 @@ export function enumerateCandidates(
         // between the follow and the sink. The default pass structures each setting both ways where
         // the join past early returns took a join somewhere (`onJoinPastReturns`), and publishes one
         // (pipeline.ts `structureReturnTailReading`). On a target that declares the join its default
-        // (`joinPastReturnsByDefault`: MIPS GCC, mwcc 2.4.2 and 2.3.3) it structures the join first and publishes
-        // the copies (`copyReturnTails`) only where they spell the function in fewer lines, the layout
-        // shows a cross-jumped return tail, or an early return keeps a branch-proven constant
-        // unfolded. On every other target it structures the copies first and publishes them, and the
+        // (`joinPastReturnsByDefault`: MIPS GCC, mwcc 2.4.2 and 2.3.3) it structures the join first
+        // and publishes the copies (`copyReturnTails`) only where they spell the function in fewer
+        // lines, the layout shows a cross-jumped return tail, or an early return keeps a
+        // branch-proven constant unfolded. On every other target it structures the copies first and publishes them, and the
         // join only where the copies refuse. This pass
         // enumerates the tree it did not publish, so neither reading is structured twice:
         //   - `/ret-copy`, the copies, where the join was published. A chain of `if`s each holding

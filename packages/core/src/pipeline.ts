@@ -1173,8 +1173,8 @@ export interface ReturnTailReading {
 
 /** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT. On a target that
  *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`: MIPS GCC,
- *  mwcc_242_81 and mwcc_233_163n), `structureChecked`, and where that structuring took the join somewhere, the
- *  same structuring again reading the return-tail copies (`copyReturnTails`). The copies are
+ *  mwcc_242_81 and mwcc_233_163n), `structureChecked`, and where that structuring took the join
+ *  somewhere, the same structuring again reading the return-tail copies (`copyReturnTails`). The copies are
  *  published where they spell the function SHORTER, or where the target's asm layout shows that the
  *  compiler cross-jumped a tail the source wrote into every arm, or its cse left a return unfolded
  *  (below). Every other target publishes the copies (THE MEASURED DEFAULT).
@@ -1230,7 +1230,7 @@ export interface ReturnTailReading {
  *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; with all three, 2, 3, 1). Their numbers are in
  *      structure/cross-jumped-tail.ts. So, held out, this reading still loses some of the copies'
  *      matches; the 620 and the full bench lose none. Those 620 MATCH figures are of the bound with
- *      the marks on every compiler; agbcc and ido7.1 now publish the copies (THE MEASURED DEFAULT),
+ *      the marks on every compiler; agbcc and ido7.1 publish the copies (THE MEASURED DEFAULT),
  *      so on agbcc the marks are read by the tests and by no default, and the join's gains there
  *      are given up (agbcc 2 of the 620, ido7.1 7: the field's note).
  *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
@@ -1344,9 +1344,9 @@ export function structureReturnTailReading(
  *  is structured after them for the ranked fan, and its refusal costs only that reading.
  *
  *  Where the copies REFUSE, the join is published: never a lift turned into a decline. The copies
- *  here (`copyReturnTails`) are not that old default's structuring: its ladder had rungs of its own
- *  that this branch moved into the join's reading (structure.ts THE COPIES, where the join refuses),
- *  and a function they lifted on is one the copies alone decline (`synthetic:sw_gotocase2` on
+ *  here (`copyReturnTails`) are not that old default's structuring: its ladder's other rungs live in
+ *  the join's reading (structure.ts THE COPIES, where the join refuses), and a function only they
+ *  lift is one the copies alone decline (`synthetic:sw_gotocase2` on
  *  ido7.1, a case that leaves its switch for a loop exit past the switch's end). So this default
  *  also LIFTS some functions the old one declined, where only the join structures them (pokeemerald
  *  `Task_ShowContestEntryMonPic`, agbcc, a jump table whose case arms the copies cannot linearize):

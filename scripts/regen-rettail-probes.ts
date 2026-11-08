@@ -3,13 +3,13 @@
 //
 // Two claims. `crossJumpsReturnTails` (target.ts), which compilers keep a return tail written into
 // every arm ONCE (`pa`-`pf`); and `foldsBranchConstantOnTakenEdge`, which compilers fold the constant
-// a branch proved into a return on its taken edge (`pg`). It is a COMPILER claim about two SOURCE spellings of one function, the tail in
-// every arm and the tail written once after the construct. So, as for
-// `scripts/regen-switch-spelling-probes.ts`, both spellings are compiled and the objects committed,
-// and this script is what makes the pair re-measurable rather than only re-readable.
+// a branch proved into a return on its taken edge (`pg`). Each is a COMPILER claim about two SOURCE
+// spellings of one function, the tail in every arm and the tail written once after the construct.
+// So, as for `scripts/regen-switch-spelling-probes.ts`, both spellings are compiled and the objects
+// committed, and this script is what makes the pair re-measurable rather than only re-readable.
 //
-// Seven pairs (`corpus/probe-rettail-{pa,pb,pc,pd,pe,pf,pg}-{copies,join}.c`), five toolchains, each at its
-// canonical flags taken from `@asmlift/core` and `@asmlift/toolchains` rather than retyped:
+// Seven pairs (`corpus/probe-rettail-{pa,pb,pc,pd,pe,pf,pg}-{copies,join}.c`), five toolchains,
+// each at its canonical flags taken from `@asmlift/core` and `@asmlift/toolchains` rather than retyped:
 //
 //   ASMLIFT_AGBCC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… ASMLIFT_MWCC_ROOT=… npx tsx scripts/regen-rettail-probes.ts
 //

@@ -13,7 +13,7 @@
 // register to the constant (`beqz v0,L; move v0,zero`) lifts as a `const` returned on that edge, and
 // is no mark.
 //
-// MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c` (cross-jumped-tail.test.ts)
+// MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c` (unfolded-branch-constant.test.ts)
 // and on Mario Party 3's `func_8010BD28_472F98_mgmode`, which it is the shape of: gcc2.7.2 -O1, the
 // copies `nop` in the `beqz`'s slot and the join `move v0,zero`. There the join loses the copies'
 // match (0 -> 1 line off, really compiled, 2026-11-06).

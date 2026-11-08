@@ -808,7 +808,7 @@ export const NO_HIT_CODE: StructureHooks = {
 let readingCopies = false;
 /** agbcc's description with the join past early returns declared its default (target.ts
  *  `joinPastReturnsByDefault`, which agbcc leaves out, so it publishes the copies outright): the
- *  default the GCC 2.7.2 lanes and mwcc_242_81 run, read on agbcc's fixtures, and the fan naming the
+ *  default the GCC 2.7.2 lanes and mwcc 2.4.2 and 2.3.3 run, read on agbcc's fixtures, and the fan naming the
  *  copies `/ret-copy`. */
 export const AGBCC_JOIN_DEFAULT: TargetDescription = {
   ...ARMV4T_AGBCC,
