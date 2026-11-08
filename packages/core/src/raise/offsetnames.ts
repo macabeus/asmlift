@@ -1026,8 +1026,8 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
  *  fresh census until nothing more is admitted, because an access respelled may meet a second
  *  numeric one over a byte it now names — one reached by another literal included. The census
  *  of a later round is told which accesses earlier rounds rewrote, which it would otherwise read
- *  as the name's own: they are casts, judged as casts.
- *  Returns the name once per respelled access.
+ *  as the name's own: they print as the rewrite spelled them, and are judged as that
+ *  ({@link Lvalue}). Returns the name once per respelled access.
  *
  *  Its caller runs it only on a function {@link cellSpelledTwice} declines, so a function that
  *  lifts without it lifts unchanged; the caller asks {@link cellSpelledTwice} again afterwards,
