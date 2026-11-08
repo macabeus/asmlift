@@ -17865,6 +17865,30 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 numpool_idx(s32 i);',
     symbols: NUMPOOL_MAP,
   },
+  // …and TWO numeric pool words over the walked byte `gNumPool.b3a`: a word store and reload off
+  // `0x03005258`, a narrower store off `0x0300525A`. Respelled one site a round, the second
+  // literal's store is judged against the first's accesses already spelled through the name: a
+  // halfword (`numpool_2lit`) is another alias set, which agbcc forwards the reload across in the
+  // one-name C (`str; strh; add r0, r0, #0x5`), so it keeps declining; a byte (`numpool_2litb`) is
+  // char-wide, that C reloads, and it lifts through the name.
+  ...(
+    [
+      ['numpool_2lit', 'vu16'],
+      ['numpool_2litb', 'vu8'],
+    ] as const
+  ).map(([sym, narrow]): SynthSpec => ({
+    sym,
+    src:
+      'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
+      'typedef volatile unsigned char vu8;\n' +
+      'struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\n' +
+      `s32 ${sym}(void) {\n    s32 v0 = gNumPool.b3a;\n    vu32 *p = (vu32 *)0x03005258;\n    *p = 5;\n` +
+      `    *(${narrow} *)0x0300525A = 7;\n    return v0 + *p;\n}`,
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: `s32 ${sym}(void);`,
+    symbols: NUMPOOL_MAP,
+  })),
   // …and their O32 and PowerPC twins: the name read through `%lo` (`@l`), the store through `lui
   // 0x8010` (`lis`), which gcc 2.7.2 and KMC forward across as two spellings, and every one of the
   // four reloads as one name. The source writes the number, and an object's relocations prove it
