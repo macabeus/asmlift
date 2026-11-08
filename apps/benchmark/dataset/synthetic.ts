@@ -17889,6 +17889,38 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: `s32 ${sym}(void);`,
     symbols: NUMPOOL_MAP,
   })),
+  // …and a halfword store at a RUNTIME index off a third pool word, `0x03005200`, between the word
+  // store and reload off `0x03005258` (`numpool_ridx`): its bytes are unknown, so they may be the
+  // word's, and spelled through the name the word's C forwards past the u16 cast (`str; strh; add
+  // r3, r3, #0x5`), so it keeps declining. `numpool_2w` reaches one word off two literals, a store
+  // off `0x03005258` and a reload as `q[2]` off `0x03005250`: respelled in two rounds, the second
+  // meets the first's store as a cast the rewrite wrote, one `s32` type with the reload, and the
+  // one-name C reloads past the byte store (`str; strb; ldr`), so it lifts through the name.
+  {
+    sym: 'numpool_ridx',
+    src:
+      'typedef volatile unsigned int vu32;\ntypedef volatile unsigned short vu16;\n' +
+      'struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\n' +
+      's32 numpool_ridx(s32 i) {\n    s32 v0 = gNumPool.b3a;\n    *(vu32 *)0x03005258 = 5;\n' +
+      '    ((vu16 *)0x03005200)[i] = 7;\n    return v0 + *(vu32 *)0x03005258;\n}',
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 's32 numpool_ridx(s32 i);',
+    symbols: NUMPOOL_MAP,
+  },
+  {
+    sym: 'numpool_2w',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'struct NumPool { u8 pad[0x3a]; u8 b3a; u8 r[0x1a]; };\nextern struct NumPool gNumPool;\nvoid h(void);\n' +
+      's32 numpool_2w(void) {\n    vu32 *q = (vu32 *)0x03005250;\n    q[0] = 3;\n    h();\n' +
+      '    *(vu32 *)0x03005258 = 5;\n    gNumPool.b3a = 1;\n    return q[2];\n}',
+    features: ['global', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'void h(void);\ns32 numpool_2w(void);',
+    proto: { h: { params: 0, returnsVoid: true } },
+    symbols: NUMPOOL_MAP,
+  },
   // …and their O32 and PowerPC twins: the name read through `%lo` (`@l`), the store through `lui
   // 0x8010` (`lis`), which gcc 2.7.2 and KMC forward across as two spellings, and every one of the
   // four reloads as one name. The source writes the number, and an object's relocations prove it
