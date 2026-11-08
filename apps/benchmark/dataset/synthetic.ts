@@ -17949,10 +17949,22 @@ export const SYNTHETIC: SynthSpec[] = [
   // u16 store (`str; strh; add r4, r4, #0x5`), so both keep declining. `numpool_lay` stores a WORD
   // at an index off another literal under a map whose layout has a `u8 *` member over the respelled
   // word: it prints as `gNumPool.p38`, a pointer, which agbcc forwards past the `s32` cast's store
-  // (`str [r1, #0x38]; str [r0]; add r3, r3, #0x5`), so it keeps declining too.
+  // (`str [r1, #0x38]; str [r0]; add r3, r3, #0x5`), so it keeps declining too. `numpool_dma`
+  // starts a DMA3 transfer into the word between the store and the reload (`DMA3SAD = src; DMA3DAD =
+  // 0x03005258; DMA3CNT = 0x84000001`): the device writes it, which no access the C performs says,
+  // and spelled through the name agbcc proves the registers' constant addresses apart and forwards
+  // the 5 (`add r0, r0, #0x5`), so it keeps declining (offsetnames.ts `device-access-beside`).
   ...(
     [
       ['numpool_par', 's32 i, vu16 *p', 'p[i] = 7;', NUMPOOL_MAP, '', 's32 i, volatile u16 *p'],
+      [
+        'numpool_dma',
+        'u32 *src',
+        '*(vu32 *)0x040000D4 = (u32)src;\n    *(vu32 *)0x040000D8 = 0x03005258;\n    *(vu32 *)0x040000DC = 0x84000001;',
+        NUMPOOL_MAP,
+        '',
+        'u32 *src',
+      ],
       ['numpool_gp', 's32 i', 'gNumPtr[i] = 7;', NUMPOOL_GP_MAP, 'extern vu16 *gNumPtr;\n', 's32 i'],
       ['numpool_lay', 's32 i', '((vu32 *)0x03005200)[i] = 7;', NUMPOOL_LAY_MAP, '', 's32 i'],
     ] as const
