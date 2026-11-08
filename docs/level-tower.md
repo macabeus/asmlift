@@ -185,11 +185,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   changing a default spelling loses no match: it is declared only on a compiler where held-out real
   functions, every function of projects the change was not chosen on, really compiled against the
   projects' own objects, show the new default losing none of the old one's matches, and it is left
-  out everywhere else. Its absent value is therefore the OLD default, applied by the caller, and not
-  the structurer's default: it inherits the past, never another compiler. `joinPastReturnsByDefault`
+  out everywhere else. Its absent value is the reading published before the field existed, applied
+  by the caller and not the structurer's default, and it never inherits another compiler's value;
+  but it is that reading first, not the old default's whole ladder: where it refuses, the other
+  reading stands, so a function the old default declined can lift there. For
+  `joinPastReturnsByDefault`, absent means the copies first and the join where the copies refuse
+  (pipeline.ts `copiesByDefault`). `joinPastReturnsByDefault`
   (target.ts, read by pipeline.ts `structureReturnTailReading`) is the one such field. On agbcc and
   IDO 7.1 the join past early returns gains matches at some held-out sites and loses them at others,
-  and no layout mark separates the losses, so those leave it out and publish the copies, with the
+  and no layout mark separates the losses (on IDO the candidate, which branch carries the delay-slot
+  copy of the arm's store, a plain `b` or a `beql`, is normalised away before the layout is recorded
+  and so is unmeasured), so those leave it out and publish the copies, with the
   join still ranked as `/ret-join`. The field's note carries the counts, lost and gained per compiler,
   and the gains given up. It is re-measured, not inherited, whenever the chooser reads a new mark,
   a toolchain gains a build or profile, or a held-out project is added, and it is deleted the day a

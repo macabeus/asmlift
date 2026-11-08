@@ -89,7 +89,10 @@ export interface AsmBlockLayout {
  *  cross-jumps return tails (target.ts `crossJumpsReturnTails`), the layout tells a tail the source
  *  wrote once from one it wrote into every arm, and the CFG cannot. Keyed by Block OBJECT, so a
  *  clone re-keys it (cli/src/report.ts `structuredCloneFn`). A block a pass created has no entry,
- *  and every reader takes a missing entry as "no evidence".
+ *  and every reader takes a missing entry as "no evidence". Recorded by the Thumb and MIPS
+ *  frontends only: no mark is read on mwcc (it declares neither `crossJumpsReturnTails` nor an
+ *  unfolded taken-edge constant), so frontend/ppc.ts records none until one is, and a PPC lift's
+ *  `asmLayout` is undefined.
  *
  *  AN ENTRY DESCRIBES THE ASM BLOCK THE IR BLOCK WAS LIFTED FROM, whatever raising later did to the
  *  IR block. A return sunk into it, or ops a fold absorbed (shortcircuit, tailsink, divpow2), leave
@@ -97,7 +100,14 @@ export interface AsmBlockLayout {
  *  not what the block holds now: over the agbcc lifts of the 620 functions the join re-spells
  *  (2026-11-05), 786 of 10520 blocks have an entry saying they end in a jump and no longer end in a
  *  `br`. The return-tail chooser reads exactly that, the asm terminator. A reader of the current
- *  block reads its ops. */
+ *  block reads its ops.
+ *
+ *  BUT ON MIPS THE ASM IS THE NORMALISED ASM. frontend/mips.ts records the layout after
+ *  `normaliseBranchLikely`, which gives a likely branch's slot a block of its own and retargets an
+ *  unconditional `b T` whose slot copies the word at T-4 to that word, emptying the slot.
+ *  Such a `b`'s entry has `body` ending in `nop` where the compiler emitted the copied word
+ *  (`func_80A42DB4_jp`'s `b` at 0x80A42DCC, whose slot is `sw zero,0(a3)`), so every MIPS mark
+ *  reads the normalised body, not the emitted one. */
 export type AsmLayout = Map<Block, AsmBlockLayout>;
 
 /** Where a function-scope static lives, which decides how its definition is spelled: `rodata` is

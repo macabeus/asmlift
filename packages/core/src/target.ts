@@ -1320,7 +1320,9 @@ export interface TargetDescription {
     // feed (pipeline.ts `structureReturnTailReading`), which the size bound and the marks above
     // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
     // join was a default, and the join is still structured and kept in the ranked fan as
-    // `/ret-join`: a compiler the held-out measurement has not reached keeps the default it had.
+    // `/ret-join`. A compiler the held-out measurement has not reached publishes the copies first,
+    // and the join only where the copies refuse, so it lifts every function it lifted before and
+    // may lift one the old default declined (pipeline.ts `copiesByDefault`).
     // docs/level-tower.md (A MEASURED DEFAULT IS THE ONE EXCEPTION) says why a field whose readings
     // split site by site may still be declared here, and what re-measures it.
     //
@@ -1343,10 +1345,14 @@ export interface TargetDescription {
     //     different arguments, and a third source spelling the copies happen to share. Given up:
     //     18 held out and 2 of the 620.
     //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
-    //     never cross-jumps, and two `sw zero,0(a3)` stay two blocks; but the frontend retargets a
-    //     `b T` whose delay slot copies the word at T-4 to that word (frontend/mips.ts
-    //     `normaliseBranchLikely`), and the emptied slot leaves the layout record a `nop`, so the
-    //     second copy is not readable where the chooser looks. Given up: 18 held out and 7 of the 620.
+    //     never cross-jumps, so no cross-jump mark applies. Counting copies of the arm's store does
+    //     not separate the readings either: compiled, the join of `func_80A42DB4_jp` ALSO keeps two
+    //     `sw zero,0(a3)`, because ido fills a `beql`'s likely slot with a copy of its target's first
+    //     word. What differs is the branch the slot copy rides: the copies' arm schedules its own
+    //     store into the slot of a plain `b`, the join's copy sits in a `beql`'s. That is the
+    //     candidate signal, unmeasured: frontend/mips.ts `normaliseBranchLikely` rewrites both to one
+    //     shape (its `likely` and `freed` sets still tell them apart) before the layout is recorded,
+    //     so no layout entry carries it. Given up: 18 held out and 7 of the 620.
     joinPastReturnsByDefault?: boolean;
   };
 }
