@@ -882,11 +882,11 @@ describe('a numeric address the function also reaches through a name', () => {
       '((u8 *)&gUnk_03005220)[58] = 1;',
     );
     // a device-register store reached off the literal through a constant added to it
-    // (`ldr r2, =0xffada7; add r1, r1, r2` lands on 0x04000000) keeps its numeric address
+    // (`ldr r2, =0xffada7; add r1, r1, r2` lands on 0x04000000) is never renamed with it, and its
+    // effect may write the byte, so nothing is respelled (`device-access-beside`)
     const io = `${E5('0x3005259', 'strb\tr0, [r1]\n\tldr\tr2, .L8+4\n\tadd\tr1, r1, r2\n\tstrh\tr0, [r1]')}\t.word\t0xffada7\n`;
-    const ioOut = lifted(io, unsized);
-    expect(ioOut).toContain('((u8 *)&gUnk_03005220)[57] = 1;');
-    expect(ioOut).toContain('*(u16 *)67108864 = 1;');
+    expect(judged(io, unsized)).toEqual([['0x3005259', 'device-access-beside']]);
+    expect(() => lifted(io, unsized)).toThrow(/byte 0x3005259 is reached as 'gUnk_03005220' and as a numeric address/);
   });
 
   test('the accesses one literal reaches are judged against each other as renamed together', () => {
@@ -1155,7 +1155,71 @@ describe('a numeric address the function also reaches through a name', () => {
     const asm = probe('0x04000201', 'strb\tr0, [r2]').replace('0x030007c8', '0x04000200');
     expect(judged(asm.replace('f:', 'e5:'), io)).toEqual([['0x4000201', 'device-or-volatile']]);
     expect(() => lifted(asm.replace('f:', 'e5:'), io)).toThrow(/as a numeric address/);
-    expect(respelledWithout('device-or-volatile', asm, io)).toEqual(['gIo']);
+    // the name's own accesses sit in the window too, so `device-access-beside` refuses it as well
+    expect(() => respelledWithout('device-or-volatile', asm, io)).toThrow(/as a numeric address/);
+    const neither = without(without(NUMERIC_RESPELL_GATES, 'device-or-volatile'), 'device-access-beside');
+    const behaviors = offsetNameBehaviorsFor(ARMV4T_AGBCC, undefined);
+    expect(nameOffsetAddresses(lift('f', asm, io), io, behaviors, OFFSET_NAME_GATES, neither).respelled).toEqual([
+      'gIo',
+    ]);
+  });
+
+  test('without `device-access-beside` a word is respelled beside a DMA start', () => {
+    // agbcc -O2 -mthumb-interwork -fhex-asm, verbatim, of `s32 v0 = g.b3a; *(vu32 *)0x03005258 = 5;
+    // DMA3SAD = src; DMA3DAD = 0x03005258; DMA3CNT = 0x84000001; return v0 + *(vu32 *)0x03005258;`:
+    // the transfer writes the word, which the asm reloads. Spelled through `g`, the C has agbcc prove
+    // the registers' constant addresses apart from `g` and forward the 5 (`add r0, r0, #0x5`), the
+    // byte twin `((u8 *)&g)[56]` alike — so no width saves it, and a target that describes no device
+    // window refuses the same numeric registers no map entry covers
+    const dma = (store = 'str', load = 'ldr', device = true): string =>
+      'f:\n\tadd\tr2, r0, #0\n\tldr\tr0, .L3\n\tadd\tr0, r0, #0x3a\n\tldrb\tr0, [r0]\n\tldr\tr3, .L3+0x4\n' +
+      `\tmov\tr1, #0x5\n\t${store}\tr1, [r3]\n` +
+      (device
+        ? '\tldr\tr1, .L3+0x8\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n\tstr\tr3, [r1]\n\tldr\tr2, .L3+0xc\n' +
+          '\tldr\tr1, .L3+0x10\n\tstr\tr1, [r2]\n'
+        : '') +
+      `\t${load}\tr1, [r3]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n` +
+      // the byte twin stores the byte `g.b3a` reads
+      `\t.word\t${store === 'str' ? '0x3005258' : '0x300525a'}\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n` +
+      '\t.word\t-0x7bffffff\n';
+    const noWindow: TargetDescription = {
+      ...ARMV4T_AGBCC,
+      capabilities: { ...ARMV4T_AGBCC.capabilities, deviceRegisters: undefined },
+    };
+    const maps: SymbolMap[] = [
+      new Map([[0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]]]),
+      new Map([[0x03005220, [{ name: 'g', kind: 'data' }]]]),
+    ];
+    for (const g of maps) {
+      for (const [store, load] of [
+        ['str', 'ldr'],
+        ['strb', 'ldrb'],
+      ]) {
+        for (const target of [ARMV4T_AGBCC, noWindow]) {
+          expect(() => decompile('f', dma(store, load), target, { symbols: g }), store).toThrow(
+            /byte 0x300525a is reached as 'g' and as a numeric address/,
+          );
+          // the control: no device access beside it, and the number lifts through the name
+          expect(decompile('f', dma(store, load, false), target, { symbols: g }).respelledNames, store).toEqual(['g']);
+        }
+      }
+      expect(judged(dma().replace('f:', 'e5:'), g)).toEqual([['0x3005258', 'device-access-beside']]);
+      expect(respelledWithout('device-access-beside', dma(), g)).toEqual(['g']);
+    }
+  });
+
+  test('a device store at a runtime index is no device partner: agbcc reloads past it', () => {
+    // agbcc -O2 of `v0 = g.b3a; ((u8 *)&g)[58] = 5; ((vu32 *)0x040000D4)[i] = a0; return v0 +
+    // ((u8 *)&g)[58];` reloads (`str r4, [r1]; ldrb r1, [r3]`), as past any store through a pointer
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tldr\tr0, .L3\n\tadd\tr0, r0, #0x3a\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr3, .L3+0x4\n\tmov\tr2, #0x5\n\tstrb\tr2, [r3]\n\tlsl\tr1, r1, #0x2\n\tldr\tr2, .L3+0x8\n' +
+      '\tadd\tr1, r1, r2\n\tstr\tr4, [r1]\n\tldrb\tr1, [r3]\n\tadd\tr0, r0, r1\n\tpop\t{r4}\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tg\n\t.word\t0x300525a\n\t.word\t0x40000d4\n';
+    const g: SymbolMap = new Map([[0x03005220, [{ name: 'g', kind: 'data', size: 0x40 }]]]);
+    const r = decompile('f', asm, ARMV4T_AGBCC, { symbols: g, prototypes: { f: { params: 2 } } });
+    expect(r.respelledNames).toEqual(['g']);
+    expect(r.source).toContain('((u8 *)&g)[58] = 5;');
   });
 
   test('without `not-one-literal-access` an access through a join of two literals is respelled', () => {

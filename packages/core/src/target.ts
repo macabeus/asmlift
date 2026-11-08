@@ -24,7 +24,10 @@
 //   • capabilities.deviceRegisters → six readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the numeric respell's `device-or-volatile` refusal to spell an address in the
-//     window through a map name (raise/offsetnames.ts `respellNumericThroughName`, through
+//     window through a map name, and its `device-access-beside` refusal to respell anything in a
+//     function with a constant-address access in the window — a DMA start there may write the
+//     respelled bytes, which asks the window as a superset of `deviceMemoryWriters` and so reads it
+//     in the direction it may be wide in (raise/offsetnames.ts `respellNumericThroughName`, through
 //     pipeline.ts `offsetNameBehaviorsFor`), the `/vol-store` variation's eligibility
 //     (l3/volstore.ts), rank.ts's volatility tie-break between two byte-identical spellings, the first half of `/unreduce`'s
 //     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device

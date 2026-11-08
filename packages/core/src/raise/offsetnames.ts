@@ -705,7 +705,9 @@ export type OffsetNameBehaviors = StampBehaviors & {
   readonly reloadsAcrossSpellings?: boolean;
   /** the target's device-register window (`capabilities.deviceRegisters`): a numeric access into
    *  it may be a `volatile` register the source spelled by address, which no map name carries, so
-   *  {@link respellNumericThroughName} leaves it as the asm has it */
+   *  {@link respellNumericThroughName} leaves it as the asm has it — and, since a store there may
+   *  start a transfer into ordinary memory, respells nothing beside a constant-address access in it
+   *  (absent ⇒ any `volatile` or unmapped numeric access counts as one) */
   readonly deviceRegisters?: readonly [number, number];
   /** the compiler reloads a cell of one object stored and read as two integer types
    *  (`compilerBehaviors` `reloadsAcrossIntegerTypes`; absent ⇒ it may forward), which
@@ -922,6 +924,12 @@ export interface NumericRespell {
   readonly partners: readonly (readonly [Lvalue, Lvalue])[];
   /** the target's device-register window, if it has one */
   readonly device: readonly [number, number] | undefined;
+  /** another access of the function, at a constant address, may be a DEVICE access: in the
+   *  target's device-register window, or — on a target that describes no window — `volatile`, or
+   *  at a numeric address no map entry covers. Its effect may write the respelled bytes (a DMA store
+   *  starts a transfer into them) where the compiler proves its constant address apart from the
+   *  name and forwards past it */
+  readonly deviceBeside: boolean;
   /** the compiler reloads across two integer types of one object (`compilerBehaviors`
    *  `reloadsAcrossIntegerTypes`), so no width pair can forward */
   readonly reloadsAcrossTypes: boolean;
@@ -945,6 +953,26 @@ export const NUMERIC_RESPELL_GATES: readonly Gate<NumericRespell>[] = [
     guardedBy: 'offset-names.test.ts: without `device-or-volatile` a device register store is respelled through a name',
     rejects: (c) =>
       c.op.attrs.volatile === true || (c.device !== undefined && c.lo < c.device[1] && c.hi > c.device[0]),
+  },
+  // A store into the device window can make the DEVICE write ordinary memory — `DMA3CNT =
+  // 0x84000001` copies a word into the respelled one — and no access the C performs says so. Two
+  // numeric spellings keep the function declined; one name lets the compiler prove the register's
+  // constant address apart from the name's and forward the value stored before it: agbcc `-O2`
+  // compiles `((s32 *)&g)[14] = 5; <DMA3 SAD/DAD/CNT stores>; return v0 + ((s32 *)&g)[14];` to
+  // `add r0, r0, #0x5`, and the byte twin `((u8 *)&g)[58]` alike (`strb; ...; add r0, r0, #0x5`)
+  // — address disambiguation, not alias sets, so no width or type of the respelled access helps
+  // and every compiler is asked. The region is the target's own window (`deviceRegisters`, which
+  // must cover every register a source reaches, so it is wide in the direction that declines, and
+  // holds the narrower `deviceMemoryWriters`), any access in it, a read included; a target that
+  // describes none is fail-closed: any `volatile` access, and any numeric address no map entry
+  // covers, may be a device's. A device access at a RUNTIME address is no such partner: agbcc
+  // reloads past `((vu32 *)0x040000D4)[i] = a0` (`str r4, [r1]; ldrb r1, [r3]`) as past any pointer.
+  {
+    id: 'device-access-beside',
+    why: 'another access at a constant address may be a device whose effect writes the respelled bytes',
+    sound: true,
+    guardedBy: 'offset-names.test.ts: without `device-access-beside` a word is respelled beside a DMA start',
+    rejects: (c) => c.deviceBeside,
   },
   // NOT sound, and the four after it are not either: each refuses a respell the re-run of
   // `cellSpelledTwice` would decline anyway (a second name over the byte meets the one chosen), or
@@ -1282,6 +1310,21 @@ function respellCase(
       partners.push([me, { width: u.width, type: null }]);
     }
   }
+  // Any other access at a constant address that may be a device's, read or written, before or
+  // after: in the target's window, or — on a target that describes none — `volatile` (a register a
+  // source spells by address, or a read the lift keeps), or numeric where no map entry covers it.
+  const window = behaviors.deviceRegisters;
+  const mapped = (l: number, h: number): boolean =>
+    [...symbols].some(([a, entries]) => entries.some((i) => a <= l && h <= a + (i.size ?? 1)));
+  const deviceBeside = placed.some(
+    (y) =>
+      y.op !== op &&
+      y.ranges.some(([l, h]) =>
+        window !== undefined
+          ? l < window[1] && h > window[0]
+          : y.op.attrs.volatile === true || (spellingOf(y) === null && !(l < hi && lo < h) && !mapped(l, h)),
+      ),
+  );
   return {
     op,
     placings: mine.length,
@@ -1297,6 +1340,7 @@ function respellCase(
     otherName,
     partners,
     device: behaviors.deviceRegisters,
+    deviceBeside,
     reloadsAcrossTypes: behaviors.reloadsAcrossIntegerTypes === true,
   };
 }
