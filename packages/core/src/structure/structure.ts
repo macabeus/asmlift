@@ -54,7 +54,16 @@
 // into all of them but one, or into all of them under the `/tail-copies` variation. Regime A keeps
 // the refusal, since its if-recovery already lifts.
 import { globalBaseOf } from '../ir/alias';
-import { type WordCtx, demandedBits, incomingArgs, mayAlwaysHold, overwrittenReads, storeForwards } from '../ir/bits';
+import {
+  type DemandedBitsIndex,
+  type WordCtx,
+  demandedBits,
+  demandedBitsIndex,
+  incomingArgs,
+  mayAlwaysHold,
+  overwrittenReads,
+  storeForwards,
+} from '../ir/bits';
 import {
   Block,
   CALL_RETURN_OBJECT,
@@ -4551,6 +4560,10 @@ function structureRanked(
     /** the sign of a symbol's loads whose extension some use reads (`extensionImmaterial`) */
     const signedLoads = new Map<string, boolean>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
+    // one reader index for every load this walk asks `extensionImmaterial` about: the walk only
+    // reads the IR, so the index built at the first ask is the one each later ask would build
+    let builtIndex: DemandedBitsIndex | undefined;
+    const bitsIndex = () => (builtIndex ??= demandedBitsIndex(fn));
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         // A C++ reference global is a cell holding its referent's address, and the assembly reads
@@ -4584,7 +4597,7 @@ function structureRanked(
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
-              if (!extensionImmaterial(fn, op, op.attrs.width as number, useSitesOf)) {
+              if (!extensionImmaterial(fn, op, op.attrs.width as number, useSitesOf, bitsIndex)) {
                 signedLoads.set(s, op.attrs.signed as boolean);
               }
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
@@ -12192,8 +12205,26 @@ export function functionPostDominators(
   forest: { byHeader: ReadonlyMap<Block, NaturalLoop> } = analyzeLoops(fn, dominators(fn)),
 ): Map<Block, Block | null> {
   const exitless = [...forest.byHeader.values()].filter((nl) => nl.exitEdges.length === 0).map((nl) => nl.header);
-  return postDominators(fn, undefined, undefined, new Set(exitless));
+  const ends = new Set(exitless);
+  // MEMOISED ON THE CFG IT READS: the ladder structures one fn again per rung (`structureLadder`),
+  // and each run asks this of the same CFG. The key is everything `postDominators` reads here —
+  // the block order, each terminator's opcode and successors, and which blocks end paths — so a
+  // structuring that changed any of it computes afresh. Handed out as a copy, so no caller can
+  // edit another's answer.
+  const key: unknown[] = [];
+  for (const b of fn.blocks) {
+    const term = b.ops[b.ops.length - 1];
+    key.push(b, term?.opcode, ends.has(b), ...successorsOf(b), null);
+  }
+  const cached = POST_DOMINATORS.get(fn);
+  if (cached !== undefined && cached.key.length === key.length && cached.key.every((x, i) => x === key[i])) {
+    return new Map(cached.ipdom);
+  }
+  const ipdom = postDominators(fn, undefined, undefined, ends);
+  POST_DOMINATORS.set(fn, { key, ipdom: new Map(ipdom) });
+  return ipdom;
 }
+const POST_DOMINATORS = new WeakMap<Fn, { key: readonly unknown[]; ipdom: ReadonlyMap<Block, Block | null> }>();
 
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do
 // the blocks of `ends` besides their own successors. Over the subgraph `keep` induces when given,
@@ -12256,6 +12287,11 @@ function postDominators(
     const strict = [...pdom.get(b)!].filter((c) => c !== b);
     let chosen: Block | null = null;
     for (const c of strict) {
+      // `others` has strict.length - 1 members, so a smaller set cannot hold them all: the same
+      // answer, without building and walking `others` for every farther post-dominator
+      if (pdom.get(c)!.size < strict.length - 1) {
+        continue;
+      }
       const others = strict.filter((x) => x !== c);
       if (others.every((x) => pdom.get(c)!.has(x))) {
         chosen = c;
@@ -12361,11 +12397,12 @@ function extensionImmaterial(
   load: Op,
   width: number,
   useSitesOf: ReadonlyMap<Value, readonly UseSite[]>,
+  index: () => DemandedBitsIndex,
 ): boolean {
   const v = load.results[0];
   return (
     width < 4 &&
     (useSitesOf.get(v)?.length ?? 0) > 0 &&
-    (demandedBits(fn, v, false) & ~(2 ** (8 * width) - 1)) >>> 0 === 0
+    (demandedBits(fn, v, false, index()) & ~(2 ** (8 * width) - 1)) >>> 0 === 0
   );
 }

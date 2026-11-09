@@ -1638,20 +1638,17 @@ const FULL = 0xffffffff;
 /** The low `bits` bits, as a mask. */
 const lowBits = (bits: number): number => (bits >= 32 ? FULL : 2 ** bits - 1);
 
-/** THE BITS OF `root` ANY READER NEEDS, as a mask: a store of W bytes needs the low 8W bits of the
- *  value it stores, a `zext` of W bits its operand's low W bits its own readers need, a `sext` those
- *  and its sign bit where they need any bit above, a constant mask and the bitwise ops pass their
- *  readers' bits through, a shift by a constant moves them, an add, a subtract or a multiply needs
- *  every bit up to its readers' highest, since a carry only travels up, and a join needs what its
- *  parameter's readers need. Every other reader — a compare, a call, an address, a shift's count —
- *  needs all 32, and so does a join that reaches itself again. A `ret` needs none where the
- *  function's own declaration returns nothing (`voidOwn`), all 32 otherwise. A value nothing reads
- *  needs none: a caller for which an unseen reader may exist checks for a use itself.
- *
- *  Asked whether a caller reads a register-returned struct's word past the struct
- *  (frontend/register-struct-call.ts), and whether any use of a narrow load reads the bits its
- *  extension fills (structure.ts `extensionImmaterial`). */
-export function demandedBits(fn: Fn, root: Value, voidOwn: boolean): number {
+/** What `demandedBits` walks, built from the whole function: each value's defining op, the ops that
+ *  read it (each once), and the block parameters an edge hands it to. A caller asking about many
+ *  values of one unchanged function builds it once and hands it to each ask; each ask still walks
+ *  from its own root with its own memo, so the answer is the one a fresh index gives. */
+export interface DemandedBitsIndex {
+  readonly defs: ReadonlyMap<Value, Op>;
+  readonly readers: ReadonlyMap<Value, readonly Op[]>;
+  readonly params: ReadonlyMap<Value, readonly Value[]>;
+}
+
+export function demandedBitsIndex(fn: Fn): DemandedBitsIndex {
   const defs = defOpMap(fn);
   const readers = new Map<Value, Op[]>();
   const params = new Map<Value, Value[]>();
@@ -1666,6 +1663,29 @@ export function demandedBits(fn: Fn, root: Value, voidOwn: boolean): number {
       }
     }
   }
+  return { defs, readers, params };
+}
+
+/** THE BITS OF `root` ANY READER NEEDS, as a mask: a store of W bytes needs the low 8W bits of the
+ *  value it stores, a `zext` of W bits its operand's low W bits its own readers need, a `sext` those
+ *  and its sign bit where they need any bit above, a constant mask and the bitwise ops pass their
+ *  readers' bits through, a shift by a constant moves them, an add, a subtract or a multiply needs
+ *  every bit up to its readers' highest, since a carry only travels up, and a join needs what its
+ *  parameter's readers need. Every other reader — a compare, a call, an address, a shift's count —
+ *  needs all 32, and so does a join that reaches itself again. A `ret` needs none where the
+ *  function's own declaration returns nothing (`voidOwn`), all 32 otherwise. A value nothing reads
+ *  needs none: a caller for which an unseen reader may exist checks for a use itself.
+ *
+ *  Asked whether a caller reads a register-returned struct's word past the struct
+ *  (frontend/register-struct-call.ts), and whether any use of a narrow load reads the bits its
+ *  extension fills (structure.ts `extensionImmaterial`). */
+export function demandedBits(
+  fn: Fn,
+  root: Value,
+  voidOwn: boolean,
+  index: DemandedBitsIndex = demandedBitsIndex(fn),
+): number {
+  const { defs, readers, params } = index;
   const memo = new Map<Value, number>();
   const constOf = (x: Value | undefined): number | undefined => {
     const d = x === undefined ? undefined : defs.get(x);
