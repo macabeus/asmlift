@@ -406,7 +406,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "the same raised function again with the copies and that shared region as the `if`'s follow: it is " +
       'written once after the `if`, and every other path leaves through an early `return`. On agbcc, ' +
       "this example's compiler, the copies are the default, so this is the step from them to the region " +
-      'written once. Where the join past early returns is the default instead (MIPS GCC, CodeWarrior ' +
+      'written once. Where the join past early returns is the default instead (CodeWarrior ' +
       "2.4.2 and 2.3.3), it already writes this example's region once, since the paths that do not " +
       'return meet at it: the variation is a reading of the copies, ranked beside them.',
     offeredWhen: {
@@ -427,7 +427,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'code below an `if` whose arms only meet at the `return` is written into each arm',
     detail:
       'An `if` with an early `return` in one arm has no block both arms reach before the function ' +
-      'returns. Where the join past early returns is the default (MIPS GCC, CodeWarrior 2.3.3, and 2.4.2, ' +
+      'returns. Where the join past early returns is the default (CodeWarrior 2.3.3, and 2.4.2, ' +
       "this example's compiler), asmlift gives it the block where the paths that do not return meet as its " +
       'join, so the code from there is written once and every other path leaves through its early ' +
       '`return`; that also reads early returns the compiler merged into the epilogue or cross-jumped ' +
@@ -438,7 +438,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'cross-jumps return tails and the layout shows it did, or where an early return keeps a constant ' +
       'its branch proved unfolded (gcc 2.x below -O2), they are the default instead, and the join is ' +
       'offered as `ret-join`. On agbcc and IDO 7.1, measured against held-out functions where the join ' +
-      'loses matches, and on CodeWarrior 2.4.7, where no held-out function was measured, the copies are ' +
+      'loses matches, on GCC 2.7.2 and KMC, measured against generated functions where it does, and on CodeWarrior 2.4.7, where no held-out function was measured, the copies are ' +
       'the default outright, and this variation is never offered there. Past the copy budget the copies ' +
       'are not offered.',
     offeredWhen: {
@@ -465,7 +465,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the return-tail copies, or where the layout shows the compiler cross-jumped a return tail the ' +
       'source wrote into every arm, or where an early return keeps a constant its branch proved unfolded ' +
       '(gcc 2.x below -O2), the copies are the default and this is the join, offered beside them, which is ' +
-      "the source some functions were written as. On agbcc, this example's compiler, and on IDO 7.1 and " +
+      "the source some functions were written as. On agbcc, this example's compiler, and on IDO 7.1, GCC 2.7.2, KMC and " +
       'CodeWarrior 2.4.7, the copies are the default outright: the join is this variation ' +
       'wherever it is taken.',
     offeredWhen: {
