@@ -1077,10 +1077,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `outgoing-stack-args`' phrase, and the decided cause, an address-taken local, wins. All three
   // are `upd_lcopy` on the three CodeWarrior builds, whose struct copy into a local steps a base
   // captured a word below the object (`addi r5,r1,4; … stwu r0,8(r5)`).
+  //
+  // THE THUMB OUTGOING PAIR is the stack-argument licence's refusal inside the Thumb sp-as-data throw:
+  // "stack pointer used as data — … it may be an outgoing stack argument …", and the named cause wins.
+  // Both markers are agbcc controls of an undeclared call its callee's body cannot size:
+  // `stkbody_more` (the body loads fewer words than are staged) and `stkbody_none` (no body).
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 5],
     ['address-taken-local > outgoing-stack-args', 3],
+    ['outgoing-stack-args > stack-frames', 2],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {

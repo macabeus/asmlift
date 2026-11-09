@@ -17,10 +17,13 @@
 // What the range is read as is the target's: where the frontend reads objdump text (MIPS and
 // PowerPC, objfile.ts `readsObjdumpText`) it is disassembled with the target's own objdump, in the
 // section the symbol names (objfile.ts `disasmRange`: overlays put several sections at one address).
-// The agbcc frontend reads no objdump text, so a Thumb range of an ARM image is read for one shape
-// alone: an interworking veneer, a word-aligned Thumb entry of `bx pc; nop` whose ARM word after it
-// is an unconditional `b` (core frontend/arm-body.ts `thumbToArmVeneerTarget`). The ARM words the `b` reaches are handed in as
-// the body, and the core scans them; any other Thumb range gives no body.
+// The agbcc frontend reads no objdump text, so a Thumb range of an ARM image is read as words. An
+// interworking veneer, a word-aligned Thumb entry of `bx pc; nop` whose ARM word after it is an
+// unconditional `b` (core frontend/arm-body.ts `thumbToArmVeneerTarget`), is handed in as the ARM
+// words the `b` reaches, which the core scans. Any other Thumb range is handed in as its first
+// halfwords (`MAX_THUMB_HALFWORDS`), which the core reads only for the incoming stack words its
+// entry loads (frontend/thumb-entry.ts): a prefix is all that pass reads, and a pass that runs off
+// it stops there, keeping what it read.
 //
 // A RANGE IS ONE BODY, WHATEVER SYMBOLS SIT INSIDE IT. objdump starts a `<name>:` header at every
 // symbol in a range (mp3's `*_VRAM_END` inside func_8010EC38_25B288_rockin_raceway, af's `.L800F29C8`,
@@ -69,6 +72,9 @@ const MAX_RANGE = 0x10000;
 /** The most ARM words handed in behind a veneer: the scan answers nothing for a body that has not
  *  returned by then. */
 const MAX_ARM_WORDS = 256;
+/** The most halfwords of a Thumb body handed in: the entry scan reads only the straight-line code
+ *  after the prologue's saves and frame reservation, and stops at the first branch. */
+const MAX_THUMB_HALFWORDS = 64;
 
 interface ElfSymbol {
   name: string;
@@ -255,8 +261,11 @@ export function calleeBodiesFromElf(
     }
     if (!readsObjdumpText(target)) {
       const words = range.thumb ? veneeredArmWords(image, range) : undefined;
+      const halfwords = range.thumb && words === undefined ? thumbHalfwords(image, range) : undefined;
       if (words !== undefined) {
         bodies[callee] = { kind: 'arm', words };
+      } else if (halfwords !== undefined) {
+        bodies[callee] = { kind: 'thumb', halfwords };
       }
       continue;
     }
@@ -341,6 +350,20 @@ export function calleeAt(image: ElfImage, range: FunctionRange, addr: number): s
 function codeAt(image: ElfImage, addr: number, bytes: number): number | undefined {
   const s = image.elf.sections.find((x) => isCode(x) && x.addr <= addr && addr + bytes <= x.addr + x.size);
   return s === undefined ? undefined : s.offset + (addr - s.addr);
+}
+
+/** The first halfwords of the Thumb range, up to `MAX_THUMB_HALFWORDS` and the range's end; undefined
+ *  where its bytes are in no code section. */
+function thumbHalfwords(image: ElfImage, range: FunctionRange): number[] | undefined {
+  const { bytes, littleEndian } = image.elf;
+  const n = Math.min(MAX_THUMB_HALFWORDS, Math.floor((range.end - range.start) / 2));
+  const at = n > 0 ? codeAt(image, range.start, 2 * n) : undefined;
+  if (at === undefined) {
+    return undefined;
+  }
+  return Array.from({ length: n }, (_, k) =>
+    littleEndian ? bytes.readUInt16LE(at + 2 * k) : bytes.readUInt16BE(at + 2 * k),
+  );
 }
 
 /** The ARM words a Thumb veneer at `range` enters, up to the first `bx lr` or `MAX_ARM_WORDS`; undefined

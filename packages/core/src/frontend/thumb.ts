@@ -35,6 +35,7 @@ import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
+import { type CalleeStackWords, asksCalleeBody } from './callee-body';
 import { pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
@@ -92,6 +93,7 @@ import {
   analyzeOutgoingArgs,
   loadedWordBound,
 } from './stackargs';
+import { thumbEntryWordsFromText } from './thumb-entry';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -2622,7 +2624,13 @@ function liftOnce(
   homesReleased: boolean,
   options: Pick<
     LiftOptions,
-    'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
+    | 'contextOwnWords'
+    | 'contextOwnProto'
+    | 'ownMemoryReturn'
+    | 'calleeBodyBound'
+    | 'calleeStackWords'
+    | 'stackSized'
+    | 'entryReadCalls'
   >,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options, homesReleased);
@@ -3437,6 +3445,7 @@ function measureThumbFrame({
   homesReleased = false,
   own,
   dropsVoidReturn,
+  stackWordsOf,
 }: {
   name: string;
   target: TargetDescription;
@@ -3451,6 +3460,10 @@ function measureThumbFrame({
    *  pipeline.ts `raiseRecovered` drops ret operands for. The context's own entry, proving or not,
    *  leaves the operand in place. */
   dropsVoidReturn: boolean;
+  /** the incoming stack words a callee nothing declares loads, off its own body
+   *  (`LiftOptions.calleeStackWords`): the outgoing-argument analysis's `bodyReads`, which asks it
+   *  only where the code stages a block */
+  stackWordsOf?: CalleeStackWords;
 }): ThumbFrame {
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -3978,6 +3991,7 @@ function measureThumbFrame({
     const off = escapedOffsetOf.get(ins);
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
+  const stagesOutgoing = target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
   const eventBlocks = asmBlocks.map((ab) => ({
     events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
       const escaped = escapeEvent(ins);
@@ -4003,6 +4017,10 @@ function measureThumbFrame({
             callee,
             declared: declared === null ? null : outgoingBlock(declared.widths, target),
             params: declared?.params,
+            // where nothing declares a named call, what its callee's body loads of the stack words
+            ...(declared === null && calleeRegister(ins, target) === null && stagesOutgoing
+              ? { bodyReads: () => stackWordsOf?.(callee) }
+              : {}),
           },
         ];
       }
@@ -5635,10 +5653,18 @@ function thumbFillOf(
     contextOwnProto,
     ownMemoryReturn,
     calleeBodyBound,
+    calleeStackWords,
+    stackSized,
     entryReadCalls,
   }: Pick<
     LiftOptions,
-    'contextOwnWords' | 'contextOwnProto' | 'ownMemoryReturn' | 'calleeBodyBound' | 'entryReadCalls'
+    | 'contextOwnWords'
+    | 'contextOwnProto'
+    | 'ownMemoryReturn'
+    | 'calleeBodyBound'
+    | 'calleeStackWords'
+    | 'stackSized'
+    | 'entryReadCalls'
   > = {},
   homesReleased = false,
 ): ThumbFill {
@@ -5656,6 +5682,7 @@ function thumbFillOf(
     () => ownDeclarationOf(name, prototypes, contextOwnProto),
     calleeBodyBound,
     entryReadCalls,
+    stackSized,
   );
   const frame = measureThumbFrame({
     name,
@@ -5666,6 +5693,10 @@ function thumbFillOf(
     homesReleased,
     own: ownDeclarationOf(name, prototypes, contextOwnProto),
     dropsVoidReturn: declaresVoidReturn(prototypes[name]),
+    stackWordsOf: (callee) =>
+      asksCalleeBody(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
+        ? calleeStackWords?.(callee)
+        : undefined,
   });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
@@ -6852,6 +6883,8 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       usedSlotOffsets.add(off);
       return ssa.readVar(stackSlotKey(off), bi);
     },
+    // …and that block is the arity of a call nothing declares, where its callee's body licensed it
+    stackWords: frame.slotsOk ? frame.outgoingArgs.blocks.get(ins)?.length : undefined,
     // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT IS AN ARGUMENT ALL THE SAME. The frame walks
     // read the call as handed every argument register it holds (`frameAddressReceivers`), and the
     // lift reads the object as written by that receiver (`isFrameObjectAccess`, with no reaching-
@@ -7046,7 +7079,12 @@ function fallLabel(asmBlocks: readonly AsmBlock[], name: string, bi: number): st
 }
 
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
-export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lift };
+export const thumbFrontend: Frontend = {
+  id: 'thumb',
+  inputFormat: 'gnu-as',
+  lift,
+  entryStackWords: thumbEntryWordsFromText,
+};
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
  *  every source path under `./*`, so a plain `export` here would put the pad table, the pad predicate, the witness serialisation and the lift's stages into the

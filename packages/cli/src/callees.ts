@@ -177,7 +177,10 @@ export function guessedArityCallees(
  *  body outside the input the lift asked, with what it reads at most in argument words: core
  *  `DecompileResult.calleeBodiesAsked`, of a body main.ts read off the linked ELF) is named on a line
  *  of its own. Its arity is still guessed from the argument registers, and the bound never caps it:
- *  what the body answered settled only the registers the caller did not set up for the call. */
+ *  what the body answered settled only the registers the caller did not set up for the call. A
+ *  callee in `sized` (core `DecompileResult.calleeStackSized`, with the stack words its call was laid
+ *  out at) was no guess: it is named on a line of its own, as sized by the stack words its body
+ *  loads. */
 export function guessedArityNote(
   asm: string,
   self: string,
@@ -186,11 +189,14 @@ export function guessedArityNote(
   symbols?: SymbolMap,
   relocs?: readonly Reloc[],
   asked?: ReadonlyMap<string, number>,
+  sized?: ReadonlyMap<string, number>,
 ): string {
   const all = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
-  const guessed = all.filter((n) => !asked?.has(n));
-  const within = all.filter((n) => asked?.has(n));
+  const bodySized = all.filter((n) => sized?.has(n));
+  const guessed = all.filter((n) => !asked?.has(n) && !sized?.has(n));
+  const within = all.filter((n) => asked?.has(n) && !sized?.has(n));
   const remedy = (n: string) => `pass --proto '{"${n}":{"params":N}}' if a guess is wrong\n`;
+  const words = (n: number) => `${n} argument word${n === 1 ? '' : 's'}`;
   return (
     (guessed.length === 0
       ? ''
@@ -201,6 +207,12 @@ export function guessedArityNote(
       : `asmlift: [proto] ${within.length} callee(s) have no declared arity, guessed from the argument registers, ` +
         'each register the call left unset checked against what its body in tools.asmlift.elf reads: ' +
         `${within.map((n) => `${n} (at most ${asked!.get(n)} argument word${asked!.get(n) === 1 ? '' : 's'})`).join(', ')} — ` +
-        remedy(within[0]))
+        remedy(within[0])) +
+    (bodySized.length === 0
+      ? ''
+      : `asmlift: [proto] ${bodySized.length} callee(s) have no declared arity, each call sized by the incoming ` +
+        'stack words its own body loads, past every argument register: ' +
+        `${bodySized.map((n) => `${n} (${words(target.argRegs.length + sized!.get(n)!)})`).join(', ')} — ` +
+        `pass --proto '{"${bodySized[0]}":{"params":N}}' to state it\n`)
   );
 }

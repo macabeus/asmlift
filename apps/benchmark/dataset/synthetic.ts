@@ -4397,6 +4397,134 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int callee(int); int spill10(int k, int *p);',
     proto: { callee: { params: 1 } },
   },
+  // AN UNDECLARED CALLEE'S BODY SIZES ITS STACK ARGUMENTS (frontend/stackargs.ts, "THE CALLEE'S BODY";
+  // frontend/callee-body.ts `CalleeStackWords`). kl2dct's sub_08049A34 stages five words for
+  // `sub_08004060`, which nothing declares; unsized, it declines "the store to [sp,#0] is never
+  // reloaded and its lower slots are supplied": the code alone cannot say where that block ends.
+  // The incoming stack words the callee's body loads (its lift, or its entry where it does not lift)
+  // are a lower bound on what it takes, and the caller staging exactly those words on every path
+  // closes it from above. The O32 frontends take the same licence past a0..a3 at 16(sp).
+  //   stkbody9: `nine` is defined K&R in the same unit and loads five incoming words; the loop
+  //     stages them before each call, and the row lifts the nine-argument call.
+  //   stkbody_br: `br6` loads its one stack word only on one branch, past its straight-line
+  //     entry (agbcc loads it inside that branch), so only its lift sizes the six-argument call. On
+  //     O32 it stays declined: `br6` reads a2 and a3 only as `sink`'s, which proves no read there,
+  //     and O32 may skip a register for an 8-aligned argument (frontend/callee-body.ts
+  //     `readsEveryArgReg`).
+  //   stkbody_two: `nine` then `six` from one frame: `nine`'s higher words still sit in the area
+  //     at `six`, and the call that took them ends them, so each call takes its own block.
+  //   stkbody_pair: `ts` takes a struct holding a `long long` after three words; O32 passes it at
+  //     16(sp) and leaves a3 empty, which no caller writes, so the row stays declined there
+  //     (control); agbcc splits it across r3 and [sp,#0], and lifts.
+  //   stkbody_entry: `nine` ends in a computed goto (`mov pc, r0`), which does not lift, so only
+  //     its straight-line entry (frontend/thumb-entry.ts), which loads all five incoming words,
+  //     sizes the call: kl2dct's `sub_08004060` is such a callee. agbcc only: no O32 frontend
+  //     scans an entry.
+  //   stkbody_more: a K&R `kr` that loads one incoming word, called with six arguments (two staged):
+  //     the body's bound is short of what is staged, so the row stays declined (control).
+  //   stkbody_none: `nine` declared K&R and defined nowhere in the unit: no body, no bound, so the
+  //     row stays declined (control).
+  {
+    sym: 'stkbody9',
+    src:
+      'extern int gv[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{ gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i; }\n' +
+      'void stkbody9(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'extern int gv[];\nvoid nine();\nvoid stkbody9(int *p, int n);',
+    proto: { stkbody9: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_br',
+    src:
+      'int sink(int);\n' +
+      'int br6(a, b, c, d, e, f) int a, b, c, d, e, f; { if (a) return sink(b) + f; return b; }\n' +
+      'int stkbody_br(int *p) { return br6(p[0], p[1], p[2], p[3], p[4], p[5]); }',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int sink(int);\nint br6();\nint stkbody_br(int *p);',
+    proto: { sink: { params: 1 }, br6: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_two',
+    src:
+      'int nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i; { return a + b + c + d + e + f + g + h + i; }\n' +
+      'int six(a, b, c, d, e, f) int a, b, c, d, e, f; { return a + b + c + d + e + f; }\n' +
+      'int stkbody_two(int *p, int *q) {\n' +
+      '    nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '    return six(q[0], q[1], q[2], q[3], q[4], q[5]);\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int nine();\nint six();\nint stkbody_two(int *p, int *q);',
+    proto: { nine: { returns: 'int' }, six: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_pair',
+    src:
+      'struct L { long long v; };\n' +
+      'int ts(int a, int b, int c, struct L s) { return a + b + c + (int)s.v; }\n' +
+      'int stkbody_pair(int a, struct L *p) { return ts(a, 5, 6, *p); }',
+    features: ['multi-arg', 'struct'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct L { long long v; };\nint ts();\nint stkbody_pair(int a, struct L *p);',
+    proto: { ts: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_entry',
+    src:
+      'extern int gv[];\n' +
+      'void nine(a, b, c, d, e, f, g, h, i) int a, b, c, d, e, f, g, h, i;\n' +
+      '{\n' +
+      '    static void *t[] = { &&l0, &&l1 };\n' +
+      '    gv[0] = a + e; gv[1] = b + f; gv[2] = c + g; gv[3] = d + h; gv[4] = i;\n' +
+      '    goto *t[a & 1];\n' +
+      'l0: gv[5] = 1;\n' +
+      'l1: ;\n' +
+      '}\n' +
+      'void stkbody_entry(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'extern int gv[];\nvoid nine();\nvoid stkbody_entry(int *p, int n);',
+    proto: { stkbody_entry: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkbody_more',
+    src:
+      'int kr(a, b, c, d, e) int a, b, c, d, e; { return e - a; }\n' +
+      'int stkbody_more(int x) { return kr(x, 2, 3, 4, 5, 6); }',
+    features: ['multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'int kr();\nint stkbody_more(int x);',
+    proto: { kr: { returns: 'int' } },
+  },
+  {
+    sym: 'stkbody_none',
+    src:
+      'void nine();\n' +
+      'void stkbody_none(int *p, int n) {\n' +
+      '    while (n-- > 0) {\n' +
+      '        nine(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);\n' +
+      '        p += 9;\n' +
+      '    }\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void nine();\nvoid stkbody_none(int *p, int n);',
+    proto: { stkbody_none: { returnsVoid: true }, nine: { returnsVoid: true } },
+  },
   // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack

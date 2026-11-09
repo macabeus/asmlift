@@ -2789,6 +2789,11 @@ function liftOnce(
               // of the parameter area (mwcc 2.3.3 builds `g(1, 2, 3, 4, 5, 6, 7, x)` with `long long x`
               // that way). A single word there cannot be an argument after seven: the eighth word would
               // have gone in r10.
+              //
+              // KNOWN GAP: the callee's body is not asked how many stack words it loads, as the
+              // Thumb and O32 frontends ask it (frontend/callee-body.ts `CalleeStackWords`): this
+              // frontend passes no stack word to any call, and `measurePpcFrame` refuses even a
+              // declared one that takes some, so a body would have nothing to license here.
               refuse: (argc) => {
                 if (argc < ARG_REGS.length - 1) {
                   return;
