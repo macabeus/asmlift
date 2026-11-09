@@ -1167,7 +1167,7 @@ test('two loops `goto`ing the end of one switch arm each render once', () => {
  *  do-while, and its hit's edge into that merge is a ret target it could copy as `t(i); return;`.
  *  Read as that do-while, the edge reaches the merge from inside the loop, where no `break;` can say
  *  so, and the switch declines; the structuring is run again with the copy behind every `while (1)`
- *  reading (`RetCopyRanking`), and the two-level one takes the loop: `if (f != 0) break;` leaves
+ *  reading (`LoopTailCopyRanking`), and the two-level one takes the loop: `if (f != 0) break;` leaves
  *  the switch, and `t(i)` renders once. */
 const GOTO_RET_MERGE = `fn gotoretmerge {
 ^bb0(%0: s32, %1: s32, %2: s32):
@@ -1213,7 +1213,7 @@ test('a `goto` to the end of a switch arm whose merge returns lifts as a flag, n
  *  as gcc2.7.2kmc lays it out: no zero-trip guard, so the loop's header dominates `t(i); return`,
  *  and the do-while reading copies it into the hit. Emission finds that hit's branch no join in the
  *  body ("unrecovered back-edge"), and the structuring run again with the copy last
- *  (`RetCopyRanking`) spells the loop `while (1)`. */
+ *  (`LoopTailCopyRanking`) spells the loop `while (1)`. */
 const CONST_TRIP_RET = `fn consttripret {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -1306,7 +1306,7 @@ test('a shared ret tail no flag-free `while (1)` takes is copied, not flagged', 
 
 /** mwcc_242_81's `for (i…) { for (j…) if (probe(j, i) == x) goto out; k(i); } out: t(i);`: the
  *  hit's ret-tail copy is refused where it is emitted on the first structuring, and lifts once the
- *  ret copies rank last. The outward flag, a variable the asm does not hold, is asked only of a
+ *  loop-tail copies rank last. The outward flag, a variable the asm does not hold, is asked only of a
  *  structuring every reading without it declines (`LAST_RESORT_RUNGS`). */
 const RET_COPY_RANKED_LAST = `fn retlast {
 ^bb0(%0: s32, %1: s32, %2: s32):

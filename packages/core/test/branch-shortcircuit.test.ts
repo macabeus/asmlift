@@ -137,6 +137,7 @@ function chain(opts: {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 
@@ -1013,6 +1014,7 @@ describe('chains', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(fn.blocks).toHaveLength(3); // both condition blocks consumed
@@ -1061,6 +1063,7 @@ describe('the refusals found by the adversarial round', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
@@ -1113,6 +1116,7 @@ describe('the refusals found by the adversarial round', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
   });
@@ -1210,6 +1214,7 @@ function comparisonTree(): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 
@@ -1310,6 +1315,7 @@ describe('the VALUE form shares the entry-block refusal', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     expect(recognizeShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
@@ -1396,6 +1402,7 @@ describe('the VALUE form carries the write-order record too', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     fn.writeOrder = {
       lastWrite: new Map([
@@ -1689,6 +1696,7 @@ describe('the VALUE form takes a fused connective head, and negates one by De Mo
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
   };
   const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
@@ -1805,6 +1813,7 @@ describe('the VALUE form refuses a NON-BOOLEAN head, because the chain reduction
         slotHomes: undefined,
         paramEvidence: undefined,
         localObjects: undefined,
+        asmLayout: undefined,
       },
       cond,
     };

@@ -11,11 +11,14 @@
 // naming walk's own admission table. They ask different questions of the same oracle: generate a
 // function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
 // the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
+import { test } from 'vitest';
+
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { type StructureHooks, TWO_LEVEL_EXIT_GATES } from '../src/structure/structure';
+import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 /** `{ k: 'var' }` — the leaf every tree-building test needs most. */
 export const v = (name: string): Expr => ({ k: 'var', name });
@@ -218,6 +221,7 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = f
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 
@@ -792,3 +796,38 @@ export const NO_HIT_CODE: StructureHooks = {
     { id: 'no-hit-code', why: 'the hit rung off', sound: false, rejects: (c) => c.hitRunsCode },
   ],
 };
+
+// THE RETURN-TAIL COPIES, AS A TEST ASKS THEM. `structure()` reads the join past early returns, and
+// so does decompile() save where the join spells the function longer, where it publishes the copies
+// (`copyReturnTails`; pipeline.ts `structureReturnTailReading`). Elsewhere the copies are rank.ts's
+// `/ret-copy` candidate, and the recovery a fixture with an early-returning arm reaches is the
+// copies' one there. A test written against that recovery is declared with `testCopies`, and the
+// file routes its `decompile`/`structure` calls through `withCopies`, so the option is on for that
+// test's calls and off for every other test. A test whose fixture decompile() already publishes the
+// copies for is a plain `test`, so it pins that size bound as well.
+let readingCopies = false;
+/** agbcc's description with the join past early returns declared its default (target.ts
+ *  `joinPastReturnsByDefault`, which agbcc leaves out, so it publishes the copies outright): the
+ *  default the GCC 2.7.2 lanes and mwcc 2.4.2 and 2.3.3 run, read on agbcc's fixtures, and the fan naming the
+ *  copies `/ret-copy`. */
+export const AGBCC_JOIN_DEFAULT: TargetDescription = {
+  ...ARMV4T_AGBCC,
+  compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, joinPastReturnsByDefault: true },
+};
+export function testCopies(name: string, body: () => unknown, timeout?: number): void {
+  test(
+    name,
+    async () => {
+      readingCopies = true;
+      try {
+        await body();
+      } finally {
+        readingCopies = false;
+      }
+    },
+    timeout,
+  );
+}
+/** `opts` with `copyReturnTails` on inside a `testCopies` test, and `opts` unchanged outside one. */
+export const withCopies = <O extends object | undefined>(opts: O): O =>
+  readingCopies ? ({ ...(opts ?? {}), copyReturnTails: true } as O) : opts;

@@ -24,11 +24,24 @@ import type { AsmData } from '../src/frontend/asmdata';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
-import { decompile, readabilityRewrites } from '../src/pipeline';
+import { decompile as decompileJoined, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { BYPASS_TAIL_GATES, EXIT_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import {
+  BYPASS_TAIL_GATES,
+  EXIT_TAIL_GATES,
+  type StructureHooks,
+  structure as structureJoined,
+} from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
-import { irAgreement } from './helpers';
+import { irAgreement, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
@@ -748,7 +761,7 @@ describe('a return tail a path that bypasses the loop also enters', () => {
     expect(out.source.match(/fin\(/g)).toHaveLength(2);
   });
 
-  test('on the exit path: the arm copies the tail past the bypassing entrant', () => {
+  testCopies('on the exit path: the arm copies the tail past the bypassing entrant', () => {
     const { src, agreement, shipped } = judged(BYPASS_ON_EXIT_IR);
     const loop = loopOf(src);
     expect(loop).toMatch(/v(\d+) = v\d+ \+ a0;\n\s+fin\(v\1\);\n\s+return v\1;/);

@@ -264,6 +264,7 @@ export interface VariationDefinition {
 const CALLS =
   'void A(); void B(); void C(); void D(); void X(); void Y(); void P(); void Q(); s32 f(); s32 g(); s32 h(); void use();\n';
 
+const PIPELINE = 'packages/core/src/pipeline.ts';
 const RANK = 'packages/core/src/rank.ts';
 const RANK_VARIATIONS = 'packages/core/src/rank-variations.ts';
 const SYMBOLS = 'packages/core/src/symbols.ts';
@@ -400,10 +401,14 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     title: 'Shared code after an early return',
     summary: 'code both arms of an `if` reach before returning is written once, after the `if`',
     detail:
-      'An `if` whose arms never meet again before the function returns has no follow, so by default a ' +
-      'region both arms reach is written in each of them. This structures the same raised function again ' +
-      "with that shared region as the `if`'s follow: it is written once after the `if`, and every other " +
-      'path leaves through an early `return`.',
+      'An `if` whose arms never meet again before the function returns has no follow, so under the ' +
+      'return-tail copies (`ret-copy`) a region both arms reach is written in each of them. This structures ' +
+      "the same raised function again with the copies and that shared region as the `if`'s follow: it is " +
+      'written once after the `if`, and every other path leaves through an early `return`. On agbcc, ' +
+      "this example's compiler, the copies are the default, so this is the step from them to the region " +
+      'written once. Where the join past early returns is the default instead (CodeWarrior ' +
+      "2.4.2 and 2.3.3), it already writes this example's region once, since the paths that do not " +
+      'return meet at it: the variation is a reading of the copies, ranked beside them.',
     offeredWhen: {
       when: 'Some `if` has arms that reach a common `return` block and no common block before it.',
       decidedBy: { symbol: 'hasDivergentSharedRet', file: STRUCTURE },
@@ -415,33 +420,68 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'if (c) { A(); } else { if (x) { C(); return; } } B();',
     },
     implementedIn: STRUCTURE,
-    seeAlso: ['shared-tail'],
+    seeAlso: ['shared-tail', 'ret-copy'],
   },
-  'ret-join': {
-    title: 'Join past early returns',
-    summary: 'code below an `if` whose arms only meet at the `return` is written once, after the `if`',
+  'ret-copy': {
+    title: 'Return tails copied',
+    summary: 'code below an `if` whose arms only meet at the `return` is written into each arm',
     detail:
       'An `if` with an early `return` in one arm has no block both arms reach before the function ' +
-      'returns, so by default everything below it is written into each arm, once more per such `if` of ' +
-      'a chain. This structures the same raised function again with the block where the paths that do ' +
-      "not return meet as the `if`'s join: the code from there is written once, and every other path " +
-      'leaves through its early `return`. Unlike `shared-ret` it needs no `return` block the arms share ' +
-      "apart from the function's own end, so it also reads early returns the compiler merged into the " +
-      'epilogue or cross-jumped into one return tail. A `switch` with a `case` that returns early is ' +
-      'read the same way.',
+      'returns. Where the join past early returns is the default (CodeWarrior 2.3.3, and 2.4.2, ' +
+      "this example's compiler), asmlift gives it the block where the paths that do not return meet as its " +
+      'join, so the code from there is written once and every other path leaves through its early ' +
+      '`return`; that also reads early returns the compiler merged into the epilogue or cross-jumped ' +
+      'into one return tail, and a `switch` with a `case` that returns early. This structures the same ' +
+      'raised function again with no such join: everything below the `if` is written into each arm, ' +
+      'once more per such `if` of a chain, which is the source some functions were written as. Where ' +
+      'the copies spell the whole function in fewer lines than the join, where the compiler is one that ' +
+      'cross-jumps return tails and the layout shows it did, or where an early return keeps a constant ' +
+      'its branch proved unfolded (gcc 2.x below -O2), they are the default instead, and the join is ' +
+      'offered as `ret-join`. On agbcc and IDO 7.1, measured against held-out functions where the join ' +
+      'loses matches, on GCC 2.7.2 and KMC, measured against generated functions where it does, and on CodeWarrior 2.4.7, where no held-out function was measured, the copies are ' +
+      'the default outright, and this variation is never offered there. Past the copy budget the copies ' +
+      'are not offered.',
     offeredWhen: {
-      when: 'An `if` or `switch` outside every loop joins only at the return, but its arms meet past early returns.',
-      decidedBy: { symbol: 'hasJoinPastReturns', file: STRUCTURE },
+      when: 'Some `if` or `switch` outside every loop took a join past early returns that the default kept.',
+      decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
     },
     example: {
-      compiler: 'agbcc',
+      compiler: 'mwcc',
       unit: CALLS + 'extern s32 gT; void example(s32 a, s32 b) { @ }',
-      before: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); X(); Y(); } else { C(); X(); Y(); }',
-      after: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); } else { C(); } X(); Y();',
+      before: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); } else { C(); } X(); Y();',
+      after: 'if (a > 3) { if (b == 1) { A(); gT = 0; return; } B(); X(); Y(); } else { C(); X(); Y(); }',
       note: 'the shape of `synthetic:retchain_one`',
     },
     implementedIn: STRUCTURE,
-    seeAlso: ['shared-ret'],
+    seeAlso: ['shared-ret', 'ret-join'],
+  },
+  'ret-join': {
+    title: 'Join past early returns, where the copies are the default',
+    summary: 'the join past early returns, where it writes a return tail into early returns',
+    detail:
+      'The join past early returns writes the code below a divergent `if` once, but where the paths that ' +
+      'do not return meet at a block only some of them reach, every other path becomes an early `return` ' +
+      'that takes its own copy of the tail below. Where that spells the whole function in more lines than ' +
+      'the return-tail copies, or where the layout shows the compiler cross-jumped a return tail the ' +
+      'source wrote into every arm, or where an early return keeps a constant its branch proved unfolded ' +
+      '(gcc 2.x below -O2), the copies are the default and this is the join, offered beside them, which is ' +
+      "the source some functions were written as. On agbcc, this example's compiler, and on IDO 7.1, GCC 2.7.2, KMC and " +
+      'CodeWarrior 2.4.7, the copies are the default outright: the join is this variation ' +
+      'wherever it is taken.',
+    offeredWhen: {
+      when: 'Some `if` or `switch` outside every loop took a join past early returns that the default gave up for the copies.',
+      decidedBy: { symbol: 'structureReturnTailReading', file: PIPELINE },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a) { @ }',
+      before: 'if (a == 1) { A(); B(); } else if (a == 2 || a == 3) { A(); } else { A(); B(); } X(); Y(); C();',
+      after:
+        'if (a == 1) { A(); } else { if (a == 2 || a == 3) { A(); X(); Y(); C(); return; } A(); } B(); X(); Y(); C();',
+      note: 'the shape of sa3 `sub_809A808`',
+    },
+    implementedIn: PIPELINE,
+    seeAlso: ['ret-copy'],
   },
   'shared-tail': {
     title: 'Store tail copied back',
@@ -449,7 +489,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     detail:
       "agbcc's global common-subexpression pass can move a trailing store into every predecessor of a join, " +
       'and the paths then jump into one `store; return` tail. This lift copies that tail back into each ' +
-      'path that branches to it, and then structures with the shared follow `shared-ret` uses, so the ' +
+      'path that branches to it, and then structures with the copies and the shared follow `shared-ret` uses, so the ' +
       'store the source wrote once is written after the `if` and the others before an early `return`. It is ' +
       'enumerated apart from `shared-ret` because the sink can delete the shared `return` that variation needs.',
     compilerBehavior:

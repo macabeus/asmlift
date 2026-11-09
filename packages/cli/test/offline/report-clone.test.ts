@@ -51,6 +51,7 @@ const emit = (fn: Parameters<typeof raiseRecovered>[0]) => {
       ...structureOptionsFor(ARMV4T_AGBCC, false),
       spellSwitchFallthrough: cBackend.spellsSwitchFallthrough,
       spellSwitchBreak: cBackend.spellsSwitchBreak,
+      spellEarlyReturns: cBackend.spellsEarlyReturn,
     }),
   );
 };
@@ -116,4 +117,20 @@ test('the parameter evidence is keyed by the CLONE’s parameters, not the origi
   // The OBSERVATIONS survive the re-key: this parameter is homed dead and widened in place, which
   // is the pair raise/paramwidth.ts needs before it may narrow one.
   expect([...evidence.values()]).toEqual([{ deadHome: true, selfRedefined: true }]);
+});
+
+// `Fn.asmLayout` is keyed by BLOCK, and its reader is the return-tail chooser: a clone that carried
+// the original's keys would give the probe's chooser no layout evidence, and it would publish the
+// size bound's reading where the headline publishes the copies (core
+// structure/cross-jumped-tail.ts).
+test('the asm layout is keyed by the CLONE’s blocks, with each block’s place and body kept', () => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', GCD, ARMV4T_AGBCC, {}, undefined, undefined);
+  expect(fn.asmLayout?.size).toBe(fn.blocks.length);
+  const clone = structuredCloneFn(fn);
+  const layout = clone.asmLayout!;
+  expect(layout.size).toBe(fn.asmLayout!.size);
+  fn.blocks.forEach((b, i) => {
+    expect(fn.asmLayout!.has(clone.blocks[i])).toBe(false);
+    expect(layout.get(clone.blocks[i])).toEqual(fn.asmLayout!.get(b));
+  });
 });

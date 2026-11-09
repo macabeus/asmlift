@@ -279,7 +279,7 @@ test('two in-body sides meeting below the loop bottom join where they meet, writ
 // `^bb5`, so ownership by dominance alone would claim it; but the loop's own exit reaches it too,
 // and emitting it on both paths writes `gOut` twice. The arm owns nothing, and the do-while
 // reading that copies `^bb5` in as an early `return` finds no join in the body; the structuring
-// that asks `while (1)` first (`RetCopyRanking`) breaks to `^bb5` from both edges, and `gOut` is
+// that asks `while (1)` first (`LoopTailCopyRanking`) breaks to `^bb5` from both edges, and `gOut` is
 // written once, after the loop.
 const ARM_ON_POSTLOOP_JOIN = `fn sharedtail {
 ^bb0(%0: s32*):

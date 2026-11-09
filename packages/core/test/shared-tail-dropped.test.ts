@@ -6,7 +6,7 @@
 // a boundary contract. Both are sound, and that is why only the enumeration can refuse it: each
 // shared-tail pass's setting reads the default pass's dropped set. And each keeps its OWN drops apart,
 // so a follow the unsunk fn cannot carry does not take the sunk fn's candidate with it.
-// `structureChecked` is mocked to fail chosen `/defsite` points and to mark every other one, because
+// The structuring is mocked to fail chosen `/defsite` points and to mark every other one, because
 // no committed disassembly makes a contract fail on one of these passes and pass on another — the
 // closure is a property of the loop, not of any row.
 import { expect, test, vi } from 'vitest';
@@ -26,18 +26,26 @@ vi.mock('../src/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/pipeline')>();
   return {
     ...actual,
+    // the default pass structures through the size-bounded return-tail reading, which calls the
+    // module's own `structureChecked`, out of the mock's reach: it is the primary pass
+    structureReturnTailReading: (...args: Parameters<typeof actual.structureReturnTailReading>) => {
+      const [fn, opts] = args;
+      defaultFns.add(print(fn));
+      if (opts.anchorConstCopies && fail.default) {
+        throw new Error('mocked contract failure');
+      }
+      const read = actual.structureReturnTailReading(...args);
+      return opts.anchorConstCopies
+        ? { ...read, sfn: { ...read.sfn, locals: [...read.sfn.locals, { name: 'zzDefsite', type: T.s(32) }] } }
+        : read;
+    },
     structureChecked: (...args: Parameters<typeof actual.structureChecked>) => {
       const fn = args[0];
       const opts = args[1] ?? {};
       const text = print(fn);
-      if (!opts.followEarlyReturns) {
-        defaultFns.add(text);
-      }
-      const pass = !opts.followEarlyReturns ? 'default' : defaultFns.has(text) ? 'sharedRet' : 'sharedTail';
-      if (
-        opts.anchorConstCopies &&
-        ((pass === 'default' && fail.default) || (pass === 'sharedRet' && fail.sharedRet))
-      ) {
+      // the twins, and any other caller: the default pass is `structureReturnTailReading`'s above
+      const pass = opts.followEarlyReturns ? (defaultFns.has(text) ? 'sharedRet' : 'sharedTail') : 'other';
+      if (opts.anchorConstCopies && pass === 'sharedRet' && fail.sharedRet) {
         throw new Error('mocked contract failure');
       }
       const sfn = actual.structureChecked(...args);
@@ -53,12 +61,9 @@ const THUMB =
   'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
   '\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n.L6:\n\tstr\tr3, [r2, #4]\n' +
   '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
-// `shared-tail.test.ts`'s arm the compiler left returning, where only the follow runs.
-const THUMB_LEFT =
-  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
-  '\tmov\tr3, #7\n\tstr\tr3, [r2, #4]\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
-  '\tstr\tr3, [r2, #4]\n.L6:\n\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
-// `shared-tail.test.ts`'s `THUMB_FLAT`, where both twins run.
+// `shared-tail.test.ts`'s `THUMB_FLAT`, where both twins run. (Its `THUMB_LEFT`, where only the
+// follow runs, writes the follow's tree as the default's join past early returns, so the
+// `/shared-ret` twin there is a duplicate of a default candidate and nothing of its own is left.)
 const THUMB_FLAT =
   'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
   '\tcmp\tr0, #5\n\tbeq\t.L7\n\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
@@ -78,7 +83,7 @@ const run = (asm: string, failing: typeof fail) => {
 
 test.each([
   ['/shared-tail', THUMB],
-  ['/shared-ret', THUMB_LEFT],
+  ['/shared-ret', THUMB_FLAT],
 ])('the %s alternative skips every setting its default sibling dropped, and keeps the rest', (suffix, asm) => {
   const { errors, cands } = run(asm, { default: true, sharedRet: false });
   expect(

@@ -14624,7 +14624,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      On the MIPS gcc lanes brk2sw_one's switch is the function's tail, so the arm's merge ends
   //      in `ret` and the loop's hit edge into it reads as a do-while copying that tail as an early
   //      `return`, which emission cannot spell from inside the switch arm. The structuring is run
-  //      again with that copy behind every `while (1)` reading (structure.ts `RetCopyRanking`), and
+  //      again with that copy behind every `while (1)` reading (structure.ts `LoopTailCopyRanking`), and
   //      the two-level reading takes the loop there too.
   //      agbcc, gcc2.7.2kmc and gcc2.7.2: both lift. ido7.1: brk2sw_one lifts; brk2sw declines
   //      at the flag's `break` ("sits in a case body, where `break` would leave only the switch",
@@ -17773,6 +17773,1947 @@ export const SYNTHETIC: SynthSpec[] = [
           }))),
     ];
   }),
+  // `cwret_g*` — copies-written early returns, from a generator of 160 random void/s32 functions of
+  // three params: early-return arms interleaved with tail arms, and a one-to-three-statement shared
+  // tail copied into every tail arm (calls k/m/h/q, stores to gT/gU/gArr[v & 15]). These 37 are the
+  // ones whose plain default moves between the copies and the join on at least one toolchain, scored
+  // by the real compilers: the losses the join reading took against the copies (agbcc: cut calls
+  // g17/g19/g33/g78/g95, split tail g22, register allocation only g53; gcc2.7.2kmc: g124, g25, g30,
+  // g42, g46, g50, g53, g70, g95; gcc2.7.2: g83) and the gains it made (agbcc g31/g47/g67/g85/g107,
+  // gcc2.7.2kmc g0/g29/g106/g139/g149, gcc2.7.2 g10/g125, ido7.1 g16/g43/g45/g51/g66/g79/g88/g96/
+  // g113/g123). No earlier row moved with that default, so none spoke for either reading. Each runs
+  // on all five toolchains, because a shape one compiler cross-jumps is a control on the others.
+  {
+    sym: 'cwret_g0',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g0(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (c != 0) {\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        v = v + b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    k(7);\n' +
+      '    gT = v;\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    v = v + b;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g0(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g0: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g10',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g10(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        gU = c;\n' +
+      '        v = v + c;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    case 1:\n' +
+      '        k(3);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    gT = v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g10(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g10: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g16',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g16(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        k(0);\n' +
+      '        gT = v;\n' +
+      '        m(v + 3);\n' +
+      '        gU = b;\n' +
+      '        v = v + b;\n' +
+      '        return v;\n' +
+      '    case 1:\n' +
+      '        return 0;\n' +
+      '    case 2:\n' +
+      '        m(v + 1);\n' +
+      '        k(v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        gU = b;\n' +
+      '        v = v + b;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    k(1);\n' +
+      '    h(10, v);\n' +
+      '    gU = b;\n' +
+      '    v = v + b;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g16(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g16: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g17',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g17(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        return;\n' +
+      '    case 1:\n' +
+      '        m(v + 5);\n' +
+      '        k(v);\n' +
+      '        h(30, v);\n' +
+      '        gU = a;\n' +
+      '        return;\n' +
+      '    case 2:\n' +
+      '        m(v + 4);\n' +
+      '        h(30, v);\n' +
+      '        gU = a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    k(8);\n' +
+      '    h(30, v);\n' +
+      '    gU = a;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g17(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g17: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g19',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g19(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a < 4) {\n' +
+      '        gU = a;\n' +
+      '        h(20, v);\n' +
+      '        k(v);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    } else if (c != 0) {\n' +
+      '        v = q(v);\n' +
+      '        h(20, v);\n' +
+      '        k(v);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    } else if (a < 6) {\n' +
+      '        k(c);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(20, v);\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    h(20, v);\n' +
+      '    k(v);\n' +
+      '    gT = v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g19(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g19: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g22',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g22(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (gA != 0) {\n' +
+      '        v = v + a;\n' +
+      '        h(30, v);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (b == c) {\n' +
+      '        v = v + c;\n' +
+      '        m(v + 2);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (gA != 0) {\n' +
+      '        return;\n' +
+      '    } else if (c != 0) {\n' +
+      '        gU = c;\n' +
+      '        h(30, v);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gU = b;\n' +
+      '    k(v);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g22(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g22: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g25',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g25(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (gA != 0) {\n' +
+      '        h(20, c);\n' +
+      '        return 0;\n' +
+      '    } else if (a < 3) {\n' +
+      '        gU = a;\n' +
+      '        h(10, v);\n' +
+      '        k(3);\n' +
+      '        return v;\n' +
+      '    } else if (b > 0) {\n' +
+      '        h(30, v);\n' +
+      '        m(v + 4);\n' +
+      '        k(3);\n' +
+      '        return v;\n' +
+      '    } else if (b == c) {\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    k(3);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g25(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g25: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g29',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g29(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b == c) {\n' +
+      '        h(20, v);\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 6) {\n' +
+      '        m(c + 2);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        m(v + 5);\n' +
+      '        gU = a;\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        v = q(v);\n' +
+      '        h(20, v);\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gT = v;\n' +
+      '    gArr[v & 15] = a;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g29(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g29: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g30',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g30(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b == c) {\n' +
+      '        v = v + 1;\n' +
+      '        h(20, v);\n' +
+      '        gU = b;\n' +
+      '        h(10, v);\n' +
+      '        return;\n' +
+      '    } else if (c != 0) {\n' +
+      '        m(c + 3);\n' +
+      '        return;\n' +
+      '    } else if (a == 1) {\n' +
+      '        m(c + 3);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(20, v);\n' +
+      '    gU = b;\n' +
+      '    h(10, v);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g30(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g30: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g31',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g31(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        h(10, v);\n' +
+      '        return v;\n' +
+      '    case 1:\n' +
+      '        gT = c;\n' +
+      '        return 4;\n' +
+      '    case 2:\n' +
+      '        c = q(c);\n' +
+      '        return 0;\n' +
+      '    }\n' +
+      '    h(10, v);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g31(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g31: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g33',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g33(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 4) {\n' +
+      '        gT = v;\n' +
+      '        h(30, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        v = v + a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (gA != 0) {\n' +
+      '        v = v + c;\n' +
+      '        k(v);\n' +
+      '        h(30, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        v = v + a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a == 0) {\n' +
+      '        gT = v;\n' +
+      '        h(30, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        v = v + a;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(30, v);\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    v = v + a;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g33(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g33: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g42',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g42(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (gA != 0) {\n' +
+      '        v = v + 1;\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (a < 6) {\n' +
+      '        k(v);\n' +
+      '        v = v + c;\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (a == 0) {\n' +
+      '        gT = v;\n' +
+      '        v = q(v);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    } else if (a == 2) {\n' +
+      '        c = q(c);\n' +
+      '        return;\n' +
+      '    } else if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gU = a;\n' +
+      '    k(4);\n' +
+      '    k(v);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g42(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g42: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g43',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g43(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 1) {\n' +
+      '        gU = c;\n' +
+      '        m(v + 1);\n' +
+      '        k(v);\n' +
+      '        h(10, v);\n' +
+      '        gU = c;\n' +
+      '        return v;\n' +
+      '    } else if (gA != 0) {\n' +
+      '        gT = v;\n' +
+      '        k(v);\n' +
+      '        h(10, v);\n' +
+      '        gU = c;\n' +
+      '        return v;\n' +
+      '    } else if (b == c) {\n' +
+      '        c = c + c;\n' +
+      '        return 6;\n' +
+      '    }\n' +
+      '    gT = v;\n' +
+      '    k(v);\n' +
+      '    k(v);\n' +
+      '    h(10, v);\n' +
+      '    gU = c;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g43(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g43: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g45',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g45(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        m(v + 4);\n' +
+      '        k(v);\n' +
+      '        v = v + a;\n' +
+      '        return v;\n' +
+      '    case 1:\n' +
+      '        gT = v;\n' +
+      '        h(20, v);\n' +
+      '        k(v);\n' +
+      '        v = v + a;\n' +
+      '        return v;\n' +
+      '    case 2:\n' +
+      '        gT = v;\n' +
+      '        gU = b;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        k(v);\n' +
+      '        v = v + a;\n' +
+      '        return v;\n' +
+      '    case 3:\n' +
+      '        k(8);\n' +
+      '        return q(a);\n' +
+      '    case 4:\n' +
+      '        k(2);\n' +
+      '        return 0;\n' +
+      '    }\n' +
+      '    k(v);\n' +
+      '    v = v + a;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g45(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g45: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g46',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g46(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a == 4) {\n' +
+      '        k(v);\n' +
+      '        gT = v;\n' +
+      '        m(v + 5);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        gT = v;\n' +
+      '        m(v + 5);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 2) {\n' +
+      '        gT = v;\n' +
+      '        m(v + 3);\n' +
+      '        m(v + 5);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (gA != 0) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    m(v + 5);\n' +
+      '    gT = v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g46(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g46: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g47',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g47(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (c != 0) {\n' +
+      '        k(3);\n' +
+      '        h(20, v);\n' +
+      '        gU = b;\n' +
+      '        k(6);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return 1;\n' +
+      '    }\n' +
+      '    if (gA != 0) {\n' +
+      '        gT = c;\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    v = q(v);\n' +
+      '    k(8);\n' +
+      '    gU = b;\n' +
+      '    k(6);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g47(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g47: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g50',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g50(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b == c) {\n' +
+      '        gU = c;\n' +
+      '        h(10, v);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 2) {\n' +
+      '        v = q(v);\n' +
+      '        k(v);\n' +
+      '        h(10, v);\n' +
+      '        k(v);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 4) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(20, v);\n' +
+      '    gU = a;\n' +
+      '    h(10, v);\n' +
+      '    k(v);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g50(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g50: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g51',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g51(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (gA != 0) {\n' +
+      '        m(v + 4);\n' +
+      '        k(v);\n' +
+      '        v = v + b;\n' +
+      '        h(30, v);\n' +
+      '        gU = b;\n' +
+      '        return v;\n' +
+      '    } else if (a == 1) {\n' +
+      '        h(20, v);\n' +
+      '        k(v);\n' +
+      '        v = v + b;\n' +
+      '        h(30, v);\n' +
+      '        gU = b;\n' +
+      '        return v;\n' +
+      '    } else if (a == 4) {\n' +
+      '        h(30, v);\n' +
+      '        k(1);\n' +
+      '        v = v + b;\n' +
+      '        h(30, v);\n' +
+      '        gU = b;\n' +
+      '        return v;\n' +
+      '    } else if (a == 2) {\n' +
+      '        return q(a);\n' +
+      '    }\n' +
+      '    v = v + b;\n' +
+      '    h(30, v);\n' +
+      '    gU = b;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g51(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g51: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g53',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g53(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 2) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        h(20, v);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    } else if (b == c) {\n' +
+      '        h(10, c);\n' +
+      '        return;\n' +
+      '    } else if (b > 3) {\n' +
+      '        v = q(v);\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    } else if (b == c) {\n' +
+      '        v = v + 1;\n' +
+      '        gT = v;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    gT = v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g53(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g53: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g66',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g66(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        gT = v;\n' +
+      '        v = q(v);\n' +
+      '        k(v);\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    case 1:\n' +
+      '        return 5;\n' +
+      '    case 2:\n' +
+      '        gU = c;\n' +
+      '        k(1);\n' +
+      '        k(v);\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    case 3:\n' +
+      '        gU = a;\n' +
+      '        gT = v;\n' +
+      '        k(v);\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    case 4:\n' +
+      '        return 4;\n' +
+      '    }\n' +
+      '    k(v);\n' +
+      '    k(v);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g66(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g66: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g67',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g67(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (c != 0) {\n' +
+      '        h(30, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        m(v + 3);\n' +
+      '        return v;\n' +
+      '    } else if (c != 0) {\n' +
+      '        m(v + 2);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        m(v + 3);\n' +
+      '        return v;\n' +
+      '    } else if (gA != 0) {\n' +
+      '        return 6;\n' +
+      '    } else if (a == 0) {\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    m(v + 3);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g67(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g67: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g70',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g70(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a == 3) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        h(20, v);\n' +
+      '        m(v + 4);\n' +
+      '        gU = b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a == 1) {\n' +
+      '        k(v);\n' +
+      '        gU = c;\n' +
+      '        m(v + 4);\n' +
+      '        gU = b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 4) {\n' +
+      '        v = v + b;\n' +
+      '        k(v);\n' +
+      '        m(v + 4);\n' +
+      '        gU = b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    m(v + 3);\n' +
+      '    m(v + 4);\n' +
+      '    gU = b;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g70(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g70: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g78',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g78(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 4) {\n' +
+      '        m(v + 4);\n' +
+      '        m(v + 3);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a == 1) {\n' +
+      '        m(c + 2);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        k(8);\n' +
+      '        m(v + 3);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        m(v + 1);\n' +
+      '        m(v + 3);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    m(v + 3);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g78(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g78: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g79',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g79(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a == 5) {\n' +
+      '        gT = c;\n' +
+      '        return 0;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        v = q(v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (a == 1) {\n' +
+      '        h(30, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (a == 2) {\n' +
+      '        return 0;\n' +
+      '    }\n' +
+      '    v = q(v);\n' +
+      '    m(v + 2);\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    k(v);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g79(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g79: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g83',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g83(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 1) {\n' +
+      '        m(c + 1);\n' +
+      '        return;\n' +
+      '    } else if (a < 4) {\n' +
+      '        h(20, v);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        v = q(v);\n' +
+      '        gU = a;\n' +
+      '        return;\n' +
+      '    } else if (a == 1) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    v = v + 1;\n' +
+      '    v = q(v);\n' +
+      '    gU = a;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g83(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g83: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g85',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g85(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        k(v);\n' +
+      '        m(v + 2);\n' +
+      '        gT = v;\n' +
+      '        v = q(v);\n' +
+      '        k(v);\n' +
+      '        return v;\n' +
+      '    case 1:\n' +
+      '        return 9;\n' +
+      '    case 2:\n' +
+      '        k(c);\n' +
+      '        return 7;\n' +
+      '    }\n' +
+      '    gT = v;\n' +
+      '    v = q(v);\n' +
+      '    k(v);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g85(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g85: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g88',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g88(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 1) {\n' +
+      '        k(c);\n' +
+      '        return q(a);\n' +
+      '    } else if (a < 2) {\n' +
+      '        h(30, v);\n' +
+      '        k(5);\n' +
+      '        return v;\n' +
+      '    } else if (a < 1) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        gU = a;\n' +
+      '        k(5);\n' +
+      '        return v;\n' +
+      '    } else if (a == 2) {\n' +
+      '        c = q(c);\n' +
+      '        return q(a);\n' +
+      '    }\n' +
+      '    gU = c;\n' +
+      '    h(20, v);\n' +
+      '    k(5);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g88(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g88: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g95',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g95(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a < 5) {\n' +
+      '        gT = v;\n' +
+      '        h(20, v);\n' +
+      '        k(8);\n' +
+      '        h(10, v);\n' +
+      '        gU = b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        k(v);\n' +
+      '        gU = a;\n' +
+      '        k(8);\n' +
+      '        h(10, v);\n' +
+      '        gU = b;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    v = q(v);\n' +
+      '    k(8);\n' +
+      '    h(10, v);\n' +
+      '    gU = b;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g95(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g95: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g96',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g96(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a == 4) {\n' +
+      '        m(c + 4);\n' +
+      '        return q(a);\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        gT = v;\n' +
+      '        k(6);\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (a < 6) {\n' +
+      '        gT = v;\n' +
+      '        m(v + 1);\n' +
+      '        k(6);\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (a < 1) {\n' +
+      '        k(2);\n' +
+      '        k(6);\n' +
+      '        gT = v;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (b > 0) {\n' +
+      '        return q(a);\n' +
+      '    }\n' +
+      '    v = q(v);\n' +
+      '    gT = v;\n' +
+      '    k(6);\n' +
+      '    gT = v;\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g96(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g96: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g106',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g106(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (c != 0) {\n' +
+      '        m(c + 1);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a == 1) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        k(v);\n' +
+      '        v = v + c;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (gA != 0) {\n' +
+      '        m(v + 4);\n' +
+      '        gT = v;\n' +
+      '        k(v);\n' +
+      '        v = v + c;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (b > 4) {\n' +
+      '        h(20, v);\n' +
+      '        h(30, v);\n' +
+      '        k(v);\n' +
+      '        v = v + c;\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 6) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(20, v);\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    k(v);\n' +
+      '    v = v + c;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g106(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g106: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g107',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g107(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 3) {\n' +
+      '        gU = b;\n' +
+      '        v = v + c;\n' +
+      '        h(20, v);\n' +
+      '        v = v + c;\n' +
+      '        m(v + 2);\n' +
+      '        return v;\n' +
+      '    } else if (b == c) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        h(20, v);\n' +
+      '        h(20, v);\n' +
+      '        v = v + c;\n' +
+      '        m(v + 2);\n' +
+      '        return v;\n' +
+      '    } else if (a == 4) {\n' +
+      '        k(c);\n' +
+      '        return q(a);\n' +
+      '    } else if (a < 2) {\n' +
+      '        gT = v;\n' +
+      '        gU = b;\n' +
+      '        h(20, v);\n' +
+      '        v = v + c;\n' +
+      '        m(v + 2);\n' +
+      '        return v;\n' +
+      '    } else if (a < 6) {\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    m(v + 3);\n' +
+      '    m(v + 4);\n' +
+      '    h(20, v);\n' +
+      '    v = v + c;\n' +
+      '    m(v + 2);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g107(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g107: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g113',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g113(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (c != 0) {\n' +
+      '        gArr[c & 15] = a;\n' +
+      '        return q(a);\n' +
+      '    }\n' +
+      '    if (b > 2) {\n' +
+      '        v = v + 1;\n' +
+      '        v = q(v);\n' +
+      '        v = v + a;\n' +
+      '        gU = b;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (b > 4) {\n' +
+      '        h(10, c);\n' +
+      '        return 2;\n' +
+      '    }\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    v = q(v);\n' +
+      '    v = v + a;\n' +
+      '    gU = b;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g113(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g113: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g123',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g123(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 2) {\n' +
+      '        k(v);\n' +
+      '        h(20, v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (a < 6) {\n' +
+      '        c = c + b;\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    if (c != 0) {\n' +
+      '        h(30, v);\n' +
+      '        h(30, v);\n' +
+      '        h(20, v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        m(v + 4);\n' +
+      '        gT = v;\n' +
+      '        h(20, v);\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    if (b == c) {\n' +
+      '        k(c);\n' +
+      '        return 0;\n' +
+      '    }\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    h(20, v);\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g123(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g123: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g124',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g124(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (b > 1) {\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        h(30, v);\n' +
+      '        gT = v;\n' +
+      '        gU = b;\n' +
+      '        k(0);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 5) {\n' +
+      '        h(20, c);\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    if (a < 6) {\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(10, v);\n' +
+      '    gT = v;\n' +
+      '    gU = b;\n' +
+      '    k(0);\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g124(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g124: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g125',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g125(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        m(v + 3);\n' +
+      '        h(30, v);\n' +
+      '        v = v + b;\n' +
+      '        return;\n' +
+      '    case 1:\n' +
+      '        gU = a;\n' +
+      '        v = v + b;\n' +
+      '        return;\n' +
+      '    case 2:\n' +
+      '        k(v);\n' +
+      '        v = v + b;\n' +
+      '        return;\n' +
+      '    case 3:\n' +
+      '        c = q(c);\n' +
+      '        return;\n' +
+      '    case 4:\n' +
+      '        return;\n' +
+      '    }\n' +
+      '    h(30, v);\n' +
+      '    k(v);\n' +
+      '    v = v + b;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      'void cwret_g125(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g125: { params: 3, returnsVoid: true },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g139',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g139(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    switch (a) {\n' +
+      '    case 0:\n' +
+      '        h(10, c);\n' +
+      '        return 0;\n' +
+      '    case 1:\n' +
+      '        v = q(v);\n' +
+      '        k(9);\n' +
+      '        m(v + 3);\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        return v;\n' +
+      '    }\n' +
+      '    k(9);\n' +
+      '    m(v + 3);\n' +
+      '    gArr[v & 15] = a;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g139(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g139: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'cwret_g149',
+    src:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g149(s32 a, s32 b, s32 c) {\n' +
+      '    s32 v = b;\n' +
+      '    if (a == 3) {\n' +
+      '        v = v + 1;\n' +
+      '        gArr[v & 15] = a;\n' +
+      '        m(v + 2);\n' +
+      '        v = v + 1;\n' +
+      '        return v;\n' +
+      '    } else if (b > 2) {\n' +
+      '        gT = c;\n' +
+      '        return b;\n' +
+      '    } else if (b > 1) {\n' +
+      '        k(8);\n' +
+      '        return b;\n' +
+      '    }\n' +
+      '    m(v + 2);\n' +
+      '    v = v + 1;\n' +
+      '    return v;\n' +
+      '}',
+    features: ['branch', 'global', 'multi-arg'],
+    toolchains: [...FIVE],
+    ctx:
+      'extern s32 gA, gB, gC, gD, gT, gU, gV, gW, gOut;\n' +
+      'extern s32 gArr[16];\n' +
+      'void k(s32 x);\n' +
+      'void m(s32 x);\n' +
+      's32 q(s32 x);\n' +
+      'void h(s32 x, s32 y);\n' +
+      's32 cwret_g149(s32 a, s32 b, s32 c);',
+    proto: {
+      cwret_g149: { params: 3 },
+      k: { params: 1, returnsVoid: true },
+      m: { params: 1, returnsVoid: true },
+      q: { params: 1 },
+      h: { params: 2, returnsVoid: true },
+    },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

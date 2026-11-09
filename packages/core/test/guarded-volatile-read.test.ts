@@ -10,13 +10,13 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { decompile, stampBehaviorsFor } from '../src/pipeline';
+import { decompile, stampBehaviorsFor, structureReturnTailReading } from '../src/pipeline';
 import { stampDeclaredVolatile } from '../src/raise/declared-volatile';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, structureOptionsFor } from '../src/target';
 
 /** Structure `ir` under `symbols`, stamped as the lift stamps it, before any raising pass. */
 const emitWith = (ir: string, symbols?: Map<string, SymbolInfo>): string => {
@@ -65,6 +65,35 @@ test('a volatile read in that operand placed only as structuring starts declines
   expect(() => structure(fn, { returnsVoid: true, symbols: VOLATILE_MAP })).toThrow(
     "cannot structure 'v': a '&&'/'||' would guard a read of the volatile object 'gVolReg', and which side of the branch the asm read it on is not recoverable",
   );
+});
+
+// The decline reads the stamp structuring itself adds, which only a function's FIRST structuring
+// adds; the op it stamped is remembered on the function, so a second structuring declines too.
+test('a second structuring of the same function declines that read as the first did', () => {
+  const fn = parse(GUARDED_READ);
+  verify(fn);
+  recoverTypes(fn);
+  const opts = { returnsVoid: true, symbols: VOLATILE_MAP } as const;
+  expect(() => structure(fn, opts)).toThrow(/would guard a read of the volatile object 'gVolReg'/);
+  expect(() => structure(fn, { ...opts, copyReturnTails: true })).toThrow(
+    /would guard a read of the volatile object 'gVolReg'/,
+  );
+});
+
+// The return-tail chooser structures two readings, so on every target, whichever reading it
+// structures first and whatever its default, the function declines as one `structure()` does.
+test.each([
+  ['agbcc (the copies by default)', ARMV4T_AGBCC],
+  ['MIPS gcc (the join by default)', MIPS_GCC],
+] as const)('%s: the return-tail chooser declines that read too', (_, target) => {
+  const fn = parse(GUARDED_READ);
+  verify(fn);
+  recoverTypes(fn);
+  expect(() =>
+    structureReturnTailReading(fn, { ...structureOptionsFor(target, true), symbols: VOLATILE_MAP }, (t) =>
+      cBackend.emit(t),
+    ),
+  ).toThrow(/a '&&'\/'\|\|' would guard a read of the volatile object 'gVolReg'/);
 });
 
 test('the declaration is what decides it — an ordinary cell keeps the connective', () => {

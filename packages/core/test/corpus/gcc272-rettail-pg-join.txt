@@ -1,0 +1,49 @@
+
+corpus.o:     file format elf32-tradbigmips
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 corpus.c
+00000000 l     O .text	00000000 gcc2_compiled.
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .data	00000000 .data
+00000000 l    d  .bss	00000000 .bss
+00000000 l    d  .reginfo	00000000 .reginfo
+00000000 l    d  .note	00000000 .note
+00000000 l    d  .comment	00000000 .comment
+00000000 g     F .text	0000006c f
+00000000         *UND*	00000000 gA
+00000000         *UND*	00000000 gB
+00000000         *UND*	00000000 gC
+00000000         *UND*	00000000 w
+00000000         *UND*	00000000 v
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+0000000c R_MIPS_HI16       gA
+00000010 R_MIPS_LO16       gA
+0000001c R_MIPS_HI16       gB
+00000020 R_MIPS_LO16       gB
+0000002c R_MIPS_HI16       gC
+00000030 R_MIPS_LO16       gC
+00000044 R_MIPS_26         w
+0000004c R_MIPS_26         v
+
+
+Contents of section .text:
+ 0000 27bdffe8 afbf0014 afb00010 3c020000  '...........<...
+ 0010 90420000 14400005 00808021 3c020000  .B...@.....!<...
+ 0020 94420000 1040000d 00001021 3c020000  .B...@.....!<...
+ 0030 94420000 30420080 14400007 24020007  .B..0B...@..$...
+ 0040 2404000b 0c000000 24050008 0c000000  $.......$.......
+ 0050 2404003c 24020007 ae020014 8fbf0014  $..<$...........
+ 0060 8fb00010 03e00008 27bd0018 00000000  ........'.......
+Contents of section .reginfo:
+ 0000 a0010034 00000000 00000000 00000000  ...4............
+ 0010 00000000 00000000                    ........        
+Contents of section .note:
+ 0000 00000008 00000000 00000001 30312e30  ............01.0
+ 0010 31000000                             1...            
+Contents of section .comment:
+ 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.
+ 0010 3200                                 2.              

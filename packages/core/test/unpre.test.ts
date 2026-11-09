@@ -10,8 +10,14 @@ import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
 import { UNPRE_GATES, recomputeDerivedParams, recomputeRedundantParams, strideDerivedParams } from '../src/raise/unpre';
-import { structure } from '../src/structure/structure';
-import { irAgreement } from './helpers';
+import { structure as structureJoined } from '../src/structure/structure';
+import { irAgreement, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 // `case 0:` falls into `case 1:`; the dispatch hands `case 1:` `a0` and `a0 + 1`, and `case 0:` hands
 // it what `fallArgs` names. `%5` is `case 0:`'s own `a0 + 1`, `%6` the constant 9, `%11` a load.
@@ -42,26 +48,26 @@ const fold = (ir: string) => {
   return { n, fn, emit: () => cBackend.emit(structure(fn, { returnsVoid: true })) };
 };
 
-test('both edges hand the parameter `a0 + 1`: it is recomputed in the block and the fall-through lifts', () => {
+testCopies('both edges hand the parameter `a0 + 1`: it is recomputed in the block and the fall-through lifts', () => {
   const { n, fn, emit } = fold(fallIr('%0, %5'));
   expect(n).toBe(1);
   expect(fn.blocks[2].params).toHaveLength(1);
   expect(emit()).toMatch(/case 0:\s*case 1:\s*side2\(a0, a0 \+ 1\);/);
 });
 
-test('a different value from one edge is a real join, and the switch-edge copy still refuses', () => {
+testCopies('a different value from one edge is a real join, and the switch-edge copy still refuses', () => {
   const { n, emit } = fold(fallIr('%0, %6'));
   expect(n).toBe(0);
   expect(emit).toThrow(/takes a value from the switch edge/);
 });
 
-test('equal loads are not recomputed: memory may change between the edge and the block', () => {
+testCopies('equal loads are not recomputed: memory may change between the edge and the block', () => {
   const { n, emit } = fold(fallIr('%0, %11', '%10'));
   expect(n).toBe(0);
   expect(emit).toThrow(/takes a value from the switch edge/);
 });
 
-test('a recomputed leaf keeps its own name where the falling edge sets the parameter beside it', () => {
+testCopies('a recomputed leaf keeps its own name where the falling edge sets the parameter beside it', () => {
   // `case 0:` hands the first parameter 9: the recomputed `a0 + 1` reads `a0`, which is live beside
   // that parameter in `case 1:`, so the parameter needs a name of its own — whose switch-edge copy
   // `v = a0;` the fall path would re-run over the 9. That refusal is the one the structurer owes.

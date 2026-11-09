@@ -16,6 +16,7 @@
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
 import {
+  type AsmLayout,
   Block,
   Fn,
   Op,
@@ -655,6 +656,57 @@ export function clobberedByCall(target: {
   return target.callerSaved.filter((r) => r !== target.returnReg);
 }
 
+/** One asm block as {@link recordAsmLayout} reads it: its instructions without its control transfer,
+ *  and whether that transfer is an unconditional jump to a label. `undefined` for a block the
+ *  frontend made up, which has no place in the asm. An instruction's `reloc` is the relocation that
+ *  fills it, where the operands do not name the symbol (disasm.ts `DisasmInstr.reloc`). */
+export interface AsmBlockText {
+  readonly body: readonly {
+    readonly mnemonic: string;
+    readonly ops: readonly string[];
+    readonly reloc?: { readonly sym: string; readonly addend: number };
+  }[];
+  readonly endsInJump: boolean;
+  /** which instructions of `body` make a call, which only the frontend's ISA knows */
+  readonly isCall: (ins: AsmBlockText['body'][number]) => boolean;
+}
+
+/** One instruction of {@link AsmBlockText} as the layout record spells it: `mnemonic op,op`, then the
+ *  symbol its relocation fills in, if any. In a relocatable object's disassembly the operands of a
+ *  global's load or store, or of a call, read the same whichever symbol it is: gcc 2.7.2's `lui
+ *  at,0x0` / `sw a2,0(at)` for `gT = c` and for `gW = c`, and `jal 0 <f>` for every callee. Spelled
+ *  without the symbol, two arms that store to different globals would read as identical bodies. */
+function layoutText(ins: AsmBlockText['body'][number]): string {
+  const text = ins.ops.length ? `${ins.mnemonic} ${ins.ops.join(',')}` : ins.mnemonic;
+  if (ins.reloc === undefined) {
+    return text;
+  }
+  const addend = ins.reloc.addend === 0 ? '' : `+0x${ins.reloc.addend.toString(16)}`;
+  return `${text} <${ins.reloc.sym}${addend}>`;
+}
+
+/** The layout record (ir/core.ts `AsmLayout`): asm block `i` is `irBlocks[i]`, which is how every
+ *  frontend's builder numbers them, and its index is its position among the blocks that have a
+ *  place in the asm. */
+export function recordAsmLayout(
+  irBlocks: readonly Block[],
+  asmBlocks: readonly (AsmBlockText | undefined)[],
+): AsmLayout {
+  const layout: AsmLayout = new Map();
+  let index = 0;
+  asmBlocks.forEach((ab, i) => {
+    if (ab !== undefined) {
+      layout.set(irBlocks[i], {
+        index: index++,
+        body: ab.body.map(layoutText),
+        calls: ab.body.flatMap((ins, at) => (ab.isCall(ins) ? [at] : [])),
+        endsInJump: ab.endsInJump,
+      });
+    }
+  });
+  return layout;
+}
+
 export function makeSsaBuilder(
   name: string,
   blockCount: number,
@@ -715,6 +767,7 @@ export function makeSsaBuilder(
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());

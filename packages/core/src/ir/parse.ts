@@ -128,6 +128,7 @@ export function parse(text: string): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 

@@ -100,6 +100,7 @@ describe('the op each PPC runtime helper computes', () => {
       slotHomes: undefined,
       paramEvidence: undefined,
       localObjects: undefined,
+      asmLayout: undefined,
     };
     recognizeWideHelpers(fn, PPC_MWCC);
     return block.ops[0].opcode;
@@ -140,6 +141,7 @@ describe('the op each PPC runtime helper computes', () => {
         slotHomes: undefined,
         paramEvidence: undefined,
         localObjects: undefined,
+        asmLayout: undefined,
       },
       PPC_MWCC,
     );
@@ -168,6 +170,7 @@ describe('the op each MIPS runtime helper computes', () => {
         slotHomes: undefined,
         paramEvidence: undefined,
         localObjects: undefined,
+        asmLayout: undefined,
       },
       target,
     );

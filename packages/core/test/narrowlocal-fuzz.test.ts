@@ -158,6 +158,7 @@ function generate(seed: number, withLoop: boolean): Fn {
     slotHomes: undefined,
     paramEvidence: undefined,
     localObjects: undefined,
+    asmLayout: undefined,
   };
 }
 
@@ -284,8 +285,10 @@ function run(sfn: SFn, seed: number): Event[] {
           }
           break;
         case 'return':
+          // a `return` ends the FUNCTION, from however deep in the tree: the join past early
+          // returns writes one inside an `if` arm, with code after the `if` it must not run
           trace.push({ fn: 'ret', args: s.value === undefined ? [] : [evalExpr(s.value)] });
-          return;
+          throw RETURNED;
         case 'break':
         case 'continue':
           return;
@@ -294,9 +297,18 @@ function run(sfn: SFn, seed: number): Event[] {
       }
     }
   };
-  exec(sfn.body);
+  try {
+    exec(sfn.body);
+  } catch (e) {
+    if (e !== RETURNED) {
+      throw e;
+    }
+  }
   return trace;
 }
+
+/** Thrown by `run`'s `return`, and caught at the function's top. */
+const RETURNED = Symbol('returned');
 
 const SEEDS = 15000;
 

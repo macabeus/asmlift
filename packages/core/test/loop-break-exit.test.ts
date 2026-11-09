@@ -12,12 +12,25 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { tallying, without } from '../src/l3/gates';
-import { decompile, readabilityRewrites } from '../src/pipeline';
+import { decompile as decompileJoined, readabilityRewrites } from '../src/pipeline';
 import { foldExitTrampolines } from '../src/raise/latch';
 import { recoverTypes } from '../src/raise/recover';
-import { BREAK_TAIL_GATES, BYPASS_TAIL_GATES, type StructureHooks, structure } from '../src/structure/structure';
+import {
+  BREAK_TAIL_GATES,
+  BYPASS_TAIL_GATES,
+  type StructureHooks,
+  structure as structureJoined,
+} from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-import { NO_HIT_CODE, irAgreement } from './helpers';
+import { NO_HIT_CODE, irAgreement, testCopies, withCopies } from './helpers';
+
+// The tests declared `testCopies` pin the recovery the return-tail copies reach (`/ret-copy`,
+// helpers.ts `testCopies`): their fixtures' early-returning arms read at the join past early
+// returns by default, which join-past-returns.test.ts pins.
+const decompile = (...[name, asm, target, opts]: Parameters<typeof decompileJoined>) =>
+  decompileJoined(name, asm, target, withCopies(opts));
+const structure = (...[fn, opts, hooks, memo]: Parameters<typeof structureJoined>) =>
+  structureJoined(fn, withCopies(opts ?? {}), hooks, memo);
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -1118,7 +1131,7 @@ describe('break arms that share a tail', () => {
   // An entry from before the loop runs on a path that ran no arm, and the exit does not reach the
   // tail: each path runs one copy once, whatever the tail does (the duplication policy, at
   // `earlyReturnArm`).
-  test('a shared tail also entered from before the loop is written in each arm and where it sits', () => {
+  testCopies('a shared tail also entered from before the loop is written in each arm and where it sits', () => {
     const { src, agreement, shipped } = judged(
       SHARED_TAIL_TOP_TESTED.replace(
         '  br ^bb1(%2)\n',
@@ -1148,7 +1161,7 @@ describe('break arms that share a tail', () => {
     expect(shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {
+  testCopies('a pure tail an `else` before the loop also enters is written in the arm and in the `else`', () => {
     const { src, agreement, shipped } = judged(PURE_TAIL_ELSE);
     expect(src).toContain('while (1) {');
     // the tail is written twice: once ahead of the `break`, once in the `else`
@@ -1160,7 +1173,7 @@ describe('break arms that share a tail', () => {
 
   // agbcc's `gLast = id;` in the break and in the `else`, cross-jumped into one `strb` past the `lsr`;
   // gcc2.7.2kmc's one `jal note` both enter. Spelt with a call the trace oracle logs.
-  test('a tail an `else` before the loop also enters is written in each when it runs an effect', () => {
+  testCopies('a tail an `else` before the loop also enters is written in each when it runs an effect', () => {
     const { src, agreement, shipped } = judged(
       PURE_TAIL_ELSE.replace(
         '  %22: s32 = sub %21, %20\n',
@@ -1342,16 +1355,19 @@ describe('a loop whose exit jumps over an `else`', () => {
     expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
   });
 
-  test('a header whose way out is a break arm sharing its tail with the `else` leaves `while` to `while (1)`', () => {
-    const r = folded(ARM_OVER_ELSE);
-    expect(r.n).toBe(1);
-    expect(r.src).toContain('while (1) {');
-    expect(r.src.match(/ping\(/g)).toHaveLength(1);
-    expect(r.src.match(/ - 7;/g)).toHaveLength(2);
-    expect(r.src.match(/out\(/g)).toHaveLength(1);
-    expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
-    expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
-  });
+  testCopies(
+    'a header whose way out is a break arm sharing its tail with the `else` leaves `while` to `while (1)`',
+    () => {
+      const r = folded(ARM_OVER_ELSE);
+      expect(r.n).toBe(1);
+      expect(r.src).toContain('while (1) {');
+      expect(r.src.match(/ping\(/g)).toHaveLength(1);
+      expect(r.src.match(/ - 7;/g)).toHaveLength(2);
+      expect(r.src.match(/out\(/g)).toHaveLength(1);
+      expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+      expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+    },
+  );
 
   // The same shape with a loop in the tail the arm and the `else` share: the two-level flag reads
   // it ahead of the copy (`shared-cycle-before-last-resort`), and with that rule dropped the arm

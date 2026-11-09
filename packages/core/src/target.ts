@@ -1251,6 +1251,120 @@ export interface TargetDescription {
     // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
     // refuses more.
     discardedReadMayFillArgRegister?: boolean;
+    // DOES THE COMPILER CROSS-JUMP RETURN TAILS? Where two arms end in the same code before the
+    // same return, does it keep ONE copy and jump the other arm into it? Where it does, the source
+    // may have written the tail into every arm (`h(10, 0); return;` in each) and the object still
+    // holds it once. So a join in the CFG is no evidence the source wrote one. What tells the two
+    // spellings apart is where the surviving copy sits, and which arms became one block. Read by
+    // the return-tail chooser (pipeline.ts `structureReturnTailReading`): it publishes the copies
+    // where the target's layout shows that merge (structure/cross-jumped-tail.ts), and never reads
+    // the layout where this is absent.
+    //
+    // gcc 2.x's jump2 pass does it: jump.c, in the `JUMP_CROSS_JUMP` run of `jump_optimize` that
+    // toplev.c makes at `optimize > 0`.
+    //   - An unconditional jump is first cross-jumped into the code before its own target label
+    //     (`find_cross_jump (insn, JUMP_LABEL (insn), 1)`).
+    //   - Only then is it tried against the other jumps to that label, and that search runs only
+    //     `if (INSN_UID (JUMP_LABEL (insn)) < max_uid)`.
+    //   - `do_cross_jump` keeps the LATER copy and jumps to a label before it. `get_label_before`
+    //     creates that label, so a jump already redirected is never searched for siblings again.
+    // So the copies spelling leaves three shapes in the object (structure/cross-jumped-tail.ts):
+    //   - an arm that does not use the tail stays laid out after the surviving copy, and that copy
+    //     ends in a jump over it;
+    //   - identical arm bodies stay separate blocks, where the join's one original label would have
+    //     merged them;
+    //   - `find_cross_jump` compares backward and stops at the first pair that differs, so a call
+    //     the tail opens with can be cut from the argument setup each arm keeps.
+    // MEASURED on two probe pairs, `corpus/probe-rettail-{pa,pb}-{copies,join}.c`: a three-arm `if`
+    // and a seven-case `switch`. Each is compiled at each toolchain's canonical flags by
+    // `scripts/regen-rettail-probes.ts`, and cross-jumped-tail.test.ts reads the objects:
+    //   - agbcc: the `pa` copies keep the tail mid-construct, ending in `b`, with the else arm laid
+    //     out after it. The `pb` copies hold the tail's store ONCE, in six case bodies; the join
+    //     has three bodies.
+    //   - gcc2.7.2 (-O1) and gcc2.7.2kmc (-O2): `pb` is the same, one store, six bodies against
+    //     three. The `pa` copies and join compile byte-identical, because the fall-through arm's
+    //     call merged too.
+    //   - ido7.1 and mwcc_242_81: NO. The `pb` copies keep all seven stores, each before its own
+    //     return, and the `pa` copies keep three calls.
+    // So `true` on ARMV4T_AGBCC and on MIPS_GCC. Each toolchain MIPS_GCC serves owes its own pair
+    // (the KEYED BY DESCRIPTION note at `spillSlotOrder`), and both are committed. ABSENT means no
+    // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
+    // unprobed, and PPC_MWCC claims nothing for them. Read only where the join is the default
+    // (`joinPastReturnsByDefault`), which both descriptions declaring this field leave out, so the
+    // marks decide no shipped default; the probe pairs still pin each one.
+    crossJumpsReturnTails?: boolean;
+    // DOES THE COMPILER FOLD THE CONSTANT A BRANCH PROVED INTO A RETURN ON THE BRANCH'S TAKEN EDGE?
+    // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
+    // records the branch's equivalence on the NOT-taken edge of every jump (`record_jump_equiv
+    // (insn, 0)`, cse.c:7597), and on the taken edge only along a path it follows (`record_jump_equiv
+    // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps, which toplev.c:3606-3607
+    // sets at `optimize >= 2` (-fcse-skip-blocks skips a block without recording the edge:
+    // `cseFollowsJumpsUnder`). (Line numbers are agbcc's gcc 2.9 tree; for
+    // 2.7.2 the probe below is the evidence.) So where this is `false`, a return of the tested value
+    // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
+    // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
+    // Read by the return-tail chooser (pipeline.ts `structureReturnTailReading`), which publishes the
+    // copies at such a return (structure/unfolded-branch-constant.ts), and only where the join is
+    // the default (`joinPastReturnsByDefault`), which MIPS_GCC, the one description declaring this
+    // field, leaves out: so it decides no shipped default, and the probes below still pin it.
+    // `false` only by the flags (`targetFor`), never declared.
+    //
+    // MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c`, the `return gB` after a
+    // `gB` tested against 0, compiled by scripts/regen-rettail-probes.ts. The `beqz`'s delay slot:
+    //   - gcc2.7.2 at -O1 (canonical): copies `nop`, join `move v0,zero`. With the arms of the
+    //     copies flipped (the return the then arm), and with `-O1 -fcse-follow-jumps`, `move v0,zero`.
+    //   - gcc2.7.2 at -O2, and gcc2.7.2kmc at -O2 (canonical): `move v0,zero` under every spelling.
+    // So `true` on MIPS_GCC, and `false` from the flags where cse follows no jump (level 1 without
+    // -fcse-follow-jumps, or -fno-cse-follow-jumps: `cseFollowsJumpsUnder`). Absent elsewhere: agbcc
+    // at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no value of this field
+    // says; ido7.1 and mwcc are unprobed.
+    foldsBranchConstantOnTakenEdge?: boolean;
+    // IS THE JOIN PAST EARLY RETURNS THE DEFAULT READING HERE? Not a compiler behaviour but a MEASURED
+    // DEFAULT, kept beside the behaviours because it is per compiler and read by the chooser they
+    // feed (pipeline.ts `structureReturnTailReading`), which the size bound and the marks above
+    // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
+    // join was a default, and the join is still structured and kept in the ranked fan as
+    // `/ret-join`. A compiler the held-out measurement has not reached publishes the copies first,
+    // and the join only where the copies refuse, so it lifts every function it lifted before and
+    // may lift one the old default declined (pipeline.ts `copiesByDefault`).
+    // docs/level-tower.md (A MEASURED DEFAULT IS THE ONE EXCEPTION) says why a field whose readings
+    // split site by site may still be declared here, and what re-measures it.
+    //
+    // MEASURED over held-out real functions, every function of a project outside the 620 the marks
+    // were chosen on, both readings really compiled against the project's own objects (2026-11-06),
+    // and over 160 generated functions written with the copies (2026-11-09). `true` only where the
+    // size bound with every mark loses no match the copies have on every measured set:
+    //   - mwcc_233_163n (Pikmin at its own flags, 2733 functions lifted, 66 re-spelled): 0 lost,
+    //     3 gained (two `actByEvent` methods 4/22 -> 0/20, `stickSlot__6PelletFi` 3/28 -> 0/26);
+    //     the generated functions: every source identical to the copies';
+    //   - mwcc_242_81 (ac-decomp and Mario Party 4, every unit compiled at this build although 9 of
+    //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained; the generated
+    //     functions: every source identical to the copies'.
+    // So `true` on PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107) leaves it
+    // out, no held-out unit measured at that build. Left out where it loses, the copies' default
+    // given back with the join's gains:
+    //   - gcc2.7.2kmc: held out (Snowboard Kids 2, 78 re-spelled) 0 lost, 2 gained
+    //     (`func_8003513C_35D3C`, `func_80045564_46164`); generated, 3 lost (the copies match, the
+    //     join is 2 to 8 lines off) and 5 gained. Given up: those 2 held out and the 5 generated.
+    //   - gcc2.7.2: held out (Mario Party 3, all 10019 functions, 150 re-spelled) 0 lost once the
+    //     unfolded return is read (`foldsBranchConstantOnTakenEdge`), none gained; generated, 1 lost
+    //     (4 lines off) and 2 gained. No mark read from the layout or the unfolded return separates
+    //     the 4 generated losses on the two lanes. Given up: the 2 generated, and the held-out and
+    //     620 functions the join brought closer.
+    //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
+    //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
+    //     different arguments, and a third source spelling the copies happen to share. Given up:
+    //     18 held out and 2 of the 620.
+    //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
+    //     never cross-jumps, so no cross-jump mark applies. Counting copies of the arm's store does
+    //     not separate the readings either: compiled, the join of `func_80A42DB4_jp` ALSO keeps two
+    //     `sw zero,0(a3)`, because ido fills a `beql`'s likely slot with a copy of its target's first
+    //     word. What differs is the branch the slot copy rides: the copies' arm schedules its own
+    //     store into the slot of a plain `b`, the join's copy sits in a `beql`'s. That is the
+    //     candidate signal, unmeasured: frontend/mips.ts `normaliseBranchLikely` rewrites both to one
+    //     shape (its `likely` and `freed` sets still tell them apart) before the layout is recorded,
+    //     so no layout entry carries it. Given up: 18 held out and 7 of the 620.
+    joinPastReturnsByDefault?: boolean;
   };
 }
 
@@ -1386,6 +1500,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchBoundCase: 'taken',
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
+    // MEASURED on the probe pairs at the field (gcc 2.x jump.c's cross-jump). Read only where the join
+    // is the default (`joinPastReturnsByDefault`), which agbcc leaves out: the join loses 9 of
+    // pokeemerald's matches no mark separates.
+    crossJumpsReturnTails: true,
     hoistsSingleSetArm: true,
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
@@ -1738,6 +1856,15 @@ export const MIPS_GCC: TargetDescription = {
     // sub-trees a decline leaves, so a NESTED dispatch comes back as an `if` nest around a `switch`
     // over some of its arms.
     switchRequiresFrontLoadedTests: true,
+    // MEASURED on BOTH toolchains this description serves, the probe pairs at the field.
+    crossJumpsReturnTails: true,
+    // MEASURED at -O2 on both toolchains this description serves, the probe pair at the field;
+    // gcc2.7.2's canonical -O1 clears it (`targetFor`).
+    foldsBranchConstantOnTakenEdge: true,
+    // `joinPastReturnsByDefault` LEFT OUT, so the copies are published and the join is ranked as
+    // `/ret-join`. On held-out real functions it lost none of the copies' matches on either toolchain
+    // this description serves, but on 160 generated functions written with the copies it lost 3 on
+    // gcc2.7.2kmc and 1 on gcc2.7.2, which no mark separates (the field's note).
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
@@ -1906,12 +2033,31 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on all three builds: the probes at the fields.
     forwardsStructReturnDestination: false,
     discardedReadMayFillArgRegister: true,
+    // MEASURED over held-out real functions at mwcc_242_81 and mwcc_233_163n, at the field;
+    // PPC_MWCC_247 leaves it out.
+    joinPastReturnsByDefault: true,
   },
 };
 
+/** A description's behaviours less `joinPastReturnsByDefault`, for a build that shares the
+ *  description but was not measured for that default. */
+function withoutJoinDefault(d: TargetDescription): TargetDescription['compilerBehaviors'] {
+  const { joinPastReturnsByDefault: _measuredElsewhere, ...behaviors } = d.compilerBehaviors;
+  return behaviors;
+}
+
 /** CodeWarrior 2.3.3b163n (Pikmin): `PPC_MWCC` but for the one declaration a probe refuted there —
- *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one. */
-export const PPC_MWCC_233: TargetDescription = { ...PPC_MWCC, globalRegisterVariables: undefined };
+ *  it rejects a global register variable ("illegal storage class"), so it has no spelling for one.
+ *  The return-tail default is PPC_MWCC's, measured at this build over Pikmin
+ *  (`joinPastReturnsByDefault`). */
+export const PPC_MWCC_233: TargetDescription = {
+  ...PPC_MWCC,
+  globalRegisterVariables: undefined,
+};
+
+/** CodeWarrior 2.4.7b107 (Mario Party 4's other build): `PPC_MWCC` less the return-tail default no
+ *  held-out function measured at this build (`joinPastReturnsByDefault`). */
+export const PPC_MWCC_247: TargetDescription = { ...PPC_MWCC, compilerBehaviors: withoutJoinDefault(PPC_MWCC) };
 
 /** A toolchain: one compiler binary, named as decomp.me names it. Several toolchains may share a
  *  description (`MIPS_GCC` serves two), and each keeps its own evidence. */
@@ -2003,7 +2149,7 @@ export const TOOLCHAIN_TARGETS = {
   },
   mwcc_247_107: {
     family: 'mwcc',
-    description: PPC_MWCC,
+    description: PPC_MWCC_247,
   },
 } as const satisfies Readonly<Record<string, ToolchainTarget>>;
 
@@ -2095,6 +2241,9 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     const { enumBytes: _flagged, ...behaviors } = target.compilerBehaviors;
     target = { ...target, compilerBehaviors: behaviors };
   }
+  if (target.compilerBehaviors.foldsBranchConstantOnTakenEdge === true && !cseFollowsJumpsUnder(profile)) {
+    target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, foldsBranchConstantOnTakenEdge: false } };
+  }
   const charSigned = plainCharSignedUnder(t.family, profile.slots);
   if (charSigned !== 'default' && charSigned !== target.compilerBehaviors.plainCharSigned) {
     const { plainCharSigned: _default, ...behaviors } = target.compilerBehaviors;
@@ -2104,6 +2253,30 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
     };
   }
   return { toolchain, cflags, target, profile };
+}
+
+/** Does gcc's cse follow jumps at these flags (`compilerBehaviors.foldsBranchConstantOnTakenEdge`)?
+ *  Only a jump cse FOLLOWS gets its taken edge's equivalence: `cse_end_of_basic_block` marks a path
+ *  branch TAKEN only under `follow_jumps` (cse.c:8192-8211), and the branch around a block that
+ *  `skip_blocks` adds is AROUND, whose block is invalidated, not recorded (cse.c:8223, :8545-8548).
+ *  toplev.c:3606-3607 sets `flag_cse_follow_jumps` at `optimize >= 2`, and the switch sets or clears
+ *  it by name either way, the level's value standing where it is not given. -O0 is answered `true`:
+ *  cse does not run there, which is a different compiler again, and a level no table reads keeps
+ *  the declaration. (cse.c line numbers are agbcc's gcc 2.9 tree.)
+ *
+ *  MEASURED on `corpus/probe-rettail-pg` at gcc2.7.2, the copies' `beqz` delay slot: `nop` (unfolded)
+ *  at -O1, at `-O1 -fcse-skip-blocks`, at `-O2 -fno-cse-follow-jumps` and at `-O2
+ *  -fno-cse-follow-jumps -fno-cse-skip-blocks`; `move v0,zero` at -O2, at `-O2 -fno-cse-skip-blocks`
+ *  and at `-O1 -fcse-follow-jumps`. The join is `move v0,zero` under all seven. */
+function cseFollowsJumpsUnder(profile: CodegenProfile): boolean {
+  if (profile.family !== 'gcc' && profile.family !== 'agbcc') {
+    return true;
+  }
+  if (profile.slots.O === '0') {
+    return true;
+  }
+  const flag = profile.slots['-fcse-follow-jumps'];
+  return flag === 'on' ? true : flag === 'off' ? false : profile.slots.O !== '1';
 }
 
 /** What the flags say a plain `char` is (`compilerBehaviors.plainCharSigned`): `default` where they
