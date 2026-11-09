@@ -1289,7 +1289,9 @@ export interface TargetDescription {
     // So `true` on ARMV4T_AGBCC and on MIPS_GCC. Each toolchain MIPS_GCC serves owes its own pair
     // (the KEYED BY DESCRIPTION note at `spillSlotOrder`), and both are committed. ABSENT means no
     // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
-    // unprobed, and PPC_MWCC claims nothing for them.
+    // unprobed, and PPC_MWCC claims nothing for them. Read only where the join is the default
+    // (`joinPastReturnsByDefault`), which both descriptions declaring this field leave out, so the
+    // marks decide no shipped default; the probe pairs still pin each one.
     crossJumpsReturnTails?: boolean;
     // DOES THE COMPILER FOLD THE CONSTANT A BRANCH PROVED INTO A RETURN ON THE BRANCH'S TAKEN EDGE?
     // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
@@ -1302,8 +1304,10 @@ export interface TargetDescription {
     // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
     // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
     // Read by the return-tail chooser (pipeline.ts `structureReturnTailReading`), which publishes the
-    // copies at such a return (structure/unfolded-branch-constant.ts). `false` only by the flags
-    // (`targetFor`), never declared.
+    // copies at such a return (structure/unfolded-branch-constant.ts), and only where the join is
+    // the default (`joinPastReturnsByDefault`), which MIPS_GCC, the one description declaring this
+    // field, leaves out: so it decides no shipped default, and the probes below still pin it.
+    // `false` only by the flags (`targetFor`), never declared.
     //
     // MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c`, the `return gB` after a
     // `gB` tested against 0, compiled by scripts/regen-rettail-probes.ts. The `beqz`'s delay slot:
@@ -1327,19 +1331,26 @@ export interface TargetDescription {
     // split site by site may still be declared here, and what re-measures it.
     //
     // MEASURED over held-out real functions, every function of a project outside the 620 the marks
-    // were chosen on, both readings really compiled against the project's own objects (2026-11-06).
-    // `true` only where the size bound with every mark loses no match the copies have:
-    //   - gcc2.7.2kmc (Snowboard Kids 2, 78 re-spelled): 0 lost, 2 gained;
-    //   - gcc2.7.2 (Mario Party 3, all 10019 functions, 150 re-spelled): 0 lost once the unfolded
-    //     return is read (`foldsBranchConstantOnTakenEdge`), which moves 14 to the copies: its one
-    //     loss back to a match, one closer, and 12 the join had brought closer given back;
+    // were chosen on, both readings really compiled against the project's own objects (2026-11-06),
+    // and over 160 generated functions written with the copies (2026-11-09). `true` only where the
+    // size bound with every mark loses no match the copies have on every measured set:
     //   - mwcc_233_163n (Pikmin at its own flags, 2733 functions lifted, 66 re-spelled): 0 lost,
     //     3 gained (two `actByEvent` methods 4/22 -> 0/20, `stickSlot__6PelletFi` 3/28 -> 0/26);
+    //     the generated functions: every source identical to the copies';
     //   - mwcc_242_81 (ac-decomp and Mario Party 4, every unit compiled at this build although 9 of
-    //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained.
-    // So `true` on MIPS_GCC, PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107)
-    // leaves it out, no held-out unit measured at that build. Left out where it loses, the copies'
-    // default given back with the join's gains:
+    //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained; the generated
+    //     functions: every source identical to the copies'.
+    // So `true` on PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107) leaves it
+    // out, no held-out unit measured at that build. Left out where it loses, the copies' default
+    // given back with the join's gains:
+    //   - gcc2.7.2kmc: held out (Snowboard Kids 2, 78 re-spelled) 0 lost, 2 gained
+    //     (`func_8003513C_35D3C`, `func_80045564_46164`); generated, 3 lost (the copies match, the
+    //     join is 2 to 8 lines off) and 5 gained. Given up: those 2 held out and the 5 generated.
+    //   - gcc2.7.2: held out (Mario Party 3, all 10019 functions, 150 re-spelled) 0 lost once the
+    //     unfolded return is read (`foldsBranchConstantOnTakenEdge`), none gained; generated, 1 lost
+    //     (4 lines off) and 2 gained. No mark read from the layout or the unfolded return separates
+    //     the 4 generated losses on the two lanes. Given up: the 2 generated, and the held-out and
+    //     620 functions the join brought closer.
     //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
     //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
     //     different arguments, and a third source spelling the copies happen to share. Given up:
@@ -1850,8 +1861,10 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED at -O2 on both toolchains this description serves, the probe pair at the field;
     // gcc2.7.2's canonical -O1 clears it (`targetFor`).
     foldsBranchConstantOnTakenEdge: true,
-    // MEASURED over held-out real functions on BOTH toolchains this description serves, at the field.
-    joinPastReturnsByDefault: true,
+    // `joinPastReturnsByDefault` LEFT OUT, so the copies are published and the join is ranked as
+    // `/ret-join`. On held-out real functions it lost none of the copies' matches on either toolchain
+    // this description serves, but on 160 generated functions written with the copies it lost 3 on
+    // gcc2.7.2kmc and 1 on gcc2.7.2, which no mark separates (the field's note).
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,

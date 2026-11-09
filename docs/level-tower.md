@@ -196,7 +196,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   and no layout mark separates the losses (on IDO the candidate, which branch carries the delay-slot
   copy of the arm's store, a plain `b` or a `beql`, is normalised away before the layout is recorded
   and so is unmeasured), so those leave it out and publish the copies, with the
-  join still ranked as `/ret-join`. The field's note carries the counts, lost and gained per compiler,
+  join still ranked as `/ret-join`. On gcc2.7.2kmc and gcc2.7.2 it loses no held-out real match but
+  loses some on generated functions written with the copies, which count too, so those leave it out
+  as well. The field's note carries the counts, lost and gained per compiler,
   and the gains given up. It is re-measured, not inherited, whenever the chooser reads a new mark,
   a toolchain gains a build or profile, or a held-out project is added, and it is deleted the day a
   signal read from the assembly separates the sites: that signal is the answer this rule only

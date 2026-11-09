@@ -130,9 +130,15 @@ describe('the unfolded return, read at each site the join was taken (structure/u
   });
 });
 
-describe('the plain default publishes the copies where the return was left unfolded', () => {
+// MIPS_GCC defaults to the copies outright (it leaves out target.ts `joinPastReturnsByDefault`), so
+// the mark is read on the description with the join declared the default, where it decides
+describe('the join default publishes the copies where the return was left unfolded', () => {
   const read = (lane: (typeof GCC_LANES)[number], p: 'copies' | 'join', o: object = {}) => {
-    const { target } = targetFor(lane.tc, TOOLCHAIN_TARGETS[lane.tc].canonicalFlags);
+    const { target: shipped } = targetFor(lane.tc, TOOLCHAIN_TARGETS[lane.tc].canonicalFlags);
+    const target = {
+      ...shipped,
+      compilerBehaviors: { ...shipped.compilerBehaviors, joinPastReturnsByDefault: true },
+    };
     return decompile('f', input(lane.slug, p).asm, target, { prototypes: PROTOS, ...input(lane.slug, p), ...o }).source;
   };
 

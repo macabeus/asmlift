@@ -278,9 +278,9 @@ describe('the cross-jumped tail, read at each site the join was taken (structure
 });
 
 // agbcc's description defaults to the copies outright (it leaves out target.ts
-// `joinPastReturnsByDefault`, measured over held-out real functions), so the marks' reading on agbcc's
-// own layouts is read on the description with the join declared the default: the chooser the GCC
-// 2.7.2 lanes run.
+// `joinPastReturnsByDefault`, measured over held-out real functions), and so does MIPS_GCC (measured
+// over generated ones), so the marks' reading on each compiler's own layouts is read on its
+// description with the join declared the default: the chooser mwcc runs, where no mark is read.
 const AGBCC_MARKS: TargetDescription = {
   ...ARMV4T_AGBCC,
   compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, joinPastReturnsByDefault: true },
@@ -371,20 +371,38 @@ describe('the plain default publishes the copies where the layout shows the merg
     expect(read({})).toBe(copies);
   });
 
+  const gccRead = (tc: (typeof GCC_LANES)[number]['tc'], slug: string, joinDefault: boolean) => {
+    const shipped = TOOLCHAIN_TARGETS[tc].description;
+    const target: TargetDescription = joinDefault
+      ? { ...shipped, compilerBehaviors: { ...shipped.compilerBehaviors, joinPastReturnsByDefault: true } }
+      : shipped;
+    return (p: Probe, o: object = {}) => {
+      const { asm, asmData } = mipsInput(slug, p);
+      return decompile('f', asm, target, { prototypes: protosOf(p), asmData, ...o }).source;
+    };
+  };
+
   test.each(GCC_LANES)(
-    '$tc: the `pb` copies are the default, and every join written once keeps the join',
+    '$tc, the join declared the default: the `pb` copies are the default, and every join written once keeps the join',
     ({ tc, slug }) => {
-      const target = TOOLCHAIN_TARGETS[tc].description;
-      const read = (p: Probe, o: object = {}) => {
-        const { asm, asmData } = mipsInput(slug, p);
-        return decompile('f', asm, target, { prototypes: protosOf(p), asmData, ...o }).source;
-      };
+      const read = gccRead(tc, slug, true);
       expect(read('pb-copies')).toBe(read('pb-copies', { copyReturnTails: true }));
       for (const p of ['pb-join', 'pc-join', 'pd-join'] as const) {
         expect(read(p)).toBe(read(p, { joinPastReturns: true }));
       }
     },
   );
+
+  // the measured default on both lanes MIPS_GCC serves: the copies, the join still the reading they
+  // were chosen over
+  test.each(GCC_LANES)('$tc: the description defaults to the copies, unmarked', ({ tc, slug }) => {
+    expect(TOOLCHAIN_TARGETS[tc].description.compilerBehaviors.joinPastReturnsByDefault).toBeUndefined();
+    const read = gccRead(tc, slug, false);
+    for (const p of ['pb-copies', 'pb-join', 'pc-join', 'pd-join'] as const) {
+      expect(read(p)).toBe(read(p, { copyReturnTails: true }));
+    }
+    expect(read('pb-join', { joinPastReturns: true })).not.toBe(read('pb-join', { copyReturnTails: true }));
+  });
 
   // The same layout on a target that does not declare the merge is no evidence: the bound decides.
   // ido7.1 lays a tail out mid-construct with no cross-jump at all, and mwcc's PPC_MWCC claims none.

@@ -1199,7 +1199,7 @@ export interface ReturnTailReading {
 }
 
 /** Stage 4, THE RETURN-TAIL READING BOUNDED BY SIZE AND READ OFF THE LAYOUT. On a target that
- *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`: MIPS GCC,
+ *  declares the join past early returns its default (target.ts `joinPastReturnsByDefault`:
  *  mwcc_242_81 and mwcc_233_163n), `structureChecked`, and where that structuring took the join
  *  somewhere, the same structuring again reading the return-tail copies (`copyReturnTails`). The copies are
  *  published where they spell the function SHORTER, or where the target's asm layout shows that the
@@ -1257,9 +1257,10 @@ export interface ReturnTailReading {
  *      gcc2.7.2kmc 9, gcc2.7.2 2 of 160; with all three, 2, 3, 1). Their numbers are in
  *      structure/cross-jumped-tail.ts. So, held out, this reading still loses some of the copies'
  *      matches; the 620 and the full bench lose none. Those 620 MATCH figures are of the bound with
- *      the marks on every compiler; agbcc and ido7.1 publish the copies (THE MEASURED DEFAULT),
- *      so on agbcc the marks are read by the tests and by no default, and the join's gains there
- *      are given up (agbcc 2 of the 620, ido7.1 7: the field's note).
+ *      the marks on every compiler; agbcc, ido7.1 and the two GCC 2.7.2 lanes publish the copies
+ *      (THE MEASURED DEFAULT), so the marks are read by the tests and by no default (no compiler
+ *      that declares `crossJumpsReturnTails` declares the join its default), and the join's gains
+ *      there are given up (agbcc 2 of the 620, ido7.1 7: the field's note).
  *    - A mark is evidence, not proof: jump2 cross-jumps shared arm code that is not a return tail
  *      too, and leaves the same marks under a join-written source (structure/cross-jumped-tail.ts).
  *      So a mark moves which verified reading is the default, never what is lifted.
@@ -1271,14 +1272,16 @@ export interface ReturnTailReading {
  *  compiles to `return 0` (structure/unfolded-branch-constant.ts). Where any site shows one, the
  *  copies are published whatever their size, as for a layout mark. MEASURED on Mario Party 3's
  *  `func_8010BD28_472F98_mgmode` (gcc2.7.2 -O1), the one held-out real function the join lost a
- *  match on there (2026-11-06): the copies match, the join is 1 line off.
+ *  match on there (2026-11-06): the copies match, the join is 1 line off. Like the layout marks it
+ *  is read by no default now: gcc2.7.2 publishes the copies (THE MEASURED DEFAULT).
  *
  *  THE MEASURED DEFAULT. A target that does not declare `joinPastReturnsByDefault` (agbcc, ido7.1,
- *  mwcc_247_107, and any description that leaves it out) publishes the copies
+ *  gcc2.7.2kmc, gcc2.7.2, mwcc_247_107, and any description that leaves it out) publishes the copies
  *  whatever the bound and the marks would say, and keeps the join as the unpublished reading, so
  *  the ranked fan holds both as before (`copiesByDefault`). The join is declared only where the
- *  held-out real functions show the bound with every mark losing none of the copies' matches; on
- *  agbcc and ido7.1 it loses some no mark read from the target separates, and mwcc_247_107 is
+ *  held-out real functions and the generated ones written with the copies show the bound with every
+ *  mark losing none of the copies' matches; on agbcc and ido7.1 (held out) and on gcc2.7.2kmc and
+ *  gcc2.7.2 (generated) it loses some no mark read from the target separates, and mwcc_247_107 is
  *  unmeasured (the field's note has the counts and the gains given up).
  *
  *  REFUSALS. Never a lift turned into a decline:

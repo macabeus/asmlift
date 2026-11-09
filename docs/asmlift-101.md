@@ -296,11 +296,11 @@ early returns, or the return-tail copies under `copyReturnTails`) declines, its 
 loop tail-copy reruns included, and only in a switch none of them spelled goto-free (`JumpRanking`
 in `structure.ts`). The whole-function readings are chosen above that ladder, not inside it
 (`structureReturnTailReading` in `pipeline.ts`). Where the target declares the join its default
-(`joinPastReturnsByDefault` in `target.ts`: MIPS GCC, mwcc_242_81 and mwcc_233_163n), a function whose join needs
+(`joinPastReturnsByDefault` in `target.ts`: mwcc_242_81 and mwcc_233_163n), a function whose join needs
 the goto publishes it even where the copies would lift without one, unless the copies are the
 shorter, the layout shows a cross-jumped return tail, or cse left a return unfolded (THE COPIES,
 BELOW ALL OF IT, above `structure()`). Every other target, agbcc (`sub_0800D188` among its
-functions) and ido7.1 included, publishes the copies, structured first, and so the goto only where
+functions), ido7.1, gcc2.7.2kmc and gcc2.7.2 included, publishes the copies, structured first, and so the goto only where
 the copies' own ladder needs it (THE MEASURED DEFAULT, `pipeline.ts`); and
 the ranked `/case-goto` variation spells with it the case bodies the goto-free copies write back
 into an entrant, as a candidate the scorer weighs against those copies. An arm whose own structuring

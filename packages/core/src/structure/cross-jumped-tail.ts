@@ -59,10 +59,11 @@
 // across arms that pass it different arguments. The probe pairs in cross-jumped-tail.test.ts check
 // each mark and each shape that is no mark.
 //
-// NOT READ ON agbcc BY DEFAULT. Over held-out real functions (pokeemerald, 2026-11-06) the
-// size bound with these marks still loses 9 of the copies' matches, none of them marked, so agbcc
-// defaults to the copies outright (it leaves out target.ts `joinPastReturnsByDefault`) and the marks
-// decide the default on the two GCC 2.7.2 lanes. agbcc's probe pairs still pin each mark.
+// READ BY NO DEFAULT. Over held-out real functions (pokeemerald, 2026-11-06) the size bound with
+// these marks still loses 9 of the copies' matches on agbcc, none of them marked; over the 160
+// generated functions (2026-11-09) it still loses 3 on gcc2.7.2kmc and 1 on gcc2.7.2. So both
+// compilers that cross-jump default to the copies outright (they leave out target.ts
+// `joinPastReturnsByDefault`), and the probe pairs still pin each mark.
 //
 // Read only from the frontend's layout record (ir/core.ts `AsmLayout`). A block with no entry, such
 // as one a raise pass made up, is no evidence either way. A function with no record (parsed IR)
