@@ -564,11 +564,16 @@ function structureWithinBudget(
   const reading: JoinReading = {
     copies: opts.copyReturnTails === true || opts.spellEarlyReturns === false,
     asked: false,
+    differs: false,
   };
   const joinHeld: (() => void)[] = [];
   let joinDeclined: unknown;
   try {
-    return structureLadder(fn, opts, hooks, memo, reading, joinHeld);
+    const sfn = structureLadder(fn, opts, hooks, memo, reading, joinHeld);
+    if (opts.copyReturnTails === true && opts.spellEarlyReturns !== false && !reading.differs) {
+      hooks.onJoinReadsAsCopies?.();
+    }
+    return sfn;
   } catch (error) {
     if (reading.copies || !reading.asked || !(error instanceof StructureError || error instanceof CopyBudgetExceeded)) {
       throw declined(error, joinHeld);
@@ -577,7 +582,7 @@ function structureWithinBudget(
   }
   const copiesHeld: (() => void)[] = [];
   try {
-    return structureLadder(fn, opts, hooks, memo, { copies: true, asked: false }, copiesHeld);
+    return structureLadder(fn, opts, hooks, memo, { copies: true, asked: false, differs: false }, copiesHeld);
   } catch (error) {
     throw error instanceof CopyBudgetExceeded ? declined(joinDeclined, joinHeld) : declined(error, copiesHeld);
   }
@@ -592,6 +597,14 @@ const STAMPED_LATE = new WeakMap<Fn, WeakSet<Op>>();
 interface JoinReading {
   readonly copies: boolean;
   asked: boolean;
+  /** Under the copies only, unheld across every attempt of the ladder: some branch this run reached
+   *  would, reading the join, have been asked it AND read differently — its region's join moved
+   *  (`cfgInRegion`), the join past returns taken, or a comparison tree refused after its
+   *  recognition began to write (switch-recover.ts `onWrites`), which the join reading then
+   *  recognizes, and writes, a second time. Until the first such branch the two readings take the
+   *  same steps, so a run that never sets it is the join's run too
+   *  (`StructureHooks.onJoinReadsAsCopies`). */
+  differs: boolean;
 }
 
 function structureLadder(
@@ -928,6 +941,7 @@ function structureRanked(
         onForOffered: undefined,
         onCounterSignRefused: undefined,
         onJoinPastReturns: undefined,
+        onJoinReadsAsCopies: undefined,
       },
       memo,
     );
@@ -5048,16 +5062,29 @@ function structureRanked(
   const askJoinPastReturns = (
     b: Block,
     stop: Block | null,
-  ): { asked: boolean; cfgJoin: Block | null; cfgInRegion: Block | null } => {
+  ): { asked: boolean; cfgJoin: Block | null; cfgInRegion: Block | null; shadowed: boolean } => {
     const cfgJoin = ipdom.get(b) ?? null;
-    const asked = !reading.copies && loopCtx === null && joinPastReturnsAsked(cfgJoin, isReturnTail);
+    // `shadowed`: the copies, at a branch the join reading would ask (`JoinReading.differs`). The
+    // caller asks the join it would take there, and none of it changes what this run reads.
+    const askable = loopCtx === null && joinPastReturnsAsked(cfgJoin, isReturnTail);
+    const asked = !reading.copies && askable;
+    const shadowed = reading.copies && askable;
     // asking moves the CFG's join in the region (`cfgInRegion`) whether or not a join is taken
     reading.asked ||= asked;
-    const cfgInRegion =
-      asked && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin)
-        ? null
-        : cfgJoin;
-    return { asked, cfgJoin, cfgInRegion };
+    const moved =
+      (asked || shadowed) && cfgJoin !== null && stop !== null && cfgJoin !== stop && reachesAvoiding(b, stop, cfgJoin);
+    if (shadowed && moved) {
+      reading.differs = true;
+    }
+    const cfgInRegion = asked && moved ? null : cfgJoin;
+    return { asked, cfgJoin, cfgInRegion, shadowed };
+  };
+  /** Under the copies, at a branch the join reading asks (`shadowed`): the join it would take there,
+   *  read as `JoinReading.differs` reads it — a join that is not the CFG's. */
+  const shadowJoin = (join: Block | null, cfgJoin: Block | null): void => {
+    if (join !== null && join !== cfgJoin) {
+      reading.differs = true;
+    }
   };
 
   const structureRegion = (b: Block, stop: Block | null): Stmt[] => {
@@ -5254,8 +5281,11 @@ function structureRanked(
       // switch, exactly as a chain of `if`s does. Same precedence and same `stop` rule as there, and
       // adopted only where the arms read at it decline nothing (below): it turns copies into one
       // tail, never a switch that spells into a decline.
-      const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
+      const { asked: pastReturnsAsked, cfgJoin, cfgInRegion, shadowed } = askJoinPastReturns(b, stop);
       const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
+      if (shadowed) {
+        shadowJoin(joinPastReturnsAt(b, stop), cfgJoin);
+      }
       const cfgFollow = cfgInRegion ?? followOverReturns(b, stop);
       let joined = pastReturns !== null && pastReturns !== cfgJoin ? pastReturns : cfgFollow;
       let merge = joined ?? stop;
@@ -6397,7 +6427,29 @@ function structureRanked(
     // successors, and taken only where the tree recovers at it; where it does
     // not, the tree is read again at the CFG's merge, as without the reading.
     const asSwitch = handedThroughSwitch(() => {
-      const { asked, cfgJoin } = askJoinPastReturns(b, stop);
+      const { asked, cfgJoin, shadowed } = askJoinPastReturns(b, stop);
+      if (shadowed) {
+        // the join reading's recognition, with a merge callback that names no merge: the same
+        // recognition as `recognizeSwitch(b, stop)` (switch-recover.ts reads `mergeAt` only as
+        // `mergeAt?.(…) ?? …`), so the copies read what they read without it. Where it refuses after
+        // it started writing, the join reading's second recognition below writes again.
+        let wrote = false;
+        const joined = recognizeSwitch(
+          b,
+          stop,
+          (arms) => {
+            shadowJoin(joinPastReturnsAt(b, stop, arms), cfgJoin);
+            return undefined;
+          },
+          () => {
+            wrote = true;
+          },
+        );
+        if (joined === null && wrote) {
+          reading.differs = true;
+        }
+        return joined;
+      }
       if (asked) {
         let took: Block | null = null;
         const joined = recognizeSwitch(b, stop, (arms) => {
@@ -6429,8 +6481,11 @@ function structureRanked(
     //
     // The join past early returns is asked ahead of both (`askJoinPastReturns` says where, and what
     // the CFG's join becomes when it is).
-    const { asked: pastReturnsAsked, cfgJoin, cfgInRegion } = askJoinPastReturns(b, stop);
+    const { asked: pastReturnsAsked, cfgJoin, cfgInRegion, shadowed } = askJoinPastReturns(b, stop);
     const pastReturns = pastReturnsAsked ? joinPastReturnsAt(b, stop) : null;
+    if (shadowed) {
+      shadowJoin(joinPastReturnsAt(b, stop), cfgJoin);
+    }
     if (pastReturns !== null && pastReturns !== cfgJoin) {
       hooks.onJoinPastReturns?.({ branch: b, join: pastReturns, kind: 'if' });
     }

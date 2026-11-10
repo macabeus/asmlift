@@ -530,6 +530,15 @@ export interface StructureHooks {
    *  filter ahead of its causation probe (`declinesOnCounterSign`, the same structuring with the rule
    *  off), and only a decline that probe ties to the rule falls through to the signed pin. */
   onCounterSignRefused?: () => void;
+  /** Fired once by a structuring that reads the return-tail copies (`copyReturnTails`) and LIFTS,
+   *  where the same structuring reading the join past early returns would have taken every step it
+   *  took: at no branch it asked would the join have been asked and moved anything (`JoinReading`'s
+   *  `differs`, structure.ts). Such a join run is this run, step for step, so it lifts the same tree,
+   *  fires the same hooks and takes no join (`onJoinPastReturns`) — the copies' run already, as
+   *  `structureWithinBudget` says of a join run that never asked. Unheld, and a positive claim: a run
+   *  that does not fire it says nothing. pipeline.ts `copiesByDefault` reads it to skip structuring a
+   *  join whose tree it would discard. Not fired by `assertDefaultAccepts`' structuring. */
+  onJoinReadsAsCopies?: () => void;
 }
 
 /** Each declared-callee table's own key order, name → position, computed once per table object: the

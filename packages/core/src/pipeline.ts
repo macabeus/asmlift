@@ -1414,10 +1414,29 @@ function copiesByDefault(
   };
   let copies: SFn | undefined;
   let copiesError: unknown;
+  // THE JOIN THAT IS THE COPIES' RUN: where the copies' structuring says the join reading would have
+  // taken every step it took (structure.ts `onJoinReadsAsCopies`), the join run lifts the same tree,
+  // fires the same hooks and takes no join past early returns, so it is published nowhere (no
+  // `sites`, below) and is not structured. Measured on `synthetic:sw_hitexit:gcc2.7.2`'s fan.
+  let joinIsCopies = false;
   try {
-    copies = structureChecked(fn, { ...structOpts, copyReturnTails: true }, hooks, memo);
+    copies = structureChecked(
+      fn,
+      { ...structOpts, copyReturnTails: true },
+      {
+        ...hooks,
+        onJoinReadsAsCopies: () => {
+          joinIsCopies = true;
+          hooks?.onJoinReadsAsCopies?.();
+        },
+      },
+      memo,
+    );
   } catch (error) {
     copiesError = refusal(error);
+  }
+  if (copies !== undefined && joinIsCopies) {
+    return { sfn: copies };
   }
   let join: SFn;
   try {
