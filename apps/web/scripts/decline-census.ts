@@ -11,7 +11,8 @@
 //
 //   pnpm regen:declines-census
 //
-// after a reworded, new, moved or removed throw in core, or a class added, changed or reordered.
+// after a reworded, new, moved or removed throw in core, or a class added or changed. Reordering
+// the classes owes nothing: the residue is the messages NO class matches, whatever their order.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 

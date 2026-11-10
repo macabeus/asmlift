@@ -14,7 +14,11 @@
 // Reads only `packages/core/src` and the classes in `declines.ts` — not the benchmark artifact, so a
 // bench regen never owes a census regen. The JSON is passed through
 // the repo's prettier config, so a regeneration that changes no figure is no diff.
+//
+// It runs from any directory: the config is found from the census path, and the config's plugins,
+// which prettier would otherwise resolve from the CURRENT directory, are resolved from the repo root.
 import { writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { format, resolveConfig } from 'prettier';
 
@@ -22,7 +26,10 @@ import { CENSUS_PATH, ROOT, currentCensus } from '../apps/web/scripts/decline-ce
 
 const out = join(ROOT, CENSUS_PATH);
 const census = currentCensus();
-const text = await format(JSON.stringify(census, null, 2), { ...(await resolveConfig(out)), filepath: out });
+const config = (await resolveConfig(out)) ?? {};
+const fromRoot = createRequire(join(ROOT, 'package.json'));
+const plugins = (config.plugins ?? []).map((p) => (typeof p === 'string' ? fromRoot.resolve(p) : p));
+const text = await format(JSON.stringify(census, null, 2), { ...config, plugins, filepath: out });
 writeFileSync(out, text);
 console.log(
   `wrote ${CENSUS_PATH}: ${census.distinctMessages} distinct messages, ` +
