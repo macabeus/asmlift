@@ -8,14 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import {
-  CENSUS_PATH,
-  REGEN_COMMAND,
-  buildCensus,
-  coreSources,
-  declineTemplates,
-  readArtifact,
-} from '../scripts/decline-census';
+import { CENSUS_PATH, REGEN_COMMAND, buildCensus, coreSources, declineTemplates } from '../scripts/decline-census';
 import { DECLINE_CLASSES, declineClassesOf } from '../src/pages/benchmark/lib/declines';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -330,9 +323,9 @@ describe('a pattern keyed on an English word claims sentences that are not about
   // `Error`, `Diagnostic.stage` in `pipeline.ts` is `lift | raise | structure | contract | verify |
   // internal` with no `backend`, and `apps/benchmark/src/eval/asmlift.ts` builds every marker as
   // `${d.stage}: …`. Measured over the artifact, every marker on a declined row opens `lift:`,
-  // `structure:` or `raise:` (`artifact.markersByStage` in `declines-census.json`). A negative test against a string the channel cannot
-  // carry asserts a hazard that does not exist; `ppc.ts`'s tail-branch refusal, a real published
-  // marker, is the whole of the case for not keying on the word `fall-through`.
+  // `structure:` or `raise:`. A negative test against a string the channel cannot carry asserts a
+  // hazard that does not exist; `ppc.ts`'s tail-branch refusal, a real published marker, is the
+  // whole of the case for not keying on the word `fall-through`.
   test('a loop-naming refusal is unclassified rather than misfiled as control flow', () => {
     expect(
       classOf(
@@ -370,8 +363,8 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   // resolving the cause, so their message is a disjunction where Thumb's is a decision. All three
   // spellings name an address-taken local first, and the first two are published markers of
   // `ac-decomp`, `marioparty4` and `pikmin`. The share they make up of `address-taken-local` is
-  // `artifact.addressTakenLocal` in `declines-census.json`, recomputed from the artifact by the
-  // census gate below rather than written here, because it moves whenever a Thumb row is lifted.
+  // read from the artifact rather than written here, because it moves whenever a Thumb row is
+  // lifted.
   test.each([
     [
       "lift: cannot lift 'step0_make_dl': stack pointer r1 used as data (address-taken local / frame " +
@@ -812,7 +805,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // taxonomy that has drifted away from the messages core emits. This one is written against the
   // data the app renders: if a refusal is reworded, or a gap nobody has named appears, "other"
   // grows and this names the markers instead of the count quietly moving.
-  const artifact = readArtifact();
+  const artifact = JSON.parse(
+    readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/data/results.json'), 'utf8'),
+  ) as { results: FunctionResult[] };
 
   test('no published decline marker falls into "other"', () => {
     const unclassified = artifact.results
@@ -936,10 +931,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
         .sort(),
     ).toEqual(NO_ROWS);
   });
-
-  // The two artifact figures the class comments used to spell — `address-taken-local`'s disjunction
-  // share and the rows `float` claims — are `artifact.addressTakenLocal` and `artifact.float` in
-  // `declines-census.json` now, held to the artifact by the census gate at the end of this file.
 
   // The two tests above catch TOTAL shadowing — a class emptied, or a marker nobody claims. They
   // do not catch a PARTIAL swallow, where both classes keep rows and only the counts move, which
@@ -1205,22 +1196,22 @@ describe('the classifier is measured against the messages core can throw, not on
   });
 
   // THE CENSUS THE HEADER CITES. `declines.ts`'s header used to spell these figures — the
-  // distinct-message count, the residue total, the residue per file and the artifact's shares —
-  // and this file pinned each with a `toContain`, so every figure was typed two or three times and
-  // edited by hand in most rounds. They live in `declines-census.json` now, written by the same
-  // harvest this file runs, and this gate is the whole of what keeps them true: it recomputes the
-  // census from core's sources and the committed artifact and requires the committed file to equal
-  // it. The residue is not a defect — some of it is input errors rather than capability gaps
-  // (`disasm.ts` "symbol not found", `format.ts`'s frontend mismatch), and the rest are gaps nothing
-  // in the corpus has reached — but move a family into a class, reword a throw, or regenerate the
-  // artifact, and this goes red until the census is regenerated.
+  // distinct-message count, the residue total and the residue per file — and this file pinned each
+  // with a `toContain`, so every figure was typed two or three times and edited by hand in most
+  // rounds. They live in `declines-census.json` now, written by the same harvest this file runs, and
+  // this gate is the whole of what keeps them true: it recomputes the census from core's sources and
+  // requires the committed file to equal it. The residue is not a defect — some of it is input errors
+  // rather than capability gaps (`disasm.ts` "symbol not found", `format.ts`'s frontend mismatch), and
+  // the rest are gaps nothing in the corpus has reached — but move a family into a class or reword,
+  // add or move a throw, and this goes red until the census is regenerated. It reads no artifact, so a
+  // bench regen never moves it.
   test('the committed census is the census the tree computes', () => {
     const committed: unknown = JSON.parse(readFileSync(join(ROOT, CENSUS_PATH), 'utf8'));
     expect(
       committed,
-      `${CENSUS_PATH} is stale against packages/core/src and the committed artifact — run ` +
+      `${CENSUS_PATH} is stale against packages/core/src and declines.ts's classes — run ` +
         `\`${REGEN_COMMAND}\` and commit the result`,
-    ).toEqual(buildCensus(CORE_TEMPLATES, readArtifact()));
+    ).toEqual(buildCensus(CORE_TEMPLATES));
   });
 
   // AN ALTERNATIVE NOTHING CAN REACH IS INERT, and the file refuses those by name — but it refused

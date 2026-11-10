@@ -10,12 +10,11 @@
 // A CLASS MUST BE DECIDABLE INSIDE THE FIRST 200 CHARACTERS OF THE REASON. The benchmark publishes a
 // marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in `apps/benchmark/src/eval/asmlift.ts`
 // is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the tail of a long message tests a string
-// the artifact does not carry. `artifact.markersAtCap` in `declines-census.json` is how many published
-// markers sit at that cap. A reason opens with the function's own name, so a long C++ name pushes
-// every later phrase toward the cap on its own — which is why `packages/core/src/frontend/ppc.ts` puts
-// `local stack frames not supported` straight after the name in its unread-store and mixed-slot
-// refusals, and why `stack-frames` keys its cross-register reload refusal on the early
-// `a slot … was saved into` rather than on anything later in that message.
+// the artifact does not carry, and many published markers sit at that cap. A reason opens with the
+// function's own name, so a long C++ name pushes every later phrase toward the cap on its own — which
+// is why `packages/core/src/frontend/ppc.ts` puts `local stack frames not supported` straight after
+// the name in its unread-store and mixed-slot refusals, and why `stack-frames` keys its cross-register
+// reload refusal on the early `a slot … was saved into` rather than on anything later in that message.
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
@@ -27,18 +26,18 @@
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
 //
-// THE FIGURES ARE IN `declines-census.json`, BESIDE THIS FILE, AND NOT HERE. `harvest` there counts
-// the distinct decline messages `packages/core/src` throws (the texts reached by
-// `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its
-// `StructOverlapError` subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands
-// the code it shares, harvested by taking each throw's balanced-paren argument, keeping its
-// string-literal pieces and replacing every interpolation with a placeholder), how many of them
-// classify as "other", and, per file, every residual message itself. `artifact` there holds the
-// figures this file's class comments rely on. The file is written by `pnpm regen:declines-census`
-// (`scripts/regen-decline-census.ts`, over the harvester in `apps/web/scripts/decline-census.ts`),
-// and `declines.test.ts` recomputes it and fails, naming that command, when it is stale. When a
-// decline message, a class or the artifact changes, run the command and commit the JSON; do not
-// write a figure here, where nothing checks it.
+// THE FIGURES ARE IN `declines-census.json`, BESIDE THIS FILE, AND NOT HERE. It counts the distinct
+// decline messages `packages/core/src` throws (the texts reached by `FrontendUnsupportedError`,
+// `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError` subclass and
+// `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares, harvested by
+// taking each throw's balanced-paren argument, keeping its string-literal pieces and replacing every
+// interpolation with a placeholder), how many of them classify as "other", and, per file, every
+// residual message itself. The file is written by `pnpm regen:declines-census`
+// (`scripts/regen-decline-census.ts`, over the harvester in `apps/web/scripts/decline-census.ts`), and
+// `declines.test.ts` recomputes it and fails, naming that command, when it is stale. When a decline
+// message or a class changes, run the command and commit the JSON; do not write a figure here, where
+// nothing checks it. The census reads no benchmark artifact, so a bench regen never moves it, and this
+// file states no figure measured on the artifact either: those go stale with every regen.
 //
 // Reading the residue: some of it belongs in "other" — a `disasm.ts` "symbol not found in the
 // disassembly" and a `format.ts` frontend mismatch are input errors, not capability gaps — but most
@@ -68,13 +67,12 @@
 //
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope with
 // a compiler's own error text: the compiler lines in the artifact belong to noncompile rows. Every
-// marker on a declined row opens with `lift:`, `structure:` or `raise:` (`artifact.markersByStage` in
-// `declines-census.json`), and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no fourth
-// value a decline could carry. Two kinds of the naming family are in that residue: `reloc-symbol.ts`
-// `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not a C
-// identifier" and "names the function's predefined name" have none (a Thumb pool word naming the
-// predefined name is the exception: `pool-word-shape` takes it). They have no rows, so they wait for
-// one.
+// marker on a declined row opens with `lift:`, `structure:` or `raise:`, and `Diagnostic.stage` in
+// `packages/core/src/pipeline.ts` has no fourth value a decline could carry. Two kinds of the naming
+// family are in that residue: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six have a
+// class here, while "names 'X', which is not a C identifier" and "names the function's predefined
+// name" have none (a Thumb pool word naming the predefined name is the exception: `pool-word-shape`
+// takes it). They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {
@@ -96,10 +94,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the label
     // does not name. One phrase, three frontends, one class — and a pattern requiring the decided
     // spelling would claim only the decided rows and leave the disjunction's to a class whose label
-    // reads "other sp uses". The split is `artifact.addressTakenLocal` in `declines-census.json`
-    // (`rows`, `disjunction`, `decided`): both figures move whenever a Thumb row is lifted or a
-    // PPC/MIPS one arrives, so they are generated from the committed artifact and held to it by
-    // `declines.test.ts`.
+    // reads "other sp uses". How the class's rows split between the two spellings is read from the
+    // artifact, not written here: it moves whenever a Thumb row is lifted or a PPC/MIPS one arrives.
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
     pattern: /address-taken stack local|address-taken local \/ frame arithmetic/,
@@ -282,10 +278,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'float',
     // THE LABEL NAMES THE FILE, NOT A LIST OF INSTRUCTION KINDS, because the pattern below has no list
     // in it either and a label that enumerates goes stale against a class that does not. The markers
-    // it claims (`artifact.float.markers` in `declines-census.json`) span the arithmetic outside the
-    // single-precision four (double adds, `fabs`), the FPU loads and stores, the moves in both
-    // directions, the conversions and two compares — and NO paired single, which an earlier label
-    // advertised at zero inhabitants:
+    // it claims span the arithmetic outside the single-precision four (double adds, `fabs`), the FPU
+    // loads and stores, the moves in both directions, the conversions and two compares — and NO paired
+    // single, which an earlier label advertised at zero inhabitants:
     //   node -e 'const R=require("./apps/benchmark/results/results.json").results;const c={};
     //   for(const r of R){if(r.asmlift.outcome!=="declined")continue;
     //   for(const m of (r.asmlift.errorMarkers||[])){const g=
@@ -317,9 +312,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // above; the one condition code a `c.cond` sets is read, so no row is left), and an FPU
     // instruction in a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
-    // populations with the command that recomputes them, and the share this class takes — the rows
-    // whose own message names an FPU instruction — is `artifact.float.rows` in
-    // `declines-census.json`, generated from the artifact and gated in `declines.test.ts`.
+    // populations with the command that recomputes them, and this class takes the rows whose own
+    // message names an FPU instruction (count them in the artifact; a figure here would go stale).
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision

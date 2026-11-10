@@ -1,218 +1,199 @@
 {
   "generatedBy": "pnpm regen:declines-census (scripts/regen-decline-census.ts) — do not hand-edit",
-  "harvest": {
-    "distinctMessages": 310,
-    "residueTotal": 114,
-    "residueByFile": [
-      {
-        "file": "frontend/thumb.ts",
-        "count": 31,
-        "messages": [
-          "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
-          "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
-          "cannot lift 'X': 'X X' loads a word that is not X's own into X, which is then used as a value — a pop is read as restoring each register it names, so the copy it makes is not modelled",
-          "cannot lift 'X': 'X X' loads a word that is not X's own save into callee-saved X, and X reaches a return so, unrestored — the caller sees the write, which no C statement spells",
-          "cannot lift 'X': 'X X' targets a label inside this function and not a declared function — an intra-function long branch and a locally-defined call thunk are the same shape here, so this declines rather than guessing which",
-          "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
-          "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
-          "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
-          "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",
-          "cannot lift 'X': block 'X' interleaves raw data (.X) with instructions",
-          "cannot lift 'X': branch target 'X' is not a code block in this function (a data label, or outside the sliced function)",
-          "cannot lift 'X': conditional branch 'X' has no reaching compare: X",
-          "cannot lift 'X': control falls off the end (block 'X' has no terminator and no successor)",
-          "cannot lift 'X': control falls through into the ARM-mode function 'X'",
-          "cannot lift 'X': data label 'X' used as a register — not modelled",
-          "cannot lift 'X': indirect/computed jump 'X X' is not a return through the caller's lr — on some path what it jumps to is not lr, nor the frame word the prologue saved lr in — jump tables / computed gotos / register tail calls not supported",
-          "cannot lift 'X': multi-value raw halfword directive mixing branches is not supported",
-          "cannot lift 'X': neither base alignment fits — X",
-          "cannot lift 'X': no base alignment (0 or 2 mod 4) puts every literal pool word on a 4-byte boundary once alignment fill is accounted forcannot lift 'X': literal pools at inconsistent alignments — cannot determine the function's base alignment",
-          "cannot lift 'X': not a function label in this asm (functions present: X)",
-          "cannot lift 'X': operand 'X' read as a register — not modelled",
-          "cannot lift 'X': pc-relative literal load with no literal pool in the function to resolve into",
-          "cannot lift 'X': pc-relative load at offset 0xX resolves to byte offset 0xX, which is not a word in a literal pool",
-          "cannot lift 'X': program counter used as a data base — not modelled",
-          "cannot lift 'X': raw branch 'X' targets byte offset 0xX, which is not an instruction boundary",
-          "cannot lift 'X': raw data directive '.X' in the code stream — it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)",
-          "cannot lift 'X': raw halfword 'X' in the code stream is not a decodable branch — skipping it would silently delete its effect",
-          "cannot lift 'X': raw-encoded input needs byte-accurate layout, but 'X' fillfills with bytes this frontend does not model, so it contributes no size to the layoutmakes item sizes unknowable",
-          "cannot lift 'X': reachable code in block 'X' falls through into data bytes",
-          "cannot lift 'X': register 'X' in 'X X' is spelled in upper case — this frontend identifies registers by spelling and models the lower-case forms only",
-          "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)"
-        ]
-      },
-      {
-        "file": "structure/structure.ts",
-        "count": 21,
-        "messages": [
-          "'X' is declared a C++ reference, and no spelling names the cell the assembly accesses",
-          "X unresolvable value(s) in 'X' — X",
-          "a struct local's bytes stored into an element of 'X' by a row subscript have no cast cell to spell",
-          "cannot structure 'X': X",
-          "cannot structure 'X': a '&&'/'||' would guard a read of the volatile object 'X', and which side of the branch the asm read it on is not recoverable",
-          "cannot structure 'X': a X X that must stay volatile is reached through a pointer with no type to put the qualifier on",
-          "cannot structure 'X': a loop latch reads an inner loop's value whose name was rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote",
-          "cannot structure 'X': a nested loop reaches the latch or the exit of the \\`for\\` around it (block #X), which \\`continue\\` or \\`break\\` would bind to the nested loop",
-          "cannot structure 'X': a post-loop value inlines a 'X' from inside the loop, which would move that effect out of it",
-          "cannot structure 'X': a pre-update exit copy has no position in the loop body it belongs to",
-          "cannot structure 'X': a pre-update exit copy sunk into a loop body writes 'X' ahead of an edge whose undefined argument's copy was dropped as carrying nothing",
-          "cannot structure 'X': a pre-update exit copy would rebuild a computed value inside a loop nested in another loop's post-loop naming",
-          "cannot structure 'X': block #X is written X times, past the copy budget of X region entries",
-          "cannot structure 'X': seeding the zero-trip value would overwrite a value the loop initialisation reads",
-          "cannot structure 'X': the \\`for\\` at block #X lost its update or its init copy",
-          "cannot structure 'X': the bottom test may evaluate an effect behind a '&&'/'||' that the asm ran on every iteration",
-          "cannot structure 'X': the code after a while (1) reads an inner loop's value whose name was rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote",
-          "cannot structure 'X': the do-while test does not spell 'X' exactly once, so its update has no place inside the test",
-          "cannot structure 'X': the kept guard's condition reads a name the loop initialisation overwrites",
-          "cannot structure 'X': the merge copy into 'X' was suppressed from its edge for a def-site anchor that no rendered position emitted",
-          "cannot structure 'X': unsupported terminator 'X' in block #X (only ret / br / cond_br / switch_br are structured today)"
-        ]
-      },
-      {
-        "file": "frontend/ppc.ts",
-        "count": 15,
-        "messages": [
-          "X X",
-          "X carries a relocation ('X') on a stack-pointer adjust — an address built in r1 is not a shape this frontend models",
-          "cannot lift 'X': 'X X' at 0xX is a X with update not modelled — X",
-          "cannot lift 'X': X does not find one frame address ('addi X,r1,N') in X on every path",
-          "cannot lift 'X': X is read after the restore at 0xX put the caller's X back — no C value names it",
-          "cannot lift 'X': X names no register save routine of the runtime",
-          "cannot lift 'X': X saves X after this function wrote it, so 'X' holds a value, not the caller's Xcannot lift 'X': X saves X after this function read it — a value handed over in a register no argument is passed in, which a compiled prologue saves before any use",
-          "cannot lift 'X': X saves below the frame address formed at 0xX, where the stack pointer's offset from its entry value is not known: X",
-          "cannot lift 'X': X saves or restores floating-point registers — not modelled",
-          "cannot lift 'X': conditional branch 'X' has no reaching compare (X): X",
-          "cannot lift 'X': conditional branch 'X' tests X, but X",
-          "cannot lift 'X': control falls off the end (the block at 0xX has no terminator and no successorX)",
-          "cannot lift 'X': the 'X' at 0xX leaves the function for 'X' — a tail call is not modelled",
-          "cannot lift 'X': the X reads the link register the X overwrote on some path, with no 'mtlr' since — the return address is lost there",
-          "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X"
-        ]
-      },
-      {
-        "file": "frontend/mips.ts",
-        "count": 12,
-        "messages": [
-          "X has the non-numeric immediate 'X' where a number belongs — this frontend will not read it as one",
-          "X sits in the delay slot of a transfer",
-          "X — its delay slot at 0xX is not the next instruction of its block (a branch target, a control transfer, or missing), so it does not run before this call alone",
-          "cannot lift 'X': 'X' at X — the disassembly has no instruction at X for the not-taken edge to land on",
-          "cannot lift 'X': 'X' at X — the disassembly has no instruction at X to be its delay slot",
-          "cannot lift 'X': 'j' at 0xX jumps to 'X' — a tail call into another function is not modelled",
-          "cannot lift 'X': X is read after the 'lw' at 0xX restores the caller's X into it — no C value names it",
-          "cannot lift 'X': no instructions found in the input text",
-          "cannot lift 'X': relocation 'X X' at 0xX carries an addend (0xX), but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format",
-          "cannot lift 'X': relocation 'X X' at 0xX falls inside the function (0xX..0xX) but on no instruction — the relocation table and this disassembly disagree about addressing",
-          "cannot lift 'X': the caller's X, which the 'lw' at 0xX restores, reaches a value this function computes with — no C value names it",
-          "cannot lift 'X': two relocations on one instruction ('X' at 0xX): 'X X' and 'X X'"
-        ]
-      },
-      {
-        "file": "frontend/splat.ts",
-        "count": 8,
-        "messages": [
-          "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
-          "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
-          "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
-          "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
-          "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
-          "cannot lift 'X': unparsable constant expression 'X'",
-          "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
-          "symbol 'X' not found in the Splat disassembly (functions present: X)"
-        ]
-      },
-      {
-        "file": "frontend/disasm.ts",
-        "count": 7,
-        "messages": [
-          "objdump elided a run of zero words ('...') at X, but a zero word is not a decodable instruction on this architecture",
-          "objdump elided a run of zero words ('...') before the first instruction of the listing, ending at X: where the run begins is unknown",
-          "objdump elided a run of zero words ('...') between X and X, which is not a whole number of instruction words",
-          "objdump line 'X' carries an address but no instruction this reader can decode",
-          "relocation 'X X' at 0xX does not fall inside the preceding instruction ('X' at 0xX)any instruction",
-          "symbol 'X' not found in the disassembly (symbols present: X)",
-          "two relocations on one instruction ('X' at 0xX): 'X X' and 'X X'"
-        ]
-      },
-      {
-        "file": "frontend/ssa.ts",
-        "count": 7,
-        "messages": [
-          "cannot lift 'X': X is read in a cycle through the entry block with no join to meet at",
-          "cannot lift 'X': argument 1 of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
-          "cannot lift 'X': argument X of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
-          "cannot lift 'X': it reads callee-saved X before writing it, and X — a value no caller passes as an argumentX — not modelled",
-          "cannot lift 'X': it reads incoming stack argument X, past the X argument words its own declaration fills — the declaration and the body disagree",
-          "cannot lift 'X': it writes callee-saved X, and X — the caller sees the writeX — not modelled",
-          "cannot lift 'X': the write to saved X at 0xX reaches a return with no restore of X after it, so the caller sees it — no C local spells a write that outlives the function"
-        ]
-      },
-      {
-        "file": "frontend/call-plan.ts",
-        "count": 5,
-        "messages": [
-          "cannot lift 'X': X, and a parameter type of its declaration has no spelling the lifted source can declare it with",
-          "cannot lift 'X': X, and its declaration states only a count of parameters, no type the lifted source can declare it with",
-          "cannot lift 'X': \\`X\\` is declared to return both a struct or union and a 64-bit value",
-          "cannot lift 'X': \\`X\\` returns X through a hidden pointer in X, and its parameters are not all sized, so which registers carry its arguments is not known",
-          "cannot lift 'X': \\`X\\` takes 'X'X as its parameter X, and X — a variadic call is lifted only where each fixed parameter is one argument word"
-        ]
-      },
-      {
-        "file": "structure/memory-access.ts",
-        "count": 3,
-        "messages": [
-          "a X-byte X at byte X has no view in the union member 'X'",
-          "a X-byte access at byte X of its base is not a whole number of elements from it — no subscript spells it",
-          "an array access carries both a member offset (X) and a field offset (X)"
-        ]
-      },
-      {
-        "file": "frontend/format.ts",
-        "count": 1,
-        "messages": [
-          "cannot lift: input looks like X, but the 'X' frontend reads X — the ARM/agbcc target takes agbcc .s text; MIPS/PPC take objdump output (the MIPS frontend also reads Splat .s)"
-        ]
-      },
-      {
-        "file": "frontend/register-struct-call.ts",
-        "count": 1,
-        "messages": [
-          "cannot lift 'X': \\`X\\` hands back a struct of X byteX in X, and this function reads bits of the register past it — what the callee left there is no value"
-        ]
-      },
-      {
-        "file": "pipeline.ts",
-        "count": 1,
-        "messages": ["X — and the function carries X, which is the more likely cause"]
-      },
-      {
-        "file": "raise/offsetnames.ts",
-        "count": 1,
-        "messages": ["cannot lift 'X': X in one function — C the compiler would read as X"]
-      },
-      {
-        "file": "structure/edge-copies.ts",
-        "count": 1,
-        "messages": ["cannot structure 'X': parallel copy writes 'X' twice (coalescing bug)"]
-      }
-    ]
-  },
-  "artifact": {
-    "declinedRows": 338,
-    "markersByStage": {
-      "lift": 291,
-      "structure": 59
+  "distinctMessages": 310,
+  "residueTotal": 114,
+  "residueByFile": [
+    {
+      "file": "frontend/thumb.ts",
+      "count": 31,
+      "messages": [
+        "cannot lift 'X': 'X X' branches to 'X', which this asm defines as a data label — not modelled",
+        "cannot lift 'X': 'X X' calls through a register that holds no function's address — not modelled",
+        "cannot lift 'X': 'X X' loads a word that is not X's own into X, which is then used as a value — a pop is read as restoring each register it names, so the copy it makes is not modelled",
+        "cannot lift 'X': 'X X' loads a word that is not X's own save into callee-saved X, and X reaches a return so, unrestored — the caller sees the write, which no C statement spells",
+        "cannot lift 'X': 'X X' targets a label inside this function and not a declared function — an intra-function long branch and a locally-defined call thunk are the same shape here, so this declines rather than guessing which",
+        "cannot lift 'X': 'X' emits fill into the code stream and fillits fill bytes are not a pad encoding this frontend models — they are real instructionsmakes item sizes unknowable",
+        "cannot lift 'X': 'X' is a label here but not a function (the function is 'X')",
+        "cannot lift 'X': ARM-mode function (arm_func_start) — this frontend lifts Thumb only",
+        "cannot lift 'X': alignment padding depends on the function's base alignment, which this input does not determine — base X and base X both decode consistently but disagree: base X has X, base X has X",
+        "cannot lift 'X': block 'X' interleaves raw data (.X) with instructions",
+        "cannot lift 'X': branch target 'X' is not a code block in this function (a data label, or outside the sliced function)",
+        "cannot lift 'X': conditional branch 'X' has no reaching compare: X",
+        "cannot lift 'X': control falls off the end (block 'X' has no terminator and no successor)",
+        "cannot lift 'X': control falls through into the ARM-mode function 'X'",
+        "cannot lift 'X': data label 'X' used as a register — not modelled",
+        "cannot lift 'X': indirect/computed jump 'X X' is not a return through the caller's lr — on some path what it jumps to is not lr, nor the frame word the prologue saved lr in — jump tables / computed gotos / register tail calls not supported",
+        "cannot lift 'X': multi-value raw halfword directive mixing branches is not supported",
+        "cannot lift 'X': neither base alignment fits — X",
+        "cannot lift 'X': no base alignment (0 or 2 mod 4) puts every literal pool word on a 4-byte boundary once alignment fill is accounted forcannot lift 'X': literal pools at inconsistent alignments — cannot determine the function's base alignment",
+        "cannot lift 'X': not a function label in this asm (functions present: X)",
+        "cannot lift 'X': operand 'X' read as a register — not modelled",
+        "cannot lift 'X': pc-relative literal load with no literal pool in the function to resolve into",
+        "cannot lift 'X': pc-relative load at offset 0xX resolves to byte offset 0xX, which is not a word in a literal pool",
+        "cannot lift 'X': program counter used as a data base — not modelled",
+        "cannot lift 'X': raw branch 'X' targets byte offset 0xX, which is not an instruction boundary",
+        "cannot lift 'X': raw data directive '.X' in the code stream — it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)",
+        "cannot lift 'X': raw halfword 'X' in the code stream is not a decodable branch — skipping it would silently delete its effect",
+        "cannot lift 'X': raw-encoded input needs byte-accurate layout, but 'X' fillfills with bytes this frontend does not model, so it contributes no size to the layoutmakes item sizes unknowable",
+        "cannot lift 'X': reachable code in block 'X' falls through into data bytes",
+        "cannot lift 'X': register 'X' in 'X X' is spelled in upper case — this frontend identifies registers by spelling and models the lower-case forms only",
+        "cannot lift 'X': stm with the base register in its own list, not as the lowest entry — the value stored for that register is UNPREDICTABLE and differs between ARMv4 (new base) and ARMv5 (old base)"
+      ]
     },
-    "markersAtCap": 116,
-    "addressTakenLocal": {
-      "rows": 24,
-      "disjunction": 6,
-      "decided": 18
+    {
+      "file": "structure/structure.ts",
+      "count": 21,
+      "messages": [
+        "'X' is declared a C++ reference, and no spelling names the cell the assembly accesses",
+        "X unresolvable value(s) in 'X' — X",
+        "a struct local's bytes stored into an element of 'X' by a row subscript have no cast cell to spell",
+        "cannot structure 'X': X",
+        "cannot structure 'X': a '&&'/'||' would guard a read of the volatile object 'X', and which side of the branch the asm read it on is not recoverable",
+        "cannot structure 'X': a X X that must stay volatile is reached through a pointer with no type to put the qualifier on",
+        "cannot structure 'X': a loop latch reads an inner loop's value whose name was rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote",
+        "cannot structure 'X': a nested loop reaches the latch or the exit of the \\`for\\` around it (block #X), which \\`continue\\` or \\`break\\` would bind to the nested loop",
+        "cannot structure 'X': a post-loop value inlines a 'X' from inside the loop, which would move that effect out of it",
+        "cannot structure 'X': a pre-update exit copy has no position in the loop body it belongs to",
+        "cannot structure 'X': a pre-update exit copy sunk into a loop body writes 'X' ahead of an edge whose undefined argument's copy was dropped as carrying nothing",
+        "cannot structure 'X': a pre-update exit copy would rebuild a computed value inside a loop nested in another loop's post-loop naming",
+        "cannot structure 'X': block #X is written X times, past the copy budget of X region entries",
+        "cannot structure 'X': seeding the zero-trip value would overwrite a value the loop initialisation reads",
+        "cannot structure 'X': the \\`for\\` at block #X lost its update or its init copy",
+        "cannot structure 'X': the bottom test may evaluate an effect behind a '&&'/'||' that the asm ran on every iteration",
+        "cannot structure 'X': the code after a while (1) reads an inner loop's value whose name was rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote",
+        "cannot structure 'X': the do-while test does not spell 'X' exactly once, so its update has no place inside the test",
+        "cannot structure 'X': the kept guard's condition reads a name the loop initialisation overwrites",
+        "cannot structure 'X': the merge copy into 'X' was suppressed from its edge for a def-site anchor that no rendered position emitted",
+        "cannot structure 'X': unsupported terminator 'X' in block #X (only ret / br / cond_br / switch_br are structured today)"
+      ]
     },
-    "float": {
-      "rows": 76,
-      "markers": 76
+    {
+      "file": "frontend/ppc.ts",
+      "count": 15,
+      "messages": [
+        "X X",
+        "X carries a relocation ('X') on a stack-pointer adjust — an address built in r1 is not a shape this frontend models",
+        "cannot lift 'X': 'X X' at 0xX is a X with update not modelled — X",
+        "cannot lift 'X': X does not find one frame address ('addi X,r1,N') in X on every path",
+        "cannot lift 'X': X is read after the restore at 0xX put the caller's X back — no C value names it",
+        "cannot lift 'X': X names no register save routine of the runtime",
+        "cannot lift 'X': X saves X after this function wrote it, so 'X' holds a value, not the caller's Xcannot lift 'X': X saves X after this function read it — a value handed over in a register no argument is passed in, which a compiled prologue saves before any use",
+        "cannot lift 'X': X saves below the frame address formed at 0xX, where the stack pointer's offset from its entry value is not known: X",
+        "cannot lift 'X': X saves or restores floating-point registers — not modelled",
+        "cannot lift 'X': conditional branch 'X' has no reaching compare (X): X",
+        "cannot lift 'X': conditional branch 'X' tests X, but X",
+        "cannot lift 'X': control falls off the end (the block at 0xX has no terminator and no successorX)",
+        "cannot lift 'X': the 'X' at 0xX leaves the function for 'X' — a tail call is not modelled",
+        "cannot lift 'X': the X reads the link register the X overwrote on some path, with no 'mtlr' since — the return address is lost there",
+        "cannot lift 'X': the store to 'X' at 0xX is not the link register's save — X"
+      ]
+    },
+    {
+      "file": "frontend/mips.ts",
+      "count": 12,
+      "messages": [
+        "X has the non-numeric immediate 'X' where a number belongs — this frontend will not read it as one",
+        "X sits in the delay slot of a transfer",
+        "X — its delay slot at 0xX is not the next instruction of its block (a branch target, a control transfer, or missing), so it does not run before this call alone",
+        "cannot lift 'X': 'X' at X — the disassembly has no instruction at X for the not-taken edge to land on",
+        "cannot lift 'X': 'X' at X — the disassembly has no instruction at X to be its delay slot",
+        "cannot lift 'X': 'j' at 0xX jumps to 'X' — a tail call into another function is not modelled",
+        "cannot lift 'X': X is read after the 'lw' at 0xX restores the caller's X into it — no C value names it",
+        "cannot lift 'X': no instructions found in the input text",
+        "cannot lift 'X': relocation 'X X' at 0xX carries an addend (0xX), but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format",
+        "cannot lift 'X': relocation 'X X' at 0xX falls inside the function (0xX..0xX) but on no instruction — the relocation table and this disassembly disagree about addressing",
+        "cannot lift 'X': the caller's X, which the 'lw' at 0xX restores, reaches a value this function computes with — no C value names it",
+        "cannot lift 'X': two relocations on one instruction ('X' at 0xX): 'X X' and 'X X'"
+      ]
+    },
+    {
+      "file": "frontend/splat.ts",
+      "count": 8,
+      "messages": [
+        "cannot lift 'X': branch/jump target 'X' is not a local label in this function (tail call / cross-function branch not modelled)",
+        "cannot lift 'X': data directive 'X' in the code stream — skipping it would silently delete its effect",
+        "cannot lift 'X': operand 'X' has a leading-zero magnitude ('X'), which is octal to the assembler and a radix this reader does not model",
+        "cannot lift 'X': relocation operand 'X' — this reader resolves a '%hi'/'%lo' half only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve as arithmetic",
+        "cannot lift 'X': two relocation operands on one instruction ('X' at 0xX): 'X' and 'X'",
+        "cannot lift 'X': unparsable constant expression 'X'",
+        "cannot lift 'X': unrecognised line in the Splat disassembly: 'X'",
+        "symbol 'X' not found in the Splat disassembly (functions present: X)"
+      ]
+    },
+    {
+      "file": "frontend/disasm.ts",
+      "count": 7,
+      "messages": [
+        "objdump elided a run of zero words ('...') at X, but a zero word is not a decodable instruction on this architecture",
+        "objdump elided a run of zero words ('...') before the first instruction of the listing, ending at X: where the run begins is unknown",
+        "objdump elided a run of zero words ('...') between X and X, which is not a whole number of instruction words",
+        "objdump line 'X' carries an address but no instruction this reader can decode",
+        "relocation 'X X' at 0xX does not fall inside the preceding instruction ('X' at 0xX)any instruction",
+        "symbol 'X' not found in the disassembly (symbols present: X)",
+        "two relocations on one instruction ('X' at 0xX): 'X X' and 'X X'"
+      ]
+    },
+    {
+      "file": "frontend/ssa.ts",
+      "count": 7,
+      "messages": [
+        "cannot lift 'X': X is read in a cycle through the entry block with no join to meet at",
+        "cannot lift 'X': argument 1 of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
+        "cannot lift 'X': argument X of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
+        "cannot lift 'X': it reads callee-saved X before writing it, and X — a value no caller passes as an argumentX — not modelled",
+        "cannot lift 'X': it reads incoming stack argument X, past the X argument words its own declaration fills — the declaration and the body disagree",
+        "cannot lift 'X': it writes callee-saved X, and X — the caller sees the writeX — not modelled",
+        "cannot lift 'X': the write to saved X at 0xX reaches a return with no restore of X after it, so the caller sees it — no C local spells a write that outlives the function"
+      ]
+    },
+    {
+      "file": "frontend/call-plan.ts",
+      "count": 5,
+      "messages": [
+        "cannot lift 'X': X, and a parameter type of its declaration has no spelling the lifted source can declare it with",
+        "cannot lift 'X': X, and its declaration states only a count of parameters, no type the lifted source can declare it with",
+        "cannot lift 'X': \\`X\\` is declared to return both a struct or union and a 64-bit value",
+        "cannot lift 'X': \\`X\\` returns X through a hidden pointer in X, and its parameters are not all sized, so which registers carry its arguments is not known",
+        "cannot lift 'X': \\`X\\` takes 'X'X as its parameter X, and X — a variadic call is lifted only where each fixed parameter is one argument word"
+      ]
+    },
+    {
+      "file": "structure/memory-access.ts",
+      "count": 3,
+      "messages": [
+        "a X-byte X at byte X has no view in the union member 'X'",
+        "a X-byte access at byte X of its base is not a whole number of elements from it — no subscript spells it",
+        "an array access carries both a member offset (X) and a field offset (X)"
+      ]
+    },
+    {
+      "file": "frontend/format.ts",
+      "count": 1,
+      "messages": [
+        "cannot lift: input looks like X, but the 'X' frontend reads X — the ARM/agbcc target takes agbcc .s text; MIPS/PPC take objdump output (the MIPS frontend also reads Splat .s)"
+      ]
+    },
+    {
+      "file": "frontend/register-struct-call.ts",
+      "count": 1,
+      "messages": [
+        "cannot lift 'X': \\`X\\` hands back a struct of X byteX in X, and this function reads bits of the register past it — what the callee left there is no value"
+      ]
+    },
+    {
+      "file": "pipeline.ts",
+      "count": 1,
+      "messages": ["X — and the function carries X, which is the more likely cause"]
+    },
+    {
+      "file": "raise/offsetnames.ts",
+      "count": 1,
+      "messages": ["cannot lift 'X': X in one function — C the compiler would read as X"]
+    },
+    {
+      "file": "structure/edge-copies.ts",
+      "count": 1,
+      "messages": ["cannot structure 'X': parallel copy writes 'X' twice (coalescing bug)"]
     }
-  }
+  ]
 }
