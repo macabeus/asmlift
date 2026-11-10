@@ -64,8 +64,9 @@ import {
   structure,
 } from './structure/structure';
 import { unfoldedBranchConstant } from './structure/unfolded-branch-constant';
+import { structuringOptions } from './structuring-options';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
-import { type TargetDescription, structureOptionsFor } from './target';
+import type { TargetDescription } from './target';
 
 /** How a gap (a construct asmlift cannot faithfully model) degrades:
  *    "strict"   — throw / `"?"`-sentinel → ContractError. Loud in the PROCESS. The default, and
@@ -290,22 +291,24 @@ function runTower(
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const { sfn } = structureReturnTailReading(
     fn,
-    {
-      ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
-      // What the EMITTED LANGUAGE can say is a structuring input wherever two recoveries of one
-      // shape are behaviourally identical and only one of them is printable (switch fall-through
-      // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
-      spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-      spellSwitchBreak: backend.spellsSwitchBreak,
-      spellEarlyReturns: backend.spellsEarlyReturn,
-      ...(opts.copyReturnTails ? { copyReturnTails: true } : {}),
-      ...(opts.joinPastReturns ? { joinPastReturns: true } : {}),
+    // Every input structuring-options.ts takes: this is the path the other three sites (rank.ts,
+    // trace.ts, the cli's report.ts probe) mirror. What the EMITTED LANGUAGE can say is a
+    // structuring input wherever two recoveries of one shape are behaviourally identical and only
+    // one of them is printable (switch fall-through vs plain if-nesting): recovery must not mint a
+    // tree this backend would refuse.
+    structuringOptions({
+      target,
+      returnsVoid: declaresVoidReturn(prototypes[name]),
+      prototypes,
+      backend,
+      copyReturnTails: opts.copyReturnTails,
+      joinPastReturns: opts.joinPastReturns,
       onGap,
-      ...(mapSymbols ? { symbols: mapSymbols } : {}),
-      ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
-      ...(inferredSymbols.size ? { inferredSymbols } : {}),
-      ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-    },
+      symbols: mapSymbols,
+      contextGlobals: opts.contextGlobals,
+      inferredSymbols,
+      orderLicensedGlobals: orderLicensed,
+    }),
     (t) => backend.emit(t),
     {},
     // ONE default-accepts memo for this lift, as rank.ts keeps one per lift: the copies the measured
