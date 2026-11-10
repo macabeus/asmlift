@@ -77,9 +77,8 @@ console.log('FPU-touching:',fp.length,'| names an FPU instruction:',named.length
 `frontend/opaque.ts`'s `fpReg` and `fpControl` reach. The **14** are `bc1t`/`bc1f` condition-code
 branches, refused by their own guard in `frontend/mips.ts` and reported as their own class
 (`fp-cond-branch`): the same missing file, but a branch has no destination to degrade, so it is a
-different mechanism and `opaqueDest` could not answer it — the `float` class in
-`apps/web/src/pages/benchmark/lib/declines.ts` says so, and this is the figure it is saying it
-about. The remaining 30 refuse at some earlier guard entirely (a PowerPC constant-pool name, a
+different mechanism and `opaqueDest` could not answer it, which is why the `float` class in
+`apps/web/src/pages/benchmark/lib/declines.ts` does not claim them. The remaining 30 refuse at some earlier guard entirely (a PowerPC constant-pool name, a
 `bctr`, an unpaired relocation).
 
 **A capability that closed only the FPU register file would move at most those 69, and a round
