@@ -11,7 +11,8 @@
 // pair (`CallLowering.pairs`) refuses a 64-bit width before any count is taken. The call a plan
 // lowers to is built here too (`CallDeclarations.lower`), and asks the frontend (`CallSite`) only
 // what its ISA alone knows: how it reads and writes a register, where an argument word past the
-// registers lives, and how it builds a pair.
+// registers lives, and how it builds a pair. A call nothing declares is lowered at a GUESSED arity,
+// which frontend/call-arity.ts counts (`fallbackArgc`) and later trims (`trimClobberedCallArgs`).
 import {
   type ByValueArg,
   aggregateType,

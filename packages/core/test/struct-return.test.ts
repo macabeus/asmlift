@@ -426,7 +426,7 @@ describe('a callee declared to return a struct or union by value', () => {
       }),
     ).toThrow(/argument 1 of the call to 'other' is a struct an earlier call handed back in r0/);
     // …and where `mv`'s own parameters are unstated its guess refuses first: `b` read into r4 and
-    // `a` left in r0 is a gap (frontend/ssa.ts `fallbackArgc`)
+    // `a` left in r0 is a gap (frontend/call-arity.ts `fallbackArgc`)
     expect(() =>
       decompile('f', F, ARMV4T_AGBCC, { prototypes: { mv: { returns: 'struct One', returnLayout: layout } } }),
     ).toThrow(/the call 'bl mv' in block 'f' has no prototype, r1 holds a value and r0 holds none/);

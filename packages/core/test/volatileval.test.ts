@@ -182,7 +182,7 @@ const SPILL = `f:
 `;
 
 // `g` declared to take the r0 a guess would count: undeclared, r2 and r3 past an r1 nothing set are a
-// gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`)
+// gap the guessed arity refuses (frontend/call-arity.ts `fallbackArgc`)
 const G1 = { prototypes: { g: { params: 1 } } };
 
 test('the default keeps the plain declaration — the slot is a fact, the qualifier is not', () => {

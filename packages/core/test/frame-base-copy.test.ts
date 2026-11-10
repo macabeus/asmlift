@@ -41,7 +41,7 @@ const SPILL = `f:
 `;
 
 // `g` takes the one argument a guess would count, declared: undeclared, `SPILL`'s r2 and r3 hold
-// values past an r1 nothing set, a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`).
+// values past an r1 nothing set, a gap the guessed arity refuses (frontend/call-arity.ts `fallbackArgc`).
 const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } });
 const liftUndeclared = (asm: string) => decompile('f', asm, ARMV4T_AGBCC);
 

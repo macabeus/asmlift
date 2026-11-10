@@ -185,7 +185,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // A guessed call arity reads the ARGUMENT REGISTERS, and r3.. are volatile under the EABI: a value
   // the first `bl` sits between cannot be an argument to the second one. Counting it invents an
   // argument — `func(1, 7)` for a call the caller set up with one — which is a wrong-code class, not
-  // a formatting one. Same trim as the Thumb frontend (frontend/ssa.ts trimClobberedCallArgs).
+  // a formatting one. Same trim as the Thumb frontend (frontend/call-arity.ts trimClobberedCallArgs).
   test('a guessed call arity drops the argument registers an earlier call clobbered', () => {
     // r3 is set before the first call too: a call whose r3 is empty while r4 holds a value is the
     // undecidable ARITY shape the guard below refuses, which is a different question from this one.

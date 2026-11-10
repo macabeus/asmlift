@@ -5,7 +5,7 @@
 // and on most ABIs `g()` and `g(x)` compile to the same caller bytes whenever x is already in the
 // first argument register — so the caller cannot decide it. Where the callee's own body is in the
 // input, the body can: an argument it never reads is no argument it can tell from a missing one.
-// That answers only a question about a register at or past what the body reads (frontend/ssa.ts
+// That answers only a question about a register at or past what the body reads (frontend/call-arity.ts
 // `fallbackArgc`'s `bound`, and the dispatch pass-through gate in frontend/call-plan.ts). It never
 // caps what the caller passes: a source call hands an unused parameter, or a K&R call extra
 // arguments, all the same, and a register below the bound may be read.

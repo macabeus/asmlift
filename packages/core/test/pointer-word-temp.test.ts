@@ -99,7 +99,7 @@ describe('a temp that keeps its integer', () => {
   test('when no sum reads it', () => {
     // read only as a call argument: the byte pointer buys no sum its association. `Prep` is
     // declared: undeclared, the pool address left in r1 past an r0 nothing set is a gap the guessed
-    // arity refuses (frontend/ssa.ts `fallbackArgc`).
+    // arity refuses (frontend/call-arity.ts `fallbackArgc`).
     const src = decompile(
       'f',
       'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tPrep\n' +

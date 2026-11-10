@@ -135,10 +135,9 @@
     },
     {
       "file": "frontend/ssa.ts",
-      "count": 7,
+      "count": 6,
       "messages": [
         "cannot lift 'X': X is read in a cycle through the entry block with no join to meet at",
-        "cannot lift 'X': argument 1 of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
         "cannot lift 'X': argument X of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled",
         "cannot lift 'X': it reads callee-saved X before writing it, and X — a value no caller passes as an argumentX — not modelled",
         "cannot lift 'X': it reads incoming stack argument X, past the X argument words its own declaration fills — the declaration and the body disagree",
@@ -164,6 +163,13 @@
         "a X-byte X at byte X has no view in the union member 'X'",
         "a X-byte access at byte X of its base is not a whole number of elements from it — no subscript spells it",
         "an array access carries both a member offset (X) and a field offset (X)"
+      ]
+    },
+    {
+      "file": "frontend/call-arity.ts",
+      "count": 1,
+      "messages": [
+        "cannot lift 'X': argument 1 of the call to X : 'a callee'} is a struct an earlier call handed back in X, and nothing here passes one on as an argument — not modelled"
       ]
     },
     {

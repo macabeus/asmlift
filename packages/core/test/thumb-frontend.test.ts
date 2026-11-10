@@ -5299,7 +5299,7 @@ describe('an incoming stack argument re-read in a loop is the parameter', () => 
 // unchanged is one. agbcc's own output for `int logv(); int pr(const char *s){ return logv(s, 1) + 1; }`
 // sets r1 alone and leaves `s` in r0, so a count that stops at r0 lifts it as `logv() + 1`. A later
 // register holding a value says the call takes arguments past the gap, and which ones is not
-// decidable, so the guess refuses (frontend/ssa.ts `fallbackArgc`), naming the call by its block.
+// decidable, so the guess refuses (frontend/call-arity.ts `fallbackArgc`), naming the call by its block.
 // A GAP IN THE ARGUMENT REGISTERS OF AN UNDECLARED CALL is decided where the register above it is
 // surely an argument (frontend/call-plan.ts `decideGap`): the call's own block set it to a value no
 // memory read produced, which nothing else reads, and agbcc fills argument words in order — so the
@@ -5427,7 +5427,7 @@ describe('a gap in the argument registers of an undeclared call', () => {
 });
 
 // PAST A VARIADIC DECLARATION'S STATED WORDS, A REGISTER HOLDING ONLY THIS FUNCTION'S OWN INCOMING
-// VALUE REFUSES (frontend/ssa.ts `fallbackArgc`): a read leaves the entry value behind as a
+// VALUE REFUSES (frontend/call-arity.ts `fallbackArgc`): a read leaves the entry value behind as a
 // definition, and whether the call is handed it is not decidable. agbcc's own output for
 // `int dprint(const char *, ...);` and each source below. The value a call destroyed reaches only
 // through that call, and the copy that re-sets the register sets it up, so neither is the entry

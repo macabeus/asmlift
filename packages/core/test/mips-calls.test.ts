@@ -206,7 +206,7 @@ describe('a guessed arity that cannot be decided refuses', () => {
   });
 
   // past a variadic declaration's stated words, a register holding only this function's own
-  // incoming value refuses (frontend/ssa.ts `fallbackArgc`), and one a call destroyed holds none.
+  // incoming value refuses (frontend/call-arity.ts `fallbackArgc`), and one a call destroyed holds none.
   // IDO 7.1's own output for `int dprint(const char *, ...);` and each source below.
   test('an incoming value past a variadic floor refuses, and one a call destroyed is no argument', () => {
     const dprint = { dprint: { returns: 's32', variadicParams: ['const char *'] }, g: { params: [], returns: 's32' } };
