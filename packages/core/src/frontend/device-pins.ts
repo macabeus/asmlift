@@ -40,7 +40,7 @@
  *  variation, and the ones that home the base or un-reduce a loop refuse a qualified base, which
  *  costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. That is also why the two
  *  policies stay two rows: the one-object row's every-store pin is what keeps `threeFills`' nine
- *  qualified stores (thumb-frontend.test.ts), and on the per-object row it costs those two matches.
+ *  qualified stores (thumb-frame-objects.test.ts), and on the per-object row it costs those two matches.
  *
  *  One store left plain this way is a GAP: a device store a pinned read of the same cell re-reads
  *  in a loop where nothing else may alias the cell. agbcc's loop pass takes the first access of a
