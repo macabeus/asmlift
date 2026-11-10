@@ -49,7 +49,7 @@ import {
   Successor,
   Value,
   defOpMap,
-  dominators,
+  dominance,
   foldWriteOrder,
   forwardingTarget,
   mkOp,
@@ -1084,10 +1084,28 @@ function armRereadSite(
 /** Whether leaving ^g for `arm` leaves a natural loop ^g is in — some back-edge `t→h` (h dominates
  *  t) whose body, h plus everything reaching t without passing h, holds ^g and not the arm. */
 function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, readonly Block[]>): boolean {
-  const dom = dominators(fn);
+  return naturalLoopBodies(fn, preds).some((body) => body.has(g) && !body.has(arm));
+}
+
+/** The natural loop bodies of `fn`'s CFG as `preds` describes it, one per back-edge `t→h` (h
+ *  dominates t): h plus everything reaching t without passing h.
+ *
+ *  MEMOISED ON THE PREDECESSOR MAP. `recognizeBranchShortCircuit` builds one `preds` per scan of the
+ *  function and rescans after every fold, so one map stands for one CFG: every site that scan asks
+ *  `loop-exit` about shares one dominator computation instead of paying one each. That was the cost
+ *  of a large function's plain lift: Klonoa's sub_0800D188 (1,783 blocks) spent most of its first
+ *  five minutes rebuilding these dominator sets per site. A caller that mutates the CFG under a map
+ *  it keeps would read stale loops, as it already reads stale predecessors. */
+function naturalLoopBodies(fn: Fn, preds: ReadonlyMap<Block, readonly Block[]>): readonly Set<Block>[] {
+  const cached = LOOP_BODIES.get(preds);
+  if (cached !== undefined && cached.fn === fn) {
+    return cached.bodies;
+  }
+  const dominates = dominance(fn);
+  const bodies: Set<Block>[] = [];
   for (const t of fn.blocks) {
     for (const h of successorsOf(t)) {
-      if (!dom.get(t)?.has(h)) {
+      if (!dominates(h, t)) {
         continue;
       }
       const body = new Set<Block>([h]);
@@ -1098,13 +1116,13 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
           work.push(...(preds.get(b) ?? []));
         }
       }
-      if (body.has(g) && !body.has(arm)) {
-        return true;
-      }
+      bodies.push(body);
     }
   }
-  return false;
+  LOOP_BODIES.set(preds, { fn, bodies });
+  return bodies;
 }
+const LOOP_BODIES = new WeakMap<ReadonlyMap<Block, readonly Block[]>, { fn: Fn; bodies: readonly Set<Block>[] }>();
 
 /** Whether analysis.ts would spell the arm's copy of a READ as a LOCAL rather than inline — a
  *  MIRROR of analysis.ts's placement and barrier rules (structure/analysis.ts: `emitPos`, the

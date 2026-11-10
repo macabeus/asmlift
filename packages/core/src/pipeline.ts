@@ -56,7 +56,13 @@ import { PRE_STRUCTURE_FOLDS, type PreStructureFold } from './raise/pre-structur
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { crossJumpedTail } from './structure/cross-jumped-tail';
-import { DefaultAcceptsMemoMisuse, type JoinPastReturnsSite, StructureError, structure } from './structure/structure';
+import {
+  DefaultAcceptsMemo,
+  DefaultAcceptsMemoMisuse,
+  type JoinPastReturnsSite,
+  StructureError,
+  structure,
+} from './structure/structure';
 import { unfoldedBranchConstant } from './structure/unfolded-branch-constant';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
@@ -301,6 +307,14 @@ function runTower(
       ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
     },
     (t) => backend.emit(t),
+    {},
+    // ONE default-accepts memo for this lift, as rank.ts keeps one per lift: the copies the measured
+    // default structures first carry `copyReturnTails`, so every run of their ladder asks
+    // `assertDefaultAccepts` to structure the default first, and without a memo each rerun pays that
+    // whole structuring again. `structure()` does not mutate `fn` (structure-purity.test.ts), so the
+    // memo's answer is the one each rerun would compute. Measured on Klonoa's sub_0800D188 (1,783
+    // blocks): every one of its copies' reruns structured the whole join ladder again.
+    new DefaultAcceptsMemo(fn),
   );
 
   // (5) lower + print: neutral AST → target language

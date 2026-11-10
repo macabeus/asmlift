@@ -1007,12 +1007,18 @@ function makeMemWriteBetween(deps: {
     if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
       return true;
     }
-    for (const x of reachAvoiding(b, b)) {
-      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
-        continue; // acyclic render block: head checked
-      }
-      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
-        continue; // not on a def→render path
+    // The between-blocks: every `x` the def's block reaches without re-crossing it from which the
+    // render block is reached again in at least one step, by the same def-avoiding walk. The render
+    // block itself counts only where it reaches itself so (its head is checked above); any other
+    // block only where it lies on a def→render path.
+    const forward = reachAvoiding(b, b);
+    if (!forward.has(render.blk)) {
+      return false; // every block on a def→render path is one the def's block reaches
+    }
+    const onPath = blocksReaching(forward, render.blk, b);
+    for (const x of forward) {
+      if (!successorsOf(x).some((s) => s !== b && onPath.has(s))) {
+        continue; // not on a def→render path (or, for the render block, acyclic: head checked)
       }
       if (wDirty(x.ops, 0, x.ops.length)) {
         return true;
@@ -1020,6 +1026,49 @@ function makeMemWriteBetween(deps: {
     }
     return false;
   };
+}
+
+/** The blocks of `within` that reach `target` in zero or more steps without passing `avoid`,
+ *  `target` included: one backward walk over `within`'s own edges.
+ *
+ *  `makeMemWriteBetween` asks, for each block `x` the def's block reaches, whether `target` is in
+ *  `reachAvoiding(x, avoid)`. That is a forward walk per `x`, quadratic in the function's size per
+ *  question, and the question is asked per op `analyze` names (`nameAccess`): Klonoa's
+ *  sub_0800D188 (1,783 blocks) spent most of its structuring in those walks. `target` is in
+ *  `reachAvoiding(x, avoid)` exactly where some successor of `x` other than `avoid` is in this set,
+ *  since every block on such a path after `x` is in `within` (`within` being everything the def's
+ *  block reaches without passing `avoid`, from which `x` was drawn). */
+function blocksReaching(within: ReadonlySet<Block>, target: Block, avoid: Block): Set<Block> {
+  const into = new Map<Block, Block[]>();
+  for (const y of within) {
+    if (y === avoid) {
+      continue;
+    }
+    for (const s of successorsOf(y)) {
+      if (s !== avoid && within.has(s)) {
+        const list = into.get(s);
+        if (list === undefined) {
+          into.set(s, [y]);
+        } else {
+          list.push(y);
+        }
+      }
+    }
+  }
+  const out = new Set<Block>();
+  if (target === avoid) {
+    return out;
+  }
+  out.add(target);
+  for (const work = [target]; work.length;) {
+    for (const y of into.get(work.pop()!) ?? []) {
+      if (!out.has(y)) {
+        out.add(y);
+        work.push(y);
+      }
+    }
+  }
+  return out;
 }
 
 /** INTERDEPENDENT PARALLEL-COPY ARGS. A terminator's successor args are ONE parallel copy

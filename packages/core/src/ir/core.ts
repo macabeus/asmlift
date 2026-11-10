@@ -598,6 +598,67 @@ export function dominators(fn: { readonly blocks: readonly Block[] }): Map<Block
   return dom;
 }
 
+/** Whether `h` dominates `t`, exactly as `dominators(fn).get(t).has(h)` answers it: the
+ *  same data-flow (dom(b) = {b} ∪ ⋂ dom(preds), the entry alone, every other block starting from all
+ *  of them), iterated to the same greatest fixed point, over one bit per block instead of a `Set`
+ *  per block. raise/shortcircuit.ts's `naturalLoopBodies` asks it once per scan of a function its fold
+ *  keeps changing, where the sets cost a large function's lift most of its raising time. */
+export function dominance(fn: { readonly blocks: readonly Block[] }): (h: Block, t: Block) => boolean {
+  const n = fn.blocks.length;
+  const words = Math.ceil(n / 32);
+  const index = new Map<Block, number>();
+  fn.blocks.forEach((b, i) => index.set(b, i));
+  const preds = predecessors(fn);
+  const dom = fn.blocks.map((_, i) => {
+    const bits = new Uint32Array(words);
+    if (i === 0) {
+      bits[0] = 1;
+    } else {
+      bits.fill(0xffffffff);
+      if (n % 32 !== 0) {
+        bits[words - 1] = 2 ** (n % 32) - 1;
+      }
+    }
+    return bits;
+  });
+  const next = new Uint32Array(words);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 1; i < n; i++) {
+      const ps = preds.get(fn.blocks[i])!;
+      if (ps.length === 0) {
+        next.fill(0);
+      } else {
+        next.set(dom[index.get(ps[0])!]);
+        for (let k = 1; k < ps.length; k++) {
+          const dp = dom[index.get(ps[k])!];
+          for (let w = 0; w < words; w++) {
+            next[w] &= dp[w];
+          }
+        }
+      }
+      next[i >>> 5] |= 1 << (i & 31);
+      const prev = dom[i];
+      let same = true;
+      for (let w = 0; w < words; w++) {
+        if (next[w] !== prev[w]) {
+          same = false;
+          break;
+        }
+      }
+      if (!same) {
+        prev.set(next);
+        changed = true;
+      }
+    }
+  }
+  return (h, t) => {
+    const hi = index.get(h);
+    const ti = index.get(t);
+    return hi !== undefined && ti !== undefined && (dom[ti][hi >>> 5] & (1 << (hi & 31))) !== 0;
+  };
+}
+
 /** Each block's IMMEDIATE dominator: of its strict `dominators`, which form a chain, the nearest —
  *  the one every other dominates, so the one with the most dominators of its own. Read off those
  *  sets rather than computed again, so the tree and the sets cannot disagree; but off the sets of
