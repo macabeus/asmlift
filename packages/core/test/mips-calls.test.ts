@@ -9,20 +9,7 @@ import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
-
-/** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
-
-/** `.text` relocation records, as the object's `objdump -r` side table hands them over. */
-const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
-  sections: new Map(),
-  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
-  symbols: new Map(),
-  symbolCount: 0,
-  bigEndian: true,
-});
+import { obj, relocs } from './helpers';
 
 const src = (
   lines: string[],

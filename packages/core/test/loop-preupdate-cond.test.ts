@@ -11,19 +11,9 @@
 // position the connective skips holds a name and `testSkipsAnEffect` finds no effect there.
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
 import type { Expr } from '../src/l3/ast';
-import { recoverTypes } from '../src/raise/recover';
-import { StructureError, spellUpdateInCond, structure } from '../src/structure/structure';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { StructureError, spellUpdateInCond } from '../src/structure/structure';
+import { emit } from './helpers';
 
 // `do { r = work(a0); } while (r != 0 && i++ <= 9)`, the kleod `DeleteAllSaveData` shape: ^bb1 is
 // header and latch, %2 is the retry counter, and the bottom test reads it at %9 — one update behind

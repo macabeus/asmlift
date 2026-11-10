@@ -38,14 +38,7 @@ import { analyze } from '../src/structure/analysis';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, structureOptionsFor } from '../src/target';
-import { irAgreement } from './helpers';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit, irAgreement } from './helpers';
 
 // A guard-fused self-loop walking a list with a trailing pointer. ^bb1 is header AND latch; its
 // exit edge hands ^bb2 both %3 (the pre-update pointer — the trailing one) and %4 (post-update).

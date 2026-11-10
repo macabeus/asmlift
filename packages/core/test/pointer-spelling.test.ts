@@ -13,6 +13,7 @@ import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
 import { declaresBytePointer, holdsPointerWord, makePointerSpelling } from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
+import { c, v } from './helpers';
 
 interface Fixture {
   /** the project map's entries; absent ⇒ no map */
@@ -43,8 +44,6 @@ const make = (f: Fixture = {}) => {
   });
 };
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const addr = (name: string): Expr => ({ k: 'addr', name });
 const cast = (to: IrType, e: Expr): Expr => ({ k: 'cast', to, e });
 const bin = (op: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });

@@ -23,6 +23,7 @@ import {
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { unmergeJoins } from '../src/l3/unmerge';
+import { asg, c, v } from './helpers';
 
 const local = (name: string) => ({ name, type: T.s(32) });
 const fn = (names: string[], body: Stmt[]): SFn => ({
@@ -33,9 +34,6 @@ const fn = (names: string[], body: Stmt[]): SFn => ({
   retType: T.void(),
   body,
 });
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
-const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const deref = (p: Expr): Expr => ({ k: 'index', base: p, idx: c(0), width: 4, signed: true });
 
 // `v16` is assigned and read, and declared nowhere: exactly what a consuming pass leaves behind

@@ -13,18 +13,7 @@
 // the hole `edge-arg-call.test.ts` names for the sibling placement rule. Toolchain-free.
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 // `if (a0 > 0 && f2(a0) != 0)` — the call is the connective's SECOND operand.
 const GUARDED_AND = `fn f {

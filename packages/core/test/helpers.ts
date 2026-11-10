@@ -11,13 +11,20 @@
 // naming walk's own admission table. They ask different questions of the same oracle: generate a
 // function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
 // the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
+import type { AsmData } from '../src/frontend/asmdata';
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { type StructureHooks, TWO_LEVEL_EXIT_GATES } from '../src/structure/structure';
+import { decompile } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { type StructureHooks, TWO_LEVEL_EXIT_GATES, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 /** `{ k: 'var' }` — the leaf every tree-building test needs most. */
@@ -25,6 +32,9 @@ export const v = (name: string): Expr => ({ k: 'var', name });
 
 /** `{ k: 'const' }`, the other leaf. */
 export const c = (value: number): Expr => ({ k: 'const', value });
+
+/** `{ k: 'assign' }` — a statement writing `value` to `name`. */
+export const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 
 /** A signed 32-bit scalar, as the `locals`/`params` records spell it. */
 export const s32 = { kind: 'int', width: 32, signed: true } as const;
@@ -295,7 +305,9 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           return rr === UNDEF ? UNDEF : rr !== 0 ? 1 : 0;
         }
         const r = evalExpr(e.r);
-        if (l === UNDEF || r === UNDEF) return UNDEF;
+        if (l === UNDEF || r === UNDEF) {
+          return UNDEF;
+        }
         // …the pointee scale of the LEFT operand when it is a declared pointer local, and 1 for
         // everything else (see `ptrScale` above)
         const scale = e.l.k === 'var' ? (ptrScale.get(e.l.name) ?? 1) : 1;
@@ -367,8 +379,12 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
       return at < 0 ? sig : exec(list, at);
     };
     for (const [i, s] of list.entries()) {
-      if (i < from) continue;
-      if (++steps > 4000) throw new Error('step cap');
+      if (i < from) {
+        continue;
+      }
+      if (++steps > 4000) {
+        throw new Error('step cap');
+      }
       switch (s.k) {
         case 'assign':
           env.set(s.name, evalExpr(s.value));
@@ -389,42 +405,68 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         }
         case 'if': {
           const sig = truthy(s.cond) ? exec(s.then) : exec(s.else ?? []);
-          if (sig !== 'none') return resume(i, sig);
+          if (sig !== 'none') {
+            return resume(i, sig);
+          }
           break;
         }
         case 'while': {
           let left: Sig = 'none';
           while (truthy(s.cond)) {
-            if (++steps > 4000) throw new Error('step cap');
+            if (++steps > 4000) {
+              throw new Error('step cap');
+            }
             const sig = exec(s.body);
-            if (sig === 'return' || sig.startsWith('end:')) left = sig;
-            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) {
+              left = sig;
+            }
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') {
+              break;
+            }
           }
-          if (left !== 'none') return resume(i, left);
+          if (left !== 'none') {
+            return resume(i, left);
+          }
           break;
         }
         case 'dowhile': {
           let left: Sig = 'none';
           do {
-            if (++steps > 4000) throw new Error('step cap');
+            if (++steps > 4000) {
+              throw new Error('step cap');
+            }
             const sig = exec(s.body);
-            if (sig === 'return' || sig.startsWith('end:')) left = sig;
-            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) {
+              left = sig;
+            }
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') {
+              break;
+            }
           } while (truthy(s.cond));
-          if (left !== 'none') return resume(i, left);
+          if (left !== 'none') {
+            return resume(i, left);
+          }
           break;
         }
         case 'for': {
           let left: Sig = 'none';
           exec([s.init]);
           while (truthy(s.cond)) {
-            if (++steps > 4000) throw new Error('step cap');
+            if (++steps > 4000) {
+              throw new Error('step cap');
+            }
             const sig = exec(s.body);
-            if (sig === 'return' || sig.startsWith('end:')) left = sig;
-            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') break;
+            if (sig === 'return' || sig.startsWith('end:')) {
+              left = sig;
+            }
+            if (sig === 'return' || sig.startsWith('end:') || sig === 'break') {
+              break;
+            }
             exec([s.inc]);
           }
-          if (left !== 'none') return resume(i, left);
+          if (left !== 'none') {
+            return resume(i, left);
+          }
           break;
         }
         case 'return':
@@ -463,7 +505,9 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
           }
           let sig: Sig = 'none';
           for (; at >= 0 && at < arms.length; at++) {
-            if (++steps > 4000) throw new Error('step cap');
+            if (++steps > 4000) {
+              throw new Error('step cap');
+            }
             sig = exec(arms[at].body);
             if (sig.startsWith('end:')) {
               throw new Error(`a ${sig} that names no labelled break of its arm`);
@@ -831,3 +875,31 @@ export function testCopies(name: string, body: () => unknown, timeout?: number):
 /** `opts` with `copyReturnTails` on inside a `testCopies` test, and `opts` unchanged outside one. */
 export const withCopies = <O extends object | undefined>(opts: O): O =>
   readingCopies ? ({ ...(opts ?? {}), copyReturnTails: true } as O) : opts;
+
+/** IR text parsed, verified, typed and structured with `structure()`'s defaults, spelled as C. */
+export const emit = (ir: string): string => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  return cBackend.emit(structure(fn));
+};
+
+/** A file under `packages/core/test/corpus`, as text. */
+export const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+
+/** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
+export const obj = (lines: string[]) =>
+  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
+  lines.map((l) => `   ${l}\n`).join('');
+
+/** `.text` relocation records, as the object's `objdump -r` side table hands them over. */
+export const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
+  sections: new Map(),
+  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
+  symbols: new Map(),
+  symbolCount: 0,
+  bigEndian: true,
+});
+
+/** A Thumb body after the label `sym:`, decompiled at agbcc's description. */
+export const dc = (sym: string, body: string) => decompile(sym, `${sym}:\n${body}`, ARMV4T_AGBCC);

@@ -1,5 +1,5 @@
 // The stages of the Thumb lift, each driven from asm text through the stages before it as
-// `liftOnce` runs them (`thumbFillOf`). `thumb-frontend.test.ts` drives the lift whole.
+// `liftOnce` runs them (`thumbFillOf`). `thumb-frontend.test.ts` and its thumb-*.test.ts siblings drive the lift whole.
 import { describe, expect, test } from 'vitest';
 
 import { __testing, lift } from '../src/frontend/thumb';

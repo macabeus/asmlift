@@ -13,18 +13,7 @@
 // multi-block-header stand-down that keeps a while-header load from de-structuring its function.
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 // a += b*b; b += a; — a' is a back-edge arg AND is read by b's update. Unmaterialized, b's copy
 // re-derives `a + b*b` in old values through a swap temp; materialized, both spell in-place.

@@ -12,14 +12,11 @@
 // text end-to-end and pins the emitted C byte-for-byte — so a decode/structure/emit regression is
 // caught deterministically, without a compiler in the loop. (Scoring still lives in the live suites;
 // this guarantees the GENERATOR is reproducible offline.)
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
-
-const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+import { read } from './helpers';
 
 interface OfflineCase {
   file: string;

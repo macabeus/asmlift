@@ -2,7 +2,7 @@
 // left at its incoming value below one the call's own block set up is the function's own argument
 // passed on — where the set one is surely an argument, and the ABI cannot leave the gap empty below
 // it. Each fixture is the toolchain's own output (canonical flags, 2026-10-18); the Thumb shapes are
-// in thumb-frontend.test.ts beside the refusals that still hold there.
+// in thumb-call-args.test.ts beside the refusals that still hold there.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -257,7 +257,7 @@ describe('the compiler facts a decided gap reads, stated for every toolchain', (
 // register (`compilerBehaviors.discardedReadMayFillArgRegister`): ido7.1 discards into $zero every
 // time, so `int logv(); int f(const char *s, int *q){ return logv(s, *q) + 1; }` decides its gap
 // there. KMC and GCC 2.7.2 discard into a1 and mwcc into r4 once v0/v1 or r0 are busy, the bytes of
-// the twin that passes the read, so there it refuses, as agbcc's r1 does (thumb-frontend.test.ts,
+// the twin that passes the read, so there it refuses, as agbcc's r1 does (thumb-call-args.test.ts,
 // `fvol`).
 describe('a value a load left above the gap', () => {
   const pld2 = [

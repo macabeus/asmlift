@@ -83,12 +83,12 @@ behind PR <ahead> and filed <awaiting-base message filename>, quoted below. That
 
 1. `git fetch origin`; rebase onto `origin/main`. A conflict in
    `apps/benchmark/results/results.json` is resolved by taking one side whole and regenerating in
-   step 2 (Hard rule 9). A conflict resolved by editing code is listed in your answer as code no
-   reviewer read.
+   step 2 (Hard rule 9). A conflict in `apps/web/src/pages/benchmark/lib/declines-census.json` (it
+   moves only when a decline message or a class does) is resolved by running
+   `pnpm regen:declines-census` and committing the regenerated JSON as the resolution. A conflict
+   resolved by editing code is listed in your answer as code no reviewer read.
 2. Regenerate the artifact when `scripts/check-artifact-provenance.sh` says one is owed: ONE full
-   bench, under the heavy lock (Hard rule 4), as the last commit on the branch. A conflict in
-   `apps/web/src/pages/benchmark/lib/declines-census.json` (it moves only when a decline message
-   or a class does) is resolved by running `pnpm regen:declines-census`.
+   bench, under the heavy lock (Hard rule 4), as the last commit on the branch.
 3. Gates: typecheck, lint, format:check, test:root and test:matching, each under the lock, then the
    provenance check again.
 4. Push. The branch was pushed before, so a rebased push is a rewrite: republish on

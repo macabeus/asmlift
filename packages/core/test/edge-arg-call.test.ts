@@ -12,20 +12,9 @@
 // and the shape is 2 of klonoa's 412 functions and 0 of 2288 sa3 ones. Toolchain-free.
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 const EDGE_CALL = `fn f {
 ^bb0(%0: unk32):
