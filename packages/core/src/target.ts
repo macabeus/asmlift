@@ -403,969 +403,1014 @@ export interface TargetDescription {
   // COMPILER BEHAVIORS — the specific compiler's canonicalization decisions, distinct from
   // hardware `capabilities`. Mostly consumed by the structurer (threaded through StructureOptions);
   // the exceptions are listed at the top of this file and each says so at its own field.
-  compilerBehaviors: {
-    // When a loop induction variable's initial value comes from an argument register, some
-    // compilers keep mutating that register across the loop (coalesce → no init copy); others
-    // copy to a fresh local. IDO -O2 and KMC GCC -O2 reuse the arg register (true); agbcc
-    // allocates fresh (false).
-    coalesceLoopInit?: boolean;
-    // Divergent-if (both arms terminate, no join): reproduce the source branch DIRECTION by
-    // emitting the forward-branch-on-negated-condition (taken arm as `else`). IDO/MIPS preserves
-    // source direction so this must be on to be byte-exact; agbcc/GCC canonicalize either way so
-    // true is a safe default there. A compiler that inverts branch canonicalization sets it
-    // false. Absent ⇒ true; a compiler opts OUT. It carries the JOINED case with it:
-    // StructureOptions.negateJoinedBranchSense defaults to this value, so the first compiler that
-    // preserves divergent sense and inverts joined sense splits them by promoting that option to a
-    // field here — never by an `arch ==` branch in the structurer.
-    preserveDivergentBranchSense?: boolean;
-    // Order the parallel-copy assignments at a CFG edge by the order the PREDECESSOR WROTE THEIR
-    // DESTINATIONS — the frontend's own measurement (ir/core.ts `WriteOrder`), falling back to a
-    // def-position proxy on a predecessor no frontend measured. Not "computation order": a
-    // destination written with a value defined elsewhere is a plain register copy, and it ranks by
-    // where that copy sits, not by where its value was computed. Uniform (true) across all current
-    // compilers; absent ⇒ true, and a compiler that opts OUT turns the sort off entirely and emits
-    // in source/param order. WHICH order a measured edge takes is not this flag's question and
-    // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that decision is
-    // refereed per row by `/copy-defpos` (rank.ts), never declared per compiler here.
-    orderArgCopiesByWriteOrder?: boolean;
-    // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
-    // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
-    // decline path keeps recovery sound either way.
-    switchAllowsNeqCase?: boolean;
-    // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
-    // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
-    // `:471-502`). Absent ⇒ false, and every clause below never admits. `structureOptionsFor`
-    // spreads it onto StructureOptions like every other field here, but NO structurer code reads
-    // it: both readers are raising passes, threaded from their driver's own `target`.
-    //
-    // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS. One field rather than one per reader,
-    // because a second boolean for the same guard lets a round that measures another compiler's
-    // `jump_optimize` set one and leave the other false, with both comments reading as
-    // authoritative.
-    //
-    //   • raise/narrowlocal.ts's `edge-extends`: a diamond this compiler would have collapsed and
-    //     did NOT is evidence the source DECLARED the local narrow, because `gcc/thumb.h:344`
-    //     PROMOTE_MODE expands a narrow-declared assignment past one SET.
-    //   • raise/retsink.ts's `compiler-hoists-single-set-arm`: a merge-variable select whose arms
-    //     this guard would have collapsed never comes back as a diamond, so a TARGET holding one
-    //     was written with early returns and its returns should be sunk.
-    //
-    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored and
-    // where retsink's seven-function spelling pair was compiled and committed
-    // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`). NOT set on MIPS_GCC despite it
-    // being the same compiler family: nothing has measured the pair there, the clause reaches 0 of
-    // its benchmark rows on either reader, and `docs/level-tower.md`'s rule for an unmeasured
-    // compiler behavior is to claim nothing. The evidence a future round needs is one run of
-    // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
-    hoistsSingleSetArm?: boolean;
-    // THE REGISTER AN INTERWORKING EPILOGUE POPS THE RETURN ADDRESS INTO WHEN THE RETURN TYPE IS 5
-    // TO 8 BYTES, which is then a fact the epilogue states about the function's width. agbcc's
-    // `thumb_exit` (gcc/thumb.c) picks that register from the SIZE of the return mode, not from
-    // liveness — r0 for `void`, r1 up to 4 bytes, r2 up to 8 — so `pop {r2}; bx r2` ends a function
-    // returning a `long long`, a `double`, or an 8-byte aggregate (which DImode covers even when it is
-    // returned through memory). Read by `frontend/thumb.ts`'s `refuseWordReturns` directly, not by
-    // the structurer. Absent ⇒ the epilogue states nothing.
-    eightByteReturnScratch?: string;
-    // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
-    // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
-    // the compilers measured give three, and the pass refuses wherever the object is silent. Each
-    // target below carries its own measurement, and raise/paramwidth.ts's header carries the
-    // compiled pairs all three readings rest on.
-    //
-    //   • `'prologue-extension'` — the extension's POSITION decides it: a narrow-declared
-    //     parameter widens at the very top of the function, a body cast widens at its use.
-    //   • `'home-store-and-in-place'` — the position decides NOTHING, both spellings leading the
-    //     function, and TWO other facts decide it together: the parameter is stored to an argument
-    //     home nothing reads back AND widened in its own argument register. Each half alone has a
-    //     compiled counterexample, so only the PAIR separates a declaration from a body cast.
-    //
-    //     THE HOME STORE IS AN `-O2` OBSERVABLE, AND `-g` IS NOT WHAT REMOVES IT. Measured on
-    //     `int f(s8 x){ return x; }`: present at `-O2` and at `-O2 -g3`, absent at `-O1`, at `-O0`
-    //     and at `-g` (which implies `-O0`). So the 42 real af rows that build at
-    //     `-G 0 -non_shared -Wab,-r4300_mul -mips2 -EB -O2 -g3` DO carry it — checked at exactly
-    //     those flags — and a target built at `-O1`/`-O0` would have to claim `'none'`. The
-    //     in-place widening survives every one of those levels, but on its own it decides nothing,
-    //     so the pass refuses there rather than reading half a pair.
-    //   • `'none'` — the object does not distinguish the two at all, so no reading of it licenses
-    //     the narrowing. It is a MEASUREMENT rather than a withholding wherever a target claims it.
-    //
-    // A compiler that sets nothing here also refuses, which is the right default for one nobody has
-    // compiled the pair with (docs/level-tower.md: claim nothing about an unmeasured behavior).
-    narrowParamWitness?: NarrowParamWitness;
-    // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
-    // pointer or cast base expands it last — so the instruction order in the target's own assembly
-    // says which of the two the source wrote, and `raise/globalshape.ts` may derive an array shape
-    // for a global no symbol map describes. Absent ⇒ the derivation is empty and every indexed
-    // global keeps today's `((T *)&gSym)[i]` cast spelling.
-    //
-    // "Expands it last" is about the SUBSCRIPT, and a second consumer reads the same flag for a
-    // question that is not: `orderLicensedGlobals` asks only where the base was materialized, and a
-    // pointer LOCAL materializes it in its own initializer STATEMENT, before the subscript runs —
-    // so `u16 *p = (u16 *)&gTbl; p[i]` is base-first in the object while `(p = (u16 *)&gTbl)[i]` is
-    // index-first, both through this same fork (compiled; raise/globalshape.ts's header carries the
-    // four-way table). This flag is therefore NARROWER than that consumer's mechanism — statement
-    // ordering needs no fork, only a compiler that does not schedule — so the home variation is denied
-    // to ido/kmc/mwcc for a reason that is not its own. Under-reach, unmeasured, and the fix when a
-    // row asks for it is a datum of its own rather than a widening of this one.
-    //
-    // Set on agbcc, where the fork is `gcc/c-typeck.c build_array_ref`'s
-    // `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF` and both
-    // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
-    // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
-    // unmeasured compiler behavior is to claim nothing. Read off the target by a raising pass
-    // (`inferGlobalArrays`), not by the structurer.
-    arrayShapeFromStride?: boolean;
-    // Which way this compiler hands out FRAME SLOTS against a spilled local's DECLARATION RANK:
-    // `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Consumed by the
-    // structurer (StructureOptions.spillSlotOrder) and applied at emit time by l3/slotorder.ts.
-    //
-    // `'unknown'` and absent both REFUSE the ordering — there is deliberately no default
-    // direction, because the wrong one reorders every declaration list on that target for no
-    // reason. That is why three of the four descriptions below ship `'unknown'`: no MIPS or PPC
-    // benchmark row lifts with two or more spilled user locals, so no row on those tiers can
-    // referee a value, and a value no row can falsify does not earn the level. Two of the three
-    // have a direction MEASURED against a committed probe and withheld for that reason; the third
-    // (mwcc) has no direction at all, because the probe does not spill there. Each says which it
-    // is, and its flip condition, at its own site.
-    //
-    // KEYED BY DESCRIPTION, WHILE THE FACT IS PER TOOLCHAIN — the first field in this bag with a
-    // stated instance of that gap. `MIPS_GCC` serves BOTH `gcc2.7.2kmc` (Snowboard Kids 2's Kyoto
-    // build at -O2) and `gcc2.7.2` (Mario Party 3's at -O1); they agree here, and a committed probe
-    // says so, but nothing in this bag could express it if they did not. Any behavior that can
-    // differ between two toolchains sharing one description is mis-keyed by construction.
-    spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
-    // Which way this compiler places the ADDRESS-TAKEN local arrays of one frame against their
-    // DECLARATION order: `ascending` = the earlier-declared array takes the lower address. Read
-    // where the frame audit declares the one object as several (frame-objects.ts
-    // `keepAsOneObject`, which declares the parts `provenParts` finds in this order), so the
-    // recompile puts each part back at its own offset. Absent REFUSES that split: the one object
-    // stays one array.
-    //
-    // MEASURED on `u8 a[64]; u8 b[32]; u8 c[48];`, each filled by a `memcpy`, at canonical flags:
-    // agbcc a@0 b@64 c@96; gcc2.7.2 and gcc2.7.2kmc a@16 b@80 c@112; ido7.1 a@104 b@72 c@24 (the
-    // reverse); mwcc_242_81 a@88 b@8 c@40, neither order — so absent there.
-    addressTakenArrayOrder?: 'ascending' | 'descending';
-    // The frame-offset multiple this compiler starts each address-taken `u8` array of a frame at,
-    // whatever its size. Read by the same split (frame-objects.ts `provenParts`): a boundary off
-    // this multiple is never where two of the source's arrays met, and a part declared there is
-    // placed at the next multiple by the recompile, moving it and growing the frame. Absent
-    // REFUSES the split, as `addressTakenArrayOrder` does.
-    //
-    // MEASURED on `u8 a[na]; u8 b[nb];`, each filled by a `memcpy` and both handed to a callee, at
-    // canonical flags, for na x nb = 4x12, 12x12, 6x10, 8x8, 20x16, 2x14: agbcc puts b at sp+4,
-    // 12, 8, 8, 20, 4 (4); gcc2.7.2 and gcc2.7.2kmc a@16 and b@24, 32, 24, 24, 40, 24 (8:
-    // BIGGEST_ALIGNMENT on MIPS, for a BLKmode local); ido7.1 b@24 and a@36, 36, 40, 32, 44, 44 (4).
-    addressTakenArrayAlignment?: 4 | 8;
-    // Does this compiler's C front end take a DESIGNATED array element in an initializer —
-    // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
-    // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
-    // plain one) compile the line above, while IDO 7.1's cfe ("Syntax Error") and every mwcc build
-    // the benchmark ships, 2.3.3, 2.4.2 and 2.4.7 ("expression syntax error"), refuse it — each
-    // compiled. Read by the C-family printer (`SFn.designators`) where a constant image
-    // (l3/constinit.ts) leaves elements out: it spells the element after a run of them by index,
-    // and without this spells the run as zeros, which a compiler that cannot parse the index takes.
-    // Absent ⇒ zeros, the spelling every C compiler parses.
-    designatedInitializers?: boolean;
-    // Does this compiler's C front end REFUSE the three pointer conversions C makes implicitly — an
-    // integer to a pointer, a pointer to an integer, and an object pointer to one of another
-    // pointee — as C++ does? Every mwcc build the benchmark ships refuses all three in C, compiled
-    // with `-lang=c`: 2.4.2 and 2.4.7 ("illegal implicit conversion" of an `unsigned int` to an
-    // `int *`) and 2.3.3 ("cannot convert"). agbcc, IDO 7.1 and both gcc 2.7.2 builds compile the same three
-    // calls at their canonical flags. Read by the C-family printer (`SFn.strictConversions`), which
-    // then casts an argument to its callee's declared parameter and a pointer of another pointee
-    // into a pointer slot exactly as it does for C++ (backend/cfamily.ts `argConversion`,
-    // `legalizePointerWrites`), and by the store of an integer into a declared pointer cell
-    // (structure/pointer-spelling.ts `intoPtrCell`, which declines that store under C++, where only a
-    // cast to the cell's own type converts). Each cast is the conversion the compiler would
-    // otherwise have made, so it changes no instruction. Absent ⇒ C's implicit conversions.
-    strictPointerConversions?: boolean;
-    // Arguments past the argument registers are staged into an area this function RESERVES at the
-    // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call
-    // site. It is GCC's ACCUMULATE_OUTGOING_ARGS target macro, and it is what makes an outgoing
-    // argument INDISTINGUISHABLE by code alone from a dead local: the words sit inside this
-    // frame's reservation and nothing this function does ever reloads one.
-    //
-    // It says WHERE the words go and nothing about the rest of the frame. Its one reader is the
-    // Thumb frontend's stack-argument licence (`frontend/thumb.ts` `declaredCall`): a declared call
-    // consumes the words it stages. Absent ⇒ no outgoing area is claimed, and a `[sp,#k]` store
-    // reaching a call unread declines.
-    //
-    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
-    // corpus's `stkarg` and `stkwide` rows and kleod's `sub_0804C300` all stage their words at
-    // [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
-    // else: a push-based caller would stage nothing inside the frame, and `docs/level-tower.md`'s
-    // rule for an unmeasured compiler behavior is to claim nothing. No other frontend calls the
-    // analysis today, so a second armv4t compiler must state this premise rather than inherit it.
-    stagesOutgoingArgsInFrame?: boolean;
-    // The outgoing area is ONE region at the frame bottom, sized for the widest call and shared by
-    // every call, with every local and spill above it, and the caller never reads a word of it
-    // back after a call — the callee may assign to its stack parameters, so the caller re-stages
-    // an argument before every call. A compiler can stage in its frame
-    // (`stagesOutgoingArgsInFrame`) and still break this. mwcc does not, though it puts a local in
-    // the words a call COULD take as stack arguments where no call takes any — which is why a
-    // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
-    // ARGUMENT REGISTER") — and not where one does: the area starts past them.
-    //
-    // It is a UNIVERSAL — for every source, the compiler emits no such read — and its readers apply
-    // the contrapositive (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
-    // BACKWARDS READING): a word loaded after a call is not in the area, so it is a local, and so is
-    // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
-    // reaches on any path is a local too, but only the Thumb frontend acts on that
-    // (`frontend/thumb.ts`'s own-frame load arm, which reads it as uninitialised), and it was probed
-    // on agbcc alone; a MIPS or PPC reader needs its own probe first. A callee that assigned the
-    // word as its stack parameter ran before the load, so the load is after a call, and with no
-    // call reaching the load there is no such callee. It is
-    // exactly as sound as the universal, so its residue is every producer the universal does not
-    // cover: hand-written asm that reads its outgoing argument back after a call loses that argument
-    // silently. The premise is this compiler's, not the ISA's.
-    // Absent ⇒ every staged word stays a candidate argument.
-    //
-    // It promises the AFTER-CALL form and no more: a compiler may still load a staged word BEFORE a
-    // call — o32 gcc defines REG_PARM_STACK_SPACE, so calls.c's save_fixed_argument_area loads
-    // staged reg-parm words around a nested call. The stronger form, no load of the area at all,
-    // is its own field (`outgoingAreaNeverLoadedFrom`), stated per compiler and never read off this.
-    //
-    // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
-    // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
-    // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
-    // re-staging, the callee's write, and no load of the area around calls inside arguments. Set
-    // on the three MIPS toolchains off their own probe (`test/corpus/probe-o32-frame.c`), where
-    // the frame-object audit is the only reader. Set on
-    // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
-    // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
-    // stores its ninth argument again before its second call. The frame-object audit is the only
-    // reader there too, and on mwcc it is LOAD-BEARING: it is what refuses an undeclared call whose
-    // ninth argument the arity guess cannot see (frontend/ppc.ts `measurePpcFrame`).
-    localsAboveOutgoingArea?: boolean;
-    // The STRONG form of `localsAboveOutgoingArea`, which it requires: from this offset up, the
-    // caller never loads a word of its outgoing area at all — not after a call, and not before one
-    // either. The offset counts from the area's start, the frame bottom: `[sp,#0]` on Thumb, `0(sp)`
-    // on O32 (whose area opens with the a0..a3 home), `0(r1)` past the push on PowerPC (whose
-    // parameter area opens at 8, past the callee's back chain and link-register words). From it up
-    // the area holds only what the caller staged for a callee; every argument that contains a call
-    // is computed before any word is staged, and nothing is saved there around a nested call. So
-    // ANY frame word this function loads at or above the offset is a local, and so is every word
-    // above it, since the area is one region at the frame bottom. Its readers apply that
-    // contrapositive, at exactly the soundness of the universal. Each frontend measures the lowest
-    // such word once (Thumb through `frontend/stackargs.ts` `loadedWordBound`, MIPS in `liftOnce`,
-    // PPC `ppcLoadedWordBound`), and every reader takes that number: Thumb's outgoing-argument
-    // analysis, `frontend/frame-objects.ts` `storedNeverRead` for its pending stores, the MIPS and
-    // PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`), and PPC's
-    // unread-slot decline, each weighing only the words beneath it. On MIPS it also caps how far an
-    // undeclared call's area can reach (`o32OutgoingArea`'s `widest`), which the local area's
-    // partition (`measureO32Frame`) and the owned range of an uninitialised read
-    // (`measureOwnedFrame`) both read. A load BELOW the offset proves nothing, and no reader counts
-    // it. A word no store reaches on any path needs only the after-call form (see
-    // `localsAboveOutgoingArea`).
-    // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
-    //
-    // Its residue is the universal's: hand-written asm that loads a word it staged, then stages it
-    // for a call, loses that argument. Each value is MEASURED, and the compiled probes are committed
-    // (`packages/core/test/outgoing-area-probes.test.ts` reads every one):
-    //   • agbcc, 0, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's
-    //     save_fixed_argument_area — which loads staged words around a nested call — is not
-    //     compiled; calls.c:1599-1610 precomputes every argument containing a call; and
-    //     store_one_arg (calls.c:3420-3470) saves an argument word only when a nested call overlaps
-    //     it, which the precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word
-    //     of the area around calls in stack arguments.
-    //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels
-    //     (ido -O1, -O2 and -O2 -g3; gcc 2.7.2 -O1 and -O2) and at -O0. NOT 0 — ido stages a
-    //     by-value aggregate's register words in the a1..a3 home and loads them back before the
-    //     call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for a char-array struct (`d3`,
-    //     `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's save_fixed_argument_area
-    //     (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No probe loads a word from
-    //     16(sp) up the area.
-    //   • mwcc, 8, on all three builds at the rows' flags and at -O0,p, and on mwcc_242_81 at -O4,s
-    //     too: no probe loads a word of the parameter area; a struct-return temp or a by-value copy
-    //     sits at 8(r1) only where no call takes a stack word, and above the area beside one that
-    //     does.
-    // Like `stagesOutgoingArgsInFrame`, a second compiler of the same ISA must state this premise
-    // rather than inherit it.
-    outgoingAreaNeverLoadedFrom?: number;
-    // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
-    // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
-    // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
-    // frame offset 0, and the question this answers is whether the rest of that reservation could
-    // be somebody else's — an outgoing argument staged at [sp,#0], a by-value struct argument's
-    // block-copy destination, or a struct return's hidden pointer.
-    //
-    // Absent ⇒ no such claim, and every `[sp,#k]` store reaching a call unread keeps the refusal
-    // it had before the capability existed. It is a layout fact about ONE compiler and it is not
-    // derivable from the architecture, which is why it is a field and not an `arch ==` branch
-    // (`docs/level-tower.md`).
-    //
-    // Set on agbcc, where it is two compiled producer tables rather than a reading — one per
-    // escape, both written out at the predicate: at one word agbcc stages no outgoing argument
-    // under a captured local (it moves the local above the area and spells its address `add rD,
-    // sp, #4`), and it names a block-copy base with a register only from two words up. The one
-    // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
-    // which the post-lift audit settles per call rather than by size.
-    oneWordFrameIsTheCapturedObject?: boolean;
-    // A frame address this function hands out — in an argument register at a call, or stored to
-    // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
-    // word from there up is a call's outgoing argument. Its first reader is the outgoing-argument
-    // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
-    // THERE. Absent ⇒ a handed-out frame address explains nothing.
-    //
-    // Set on agbcc, compiled at 2.9-arm-000512 and its canonical flags, and re-measurable from the
-    // committed probe (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-escape.s`, read
-    // by `frame-escape-probes.test.ts`). An address-taken local sits ABOVE the outgoing area
-    // (`f1`: `add r0, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when no call in the
-    // function takes a stack word (`f0`).
-    //
-    // Its RESIDUE is a by-value struct argument's block copy (`mov r0, sp` / `add r0, sp, #4`, then
-    // `bl memcpy`), whose base IS the outgoing area. agbcc stages a call's outgoing words in
-    // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`): a word staged before the copy
-    // lies below its base, and one staged after it is still pending at the call. That is why the
-    // event ends pending words PER PROGRAM POINT and only from its offset up — read
-    // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
-    // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
-    // reads the event whole-function, it only refuses or excuses a word no call takes
-    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence for any
-    // receiver, sound only where no block copy fits.
-    //
-    // Its SECOND reader is the Thumb frame model's [sp,#0] capture (`frontend/thumb.ts`, beside
-    // `noCallTakesAStackWord`), which reads the universal whole-function at offset 0: where the
-    // frame base is handed as the hidden pointer of a callee DECLARED to return a struct through
-    // memory, it is a local's address, so no word of the frame is any call's outgoing argument and
-    // the area is empty — whatever the other calls are (sret2knr: `u8 rnd();` beside two temps).
-    // This premise is read only where some call may take a stack word: where none does there is
-    // no outgoing area to confuse, and an escaping frame base is a local's address on any target,
-    // whoever receives it (a DMA source published to the device's registers, `dmafill_wh`).
-    // The residue cannot reach it: a block copy's base goes to `memcpy`, no struct-returning
-    // callee. That reading is agbcc's layout, and is measured beyond `f0`: thumb.h:573
-    // STARTING_FRAME_OFFSET 0 and :620-621 add `current_function_outgoing_args_size` to every
-    // elimination to sp (:628 ACCUMULATE_OUTGOING_ARGS); function.c:2629 puts STACK_DYNAMIC_OFFSET
-    // past the same size; calls.c:1598-1609 precomputes into a temp every argument containing a
-    // call whenever the call has stack arguments, so a struct result is never built straight into
-    // an outgoing word. Compiled at the rows' flags: `mk(..)` by value as the 5th argument, as the
-    // 1st followed by four ints, `mk(..).a` as the 5th, a 20-byte struct by value, and a 5-argument
-    // K&R `rnd(1, 2, 3, 4, 5)` beside a temp each put the temp at sp+4 or higher, with [sp,#0] the
-    // outgoing word. A frame whose sp moves between two accesses is refused before this is read
-    // (thumb.ts `frameDepthBlocker`). Hand-written asm that builds a struct return at [sp,#0] and
-    // also stores a stack argument there declines; one that hands that word, unstored, to an
-    // undeclared callee as its fifth argument loses it from the callee's guessed arity.
-    escapedFrameAddressNamesALocal?: boolean;
-    // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
-    // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
-    // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
-    // the stack words its widest call takes (none in a function that makes no call); the saved
-    // registers and the locals share the rest, and which way round is the compiler's:
-    //   'above-outgoing-area'   — from the outgoing area's end, rounded up to the 8-byte stack
-    //                             alignment, to the lowest saved register;
-    //   'above-saved-registers' — from just above the highest saved register (or the outgoing
-    //                             area's end, where that is higher) to the frame top N.
-    // Spill temps live in the same area on both, so it is the locals' and the spills' together.
-    //
-    // MEASURED off `corpus/probe-o32-frame.c` (`scripts/regen-o32-frame-probes.ts`, read by
-    // `o32-frame-probes.test.ts`): a leaf's array at sp+0 on all three MIPS toolchains; with a call
-    // taking no stack word, gcc 2.7.2 (both builds) at sp+16 under the saves and IDO at the frame top
-    // above `ra`; with one stack word, gcc at sp+24 (20 rounded) and IDO still at the top; and IDO's
-    // spill of a value live across a call between `ra` and the array.
-    //
-    // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
-    o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
-    // WHERE A FUNCTION THAT PUSHES ONE FRAME KEEPS ITS LOCALS, on a target whose frame starts with a
-    // fixed LINKAGE area — the back chain and the callee's link-register save word, which the ABI
-    // fixes and the frontend states (`frontend/ppc.ts` `PARAM_AREA_AT`, where the caller's parameter
-    // area starts). Above it the OUTGOING area holds the stack words of the widest call (none in a
-    // function whose calls take none), and the locals and spill temps share what is left below the
-    // lowest saved register:
-    //   [linkage + 4 * (stack words of the widest call), lowest saved register)
-    // in post-push offsets — O32's `above-outgoing-area` rule (`o32LocalArea`) past a linkage area
-    // instead of the a0..a3 home, without the 8-byte rounding (`areaAboveOutgoing`). The PPC
-    // frontend hands it to the frame-object audit as `ownedLocals`/`declaredLocals`; a call it
-    // lowers takes no stack word, so it refuses one whose declaration may and draws the area from
-    // the linkage's end. No object start inside it is fixed: the compiler chooses where in the area
-    // each local goes.
-    //
-    // MEASURED on mwcc 2.3.3, 2.4.2 (at -O4,p and at Mario Party 4's -O0,p) and 2.4.7 off
-    // `corpus/probe-mwcc-frame.c` (`scripts/regen-mwcc-frame-probes.ts`, read by
-    // `mwcc-frame-probes.test.ts`): every local and every home or spill lies in the area, a leaf
-    // with a local still pushes a frame whose area starts at 8, one or two stack words of a call push
-    // the locals past them, and the widest call sizes the area for every call. The first local's
-    // offset inside it differs per build and per function (8, 12 or 16 on 2.3.3; a homed parameter
-    // takes 8 at -O0,p), which is why this is an area and not a start.
-    //
-    // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
-    linkageLocalArea?: 'above-outgoing-area';
-    // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
-    // branches to the address in <reg> with every register as the caller left it, so the call is
-    // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
-    // thunks whose register can hold an address a source computed; a `<prefix>` callee outside them
-    // declines.
-    //
-    // ABSENT ⇒ a `bl` names a function on this target, whatever it is called.
-    callThunks?: { readonly prefix: string; readonly regs: readonly string[] };
-    // How this compiler marks a BRANCH it had to spell as a call: a `bl <label>` whose line carries
-    // a comment matching `comment` (tested against the text from its `@` to the end of the line) is
-    // a relay to that label of the same function, not a call. Two of its facts are this compiler's,
-    // and the Thumb frontend's lowering rests on them (`lowerFarJumpRelays`): what the mark means,
-    // and that the compiler pushes lr in every function with one, so the lr the relay writes is
-    // never the one the function returns through.
-    //
-    // ABSENT ⇒ no comment makes a `bl` anything but a call: a `bl` to a label of the function keeps
-    // its decline, however its line is commented.
-    farJumpRelay?: { readonly comment: RegExp };
-    // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
-    // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's
-    // dispatch lands a case body on: `'taken'` for its BRANCH only, `'either'` for both sides
-    // (structure/switch-recover.ts, the note at `Ranges`).
-    //
-    // One mechanism on both compilers that declare it: a binary-search dispatch stops testing a
-    // value once the tests above have narrowed it to one. agbcc's `emit_case_nodes` jumps straight to
-    // `node->left->code_label` on LT once `node_is_bounded (node->left)` holds, so
-    // `switch (x) { case 1: … case 2: … case 3: … case 4: … case 5: … case 1000: … case 2000: … }`
-    // pins `case 3` with `cmp r1, #2; bgt` under `x < 4`, `x != 2` (`corpus/agbcc-swpathbound.s`),
-    // and an unsigned switch's `case 0` with `cmp r0, #1; bcc`, which pins it at the end of the
-    // domain whatever came first. mwcc's `switch (x) { case 0: … case 1: … default: … }` is
-    // `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, where `x >= 0` is
-    // `case 0` only because `x != 1` and `x < 1` came first (`corpus/mwcc-swdispatch.asm`).
-    //
-    // THE SIDES DIFFER, and each is read off its own compiler. Every jump in `emit_case_nodes` that
-    // lands on a case body is its test's BRANCH, while the fall-through always continues into more
-    // dispatch, and none of 3176 generated agbcc dispatches lands a body on a fall side — so agbcc
-    // is `'taken'`. mwcc lands one on either: `synthetic:sw_ret:mwcc_242_81` pins `case 3` on the
-    // FALL side (`cmpwi r3,4; bge- default; b case3` under `x > 2`, `x != 2`), so mwcc is
-    // `'either'`.
-    //
-    // A DEFAULT rather than a candidate variation because each declaring compiler's other producer
-    // of the same test is told apart by its LAYOUT. An if/else-if ladder written with relational
-    // tests pins values by its path just the same (`if (x >= 4) { if (x < 5) … } else if (x >= 3)
-    // …` pins 4 and 3) but puts a body between two tests, where the dispatch puts every test above
-    // every body — so this reading needs `switchRequiresFrontLoadedTests` beside it, and both
-    // declaring compilers declare that too (`corpus/mwcc-sw{dispatch,ladder,relladder,relnest}.asm`
-    // from `corpus/probe-mwcc-sw*.c`, regenerated by `scripts/regen-switch-spelling-probes.ts`). On
-    // agbcc the unsigned endpoint has no ladder at all: -O2 fold-const rewrites `x < 1u` into
-    // `cmp r0, #0 / bne` before codegen. All three builds PPC_MWCC serves emit the dispatch
-    // identically at -O4,p and at -O0,p (`packages/cli/test/matching/ppc-compiler-behaviors.test.ts`).
-    //
-    // Absent ⇒ every relational test navigates, and inheriting it would be wrong rather than merely
-    // unmeasured: on the MIPS lanes `sltiu rd, rs, 1` is the ordinary spelling of `!x`, and it lifts
-    // to `icmp_ult rs, 1` with no equality fold anywhere — the identical IR shape, from a producer
-    // that is not a dispatch. Each compiler opts in on its own dispatch's evidence.
-    switchBoundCase?: SwitchBoundCase;
-    // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
-    // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
-    // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
-    // across them. agbcc declares it from its own sources: `stmt.c` expand_end_case takes
-    // `before_case = get_last_insn()` AFTER the bodies are expanded in source order and its closing
-    // `reorder_insns` moves only the DISPATCH in front of them, and the Makefile's SRCS compiles
-    // neither sched.c nor reorg.c. SCOPE — SRCS does compile jump.c, whose cross-jump merges two
-    // identical arm bodies into ONE block, so a merged pair's own order is gone from the asm; that
-    // surfaces as two case values sharing a body, which switch-recover.ts ties by ascending value.
-    // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit. ido and kmc-gcc have a scheduler
-    // and have not been put through that evidence. mwcc_242_81 HAS been, on two compiled pairs, and
-    // lays the bodies in source order: `synthetic:sw_defmid` with `default:` between two cases, and
-    // a three-case switch whose first case is a `beqlr`. What keeps it from declaring the reading is
-    // its FRONTEND: frontend/ppc.ts appends every conditional-return block after all the real ones,
-    // so such an arm sorts last whatever its address (switch-recover.ts, at `layoutIndex`). Placing
-    // those blocks at their branch's address is the prerequisite, and a declaration after it owes
-    // its own pairs. A compiler opts in on its own, never by inheriting.
-    switchArmsFollowLayout?: boolean;
-    // Switch recovery: DECLINE a comparison tree whose own layout INTERLEAVES a test block with a
-    // case body, on the reading that the source wrote an if/else-if LADDER there. True claims the
-    // compiler emits a source `switch`'s whole dispatch AHEAD of every arm body — the same
-    // `expand_end_case` closing `reorder_insns` `switchArmsFollowLayout` is read off, used for the
-    // other half of what it does — while a ladder's tests stay above their own bodies.
-    //
-    // IT NEEDS HALF OF `switchArmsFollowLayout`'s PREMISE, AND THE IMPLICATION RUNS ONE WAY ONLY.
-    // That flag PLACES the arms and so needs the whole no-reordering claim (nothing moved a block
-    // at all); this one only asks whether any BODY sits above a test, so a compiler that moves
-    // instructions, fills delay slots, or reorders within a block can still declare it. A compiler
-    // that declares the PLACING one has therefore already said what this one needs — never the
-    // converse. `MIPS_GCC` is the standing counterexample to the converse: it declares this flag on
-    // its own pairs (below) and deliberately does NOT declare `switchArmsFollowLayout`, because it
-    // has a scheduler. Declaring this one is not evidence for that one.
-    //
-    // agbcc declares it, and its own pair of objects says the reading is not vacuous: at agbcc's
-    // canonical flags the same two-case body is 20 bytes (0x14, ten Thumb instructions)
-    // written either way and is a DIFFERENT object — the `switch` emits `cmp #0x1e; beq` then
-    // `cmp #0x64; bne` before either body, sorted ascending and so in the reverse of the written
-    // order; the ladder emits `cmp #0x64; bne` directly above its own body and reaches `cmp #0x1e`
-    // only after it. The pair is committed: `corpus/agbcc-sw{frontload,ladder}.s` from
-    // `corpus/probe-agbcc-sw{frontload,ladder}.c`, regenerated by
-    // `scripts/regen-switch-spelling-probes.ts`, asserted in switch-arms.test.ts.
-    //
-    // mwcc declares it on its own objects: its `switch` dispatch puts every test above every body,
-    // and a ladder written with relational tests puts a body between two of them
-    // (`corpus/mwcc-sw{dispatch,relladder,relnest}.asm`, the note at `switchBoundCase`).
-    //
-    // Absent ⇒ every recoverable tree is still spelled `switch`, which is where ido sits: it has a
-    // scheduler that may move a body above a test, and it has not been put through the pair.
-    // A compiler opts in on its own compiled evidence, never by inheriting — and where one
-    // description serves two toolchains (`MIPS_GCC`), each toolchain owes its own pair, because the
-    // field cannot distinguish them (the KEYED BY DESCRIPTION note at `spillSlotOrder`).
-    switchRequiresFrontLoadedTests?: boolean;
-    // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
-    // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
-    // re-ordering independent loads opts OUT here.
-    defOrderLoadPairs?: boolean;
-    // The single-add-immediate derivation reach for the /nearbase variation (l3/nearbase.ts):
-    // neighbor absolute addresses within this many bytes may share one base local. Thumb's
-    // `add rd, #imm8` reaches 255. Absent ⇒ the variation stands down for this target.
-    nearBaseSpan?: number;
-    // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
-    // materializes for an inline constant-address access? agbcc does: `((u8 *)0x3001100)[3]`
-    // emits `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` keeps
-    // `.word 0x3001100` + `ldrb [r1, #0x3]`. True is what lets an offset surviving into the memory
-    // operand say anything about the source at all; what l3/basecse.ts's `/basefold` admission
-    // does with it — and why that is a differ-refereed candidate rather than a default — is that
-    // file's header. A compiler opts in on its own compiled pair and never by inheriting: the MIPS
-    // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
-    // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
-    foldsConstAddrOffset?: boolean;
-    // Does a STORE to a struct member past the ISA's displacement range compile differently from the
-    // same store through a cast of the base (`p->f38 = v` against `*((u8 *)p + 38) = v`)? agbcc's
-    // does: expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target (:2535)
-    // and evaluates the right-hand side first in store_field (:2624), and it expands a cast target
-    // whole (:2689) before the right-hand side (:2747). Measured on agbcc for a loaded, a constant, a
-    // computed and a parameter right-hand side: every pair builds two objects, and a hoisted
-    // `u8 *d = &p->f38; *d = v;` builds the cast's. True reads a moved store whose right-hand side
-    // is computed before its address as struct evidence (raise/structs.ts `memberStoreOrder`).
-    // ido, KMC, GCC 2.7.2 and the three mwcc builds put the two spellings in one object, a loaded
-    // right-hand side included, so they leave it absent. `/far-cast`, the lift that keeps such a
-    // store on its materialised address, is offered on every target and does not read this.
-    farMemberStoreOrder?: boolean;
-    // Does a member past the displacement range get its OWN materialised base at every access, so
-    // that one base read or written at two distinct offsets is a pointer the source held? Stated
-    // as the displacement `past` which that holds: a base materialised with a displacement whose
-    // magnitude exceeds it was built for one access. agbcc's is 0, every base: `p->f38 + p->f39`
-    // compiles to `add r0, #0x26; ldrb [r0]` and `add r1, #0x27; ldrb [r1]`, while
-    // `u8 *d = &p->f38; d[0] + d[1]` shares one `add r1, #0x26` between `ldrb [r1]` and
-    // `ldrb [r1, #1]`, and only the pointer spelling rebuilds those bytes. ido's is 32767, the
-    // `addiu` reach: inside it ido shares one `addiu at, a0, 32767` across adjacent members
-    // (`sb a1, 7232(at); sb a2, 7233(at)`), and past it the assembler expands every member access
-    // to its own `lui at, 3; addu at, at, a0` while a held `u8 *d = &p->b` (b at 200000) shares one
-    // `lui at, 3; addu v0, a0, at` between `sb t6, 3392(v0)` and `sw zero, 3396(v0)`. True refuses
-    // raise/structs.ts's displaced-access fold for such a base (`held-pointer-offsets`). The three
-    // mwcc builds share one `addis` base across members and a held pointer alike, and KMC and
-    // GCC 2.7.2 lift the held pair as members at the same bytes, so they leave it absent. Absent ⇒
-    // the fold reads a shared base as members.
-    farMemberBasePerAccess?: { past: number };
-    // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
-    // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
-    // spelling emits the indexed one's stores wherever the pointee is not volatile? agbcc does, on
-    // its own compiled evidence: the four corners in test/advance.test.ts's header, each built
-    // through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object, and the pair
-    // `TARGET_BEHAVIOR_READINGS` compiles to one object in the matching suite. True ⇒
-    // the `advance` registry entry's target gate withholds the UN-QUALIFIED variation, whose spelling this compiler cannot
-    // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
-    // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒
-    // the plain variation ships, which is the conservative reading for a compiler whose pair nobody has
-    // compiled — a compiler opts in on its own evidence and never by inheriting.
-    foldsPointerAdvance?: boolean;
-    // Does this compiler build a word global read through a pointer conversion, or stored a pointer
-    // it converts implicitly, into the object of the bare integer spelling? agbcc does: under
-    // `extern u32 g;` the pointer spelling of a cell, `g = (void *)((u8 *)g + 4); … (gLimit ^ (u32)g)`,
-    // and the integer one, `g = g + 4; … (gLimit ^ g)`, are one object (the pair
-    // `TARGET_BEHAVIOR_READINGS` compiles), the implicit conversion costing a warning. True ⇒ the
-    // `int-cell` registry entry's target gate withholds that variation, which can only tie the
-    // default's bytes here. It does not tie the warning: under -Werror the pointer spelling does not
-    // build against the integer declaration and the integer one does, which no gate sees, since the
-    // witness and the bench compile without -Werror. IDO builds the pair into two objects and
-    // CodeWarrior rejects the pointer store, so both are offered. KMC gcc builds one object too and
-    // does not declare it: the matching suite compiles each witness on one compiler. Absent ⇒
-    // offered.
-    pointerIntConversionIsFree?: boolean;
-    // Does this compiler keep the constant addend of a POINTER sum's offset where the source put it,
-    // and move an INTEGER sum's out to the base? agbcc does: `(u8 *)((u32)g + ((a << 4) + 772))`
-    // computes `(g + 772) + (a << 4)` (fold-const.c:5033-5058, `A + (V + C)` → `(A + C) + V`), while
-    // `(u8 *)g + ((a << 4) + 772)` computes `g + ((a << 4) + 772)` (c-typeck.c:2663-2692 distributes
-    // the constant, fold-const.c:4997-5011 folds it back), which is what the project's own
-    // `g->arr[a]` compiles to. Compiled at each toolchain's canonical flags, with `g` a struct
-    // pointer, a `void *` and a `u32`, as a call argument and under a dereference: agbcc,
-    // gcc2.7.2kmc and gcc2.7.2 build the two spellings into two objects wherever the offset has a
-    // constant addend and into one where it has none; ido7.1 builds one object every time, and
-    // mwcc_242_81 is CodeWarrior's index-first order (structure/pointer-spelling.ts, THE INTEGER
-    // SUM). Two rules read it. True ⇒ the arithmetic table's value row (ARITH_ROWS) spells an
-    // undeclared pointer global plus an integer with a constant term as the pointer sum where the
-    // sum is a value rather than an access's address; and the structurer declares `u8 *` a temp
-    // holding a pointer global's value that is the base of such a sum (`declaresBytePointer`),
-    // which an integer temp would compile as `(t + K) + x`. Through a temp ido7.1 does build two
-    // objects, the byte pointer's index first where the integer temp and the struct source keep the
-    // base first, and mwcc_242_81 builds one (the cli matching suite's pointer-spelling.test.ts).
-    // Absent ⇒ the integer sum and the integer temp.
-    keepsPointerSumAddend?: boolean;
-    // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
-    // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
-    // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
-    // read past a branch and nothing lifts one to a dominator. The CONVERSE — the asm's read block
-    // is where the source read — is FALSE even here, and no default may be declared as if it held.
-    //
-    // agbcc (gcc 2.9-arm) declares TRUE from its own sources plus compiled pairs: gcc's Makefile
-    // SRCS compiles neither sched.c nor reorg.c and toplev.c never mentions flag_schedule_insns, so
-    // there is no scheduler; and `s = *g; if (c) A(s); else B(s);` against `if (c) A(*g); else
-    // B(*g);` emits one ldrb + one pool word versus one of each PER ARM, moving neither. gcse.c calls
-    // one_code_hoisting_pass only `if (optimize_size)`, which toplev.c sets only for -Os, so at -O2
-    // the hoister never runs. At -Os it runs, and on `if (c) A(*gp); else B(*gp);` it moves only the
-    // pool ADDRESS load above the branch: each arm keeps its own dereference, so the read still
-    // stays in the block that spelled it. That pair is committed: `corpus/agbcc-hoist-{O2,Os}.s` from
-    // `corpus/probe-agbcc-hoist.c`, regenerated by `scripts/regen-flag-pair-probes.ts`, asserted in
-    // hoist-level-probes.test.ts. The two passes that DO move a read between blocks at -O2 — loop
-    // invariant motion, and the PRE that makes the converse false — are refusals the rule owes;
-    // structure/analysis.ts carries them.
-    //
-    // ABSENT ⇒ the rule stands down, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
-    // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
-    readsStayWhereWritten?: boolean;
-    // Does a LOCAL initialised with a memory read its dominating TEST already performed cost this
-    // compiler a SECOND load? The pair is the arm of `if (a && (p[1] & 0x7f) == 0x7f) { … }` spelled
-    // `u8 v = p[1]; p[2] = v;` against `p[2] = p[1];`, and again with a store and with a call
-    // between the local and its use. agbcc loads `p[1]` TWICE for every local spelling and once
-    // for the inline one; ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 load it ONCE for every
-    // local spelling, holding the register across the store and across the call. agbcc is the
-    // odd one out of five, so the one agbcc-shaped claim that rested on it — raise/shortcircuit.ts's
-    // `read-behind-effect`, "a copy analysis.ts spells as a local costs a load" — reads it here
-    // rather than running on every target — on mwcc it costs the probe named at PPC_MWCC's value
-    // its byte-match.
-    // Read off the target by a raising pass (raise/pre-recovery.ts), not by the structurer.
-    //
-    // ABSENT ⇒ false: the refusal stands down, and a compiler opts IN on its own compiled pair. The
-    // three descriptions that measured false (four compilers) set it anyway, so absent means
-    // UNMEASURED rather than "no".
-    reloadsLocalReread?: boolean;
-    // Does this compiler convert a constant to a NARROW lvalue's type before it materializes it
-    // for the store? Then the stored register's upper bits say the lvalue's signedness whenever
-    // the narrow sign bit is set: `u16 *p; p[6] = -1;` loads 0xffff and `s16 *p; p[6] = 0xFFFF;`
-    // loads -1. Measured on every bench compiler at its rows' flags by lifting the probe in
-    // packages/cli/test/matching/narrow-store-constant.test.ts and reading the const each store
-    // takes. Read by raise/storesign.ts (through raise/pre-recovery.ts).
-    //
-    // ABSENT ⇒ the seed stands down and a narrow store keeps the unsigned view; a compiler opts IN
-    // on its own probe.
-    narrowStoreConstantTakesLvalueType?: boolean;
-    // A LAYOUT fact rather than a canonicalization one, kept here because it is the COMPILER's:
-    // the size, in bytes, it aligns and rounds EVERY struct and union to, whatever its members.
-    // agbcc: 4 — `sizeof(struct { u16 h; })` is 4, and `struct { u8 a; union { u16 h; u8 b[2]; } u; }`
-    // seats `u` at 4 (gcc 2.9's arm STRUCTURE_SIZE_BOUNDARY). ido7.1, gcc2.7.2kmc and mwcc_242_81
-    // answer 2 and 2: the natural layout, 1. Compiled as `return sizeof …` / `return (int)&((T *)0)->m`
-    // at each row's flags; gcc2.7.2 (-O1), mwcc_233_163n and mwcc_247_107 answer the same as their
-    // descriptions' measured compilers. Read by raise/structs.ts (through raise/pre-recovery.ts),
-    // which sizes a recovered UNION member with it, and by raise/struct-arrays.ts, which declines
-    // an element struct whose stride it would round (agbcc: a stride-6 `u16 [3]` row is 8 bytes).
-    //
-    // ABSENT ⇒ unmeasured: the union recovery declines every union narrower than a word, and the
-    // struct-array recovery declines every element struct. No value is safe to assume, since one
-    // too small mislays the fields after it on agbcc (and mis-strides an element struct) and one
-    // too large drops the pad in front of them everywhere else.
-    aggregateBoundary?: number;
-    // The largest alignment any member of a struct takes, in bytes (BIGGEST_ALIGNMENT): agbcc 4,
-    // thumb.h:358, so a `long long` member sits at a word. With `aggregateBoundary` it is what sizes
-    // a declared aggregate (`aggregate.ts`). ABSENT ⇒ unmeasured, and no aggregate is sized.
-    largestAlignment?: number;
-    // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
-    // declared to return one hands it a hidden pointer as argument 0 and moves every declared
-    // argument one register up (`aggregate.ts` `returnsInMemory`, read by the call lowering every
-    // frontend shares, frontend/call-plan.ts).
-    //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
-    //     a bitfield, or when a union has a member that would be; in the return register otherwise.
-    //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
-    //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
-    //   • 'svr4' — in r3, or r3:r4, when it is 8 bytes or less, whatever its members (a float's
-    //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
-    //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
-    //     12-byte struct are handed `addi r3,…` ahead of the call).
-    //   • 'memory' — always in memory, whatever its size or members. ido7.1, gcc2.7.2kmc and gcc2.7.2
-    //     alike (compiled: `{u8}`, `{u16}`, `{u32}`, `{float}`, `{double}`, 4-, 8- and 12-byte
-    //     structs, `union {u32; u16;}` and `{u32 a:8; u32 b:8;}` are each handed `addiu a0,sp,N`
-    //     ahead of the `jal`, with the declared arguments from a1 on, and the callee returns that
-    //     pointer, `move v0,a0`).
-    // Under every rule the caller's half is lowered (frontend/call-plan.ts), and a function that
-    // itself returns a struct through memory lifts as that struct where its declaration says so and
-    // the lift proves the hidden pointer is only its storage (frontend/own-struct-return.ts); it is
-    // read as the pointer function it compiles to where nothing declares it, or where a context's
-    // declaration does and the proof fails (pipeline.ts `returnOwnStruct`).
-    // ABSENT ⇒ unmeasured, and such a call declines.
-    aggregateReturn?: 'apcs' | 'svr4' | 'memory';
-    // WHETHER A FUNCTION THAT RETURNS A STRUCT THROUGH MEMORY HANDS THE HIDDEN POINTER BACK in the
-    // return register — a COMPILER fact, which no rule above implies. `true` for ido7.1, gcc2.7.2kmc
-    // and gcc2.7.2 (`move v0,a0`, the O32 rule) and for agbcc (`add r0, r6, #0` after a call, r0
-    // left alone in a leaf: compiled `struct S12 f(s32 x)` with and without a call to `fill(t)`).
-    // `false` for mwcc_242_81, mwcc_233_163n and mwcc_247_107, whose callee clobbers r3 before the
-    // `blr`: the same `struct S12 b4(s32 x)` saves the pointer in r30/r31, stores through it, and
-    // returns with r3 = a reload of a frame word. It decides what the proof that a function's own
-    // struct return goes through that pointer asks of each `ret` (frontend/own-struct-return.ts):
-    // where it is `true` every `ret` must hand back the pointer, and where it is `false` what the
-    // return register holds is no part of the function, save a value computed for the return alone
-    // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
-    structReturnHandsBackPointer?: boolean;
-    // WHETHER A CALLER HANDS ITS OWN DESTINATION POINTER STRAIGHT ON as a callee's hidden
-    // struct-return pointer, leaving the first argument register at its incoming value below the
-    // arguments it sets up. `true` for ido7.1: `int b3(struct S *p){ *p = sg(1); return 0; }` is
-    // `jal sg; li a1,1` with a0 never touched, the bytes of `sg(p, 1)` with its result unused.
-    // `false` for gcc2.7.2kmc, gcc2.7.2, agbcc and mwcc_242_81, mwcc_233_163n and mwcc_247_107,
-    // which copy through a frame temporary (a0/r0/r3 set to a frame address ahead of the call).
-    // Compiled at the canonical flags, `b3` and `void b6(struct S *p, int k){ *p = sg(k, 5); }`.
-    // Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`): where it holds, a gap at
-    // the first argument register is decided only where the call's result is read, which no
-    // forwarded struct return's is (IDO reloads `p` from its home after the call in all five shapes
-    // compiled: `return (*p = sg(1)).b`, `return p` and three more). ABSENT ⇒ unmeasured, and read
-    // as `true`, which only refuses more.
-    forwardsStructReturnDestination?: boolean;
-    // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
-    // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
-    // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
-    // BLKmode argument across r3 and the stack, FUNCTION_ARG_ADVANCE rounds its size to a word, and
-    // no FUNCTION_ARG_PASS_BY_REFERENCE is defined); compiled, `struct A {u16 a,b,c,d; s8 e,f;}`
-    // is `ldr r0..r2` off the frame copy ahead of `bl take2`. O32 too, compiled on ido7.1,
-    // gcc2.7.2kmc and gcc2.7.2: `takeQ(s32 k, struct Q {u32 a, b;})` is passed `a1:a2` and a
-    // three-word struct `a0..a2` (an 8-aligned one starts at an even word:
-    // `evenWordAlignedArgs`); IDO also stores each word into its home slot, which the
-    // call owns. ABSENT ⇒ the target passes one some other way or states nothing: mwcc passes the
-    // address of a copy (frontend/ppc.ts refuses it).
-    byValueAggregateArgWords?: boolean;
-    // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
-    // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
-    // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
-    // and `enum {B0 = 300}` are both 4. `targetFor` drops it under `-fshort-enums`, and an enum
-    // declared with an attribute (`packed`), or with a value an int cannot hold, is not sized
-    // (proto-context.ts). ABSENT ⇒ unmeasured,
-    // and an aggregate with an enum member is not sized.
-    enumBytes?: number;
-    // Whether a plain `char` is signed, read where a context declares a global `char` and the lift
-    // asks whether a narrow read of it agrees with that declaration (structure.ts
-    // `storageDisagrees`). The compiler's default, with no flag; `targetFor` applies the flags that
-    // change it (`-funsigned-char`/`-fsigned-char`, IDO's `-signed`, mwcc's `-char`). MEASURED,
-    // `s32 g(void){ return gC; }` over `extern char gC;` at each toolchain's canonical flags: agbcc
-    // `ldrb` and ido7.1 `lbu` (unsigned), gcc2.7.2 `lb` (signed; gcc2.7.2kmc's canonical
-    // `-funsigned-char` makes it `lbu`), mwcc_242_81 `lbz` + `extsb` (signed). ABSENT ⇒ unmeasured,
-    // and a narrow read of a declared plain `char` agrees with neither sign, so it is spelled
-    // through its address.
-    plainCharSigned?: boolean;
-    // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
-    // one before, straddling a byte or a word of its declared type, with the next member that is not
-    // a bitfield at the first byte past it that its alignment allows. agbcc: thumb.h defines no
-    // PCC_BITFIELD_TYPE_MATTERS, so stor-layout.c:404-405 lays a bitfield at bit alignment and
-    // skips the no-straddle rule of :462-481 (compiled: `{u32 a:20; u32 b:20; u8 c;}` puts `c` at
-    // 5, `{u32 a:31; u32 b:31; u32 c:2;}` is 8 bytes, `{u8 a:5; u8 b:5; u8 c;}` puts `c` at 2). A
-    // zero-width bitfield, which moves the next member to EMPTY_FIELD_BOUNDARY, is not placed.
-    // ABSENT ⇒ unmeasured, and an aggregate with a bitfield is not sized.
-    bitfieldPacking?: 'contiguous';
-    // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
-    // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
-    // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
-    // `fnmsubs`, but only within one expression, so the structurer names every such product
-    // (StructureOptions.contractsFloatProducts) and the spelling compiles to the unfused pair under
-    // either setting. The MIPS targets cannot: MIPS II (ido7.1 `-mips2`) and MIPS III (kmc `-mips3`)
-    // have no fused multiply-add, and naming the product there only moves the register allocation
-    // off the object (`fpu-lift.test.ts` pins one on ido7.1).
-    //
-    // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
-    // compute on a float at all.
-    contractsFloatProducts?: boolean;
-    // Does this compiler read a double literal's shortest round-trip decimal (`ir/float-bits.ts`
-    // `doubleLiteral`) back as the same double? That is how an `fconst` is printed, so its
-    // producers run only where this is true. agbcc does: c-lex.c:1308 hands the token to
-    // REAL_VALUE_ATOF at DFmode, which is real.c:461 `ereal_atof` → `asctoe53` (:3512) →
-    // `asctoeg(s, y, 53)` (:3533), a conversion in extended precision rounded once to 53 bits.
-    //
-    // ABSENT ⇒ unmeasured, and a literal declines.
-    roundTripsDoubleLiterals?: boolean;
-    // How the compiler lays out a FUNCTION-SCOPE STATIC: the least alignment of an array, the
-    // alignment of a string-literal initializer, and whether a zero scalar keeps its `.data`. The
-    // bytes of a static do not say how the source declared it; these, with the alignment and
-    // section the target shows, say which declaration lands it there (structure/local-statics.ts).
-    // A LAYOUT fact like `aggregateBoundary`, and the compiler's, read by the structurer.
-    //
-    // ABSENT ⇒ unmeasured, and a function that defines a static declines: a wrong floor mislays
-    // every static after the first, which no score sees.
-    staticLayout?: StaticLayout;
-    // Does this compiler load a `volatile` narrow signed read zero-extended and sign-extend it in a
-    // register, never in the load itself? agbcc: yes — `*(volatile s16 *)a` is `ldrh; lsl #16; asr
-    // #16` and `volatile s8` is `ldrb; lsl; asr`, where the plain `s16` read is `ldrsh`: the
-    // sign-extend expander refuses a volatile MEM while expanding (`general_operand`, recog.c:918,
-    // under `init_recog_no_volatile`, function.c:5564) and thumb.md:393-409 then extends in a
-    // register; compiled at the canonical flags. So a lifted sign-extending narrow load is evidence
-    // the source read was plain (`readCouldBeVolatile`): the device pin (frontend/device-pins.ts)
-    // leaves it plain, and the `declared` stamp (raise/declared-volatile.ts) leaves it unplaced.
-    //
-    // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
-    // pinned, and a read of a declared object placed, whatever its extension.
-    volatileReadsExtendInRegister?: boolean;
-    // Does this compiler RELOAD a cell stored through one spelling and read back through another —
-    // two names, or a name and a numeric address, for the same byte? MEASURED at -O2, each probe
-    // storing 5 to a word, 7 to one of its bytes, and reading the word back: IDO 7.1 reloads
-    // (`D_80100000 = 5; ((u8 *)0x80100000)[1] = 7; return D_80100000;` is `sb; jr ra; lw v0`);
-    // agbcc (`sRandCount = 5; ((u8 *)&sUnknown)[4] = 7; return sRandCount;` is `strb; mov r0,
-    // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. IDO also reloads across
-    // two externs, two statics, an array element beside a scalar, and a word-wide literal beside
-    // a name. It reloads only a read that FOLLOWS the store: a read placed before a byte store
-    // through another name is sunk past it (`v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7;
-    // return v0;` is `sb; jr ra; lw v0`). So where it holds, a pair of spellings in one block
-    // outside any loop, the store first, is faithful lifted as-is, whether the asm carries both or
-    // the map chose one; any other order, and every pair where it does not hold (an asm that went
-    // back to memory proves the source did not spell the byte two ways), raise/offsetnames.ts
-    // `cellSpelledTwice` declines.
-    //
-    // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
-    reloadsAcrossSpellings?: boolean;
-    // Does this compiler, AT THESE FLAGS, keep a plain read whose value nothing uses? A FLAG fact,
-    // never written in a description: `targetFor` sets it from the optimisation level
-    // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
-    // the lift finds unused is no evidence of `volatile`, and the dead-read pin
-    // (frontend/dead-reads.ts) stamps only one the machine loaded into the register the compiler
-    // discards a volatile read into (`discardsUnusedReadsInto`).
-    //
-    // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
-    // was qualified.
-    keepsUnusedReads?: boolean;
-    // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
-    // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
-    // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
-    // `*p;`, `s->b;`, `gV;` and `(*p, 1)` through a volatile lvalue load into `r0` on mwcc 2.4.2,
-    // 2.4.7 and 2.3.3 at `-O0,p`, and into `$zero` on IDO 7.1 at `-O1` and `-O0`; the plain
-    // `x = p[5]; x = 0;` takes a home there instead (`lwz r31`, `lw t6` and a frame store), and so
-    // does a `register` local (`lwz r31`, `lw a2`). Over the 409 complete Mario Party 4 units built
-    // at `-O0,p`, 924 non-frame loads nothing reads land in r17-r31 and f18-f31, and exactly one in
-    // r0: WipeExecAlways's `wipe->type;`, a `volatile u8` member. So a dead load into this
-    // register is a qualified read, and the dead-read pin (frontend/dead-reads.ts) stamps it at a
-    // keeping level too. mwcc keeps one plain read in r0 as well, a read under an arithmetic or a
-    // cast nothing uses (`p[5] + 1;`, `(char)p[5];`), which no real unit holds: that is the pin's
-    // residue. A load this register took and an op then wrote to a home (`lwz r0` + `extsb r31,r0`,
-    // a plain `s8` local) is not discarded (frontend/dead-reads.ts `leftInDiscardRegister`). One
-    // register cannot name a pair: IDO discards a doubleword into zero:at, `lw zero,0(a0)` +
-    // `lw at,4(a0)`, which frontend/mips.ts `emitLoad` reads as the pair this register heads.
-    //
-    // ABSENT ⇒ the compiler has no such register, or it is unmeasured. agbcc, gcc 2.7.2 and KMC
-    // gcc 2.7.2 at `-O0` have none: a volatile `*p;` is an `ldr r0`/`lw v0` nothing stores, the
-    // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
-    // two apart there and refuses rather than drop the read.
-    discardsUnusedReadsInto?: string;
-    // MAY A DISCARDED READ LAND IN AN ARGUMENT REGISTER, at flags that delete a plain read nobody
-    // uses? Where it may, a value a load left in an argument register is no proof that the next
-    // call takes it. The discard register is the allocator's first free one, not a fixed register,
-    // so a single read on its own says nothing: the probe that decides is one where the usual
-    // discard register is busy. `true` for agbcc, which loads a discarded `volatile` read into the
-    // lowest free argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
-    // `g(s, *(int *)K)`). `true` for gcc2.7.2kmc and gcc2.7.2, which discard into v0/v1 until those
-    // are busy and then into a1: `int a = ga * 3; *(volatile int *)&gx; *(volatile int *)&gx;
-    // ga = a + 1; return logv(s) + 1;` is `lw a1,0(v0); lw v0,0(v0); ... jal logv` (`lw a1,0(v1)` on
-    // gcc2.7.2), the bytes of the twin that passes the first read. `true` for mwcc_242_81,
-    // mwcc_233_163n and mwcc_247_107, which discard into r0 until it is busy and then into r4: the
-    // same function's first read is `lwz r4,gx` on all three, and with three reads mwcc_233_163n's
-    // last one is `lwz r4,gx` right before `bl logv`, byte-identical to the twin that passes it.
-    // `false` for ido7.1 alone: `lw zero`, `lbu zero`, `lh zero`, and `lw zero` + `lw at` for a
-    // doubleword, with four discarded reads stacked under the same pressure too. Compiled at the
-    // canonical flags. Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a
-    // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
-    // refuses more.
-    discardedReadMayFillArgRegister?: boolean;
-    // DOES THE COMPILER CROSS-JUMP RETURN TAILS? Where two arms end in the same code before the
-    // same return, does it keep ONE copy and jump the other arm into it? Where it does, the source
-    // may have written the tail into every arm (`h(10, 0); return;` in each) and the object still
-    // holds it once. So a join in the CFG is no evidence the source wrote one. What tells the two
-    // spellings apart is where the surviving copy sits, and which arms became one block. Read by
-    // the return-tail chooser (pipeline.ts `structureReturnTailReading`): it publishes the copies
-    // where the target's layout shows that merge (structure/cross-jumped-tail.ts), and never reads
-    // the layout where this is absent.
-    //
-    // gcc 2.x's jump2 pass does it: jump.c, in the `JUMP_CROSS_JUMP` run of `jump_optimize` that
-    // toplev.c makes at `optimize > 0`.
-    //   - An unconditional jump is first cross-jumped into the code before its own target label
-    //     (`find_cross_jump (insn, JUMP_LABEL (insn), 1)`).
-    //   - Only then is it tried against the other jumps to that label, and that search runs only
-    //     `if (INSN_UID (JUMP_LABEL (insn)) < max_uid)`.
-    //   - `do_cross_jump` keeps the LATER copy and jumps to a label before it. `get_label_before`
-    //     creates that label, so a jump already redirected is never searched for siblings again.
-    // So the copies spelling leaves three shapes in the object (structure/cross-jumped-tail.ts):
-    //   - an arm that does not use the tail stays laid out after the surviving copy, and that copy
-    //     ends in a jump over it;
-    //   - identical arm bodies stay separate blocks, where the join's one original label would have
-    //     merged them;
-    //   - `find_cross_jump` compares backward and stops at the first pair that differs, so a call
-    //     the tail opens with can be cut from the argument setup each arm keeps.
-    // MEASURED on two probe pairs, `corpus/probe-rettail-{pa,pb}-{copies,join}.c`: a three-arm `if`
-    // and a seven-case `switch`. Each is compiled at each toolchain's canonical flags by
-    // `scripts/regen-rettail-probes.ts`, and cross-jumped-tail.test.ts reads the objects:
-    //   - agbcc: the `pa` copies keep the tail mid-construct, ending in `b`, with the else arm laid
-    //     out after it. The `pb` copies hold the tail's store ONCE, in six case bodies; the join
-    //     has three bodies.
-    //   - gcc2.7.2 (-O1) and gcc2.7.2kmc (-O2): `pb` is the same, one store, six bodies against
-    //     three. The `pa` copies and join compile byte-identical, because the fall-through arm's
-    //     call merged too.
-    //   - ido7.1 and mwcc_242_81: NO. The `pb` copies keep all seven stores, each before its own
-    //     return, and the `pa` copies keep three calls.
-    // So `true` on ARMV4T_AGBCC and on MIPS_GCC. Each toolchain MIPS_GCC serves owes its own pair
-    // (the KEYED BY DESCRIPTION note at `spillSlotOrder`), and both are committed. ABSENT means no
-    // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
-    // unprobed, and PPC_MWCC claims nothing for them. Read only where the join is the default
-    // (`joinPastReturnsByDefault`), which both descriptions declaring this field leave out, so the
-    // marks decide no shipped default; the probe pairs still pin each one.
-    crossJumpsReturnTails?: boolean;
-    // DOES THE COMPILER FOLD THE CONSTANT A BRANCH PROVED INTO A RETURN ON THE BRANCH'S TAKEN EDGE?
-    // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
-    // records the branch's equivalence on the NOT-taken edge of every jump (`record_jump_equiv
-    // (insn, 0)`, cse.c:7597), and on the taken edge only along a path it follows (`record_jump_equiv
-    // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps, which toplev.c:3606-3607
-    // sets at `optimize >= 2` (-fcse-skip-blocks skips a block without recording the edge:
-    // `cseFollowsJumpsUnder`). (Line numbers are agbcc's gcc 2.9 tree; for
-    // 2.7.2 the probe below is the evidence.) So where this is `false`, a return of the tested value
-    // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
-    // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
-    // Read by the return-tail chooser (pipeline.ts `structureReturnTailReading`), which publishes the
-    // copies at such a return (structure/unfolded-branch-constant.ts), and only where the join is
-    // the default (`joinPastReturnsByDefault`), which MIPS_GCC, the one description declaring this
-    // field, leaves out: so it decides no shipped default, and the probes below still pin it.
-    // `false` only by the flags (`targetFor`), never declared.
-    //
-    // MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c`, the `return gB` after a
-    // `gB` tested against 0, compiled by scripts/regen-rettail-probes.ts. The `beqz`'s delay slot:
-    //   - gcc2.7.2 at -O1 (canonical): copies `nop`, join `move v0,zero`. With the arms of the
-    //     copies flipped (the return the then arm), and with `-O1 -fcse-follow-jumps`, `move v0,zero`.
-    //   - gcc2.7.2 at -O2, and gcc2.7.2kmc at -O2 (canonical): `move v0,zero` under every spelling.
-    // So `true` on MIPS_GCC, and `false` from the flags where cse follows no jump (level 1 without
-    // -fcse-follow-jumps, or -fno-cse-follow-jumps: `cseFollowsJumpsUnder`). Absent elsewhere: agbcc
-    // at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no value of this field
-    // says; ido7.1 and mwcc are unprobed.
-    foldsBranchConstantOnTakenEdge?: boolean;
-    // IS THE JOIN PAST EARLY RETURNS THE DEFAULT READING HERE? Not a compiler behaviour but a MEASURED
-    // DEFAULT, kept beside the behaviours because it is per compiler and read by the chooser they
-    // feed (pipeline.ts `structureReturnTailReading`), which the size bound and the marks above
-    // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
-    // join was a default, and the join is still structured and kept in the ranked fan as
-    // `/ret-join`. A compiler the held-out measurement has not reached publishes the copies first,
-    // and the join only where the copies refuse, so it lifts every function it lifted before and
-    // may lift one the old default declined (pipeline.ts `copiesByDefault`).
-    // docs/level-tower.md (A MEASURED DEFAULT IS THE ONE EXCEPTION) says why a field whose readings
-    // split site by site may still be declared here, and what re-measures it.
-    //
-    // MEASURED over held-out real functions, every function of a project outside the 620 the marks
-    // were chosen on, both readings really compiled against the project's own objects (2026-11-06),
-    // and over 160 generated functions written with the copies (2026-11-09). `true` only where the
-    // size bound with every mark loses no match the copies have on every measured set:
-    //   - mwcc_233_163n (Pikmin at its own flags, 2733 functions lifted, 66 re-spelled): 0 lost,
-    //     3 gained (two `actByEvent` methods 4/22 -> 0/20, `stickSlot__6PelletFi` 3/28 -> 0/26);
-    //     the generated functions: every source identical to the copies';
-    //   - mwcc_242_81 (ac-decomp and Mario Party 4, every unit compiled at this build although 9 of
-    //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained; the generated
-    //     functions: every source identical to the copies'.
-    // So `true` on PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107) leaves it
-    // out, no held-out unit measured at that build. Left out where it loses, the copies' default
-    // given back with the join's gains:
-    //   - gcc2.7.2kmc: held out (Snowboard Kids 2, 78 re-spelled) 0 lost, 2 gained
-    //     (`func_8003513C_35D3C`, `func_80045564_46164`); generated, 3 lost (the copies match, the
-    //     join is 2 to 8 lines off) and 5 gained. Given up: those 2 held out and the 5 generated.
-    //   - gcc2.7.2: held out (Mario Party 3, all 10019 functions, 150 re-spelled) 0 lost once the
-    //     unfolded return is read (`foldsBranchConstantOnTakenEdge`), none gained; generated, 1 lost
-    //     (4 lines off) and 2 gained. No mark read from the layout or the unfolded return separates
-    //     the 4 generated losses on the two lanes. Given up: the 2 generated, and the held-out and
-    //     620 functions the join brought closer.
-    //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
-    //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
-    //     different arguments, and a third source spelling the copies happen to share. Given up:
-    //     18 held out and 2 of the 620.
-    //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
-    //     never cross-jumps, so no cross-jump mark applies. Counting copies of the arm's store does
-    //     not separate the readings either: compiled, the join of `func_80A42DB4_jp` ALSO keeps two
-    //     `sw zero,0(a3)`, because ido fills a `beql`'s likely slot with a copy of its target's first
-    //     word. What differs is the branch the slot copy rides: the copies' arm schedules its own
-    //     store into the slot of a plain `b`, the join's copy sits in a `beql`'s. That is the
-    //     candidate signal, unmeasured: frontend/mips.ts `normaliseBranchLikely` rewrites both to one
-    //     shape (its `likely` and `freed` sets still tell them apart) before the layout is recorded,
-    //     so no layout entry carries it. Given up: 18 held out and 7 of the 620.
-    joinPastReturnsByDefault?: boolean;
-  };
+  compilerBehaviors: CompilerBehaviors;
+}
+
+/** THE COMPILER BEHAVIORS, one interface per concern; `CompilerBehaviors` is their intersection, so every field stays
+ *  flat on `TargetDescription.compilerBehaviors` and no reader names a group. A field is in exactly one group, and
+ *  within a group the fields keep the order they had in the one flat bag. */
+export type CompilerBehaviors = ControlFlowBehaviors &
+  FrameLayoutBehaviors &
+  CallBehaviors &
+  LoadBehaviors &
+  SpellingBehaviors &
+  AggregateLayoutBehaviors;
+
+/** How the compiler lays out CONTROL FLOW: loops, branch sense, the copies at a CFG edge, switch dispatch, and the
+ *  tails before a return. Mostly read by the structurer and switch recovery, and by the return-tail chooser
+ *  (pipeline.ts `structureReturnTailReading`). */
+export interface ControlFlowBehaviors {
+  // When a loop induction variable's initial value comes from an argument register, some
+  // compilers keep mutating that register across the loop (coalesce → no init copy); others
+  // copy to a fresh local. IDO -O2 and KMC GCC -O2 reuse the arg register (true); agbcc
+  // allocates fresh (false).
+  coalesceLoopInit?: boolean;
+  // Divergent-if (both arms terminate, no join): reproduce the source branch DIRECTION by
+  // emitting the forward-branch-on-negated-condition (taken arm as `else`). IDO/MIPS preserves
+  // source direction so this must be on to be byte-exact; agbcc/GCC canonicalize either way so
+  // true is a safe default there. A compiler that inverts branch canonicalization sets it
+  // false. Absent ⇒ true; a compiler opts OUT. It carries the JOINED case with it:
+  // StructureOptions.negateJoinedBranchSense defaults to this value, so the first compiler that
+  // preserves divergent sense and inverts joined sense splits them by promoting that option to a
+  // field here — never by an `arch ==` branch in the structurer.
+  preserveDivergentBranchSense?: boolean;
+  // Order the parallel-copy assignments at a CFG edge by the order the PREDECESSOR WROTE THEIR
+  // DESTINATIONS — the frontend's own measurement (ir/core.ts `WriteOrder`), falling back to a
+  // def-position proxy on a predecessor no frontend measured. Not "computation order": a
+  // destination written with a value defined elsewhere is a plain register copy, and it ranks by
+  // where that copy sits, not by where its value was computed. Uniform (true) across all current
+  // compilers; absent ⇒ true, and a compiler that opts OUT turns the sort off entirely and emits
+  // in source/param order. WHICH order a measured edge takes is not this flag's question and
+  // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that decision is
+  // refereed per row by `/copy-defpos` (rank.ts), never declared per compiler here.
+  orderArgCopiesByWriteOrder?: boolean;
+  // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
+  // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
+  // decline path keeps recovery sound either way.
+  switchAllowsNeqCase?: boolean;
+  // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
+  // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
+  // `:471-502`). Absent ⇒ false, and every clause below never admits. `structureOptionsFor`
+  // spreads it onto StructureOptions like every other field here, but NO structurer code reads
+  // it: both readers are raising passes, threaded from their driver's own `target`.
+  //
+  // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS. One field rather than one per reader,
+  // because a second boolean for the same guard lets a round that measures another compiler's
+  // `jump_optimize` set one and leave the other false, with both comments reading as
+  // authoritative.
+  //
+  //   • raise/narrowlocal.ts's `edge-extends`: a diamond this compiler would have collapsed and
+  //     did NOT is evidence the source DECLARED the local narrow, because `gcc/thumb.h:344`
+  //     PROMOTE_MODE expands a narrow-declared assignment past one SET.
+  //   • raise/retsink.ts's `compiler-hoists-single-set-arm`: a merge-variable select whose arms
+  //     this guard would have collapsed never comes back as a diamond, so a TARGET holding one
+  //     was written with early returns and its returns should be sunk.
+  //
+  // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored and
+  // where retsink's seven-function spelling pair was compiled and committed
+  // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`). NOT set on MIPS_GCC despite it
+  // being the same compiler family: nothing has measured the pair there, the clause reaches 0 of
+  // its benchmark rows on either reader, and `docs/level-tower.md`'s rule for an unmeasured
+  // compiler behavior is to claim nothing. The evidence a future round needs is one run of
+  // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
+  hoistsSingleSetArm?: boolean;
+  // How this compiler marks a BRANCH it had to spell as a call: a `bl <label>` whose line carries
+  // a comment matching `comment` (tested against the text from its `@` to the end of the line) is
+  // a relay to that label of the same function, not a call. Two of its facts are this compiler's,
+  // and the Thumb frontend's lowering rests on them (`lowerFarJumpRelays`): what the mark means,
+  // and that the compiler pushes lr in every function with one, so the lr the relay writes is
+  // never the one the function returns through.
+  //
+  // ABSENT ⇒ no comment makes a `bl` anything but a call: a `bl` to a label of the function keeps
+  // its decline, however its line is commented.
+  farJumpRelay?: { readonly comment: RegExp };
+  // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
+  // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's
+  // dispatch lands a case body on: `'taken'` for its BRANCH only, `'either'` for both sides
+  // (structure/switch-recover.ts, the note at `Ranges`).
+  //
+  // One mechanism on both compilers that declare it: a binary-search dispatch stops testing a
+  // value once the tests above have narrowed it to one. agbcc's `emit_case_nodes` jumps straight to
+  // `node->left->code_label` on LT once `node_is_bounded (node->left)` holds, so
+  // `switch (x) { case 1: … case 2: … case 3: … case 4: … case 5: … case 1000: … case 2000: … }`
+  // pins `case 3` with `cmp r1, #2; bgt` under `x < 4`, `x != 2` (`corpus/agbcc-swpathbound.s`),
+  // and an unsigned switch's `case 0` with `cmp r0, #1; bcc`, which pins it at the end of the
+  // domain whatever came first. mwcc's `switch (x) { case 0: … case 1: … default: … }` is
+  // `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, where `x >= 0` is
+  // `case 0` only because `x != 1` and `x < 1` came first (`corpus/mwcc-swdispatch.asm`).
+  //
+  // THE SIDES DIFFER, and each is read off its own compiler. Every jump in `emit_case_nodes` that
+  // lands on a case body is its test's BRANCH, while the fall-through always continues into more
+  // dispatch, and none of 3176 generated agbcc dispatches lands a body on a fall side — so agbcc
+  // is `'taken'`. mwcc lands one on either: `synthetic:sw_ret:mwcc_242_81` pins `case 3` on the
+  // FALL side (`cmpwi r3,4; bge- default; b case3` under `x > 2`, `x != 2`), so mwcc is
+  // `'either'`.
+  //
+  // A DEFAULT rather than a candidate variation because each declaring compiler's other producer
+  // of the same test is told apart by its LAYOUT. An if/else-if ladder written with relational
+  // tests pins values by its path just the same (`if (x >= 4) { if (x < 5) … } else if (x >= 3)
+  // …` pins 4 and 3) but puts a body between two tests, where the dispatch puts every test above
+  // every body — so this reading needs `switchRequiresFrontLoadedTests` beside it, and both
+  // declaring compilers declare that too (`corpus/mwcc-sw{dispatch,ladder,relladder,relnest}.asm`
+  // from `corpus/probe-mwcc-sw*.c`, regenerated by `scripts/regen-switch-spelling-probes.ts`). On
+  // agbcc the unsigned endpoint has no ladder at all: -O2 fold-const rewrites `x < 1u` into
+  // `cmp r0, #0 / bne` before codegen. All three builds PPC_MWCC serves emit the dispatch
+  // identically at -O4,p and at -O0,p (`packages/cli/test/matching/ppc-compiler-behaviors.test.ts`).
+  //
+  // Absent ⇒ every relational test navigates, and inheriting it would be wrong rather than merely
+  // unmeasured: on the MIPS lanes `sltiu rd, rs, 1` is the ordinary spelling of `!x`, and it lifts
+  // to `icmp_ult rs, 1` with no equality fold anywhere — the identical IR shape, from a producer
+  // that is not a dispatch. Each compiler opts in on its own dispatch's evidence.
+  switchBoundCase?: SwitchBoundCase;
+  // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
+  // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
+  // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
+  // across them. agbcc declares it from its own sources: `stmt.c` expand_end_case takes
+  // `before_case = get_last_insn()` AFTER the bodies are expanded in source order and its closing
+  // `reorder_insns` moves only the DISPATCH in front of them, and the Makefile's SRCS compiles
+  // neither sched.c nor reorg.c. SCOPE — SRCS does compile jump.c, whose cross-jump merges two
+  // identical arm bodies into ONE block, so a merged pair's own order is gone from the asm; that
+  // surfaces as two case values sharing a body, which switch-recover.ts ties by ascending value.
+  // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit. ido and kmc-gcc have a scheduler
+  // and have not been put through that evidence. mwcc_242_81 HAS been, on two compiled pairs, and
+  // lays the bodies in source order: `synthetic:sw_defmid` with `default:` between two cases, and
+  // a three-case switch whose first case is a `beqlr`. What keeps it from declaring the reading is
+  // its FRONTEND: frontend/ppc.ts appends every conditional-return block after all the real ones,
+  // so such an arm sorts last whatever its address (switch-recover.ts, at `layoutIndex`). Placing
+  // those blocks at their branch's address is the prerequisite, and a declaration after it owes
+  // its own pairs. A compiler opts in on its own, never by inheriting.
+  switchArmsFollowLayout?: boolean;
+  // Switch recovery: DECLINE a comparison tree whose own layout INTERLEAVES a test block with a
+  // case body, on the reading that the source wrote an if/else-if LADDER there. True claims the
+  // compiler emits a source `switch`'s whole dispatch AHEAD of every arm body — the same
+  // `expand_end_case` closing `reorder_insns` `switchArmsFollowLayout` is read off, used for the
+  // other half of what it does — while a ladder's tests stay above their own bodies.
+  //
+  // IT NEEDS HALF OF `switchArmsFollowLayout`'s PREMISE, AND THE IMPLICATION RUNS ONE WAY ONLY.
+  // That flag PLACES the arms and so needs the whole no-reordering claim (nothing moved a block
+  // at all); this one only asks whether any BODY sits above a test, so a compiler that moves
+  // instructions, fills delay slots, or reorders within a block can still declare it. A compiler
+  // that declares the PLACING one has therefore already said what this one needs — never the
+  // converse. `MIPS_GCC` is the standing counterexample to the converse: it declares this flag on
+  // its own pairs (below) and deliberately does NOT declare `switchArmsFollowLayout`, because it
+  // has a scheduler. Declaring this one is not evidence for that one.
+  //
+  // agbcc declares it, and its own pair of objects says the reading is not vacuous: at agbcc's
+  // canonical flags the same two-case body is 20 bytes (0x14, ten Thumb instructions)
+  // written either way and is a DIFFERENT object — the `switch` emits `cmp #0x1e; beq` then
+  // `cmp #0x64; bne` before either body, sorted ascending and so in the reverse of the written
+  // order; the ladder emits `cmp #0x64; bne` directly above its own body and reaches `cmp #0x1e`
+  // only after it. The pair is committed: `corpus/agbcc-sw{frontload,ladder}.s` from
+  // `corpus/probe-agbcc-sw{frontload,ladder}.c`, regenerated by
+  // `scripts/regen-switch-spelling-probes.ts`, asserted in switch-arms.test.ts.
+  //
+  // mwcc declares it on its own objects: its `switch` dispatch puts every test above every body,
+  // and a ladder written with relational tests puts a body between two of them
+  // (`corpus/mwcc-sw{dispatch,relladder,relnest}.asm`, the note at `switchBoundCase`).
+  //
+  // Absent ⇒ every recoverable tree is still spelled `switch`, which is where ido sits: it has a
+  // scheduler that may move a body above a test, and it has not been put through the pair.
+  // A compiler opts in on its own compiled evidence, never by inheriting — and where one
+  // description serves two toolchains (`MIPS_GCC`), each toolchain owes its own pair, because the
+  // field cannot distinguish them (the KEYED BY DESCRIPTION note at `spillSlotOrder`).
+  switchRequiresFrontLoadedTests?: boolean;
+  // DOES THE COMPILER CROSS-JUMP RETURN TAILS? Where two arms end in the same code before the
+  // same return, does it keep ONE copy and jump the other arm into it? Where it does, the source
+  // may have written the tail into every arm (`h(10, 0); return;` in each) and the object still
+  // holds it once. So a join in the CFG is no evidence the source wrote one. What tells the two
+  // spellings apart is where the surviving copy sits, and which arms became one block. Read by
+  // the return-tail chooser (pipeline.ts `structureReturnTailReading`): it publishes the copies
+  // where the target's layout shows that merge (structure/cross-jumped-tail.ts), and never reads
+  // the layout where this is absent.
+  //
+  // gcc 2.x's jump2 pass does it: jump.c, in the `JUMP_CROSS_JUMP` run of `jump_optimize` that
+  // toplev.c makes at `optimize > 0`.
+  //   - An unconditional jump is first cross-jumped into the code before its own target label
+  //     (`find_cross_jump (insn, JUMP_LABEL (insn), 1)`).
+  //   - Only then is it tried against the other jumps to that label, and that search runs only
+  //     `if (INSN_UID (JUMP_LABEL (insn)) < max_uid)`.
+  //   - `do_cross_jump` keeps the LATER copy and jumps to a label before it. `get_label_before`
+  //     creates that label, so a jump already redirected is never searched for siblings again.
+  // So the copies spelling leaves three shapes in the object (structure/cross-jumped-tail.ts):
+  //   - an arm that does not use the tail stays laid out after the surviving copy, and that copy
+  //     ends in a jump over it;
+  //   - identical arm bodies stay separate blocks, where the join's one original label would have
+  //     merged them;
+  //   - `find_cross_jump` compares backward and stops at the first pair that differs, so a call
+  //     the tail opens with can be cut from the argument setup each arm keeps.
+  // MEASURED on two probe pairs, `corpus/probe-rettail-{pa,pb}-{copies,join}.c`: a three-arm `if`
+  // and a seven-case `switch`. Each is compiled at each toolchain's canonical flags by
+  // `scripts/regen-rettail-probes.ts`, and cross-jumped-tail.test.ts reads the objects:
+  //   - agbcc: the `pa` copies keep the tail mid-construct, ending in `b`, with the else arm laid
+  //     out after it. The `pb` copies hold the tail's store ONCE, in six case bodies; the join
+  //     has three bodies.
+  //   - gcc2.7.2 (-O1) and gcc2.7.2kmc (-O2): `pb` is the same, one store, six bodies against
+  //     three. The `pa` copies and join compile byte-identical, because the fall-through arm's
+  //     call merged too.
+  //   - ido7.1 and mwcc_242_81: NO. The `pb` copies keep all seven stores, each before its own
+  //     return, and the `pa` copies keep three calls.
+  // So `true` on ARMV4T_AGBCC and on MIPS_GCC. Each toolchain MIPS_GCC serves owes its own pair
+  // (the KEYED BY DESCRIPTION note at `spillSlotOrder`), and both are committed. ABSENT means no
+  // such merge: the chooser's size bound alone decides. mwcc_233_163n and mwcc_247_107 are
+  // unprobed, and PPC_MWCC claims nothing for them. Read only where the join is the default
+  // (`joinPastReturnsByDefault`), which both descriptions declaring this field leave out, so the
+  // marks decide no shipped default; the probe pairs still pin each one.
+  crossJumpsReturnTails?: boolean;
+  // DOES THE COMPILER FOLD THE CONSTANT A BRANCH PROVED INTO A RETURN ON THE BRANCH'S TAKEN EDGE?
+  // After `if (x == 0)`, a `return x` the jump reaches is `return 0` where it does. gcc 2.x's cse
+  // records the branch's equivalence on the NOT-taken edge of every jump (`record_jump_equiv
+  // (insn, 0)`, cse.c:7597), and on the taken edge only along a path it follows (`record_jump_equiv
+  // (insn, 1)`, cse.c:8545). It follows one only under -fcse-follow-jumps, which toplev.c:3606-3607
+  // sets at `optimize >= 2` (-fcse-skip-blocks skips a block without recording the edge:
+  // `cseFollowsJumpsUnder`). (Line numbers are agbcc's gcc 2.9 tree; for
+  // 2.7.2 the probe below is the evidence.) So where this is `false`, a return of the tested value
+  // left UNFOLDED in the object was the jump-target arm of its branch in the source: an `else`.
+  // The join past early returns spells it `if (x == 0) return x;`, the then arm, which folds.
+  // Read by the return-tail chooser (pipeline.ts `structureReturnTailReading`), which publishes the
+  // copies at such a return (structure/unfolded-branch-constant.ts), and only where the join is
+  // the default (`joinPastReturnsByDefault`), which MIPS_GCC, the one description declaring this
+  // field, leaves out: so it decides no shipped default, and the probes below still pin it.
+  // `false` only by the flags (`targetFor`), never declared.
+  //
+  // MEASURED on the probe pair `corpus/probe-rettail-pg-{copies,join}.c`, the `return gB` after a
+  // `gB` tested against 0, compiled by scripts/regen-rettail-probes.ts. The `beqz`'s delay slot:
+  //   - gcc2.7.2 at -O1 (canonical): copies `nop`, join `move v0,zero`. With the arms of the
+  //     copies flipped (the return the then arm), and with `-O1 -fcse-follow-jumps`, `move v0,zero`.
+  //   - gcc2.7.2 at -O2, and gcc2.7.2kmc at -O2 (canonical): `move v0,zero` under every spelling.
+  // So `true` on MIPS_GCC, and `false` from the flags where cse follows no jump (level 1 without
+  // -fcse-follow-jumps, or -fno-cse-follow-jumps: `cseFollowsJumpsUnder`). Absent elsewhere: agbcc
+  // at -O2 re-loads `gB` for the copies' `else` and does not fold it, which no value of this field
+  // says; ido7.1 and mwcc are unprobed.
+  foldsBranchConstantOnTakenEdge?: boolean;
+  // IS THE JOIN PAST EARLY RETURNS THE DEFAULT READING HERE? Not a compiler behaviour but a MEASURED
+  // DEFAULT, kept beside the behaviours because it is per compiler and read by the chooser they
+  // feed (pipeline.ts `structureReturnTailReading`), which the size bound and the marks above
+  // steer only where this is `true`. ABSENT ⇒ the return-tail copies are published, as before the
+  // join was a default, and the join is still structured and kept in the ranked fan as
+  // `/ret-join`. A compiler the held-out measurement has not reached publishes the copies first,
+  // and the join only where the copies refuse, so it lifts every function it lifted before and
+  // may lift one the old default declined (pipeline.ts `copiesByDefault`).
+  // docs/level-tower.md (A MEASURED DEFAULT IS THE ONE EXCEPTION) says why a field whose readings
+  // split site by site may still be declared here, and what re-measures it.
+  //
+  // MEASURED over held-out real functions, every function of a project outside the 620 the marks
+  // were chosen on, both readings really compiled against the project's own objects (2026-11-06),
+  // and over 160 generated functions written with the copies (2026-11-09). `true` only where the
+  // size bound with every mark loses no match the copies have on every measured set:
+  //   - mwcc_233_163n (Pikmin at its own flags, 2733 functions lifted, 66 re-spelled): 0 lost,
+  //     3 gained (two `actByEvent` methods 4/22 -> 0/20, `stickSlot__6PelletFi` 3/28 -> 0/26);
+  //     the generated functions: every source identical to the copies';
+  //   - mwcc_242_81 (ac-decomp and Mario Party 4, every unit compiled at this build although 9 of
+  //     Mario Party 4's rows are mwcc_247_107; 141 re-spelled): 0 lost, 0 gained; the generated
+  //     functions: every source identical to the copies'.
+  // So `true` on PPC_MWCC (mwcc_242_81) and PPC_MWCC_233; PPC_MWCC_247 (mwcc_247_107) leaves it
+  // out, no held-out unit measured at that build. Left out where it loses, the copies' default
+  // given back with the join's gains:
+  //   - gcc2.7.2kmc: held out (Snowboard Kids 2, 78 re-spelled) 0 lost, 2 gained
+  //     (`func_8003513C_35D3C`, `func_80045564_46164`); generated, 3 lost (the copies match, the
+  //     join is 2 to 8 lines off) and 5 gained. Given up: those 2 held out and the 5 generated.
+  //   - gcc2.7.2: held out (Mario Party 3, all 10019 functions, 150 re-spelled) 0 lost once the
+  //     unfolded return is read (`foldsBranchConstantOnTakenEdge`), none gained; generated, 1 lost
+  //     (4 lines off) and 2 gained. No mark read from the layout or the unfolded return separates
+  //     the 4 generated losses on the two lanes. Given up: the 2 generated, and the held-out and
+  //     620 functions the join brought closer.
+  //   - agbcc (pokeemerald, 15062 functions, 963 re-spelled): 9 lost, 18 gained. None of the 9 is
+  //     marked: switch and comparison-tree sites, a call cross-jumped across arms that pass it
+  //     different arguments, and a third source spelling the copies happen to share. Given up:
+  //     18 held out and 2 of the 620.
+  //   - ido7.1 (Animal Forest, 11363 functions, 252 re-spelled): 4 lost, one shape, 18 gained. ido
+  //     never cross-jumps, so no cross-jump mark applies. Counting copies of the arm's store does
+  //     not separate the readings either: compiled, the join of `func_80A42DB4_jp` ALSO keeps two
+  //     `sw zero,0(a3)`, because ido fills a `beql`'s likely slot with a copy of its target's first
+  //     word. What differs is the branch the slot copy rides: the copies' arm schedules its own
+  //     store into the slot of a plain `b`, the join's copy sits in a `beql`'s. That is the
+  //     candidate signal, unmeasured: frontend/mips.ts `normaliseBranchLikely` rewrites both to one
+  //     shape (its `likely` and `freed` sets still tell them apart) before the layout is recorded,
+  //     so no layout entry carries it. Given up: 18 held out and 7 of the 620.
+  joinPastReturnsByDefault?: boolean;
+}
+
+/** Where the compiler puts things in a function's own FRAME: spilled and address-taken locals, the outgoing argument
+ *  area, and what an escaping frame address names. Read by the frontends and the frame-object audit
+ *  (frontend/frame-objects.ts), and `spillSlotOrder` by the structurer. */
+export interface FrameLayoutBehaviors {
+  // Which way this compiler hands out FRAME SLOTS against a spilled local's DECLARATION RANK:
+  // `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Consumed by the
+  // structurer (StructureOptions.spillSlotOrder) and applied at emit time by l3/slotorder.ts.
+  //
+  // `'unknown'` and absent both REFUSE the ordering — there is deliberately no default
+  // direction, because the wrong one reorders every declaration list on that target for no
+  // reason. That is why three of the four descriptions below ship `'unknown'`: no MIPS or PPC
+  // benchmark row lifts with two or more spilled user locals, so no row on those tiers can
+  // referee a value, and a value no row can falsify does not earn the level. Two of the three
+  // have a direction MEASURED against a committed probe and withheld for that reason; the third
+  // (mwcc) has no direction at all, because the probe does not spill there. Each says which it
+  // is, and its flip condition, at its own site.
+  //
+  // KEYED BY DESCRIPTION, WHILE THE FACT IS PER TOOLCHAIN — the first field in this bag with a
+  // stated instance of that gap. `MIPS_GCC` serves BOTH `gcc2.7.2kmc` (Snowboard Kids 2's Kyoto
+  // build at -O2) and `gcc2.7.2` (Mario Party 3's at -O1); they agree here, and a committed probe
+  // says so, but nothing in this bag could express it if they did not. Any behavior that can
+  // differ between two toolchains sharing one description is mis-keyed by construction.
+  spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
+  // Which way this compiler places the ADDRESS-TAKEN local arrays of one frame against their
+  // DECLARATION order: `ascending` = the earlier-declared array takes the lower address. Read
+  // where the frame audit declares the one object as several (frame-objects.ts
+  // `keepAsOneObject`, which declares the parts `provenParts` finds in this order), so the
+  // recompile puts each part back at its own offset. Absent REFUSES that split: the one object
+  // stays one array.
+  //
+  // MEASURED on `u8 a[64]; u8 b[32]; u8 c[48];`, each filled by a `memcpy`, at canonical flags:
+  // agbcc a@0 b@64 c@96; gcc2.7.2 and gcc2.7.2kmc a@16 b@80 c@112; ido7.1 a@104 b@72 c@24 (the
+  // reverse); mwcc_242_81 a@88 b@8 c@40, neither order — so absent there.
+  addressTakenArrayOrder?: 'ascending' | 'descending';
+  // The frame-offset multiple this compiler starts each address-taken `u8` array of a frame at,
+  // whatever its size. Read by the same split (frame-objects.ts `provenParts`): a boundary off
+  // this multiple is never where two of the source's arrays met, and a part declared there is
+  // placed at the next multiple by the recompile, moving it and growing the frame. Absent
+  // REFUSES the split, as `addressTakenArrayOrder` does.
+  //
+  // MEASURED on `u8 a[na]; u8 b[nb];`, each filled by a `memcpy` and both handed to a callee, at
+  // canonical flags, for na x nb = 4x12, 12x12, 6x10, 8x8, 20x16, 2x14: agbcc puts b at sp+4,
+  // 12, 8, 8, 20, 4 (4); gcc2.7.2 and gcc2.7.2kmc a@16 and b@24, 32, 24, 24, 40, 24 (8:
+  // BIGGEST_ALIGNMENT on MIPS, for a BLKmode local); ido7.1 b@24 and a@36, 36, 40, 32, 44, 44 (4).
+  addressTakenArrayAlignment?: 4 | 8;
+  // Arguments past the argument registers are staged into an area this function RESERVES at the
+  // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call
+  // site. It is GCC's ACCUMULATE_OUTGOING_ARGS target macro, and it is what makes an outgoing
+  // argument INDISTINGUISHABLE by code alone from a dead local: the words sit inside this
+  // frame's reservation and nothing this function does ever reloads one.
+  //
+  // It says WHERE the words go and nothing about the rest of the frame. Its one reader is the
+  // Thumb frontend's stack-argument licence (`frontend/thumb.ts` `declaredCall`): a declared call
+  // consumes the words it stages. Absent ⇒ no outgoing area is claimed, and a `[sp,#k]` store
+  // reaching a call unread declines.
+  //
+  // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
+  // corpus's `stkarg` and `stkwide` rows and kleod's `sub_0804C300` all stage their words at
+  // [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
+  // else: a push-based caller would stage nothing inside the frame, and `docs/level-tower.md`'s
+  // rule for an unmeasured compiler behavior is to claim nothing. No other frontend calls the
+  // analysis today, so a second armv4t compiler must state this premise rather than inherit it.
+  stagesOutgoingArgsInFrame?: boolean;
+  // The outgoing area is ONE region at the frame bottom, sized for the widest call and shared by
+  // every call, with every local and spill above it, and the caller never reads a word of it
+  // back after a call — the callee may assign to its stack parameters, so the caller re-stages
+  // an argument before every call. A compiler can stage in its frame
+  // (`stagesOutgoingArgsInFrame`) and still break this. mwcc does not, though it puts a local in
+  // the words a call COULD take as stack arguments where no call takes any — which is why a
+  // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
+  // ARGUMENT REGISTER") — and not where one does: the area starts past them.
+  //
+  // It is a UNIVERSAL — for every source, the compiler emits no such read — and its readers apply
+  // the contrapositive (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
+  // BACKWARDS READING): a word loaded after a call is not in the area, so it is a local, and so is
+  // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
+  // reaches on any path is a local too, but only the Thumb frontend acts on that
+  // (`frontend/thumb.ts`'s own-frame load arm, which reads it as uninitialised), and it was probed
+  // on agbcc alone; a MIPS or PPC reader needs its own probe first. A callee that assigned the
+  // word as its stack parameter ran before the load, so the load is after a call, and with no
+  // call reaching the load there is no such callee. It is
+  // exactly as sound as the universal, so its residue is every producer the universal does not
+  // cover: hand-written asm that reads its outgoing argument back after a call loses that argument
+  // silently. The premise is this compiler's, not the ISA's.
+  // Absent ⇒ every staged word stays a candidate argument.
+  //
+  // It promises the AFTER-CALL form and no more: a compiler may still load a staged word BEFORE a
+  // call — o32 gcc defines REG_PARM_STACK_SPACE, so calls.c's save_fixed_argument_area loads
+  // staged reg-parm words around a nested call. The stronger form, no load of the area at all,
+  // is its own field (`outgoingAreaNeverLoadedFrom`), stated per compiler and never read off this.
+  //
+  // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
+  // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
+  // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
+  // re-staging, the callee's write, and no load of the area around calls inside arguments. Set
+  // on the three MIPS toolchains off their own probe (`test/corpus/probe-o32-frame.c`), where
+  // the frame-object audit is the only reader. Set on
+  // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
+  // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
+  // stores its ninth argument again before its second call. The frame-object audit is the only
+  // reader there too, and on mwcc it is LOAD-BEARING: it is what refuses an undeclared call whose
+  // ninth argument the arity guess cannot see (frontend/ppc.ts `measurePpcFrame`).
+  localsAboveOutgoingArea?: boolean;
+  // The STRONG form of `localsAboveOutgoingArea`, which it requires: from this offset up, the
+  // caller never loads a word of its outgoing area at all — not after a call, and not before one
+  // either. The offset counts from the area's start, the frame bottom: `[sp,#0]` on Thumb, `0(sp)`
+  // on O32 (whose area opens with the a0..a3 home), `0(r1)` past the push on PowerPC (whose
+  // parameter area opens at 8, past the callee's back chain and link-register words). From it up
+  // the area holds only what the caller staged for a callee; every argument that contains a call
+  // is computed before any word is staged, and nothing is saved there around a nested call. So
+  // ANY frame word this function loads at or above the offset is a local, and so is every word
+  // above it, since the area is one region at the frame bottom. Its readers apply that
+  // contrapositive, at exactly the soundness of the universal. Each frontend measures the lowest
+  // such word once (Thumb through `frontend/stackargs.ts` `loadedWordBound`, MIPS in `liftOnce`,
+  // PPC `ppcLoadedWordBound`), and every reader takes that number: Thumb's outgoing-argument
+  // analysis, `frontend/frame-objects.ts` `storedNeverRead` for its pending stores, the MIPS and
+  // PPC undeclared-call guesses (`frontend/mips.ts` `lowerJal`, `frontend/ppc.ts` `bl`), and PPC's
+  // unread-slot decline, each weighing only the words beneath it. On MIPS it also caps how far an
+  // undeclared call's area can reach (`o32OutgoingArea`'s `widest`), which the local area's
+  // partition (`measureO32Frame`) and the owned range of an uninitialised read
+  // (`measureOwnedFrame`) both read. A load BELOW the offset proves nothing, and no reader counts
+  // it. A word no store reaches on any path needs only the after-call form (see
+  // `localsAboveOutgoingArea`).
+  // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
+  //
+  // Its residue is the universal's: hand-written asm that loads a word it staged, then stages it
+  // for a call, loses that argument. Each value is MEASURED, and the compiled probes are committed
+  // (`packages/core/test/outgoing-area-probes.test.ts` reads every one):
+  //   • agbcc, 0, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's
+  //     save_fixed_argument_area — which loads staged words around a nested call — is not
+  //     compiled; calls.c:1599-1610 precomputes every argument containing a call; and
+  //     store_one_arg (calls.c:3420-3470) saves an argument word only when a nested call overlaps
+  //     it, which the precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word
+  //     of the area around calls in stack arguments.
+  //   • ido7.1, gcc2.7.2kmc and gcc2.7.2, 16: `test/corpus/*-outarea.txt` at the rows' levels
+  //     (ido -O1, -O2 and -O2 -g3; gcc 2.7.2 -O1 and -O2) and at -O0. NOT 0 — ido stages a
+  //     by-value aggregate's register words in the a1..a3 home and loads them back before the
+  //     call (`big1`: `lw a1,4(sp)`), and kmc and gcc 2.7.2 do it for a char-array struct (`d3`,
+  //     `d5`): o32 gcc defines REG_PARM_STACK_SPACE, and GCC 2.9's save_fixed_argument_area
+  //     (calls.c:648-711) covers only `[0, reg_parm_stack_space)`. No probe loads a word from
+  //     16(sp) up the area.
+  //   • mwcc, 8, on all three builds at the rows' flags and at -O0,p, and on mwcc_242_81 at -O4,s
+  //     too: no probe loads a word of the parameter area; a struct-return temp or a by-value copy
+  //     sits at 8(r1) only where no call takes a stack word, and above the area beside one that
+  //     does.
+  // Like `stagesOutgoingArgsInFrame`, a second compiler of the same ISA must state this premise
+  // rather than inherit it.
+  outgoingAreaNeverLoadedFrom?: number;
+  // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
+  // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
+  // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
+  // frame offset 0, and the question this answers is whether the rest of that reservation could
+  // be somebody else's — an outgoing argument staged at [sp,#0], a by-value struct argument's
+  // block-copy destination, or a struct return's hidden pointer.
+  //
+  // Absent ⇒ no such claim, and every `[sp,#k]` store reaching a call unread keeps the refusal
+  // it had before the capability existed. It is a layout fact about ONE compiler and it is not
+  // derivable from the architecture, which is why it is a field and not an `arch ==` branch
+  // (`docs/level-tower.md`).
+  //
+  // Set on agbcc, where it is two compiled producer tables rather than a reading — one per
+  // escape, both written out at the predicate: at one word agbcc stages no outgoing argument
+  // under a captured local (it moves the local above the area and spells its address `add rD,
+  // sp, #4`), and it names a block-copy base with a register only from two words up. The one
+  // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
+  // which the post-lift audit settles per call rather than by size.
+  oneWordFrameIsTheCapturedObject?: boolean;
+  // A frame address this function hands out — in an argument register at a call, or stored to
+  // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
+  // word from there up is a call's outgoing argument. Its first reader is the outgoing-argument
+  // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
+  // THERE. Absent ⇒ a handed-out frame address explains nothing.
+  //
+  // Set on agbcc, compiled at 2.9-arm-000512 and its canonical flags, and re-measurable from the
+  // committed probe (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-escape.s`, read
+  // by `frame-escape-probes.test.ts`). An address-taken local sits ABOVE the outgoing area
+  // (`f1`: `add r0, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when no call in the
+  // function takes a stack word (`f0`).
+  //
+  // Its RESIDUE is a by-value struct argument's block copy (`mov r0, sp` / `add r0, sp, #4`, then
+  // `bl memcpy`), whose base IS the outgoing area. agbcc stages a call's outgoing words in
+  // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`): a word staged before the copy
+  // lies below its base, and one staged after it is still pending at the call. That is why the
+  // event ends pending words PER PROGRAM POINT and only from its offset up — read
+  // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
+  // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
+  // reads the event whole-function, it only refuses or excuses a word no call takes
+  // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence for any
+  // receiver, sound only where no block copy fits.
+  //
+  // Its SECOND reader is the Thumb frame model's [sp,#0] capture (`frontend/thumb.ts`, beside
+  // `noCallTakesAStackWord`), which reads the universal whole-function at offset 0: where the
+  // frame base is handed as the hidden pointer of a callee DECLARED to return a struct through
+  // memory, it is a local's address, so no word of the frame is any call's outgoing argument and
+  // the area is empty — whatever the other calls are (sret2knr: `u8 rnd();` beside two temps).
+  // This premise is read only where some call may take a stack word: where none does there is
+  // no outgoing area to confuse, and an escaping frame base is a local's address on any target,
+  // whoever receives it (a DMA source published to the device's registers, `dmafill_wh`).
+  // The residue cannot reach it: a block copy's base goes to `memcpy`, no struct-returning
+  // callee. That reading is agbcc's layout, and is measured beyond `f0`: thumb.h:573
+  // STARTING_FRAME_OFFSET 0 and :620-621 add `current_function_outgoing_args_size` to every
+  // elimination to sp (:628 ACCUMULATE_OUTGOING_ARGS); function.c:2629 puts STACK_DYNAMIC_OFFSET
+  // past the same size; calls.c:1598-1609 precomputes into a temp every argument containing a
+  // call whenever the call has stack arguments, so a struct result is never built straight into
+  // an outgoing word. Compiled at the rows' flags: `mk(..)` by value as the 5th argument, as the
+  // 1st followed by four ints, `mk(..).a` as the 5th, a 20-byte struct by value, and a 5-argument
+  // K&R `rnd(1, 2, 3, 4, 5)` beside a temp each put the temp at sp+4 or higher, with [sp,#0] the
+  // outgoing word. A frame whose sp moves between two accesses is refused before this is read
+  // (thumb.ts `frameDepthBlocker`). Hand-written asm that builds a struct return at [sp,#0] and
+  // also stores a stack argument there declines; one that hands that word, unstored, to an
+  // undeclared callee as its fifth argument loses it from the callee's guessed arity.
+  escapedFrameAddressNamesALocal?: boolean;
+  // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
+  // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
+  // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
+  // the stack words its widest call takes (none in a function that makes no call); the saved
+  // registers and the locals share the rest, and which way round is the compiler's:
+  //   'above-outgoing-area'   — from the outgoing area's end, rounded up to the 8-byte stack
+  //                             alignment, to the lowest saved register;
+  //   'above-saved-registers' — from just above the highest saved register (or the outgoing
+  //                             area's end, where that is higher) to the frame top N.
+  // Spill temps live in the same area on both, so it is the locals' and the spills' together.
+  //
+  // MEASURED off `corpus/probe-o32-frame.c` (`scripts/regen-o32-frame-probes.ts`, read by
+  // `o32-frame-probes.test.ts`): a leaf's array at sp+0 on all three MIPS toolchains; with a call
+  // taking no stack word, gcc 2.7.2 (both builds) at sp+16 under the saves and IDO at the frame top
+  // above `ra`; with one stack word, gcc at sp+24 (20 rounded) and IDO still at the top; and IDO's
+  // spill of a value live across a call between `ra` and the array.
+  //
+  // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
+  o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
+  // WHERE A FUNCTION THAT PUSHES ONE FRAME KEEPS ITS LOCALS, on a target whose frame starts with a
+  // fixed LINKAGE area — the back chain and the callee's link-register save word, which the ABI
+  // fixes and the frontend states (`frontend/ppc.ts` `PARAM_AREA_AT`, where the caller's parameter
+  // area starts). Above it the OUTGOING area holds the stack words of the widest call (none in a
+  // function whose calls take none), and the locals and spill temps share what is left below the
+  // lowest saved register:
+  //   [linkage + 4 * (stack words of the widest call), lowest saved register)
+  // in post-push offsets — O32's `above-outgoing-area` rule (`o32LocalArea`) past a linkage area
+  // instead of the a0..a3 home, without the 8-byte rounding (`areaAboveOutgoing`). The PPC
+  // frontend hands it to the frame-object audit as `ownedLocals`/`declaredLocals`; a call it
+  // lowers takes no stack word, so it refuses one whose declaration may and draws the area from
+  // the linkage's end. No object start inside it is fixed: the compiler chooses where in the area
+  // each local goes.
+  //
+  // MEASURED on mwcc 2.3.3, 2.4.2 (at -O4,p and at Mario Party 4's -O0,p) and 2.4.7 off
+  // `corpus/probe-mwcc-frame.c` (`scripts/regen-mwcc-frame-probes.ts`, read by
+  // `mwcc-frame-probes.test.ts`): every local and every home or spill lies in the area, a leaf
+  // with a local still pushes a frame whose area starts at 8, one or two stack words of a call push
+  // the locals past them, and the widest call sizes the area for every call. The first local's
+  // offset inside it differs per build and per function (8, 12 or 16 on 2.3.3; a homed parameter
+  // takes 8 at -O0,p), which is why this is an area and not a start.
+  //
+  // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
+  linkageLocalArea?: 'above-outgoing-area';
+}
+
+/** How a CALL and a RETURN cross: register thunks, struct returns and their hidden pointer, structs passed by value,
+ *  and what a guessed arity may read off an argument register (frontend/call-plan.ts, frontend/own-struct-return.ts,
+ *  frontend/thumb.ts). */
+export interface CallBehaviors {
+  // THE REGISTER AN INTERWORKING EPILOGUE POPS THE RETURN ADDRESS INTO WHEN THE RETURN TYPE IS 5
+  // TO 8 BYTES, which is then a fact the epilogue states about the function's width. agbcc's
+  // `thumb_exit` (gcc/thumb.c) picks that register from the SIZE of the return mode, not from
+  // liveness — r0 for `void`, r1 up to 4 bytes, r2 up to 8 — so `pop {r2}; bx r2` ends a function
+  // returning a `long long`, a `double`, or an 8-byte aggregate (which DImode covers even when it is
+  // returned through memory). Read by `frontend/thumb.ts`'s `refuseWordReturns` directly, not by
+  // the structurer. Absent ⇒ the epilogue states nothing.
+  eightByteReturnScratch?: string;
+  // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
+  // branches to the address in <reg> with every register as the caller left it, so the call is
+  // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
+  // thunks whose register can hold an address a source computed; a `<prefix>` callee outside them
+  // declines.
+  //
+  // ABSENT ⇒ a `bl` names a function on this target, whatever it is called.
+  callThunks?: { readonly prefix: string; readonly regs: readonly string[] };
+  // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
+  // declared to return one hands it a hidden pointer as argument 0 and moves every declared
+  // argument one register up (`aggregate.ts` `returnsInMemory`, read by the call lowering every
+  // frontend shares, frontend/call-plan.ts).
+  //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
+  //     a bitfield, or when a union has a member that would be; in the return register otherwise.
+  //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
+  //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
+  //   • 'svr4' — in r3, or r3:r4, when it is 8 bytes or less, whatever its members (a float's
+  //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
+  //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
+  //     12-byte struct are handed `addi r3,…` ahead of the call).
+  //   • 'memory' — always in memory, whatever its size or members. ido7.1, gcc2.7.2kmc and gcc2.7.2
+  //     alike (compiled: `{u8}`, `{u16}`, `{u32}`, `{float}`, `{double}`, 4-, 8- and 12-byte
+  //     structs, `union {u32; u16;}` and `{u32 a:8; u32 b:8;}` are each handed `addiu a0,sp,N`
+  //     ahead of the `jal`, with the declared arguments from a1 on, and the callee returns that
+  //     pointer, `move v0,a0`).
+  // Under every rule the caller's half is lowered (frontend/call-plan.ts), and a function that
+  // itself returns a struct through memory lifts as that struct where its declaration says so and
+  // the lift proves the hidden pointer is only its storage (frontend/own-struct-return.ts); it is
+  // read as the pointer function it compiles to where nothing declares it, or where a context's
+  // declaration does and the proof fails (pipeline.ts `returnOwnStruct`).
+  // ABSENT ⇒ unmeasured, and such a call declines.
+  aggregateReturn?: 'apcs' | 'svr4' | 'memory';
+  // WHETHER A FUNCTION THAT RETURNS A STRUCT THROUGH MEMORY HANDS THE HIDDEN POINTER BACK in the
+  // return register — a COMPILER fact, which no rule above implies. `true` for ido7.1, gcc2.7.2kmc
+  // and gcc2.7.2 (`move v0,a0`, the O32 rule) and for agbcc (`add r0, r6, #0` after a call, r0
+  // left alone in a leaf: compiled `struct S12 f(s32 x)` with and without a call to `fill(t)`).
+  // `false` for mwcc_242_81, mwcc_233_163n and mwcc_247_107, whose callee clobbers r3 before the
+  // `blr`: the same `struct S12 b4(s32 x)` saves the pointer in r30/r31, stores through it, and
+  // returns with r3 = a reload of a frame word. It decides what the proof that a function's own
+  // struct return goes through that pointer asks of each `ret` (frontend/own-struct-return.ts):
+  // where it is `true` every `ret` must hand back the pointer, and where it is `false` what the
+  // return register holds is no part of the function, save a value computed for the return alone
+  // (`returnedAlone`). ABSENT ⇒ unmeasured, and read as `true`, which only refuses more.
+  structReturnHandsBackPointer?: boolean;
+  // WHETHER A CALLER HANDS ITS OWN DESTINATION POINTER STRAIGHT ON as a callee's hidden
+  // struct-return pointer, leaving the first argument register at its incoming value below the
+  // arguments it sets up. `true` for ido7.1: `int b3(struct S *p){ *p = sg(1); return 0; }` is
+  // `jal sg; li a1,1` with a0 never touched, the bytes of `sg(p, 1)` with its result unused.
+  // `false` for gcc2.7.2kmc, gcc2.7.2, agbcc and mwcc_242_81, mwcc_233_163n and mwcc_247_107,
+  // which copy through a frame temporary (a0/r0/r3 set to a frame address ahead of the call).
+  // Compiled at the canonical flags, `b3` and `void b6(struct S *p, int k){ *p = sg(k, 5); }`.
+  // Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`): where it holds, a gap at
+  // the first argument register is decided only where the call's result is read, which no
+  // forwarded struct return's is (IDO reloads `p` from its home after the call in all five shapes
+  // compiled: `return (*p = sg(1)).b`, `return p` and three more). ABSENT ⇒ unmeasured, and read
+  // as `true`, which only refuses more.
+  forwardsStructReturnDestination?: boolean;
+  // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
+  // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
+  // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
+  // BLKmode argument across r3 and the stack, FUNCTION_ARG_ADVANCE rounds its size to a word, and
+  // no FUNCTION_ARG_PASS_BY_REFERENCE is defined); compiled, `struct A {u16 a,b,c,d; s8 e,f;}`
+  // is `ldr r0..r2` off the frame copy ahead of `bl take2`. O32 too, compiled on ido7.1,
+  // gcc2.7.2kmc and gcc2.7.2: `takeQ(s32 k, struct Q {u32 a, b;})` is passed `a1:a2` and a
+  // three-word struct `a0..a2` (an 8-aligned one starts at an even word:
+  // `evenWordAlignedArgs`); IDO also stores each word into its home slot, which the
+  // call owns. ABSENT ⇒ the target passes one some other way or states nothing: mwcc passes the
+  // address of a copy (frontend/ppc.ts refuses it).
+  byValueAggregateArgWords?: boolean;
+  // MAY A DISCARDED READ LAND IN AN ARGUMENT REGISTER, at flags that delete a plain read nobody
+  // uses? Where it may, a value a load left in an argument register is no proof that the next
+  // call takes it. The discard register is the allocator's first free one, not a fixed register,
+  // so a single read on its own says nothing: the probe that decides is one where the usual
+  // discard register is busy. `true` for agbcc, which loads a discarded `volatile` read into the
+  // lowest free argument register (`*(volatile int *)K; g(s)` is `ldr r1,[r1]; bl g`, the bytes of
+  // `g(s, *(int *)K)`). `true` for gcc2.7.2kmc and gcc2.7.2, which discard into v0/v1 until those
+  // are busy and then into a1: `int a = ga * 3; *(volatile int *)&gx; *(volatile int *)&gx;
+  // ga = a + 1; return logv(s) + 1;` is `lw a1,0(v0); lw v0,0(v0); ... jal logv` (`lw a1,0(v1)` on
+  // gcc2.7.2), the bytes of the twin that passes the first read. `true` for mwcc_242_81,
+  // mwcc_233_163n and mwcc_247_107, which discard into r0 until it is busy and then into r4: the
+  // same function's first read is `lwz r4,gx` on all three, and with three reads mwcc_233_163n's
+  // last one is `lwz r4,gx` right before `bl logv`, byte-identical to the twin that passes it.
+  // `false` for ido7.1 alone: `lw zero`, `lbu zero`, `lh zero`, and `lw zero` + `lw at` for a
+  // doubleword, with four discarded reads stacked under the same pressure too. Compiled at the
+  // canonical flags. Read by the guessed-arity gap (frontend/call-plan.ts `decideGap`), which a
+  // load decides only where this is `false`. ABSENT ⇒ unmeasured, and read as `true`, which only
+  // refuses more.
+  discardedReadMayFillArgRegister?: boolean;
+}
+
+/** What the compiler does with NARROW VALUES and MEMORY READS: how a narrow parameter or store constant shows in the
+ *  object, where a read stays or is reloaded, and what becomes of a read nobody uses. Read by raising passes, the
+ *  structurer, and the dead-read and device pins. */
+export interface LoadBehaviors {
+  // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
+  // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
+  // the compilers measured give three, and the pass refuses wherever the object is silent. Each
+  // target below carries its own measurement, and raise/paramwidth.ts's header carries the
+  // compiled pairs all three readings rest on.
+  //
+  //   • `'prologue-extension'` — the extension's POSITION decides it: a narrow-declared
+  //     parameter widens at the very top of the function, a body cast widens at its use.
+  //   • `'home-store-and-in-place'` — the position decides NOTHING, both spellings leading the
+  //     function, and TWO other facts decide it together: the parameter is stored to an argument
+  //     home nothing reads back AND widened in its own argument register. Each half alone has a
+  //     compiled counterexample, so only the PAIR separates a declaration from a body cast.
+  //
+  //     THE HOME STORE IS AN `-O2` OBSERVABLE, AND `-g` IS NOT WHAT REMOVES IT. Measured on
+  //     `int f(s8 x){ return x; }`: present at `-O2` and at `-O2 -g3`, absent at `-O1`, at `-O0`
+  //     and at `-g` (which implies `-O0`). So the 42 real af rows that build at
+  //     `-G 0 -non_shared -Wab,-r4300_mul -mips2 -EB -O2 -g3` DO carry it — checked at exactly
+  //     those flags — and a target built at `-O1`/`-O0` would have to claim `'none'`. The
+  //     in-place widening survives every one of those levels, but on its own it decides nothing,
+  //     so the pass refuses there rather than reading half a pair.
+  //   • `'none'` — the object does not distinguish the two at all, so no reading of it licenses
+  //     the narrowing. It is a MEASUREMENT rather than a withholding wherever a target claims it.
+  //
+  // A compiler that sets nothing here also refuses, which is the right default for one nobody has
+  // compiled the pair with (docs/level-tower.md: claim nothing about an unmeasured behavior).
+  narrowParamWitness?: NarrowParamWitness;
+  // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
+  // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
+  // re-ordering independent loads opts OUT here.
+  defOrderLoadPairs?: boolean;
+  // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
+  // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
+  // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
+  // read past a branch and nothing lifts one to a dominator. The CONVERSE — the asm's read block
+  // is where the source read — is FALSE even here, and no default may be declared as if it held.
+  //
+  // agbcc (gcc 2.9-arm) declares TRUE from its own sources plus compiled pairs: gcc's Makefile
+  // SRCS compiles neither sched.c nor reorg.c and toplev.c never mentions flag_schedule_insns, so
+  // there is no scheduler; and `s = *g; if (c) A(s); else B(s);` against `if (c) A(*g); else
+  // B(*g);` emits one ldrb + one pool word versus one of each PER ARM, moving neither. gcse.c calls
+  // one_code_hoisting_pass only `if (optimize_size)`, which toplev.c sets only for -Os, so at -O2
+  // the hoister never runs. At -Os it runs, and on `if (c) A(*gp); else B(*gp);` it moves only the
+  // pool ADDRESS load above the branch: each arm keeps its own dereference, so the read still
+  // stays in the block that spelled it. That pair is committed: `corpus/agbcc-hoist-{O2,Os}.s` from
+  // `corpus/probe-agbcc-hoist.c`, regenerated by `scripts/regen-flag-pair-probes.ts`, asserted in
+  // hoist-level-probes.test.ts. The two passes that DO move a read between blocks at -O2 — loop
+  // invariant motion, and the PRE that makes the converse false — are refusals the rule owes;
+  // structure/analysis.ts carries them.
+  //
+  // ABSENT ⇒ the rule stands down, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
+  // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
+  readsStayWhereWritten?: boolean;
+  // Does a LOCAL initialised with a memory read its dominating TEST already performed cost this
+  // compiler a SECOND load? The pair is the arm of `if (a && (p[1] & 0x7f) == 0x7f) { … }` spelled
+  // `u8 v = p[1]; p[2] = v;` against `p[2] = p[1];`, and again with a store and with a call
+  // between the local and its use. agbcc loads `p[1]` TWICE for every local spelling and once
+  // for the inline one; ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 load it ONCE for every
+  // local spelling, holding the register across the store and across the call. agbcc is the
+  // odd one out of five, so the one agbcc-shaped claim that rested on it — raise/shortcircuit.ts's
+  // `read-behind-effect`, "a copy analysis.ts spells as a local costs a load" — reads it here
+  // rather than running on every target — on mwcc it costs the probe named at PPC_MWCC's value
+  // its byte-match.
+  // Read off the target by a raising pass (raise/pre-recovery.ts), not by the structurer.
+  //
+  // ABSENT ⇒ false: the refusal stands down, and a compiler opts IN on its own compiled pair. The
+  // three descriptions that measured false (four compilers) set it anyway, so absent means
+  // UNMEASURED rather than "no".
+  reloadsLocalReread?: boolean;
+  // Does this compiler convert a constant to a NARROW lvalue's type before it materializes it
+  // for the store? Then the stored register's upper bits say the lvalue's signedness whenever
+  // the narrow sign bit is set: `u16 *p; p[6] = -1;` loads 0xffff and `s16 *p; p[6] = 0xFFFF;`
+  // loads -1. Measured on every bench compiler at its rows' flags by lifting the probe in
+  // packages/cli/test/matching/narrow-store-constant.test.ts and reading the const each store
+  // takes. Read by raise/storesign.ts (through raise/pre-recovery.ts).
+  //
+  // ABSENT ⇒ the seed stands down and a narrow store keeps the unsigned view; a compiler opts IN
+  // on its own probe.
+  narrowStoreConstantTakesLvalueType?: boolean;
+  // Does this compiler load a `volatile` narrow signed read zero-extended and sign-extend it in a
+  // register, never in the load itself? agbcc: yes — `*(volatile s16 *)a` is `ldrh; lsl #16; asr
+  // #16` and `volatile s8` is `ldrb; lsl; asr`, where the plain `s16` read is `ldrsh`: the
+  // sign-extend expander refuses a volatile MEM while expanding (`general_operand`, recog.c:918,
+  // under `init_recog_no_volatile`, function.c:5564) and thumb.md:393-409 then extends in a
+  // register; compiled at the canonical flags. So a lifted sign-extending narrow load is evidence
+  // the source read was plain (`readCouldBeVolatile`): the device pin (frontend/device-pins.ts)
+  // leaves it plain, and the `declared` stamp (raise/declared-volatile.ts) leaves it unplaced.
+  //
+  // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
+  // pinned, and a read of a declared object placed, whatever its extension.
+  volatileReadsExtendInRegister?: boolean;
+  // Does this compiler RELOAD a cell stored through one spelling and read back through another —
+  // two names, or a name and a numeric address, for the same byte? MEASURED at -O2, each probe
+  // storing 5 to a word, 7 to one of its bytes, and reading the word back: IDO 7.1 reloads
+  // (`D_80100000 = 5; ((u8 *)0x80100000)[1] = 7; return D_80100000;` is `sb; jr ra; lw v0`);
+  // agbcc (`sRandCount = 5; ((u8 *)&sUnknown)[4] = 7; return sRandCount;` is `strb; mov r0,
+  // #5`) and gcc 2.7.2 (`sb; jr ra; li v0, 5`) forward the stored value. IDO also reloads across
+  // two externs, two statics, an array element beside a scalar, and a word-wide literal beside
+  // a name. It reloads only a read that FOLLOWS the store: a read placed before a byte store
+  // through another name is sunk past it (`v0 = D_80100004; ((u8 *)&D_80100000)[5] = 7;
+  // return v0;` is `sb; jr ra; lw v0`). So where it holds, a pair of spellings in one block
+  // outside any loop, the store first, is faithful lifted as-is, whether the asm carries both or
+  // the map chose one; any other order, and every pair where it does not hold (an asm that went
+  // back to memory proves the source did not spell the byte two ways), raise/offsetnames.ts
+  // `cellSpelledTwice` declines.
+  //
+  // ABSENT ⇒ false: the compiler forwards (or is unmeasured, which declines the same pairs).
+  reloadsAcrossSpellings?: boolean;
+  // Does this compiler, AT THESE FLAGS, keep a plain read whose value nothing uses? A FLAG fact,
+  // never written in a description: `targetFor` sets it from the optimisation level
+  // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
+  // the lift finds unused is no evidence of `volatile`, and the dead-read pin
+  // (frontend/dead-reads.ts) stamps only one the machine loaded into the register the compiler
+  // discards a volatile read into (`discardsUnusedReadsInto`).
+  //
+  // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
+  // was qualified.
+  keepsUnusedReads?: boolean;
+  // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
+  // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
+  // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
+  // `*p;`, `s->b;`, `gV;` and `(*p, 1)` through a volatile lvalue load into `r0` on mwcc 2.4.2,
+  // 2.4.7 and 2.3.3 at `-O0,p`, and into `$zero` on IDO 7.1 at `-O1` and `-O0`; the plain
+  // `x = p[5]; x = 0;` takes a home there instead (`lwz r31`, `lw t6` and a frame store), and so
+  // does a `register` local (`lwz r31`, `lw a2`). Over the 409 complete Mario Party 4 units built
+  // at `-O0,p`, 924 non-frame loads nothing reads land in r17-r31 and f18-f31, and exactly one in
+  // r0: WipeExecAlways's `wipe->type;`, a `volatile u8` member. So a dead load into this
+  // register is a qualified read, and the dead-read pin (frontend/dead-reads.ts) stamps it at a
+  // keeping level too. mwcc keeps one plain read in r0 as well, a read under an arithmetic or a
+  // cast nothing uses (`p[5] + 1;`, `(char)p[5];`), which no real unit holds: that is the pin's
+  // residue. A load this register took and an op then wrote to a home (`lwz r0` + `extsb r31,r0`,
+  // a plain `s8` local) is not discarded (frontend/dead-reads.ts `leftInDiscardRegister`). One
+  // register cannot name a pair: IDO discards a doubleword into zero:at, `lw zero,0(a0)` +
+  // `lw at,4(a0)`, which frontend/mips.ts `emitLoad` reads as the pair this register heads.
+  //
+  // ABSENT ⇒ the compiler has no such register, or it is unmeasured. agbcc, gcc 2.7.2 and KMC
+  // gcc 2.7.2 at `-O0` have none: a volatile `*p;` is an `ldr r0`/`lw v0` nothing stores, the
+  // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
+  // two apart there and refuses rather than drop the read.
+  discardsUnusedReadsInto?: string;
+}
+
+/** Which SOURCE SPELLINGS the compiler accepts, and which of them it builds into one object: initializers, pointer
+ *  conversions, address arithmetic, far members, a plain `char`'s sign, float products and literals. Read by the
+ *  printer, rank.ts and the L3 variations' target gates, and by the passes that pick a declaration's or an access's
+ *  spelling. */
+export interface SpellingBehaviors {
+  // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
+  // pointer or cast base expands it last — so the instruction order in the target's own assembly
+  // says which of the two the source wrote, and `raise/globalshape.ts` may derive an array shape
+  // for a global no symbol map describes. Absent ⇒ the derivation is empty and every indexed
+  // global keeps today's `((T *)&gSym)[i]` cast spelling.
+  //
+  // "Expands it last" is about the SUBSCRIPT, and a second consumer reads the same flag for a
+  // question that is not: `orderLicensedGlobals` asks only where the base was materialized, and a
+  // pointer LOCAL materializes it in its own initializer STATEMENT, before the subscript runs —
+  // so `u16 *p = (u16 *)&gTbl; p[i]` is base-first in the object while `(p = (u16 *)&gTbl)[i]` is
+  // index-first, both through this same fork (compiled; raise/globalshape.ts's header carries the
+  // four-way table). This flag is therefore NARROWER than that consumer's mechanism — statement
+  // ordering needs no fork, only a compiler that does not schedule — so the home variation is denied
+  // to ido/kmc/mwcc for a reason that is not its own. Under-reach, unmeasured, and the fix when a
+  // row asks for it is a datum of its own rather than a widening of this one.
+  //
+  // Set on agbcc, where the fork is `gcc/c-typeck.c build_array_ref`'s
+  // `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF` and both
+  // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
+  // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
+  // unmeasured compiler behavior is to claim nothing. Read off the target by a raising pass
+  // (`inferGlobalArrays`), not by the structurer.
+  arrayShapeFromStride?: boolean;
+  // Does this compiler's C front end take a DESIGNATED array element in an initializer —
+  // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
+  // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
+  // plain one) compile the line above, while IDO 7.1's cfe ("Syntax Error") and every mwcc build
+  // the benchmark ships, 2.3.3, 2.4.2 and 2.4.7 ("expression syntax error"), refuse it — each
+  // compiled. Read by the C-family printer (`SFn.designators`) where a constant image
+  // (l3/constinit.ts) leaves elements out: it spells the element after a run of them by index,
+  // and without this spells the run as zeros, which a compiler that cannot parse the index takes.
+  // Absent ⇒ zeros, the spelling every C compiler parses.
+  designatedInitializers?: boolean;
+  // Does this compiler's C front end REFUSE the three pointer conversions C makes implicitly — an
+  // integer to a pointer, a pointer to an integer, and an object pointer to one of another
+  // pointee — as C++ does? Every mwcc build the benchmark ships refuses all three in C, compiled
+  // with `-lang=c`: 2.4.2 and 2.4.7 ("illegal implicit conversion" of an `unsigned int` to an
+  // `int *`) and 2.3.3 ("cannot convert"). agbcc, IDO 7.1 and both gcc 2.7.2 builds compile the same three
+  // calls at their canonical flags. Read by the C-family printer (`SFn.strictConversions`), which
+  // then casts an argument to its callee's declared parameter and a pointer of another pointee
+  // into a pointer slot exactly as it does for C++ (backend/cfamily.ts `argConversion`,
+  // `legalizePointerWrites`), and by the store of an integer into a declared pointer cell
+  // (structure/pointer-spelling.ts `intoPtrCell`, which declines that store under C++, where only a
+  // cast to the cell's own type converts). Each cast is the conversion the compiler would
+  // otherwise have made, so it changes no instruction. Absent ⇒ C's implicit conversions.
+  strictPointerConversions?: boolean;
+  // The single-add-immediate derivation reach for the /nearbase variation (l3/nearbase.ts):
+  // neighbor absolute addresses within this many bytes may share one base local. Thumb's
+  // `add rd, #imm8` reaches 255. Absent ⇒ the variation stands down for this target.
+  nearBaseSpan?: number;
+  // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
+  // materializes for an inline constant-address access? agbcc does: `((u8 *)0x3001100)[3]`
+  // emits `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` keeps
+  // `.word 0x3001100` + `ldrb [r1, #0x3]`. True is what lets an offset surviving into the memory
+  // operand say anything about the source at all; what l3/basecse.ts's `/basefold` admission
+  // does with it — and why that is a differ-refereed candidate rather than a default — is that
+  // file's header. A compiler opts in on its own compiled pair and never by inheriting: the MIPS
+  // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
+  // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
+  foldsConstAddrOffset?: boolean;
+  // Does a STORE to a struct member past the ISA's displacement range compile differently from the
+  // same store through a cast of the base (`p->f38 = v` against `*((u8 *)p + 38) = v`)? agbcc's
+  // does: expand_assignment (gcc/expr.c) expands only the base of a COMPONENT_REF target (:2535)
+  // and evaluates the right-hand side first in store_field (:2624), and it expands a cast target
+  // whole (:2689) before the right-hand side (:2747). Measured on agbcc for a loaded, a constant, a
+  // computed and a parameter right-hand side: every pair builds two objects, and a hoisted
+  // `u8 *d = &p->f38; *d = v;` builds the cast's. True reads a moved store whose right-hand side
+  // is computed before its address as struct evidence (raise/structs.ts `memberStoreOrder`).
+  // ido, KMC, GCC 2.7.2 and the three mwcc builds put the two spellings in one object, a loaded
+  // right-hand side included, so they leave it absent. `/far-cast`, the lift that keeps such a
+  // store on its materialised address, is offered on every target and does not read this.
+  farMemberStoreOrder?: boolean;
+  // Does a member past the displacement range get its OWN materialised base at every access, so
+  // that one base read or written at two distinct offsets is a pointer the source held? Stated
+  // as the displacement `past` which that holds: a base materialised with a displacement whose
+  // magnitude exceeds it was built for one access. agbcc's is 0, every base: `p->f38 + p->f39`
+  // compiles to `add r0, #0x26; ldrb [r0]` and `add r1, #0x27; ldrb [r1]`, while
+  // `u8 *d = &p->f38; d[0] + d[1]` shares one `add r1, #0x26` between `ldrb [r1]` and
+  // `ldrb [r1, #1]`, and only the pointer spelling rebuilds those bytes. ido's is 32767, the
+  // `addiu` reach: inside it ido shares one `addiu at, a0, 32767` across adjacent members
+  // (`sb a1, 7232(at); sb a2, 7233(at)`), and past it the assembler expands every member access
+  // to its own `lui at, 3; addu at, at, a0` while a held `u8 *d = &p->b` (b at 200000) shares one
+  // `lui at, 3; addu v0, a0, at` between `sb t6, 3392(v0)` and `sw zero, 3396(v0)`. True refuses
+  // raise/structs.ts's displaced-access fold for such a base (`held-pointer-offsets`). The three
+  // mwcc builds share one `addis` base across members and a held pointer alike, and KMC and
+  // GCC 2.7.2 lift the held pair as members at the same bytes, so they leave it absent. Absent ⇒
+  // the fold reads a shared base as members.
+  farMemberBasePerAccess?: { past: number };
+  // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
+  // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
+  // spelling emits the indexed one's stores wherever the pointee is not volatile? agbcc does, on
+  // its own compiled evidence: the four corners in test/advance.test.ts's header, each built
+  // through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object, and the pair
+  // `TARGET_BEHAVIOR_READINGS` compiles to one object in the matching suite. True ⇒
+  // the `advance` registry entry's target gate withholds the UN-QUALIFIED variation, whose spelling this compiler cannot
+  // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
+  // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒
+  // the plain variation ships, which is the conservative reading for a compiler whose pair nobody has
+  // compiled — a compiler opts in on its own evidence and never by inheriting.
+  foldsPointerAdvance?: boolean;
+  // Does this compiler build a word global read through a pointer conversion, or stored a pointer
+  // it converts implicitly, into the object of the bare integer spelling? agbcc does: under
+  // `extern u32 g;` the pointer spelling of a cell, `g = (void *)((u8 *)g + 4); … (gLimit ^ (u32)g)`,
+  // and the integer one, `g = g + 4; … (gLimit ^ g)`, are one object (the pair
+  // `TARGET_BEHAVIOR_READINGS` compiles), the implicit conversion costing a warning. True ⇒ the
+  // `int-cell` registry entry's target gate withholds that variation, which can only tie the
+  // default's bytes here. It does not tie the warning: under -Werror the pointer spelling does not
+  // build against the integer declaration and the integer one does, which no gate sees, since the
+  // witness and the bench compile without -Werror. IDO builds the pair into two objects and
+  // CodeWarrior rejects the pointer store, so both are offered. KMC gcc builds one object too and
+  // does not declare it: the matching suite compiles each witness on one compiler. Absent ⇒
+  // offered.
+  pointerIntConversionIsFree?: boolean;
+  // Does this compiler keep the constant addend of a POINTER sum's offset where the source put it,
+  // and move an INTEGER sum's out to the base? agbcc does: `(u8 *)((u32)g + ((a << 4) + 772))`
+  // computes `(g + 772) + (a << 4)` (fold-const.c:5033-5058, `A + (V + C)` → `(A + C) + V`), while
+  // `(u8 *)g + ((a << 4) + 772)` computes `g + ((a << 4) + 772)` (c-typeck.c:2663-2692 distributes
+  // the constant, fold-const.c:4997-5011 folds it back), which is what the project's own
+  // `g->arr[a]` compiles to. Compiled at each toolchain's canonical flags, with `g` a struct
+  // pointer, a `void *` and a `u32`, as a call argument and under a dereference: agbcc,
+  // gcc2.7.2kmc and gcc2.7.2 build the two spellings into two objects wherever the offset has a
+  // constant addend and into one where it has none; ido7.1 builds one object every time, and
+  // mwcc_242_81 is CodeWarrior's index-first order (structure/pointer-spelling.ts, THE INTEGER
+  // SUM). Two rules read it. True ⇒ the arithmetic table's value row (ARITH_ROWS) spells an
+  // undeclared pointer global plus an integer with a constant term as the pointer sum where the
+  // sum is a value rather than an access's address; and the structurer declares `u8 *` a temp
+  // holding a pointer global's value that is the base of such a sum (`declaresBytePointer`),
+  // which an integer temp would compile as `(t + K) + x`. Through a temp ido7.1 does build two
+  // objects, the byte pointer's index first where the integer temp and the struct source keep the
+  // base first, and mwcc_242_81 builds one (the cli matching suite's pointer-spelling.test.ts).
+  // Absent ⇒ the integer sum and the integer temp.
+  keepsPointerSumAddend?: boolean;
+  // Whether a plain `char` is signed, read where a context declares a global `char` and the lift
+  // asks whether a narrow read of it agrees with that declaration (structure.ts
+  // `storageDisagrees`). The compiler's default, with no flag; `targetFor` applies the flags that
+  // change it (`-funsigned-char`/`-fsigned-char`, IDO's `-signed`, mwcc's `-char`). MEASURED,
+  // `s32 g(void){ return gC; }` over `extern char gC;` at each toolchain's canonical flags: agbcc
+  // `ldrb` and ido7.1 `lbu` (unsigned), gcc2.7.2 `lb` (signed; gcc2.7.2kmc's canonical
+  // `-funsigned-char` makes it `lbu`), mwcc_242_81 `lbz` + `extsb` (signed). ABSENT ⇒ unmeasured,
+  // and a narrow read of a declared plain `char` agrees with neither sign, so it is spelled
+  // through its address.
+  plainCharSigned?: boolean;
+  // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
+  // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
+  // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
+  // `fnmsubs`, but only within one expression, so the structurer names every such product
+  // (StructureOptions.contractsFloatProducts) and the spelling compiles to the unfused pair under
+  // either setting. The MIPS targets cannot: MIPS II (ido7.1 `-mips2`) and MIPS III (kmc `-mips3`)
+  // have no fused multiply-add, and naming the product there only moves the register allocation
+  // off the object (`fpu-lift.test.ts` pins one on ido7.1).
+  //
+  // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
+  // compute on a float at all.
+  contractsFloatProducts?: boolean;
+  // Does this compiler read a double literal's shortest round-trip decimal (`ir/float-bits.ts`
+  // `doubleLiteral`) back as the same double? That is how an `fconst` is printed, so its
+  // producers run only where this is true. agbcc does: c-lex.c:1308 hands the token to
+  // REAL_VALUE_ATOF at DFmode, which is real.c:461 `ereal_atof` → `asctoe53` (:3512) →
+  // `asctoeg(s, y, 53)` (:3533), a conversion in extended precision rounded once to 53 bits.
+  //
+  // ABSENT ⇒ unmeasured, and a literal declines.
+  roundTripsDoubleLiterals?: boolean;
+}
+
+/** How the compiler SIZES and places declared data: struct and union rounding, member alignment, enums, bitfields, and
+ *  function-scope statics (aggregate.ts, raise/structs.ts, structure/local-statics.ts). */
+export interface AggregateLayoutBehaviors {
+  // A LAYOUT fact rather than a canonicalization one, kept here because it is the COMPILER's:
+  // the size, in bytes, it aligns and rounds EVERY struct and union to, whatever its members.
+  // agbcc: 4 — `sizeof(struct { u16 h; })` is 4, and `struct { u8 a; union { u16 h; u8 b[2]; } u; }`
+  // seats `u` at 4 (gcc 2.9's arm STRUCTURE_SIZE_BOUNDARY). ido7.1, gcc2.7.2kmc and mwcc_242_81
+  // answer 2 and 2: the natural layout, 1. Compiled as `return sizeof …` / `return (int)&((T *)0)->m`
+  // at each row's flags; gcc2.7.2 (-O1), mwcc_233_163n and mwcc_247_107 answer the same as their
+  // descriptions' measured compilers. Read by raise/structs.ts (through raise/pre-recovery.ts),
+  // which sizes a recovered UNION member with it, and by raise/struct-arrays.ts, which declines
+  // an element struct whose stride it would round (agbcc: a stride-6 `u16 [3]` row is 8 bytes).
+  //
+  // ABSENT ⇒ unmeasured: the union recovery declines every union narrower than a word, and the
+  // struct-array recovery declines every element struct. No value is safe to assume, since one
+  // too small mislays the fields after it on agbcc (and mis-strides an element struct) and one
+  // too large drops the pad in front of them everywhere else.
+  aggregateBoundary?: number;
+  // The largest alignment any member of a struct takes, in bytes (BIGGEST_ALIGNMENT): agbcc 4,
+  // thumb.h:358, so a `long long` member sits at a word. With `aggregateBoundary` it is what sizes
+  // a declared aggregate (`aggregate.ts`). ABSENT ⇒ unmeasured, and no aggregate is sized.
+  largestAlignment?: number;
+  // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
+  // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
+  // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
+  // and `enum {B0 = 300}` are both 4. `targetFor` drops it under `-fshort-enums`, and an enum
+  // declared with an attribute (`packed`), or with a value an int cannot hold, is not sized
+  // (proto-context.ts). ABSENT ⇒ unmeasured,
+  // and an aggregate with an enum member is not sized.
+  enumBytes?: number;
+  // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
+  // one before, straddling a byte or a word of its declared type, with the next member that is not
+  // a bitfield at the first byte past it that its alignment allows. agbcc: thumb.h defines no
+  // PCC_BITFIELD_TYPE_MATTERS, so stor-layout.c:404-405 lays a bitfield at bit alignment and
+  // skips the no-straddle rule of :462-481 (compiled: `{u32 a:20; u32 b:20; u8 c;}` puts `c` at
+  // 5, `{u32 a:31; u32 b:31; u32 c:2;}` is 8 bytes, `{u8 a:5; u8 b:5; u8 c;}` puts `c` at 2). A
+  // zero-width bitfield, which moves the next member to EMPTY_FIELD_BOUNDARY, is not placed.
+  // ABSENT ⇒ unmeasured, and an aggregate with a bitfield is not sized.
+  bitfieldPacking?: 'contiguous';
+  // How the compiler lays out a FUNCTION-SCOPE STATIC: the least alignment of an array, the
+  // alignment of a string-literal initializer, and whether a zero scalar keeps its `.data`. The
+  // bytes of a static do not say how the source declared it; these, with the alignment and
+  // section the target shows, say which declaration lands it there (structure/local-statics.ts).
+  // A LAYOUT fact like `aggregateBoundary`, and the compiler's, read by the structurer.
+  //
+  // ABSENT ⇒ unmeasured, and a function that defines a static declines: a wrong floor mislays
+  // every static after the first, which no score sees.
+  staticLayout?: StaticLayout;
 }
 
 /** THE SPELLINGS ONE REGISTER HAS in an ISA's asm, as `[number, alias]` pairs — the one place they
@@ -2051,13 +2096,22 @@ function withoutJoinDefault(d: TargetDescription): TargetDescription['compilerBe
  *  The return-tail default is PPC_MWCC's, measured at this build over Pikmin
  *  (`joinPastReturnsByDefault`). */
 export const PPC_MWCC_233: TargetDescription = {
+  // Inherits every field of PPC_MWCC, its whole `compilerBehaviors` included; overrides only
+  // `globalRegisterVariables`. A change to a PPC_MWCC behavior is a change here too
+  // (target-behaviors.test.ts pins both).
   ...PPC_MWCC,
   globalRegisterVariables: undefined,
 };
 
 /** CodeWarrior 2.4.7b107 (Mario Party 4's other build): `PPC_MWCC` less the return-tail default no
  *  held-out function measured at this build (`joinPastReturnsByDefault`). */
-export const PPC_MWCC_247: TargetDescription = { ...PPC_MWCC, compilerBehaviors: withoutJoinDefault(PPC_MWCC) };
+export const PPC_MWCC_247: TargetDescription = {
+  // Inherits every field of PPC_MWCC; overrides only `compilerBehaviors`, with PPC_MWCC's less
+  // `joinPastReturnsByDefault`. Every other PPC_MWCC behavior is this build's too
+  // (target-behaviors.test.ts pins both).
+  ...PPC_MWCC,
+  compilerBehaviors: withoutJoinDefault(PPC_MWCC),
+};
 
 /** A toolchain: one compiler binary, named as decomp.me names it. Several toolchains may share a
  *  description (`MIPS_GCC` serves two), and each keeps its own evidence. */
