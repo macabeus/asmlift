@@ -1225,7 +1225,7 @@ ${body}
 
   test('a key whose accesses DISAGREE on the stamp is refused whole, never half-homed', () => {
     // `Collected.ordered` folds the stamp with `&&`, and this is what that `&&` decides. No
-    // assembly reaches it: `structure.ts`'s `stampOrderedBases` runs over the finished body and
+    // assembly reaches it: `structure/ast-rewrites.ts`'s `stampOrderedBases` runs over the finished body and
     // stamps per SYMBOL, so every access of one key leaves it agreeing — which is exactly why the
     // fixture is built by hand. What the rule guards is a LATER pass that rebuilds one node and
     // drops the stamp, and the answer it gives there is REFUSE rather than hoist a base only some

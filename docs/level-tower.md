@@ -1402,13 +1402,13 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   `Gate<Ctx>` is per-candidate and these would need a SECOND table over a different `Ctx` — which the
   paragraph below says to build when a round has had to instrument them, and not before.
 - **Not tabled, and the decline left in prose.** `pointeeElement` in
-  [`structure/structure.ts`](../packages/core/src/structure/structure.ts) lists its refusals in
+  [`structure/memory-access.ts`](../packages/core/src/structure/memory-access.ts) lists its refusals in
   prose and states that it is "NOT a `Gate` table … unlike `FRESH_MERGE_GATES` and
-  `CARRIER_NAME_GATES` in this same file: those refusals are predicates over ONE prepared context,
+  `CARRIER_NAME_GATES` in carrier-gates.ts: those refusals are predicates over ONE prepared context,
   while these interleave with the computations that produce the values the later ones test […], so
   building that Ctx would run all of it on inputs the earlier gates reject." That reason is the EAGER
-  reading of "prepared", which the same file answers in `CarrierName`: its fields are getters
-  (`grep -n "THE FIELDS ARE LAZY" packages/core/src/structure/structure.ts`), so a later gate's input
+  reading of "prepared", which carrier-gates.ts answers in `CarrierName`: its fields are getters
+  (`grep -n "THE FIELDS ARE LAZY" packages/core/src/structure/carrier-gates.ts`), so a later gate's input
   is computed only when the earlier ones let it be asked, and blame is unchanged.
   `pointeeElement` is pure, so each of its refusals is expressible that way too and its interleaving
   is a cost, not a bar. **The bar that IS structural is the lazy one: a refusal whose input cannot be

@@ -628,7 +628,7 @@ export const FIXTURES: DecompFixture[] = [
       // `v1 = a1` (the count, which agbcc never copies — `n` stays in r1) ahead of `v0 = a0` (a real
       // `add r2, r0, #0`): edge copies follow the predecessor's WRITE ORDER (ir/core.ts
       // `WriteOrder`), and a destination the pred never wrote sorts first, which is where the
-      // def-position proxy puts an outside def too (structure.ts `NO_RECORD`). No instruction
+      // def-position proxy puts an outside def too (structure/edge-copies.ts `NO_RECORD`). No instruction
       // licenses the count's position and the recompile is indifferent — both orders score 3 with
       // the same breakdown (insert 1, delete 1, arg 1) — but the front slot is priced: pinning
       // unrecorded copies at their param-order slot loses armdef, loopfall, loopset and structarr

@@ -1290,7 +1290,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about the distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about the distinct messages across 14 files, which
   // nothing but this can hold to them.
   //
   // EVERY FIGURE IN THAT PARAGRAPH IS SPELT TWICE and there is no way around it: one copy is prose
@@ -1327,17 +1327,19 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 31],
-    ['structure/structure.ts', 25],
+    ['structure/structure.ts', 21],
     ['frontend/ppc.ts', 15],
     ['frontend/mips.ts', 12],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/ssa.ts', 7],
     ['frontend/call-plan.ts', 5],
+    ['structure/memory-access.ts', 3],
     ['frontend/format.ts', 1],
     ['frontend/register-struct-call.ts', 1],
     ['pipeline.ts', 1],
     ['raise/offsetnames.ts', 1],
+    ['structure/edge-copies.ts', 1],
   ];
   const RESIDUE_TOTAL = 114;
 

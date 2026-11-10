@@ -48,19 +48,19 @@
 //                               into a scratch register read as a value, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  25  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, a nested loop that reaches the latch or the
 //                               exit of the `for` around it, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
-//                               an access whose byte offset is not a whole number of its own elements
-//                               (no subscript spells it), a struct local's bytes stored into an array
+//                               a struct local's bytes stored into an array
 //                               element by a recovered row subscript, a global the context declares a C++
 //                               reference (no spelling names its cell), a structuring that writes the
 //                               code below `if`s without a join once per path past the copy budget,
-//                               and four internal invariants (an ambiguous
-//                               array offset, a parallel-copy bug, an access a recovered union has no
-//                               view for, a `for` that lost its update or its init copy)
+//                               and one internal invariant (a `for` that lost its update or its init copy)
+//   structure/memory-access.ts 3  an access whose byte offset is not a whole number of its own
+//                               elements (no subscript spells it), and two internal invariants (an
+//                               ambiguous array offset, an access a recovered union has no view for)
 //   frontend/mips.ts        12  a relocation with an addend, a non-numeric immediate, the caller's
 //                               value a restore writes read as a value (at the read, or through a
 //                               merge), five refusals about a disassembly the reader cannot account
@@ -110,8 +110,9 @@
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //   raise/offsetnames.ts     1  one byte reached under two spellings in one function (two names, or a
 //                               name and a numeric address) with a store among them
+//   structure/edge-copies.ts 1  an internal invariant: a parallel copy that writes one name twice
 //
-// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all fifteen of them, and the file
+// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all seventeen of them, and the file
 // names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
 // harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
 // then reads THIS FILE back and requires each one to be spelled here. Move a family out of the

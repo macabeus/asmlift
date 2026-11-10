@@ -782,7 +782,7 @@ test('a bottom-tested loop with a mid-body `break` is `while (1)`', () => {
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
-// ── A `break` WHOSE ARM RUNS CODE (structure.ts `codeBreakArm`) ─────────────────────────────────
+// ── A `break` WHOSE ARM RUNS CODE (structure/exit-arms.ts `codeBreakArm`) ─────────────────────────────────
 //
 // `for (i = 0; i < n; i++) { if (t(i) == 7) { hit(i); break; } } out();` — the arm's block never
 // reaches the latch, so it sits outside the natural loop and is a second exit target. It is one exit

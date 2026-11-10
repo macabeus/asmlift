@@ -10,7 +10,7 @@ export interface StructField {
   /** A cell the function also reads or writes at another width or extension, declared at its
    *  widest view because the union of its views would not fit the compiler's layout
    *  (raise/structs.ts `buildUnionStruct`). An access of any other type is a cast of the base
-   *  (structure.ts `memAccess`). */
+   *  (structure/memory-access.ts `memAccess`). */
   castViews?: true;
 }
 
@@ -207,7 +207,7 @@ export function isCastView(
 
 /** The view of a union an access of `width` bytes at byte `at` of it reads — the rule
  *  `unionViewAt` states, asked of a union that is not a struct's member (a frame object declared
- *  as one, structure.ts `laddrType`). */
+ *  as one, structure/memory-access.ts `laddrType`). */
 export function unionView(
   u: Extract<IrType, { kind: 'union' }>,
   at: number,

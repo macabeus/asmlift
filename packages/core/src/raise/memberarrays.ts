@@ -67,7 +67,7 @@
 // claim different VALUES — struct-arrays types the materialized `add(P, K)`, this pass groups on
 // `P` — so each refuses what another has marked: `claimed-access` and `base-typed` here,
 // `arrayBases` and the `unknown` check there. `field_K[i].f` is a layout this pass does not declare;
-// the loud half of that refusal is in structure.ts's `arrayAccess`.
+// the loud half of that refusal is in structure/memory-access.ts's `arrayAccess`.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, type StructField, T, scalarTypeForAccess } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -152,7 +152,7 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
   },
   {
     // A named global's layout belongs to the project's headers, and the member spelling is the one
-    // spelling that cannot consult them: structure.ts's `arrayAccess` renders `&gSym` through the
+    // spelling that cannot consult them: structure/memory-access.ts's `arrayAccess` renders `&gSym` through the
     // symbol context — the map's own array declaration, `gSym[i]` — only while no member offset is
     // set, and takes the `(struct StructN *)&gSym` cast once one is. So claiming a global trades a
     // declaration asmlift has evidence for against one it invents. The base is resolved through

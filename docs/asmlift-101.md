@@ -277,7 +277,7 @@ comparison trees and jump tables), and for anything else it _declines_ rather th
 `goto` — because for byte-matching, emitting the compiler's canonical shape is the whole game,
 and a `goto` is almost never that shape. The one it spells without a `goto` is a search loop's
 exit past the code after it (`for (j…) { if (hit) goto next; } k(i); next:;`): a flag set before a
-`break` and tested after the loop (`TwoLevelExit` in `structure.ts`). That lift is exact but not
+`break` and tested after the loop (`TwoLevelExit` in `structure/loop-shapes.ts`). That lift is exact but not
 byte-matching — the `synthetic:brk2lvl` rows' own `goto` source is what reproduces their bytes, on
 all five toolchains. The structurer lives in
 [`packages/core/src/structure/`](../packages/core/src/structure) — the most intricate code in the

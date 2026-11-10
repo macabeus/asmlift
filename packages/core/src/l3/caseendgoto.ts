@@ -10,7 +10,7 @@
 //     break;                                      break;
 //
 // The structurer writes the flag where a two-level exit's second target lies past the code after
-// the loop (structure.ts `TwoLevelExit`, `emitForeverExit`). Where that target is the end of the
+// the loop (structure/loop-shapes.ts `TwoLevelExit`, `emitForeverExit`). Where that target is the end of the
 // switch arm, agbcc threads the source's goto past the loop around the switch (jump.c
 // `follow_jumps`), and on agbcc, KMC, gcc 2.7.2 and IDO the goto compiles to the source's bytes
 // where the flag never does (`synthetic:sw_hitexit`); but inside asmlift's own candidates the flag

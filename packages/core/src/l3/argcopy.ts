@@ -246,7 +246,7 @@ export function argCopyUnder(
   };
   /** The function assigns `n` anywhere. `stmtChildren`, never `stmtLists`: a `for`'s `init` and
    *  `inc` are STATEMENTS rather than lists, and an induction step that advances the parameter is
-   *  exactly one of them — the shape `structure/structure.ts`'s `recognizeForLoops` mints. */
+   *  exactly one of them — the shape `structure/ast-rewrites.ts`'s `recognizeForLoops` mints. */
   const assignsTo = (n: string, list: Stmt[] = sfn.body): boolean =>
     list.some((st) => (st.k === 'assign' && st.name === n) || assignsTo(n, stmtChildren(st)));
   for (const p of sfn.params) {

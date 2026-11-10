@@ -507,7 +507,7 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       // node width must AGREE with the element size (when the struct declares one): a mismatch
       // means the stride channel is corrupt, so it types scalar and the field contract flags it.
       // A recovered struct declares no size, so the one other index on its pointer — a CAST VIEW of
-      // a `castViews` field, `((u8 *)p)[1]` (structure.ts `memAccess`) — is told apart by the
+      // a `castViews` field, `((u8 *)p)[1]` (structure/memory-access.ts `memAccess`) — is told apart by the
       // same rule that minted it, and reads its scalar.
       const bt = rec(e.base);
       if (

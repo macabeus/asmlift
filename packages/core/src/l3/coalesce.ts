@@ -65,7 +65,7 @@ export interface Span {
  *  respect, which is what `const-fed` reads every non-const assign as.
  *
  *  Both halves of the step test are load-bearing, and neither is what the pipeline's `for`
- *  producers check — `recognizeForLoops` (structure/structure.ts) admits ANY self-referencing step,
+ *  producers check — `recognizeForLoops` (structure/ast-rewrites.ts) admits ANY self-referencing step,
  *  and l3/reindex.ts's two walk rewrites mint `iv = iv + 1`, so this predicate is implied by all
  *  three rather than trusting any of them; a `for` reaching here may be a walk, not a count. `a = *p` (no self-read) and `p = p->next` / `a = tab[a]` (a self-read
  *  that is still a MEMORY read every iteration) are both locals `const-fed` exists to refuse; only

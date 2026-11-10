@@ -257,7 +257,7 @@ export function declaredSubscripts(
 
 /** THE split of a BYTE residual into a multidimensional array's subscripts, shared by the two
  *  declarations that can state a rank: a GLOBAL's ({@link declaredSubscripts}) and an array
- *  MEMBER's (structure.ts `pointeeElement`). One copy, because the two must not come to disagree
+ *  MEMBER's (memory-access.ts `pointeeElement`). One copy, because the two must not come to disagree
  *  about which term is a row.
  *
  *  `needRecovered` is the one place they legitimately differ, and it is a fact about the
