@@ -71,14 +71,7 @@ import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
 import type { CalleeBodyBound } from './callee-body';
-import {
-  type Declarations,
-  computedOnlyToReturn,
-  leftInDiscardRegister,
-  pinDeadReads,
-  unreadPairHalf,
-} from './dead-reads';
-import { pinDeviceAccesses } from './device-pins';
+import { type Declarations, computedOnlyToReturn, leftInDiscardRegister, unreadPairHalf } from './dead-reads';
 import {
   type DisasmInstr,
   parseImm,
@@ -88,6 +81,7 @@ import {
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
+import { finishLift } from './finish';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import {
@@ -104,7 +98,6 @@ import {
   writesFloatReturn,
 } from './fpu';
 import {
-  FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
@@ -132,14 +125,7 @@ import {
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import {
-  type ArgSlots,
-  abiSortEntryParams,
-  incomingStackArgKey,
-  mintArgSlotHoles,
-  stackArgSlots,
-  stackSlotKey,
-} from './ssa';
+import { type ArgSlots, incomingStackArgKey, mintArgSlotHoles, stackArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder, refuseSavedRegisterLeaks, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
@@ -3886,49 +3872,52 @@ function liftOnce(
   assertNoNonValueEscaped(irBlocks);
   assertNonValuesConsumed();
 
-  if (frame !== null) {
-    // Prove every `laddr` names storage of this frame at a shape the machine states, or decline
-    // (`auditFrameObjects`); an accepted function then gets the device pin the audit answers. The
-    // slot model's words are named from the pushed r1, as the audit names every offset.
-    const verdict = FRAME_OBJECT_AUDIT.run({
-      name,
-      irBlocks,
-      ownedLocals: frame.area,
-      declaredLocals: frame.area,
-      usedSlotOffsets: new Set(
-        [...valueSlots.keys()].map((o) => o + frame.size).filter((o) => o >= 0 && o < frame.size),
-      ),
-      // the bound of the pushed frame, named from the pushed r1 as every offset here is
-      loadedWords:
-        loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound(-frame.size) + frame.size },
-      capturedObjectIsTheWholeFrame: false,
-      movedCaptures,
-      returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
-      symbols: undefined,
-      target,
-      oneObject,
-    });
-    if (verdict !== undefined && 'oneObject' in verdict) {
-      return verdict;
-    }
-    if (verdict !== undefined) {
-      pinDeviceAccesses(irBlocks, verdict, target, undefined);
-    }
-  }
-  pinDeadReads(irBlocks, target, {
+  return finishLift({
     name,
+    target,
+    ssa,
     own: prototypes[name],
-    atWordReturn: unreadHigh,
-    atUndeclaredCall: calls.heldAtUndeclaredCall,
-    compared,
-    spilled: ssa.frameWrites,
-    discarded: leftInDiscardRegister(irBlocks, discarded, writtenElsewhere),
-    declarations,
+    calls,
+    symbols: declarations.symbols,
+    context: declarations.context,
+    oneObject,
+    entryHasPreds: preds[0].length > 0,
+    argSlots,
+    // mwcc passes a struct argument as the address of a copy, which this frontend refuses
+    // (`byValueAggregateArgWords` is absent on every mwcc target), and returns a small struct in
+    // r3:r4 rather than through memory (`PPC_CALL_LOWERING.memoryReturn` is false): no call carries
+    // by-value words or a hidden pointer, so these steps have nothing to read here.
+    foldsByValueArgs: false,
+    memoryReturn: false,
+    // A function with no local area (`measurePpcFrame`) has nothing to audit. The slot model's
+    // words are named from the pushed r1, as the audit names every offset.
+    frame:
+      frame === null
+        ? undefined
+        : () => ({
+            ownedLocals: frame.area,
+            declaredLocals: frame.area,
+            usedSlotOffsets: new Set(
+              [...valueSlots.keys()].map((o) => o + frame.size).filter((o) => o >= 0 && o < frame.size),
+            ),
+            // the bound of the pushed frame, named from the pushed r1 as every offset here is
+            loadedWords:
+              loadedFrom === undefined
+                ? undefined
+                : { from: loadedFrom, bound: loadedWordBound(-frame.size) + frame.size },
+            capturedObjectIsTheWholeFrame: false,
+            movedCaptures,
+          }),
+    // PPC has always handed the audit and the device pin no symbol map (its fold and its dead-read
+    // pin get the lift's declarations as the others do).
+    auditReadsSymbols: false,
+    deadReads: () => ({
+      atWordReturn: unreadHigh,
+      compared,
+      discarded: leftInDiscardRegister(irBlocks, discarded, writtenElsewhere),
+    }),
+    statics,
   });
-
-  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
-  ssa.fn.localObjects = statics.finish();
-  return ssa.fn;
 }
 
 /** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `returns` holds,

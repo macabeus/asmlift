@@ -34,23 +34,15 @@ import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import { ARM_REGISTER_ALIASES, type TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
+import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
 import { type CalleeStackWords, asksCalleeBody } from './callee-body';
-import { pinDeadReads, unreadPairHalf } from './dead-reads';
-import { pinDeviceAccesses } from './device-pins';
+import { unreadPairHalf } from './dead-reads';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
+import { finishLift } from './finish';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import {
-  FRAME_OBJECT_AUDIT,
-  type FrameObjectAudit,
-  type FrameObjectRelift,
-  type FrameRange,
-  liftWithRelift,
-  nameMergedSretObjects,
-  refuseSretOutsideFrame,
-} from './frame-objects';
+import { type FrameObjectAudit, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
 import { type Frontend, type LiftOptions, type OwnDeclaration, ownDeclarationOf } from './frontend';
 import {
   type CaseEntry,
@@ -74,7 +66,6 @@ import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
   type SsaBuilder,
-  abiSortEntryParams,
   assertScratchRegsPartitioned,
   makeSsaBuilder,
   mintArgSlotHoles,
@@ -2606,8 +2597,8 @@ export function lift(
 /** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
  *  text, the CFG, the target's scratch registers, each callee's declaration, the frame and the SSA
  *  builder), then every block filled in order (`fillThumbBlock`), the word returns judged
- *  (`thumbPairs`), the frame-object audit, the device pin and the struct-return destinations
- *  (`refuseSretOutsideFrame`). Each stage reads the records of the stages before it; the fill reads
+ *  (`thumbPairs`), then the end every frontend shares (frontend/finish.ts `finishLift`): the
+ *  frame-object audit, the device pin and the struct-return destinations. Each stage reads the records of the stages before it; the fill reads
  *  them as one record (`ThumbFill`). What the fill writes as it goes is named state: the slot
  *  offsets it keyed and the captures it moved (`ThumbFrameUses`), which the audit reads; the 64-bit
  *  pairs it built (`ThumbPairs`); and the flags each block leaves (`ThumbFlagCarry`), which a later
@@ -2635,7 +2626,7 @@ function liftOnce(
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject, options, homesReleased);
   const { cfg, frame, ssa, pairs, statics } = fill;
-  const { fn, irBlocks, paramReg } = ssa;
+  const { irBlocks } = ssa;
 
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   cfg.asmBlocks.forEach((ab, bi) => {
@@ -2693,49 +2684,35 @@ function liftOnce(
     );
   }
 
-  // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
-  // before the audit judges the frame objects, that one among them.
-  foldByValueArgs(name, irBlocks, fill.calls, { symbols, context });
-  nameMergedSretObjects(irBlocks);
-
-  // Prove every `laddr` this function emitted really does name storage of this function's own, at
-  // a shape the machine states, or decline (auditFrameObjects); an accepted function then gets the
-  // device pin the audit answers (pinDeviceAccesses).
-  const verdict = FRAME_OBJECT_AUDIT.run({
+  return finishLift({
     name,
-    irBlocks,
-    ...frame.partition,
-    usedSlotOffsets: fill.frameUses.usedSlotOffsets,
-    loadedWords: frame.loadedWords,
-    capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
-    escapesReliedOn: frame.escapesReliedOn,
-    movedCaptures: fill.frameUses.movedCaptures,
-    returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
-    symbols,
     target,
-    oneObject,
-    releasableHomes: frame.releasableHomes,
-  });
-  if (verdict !== undefined && 'oneObject' in verdict) {
-    return verdict;
-  }
-  if (verdict !== undefined) {
-    pinDeviceAccesses(irBlocks, verdict, target, symbols);
-  }
-  refuseSretOutsideFrame(name, irBlocks, target);
-  pinDeadReads(irBlocks, target, {
-    name,
+    ssa,
     own: prototypes[name],
-    atWordReturn: pairs.unreadHigh,
-    atUndeclaredCall: fill.calls.heldAtUndeclaredCall,
-    compared: fill.flags.compared,
-    spilled: ssa.frameWrites,
-    declarations: { symbols, context },
+    calls: fill.calls,
+    symbols,
+    context,
+    oneObject,
+    entryHasPreds: cfg.preds[0].length > 0,
+    argSlots,
+    // AAPCS hands a struct over in argument words, and returns one through a hidden pointer in r0
+    // (`THUMB_CALL_LOWERING.memoryReturn`).
+    foldsByValueArgs: true,
+    memoryReturn: true,
+    // Thumb measures a frame for every function (`thumbFillOf`), and audits it.
+    frame: () => ({
+      ...frame.partition,
+      usedSlotOffsets: fill.frameUses.usedSlotOffsets,
+      loadedWords: frame.loadedWords,
+      capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
+      escapesReliedOn: frame.escapesReliedOn,
+      movedCaptures: fill.frameUses.movedCaptures,
+      releasableHomes: frame.releasableHomes,
+    }),
+    auditReadsSymbols: true,
+    deadReads: () => ({ atWordReturn: pairs.unreadHigh, compared: fill.flags.compared }),
+    statics,
   });
-
-  abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
-  fn.localObjects = statics.finish();
-  return fn;
 }
 
 /** THE TEXT A LIFT READS: the decoded blocks with every recovered jump table's dispatch elided
