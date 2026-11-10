@@ -476,7 +476,7 @@ export function computedOnlyToReturn(blocks: readonly Block[]): (v: Value) => bo
 /** Stamp `volatile` on every read these blocks never use that no gate refuses, outermost first.
  *  `facts` is what the frontend gathered while it filled the blocks.
  *
- *  CALLED BY EACH FRONTEND, at the end of its lift, and not once in pipeline.ts `liftStamped`: the
+ *  CALLED BY EACH FRONTEND, at the end of its lift (frontend/finish.ts `finishLift`), and not once in pipeline.ts `liftStamped`: the
  *  pair, call and compare gates need what a return, a call or a compare left in a register no op
  *  reads, which only the frontend's SSA builder answers, and only while it is filling the blocks.
  *  The IR it hands back has no register left to ask. */

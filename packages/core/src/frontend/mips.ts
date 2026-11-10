@@ -29,10 +29,8 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import { O32_REGISTER_ALIASES, type TargetDescription } from '../target';
 import { type AsmData, readJumpTable, readU32, textRelocAt } from './asmdata';
-import { callDeclarations, foldByValueArgs } from './call-plan';
+import { callDeclarations } from './call-plan';
 import { asksCalleeBody } from './callee-body';
-import { pinDeadReads } from './dead-reads';
-import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
   type DisasmReloc,
@@ -44,6 +42,7 @@ import {
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
+import { finishLift } from './finish';
 import { assertInputFormat } from './format';
 import {
   type ReturnHomeRule,
@@ -58,15 +57,12 @@ import {
   writesFloatReturn,
 } from './fpu';
 import {
-  FRAME_OBJECT_AUDIT,
   type FrameObjectRelift,
   type FrameRange,
   areaAboveOutgoing,
   keptInRelift,
   landsOnArea,
   liftWithRelift,
-  nameMergedSretObjects,
-  refuseSretOutsideFrame,
 } from './frame-objects';
 import { type Frontend, type LiftOptions, ownDeclarationOf } from './frontend';
 import { makeHighHalves } from './high-half';
@@ -88,14 +84,7 @@ import {
 } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import {
-  type ArgSlots,
-  abiSortEntryParams,
-  incomingStackArgKey,
-  mintArgSlotHoles,
-  stackArgSlots,
-  stackSlotKey,
-} from './ssa';
+import { type ArgSlots, incomingStackArgKey, mintArgSlotHoles, stackArgSlots, stackSlotKey } from './ssa';
 import {
   makeSsaBuilder,
   recordAsmLayout,
@@ -1659,7 +1648,7 @@ function liftOnce(
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
     liveIns.globalRegs,
   );
-  const { irBlocks, readVar, writeVar, paramReg } = ssa;
+  const { irBlocks, readVar, writeVar } = ssa;
   // Where the compiler put each block (ir/core.ts `AsmLayout`). A delay slot runs in its branch's
   // block, so it is part of the body; a branch-likely's slot is a block of its own already.
   ssa.fn.asmLayout = recordAsmLayout(
@@ -3396,57 +3385,52 @@ function liftOnce(
     }
   }
 
-  // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
-  // before the audit judges the frame objects, as on Thumb.
-  foldByValueArgs(name, irBlocks, calls, { symbols, context });
-  nameMergedSretObjects(irBlocks);
-
-  if (frame !== null) {
-    refuseEscapedFrameSums(name, irBlocks, frameSums);
-    // Prove every `laddr` names storage of this frame at a shape the machine states, or decline
-    // (`auditFrameObjects`); an accepted function then gets the device pin the audit answers.
-    const verdict = FRAME_OBJECT_AUDIT.run({
-      name,
-      irBlocks,
-      ownedLocals: frame.area,
-      declaredLocals: frame.area,
-      usedSlotOffsets: new Set([...valueSlots].filter((o) => o < frame.size)),
-      loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound },
-      capturedObjectIsTheWholeFrame: false,
-      movedCaptures,
-      directAccesses,
-      returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
-      symbols,
-      target,
-      oneObject,
-    });
-    if (verdict !== undefined && 'oneObject' in verdict) {
-      return verdict;
-    }
-    if (verdict !== undefined) {
-      pinDeviceAccesses(irBlocks, verdict, target, symbols);
-    }
-  }
-  refuseSretOutsideFrame(name, irBlocks, target);
-  pinDeadReads(irBlocks, target, {
+  return finishLift({
     name,
+    target,
+    ssa,
     own: prototypes[name],
-    atUndeclaredCall: calls.heldAtUndeclaredCall,
-    spilled: ssa.frameWrites,
-    discarded,
-    declarations: { symbols, context },
+    calls,
+    symbols,
+    context,
+    oneObject,
+    entryHasPreds: preds[0].length > 0,
+    argSlots,
+    // O32 hands a struct over in argument words, and returns one through a hidden pointer in a0
+    // (the lowering `callDeclarations` is handed above states `memoryReturn: true`).
+    foldsByValueArgs: true,
+    memoryReturn: true,
+    // A function with no local area (`measureO32Frame`) has nothing to audit.
+    frame:
+      frame === null
+        ? undefined
+        : () => ({
+            ownedLocals: frame.area,
+            declaredLocals: frame.area,
+            usedSlotOffsets: new Set([...valueSlots].filter((o) => o < frame.size)),
+            loadedWords: loadedFrom === undefined ? undefined : { from: loadedFrom, bound: loadedWordBound },
+            capturedObjectIsTheWholeFrame: false,
+            movedCaptures,
+            directAccesses,
+          }),
+    // A frame sum is a value no op defines, so one that reached anything the fill did not
+    // materialize refuses before the audit reads the frame.
+    refuseBeforeAudit: () => refuseEscapedFrameSums(name, irBlocks, frameSums),
+    auditReadsSymbols: true,
+    // the facts this fill gathers: no word-return pair (`pairs: false`) and no compare record
+    deadReads: () => ({ discarded }),
+    // Asked once everything else lifted, so a function that declines for another reason keeps that message.
+    refuseLast: () =>
+      refuseReturnsNotThroughCallersRa(
+        name,
+        blocks,
+        blocks.map((b) => succAddrs.get(b)!.flatMap((a) => (idxOf.has(a) ? [idxOf.get(a)!] : []))),
+        target.callerSaved,
+        target.kernelRegs ?? [],
+      ),
+    // MIPS records no function-scope static.
+    statics: undefined,
   });
-
-  // Asked once everything else lifted, so a function that declines for another reason keeps that message.
-  refuseReturnsNotThroughCallersRa(
-    name,
-    blocks,
-    blocks.map((b) => succAddrs.get(b)!.flatMap((a) => (idxOf.has(a) ? [idxOf.get(a)!] : []))),
-    target.callerSaved,
-    target.kernelRegs ?? [],
-  );
-  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
-  return ssa.fn;
 }
 
 /** `sp + index`, deferred to its use (`materialize`): the frame offset it starts from and the index. */
