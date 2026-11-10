@@ -41,7 +41,7 @@ import { isArgumentPair } from './pairparams';
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` would delete the
  *     arithmetic. Optimising (-O1, -O2), agbcc deletes a helper call whose result is dead
  *     (`s = a * b; g(); return 0;` calls no `__mulsf3`), so the result's one reader was a later call
- *     that took it in r0, and a guessed arity does not count a register a call wrote (frontend/ssa.ts
+ *     that took it in r0, and a guessed arity does not count a register a call wrote (frontend/call-arity.ts
  *     `fallbackArgc`, `trimClobberedCallArgs`): `g1(a * b)` with `g1` undeclared reads as
  *     `__mulsf3(); return g1();`, and folded would print `return g1();`. A double's pair refuses
  *     that shape at the frontend, naming the half the next call reads; a single is one word, so it

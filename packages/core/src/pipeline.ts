@@ -637,10 +637,11 @@ const relocsOnly = (relocs: readonly Reloc[], target: TargetDescription): AsmDat
  *  `(s32 a0, s32 a1, s32 a2, s32 a3)`).
  *
  *  "READS" MEANS THE FINISHED LIFT, not the SSA builder. A register is read as the argument of a
- *  call whose arity was guessed, and the guess then trims it (`k4(a, b, 2, 0); zq(a); sl();` reads
- *  a2/a3 as `zq`'s and `sl`'s possible arguments); so the test is that an undefined value of a
- *  dropped register survives into the lift — an `undef` keyed by it, or by a join that took it,
- *  that `dce` would not delete, or one the machine homes to a slot nothing reads
+ *  call whose arity was guessed (frontend/call-arity.ts), and the guess then trims it
+ *  (`k4(a, b, 2, 0); zq(a); sl();` reads a2/a3 as `zq`'s and `sl`'s possible arguments); so the
+ *  test is that an undefined value of a dropped register survives into the lift — an `undef` keyed
+ *  by it, or by a join that took it, that `dce` would not delete, or one the machine homes to a
+ *  slot nothing reads
  *  (`readDroppedArgRegs`). A read the raising tower would delete later still counts: that only
  *  keeps the parameter.
  *

@@ -337,7 +337,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'constant and has to load it, and a missing load rules the wider reading out.',
     offeredWhen: {
       when: 'A call whose arity was guessed passes a register its own block did not set.',
-      decidedBy: { symbol: 'hasSetupArgsNarrowing', file: 'packages/core/src/frontend/ssa.ts' },
+      decidedBy: { symbol: 'hasSetupArgsNarrowing', file: 'packages/core/src/frontend/call-arity.ts' },
     },
     example: {
       compiler: 'agbcc',
@@ -345,7 +345,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       before: 'if (a0 == 5) f(a0);',
       after: 'if (a0 == 5) f();',
     },
-    implementedIn: 'packages/core/src/frontend/ssa.ts',
+    implementedIn: 'packages/core/src/frontend/call-arity.ts',
   },
   connective: {
     title: 'Comparison chain as `||`',
@@ -987,7 +987,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       compiler: 'agbcc',
       // The callees are PROTOTYPED here, unlike `CALLS`: `bl f` sees `c` read in r2 and a0 untouched
       // in r0, which a pass-through `f(a0, a1, c)` would leave the same way, so an undeclared `f`
-      // declines (frontend/ssa.ts `fallbackArgc` refuses the gap). The lift reads these declarations
+      // declines (frontend/call-arity.ts `fallbackArgc` refuses the gap). The lift reads these declarations
       // off the unit as shown.
       unit:
         's32 f(void); s32 g(void); s32 h(s32, s32);\n' +

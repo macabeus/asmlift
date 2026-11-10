@@ -14,7 +14,7 @@ import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, type Tar
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-clobbered-read.s'), 'utf8');
 const lift = (name: string, prototypes = {}) => decompile(name, asm, ARMV4T_AGBCC, { prototypes });
 // The callee is declared where the value it destroys sits in r3 past an r0 nothing set: undeclared,
-// that is a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`) before the read is asked.
+// that is a gap the guessed arity refuses (frontend/call-arity.ts `fallbackArgc`) before the read is asked.
 const CALLEE = { callee: { params: 0 } };
 const PRESERVING = { preserves_r3: { params: 0 } };
 

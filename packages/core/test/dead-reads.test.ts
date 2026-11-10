@@ -147,7 +147,7 @@ test('a read the guessed arity leaves in an argument register is no dead read', 
   // agbcc of `extern void g(); void f(int a, int *p, int c){ g(a, c ? p[1] : p[2]); }`: r0 holds
   // the incoming `a`, so a guess that stopped at r0 would pass nothing, and the r1 loads would be
   // unused by the LIFT only. r1 holding a value past an r0 nothing set is a gap the guess refuses
-  // (frontend/ssa.ts `fallbackArgc`), so no reading of the loads is published at all…
+  // (frontend/call-arity.ts `fallbackArgc`), so no reading of the loads is published at all…
   const asm =
     'f:\n\tpush\t{lr}\n\tcmp\tr2, #0\n\tbeq\t.L3\n\tldr\tr1, [r1, #0x4]\n\tb\t.L4\n.L3:\n' +
     '\tldr\tr1, [r1, #0x8]\n.L4:\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';

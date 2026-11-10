@@ -236,7 +236,7 @@ export function calleeDeclaration(callee: string, prototypes: Prototypes, helper
  *
  *  THE MACHINE IS NOT A WITNESS FOR A WIDTH NOBODY STATED, which is the reading this replaces. The
  *  contiguous scan is wrong in both directions and neither is recoverable here. It OVER-counts:
- *  it is read before `frontend/ssa.ts` `narrowToSetupArgs` trims the registers a call sat between,
+ *  it is read before `frontend/call-arity.ts` `narrowToSetupArgs` trims the registers a call sat between,
  *  so `bl __muldi3` leaves r2 and r3 counted as arguments of the NEXT call. It UNDER-counts: an
  *  incoming argument register this function passes straight through has no definition here at all,
  *  so it counts zero — measured on agbcc, `void g(MyU64); void f(MyU64 x){ g(x|1); }` leaves the

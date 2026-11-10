@@ -311,7 +311,7 @@ describe('a map-declared pointer VALUE is spelled legally where it is assigned',
     // own choice; `(void *)` would be legal too, but the exact type is available here and is not
     // where the map's declaration and this one can disagree
     // `Prep` is declared: undeclared, the pool address left in r1 past an r0 nothing set is a gap the
-    // guessed arity refuses (frontend/ssa.ts `fallbackArgc`)
+    // guessed arity refuses (frontend/call-arity.ts `fallbackArgc`)
     const src = run2(
       'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tPrep\n' +
         '\tldr\tr0, [r4, #0x18]\n\tldrb\tr1, [r4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r4, #0x18]\n' +

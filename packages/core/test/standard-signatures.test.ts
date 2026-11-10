@@ -2,7 +2,7 @@
 // arity lookup. What an entry buys is what RUNTIME_HELPERS buys for `__divsi3`: the call's
 // ARGUMENTS ARE RECOVERED. Without one the arity is guessed: a call whose argument registers were
 // never written in this function keeps none of them, or refuses where a register past them was
-// (frontend/ssa.ts `fallbackArgc`).
+// (frontend/call-arity.ts `fallbackArgc`).
 import { expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';

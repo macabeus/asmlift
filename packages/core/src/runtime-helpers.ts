@@ -180,7 +180,7 @@ export function helperPrototypes(
  *  NAMING THEM IS A TRADE, and these ten make it: a call the fold refuses declines where an unnamed
  *  helper would publish as a pass-through. So a function whose float arithmetic feeds a compare, a
  *  conversion or an ordinary call declines, where unnamed it would print `__muldf3(); g();`. For
- *  the singles that pass-through is wrong C: unnamed, `__mulsf3`'s arity is GUESSED (frontend/ssa.ts
+ *  the singles that pass-through is wrong C: unnamed, `__mulsf3`'s arity is GUESSED (frontend/call-arity.ts
  *  `fallbackArgc`), and a guess drops what the function passes on unchanged — `a * b + c` as
  *  `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`.
  *
