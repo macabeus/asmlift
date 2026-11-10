@@ -110,11 +110,15 @@ export type ArmExit =
 
 export interface SwitchRecovery {
   /** `mergeAt`, given the tree's case and default blocks, may name the switch's end ahead of the
-   *  CFG's (structure.ts's join past early returns); `undefined` keeps `ipdom ?? stop`. */
+   *  CFG's (structure.ts's join past early returns); `undefined` keeps `ipdom ?? stop`. `onWrites`
+   *  fires where the recognition starts to write — the dispatch hoist, whose `argAssignsFor` mints
+   *  names, and the arms after it: every `null` returned before it is a pure refusal, which
+   *  recognizing the same tree again repeats and changes nothing. */
   recognizeSwitch: (
     b: Block,
     stop: Block | null,
     mergeAt?: (arms: readonly Block[]) => Block | undefined,
+    onWrites?: () => void,
   ) => Stmt[] | null;
   /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
    *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
@@ -1020,6 +1024,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     b: Block,
     stop: Block | null,
     mergeAt?: (arms: readonly Block[]) => Block | undefined,
+    onWrites?: () => void,
   ): Stmt[] | null => {
     const root = testInfo(b);
     if (!root) {
@@ -1510,6 +1515,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         dispatchEdges.push({ pred: t, succ: e });
       }
     }
+    onWrites?.();
     const hoisted = hoistDispatchCopies(dispatchEdges, [
       b,
       ...caseBlocks,

@@ -691,3 +691,95 @@ describe('the return-tail reading bounded by size', () => {
     expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/ret-join')).toBe(true);
   });
 });
+
+// THE JOIN THAT IS THE COPIES' RUN (structure.ts `onJoinReadsAsCopies`, pipeline.ts
+// `copiesByDefault`): a copies structuring that lifts says where the join reading would have taken
+// every step it took, and under the measured default that join is then not structured. The claim
+// is read against the join's own run: wherever the hook fires, the join lifts the same source and
+// takes no join past early returns.
+describe('a copies structuring that says the join would read the same', () => {
+  const DIAMOND = parse(
+    [
+      'fn f {',
+      '^bb0(%0: s32):',
+      '  %1: s32 = const {value=3}',
+      '  %2: u32 = icmp_slt %1, %0',
+      '  cond_br %2, ^bb1(), ^bb2()',
+      '^bb1():',
+      '  %3: s32 = call %0 {target="b"}',
+      '  br ^bb3()',
+      '^bb2():',
+      '  %4: s32 = call %0 {target="c"}',
+      '  br ^bb3()',
+      '^bb3():',
+      '  ret',
+      '}',
+      '',
+    ].join('\n'),
+  );
+  const fixtures: [string, () => Fn][] = [
+    ['a diamond into the return', () => DIAMOND],
+    ...(['own', 'epilogue', 'crossjumped', 'branchyxj', 'tangled'] as const).flatMap((flavor): [string, () => Fn][] => [
+      [`chain(1, ${flavor})`, () => chain(1, flavor)],
+      [`chain(3, ${flavor}, innerIf)`, () => chain(3, flavor, true)],
+    ]),
+    ['treeChain(2)', () => treeChain(2)],
+    ['switchChain(2, own)', () => switchChain(2, 'own')],
+    ['switchChain(2, epilogue)', () => switchChain(2, 'epilogue')],
+  ];
+
+  for (const [name, make] of fixtures) {
+    test(`${name}: where the hook fires, the join lifts the copies' source and takes no join`, () => {
+      const fn = make();
+      let same = 0;
+      const copies = cBackend.emit(
+        structure(fn, { returnsVoid: true, copyReturnTails: true }, { onJoinReadsAsCopies: () => same++ }),
+      );
+      expect(same).toBeLessThanOrEqual(1);
+      let took = 0;
+      let join: string | undefined;
+      try {
+        join = cBackend.emit(structure(fn, { returnsVoid: true }, { onJoinPastReturns: () => took++ }));
+      } catch {
+        join = undefined;
+      }
+      if (same === 1) {
+        expect(join).toBe(copies);
+        expect(took).toBe(0);
+      }
+      // and where the join takes one, the copies never claim it reads the same
+      if (took > 0) {
+        expect(same).toBe(0);
+      }
+    });
+  }
+
+  test('a diamond into the return: the hook fires, and the measured default structures it once', () => {
+    let same = 0;
+    structure(DIAMOND, { returnsVoid: true, copyReturnTails: true }, { onJoinReadsAsCopies: () => same++ });
+    expect(same).toBe(1);
+    // one structuring: the caller's `onJoinReadsAsCopies` fires once, and nothing is unpublished
+    let fired = 0;
+    const read = structureReturnTailReading(DIAMOND, { returnsVoid: true }, (t) => cBackend.emit(t), {
+      onJoinReadsAsCopies: () => fired++,
+    });
+    expect(fired).toBe(1);
+    expect(read.unpublished).toBeUndefined();
+    expect(cBackend.emit(read.sfn)).toBe(cBackend.emit(structure(DIAMOND, { returnsVoid: true })));
+  });
+
+  test('a chain whose join is taken: the hook stays silent, and the join is the unpublished reading', () => {
+    const fn = chain(3, 'own');
+    let same = 0;
+    structure(fn, { returnsVoid: true, copyReturnTails: true }, { onJoinReadsAsCopies: () => same++ });
+    expect(same).toBe(0);
+    const read = structureReturnTailReading(fn, { returnsVoid: true }, (t) => cBackend.emit(t));
+    expect(read.unpublished?.reading).toBe('join');
+  });
+
+  test('the join reading itself never fires it', () => {
+    let same = 0;
+    structure(DIAMOND, { returnsVoid: true }, { onJoinReadsAsCopies: () => same++ });
+    expect(same).toBe(0);
+  });
+});
