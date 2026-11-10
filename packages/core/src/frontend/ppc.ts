@@ -3908,8 +3908,8 @@ function liftOnce(
             capturedObjectIsTheWholeFrame: false,
             movedCaptures,
           }),
-    // PPC has always handed the audit and the device pin no symbol map (its fold and its dead-read
-    // pin get the lift's declarations as the others do).
+    // PPC has always handed the audit and the device pin no symbol map. Its dead-read pin gets the
+    // lift's declarations as the others' does; it runs no fold (`foldsByValueArgs: false` above).
     auditReadsSymbols: false,
     deadReads: () => ({
       atWordReturn: unreadHigh,
