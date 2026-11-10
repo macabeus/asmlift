@@ -19,6 +19,7 @@ import {
   makePointerSpelling,
 } from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
+import { c, v } from './helpers';
 
 const ptrInfo = (name: string): SymbolInfo => ({ name, kind: 'data', declared: true, shape: 'pointer', size: 4 });
 const bgPtrsInfo: SymbolInfo = {
@@ -60,8 +61,6 @@ const make = (compiler?: ArithCompilerFacts, readers?: Pick<PointerSpellingDeps,
   });
 };
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const addr = (name: string): Expr => ({ k: 'addr', name });
 const cast = (to: IrType, e: Expr): Expr => ({ k: 'cast', to, e });
 const bin = (op: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });

@@ -4,22 +4,10 @@
 // lifts as before. Shapes compiled at canonical flags on ido7.1, gcc2.7.2kmc and gcc2.7.2.
 import { describe, expect, test } from 'vitest';
 
-import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { MIPS_GCC } from '../src/target';
-
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
-
-const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
-  sections: new Map(),
-  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
-  symbols: new Map(),
-  symbolCount: 0,
-  bigEndian: true,
-});
+import { obj, relocs } from './helpers';
 
 const src = (lines: string[], prototypes: Prototypes = {}, rs: [number, string, string][] = []) =>
   decompile('f', obj(lines), MIPS_GCC, { asmData: relocs(rs), prototypes: { k1: { params: 1 }, ...prototypes } })

@@ -5,14 +5,11 @@
 // functions, and asserts byte-identical output. Here: every input is decompiled three times —
 // forward pass, reverse-order pass (different predecessors = contamination shows), and a repeat
 // pass — and all three must agree byte-for-byte per input.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
-
-const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+import { read } from './helpers';
 
 // One entry per ISA family plus the stateful shapes: a loop (countdown — naming + coalescing), a
 // swap-cycle back edge (tempCounter), sequential loops (nested withSub merge), and a pool-global

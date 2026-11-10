@@ -11,9 +11,8 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { tallying, without } from '../src/l3/gates';
 import { UNMERGE_ARM_GATES, UNMERGE_RUNG_GATES, UNMERGE_SITE_GATES, unmergeJoins } from '../src/l3/unmerge';
-import { c, v } from './helpers';
+import { asg, c, v } from './helpers';
 
-const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const deref = (p: Expr): Expr => ({ k: 'index', base: p, idx: c(0), width: 2, signed: false });
 const store = (p: Expr, value: Expr): Stmt => ({ k: 'store', lval: deref(p), value });
 const call = (fn: string): Expr => ({ k: 'call', fn, args: [] });

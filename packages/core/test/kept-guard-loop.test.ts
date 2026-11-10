@@ -12,16 +12,9 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
-import { irAgreement } from './helpers';
+import { emit, irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 96 }, (_, k) => 1 + k * 4099);
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
 
 // Guard `n <= 0` beside latch `n != 0` — the countdown-`for` lowering (agbcc/gcc reverse the
 // induction variable, so the two predicates differ). Fusing to `while (v != 0)` would run a loop

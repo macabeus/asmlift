@@ -7,18 +7,7 @@
 // wrong reason cannot read as a pass.
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 // `while (*a == *b) { if (*a == 0) return 0; a++; b++; } return *a - *b;` — ^bb2's `if` leaves the
 // loop for ^bb5, which ^bb4 (the post-loop path) also reaches, so the CFG join of ^bb2 is ^bb5.

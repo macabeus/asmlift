@@ -9,12 +9,10 @@
 // name still standing in the emitted C.
 import { describe, expect, test } from 'vitest';
 
-import type { Expr, Stmt } from '../src/l3/ast';
+import type { Stmt } from '../src/l3/ast';
 import { mentionsAnyLocal } from '../src/l3/mentions';
+import { asg, c, v } from './helpers';
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
-const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const names = new Set(['t']);
 const finds = (s: Stmt) => expect(mentionsAnyLocal([s], names)).toBe(true);
 

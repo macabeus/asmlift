@@ -10,13 +10,9 @@ import type { AsmData } from '../src/frontend/asmdata';
 import { __testing } from '../src/frontend/mips';
 import { decompile } from '../src/pipeline';
 import { type ToolchainId, canonicalFlagsOf, targetFor } from '../src/target';
+import { obj } from './helpers';
 
 const TOOLCHAINS: ToolchainId[] = ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'];
-
-/** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
 
 /** `.text` relocation records naming each `jal`'s callee. */
 const relocs = (rs: [offset: number, sym: string][]): AsmData => ({

@@ -13,9 +13,8 @@ import type { Expr, SFn, SImage, Stmt } from '../src/l3/ast';
 import { constantImageRefusal, foldConstantImages } from '../src/l3/constinit';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription, structureOptionsFor } from '../src/target';
+import { c, v } from './helpers';
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const copy = (dst: string, src: string, n: number): Stmt => ({
   k: 'exprstmt',
   value: { k: 'call', fn: 'memcpy', args: [v(dst), { k: 'addr', name: src }, c(n)] },

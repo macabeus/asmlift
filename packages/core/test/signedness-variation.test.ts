@@ -13,6 +13,7 @@ import { type VarTypes, renderedIntSignedness } from '../src/l3/typing';
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, type TargetDescription } from '../src/target';
+import { v } from './helpers';
 
 /** Lifts taken by the enumeration under test. The DECLINE's entire effect is a lift that never
  *  happens, and it is invisible everywhere downstream: a decline that stopped firing would re-lift,
@@ -179,7 +180,6 @@ function underBothPins(root: Expr, pinned: readonly string[], declared: Record<s
 const movedBy = (nodes: ReturnType<typeof underBothPins>, opts: { leaves: boolean }): number =>
   nodes.filter((n) => n.signedPin !== n.unsignedPin && (opts.leaves || (n.e.k !== 'var' && n.e.k !== 'const'))).length;
 
-const v = (name: string): Expr => ({ k: 'var', name });
 const lit = (value: number): Expr => ({ k: 'const', value });
 const op = (o: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op: o, l, r });
 

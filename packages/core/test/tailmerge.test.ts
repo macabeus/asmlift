@@ -4,8 +4,6 @@
 // Both arms execute it LAST on their own path, so moving it below the `if` needs no liveness or
 // dominance analysis — which is why the BELOW direction is the one that is unconditionally sound,
 // and (measured) also the one that matches.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
@@ -15,8 +13,7 @@ import { mergeCommonTails } from '../src/l3/tailmerge';
 import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
-
-const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+import { read } from './helpers';
 
 const asg = (name: string, v: number): Stmt => ({ k: 'assign', name, value: { k: 'const', value: v } });
 const call = (fn: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn, args: [] } });
