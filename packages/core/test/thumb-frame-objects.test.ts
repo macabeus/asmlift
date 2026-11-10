@@ -1,4 +1,4 @@
-// `incoming stack arguments (AAPCS args 5+)` is one describe spread over four files, each
+// `incoming stack arguments (AAPCS args 5+)` is one describe spread over three files, each
 // re-opening it under the same name so every test keeps its describe chain:
 // thumb-stack-args.test.ts (the incoming words and the register arguments beside them),
 // thumb-frontend.test.ts (the frame-slot model), thumb-frame-objects.test.ts (frame objects and
