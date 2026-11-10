@@ -231,7 +231,7 @@ export interface GuessedCallSite {
    *  decide (`inherited`) */
   returnRegBefore: 'destroyed' | 'written' | 'inherited';
   /** which earlier callee's result in the return register is an argument here, not a leftover:
-   *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
+   *  the site's lowering says so (`SsaBuilder.recordGuessedCall` (frontend/ssa.ts)). Absent where none is. */
   passesCalleeResult?: (result: Value) => boolean;
   /** handed the FRESH argument registers the trim cuts from this site's guess, and the ones it
    *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
@@ -266,9 +266,9 @@ export interface CallArgTrim {
   calleeResults: ReadonlySet<Value>;
   /** per block, the registers a call destroyed on SOME path into it with nothing written since. A
    *  call lists the return register there only when it leaves it holding nothing the caller can
-   *  name — a struct handed back in it ({@link SsaBuilder.noteCall}). */
+   *  name — a struct handed back in it (`SsaBuilder.noteCall` (frontend/ssa.ts)). */
   destroyedIn: ReadonlyArray<ReadonlySet<string>>;
-  /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
+  /** one entry per CFG edge, as passed to `makeSsaBuilder` (frontend/ssa.ts) */
   preds: number[][];
   /** the blocks `preds` indexes, terminators included — the edges a guard proves a value on */
   blocks: readonly Block[];
