@@ -154,7 +154,7 @@ describe('what is not provably a relay declines loud', () => {
   });
 
   // A return that is not one declines in a relay's function as in any other (the near-`b` twins
-  // are `thumb-frontend.test.ts`'s). Pinned here because lowering the relay must not let one through.
+  // are `thumb-instructions.test.ts`'s). Pinned here because lowering the relay must not let one through.
   test("a relay in a function with a `bx` that is not a return through the caller's lr declines", () => {
     declines(
       `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n` +

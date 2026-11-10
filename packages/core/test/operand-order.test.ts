@@ -6,23 +6,12 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
-import { verify } from '../src/ir/verify';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { mulFirstSums } from '../src/l3/mulfirst';
 import { decompile } from '../src/pipeline';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-import { v } from './helpers';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit, v } from './helpers';
 
 test('a commutative mul whose machine operands are def-DESCENDING re-spells in def order', () => {
   // load w, load h, `mul h, w` (dst-first machine order) — the source was `w * h`.

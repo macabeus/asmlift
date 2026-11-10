@@ -8,8 +8,6 @@
 // into it is a `return;` the source wrote. The unoptimised object is where that distinction costs
 // bytes — every `return;` is its own branch there — and it is exactly where reading the asm gets
 // it right. The reading itself is `structure/retspell.ts`.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { parse } from '../src/ir/parse';
@@ -20,8 +18,8 @@ import { dropUnspelledReturns } from '../src/l3/tailret';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { unspelledEpilogues } from '../src/structure/retspell';
 import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
+import { read } from './helpers';
 
-const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 const O0 = read('agbcc-retspell-O0.s');
 const O2 = read('agbcc-retspell-O2.s');
 

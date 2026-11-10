@@ -14,19 +14,10 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { frontendFor } from '../src/frontend/registry';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
-import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 // `t = k / n; *q = n; return t + 1;`, the divide a `bl __divsi3`
 const DIV_STORE = `fn f {

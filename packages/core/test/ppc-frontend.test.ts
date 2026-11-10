@@ -1374,7 +1374,7 @@ test('a reloc on a frame adjust (`addi r1`) is loud whether or not an `@ha` is p
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads
 // there depends on telling the callee's own result from caller-side setup — the same rule the
-// Thumb frontend runs (test/thumb-frontend.test.ts), on the second frontend that has the aliasing.
+// Thumb frontend runs (test/thumb-stack-args.test.ts), on the second frontend that has the aliasing.
 describe('a guessed call arity and the EABI return register', () => {
   const PRO = '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\n';
   const EPI = '24:\tlwz     r0,20(r1)\n28:\tmtlr    r0\n2c:\taddi    r1,r1,16\n30:\tblr\n';

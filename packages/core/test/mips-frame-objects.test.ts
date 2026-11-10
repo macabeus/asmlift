@@ -7,23 +7,11 @@
 // declared one.
 import { describe, expect, test } from 'vitest';
 
-import type { AsmData } from '../src/frontend/asmdata';
 import { measureO32Frame } from '../src/frontend/mips';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
-
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
-
-const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
-  sections: new Map(),
-  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
-  symbols: new Map(),
-  symbolCount: 0,
-  bigEndian: true,
-});
+import { obj, relocs } from './helpers';
 
 const PROTOS: Prototypes = {
   fill: { params: ['s32 *'], returnsVoid: true },

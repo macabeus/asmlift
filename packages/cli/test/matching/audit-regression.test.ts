@@ -89,7 +89,8 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // whose hidden pointer looks exactly like an out-parameter. The bar is not "produces something":
   // the emitted C is recompiled and objdiffed against the same object, byte for byte. Anything
   // larger, and `add rD, sp, #k`, still decline loud; the controls for that live in
-  // packages/core/test/thumb-frontend.test.ts, with the compiled counterexamples.
+  // packages/core/test/thumb-frontend.test.ts and thumb-frame-objects.test.ts, with the compiled
+  // counterexamples.
   test('an address-taken local handed to a callee lifts, byte-exact', () => {
     const asm = compileTargetAsm(
       'extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }',

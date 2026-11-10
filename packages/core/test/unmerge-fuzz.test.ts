@@ -31,12 +31,9 @@ import {
   UNMERGE_VALUE_GATES,
   unmergeJoins,
 } from '../src/l3/unmerge';
-import { mulberry32 } from './helpers';
+import { asg, c, mulberry32, v } from './helpers';
 
-const c = (value: number): Expr => ({ k: 'const', value });
-const v = (name: string): Expr => ({ k: 'var', name });
 const mem = (idx: Expr): Expr => ({ k: 'index', base: v('gMem'), idx, width: 4, signed: true });
-const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const st = (idx: Expr, value: Expr): Stmt => ({ k: 'store', lval: mem(idx), value });
 const call = (fn: string): Expr => ({ k: 'call', fn, args: [] });
 

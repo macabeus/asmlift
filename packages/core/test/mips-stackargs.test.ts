@@ -4,21 +4,9 @@
 // never-stored read keeps its refusal, and so does every shape whose depth is not one number.
 import { describe, expect, test } from 'vitest';
 
-import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
-
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
-
-const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
-  sections: new Map(),
-  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
-  symbols: new Map(),
-  symbolCount: 0,
-  bigEndian: true,
-});
+import { obj, relocs } from './helpers';
 
 const src = (lines: string[], rs: [number, string, string][] = [], target = MIPS_IDO) =>
   decompile('f', obj(lines), target, { asmData: relocs(rs), prototypes: { k1: { params: 1 } } }).source;

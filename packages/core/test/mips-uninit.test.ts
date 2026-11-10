@@ -11,11 +11,7 @@ import { assertScratchRegsPartitioned, registerLiveIns } from '../src/frontend/s
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
-
-/** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
-const obj = (lines: string[]) =>
-  '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
-  lines.map((l) => `   ${l}\n`).join('');
+import { obj } from './helpers';
 
 /** `.text` R_MIPS_26 records naming `k`, as `objdump -r` hands them over. */
 const callsTo = (sym: string, offsets: number[]): AsmData => ({

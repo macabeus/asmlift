@@ -12,25 +12,16 @@
 //   struct L { s64 v; }; struct S8 tk3(s32, struct L); struct S8 tk(struct L); extern struct L gL;
 import { describe, expect, test } from 'vitest';
 
-import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import type { AggregateLayout, Prototypes } from '../src/proto';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
+import { relocs } from './helpers';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
 const obj = (name: string, lines: string[]) =>
   '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n' +
   `00000000 <${name}>:\n` +
   lines.map((l) => `   ${l}\n`).join('');
-
-/** `.text` relocation records, as the object's `objdump -r` side table hands them over. */
-const relocs = (rs: [offset: number, type: string, sym: string][]): AsmData => ({
-  sections: new Map(),
-  relocs: rs.map(([offset, type, sym]) => ({ section: '.text', offset, type, sym, addend: 0 })),
-  symbols: new Map(),
-  symbolCount: 0,
-  bigEndian: true,
-});
 
 interface Fixture {
   readonly lines: string[];

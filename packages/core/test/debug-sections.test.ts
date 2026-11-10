@@ -3,15 +3,12 @@
 // `.LBB2`, …) inside them. The pair (`scripts/regen-flag-pair-probes.ts`) is one source at the
 // canonical flags with and without `-g`, and the Thumb frontend must lift exactly the same function
 // from both.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { withoutDebugSections } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
-
-const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
+import { read } from './helpers';
 
 test('the -g build carries debug sections and marker labels the plain build does not', () => {
   const plain = read('agbcc-debug.s');

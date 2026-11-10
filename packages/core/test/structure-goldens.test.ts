@@ -27,13 +27,7 @@ import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
-
-const emit = (ir: string): string => {
-  const fn = parse(ir);
-  verify(fn);
-  recoverTypes(fn);
-  return cBackend.emit(structure(fn));
-};
+import { emit } from './helpers';
 
 /** Attach a write-order record the way a FRONTEND would, and re-verify.
  *
