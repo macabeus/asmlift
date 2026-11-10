@@ -4,14 +4,21 @@
 // present and only the counts moved, which no other gate can see. These pin the orderings that
 // actually overlap.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DECLINE_CLASSES, OTHER_CLASS, declineClassesOf } from '../src/pages/benchmark/lib/declines';
+import {
+  CENSUS_PATH,
+  REGEN_COMMAND,
+  buildCensus,
+  coreSources,
+  declineTemplates,
+  readArtifact,
+} from '../scripts/decline-census';
+import { DECLINE_CLASSES, declineClassesOf } from '../src/pages/benchmark/lib/declines';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
-const CORE_SRC = join(ROOT, 'packages/core/src');
 
 /** A source file with its COMMENT LINES removed — a line whose first non-space character opens or
  *  continues one. Every phrase check below runs against this rather than the raw text, because a
@@ -25,88 +32,11 @@ const codeOf = (file: string): string =>
     .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
     .join('\n');
 
-/** Every decline message `packages/core/src` can throw, as a template.
- *
- *  A DECLINE is what the benchmark publishes as a marker: the pipeline catches these four
- *  constructors and annotates. Each site's balanced-paren argument is taken, its string-literal
- *  pieces kept and every `${…}` replaced by a placeholder — so an interpolated MNEMONIC or SYMBOL
- *  becomes `X` here, which is why a class keyed on a mnemonic alternation cannot be exercised from
- *  this corpus and is pinned by hand instead (see `NOT_IN_TEMPLATES`). */
-const DECLINE_CTORS = new Set([
-  'FrontendUnsupportedError',
-  'PpcUnsupportedError',
-  'RaiseUnsupportedError',
-  // A SUBCLASS IS A FIFTH CTOR TO THIS HARVEST, not a fourth: the walk reads the NAME at the throw
-  // site and knows nothing about the class hierarchy. `StructOverlapError extends
-  // RaiseUnsupportedError`, and leaving it out took raise/structs.ts's two overlap messages out of
-  // the harvest — which made the `structs` class match nothing core can throw.
-  'StructOverlapError',
-  'StructureError',
-]);
-
-/** The type a frontend hands its refusal to shared code as (frontend/errors.ts). */
-const SHARED_REFUSAL = /\bFrontendRefusal\b/;
-
-const coreSources = (): { file: string; src: string }[] => {
-  const files: string[] = [];
-  (function walk(d: string) {
-    for (const e of readdirSync(d)) {
-      const p = join(d, e);
-      if (statSync(p).isDirectory()) {
-        walk(p);
-      } else if (p.endsWith('.ts')) {
-        files.push(p);
-      }
-    }
-  })(CORE_SRC);
-  return files.sort().map((f) => ({ file: f.slice(CORE_SRC.length + 1), src: readFileSync(f, 'utf8') }));
-};
-
-const declineTemplates = (sources: readonly { file: string; src: string }[]) => {
-  const out: { file: string; line: number; text: string }[] = [];
-  for (const { file, src } of sources) {
-    // A FILE THAT HOLDS A `FrontendRefusal` throws through it, so each call of one there, `fail(`
-    // or a dialect's `d.fail(`, is a site too.
-    const re = SHARED_REFUSAL.test(src) ? /throw new (\w+)\(|(?<!\w)(?:\w+\.)?(fail)\(/g : /throw new (\w+)\(/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src))) {
-      if (m[2] === undefined && !DECLINE_CTORS.has(m[1])) {
-        continue;
-      }
-      let i = m.index + m[0].length;
-      let depth = 1;
-      const start = i;
-      while (i < src.length && depth > 0) {
-        if (src[i] === '(') {
-          depth++;
-        } else if (src[i] === ')') {
-          depth--;
-        }
-        i++;
-      }
-      const arg = src.slice(start, i - 1);
-      const pieces: string[] = [];
-      const lit = /`((?:[^`\\]|\\.)*)`|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g;
-      let l: RegExpExecArray | null;
-      while ((l = lit.exec(arg))) {
-        pieces.push(l[1] ?? l[2] ?? l[3] ?? '');
-      }
-      const text = pieces
-        .join('')
-        .replace(/\$\{[^}]*\}/g, 'X')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (text) {
-        out.push({ file, line: src.slice(0, m.index).split('\n').length, text });
-      }
-    }
-  }
-  return out;
-};
-
+// The harvest of every decline message core can throw lives in `apps/web/scripts/decline-census.ts`,
+// shared with `scripts/regen-decline-census.ts`, so the census the script commits and the one these
+// gates recompute come from one walk.
 const CORE_SOURCES = coreSources();
 const CORE_TEMPLATES = declineTemplates(CORE_SOURCES);
-const classOfText = (t: string) => DECLINE_CLASSES.find((c) => c.pattern.test(t))?.key ?? OTHER_CLASS.key;
 
 /** a declined row carrying exactly these markers */
 const row = (...errorMarkers: string[]) =>
@@ -392,15 +322,15 @@ describe('a pattern keyed on an English word claims sentences that are not about
   });
 
   // A loop-naming refusal is not control flow, so being unnamed is the honest answer here and the
-  // residue list in `declines.ts` records it.
+  // residue list in `declines-census.json` records it.
   //
   // THE OTHER TEMPTING NEGATIVE CASE CANNOT BE PUBLISHED AT ALL: `pascal backend: switch
   // fall-through has no faithful IDO Pascal case-of spelling` is a real text
   // (`packages/core/src/backend/pascal.ts`) and not a real marker — it is thrown as a plain
   // `Error`, `Diagnostic.stage` in `pipeline.ts` is `lift | raise | structure | contract | verify |
   // internal` with no `backend`, and `apps/benchmark/src/eval/asmlift.ts` builds every marker as
-  // `${d.stage}: …`. Measured over the artifact, every marker on a declined row opens `lift:`
-  // (253), `structure:` (49) or `raise:` (18). A negative test against a string the channel cannot
+  // `${d.stage}: …`. Measured over the artifact, every marker on a declined row opens `lift:`,
+  // `structure:` or `raise:` (`artifact.markersByStage` in `declines-census.json`). A negative test against a string the channel cannot
   // carry asserts a hazard that does not exist; `ppc.ts`'s tail-branch refusal, a real published
   // marker, is the whole of the case for not keying on the word `fall-through`.
   test('a loop-naming refusal is unclassified rather than misfiled as control flow', () => {
@@ -440,8 +370,8 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   // resolving the cause, so their message is a disjunction where Thumb's is a decision. All three
   // spellings name an address-taken local first, and the first two are published markers of
   // `ac-decomp`, `marioparty4` and `pikmin`. The share they make up of `address-taken-local` is
-  // recomputed from the artifact below rather than written here, because it moves whenever a Thumb
-  // row is lifted and a stale count in a comment is invisible to every gate in this file.
+  // `artifact.addressTakenLocal` in `declines-census.json`, recomputed from the artifact by the
+  // census gate below rather than written here, because it moves whenever a Thumb row is lifted.
   test.each([
     [
       "lift: cannot lift 'step0_make_dl': stack pointer r1 used as data (address-taken local / frame " +
@@ -882,9 +812,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // taxonomy that has drifted away from the messages core emits. This one is written against the
   // data the app renders: if a refusal is reworded, or a gap nobody has named appears, "other"
   // grows and this names the markers instead of the count quietly moving.
-  const artifact = JSON.parse(
-    readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/data/results.json'), 'utf8'),
-  ) as { results: FunctionResult[] };
+  const artifact = readArtifact();
 
   test('no published decline marker falls into "other"', () => {
     const unclassified = artifact.results
@@ -1009,47 +937,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     ).toEqual(NO_ROWS);
   });
 
-  // THE PARAGRAPH, NOT ONE CLAUSE. `declines.ts`'s own header explains why `address-taken-local`
-  // reads as a big class that a Thumb capability barely moves: most of its rows arrive by the
-  // DISJUNCTION spelling PPC and MIPS write, which refuses without resolving which cause it is.
-  // That argument is two counts, both of which move the moment a Thumb row is lifted — and after
-  // this branch lifted one, three places in the repo still said the old pair. A number in prose is
-  // checked by nothing, so this recomputes both from the artifact and reads them back out of the
-  // comment. The comment is normalised first: it wraps, and a phrase split across two `//` lines
-  // is a phrase no `toContain` finds.
-  test('the disjunction share this paragraph names is the share the artifact has', () => {
-    const CLASS = DECLINE_CLASSES.find((c) => c.key === 'address-taken-local')!;
-    const DISJUNCTION = /address-taken local \/ frame arithmetic/;
-    const markersOf = (r: FunctionResult) => (r.asmlift.outcome === 'declined' ? (r.asmlift.errorMarkers ?? []) : []);
-    const rows = artifact.results.filter((r) => markersOf(r).some((m) => CLASS.pattern.test(m)));
-    const disjunction = rows.filter((r) => markersOf(r).some((m) => DISJUNCTION.test(m)));
-    const decided = rows.length - disjunction.length;
-
-    const prose = readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/lib/declines.ts'), 'utf8')
-      .replace(/^\s*\/\/ ?/gm, '')
-      .replace(/\s+/g, ' ');
-    expect(prose).toContain(`disjunction is ${disjunction.length} of the ${rows.length} rows`);
-    expect(prose).toContain(`claims ${decided} of them`);
-  });
-
-  // THE FIGURE THE `float` CLASS PUBLISHES, recomputed here for the same reason the paragraph
-  // above is: it is a number in a comment, it moves the moment a capability files an FP row under
-  // an earlier guard, and nothing else would say so. The class's OTHER figure — how many corpus
-  // rows contain an FPU instruction at all — is not here, because deriving it needs a list of FPU
-  // mnemonics and the whole point of the phrase is that this package no longer keeps one; it lives
-  // in `docs/floating-point.md` §1 beside the command that recomputes it, which the class comment
-  // names.
-  test('the float class names the number of rows it actually claims', () => {
-    const rows = artifact.results.filter((r) => declineClassesOf(r).includes('float')).length;
-    const prose = readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/lib/declines.ts'), 'utf8')
-      .replace(/^\s*\/\/ ?/gm, '')
-      .replace(/\s+/g, ' ');
-    expect(
-      prose,
-      `declines.ts's float class must say "it claims the ${rows} rows whose own message names an FPU ` +
-        `instruction" — that is what the committed artifact has`,
-    ).toContain(`it claims the ${rows} rows whose own message names an FPU instruction`);
-  });
+  // The two artifact figures the class comments used to spell — `address-taken-local`'s disjunction
+  // share and the rows `float` claims — are `artifact.addressTakenLocal` and `artifact.float` in
+  // `declines-census.json` now, held to the artifact by the census gate at the end of this file.
 
   // The two tests above catch TOTAL shadowing — a class emptied, or a marker nobody claims. They
   // do not catch a PARTIAL swallow, where both classes keep rows and only the counts move, which
@@ -1287,17 +1177,11 @@ describe('a class may not outlive the message it classifies', () => {
 
 describe('the classifier is measured against the messages core can throw, not only against the corpus', () => {
   // THE ANCHOR ABOVE IS BOUNDED BY THE CORPUS. It proves the artifact leaves nothing unclassified,
-  // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
-  // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
-  // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about the distinct messages across 14 files, which
-  // nothing but this can hold to them.
-  //
-  // EVERY FIGURE IN THAT PARAGRAPH IS SPELT TWICE and there is no way around it: one copy is prose
-  // a reader acts on, the other is derived here from the harvest. What keeps them honest is that
-  // the derived side is read back OUT of `declines.ts`, figure by figure — the distinct-message
-  // count, the residue total, and one `toContain` per file — so a drift in either copy is red.
-  // A figure gated on one clause of the paragraph is a gate on one clause of the paragraph.
+  // which is a claim about the artifact's declined rows — not about asmlift. These gates are the
+  // other denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
+  // sites themselves. The residue they measure is the honest one, and `declines-census.json` lists
+  // it by file, message by message; the census gate at the end of this describe holds that file to
+  // the harvest.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
     // Without this, deleting the walk would make every gate below vacuously pass.
@@ -1320,75 +1204,23 @@ describe('the classifier is measured against the messages core can throw, not on
     expect(harvested.filter((t) => t.file === 'frontend/mips.ts' && t.text === text)).toHaveLength(1);
   });
 
-  // The count the header paragraph publishes. It is a RESIDUE and not a defect — some of these are
-  // input errors rather than capability gaps (`disasm.ts` "symbol not found", `format.ts`'s
-  // frontend mismatch), and the rest are gaps nothing in the corpus has reached, which is why they
-  // are named in prose rather than given classes with no inhabitant. What this gate buys is that
-  // the paragraph cannot drift: move a family into a class and this goes red with the new number.
-  const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 31],
-    ['structure/structure.ts', 21],
-    ['frontend/ppc.ts', 15],
-    ['frontend/mips.ts', 12],
-    ['frontend/splat.ts', 8],
-    ['frontend/disasm.ts', 7],
-    ['frontend/ssa.ts', 7],
-    ['frontend/call-plan.ts', 5],
-    ['structure/memory-access.ts', 3],
-    ['frontend/format.ts', 1],
-    ['frontend/register-struct-call.ts', 1],
-    ['pipeline.ts', 1],
-    ['raise/offsetnames.ts', 1],
-    ['structure/edge-copies.ts', 1],
-  ];
-  const RESIDUE_TOTAL = 114;
-
-  // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
-  // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
-  // rows as hand-typed prose. Each figure below is derived from the harvest and then required to
-  // appear in `declines.ts`, so no clause of that paragraph can drift while the others hold.
-  const DECLINES_TS = 'apps/web/src/pages/benchmark/lib/declines.ts';
-  const declinesSource = (): string => readFileSync(join(ROOT, DECLINES_TS), 'utf8');
-  const distinctMessages = (): number => new Set(CORE_TEMPLATES.map((t) => t.text)).size;
-
-  test('the header paragraph names the number of messages the harvest actually finds', () => {
-    const distinct = distinctMessages();
+  // THE CENSUS THE HEADER CITES. `declines.ts`'s header used to spell these figures — the
+  // distinct-message count, the residue total, the residue per file and the artifact's shares —
+  // and this file pinned each with a `toContain`, so every figure was typed two or three times and
+  // edited by hand in most rounds. They live in `declines-census.json` now, written by the same
+  // harvest this file runs, and this gate is the whole of what keeps them true: it recomputes the
+  // census from core's sources and the committed artifact and requires the committed file to equal
+  // it. The residue is not a defect — some of it is input errors rather than capability gaps
+  // (`disasm.ts` "symbol not found", `format.ts`'s frontend mismatch), and the rest are gaps nothing
+  // in the corpus has reached — but move a family into a class, reword a throw, or regenerate the
+  // artifact, and this goes red until the census is regenerated.
+  test('the committed census is the census the tree computes', () => {
+    const committed: unknown = JSON.parse(readFileSync(join(ROOT, CENSUS_PATH), 'utf8'));
     expect(
-      declinesSource(),
-      `declines.ts's header paragraph must say "throws ${distinct} distinct decline messages" — that is ` +
-        `what the harvest finds today`,
-    ).toContain(`throws ${distinct} distinct decline messages`);
-  });
-
-  test('…and the share of them the paragraph calls the residue', () => {
-    expect(
-      declinesSource(),
-      `declines.ts's header paragraph must say "${RESIDUE_TOTAL} of them classify as \\"other\\"" — that is ` +
-        `the residue the harvest leaves`,
-    ).toContain(`${RESIDUE_TOTAL} of them classify as "other"`);
-  });
-
-  // The per-file table, which is the half that drifts silently: a capability lands, one file's
-  // residue drops by one, and nothing but this says so. Matched on the harvest's own file key
-  // (which is why the table spells `structure/structure.ts`, not `structure.ts`) and tolerant of
-  // the column alignment, because a realignment is not a drift.
-  test.each(RESIDUE_BY_FILE)('the per-file table says %s has %i', (file, count) => {
-    expect(declinesSource(), `declines.ts's header table must list "${file}" with ${count} residual messages`).toMatch(
-      new RegExp(`^//\\s+${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${count}\\s`, 'm'),
-    );
-  });
-
-  test('the residue the header paragraph names is the residue that is there', () => {
-    const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');
-    const byFile = new Map<string, number>();
-    for (const t of unclassified) {
-      const file = CORE_TEMPLATES.find((x) => x.text === t)!.file;
-      byFile.set(file, (byFile.get(file) ?? 0) + 1);
-    }
-    expect({
-      total: unclassified.length,
-      byFile: [...byFile.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
-    }).toEqual({ total: RESIDUE_TOTAL, byFile: RESIDUE_BY_FILE });
+      committed,
+      `${CENSUS_PATH} is stale against packages/core/src and the committed artifact — run ` +
+        `\`${REGEN_COMMAND}\` and commit the result`,
+    ).toEqual(buildCensus(CORE_TEMPLATES, readArtifact()));
   });
 
   // AN ALTERNATIVE NOTHING CAN REACH IS INERT, and the file refuses those by name — but it refused

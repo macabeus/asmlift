@@ -16,6 +16,7 @@
     "bench": "node --import ./packages/cli/src/loaded-code-hook.mjs --import tsx apps/benchmark/src/cli.ts",
     "bench:merge": "tsx apps/benchmark/src/cli.ts merge",
     "bench:smoke": "node --import ./packages/cli/src/loaded-code-hook.mjs --import tsx apps/benchmark/src/cli.ts smoke",
+    "regen:declines-census": "tsx scripts/regen-decline-census.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
