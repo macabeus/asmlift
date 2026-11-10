@@ -3,7 +3,7 @@
 // `for (i…) { for (j…) { if (hit(j)) goto next; } k(i); next:; }` leaves the inner loop two ways:
 // by its own exit, into `k(i)`, and from the search straight to the end of the outer body. L3 has
 // no `goto`, so structure spells the second way out `f = 1; break;`, with `f = 0;` ahead of the loop
-// and the code it skips under `if (f == 0)` after it (structure.ts `TwoLevelExit`); where the target
+// and the code it skips under `if (f == 0)` after it (structure/loop-shapes.ts `TwoLevelExit`); where the target
 // is the end of the switch arm the loop sits in, the flag reads `if (f != 0) break;`. Every fixture
 // is judged against its own IR by the trace oracle (`irAgreement`), as `structure()` returns it and
 // as it ships after `readabilityRewrites`, and over enough seeds to cover a zero-trip inner loop

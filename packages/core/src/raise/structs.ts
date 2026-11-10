@@ -754,7 +754,7 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
       continue;
     } // already typed (not a bare recovery target)
     // A FRAME OBJECT'S ADDRESS is never a recovery target: its declaration is the frame audit's
-    // stamp (structure.ts `laddrType` — a scalar, a `u8` array, a struct-return temp, or the union
+    // stamp (structure/memory-access.ts `laddrType` — a scalar, a `u8` array, a struct-return temp, or the union
     // of the views its accesses use), and every access to it is spelled from that stamp, never
     // through a type recovered here. Recovered anyway, the one-object area's accesses at several
     // offsets and widths make a second, per-word union of the same bytes that nothing references
@@ -794,7 +794,7 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
       // misaligned access renders through the element index `off / width`, which is a fraction and
       // not C, so forgiving it would trade a loud decline for an uncompilable candidate. THIS layer
       // is the one that can name the layout, which is why the refusal a reader sees is this one.
-      // structure/structure.ts `displacementIndex` refuses the fraction a second time where it
+      // structure/memory-access.ts `displacementIndex` refuses the fraction a second time where it
       // would be computed, for the bases that never reach this pass at all (already typed, or a
       // forgiven overlap); that message can only describe the access, not the layout.
       //

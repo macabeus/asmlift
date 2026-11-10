@@ -524,7 +524,7 @@ export function reachableBlocks(fn: { readonly blocks: readonly Block[] }): Set<
  *  Forward only, so an enclosing loop's next iteration does not count: the exit of a loop nested in
  *  another reaches every block of the inner body round the outer back-edge, and a full walk would
  *  say it runs the inner loop's own arms. Two passes ask "does a loop's exit run this block":
- *  `raise/latch.ts`'s exit-trampoline scope gate and `structure.ts`'s `offExitPathOf` (the
+ *  `raise/latch.ts`'s exit-trampoline scope gate and `structure/exit-arms.ts`'s `offExitPathOf` (the
  *  duplication policy `codeBreakArm` and `earlyReturnArm` share). */
 export function reachForward(
   from: Block,

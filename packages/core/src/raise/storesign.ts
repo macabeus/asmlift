@@ -45,7 +45,7 @@ import type { TargetDescription } from '../target';
  *  and the structurer seed from it; raise/struct-arrays.ts keeps the stamp beside its loads'
  *  sign instead. What each does when a LOAD disagrees is its own: raise/structs.ts,
  *  raise/struct-arrays.ts and rank-declare.ts prefer the load, and the structurer spells a member
- *  that disagrees with the stamp as a cast cell (structure/structure.ts `stampedStoreLval`). */
+ *  that disagrees with the stamp as a cast cell (structure/memory-access.ts `stampedStoreLval`). */
 export function storeSigned(op: Op, width: number): boolean {
   return (op.attrs.signed as boolean | undefined) ?? width === 4;
 }

@@ -1,4 +1,4 @@
-// UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`): `FOR_PLAN_GATES`,
+// UNIT tests for `forPlanAt`'s rule tables (structure.ts, THE LOOP AS A `for`; the tables are loop-gates.ts): `FOR_PLAN_GATES`,
 // `FOR_PLAN_IV_GATES` and `FOR_BOUND_GATES`. Each SOUND gate the suite does not already guard
 // elsewhere is dropped here and the pass re-run on a fixture it refuses: the `for` then lifts and is
 // wrong — the trace oracle (`irAgreement`) disagrees with the IR, a contract fails, or, where the

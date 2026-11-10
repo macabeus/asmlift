@@ -55,7 +55,7 @@
 // Not `synthetic:thrbreak:gcc2.7.2kmc`, whatever the counter's width: kmc indexes `t[i]` there by
 // a value each exit computes on its own block (`i<<2`, re-masked `i & 0xff` for a `u8`, in the exit
 // branch's delay slot), so no value R reads is defined at E. That row lifts through the break tail
-// its exits share instead (structure.ts `codeBreakArm`). Nor a gcc2.7.2 walk with two separate
+// its exits share instead (structure/exit-arms.ts `codeBreakArm`). Nor a gcc2.7.2 walk with two separate
 // break tests (`if (x == p->a) break; if (y == p->b) break;`): every in-loop edge hands R an
 // `x & 0xff` its own block re-masked, none defined at E, so it declines loudly.
 import { Block, Fn, Op, Value, dominators, predecessors, successorsOf } from '../ir/core';

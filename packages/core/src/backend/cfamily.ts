@@ -396,7 +396,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // TWO different mechanisms. The two GLOBAL ones register a matching element type for the
       // global (structure/globalaccess.ts `bareArrayLead` and `declaredSubscripts`, both through
       // structure.ts's `noteGlobal`, so the type walk finds it); the MEMBER one
-      // (structure.ts `pointeeElement`, `gPtr->grid[0][i]`) has no global to register and states
+      // (structure/memory-access.ts `pointeeElement`, `gPtr->grid[0][i]`) has no global to register and states
       // the element type on the node instead (`baseElem`). Nothing else enforced either, and the
       // failure would be quiet-ish: legalization would wrap the base, spelling `((u16 *)g)[0][i]`,
       // which subscripts a `u16` twice. Check it rather than assume.
@@ -602,7 +602,7 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
   // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
   // statement, which a `switch` is not, so it already means what L3 means. What a pass that re-spells
   // a loop must preserve is exactly that — the three that can re-spell a loop into one whose
-  // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
+  // `continue` would run a different increment (`recognizeForLoops` in structure/ast-rewrites.ts,
   // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
   // before firing, and a fourth must too.
   for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {

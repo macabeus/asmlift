@@ -1678,7 +1678,7 @@ export function demandedBitsIndex(fn: Fn): DemandedBitsIndex {
  *
  *  Asked whether a caller reads a register-returned struct's word past the struct
  *  (frontend/register-struct-call.ts), and whether any use of a narrow load reads the bits its
- *  extension fills (structure.ts `extensionImmaterial`). */
+ *  extension fills (structure/declared-storage.ts `extensionImmaterial`). */
 export function demandedBits(
   fn: Fn,
   root: Value,

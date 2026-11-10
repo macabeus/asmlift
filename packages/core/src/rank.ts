@@ -1601,7 +1601,7 @@ export function enumerateCandidates(
     // because this hoist is where the next reader will propose it. `orderLicensedGlobals` is decidable
     // on the lifted fn, so the hoist could also be dropped wherever THAT set is empty. It would be
     // sound, and it would be inert, for the same one reason: an empty licence stamps no
-    // `baseOrdered` (structure.ts `stampOrderedBases`), so `order-licensed` refuses every key, so
+    // `baseOrdered` (structure/ast-rewrites.ts `stampOrderedBases`), so `order-licensed` refuses every key, so
     // `hoist` returns null and this hoist's three emission sites — two `respell`s and the `respellEach`
     // whose generator fans over volatile SUBSETS, so the third is a set and not one spelling — emit
     // nothing. Which GENERALIZES to every variation carrying a licence: a skip like it is sound exactly

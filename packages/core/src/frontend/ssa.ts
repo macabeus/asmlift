@@ -8,7 +8,7 @@
 // needed and they are not interchangeable — phi wiring wants the distinct predecessor BLOCKS (one
 // value each), while the args it appends belong to the EDGES (every one of them). `distinctPreds`
 // names the first; `appendSuccessorArg` walks the second. (ir/core.ts `predecessors` and
-// structure.ts `predecessorBlocks` have the same duality, and structure.ts already dedups ad hoc
+// structure/cfg.ts `predecessorBlocks` have the same duality, and structure.ts already dedups ad hoc
 // at its two join sites.)
 //
 // Protocol: create the builder, then fill blocks in index order. For each block, emit its

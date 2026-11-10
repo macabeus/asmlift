@@ -2095,7 +2095,7 @@ test('a case body that leaves the switch from inside a loop it opened writes the
   // The loop's exit is the `goto`'s target, the switch's own merge. The other way out, `p() == 0`,
   // falls into `case 2:` unless `gB`. It is a break arm that runs code, and it copies `case 2`'s
   // `f(i)` ahead of its `break`. The dispatch enters that block from before the loop, which the
-  // duplication policy admits (structure.ts, at `earlyReturnArm`). Each path runs one copy once, and
+  // duplication policy admits (structure/exit-arms.ts, at `earlyReturnArm`). Each path runs one copy once, and
   // a host run against the source agrees on 20000 states.
   const out = ifBreakLift('loopout');
   expect(out).not.toContain('goto');

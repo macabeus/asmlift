@@ -65,7 +65,7 @@ export interface SymbolStructField {
    *  a global's rank. No such gate covers a MEMBER's rank — a member simply omits the key both
    *  when the DWARF carries no subranges and when the package is too old to look — so absence
    *  here means "the map could not say". A consumer that must type-check against a FOREIGN
-   *  declaration (the indexed member spelling, structure.ts's `pointeeElement`) refuses on
+   *  declaration (the indexed member spelling, structure/memory-access.ts's `pointeeElement`) refuses on
    *  absence; a consumer synthesizing its OWN declaration may still flatten, because its access
    *  and its declaration then agree by construction. That is why {@link structFieldInnerExtents}
    *  answers `[]` for absence and the refusal lives at the access site instead. */

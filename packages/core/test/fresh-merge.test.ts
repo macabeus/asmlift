@@ -1,4 +1,4 @@
-// The parameter-merge-home rule (structure.ts `freshParamMerge` and `FRESH_MERGE_GATES`): a merge
+// The parameter-merge-home rule (structure.ts `freshParamMerge` and carrier-gates.ts `FRESH_MERGE_GATES`): a merge
 // whose carrier is an entry parameter — or a home the rule itself minted — takes its own local
 // rather than assigning back into that name. Off by default; `/fresh-merge` enumerates it.
 //

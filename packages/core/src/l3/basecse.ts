@@ -122,7 +122,7 @@ import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } fr
 //
 // …and a REINTERPRET CAST of one of those leaves, `((struct S *)&gSym)[i]`, which is the same leaf
 // wearing the pointer type its element needs. The structurer emits it for an array of STRUCTS
-// (structure.ts arrayAccess's `fieldOff` path), where the scalar `scalarTypeForAccess` this pass
+// (structure/memory-access.ts arrayAccess's `fieldOff` path), where the scalar `scalarTypeForAccess` this pass
 // otherwise mints is meaningless — a 28-byte element has no `intType`. The cast is the base's
 // SPELLING rather than a different base, so it hoists to `struct S *p = (struct S *)&gSym`, the
 // accesses stride it exactly as a scalar key's do, and the KEY carries the cast's target type
@@ -371,7 +371,7 @@ export interface BaseKey {
    *  of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
    *  agbcc CSEs the pool word, so one `ldr` is shared by every access of the name and there is one
    *  order fact to have. WITHIN ONE STRUCTURING the `&&` therefore decides nothing:
-   *  `structure/structure.ts`'s `stampOrderedBases` is a post-pass over the finished body that
+   *  `structure/ast-rewrites.ts`'s `stampOrderedBases` is a post-pass over the finished body that
    *  stamps per SYMBOL, so the accesses of one key leave it agreeing. What the `&&` guards is a
    *  LATER pass that rebuilt one node and dropped the stamp — a tree whose stamps are MIXED — and
    *  what it does there is refuse the key whole rather than half-home it, which no assembly can

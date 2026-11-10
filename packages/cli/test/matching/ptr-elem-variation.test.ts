@@ -1,6 +1,6 @@
 // `/no-ptr-elem` WINS — the corpus's negative census, answered by construction.
 //
-// `structure/structure.ts`'s `ptrMemberElement` spells a whole-element subscript through a
+// `structure/memory-access.ts`'s `ptrMemberElement` spells a whole-element subscript through a
 // map-declared pointer MEMBER (`gBgDataPtrs.pBufBg3Tilemap[i + 157]`) where the byte arithmetic
 // the asm actually carries would otherwise stand. `/no-ptr-elem` is the arm that turns it off
 // (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemSettings`), and the two are the same

@@ -44,7 +44,7 @@ export type Expr =
   | { k: 'postincr'; name: string; by: 1 | -1 }
   // A C-style value cast `(T)e`. Tree-level producers: a width-narrowing cast `(u8)e` (the
   // recovered form of a byte/half extend idiom — zext/sext IR ops), the STRUCT-pointer cast
-  // (structure.ts memAccess/arrayAccess struct paths — see the note on `field` below), and the
+  // (structure/memory-access.ts memAccess/arrayAccess struct paths — see the note on `field` below), and the
   // integer legalization of a pointer operand under an operator C rejects (the arithmetic table,
   // structure/pointer-spelling.ts: `3 & (s32)p`). Scalar deref casts are backend-owned — the
   // C-family printer synthesizes them from the `index` node's width. Each backend spells the cast
@@ -205,7 +205,7 @@ export type Expr =
        *  the consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
        *  answers nothing (cfamily.ts `legalizedIndexBase`), so wherever the walk can read the base
        *  it corrects a stale statement instead of being overridden by it. The one producer,
-       *  structure/structure.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
+       *  structure/memory-access.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
        *  has just passed `spellsAccessType` on — and that predicate IS
        *  `typeEquals(T.int(width*8, elemSigned), scalarTypeForAccess(width, signed))`, so
        *  `derefStrideOk` over the stated pointer is true by construction at every width (4 by
@@ -229,7 +229,7 @@ export type Expr =
        *  *u.half;` returns stale (`mov r0, #0x1`) where the subscript reloads. Set on a view of a
        *  frame union (structure.ts `frameUnionAccess`), the one access that rests on that set,
        *  and on an element of a frame array, where it only keeps the element spelling at index 0
-       *  (structure.ts `bareArrayIndex`, l3/constinit.ts `asElement`). */
+       *  (structure/memory-access.ts `bareArrayIndex`, l3/constinit.ts `asElement`). */
       subscript?: true;
     }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct

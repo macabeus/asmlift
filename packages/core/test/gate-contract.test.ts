@@ -155,7 +155,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],
   ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
-  // structure.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
+  // structure/exit-arms.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
   EXIT_TAIL_GATES: EXIT_TAIL_GATES as readonly Gate<never>[],
   // ... and when an arm writes a copy of a return tail a path that bypasses the loop also enters
   BYPASS_TAIL_GATES: BYPASS_TAIL_GATES as readonly Gate<never>[],

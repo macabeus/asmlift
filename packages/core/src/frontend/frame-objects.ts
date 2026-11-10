@@ -2575,7 +2575,7 @@ function keepAsOneObject({
   // read moves past a store to the same bytes — compiled, a `u16` read, a `u32` store and the same
   // read again reloads through the union and returns the stale value through casts. So the object
   // is stamped with the views its accesses use (`unionViews`) and declared as that union
-  // (structure.ts `laddrType`), where every access to it is a fixed offset on the object itself,
+  // (structure/memory-access.ts `laddrType`), where every access to it is a fixed offset on the object itself,
   // aligned to its own width — the cases `unionRefusal` names refuse as before.
   const widthAt = new Map<number, number>();
   let twoWidths: { b: number; had: number; width: number } | undefined;

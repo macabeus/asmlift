@@ -990,7 +990,7 @@ export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
 
 /** A FRAME UNION IS READ AND WRITTEN ONLY THROUGH ITS VIEWS. The frame audit declares storage
  *  accessed at two widths over one byte as a union of per-width views (frontend/frame-objects.ts
- *  `unionViews`, structure.ts `laddrType`), because agbcc gives an access through a union member
+ *  `unionViews`, structure/memory-access.ts `laddrType`), because agbcc gives an access through a union member
  *  alias set 0 and reorders nothing past it — where a cast on the same bytes is read stale past a
  *  store of the other width. That licence holds only while EVERY access is a member access:
  *    - the union's name appears only as the base of a view (`u.half`), and an element of an array

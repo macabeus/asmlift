@@ -233,7 +233,7 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
 
 // The record says NOTHING about a destination the pred never wrote, and the rule invents no
 // answer: that copy keeps the front position the def-position proxy gives an argument the pred did
-// not compute (structure.ts `NO_RECORD`). Here the latch wrote only v0's and v2's keys, so v1's
+// not compute (structure/edge-copies.ts `NO_RECORD`). Here the latch wrote only v0's and v2's keys, so v1's
 // copy is ordered ahead of both — and being first, v1 is the member the cycle spills. (`v2 = v2 + 1`
 // still leads the body: it is the one copy outside the cycle, and `sequentialize` emits every
 // emittable copy before it breaks one.) Pinning an unrecorded copy at its param-order slot instead
