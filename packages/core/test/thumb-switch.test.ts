@@ -90,7 +90,7 @@ const conv = (arms: string[], tail = '.Lend:\n\tbx\tlr\n') =>
   tail;
 // THE ARMS' CALLEES ARE DECLARED TO TAKE NOTHING where an arm's call sets no register up. They are
 // effect markers, and the dispatch idiom switches on r1: undeclared, such a call sees r1 read and r0
-// not, a gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`) before any switch question.
+// not, a gap the guessed arity refuses (frontend/call-arity.ts `fallbackArgc`) before any switch question.
 const SIDES = Object.fromEntries(
   ['sideA', 'sideB', 'sideC', 'sideD', 'sideEnd', 'sideZ'].map((n) => [n, { params: 0, returns: 's32' }]),
 );

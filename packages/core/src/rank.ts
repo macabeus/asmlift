@@ -307,7 +307,7 @@ export interface Candidate {
    *  the new spelling compares the same values (l3/initfirst.ts `swapSide`, l3/reindex.ts). */
   signedUnsignedCompare?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
-   *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
+   *  a register is passed (frontend/call-arity.ts `setupArgsDiscardsPassedResult`). It loses every score
    *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
    *  dropping a value the callee may read. */
   discardsPassedResult?: true;
@@ -2059,7 +2059,7 @@ export function enumerateCandidates(
         ownContext.ownContextProto,
       );
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
-      // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
+      // the two readings the source spelled is genuinely ambiguous, and frontend/call-arity.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
       //
       // A LIFT VARIATION, in the same position in a candidate's variations as the signedness pin and

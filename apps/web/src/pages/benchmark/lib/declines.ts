@@ -608,7 +608,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // The arity of a call is guessed from the argument registers a value reaches, and the guess
-    // cannot be trusted: a gap in them (`frontend/ssa.ts` `fallbackArgc`) — past every register
+    // cannot be trusted: a gap in them (`frontend/call-arity.ts` `fallbackArgc`) — past every register
     // for an undeclared callee, past the fixed words of a variadic one — or a declaration that
     // states parameters no layout places — a float on a target with no FPU, or a count the guess
     // falls short of (`frontend/call-plan.ts` `refuseUnplacedFloat`, `refuseShortOfDeclared`),

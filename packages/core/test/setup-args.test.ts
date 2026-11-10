@@ -1,4 +1,4 @@
-// The `/setup-args` lift variation (rank.ts, frontend/ssa.ts narrowToSetupArgs) — the arity a
+// The `/setup-args` lift variation (rank.ts, frontend/call-arity.ts narrowToSetupArgs) — the arity a
 // prototype-less call gets when only the CALLING BLOCK's own setup counts. Pins: that the wider
 // reading stays the default, that the narrower one is offered beside it, that neither an argument
 // the block set up nor a declared arity is the variation's to drop, and that the narrowed lift carries
@@ -103,7 +103,7 @@ describe('a frame address the narrower reading would cut', () => {
     '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L7:\n\t.word\tgv\n';
 
   // `f` is declared: at its call r2 holds agbcc's copy of `a` and r1 nothing, a gap its guess
-  // refuses (frontend/ssa.ts `fallbackArgc`)
+  // refuses (frontend/call-arity.ts `fallbackArgc`)
   test('is kept in every candidate, the `/setup-args` ones included', () => {
     const cs = enumerateCandidates('v1', V1, ARMV4T_AGBCC, { prototypes: { f: { params: 0 } } });
     const narrowed = cs.filter((c) => hasVariation(c.variations, 'setup-args'));
