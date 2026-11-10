@@ -7,135 +7,72 @@
 // deliberately stable prose (each decline message names its construct); an unrecognized reason
 // falls into "other" with its raw text preserved — never silently dropped.
 //
-// A CLASS MUST BE DECIDABLE INSIDE THE FIRST 200 CHARACTERS OF THE REASON. The benchmark publishes
-// a marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in
-// `apps/benchmark/src/eval/asmlift.ts` is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the
-// tail of a long message tests a string the artifact does not carry. 18 markers in the published
-// artifact sit at that cap. A reason opens with the function's own name, so a long C++ name pushes
-// every later phrase toward the cap on its own — which is why `packages/core/src/frontend/ppc.ts`
-// puts `local stack frames not supported` straight after the name in its unread-store and
-// mixed-slot refusals, and why `stack-frames` keys its cross-register reload refusal on the early
-// `a slot … was saved into` rather than on anything later in that message.
+// A CLASS MUST BE DECIDABLE INSIDE THE FIRST 200 CHARACTERS OF THE REASON. The benchmark publishes a
+// marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in `apps/benchmark/src/eval/asmlift.ts`
+// is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the tail of a long message tests a string
+// the artifact does not carry, and many published markers sit at that cap. A reason opens with the
+// function's own name, so a long C++ name pushes every later phrase toward the cap on its own — which
+// is why `packages/core/src/frontend/ppc.ts` puts `local stack frames not supported` straight after
+// the name in its unread-store and mixed-slot refusals, and why `stack-frames` keys its cross-register
+// reload refusal on the early `a slot … was saved into` rather than on anything later in that message.
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 305 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
-// has named, fails there by name rather than quietly enlarging a catch-all.
+// declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody has
+// named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 310 distinct decline messages (the texts reached by
-// `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
-// subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
-// harvested by taking each throw's balanced-paren argument, keeping
-// its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 114 of them classify as "other". Some belong
-// there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
-// are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, literal pools no base
-//                               alignment fits, alignment fill that depends on the function's base
-//                               alignment, code that runs into data, pc used as a data base, an operand that
-//                               names no register read as one, `stm` with its own base in the list,
-//                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, an unmarked `bl`
-//                               to a label of this function (a call thunk), a call
-//                               through `sp` or `lr`, a return that does not jump through the
-//                               caller's lr, a `pop` that loads a callee-saved register with a word
-//                               not its own save and returns so, a `pop` that copies another word
-//                               into a scratch register read as a value, and the reaching-compare throw
-//                               whose reason is interpolated (`cross-block-flags` keys on one of its
-//                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
-//                               `loop-exit-values` claims, a nested loop that reaches the latch or the
-//                               exit of the `for` around it, an unsupported terminator, a volatile read
-//                               behind a `&&`/`||`, a pinned device access reached through a pointer
-//                               with no type to qualify, the pass-through of a recovered switch's own `why`,
-//                               a struct local's bytes stored into an array
-//                               element by a recovered row subscript, a global the context declares a C++
-//                               reference (no spelling names its cell), a structuring that writes the
-//                               code below `if`s without a join once per path past the copy budget,
-//                               and one internal invariant (a `for` that lost its update or its init copy)
-//   structure/memory-access.ts 3  an access whose byte offset is not a whole number of its own
-//                               elements (no subscript spells it), and two internal invariants (an
-//                               ambiguous array offset, an access a recovered union has no view for)
-//   frontend/mips.ts        12  a relocation with an addend, a non-numeric immediate, the caller's
-//                               value a restore writes read as a value (at the read, or through a
-//                               merge), five refusals about a disassembly the reader cannot account
-//                               for, a `jal` in a delay slot, one whose own slot is not the next word of its block, and a
-//                               `j` to another function (a tail call)
-//   frontend/ppc.ts         15  a load or store with update read no single way (a base of r0 or
-//                               r1, a load into r1, its own base loaded or stored, a relocation
-//                               other than `@l`), a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), the return address
-//                               `mflr` copies out stored anywhere but the link register's save word,
-//                               the reaching-compare throw whose reason is interpolated (as Thumb's),
-//                               the two-armed branch denylist, whose
-//                               template is interpolation end to end, the caller's value a restore
-//                               puts back read as a value, a `stmw` or save routine saving a register
-//                               this function already wrote or read, and four ways a `bl` into a register
-//                               save or restore routine is not the bookkeeping it looks like (a
-//                               number no runtime routine has, the floating-point routines, no
-//                               single frame address in r11, r1's depth unknown there), control
-//                               falling off the end, an `mflr` reading a link register a `bl`
-//                               overwrote, and a `b` out of the function (a tail call)
-//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
-//                               branch, an unparsable constant expression, and a magnitude with a
-//                               leading zero (octal to the assembler)
-//   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ssa.ts          7  a register read round a cycle through the entry block with no join,
-//                               a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument, or copied into another
-//                               of a guessed call's arguments, an incoming stack
-//                               argument past the words the function's own declaration fills, and a
-//                               callee-saved register the function never saved read before any
-//                               write or written (a global register variable), and a write to a
-//                               saved MIPS or PowerPC register that reaches a return unrestored
-//   frontend/call-plan.ts    5  a call returning a struct through a hidden pointer whose parameters
-//                               nothing sizes, one whose declaration the lifted source cannot print (a
-//                               type it has no spelling for, or a bare parameter count that states
-//                               none), one declared to return both a struct and a 64-bit value, and
-//                               a variadic call one of whose fixed parameters is not one word
-//                               (its two refusals of the struct return itself are `struct-return`'s,
-//                               its four of a struct passed by value `byvalue-arg`'s, and its two
-//                               64-bit refusals are NOT here either — both carry
-//                               `wide-call-arg`'s phrase, because they are that capability gap seen
-//                               from a lowering with no register pair: one for a declared wide
-//                               PARAMETER and one for a declared wide RETURN)
-//   frontend/format.ts       1  the input/frontend mismatch — an input error
-//   frontend/register-struct-call.ts 1  a register read past a struct of one or two bytes a
-//                               callee handed back in it, where the callee's leftover bits are no value
-//   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
-//   raise/offsetnames.ts     1  one byte reached under two spellings in one function (two names, or a
-//                               name and a numeric address) with a store among them
-//   structure/edge-copies.ts 1  an internal invariant: a parallel copy that writes one name twice
+// THE FIGURES ARE IN `declines-census.json`, BESIDE THIS FILE, AND NOT HERE. It counts the distinct
+// decline messages `packages/core/src` throws (the texts reached by `FrontendUnsupportedError`,
+// `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError` subclass and
+// `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares, harvested by
+// taking each throw's balanced-paren argument, keeping its string-literal pieces and replacing every
+// interpolation with a placeholder), how many of them classify as "other", and, per file, every
+// residual message itself. The file is written by `pnpm regen:declines-census`
+// (`scripts/regen-decline-census.ts`, over the harvester in `apps/web/scripts/decline-census.ts`), and
+// `declines.test.ts` recomputes it and fails, naming that command, when it is stale. When a decline
+// message or a class changes, run the command and commit the JSON; do not write a figure here, where
+// nothing checks it. The census reads no benchmark artifact, so a bench regen never moves it, and this
+// file states no figure measured on the artifact either: those go stale with every regen.
 //
-// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all seventeen of them, and the file
-// names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
-// harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
-// then reads THIS FILE back and requires each one to be spelled here. Move a family out of the
-// residue and into a class and the gate goes red with the new number. A paragraph is only as
-// checked as its least-checked clause, so a figure added here needs its `toContain` in the same
-// commit — otherwise it is prose that reads like a measurement.
+// Reading the residue: some of it belongs in "other" — a `disasm.ts` "symbol not found in the
+// disassembly" and a `format.ts` frontend mismatch are input errors, not capability gaps — but most
+// of it is gaps nothing in the corpus has reached yet. A few entries are not gaps at all and cannot
+// be, because the harvest sees a template rather than a message:
+//   - the reaching-compare throws of `frontend/thumb.ts` and `frontend/ppc.ts` interpolate their
+//     reason, so the template with a placeholder in it matches nothing even though
+//     `cross-block-flags` keys on one of those reasons;
+//   - `frontend/ppc.ts`'s two-armed branch denylist is interpolation end to end;
+//   - `pipeline.ts`'s attribution wrapper carries whichever reason it wraps;
+//   - and the internal invariants (`structure/edge-copies.ts`'s parallel copy that writes one name
+//     twice, `structure/memory-access.ts`'s ambiguous array offset and union with no view, a `for`
+//     in `structure/structure.ts` that lost its update or init copy) are bugs if they ever fire.
+// `frontend/call-plan.ts`'s other refusals are classified, not residue: those of a struct return
+// itself are `struct-return`'s, those of a struct passed by value `byvalue-arg`'s, and its 64-bit
+// refusals carry `wide-call-arg`'s phrase, because they are that capability gap seen from a
+// lowering with no register pair (one for a declared wide PARAMETER and one for a declared wide
+// RETURN).
 //
-// Named here rather than given classes, because a class with no inhabitant and no witness row is
-// the defect this file exists to remove. A class that HAS a name and no rows is read in only one
-// place: `DeclinePicker` in `components/FeaturePicker.tsx` renders one option per class and
-// disables the zero-count ones, so the label is the whole of what a reader gets. `GapAnalysis.tsx`
-// — the panel whose own subtitle calls itself the roadmap view — renders `declinePareto`, which
-// accumulates only from markers it saw, so a zero-row class does not appear there at all. A label
-// written for the roadmap reader lands on the picker.
+// The residue is listed in the census rather than given classes, because a class with no inhabitant
+// and no witness row is the defect this file exists to remove. A class that HAS a name and no rows is
+// read in only one place: `DeclinePicker` in `components/FeaturePicker.tsx` renders one option per
+// class and disables the zero-count ones, so the label is the whole of what a reader gets.
+// `GapAnalysis.tsx` — the panel whose own subtitle calls itself the roadmap view — renders
+// `declinePareto`, which accumulates only from markers it saw, so a zero-row class does not appear
+// there at all. A label written for the roadmap reader lands on the picker.
 //
-// `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
-// with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
-// belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
-// fourth value a decline could carry. Two kinds of the naming family are in that residue: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six
-// have a class here, while "names 'X', which is not a C identifier" and "names the function's
-// predefined name" have none (a Thumb pool word naming the predefined name is the exception:
-// `pool-word-shape` takes it). They have no rows, so they wait for one.
+// `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope with
+// a compiler's own error text: the compiler lines in the artifact belong to noncompile rows. Every
+// marker on a declined row opens with `lift:`, `structure:` or `raise:`, and `Diagnostic.stage` in
+// `packages/core/src/pipeline.ts` has no fourth value a decline could carry. Two kinds of the naming
+// family are in that residue: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six have a
+// class here, while "names 'X', which is not a C identifier" and "names the function's predefined
+// name" have none (a Thumb pool word naming the predefined name is the exception: `pool-word-shape`
+// takes it). They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {
@@ -149,19 +86,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   // was one "local stack frames" bucket splits into the capabilities actually missing. Specific
   // classes first — the classifier is first-match.
   {
-    // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts`
-    // and the frame-object audit it calls (`frontend/frame-objects.ts`) decide the cause at the
-    // throw and spell it ("address-taken stack local"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
-    // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
-    // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
-    // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
-    // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 6 of the 24 rows, so a pattern requiring the decided spelling claims 18 of
-    // them and leaves the rest to a class whose label reads "other sp uses".
-    // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
-    // prose is checked by nothing — so they are recomputed from the committed artifact by
-    // `apps/web/test/declines.test.ts` ("the disjunction share this paragraph names is the share
-    // the artifact has"), which reads this comment's own text back and fails on either number.
+    // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts` and the
+    // frame-object audit it calls (`frontend/frame-objects.ts`) decide the cause at the throw and
+    // spell it ("address-taken stack local"); `frontend/ppc.ts` and `frontend/mips.ts` read the same
+    // guard — their own comments say so, "mirroring the PPC frontend's r1" — and refuse without
+    // resolving it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
+    // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the label
+    // does not name. One phrase, three frontends, one class — and a pattern requiring the decided
+    // spelling would claim only the decided rows and leave the disjunction's to a class whose label
+    // reads "other sp uses". How the class's rows split between the two spellings is read from the
+    // artifact, not written here: it moves whenever a Thumb row is lifted or a PPC/MIPS one arrives.
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
     pattern: /address-taken stack local|address-taken local \/ frame arithmetic/,
@@ -342,11 +276,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'float',
-    // THE LABEL NAMES THE FILE, NOT A LIST OF INSTRUCTION KINDS, because the pattern below has no
-    // list in it either and a label that enumerates goes stale against a class that does not. The
-    // 55 markers it claims today span the arithmetic outside the single-precision four (double
-    // adds, `fabs`), the FPU loads and stores, the moves in both directions, the conversions and two
-    // compares — and NO paired single, which an earlier label advertised at zero inhabitants:
+    // THE LABEL NAMES THE FILE, NOT A LIST OF INSTRUCTION KINDS, because the pattern below has no list
+    // in it either and a label that enumerates goes stale against a class that does not. The markers
+    // it claims span the arithmetic outside the single-precision four (double adds, `fabs`), the FPU
+    // loads and stores, the moves in both directions, the conversions and two compares — and NO paired
+    // single, which an earlier label advertised at zero inhabitants:
     //   node -e 'const R=require("./apps/benchmark/results/results.json").results;const c={};
     //   for(const r of R){if(r.asmlift.outcome!=="declined")continue;
     //   for(const m of (r.asmlift.errorMarkers||[])){const g=
@@ -378,8 +312,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // above; the one condition code a `c.cond` sets is read, so no row is left), and an FPU
     // instruction in a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
-    // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 76 rows whose own message names an FPU instruction.
+    // populations with the command that recomputes them, and this class takes the rows whose own
+    // message names an FPU instruction (count them in the artifact; a figure here would go stale).
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
@@ -884,7 +818,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
     // loop". So the pattern carries one producer phrase — the MIPS and PPC frontends' denylist for
     // a branch mnemonic no frontend models — and the label names that and nothing else. Everything
-    // a wider pattern would swallow falls to `other`, where the residue list names it.
+    // a wider pattern would swallow falls to `other`, where `declines-census.json` lists it.
     key: 'branch-form',
     label: 'Unmodelled branch forms (a control transfer no frontend models)',
     pattern: /unmodelled control transfer|not a modelled branch form/,

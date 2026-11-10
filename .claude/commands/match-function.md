@@ -328,6 +328,13 @@ Four things this gate does not catch by itself:
   numbers measured without it — which a per-row diff against the base then credits to your branch.
   So the order is rebase → gates → regenerate → push. `scripts/check-artifact-provenance.sh` fails
   all three shapes; run it before opening the PR.
+- **The decline census is regenerated, never hand-edited.**
+  `apps/web/src/pages/benchmark/lib/declines-census.json` lists the decline messages core can
+  throw that no class in `declines.ts` claims. After a reworded, new, moved or removed throw in
+  core, or a class change, run `pnpm regen:declines-census` and commit the JSON;
+  `apps/web/test/declines.test.ts` fails naming that command when it is stale. It reads no
+  benchmark artifact, so a bench regen alone never owes it. A conflict in it is resolved by
+  regenerating, not by merging lines.
 - **A number measured OUTSIDE the harness goes stale the same way, and nothing checks it.** The
   ranked run from Phase 0 measures the commit it ran at, and when the target is not a benchmark
   row the regression gate cannot see it move — so remediation rewrites what it measures with
