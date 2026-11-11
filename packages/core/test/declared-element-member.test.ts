@@ -65,6 +65,25 @@ const FPC = `fpc:
 \t.word\tg3
 `;
 
+// `struct Cell { u16 tile; u16 attr; }; extern struct Cell gCells[32];`, which the map shapes as an
+// array of 4-byte elements (the shape DWARF gives), copied whole and then read through a member:
+//   u32 cp2(u32 i, u32 j, u32 k) { gCells[k] = gCells[j]; return gCells[i].tile; }
+const CP2 = `cp2:
+\tldr\tr3, .L6
+\tlsl\tr2, r2, #2
+\tadd\tr2, r2, r3
+\tlsl\tr1, r1, #2
+\tadd\tr1, r1, r3
+\tldr\tr1, [r1]
+\tstr\tr1, [r2]
+\tlsl\tr0, r0, #2
+\tadd\tr0, r0, r3
+\tldrh\tr0, [r0]
+\tbx\tlr
+.L6:
+\t.word\tgCells
+`;
+
 const TYPES = 'typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef short s16;\n';
 const S = 'struct S { u32 p; u16 a; u16 b; s16 c; u8 d; };\n';
 
@@ -142,6 +161,25 @@ describe('a struct-array member spelled through the declared array', () => {
     const src = lift(FPC, 'typedef void (*Fp)(void);\nstruct S3 { Fp p; u32 x; };\nextern struct S3 g3[4];');
     expect(src).not.toMatch(/\bg3\[a0\]\.p\b/);
     expect(src).toContain('&g3)[a0]');
+  });
+
+  test('a word copy of the same array spelled bare does not hide the declared element from the member', () => {
+    // the bare copy notes `gCells` as a pointer to u32 (memory-access.ts `bareArrayIndex`); the
+    // member read must still type `gCells[a0]` as the declared struct, or the lift throws ill-typed
+    const cells: SymbolMap = new Map([
+      ...MAP,
+      [0x3000100, [{ name: 'gCells', kind: 'data', shape: 'array', elemSize: 4, dims: [32] }]],
+    ]);
+    const src = decompile('cp2', CP2, ARMV4T_AGBCC, {
+      symbols: cells,
+      contextGlobals: globalsFromContext(
+        `${TYPES}struct Cell { u16 tile; u16 attr; };\nextern struct Cell gCells[32];`,
+        'c',
+      ),
+      prototypes: { cp2: { params: ['u32', 'u32', 'u32'], returns: 'u32' } },
+    }).source;
+    expect(src).toMatch(/\bgCells\[a2\] = gCells\[a1\];/);
+    expect(src).toMatch(/\bgCells\[a0\]\.tile\b/);
   });
 
   test('a store of another sign takes it: a store truncates to the member whatever its type', () => {
