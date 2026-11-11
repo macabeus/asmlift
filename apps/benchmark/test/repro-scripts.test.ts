@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { vendoredContextPath } from '../src/cases/manifests';
 import { asmliftScript, m2cScript } from '../src/report/repro-scripts';
 
 const rows = (JSON.parse(readFileSync(join(import.meta.dirname, '../results/results.json'), 'utf8')) as BenchOutput)
@@ -173,6 +174,20 @@ describe('asmliftScript (pinned)', () => {
     const synth = asmliftScript(row('synthetic:add:ido7.1'));
     expect(synth).not.toContain('real tier:');
     expect(synth).not.toContain('ctx.i');
+  });
+
+  test('real rows lift against the vendored unit context the benchmark read their declarations from', () => {
+    const real = rows.filter((r) => r.tier === 'real');
+    for (const fn of real) {
+      const path = vendoredContextPath(fn.project, fn.sym);
+      expect(path, fn.id).toBeDefined();
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toContain(`gunzip -kc "$ASMLIFT_PATH/${path}" > declarations.i`);
+      expect(s.split('args=(')[1], fn.id).toContain('--context declarations.i');
+    }
+    // the C7FC winner's spelling needs the context: `gBgInfo[...].hOfs` is the project's declaration
+    expect(vendoredContextPath('kleod', 'sub_0804C7FC')).toMatch(/^apps\/benchmark\/dataset\/real\/tu\/kleod\/ctx-/);
+    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('--context');
   });
 
   test('real rows state the pinned-checkout recipe with real commands (comments only)', () => {

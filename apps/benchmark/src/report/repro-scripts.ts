@@ -15,6 +15,7 @@ import {
   REAL_DIR,
   type RealManifest,
   loadCompleteManifests,
+  vendoredContextPath,
   vendoredMapFile,
 } from '../cases/manifests';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
@@ -274,6 +275,18 @@ cat > proto.json <<'PROTO_INPUT'
 ${JSON.stringify(fn.proto, null, 2)}
 PROTO_INPUT`
     : '';
+  // The declarations the benchmark read this row's globals and callees from: the row's vendored unit
+  // context, which is not always the scoring rung step 1 writes as ctx.i.
+  const declarations = fn.tier === 'real' ? vendoredContextPath(fn.project, fn.sym) : undefined;
+  const declarationsBlock = declarations
+    ? `
+
+# The project declarations the benchmark lifted this row against (asmlift's --context): the row's
+# vendored unit context, VERBATIM. What it declares decides spellings, e.g. a member of a struct
+# array the project declares is spelled through that array. It is not always the scoring rung
+# step 1 writes as ctx.i, which can be smaller.
+gunzip -kc "$ASMLIFT_PATH/${declarations}" > declarations.i`
+    : '';
   const realNote =
     fn.tier === 'real'
       ? `
@@ -319,7 +332,7 @@ pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD"${
 # The exact ${asmKind} text.
 cat > in.asm <<'ASM_INPUT'
 ${fn.targetAsm.trimEnd()}
-ASM_INPUT${dumpBlock}${protoBlock}
+ASM_INPUT${dumpBlock}${protoBlock}${declarationsBlock}
 
 # ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────${realNote}
 args=(
@@ -337,6 +350,11 @@ ${flagLine('--proto proto.json', 'the prototype hints above (callee arities / vo
       : ''
   }
 ${flagLine('--config decomp.yaml', 'the compile command from step 1')}${
+    declarations
+      ? `
+${flagLine('--context declarations.i', 'the project declarations above')}`
+      : ''
+  }${
     moduleOf(fn.addr) === undefined
       ? ''
       : `
