@@ -8,6 +8,7 @@
 // (`vitest run apps/benchmark/test`) runs where no compiler is available, so the enumeration itself
 // is not what is exercised here.
 import { FRAME_OBJECT_AUDIT } from '@asmlift/core/frontend/frame-objects';
+import { GATE_TABLES } from '@asmlift/core/gate-registry';
 import { parse } from '@asmlift/core/ir/parse';
 import { T } from '@asmlift/core/ir/types';
 import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
@@ -60,9 +61,39 @@ describe('the gate census seam', () => {
       'unthread',
       'reroll',
       'unpre',
+      'member-arrays',
+      'narrowlocal',
       'frame-objects',
     ]);
   });
+
+  it("takes each pass's tables from the gate registry's census seats, in the driver's order", () => {
+    // The registry (packages/core/src/gate-registry.ts) is the one list the contract test also
+    // iterates, so a table seated there is censused here and nowhere is it typed twice.
+    const seats = GATE_TABLES.flatMap((t) => (t.census ? [[t.census.pass, t.census.table, t.table] as const] : []));
+    for (const [id, pass] of Object.entries(PASSES)) {
+      const fromRegistry = seats.filter(([p]) => p === id);
+      expect(pass.tables.map(([label]) => label).sort(), id).toEqual(fromRegistry.map(([, label]) => label).sort());
+      for (const [label, table] of pass.tables) {
+        expect(table, `${id}/${label}`).toBe(fromRegistry.find(([, l]) => l === label)![2]);
+      }
+    }
+    expect(new Set(seats.map(([p]) => p))).toEqual(new Set(CENSUSABLE_PASSES));
+  });
+
+  it.each(['member-arrays', 'narrowlocal'])(
+    'swaps the %s pre-recovery entry and the undo restores it exactly',
+    (id) => {
+      const entry = () => PRE_RECOVERY_PASSES.find((p) => p.id === id)!;
+      const pass = PASSES[id];
+      const wrapped = pass.tables.map(([, t]) => tallying(t));
+      const before = entry().run;
+      const uninstall = pass.install(wrapped.map((w) => w.gates));
+      expect(entry().run).not.toBe(before);
+      uninstall();
+      expect(entry().run).toBe(before);
+    },
+  );
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {
     expect(PASSES.unmerge.tables.map(([name]) => name)).toEqual(['site', 'arm', 'value', 'rung', 'totality']);

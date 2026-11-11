@@ -648,8 +648,8 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
  *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
  *  each hoist rides as its own candidate and the differ referees between them. A new
- *  hoist is one entry here, one gate table, and that table's line in the gate-contract
- *  roster — not nine hand-edited sites that can drift; whether it also joins the `/livebase`
+ *  hoist is one entry here, one gate table, and that table's line in
+ *  gate-registry.ts — not nine hand-edited sites that can drift; whether it also joins the `/livebase`
  *  PAIRINGS is the entry's own `pairings`. A MIRROR hoist (bind the scalar cells, leave
  *  the register file inline) is that, with the complementary predicate; it is never another entry
  *  in LIVEBASE_BLOCK_GATES, which can only reject more.
