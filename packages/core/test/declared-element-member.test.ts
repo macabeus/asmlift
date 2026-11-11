@@ -88,6 +88,8 @@ describe('a struct-array member spelled through the declared array', () => {
     expect(src).toMatch(/\bg\[a0\]\.a = a1;/);
     expect(src).toMatch(/\bg\[a0\]\.b = a2;/);
     expect(src).not.toContain('&g');
+    // the recovered element no access names any more is not declared
+    expect(src).not.toContain('struct Elem');
   });
 
   test('loads of two members read the declared members', () => {
@@ -103,6 +105,7 @@ describe('a struct-array member spelled through the declared array', () => {
 
   test('a struct array the context does not declare keeps the cast', () => {
     expect(lift(F, undefined)).toContain('&g)[a0]');
+    expect(lift(F, undefined)).toMatch(/^struct Elem0 \{/m);
     expect(lift(F, `${S}extern u32 gOtherArray[4];`)).toContain('&g)[a0]');
   });
 
