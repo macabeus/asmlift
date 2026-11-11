@@ -25,8 +25,9 @@ import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbol
 import { type ContextGlobals, splitOwnContext } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
+import { structuringOptions } from './structuring-options';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
-import { type ResolvedTarget, type TargetDescription, type ToolchainId, structureOptionsFor } from './target';
+import type { ResolvedTarget, TargetDescription, ToolchainId } from './target';
 
 /** EVERY stage dump carries the write-order record (ir/print.ts `PrintOptions`) — not just
  *  `stage:lift`, even though only the frontend measures it. Two reasons: the raising folds MUTATE
@@ -343,17 +344,19 @@ function traceTower(
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const { sfn } = structureReturnTailReading(
     fn,
-    {
-      ...structureOptionsFor(target, returnsVoid, prototypes),
-      spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
-      spellSwitchBreak: (opts.backend ?? cBackend).spellsSwitchBreak,
-      spellEarlyReturns: (opts.backend ?? cBackend).spellsEarlyReturn,
+    // decompile()'s inputs minus the two forced readings (`copyReturnTails`, `joinPastReturns`),
+    // which TraceOptions does not offer: a trace explains the default lift.
+    structuringOptions({
+      target,
+      returnsVoid,
+      prototypes,
+      backend,
       onGap: opts.onGap ?? 'strict',
-      ...(mapSymbols ? { symbols: mapSymbols } : {}),
-      ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
-      ...(inferredSymbols.size ? { inferredSymbols } : {}),
-      ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-    },
+      symbols: mapSymbols,
+      contextGlobals: opts.contextGlobals,
+      inferredSymbols,
+      orderLicensedGlobals: orderLicensed,
+    }),
     (t) => backend.emit(t),
   );
   trace.push({

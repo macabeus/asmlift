@@ -114,6 +114,7 @@ import {
   StructureError,
   hasDivergentSharedRet,
 } from './structure/structure';
+import { structuringOptions } from './structuring-options';
 import {
   type SymbolInfo,
   type SymbolMap,
@@ -122,7 +123,7 @@ import {
   isPtrField,
   symbolsByName,
 } from './symbols';
-import { type TargetDescription, structureOptionsFor } from './target';
+import type { TargetDescription } from './target';
 import {
   type SubjectVariationName,
   type Variation,
@@ -570,17 +571,24 @@ export function enumerateCandidates(
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
   const ownContext = splitOwnContext(opts.prototypes, name, opts.ownContextProto);
   const prototypes = prototypesFromSymbols(opts.symbols, ownContext.prototypes ?? {});
-  const baseOpts = {
-    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
-    // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
-    // be handed a tree carrying one, because its refusal costs the whole candidate (and, when
-    // every candidate carries it, the whole row).
-    spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-    spellSwitchBreak: backend.spellsSwitchBreak,
-    spellEarlyReturns: backend.spellsEarlyReturn,
-    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
-    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
-  };
+  // See the same call in pipeline.ts: a backend that cannot print switch fall-through must not be
+  // handed a tree carrying one, because its refusal costs the whole candidate (and, when every
+  // candidate carries it, the whole row). Left out on purpose, each added per candidate below:
+  //   - `inferredSymbols` / `orderLicensedGlobals`: each lift setting reads its own lifted fn, and
+  //     the shapes are filtered against the map and `declSymbols` first. `structOpts` spreads them
+  //     straight after this object, where the builder would have put them.
+  //   - `copyReturnTails` and `joinPastReturns`: the return-tail reading is a ranked variation here
+  //     (the `/ret-copy` alternative, and `copiesBarred` on the default pass).
+  //   - `onGap`: candidates are compiled and a gap marker never compiles, so structure()'s default
+  //     'strict' is the policy.
+  const baseOpts = structuringOptions({
+    target,
+    returnsVoid: declaresVoidReturn(prototypes[name]),
+    prototypes,
+    backend,
+    symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
+    contextGlobals: opts.contextGlobals,
+  });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the
   // source compiler emitted is genuinely ambiguous from asm. There is no safe global heuristic

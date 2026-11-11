@@ -15,8 +15,9 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
+import { structuringOptions } from '@asmlift/core/structuring-options';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
-import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
+import type { ResolvedTarget, TargetDescription } from '@asmlift/core/target';
 import { type PatternEvent, type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
 
 import { decompileRanked } from './rank';
@@ -185,15 +186,22 @@ function probedSource(
     // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
     const { sfn } = structureReturnTailReading(
       clone,
-      {
-        ...structureOptionsFor(target, returnsVoid, prototypes),
-        spellSwitchFallthrough: backend.spellsSwitchFallthrough,
-        spellSwitchBreak: backend.spellsSwitchBreak,
-        spellEarlyReturns: backend.spellsEarlyReturn,
-        ...(mapSymbols ? { symbols: mapSymbols } : {}),
-        ...(contextGlobals ? { contextGlobals } : {}),
-        ...(inferredSymbols.size ? { inferredSymbols } : {}),
-      },
+      // decompileTraced's inputs, with three differences kept as they were. Each may be drift from
+      // the main path rather than a choice, and changing any of them changes the probe's output:
+      //   - `returnsVoid` is read off the caller's own table (`decompileWithReport`), not the
+      //     symbol-merged `prototypes` handed in beside it, which the main path reads it from;
+      //   - no `onGap`, so the probe structures 'strict' even under an annotate report;
+      //   - no `orderLicensedGlobals`: `probeSource` hands the probe the derived shapes only.
+      // The two forced readings are absent as in the trace: neither options type offers them.
+      structuringOptions({
+        target,
+        returnsVoid,
+        prototypes,
+        backend,
+        symbols: mapSymbols,
+        contextGlobals,
+        inferredSymbols,
+      }),
       (t) => backend.emit(t),
     );
     return backend.emit(sfn);
