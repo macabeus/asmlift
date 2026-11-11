@@ -3,6 +3,7 @@
 // the hooks report (`JoinPastReturnsSite`), and the declared-callee tables cut to what one body
 // calls (`calledOnly`).
 import { Block } from '../ir/core';
+import type { IrType } from '../ir/types';
 import { Stmt, walkExprs } from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import type { ContextGlobals } from '../proto-context';
@@ -429,6 +430,13 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  re-derives. Read with the map setting and without it: a context declaration is what every
    *  candidate compiles against, whichever names it spells. */
   contextGlobals?: ContextGlobals;
+  /** `contextGlobals.arrayElements` laid out on this target: each context-declared array of a
+   *  struct, its element as an IR struct (`aggregate.ts` `aggregateType`, named members at the
+   *  target's offsets) and the array's rank. Built where the target is in hand
+   *  (structuring-options.ts); an element this target does not size is left out. Read where an
+   *  element's member is spelled through the declared array (memory-access.ts
+   *  `declaredElementMember`). */
+  contextArrayElements?: ReadonlyMap<string, { readonly type: IrType; readonly rank: number }>;
 }
 
 /** Where one `if`, comparison tree or jump table took the join past its early returns
