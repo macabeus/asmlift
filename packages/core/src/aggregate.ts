@@ -10,9 +10,11 @@ import {
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredCallArgs,
+  declaredSigned,
   declaredWidth,
   declaresAggregateReturn,
   declaresVoidReturn,
+  isAddress,
   ownArgumentWords,
   ownLeadingWordParams,
   paramClassOf,
@@ -102,7 +104,10 @@ export function aggregateType(
 }
 
 /** The IR type of a scalar or pointer member spelling: a pointer to a scalar keeps its pointee, any
- *  other pointer is `void *`, which lays out the same. */
+ *  other pointer is `void *`, which lays out the same — a pointer to a function or to an array
+ *  (`void (*)(u8)`, `u8 (*)[4]`) included, which is no integer to compare or shift. An integer
+ *  whose signedness the spelling does not state (`size_t`, `uintptr_t`) is left untyped, as a
+ *  plain `char` is. */
 function scalarType(spelling: string): IrType | undefined {
   const s = spelling
     .replace(/\b(?:const|volatile)\b/g, ' ')
@@ -111,11 +116,15 @@ function scalarType(spelling: string): IrType | undefined {
   if (s.endsWith('*')) {
     return T.ptr(scalarType(s.slice(0, -1)) ?? T.void());
   }
+  if (isAddress(s)) {
+    return T.ptr(T.void());
+  }
   if (s === 'float' || s === 'double') {
     return s === 'float' ? T.f32() : T.f64();
   }
   const bits = declaredWidth(s);
-  return bits === undefined || s === 'char' ? undefined : T.int(bits, !/^u\d|\bunsigned\b/.test(s));
+  const signed = declaredSigned(s);
+  return bits === undefined || signed === undefined ? undefined : T.int(bits, signed);
 }
 
 function memberSize(m: AggregateMember, target: TargetDescription): { size: number; align: number } | undefined {
