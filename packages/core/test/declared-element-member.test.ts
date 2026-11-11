@@ -2,7 +2,9 @@
 // `g[i].a`, rather than through a cast of its address (structure/memory-access.ts
 // `declaredElementMember`, DECLARED_MEMBER_GATES). On agbcc only the declared array's subscript is
 // an ARRAY_REF, which expands base-first, so the two spellings place the array's address load
-// differently: kleod:sub_0804C7FC:agbcc matches with this spelling and with no cast spelling.
+// differently: kleod:sub_0804C7FC:agbcc matches with this spelling and with no INLINE cast spelling
+// (a cast base held in a pointer local assigned at its first use matches too; ORDERBASE_HOISTS in
+// rank-variations.ts withholds that placement).
 //
 // The assembly is agbcc's own (-O2 -mthumb-interwork) for
 //   struct S { u32 p; u16 a; u16 b; s16 c; u8 d; };  extern struct S g[4];

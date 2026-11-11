@@ -883,7 +883,11 @@ export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
  *  `kleod:StreamCmd_SetBGScroll`. Run through the harness on all four, an entry at
  *  `placement: 'first-use'` scores nothing: 146 → 146, noncompile → noncompile, MATCH → MATCH,
  *  noncompile → noncompile, against +1129 candidates over those rows' 15167 (+7.4%) and
- *  `kleod:UpdateCameraScroll` 224 s → 278 s. That hoist stays withheld.
+ *  `kleod:UpdateCameraScroll` 224 s → 278 s. That hoist stays withheld. One row it does reach:
+ *  `kleod:sub_0804C7FC:agbcc`, whose reread-globals candidate at `first-use` compiles identical to
+ *  the target. That row is matched with no new candidate instead, by the array its declaration
+ *  context declares (structure/memory-access.ts `declaredElementMember`), so a lift of it with no
+ *  map or no context is the one this withholding still costs.
  *
  *  `scope` is a DIFFERENT question and a row demanded it. `first-use` reaches only the top-level
  *  statement list, so on a function whose licensed base is used solely inside a guarded loop it
