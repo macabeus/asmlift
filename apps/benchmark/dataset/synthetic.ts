@@ -7955,11 +7955,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // A member of a CONTEXT-DECLARED struct array, `gBgOfs[i].hOfs` (core
   // structure/memory-access.ts `declaredElementMember`). Shaped on kleod:sub_0804C7FC:agbcc, which
   // reads the index out of a script cursor and stores two members around calls. On agbcc only the
-  // declared array's subscript is an ARRAY_REF, and that expands base-first: every cast spelling
-  // of the base, `((struct Elem0 *)&gBgOfs)[i].field_8` included, places `ldr =gBgOfs` after the
-  // index scale instead of before the cursor's reload. So the lift needs the declared element
-  // type and its member names, which the row's `ctx` states and its candidates compile against
-  // (`candidateContext`). The map names the cursor only, which is what gives the structurer a
+  // declared array's subscript is an ARRAY_REF, and that expands base-first: every inline cast
+  // spelling of the base, `((struct Elem0 *)&gBgOfs)[i].field_8` included, places `ldr =gBgOfs`
+  // after the index scale instead of before the cursor's reload. So the fan reaches it through the
+  // declared element type and its member names, which the row's `ctx` states and its candidates
+  // compile against (`candidateContext`); a cast base in a pointer local assigned at its first use
+  // would too, a placement core rank-variations.ts ORDERBASE_HOISTS withholds. The map names the
+  // cursor only, which is what gives the structurer a
   // symbol context (the spelling is taken only where a map is in play); it renders the same
   // `extern void *gScript;` the row's `ctx` states.
   {
