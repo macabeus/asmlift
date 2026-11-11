@@ -3704,9 +3704,10 @@ function structureRanked(
     }
     // A MEMBER ARRAY'S ADDRESS, `&base->field_K[0]`, spelled as the member itself, which decays to
     // it: raise/structs.ts stamps `memberOff` on the `add(base, K)` that materializes the address
-    // of a member it seated off a strength-reduced walk (raise/memberarrays.ts `memberWalks`). The
-    // same cast rule as structure/memory-access.ts `arrayAccess`'s member path: a base that does
-    // not render as the struct pointer the member belongs to is cast to it.
+    // of a member it seated off a strength-reduced walk (raise/memberarrays.ts `memberWalks`). A
+    // base that does not render as the struct pointer the member belongs to is cast to it, as in
+    // structure/memory-access.ts `arrayAccess`'s member path — less that path's cast of an `index`
+    // base, which this rule leaves uncast.
     if (d.opcode === 'add' && d.attrs.memberOff !== undefined) {
       const base = d.operands.find((o) => defs.get(o)?.opcode !== 'const')!;
       const bt = base.type;

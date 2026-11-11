@@ -440,11 +440,9 @@ function arithScale(t: IrType | undefined): number | null {
  *  whose element the read strides, or null. The two are one value to C and not one tree to agbcc:
  *  the subscript of an array-typed operand is an ARRAY_REF (c-typeck.c `build_array_ref`), while
  *  `*(a + i)` decays the array to a pointer first and dereferences a PLUS — and for a struct's
- *  member array that moves the member offset. Compiled on pokeemerald:CreateBattleTowerMon:agbcc
- *  with the row's own command line, `a1->field_4[v1]` materializes `adds r4, r6, #4` before the
- *  loop and reads `ldrh [r4, #0]`, the target's bytes; `*(a1->field_4 + v1)` folds the `+4` into
- *  `ldrh [r4, #4]`, two instructions off. So the subscript is the spelling of the walk the asm ran.
- *  A POINTER init is left alone: for a pointer operand `build_array_ref` IS `*(p + i)`, so the
+ *  member array that moves the member offset: `a1->field_4[v1]` materializes `adds r4, r6, #4`
+ *  before the loop and reads `ldrh [r4, #0]`, where `*(a1->field_4 + v1)` folds the `+4` into
+ *  `ldrh [r4, #4]` (raise/memberarrays.ts's walk header has the measurement). A POINTER init is left alone: for a pointer operand `build_array_ref` IS `*(p + i)`, so the
  *  rewrite would buy nothing and change every existing closed form. */
 function arraySubscript(read: Expr, closed: Expr, vt: VarTypes): Expr | null {
   if (read.k !== 'index' || read.idx.k !== 'const' || read.idx.value !== 0 || read.lead !== undefined) {
