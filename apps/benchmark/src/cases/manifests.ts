@@ -694,6 +694,25 @@ export function loadManifestsForRepair(): RealManifest[] {
   return loadRaw({ complete: false, units: false });
 }
 
+const vendoredIndexes = new Map<string, Record<string, VendoredEntry> | undefined>();
+/** The repo-relative path of the unit context a real row's lift reads the project's declarations
+ *  from (`VendoredManifest.vendored(sym).ctxI`, the context `rowContextGlobals` and `rowPrototypes`
+ *  read), or undefined where `bench vendor` wrote no entry for the row. Not m2c's context
+ *  (`ctxPath`), which can be another file. */
+export function vendoredContextPath(project: string, sym: string): string | undefined {
+  if (!vendoredIndexes.has(project)) {
+    const indexPath = join(REAL_DIR, 'tu', project, 'index.json');
+    vendoredIndexes.set(
+      project,
+      existsSync(indexPath)
+        ? (JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, VendoredEntry>)
+        : undefined,
+    );
+  }
+  const entry = vendoredIndexes.get(project)?.[sym];
+  return entry === undefined ? undefined : `apps/benchmark/dataset/real/tu/${project}/${entry.ctx}`;
+}
+
 /** Complete manifests without their vendored inputs: what a reader of published rows needs. */
 export function loadCompleteManifests(): RealManifest[] {
   return loadRaw({ complete: true });
