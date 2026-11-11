@@ -510,6 +510,23 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       // a `castViews` field, `((u8 *)p)[1]` (structure/memory-access.ts `memAccess`) — is told apart by the
       // same rule that minted it, and reads its scalar.
       const bt = rec(e.base);
+      // The element of a context-declared struct array, `gBgInfo[i]` under `.hOfs`
+      // (structure/memory-access.ts `declaredElementMember`), whose declaration states a STRUCT
+      // element of the node's stride. It is read where the walk answers nothing, and over a SCALAR
+      // pointee the walk does answer: the bare-array spelling of the same name
+      // (`gCells[k] = gCells[j]`, memory-access.ts `bareArrayIndex`) notes it as a pointer to the
+      // access width in `SFn.globals`, a spelling's convenience the declaration overrides, since the
+      // candidate compiles against that declaration and `gCells[i]` IS the struct there. A struct
+      // pointee the walk reads still wins (see l3/ast.ts on precedence).
+      if (
+        e.baseElem?.kind === 'struct' &&
+        e.baseElem.size === e.width &&
+        (bt === undefined ||
+          (bt.kind === 'ptr' && bt.to.kind === 'int') ||
+          (bt.kind === 'array' && bt.elem.kind === 'int'))
+      ) {
+        return e.baseElem;
+      }
       if (
         bt?.kind === 'ptr' &&
         bt.to.kind === 'struct' &&
@@ -523,13 +540,6 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       }
       if (bt?.kind === 'array' && derefStrideOk(bt, e.width, e.signed)) {
         return bt.elem;
-      }
-      // A base the walk cannot type, whose declaration states a STRUCT element of the node's stride:
-      // the element of a context-declared struct array, `gBgInfo[i]` under `.hOfs`
-      // (structure/memory-access.ts `declaredElementMember`). Read only where the walk answers
-      // nothing, as `baseElem` always is (see l3/ast.ts).
-      if (bt === undefined && e.baseElem?.kind === 'struct' && e.baseElem.size === e.width) {
-        return e.baseElem;
       }
       return scalarTypeForAccess(e.width, e.signed);
     }

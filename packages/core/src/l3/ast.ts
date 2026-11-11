@@ -216,6 +216,9 @@ export type Expr =
        *  context-declared struct array (`gBgInfo[i]`), whose size it has checked against the
        *  node's stride. Only a dot-form `field` base carries one, which the printer spells
        *  unlegalized, and `exprCType` reads it (l3/typing.ts) so the member under it is typed.
+       *  Its precedence is wider by one case: it also wins over a SCALAR pointee the walk reads,
+       *  which is the bare-array spelling's note of the same name (`gCells[k] = gCells[j]`
+       *  beside `gCells[i].tile`), since the candidate compiles against the declaration it states.
        *
        *  THE ALTERNATIVE REJECTED: teach `exprCType` the pointee layout, the way
        *  `sym.noteGlobal` types the bare-array spelling —
