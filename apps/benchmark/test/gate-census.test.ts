@@ -21,7 +21,7 @@ import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
-import { CENSUSABLE_PASSES, PASSES, gateCensus } from '../src/run/gate-census';
+import { CENSUSABLE_PASSES, PASSES, censusablePasses, gateCensus } from '../src/run/gate-census';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -43,7 +43,7 @@ const emptyArmSite = (): SFn => ({
 const unmergeVariation = () => PRE_RESPELL_VARIATIONS.find((p) => p.name === 'unmerge')!;
 
 describe('the gate census seam', () => {
-  it('names the registered passes', () => {
+  it('names the censusable passes', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
     // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
@@ -79,6 +79,23 @@ describe('the gate census seam', () => {
       }
     }
     expect(new Set(seats.map(([p]) => p))).toEqual(new Set(CENSUSABLE_PASSES));
+  });
+
+  it('refuses a registry seat with no driver, and a driver whose labels are not its seats', () => {
+    // `PASSES` is built by this check when the module loads, so a mismatch in the real registry
+    // throws before any test here runs. These hand it the two bad shapes directly.
+    const table = GATE_TABLES.find((t) => t.name === 'UNPRE_GATES')!;
+    const install = () => () => {};
+    expect(() =>
+      censusablePasses([{ ...table, census: { pass: 'no-such-pass', table: 'unpre' } }], {
+        unpre: { tables: ['unpre'], install },
+      }),
+    ).toThrow(/UNPRE_GATES in census pass 'no-such-pass', which has no driver/);
+    expect(() => censusablePasses([table], { unpre: { tables: ['unpre', 'extra'], install } })).toThrow(
+      /census pass 'unpre' reads tables \[unpre, extra\] but gate-registry seats \[unpre\]/,
+    );
+    expect(() => censusablePasses([], { unpre: { tables: ['unpre'], install } })).toThrow(/seats \[\]/);
+    expect(Object.keys(censusablePasses([table], { unpre: { tables: ['unpre'], install } }))).toEqual(['unpre']);
   });
 
   it.each(['member-arrays', 'narrowlocal'])(
@@ -230,7 +247,7 @@ describe('the gate census seam', () => {
 
   it('refuses a pass it cannot reach, rather than censusing zero', () => {
     // `raise/retsink.ts` takes its table as a parameter and is NOT censusable: its caller is a
-    // static import in `pipeline.ts`. The distinction this refusal draws is the whole registry.
+    // static import in `pipeline.ts`. The distinction this refusal draws is the whole list of drivers.
     expect(gateCensus({ pass: 'retsink' })).toBe(2);
   });
 });

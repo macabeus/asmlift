@@ -1,8 +1,20 @@
 // `src/gate-registry.ts` is the one list of gate tables that the contract test
 // (gate-contract.test.ts) and the benchmark's refusal census (apps/benchmark run/gate-census.ts)
 // both iterate. It fails in one way: a table OMITTED from it ships with no contract and no census
-// seat, and no assertion over the list can see a table that is not on it. So this file reads the
-// declarations out of `src/` and compares them with the list.
+// seat, and no assertion over the list can see a table that is not on it. So this file finds the
+// tables `src/` exports and compares them with the list, two ways.
+//
+// BY SHAPE, at runtime: every module under `src/` is imported, and every exported value that IS a
+// gate table (a non-empty array of `{ id, why, sound, rejects }`), or holds one as a record's value
+// or as a `.gates` field of a record or list entry (the base-hoist lists), must be a table the
+// registry holds. This is the check that does not care how the export is spelled: `Array<Gate<…>>`,
+// `as const satisfies`, `export let`, `export { x as Y }`, a type alias, a builder function's
+// result, or a record of tables under any name.
+//
+// BY NAME, over the source text: every `export const *_GATES`, and every const annotated
+// `Gate<…>[]`, must be on the list under the module that declares it. This adds the two things
+// shape cannot see: an exported table that is still EMPTY, and the module a bundle record belongs
+// to (`GATE_TABLE_BUNDLES`).
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -59,6 +71,56 @@ describe('the gate registry', () => {
       .filter((k) => !have.has(k))
       .sort();
     expect(missing, `exported gate tables absent from src/gate-registry.ts: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  test('holds every exported value shaped like a gate table, however the export is spelled', async () => {
+    const isGate = (g: unknown): boolean => {
+      const r = g as Record<string, unknown> | null;
+      return (
+        typeof r === 'object' &&
+        r !== null &&
+        typeof r.id === 'string' &&
+        typeof r.why === 'string' &&
+        typeof r.sound === 'boolean' &&
+        typeof r.rejects === 'function'
+      );
+    };
+    const isTable = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every(isGate);
+    const gatesOf = (v: unknown): unknown =>
+      typeof v === 'object' && v !== null ? (v as { gates?: unknown }).gates : undefined;
+    const known = new Set<unknown>(GATE_TABLES.map((t) => t.table));
+    const seen = new Set<unknown>();
+    const unregistered: string[] = [];
+    const check = (where: string, v: unknown): void => {
+      if (!isTable(v)) {
+        return;
+      }
+      seen.add(v);
+      if (!known.has(v)) {
+        unregistered.push(where);
+      }
+    };
+    for (const f of srcFiles()) {
+      const rel = f.slice(SRC.length + 1).replaceAll('\\', '/');
+      const mod = (await import(f)) as Record<string, unknown>;
+      for (const [name, v] of Object.entries(mod)) {
+        check(`${rel}:${name}`, v);
+        if (Array.isArray(v)) {
+          v.forEach((e, i) => check(`${rel}:${name}[${i}].gates`, gatesOf(e)));
+        } else if (typeof v === 'object' && v !== null) {
+          for (const [k, e] of Object.entries(v)) {
+            check(`${rel}:${name}.${k}`, e);
+            check(`${rel}:${name}.${k}.gates`, gatesOf(e));
+          }
+        }
+      }
+    }
+    // REACH: a shape test that stopped recognising a rule would pass by finding nothing.
+    expect(
+      [...known].filter((t) => seen.has(t)).length,
+      'the shape scan found almost none of the registered tables — its rule shape has rotted',
+    ).toBeGreaterThan(60);
+    expect(unregistered.sort(), `gate tables absent from src/gate-registry.ts: ${unregistered.join(', ')}`).toEqual([]);
   });
 
   test('lists nothing the source does not export', () => {

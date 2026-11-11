@@ -35,7 +35,7 @@ const ENUMERATION = ['packages/core/src/rank.ts', RANK_VARIATIONS].map(withoutCo
 const HOISTS = [...LIVEBASE_HOISTS, ...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS, ...ORDERBASE_HOISTS];
 const tableName = (table: unknown): GateTableName | undefined =>
   (Object.keys(VARIATION_GATE_TABLES) as GateTableName[]).find((k) => VARIATION_GATE_TABLES[k] === table);
-/** An exported admission table's name, as `gate-contract.test.ts` registers them. */
+/** An exported admission table's name, as `src/gate-registry.ts` lists them. */
 const TABLE_NAME = /\b[A-Z][A-Z0-9_]*(?:_GATES|_ELIGIBILITY)\b/g;
 
 const load = (file: string) => import(join(REPO_ROOT, file)) as Promise<Record<string, unknown>>;

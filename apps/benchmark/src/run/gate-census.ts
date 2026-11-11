@@ -20,17 +20,19 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHAT PUTS A PASS IN THE REGISTRY BELOW. Taking the gate table as a parameter is necessary and
+// WHAT PUTS A PASS IN THE REGISTRY OF CENSUS DRIVERS BELOW (`DRIVERS`; core's `gate-registry.ts`
+// lists TABLES, and is a different list). Taking the gate table as a parameter is necessary and
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
 // holding the call. Fifteen passes have one — `unmergeJoins` and `jumpToCaseEnds` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
-// `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
+// `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this file's
 // `arm-reread` and `shared-value`, one entry per table), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
 // in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`, `unpre`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
-// `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
+// `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. All fifteen
+// have a driver below, sixteen pass ids in all, because the branch fold has one per table. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
 // `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has
 // none, because the binding is a read-only module-namespace property — measured, not argued:
@@ -43,8 +45,8 @@
 // caller does not have yet. WHICH TABLES a pass counts, and the label each line prints, are not
 // kept here: each table's `census` seat in `packages/core/src/gate-registry.ts` names them, the
 // same list the contract test iterates, and `PASSES` is built from it below. A driver only says
-// the order its `install` reads them in. A table seated in the registry under a pass with no
-// driver, or a driver whose labels the registry does not seat, throws when this module loads.
+// the order its `install` reads them in. A table seated in gate-registry.ts under a pass with no
+// driver, or a driver whose labels gate-registry.ts does not seat, throws when this module loads.
 // `enumerateRanked` is
 // deliberately the only driver: it is the same entry `bench fan` and the runner use, so a census
 // here counts the refusals the BENCHMARK'S configuration produced rather than a rig's.
@@ -55,7 +57,7 @@ import {
   type HandBack,
   auditFrameObjects,
 } from '@asmlift/core/frontend/frame-objects';
-import { GATE_TABLES } from '@asmlift/core/gate-registry';
+import { GATE_TABLES, type GateTableEntry } from '@asmlift/core/gate-registry';
 import type { Fn } from '@asmlift/core/ir/core';
 import { type CaseEndSite, jumpToCaseEnds } from '@asmlift/core/l3/caseendgoto';
 import type { Gate } from '@asmlift/core/l3/gates';
@@ -102,8 +104,8 @@ interface CensusablePass {
 }
 
 /** A pass's driver: the labels of the tables its `install` reads, in the order it reads them
- *  (`w[0]` is the first label's table). The tables themselves come from the registry. */
-interface CensusDriver {
+ *  (`w[0]` is the first label's table). The tables themselves come from gate-registry.ts. */
+export interface CensusDriver {
   readonly tables: readonly string[];
   readonly install: CensusablePass['install'];
 }
@@ -394,14 +396,20 @@ const DRIVERS: Record<string, CensusDriver> = {
   },
 };
 
-/** Each driver with its tables, taken from the registry's census seats in the driver's order. */
-function censusablePasses(): Record<string, CensusablePass> {
+/** Each driver with its tables, taken from gate-registry.ts's census seats in the driver's order.
+ *  Throws when a seat names a pass with no driver, or a driver's labels are not its seats. Takes
+ *  the gate registry's entries and the drivers as arguments so a test can hand it a bad seat; this module calls
+ *  it once, on load, with the real ones. */
+export function censusablePasses(
+  entries: readonly GateTableEntry[],
+  drivers: Readonly<Record<string, CensusDriver>>,
+): Record<string, CensusablePass> {
   const seated = new Map<string, Map<string, readonly Gate<never>[]>>();
-  for (const t of GATE_TABLES) {
+  for (const t of entries) {
     if (!t.census) {
       continue;
     }
-    if (!(t.census.pass in DRIVERS)) {
+    if (!(t.census.pass in drivers)) {
       throw new Error(
         `gate-registry seats ${t.name} in census pass '${t.census.pass}', which has no driver in run/gate-census.ts`,
       );
@@ -411,7 +419,7 @@ function censusablePasses(): Record<string, CensusablePass> {
     seated.set(t.census.pass, tables);
   }
   return Object.fromEntries(
-    Object.entries(DRIVERS).map(([id, d]) => {
+    Object.entries(drivers).map(([id, d]) => {
       const tables = seated.get(id) ?? new Map<string, readonly Gate<never>[]>();
       const labels = [...tables.keys()].sort();
       if (labels.join() !== [...d.tables].sort().join()) {
@@ -424,7 +432,7 @@ function censusablePasses(): Record<string, CensusablePass> {
   );
 }
 
-export const PASSES: Record<string, CensusablePass> = censusablePasses();
+export const PASSES: Record<string, CensusablePass> = censusablePasses(GATE_TABLES, DRIVERS);
 
 export const CENSUSABLE_PASSES = Object.keys(PASSES);
 

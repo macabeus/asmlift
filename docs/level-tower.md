@@ -1459,19 +1459,20 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
 
   **What makes a pass censusable is a fact about its CALLER.** Many passes in `packages/core/src`
   take their table as a parameter (`git grep -lE "gates\??: readonly Gate<" packages/core/src`);
-  TWELVE have a caller held in a mutable record — `/unmerge` in `rank-variations.ts`'s
-  `PRE_RESPELL_VARIATIONS`; the branch short-circuit fold, `truncload`, `member-arrays`,
-  `narrowlocal` and `paramwidth` in `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`; the four loop
-  folds `latchfold`, `trampoline`, `unthread` and `reroll` in `raise/pre-structure.ts`'s
-  `PRE_STRUCTURE_FOLDS`; and `nameOffsetAddresses` and the frame-object audit in their own
+  FIFTEEN have a caller held in a mutable record — `/unmerge` and the case-end goto in
+  `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`; the branch short-circuit fold, `truncload`,
+  `member-arrays`, `displaced`, `narrowlocal` and `paramwidth` in `raise/pre-recovery.ts`'s
+  `PRE_RECOVERY_PASSES`; the five loop folds `latchfold`, `trampoline`, `unthread`, `reroll` and
+  `unpre` in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS`; and `nameOffsetAddresses` and the frame-object audit in their own
   `OFFSET_NAME_PASS` and `FRAME_OBJECT_AUDIT`, records with no list around them because each seat
-  in the tower is fixed rather than a position. Which of them are registered is the registry's to
+  in the tower is fixed rather than a position. Which of them have a census driver is the census's to
   say, not this paragraph's (`CENSUSABLE_PASSES` in `apps/benchmark/src/run/gate-census.ts`;
   `pnpm bench gates --pass <id>`); its header carries the same list. A pass
   reached only through a static import has no seam — the binding is read-only
   (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_) — and `raise/retsink.ts` is
-  one: the seam is the record, not the directory. So for any other pass the cost of an entry in that
-  registry is a seam, not a wrapper — and a pass that wants to be censusable should be given one
+  one: the seam is the record, not the directory. So for any other pass the cost of being censused is
+  a seam, then a driver in `gate-census.ts` and a census seat on each of its tables in
+  `packages/core/src/gate-registry.ts` — not a wrapper — and a pass that wants to be censusable should be given one
   when its caller is written, which is cheap then and a redesign later. A record with no list also
   gives up the invariant a list carries — `PRE_RECOVERY_PASSES` reaches every driver, three
   hand-written calls do not — so it owes a test that asserts each driver reaches it
