@@ -436,6 +436,30 @@ function arithScale(t: IrType | undefined): number | null {
   return t.kind === 'int' && t.width === 32 ? 1 : null;
 }
 
+/** THE SUBSCRIPT OF A DECLARED ARRAY: `*(INIT + ctr)` respelled `INIT[ctr]` when INIT is an ARRAY
+ *  whose element the read strides, or null. The two are one value to C and not one tree to agbcc:
+ *  the subscript of an array-typed operand is an ARRAY_REF (c-typeck.c `build_array_ref`), while
+ *  `*(a + i)` decays the array to a pointer first and dereferences a PLUS — and for a struct's
+ *  member array that moves the member offset. Compiled on pokeemerald:CreateBattleTowerMon:agbcc
+ *  with the row's own command line, `a1->field_4[v1]` materializes `adds r4, r6, #4` before the
+ *  loop and reads `ldrh [r4, #0]`, the target's bytes; `*(a1->field_4 + v1)` folds the `+4` into
+ *  `ldrh [r4, #4]`, two instructions off. So the subscript is the spelling of the walk the asm ran.
+ *  A POINTER init is left alone: for a pointer operand `build_array_ref` IS `*(p + i)`, so the
+ *  respelling would buy nothing and churn every existing closed form. */
+function arraySubscript(read: Expr, closed: Expr, vt: VarTypes): Expr | null {
+  if (read.k !== 'index' || read.idx.k !== 'const' || read.idx.value !== 0 || read.lead !== undefined) {
+    return null;
+  }
+  if (closed.k !== 'bin' || closed.op !== '+') {
+    return null;
+  }
+  const t = exprCType(closed.l, vt);
+  if (t?.kind !== 'array' || ptrElemBytes(t.elem) !== read.width) {
+    return null;
+  }
+  return { ...read, base: clone(closed.l), idx: clone(closed.r) };
+}
+
 /** Does this local's DECLARATION pin it against deletion? Every flag `SFn.locals` can carry, because
  *  each is a fact about the ASM that only the declaration states: two qualifiers (deleting a
  *  `volatile u16 *` local re-spells `*p = 0` as a raw cast with no qualifier on it — l3/inlinebase.ts
@@ -943,6 +967,13 @@ export function unreduceAccumulators(
     }
     changed = true;
     const sub = (e: Expr): Expr => {
+      if (e.k === 'index' && e.base.k === 'var') {
+        const hit = rewrites.get(e.base.name);
+        const subscript = hit === undefined ? null : arraySubscript(e, hit, vt);
+        if (subscript !== null) {
+          return subscript;
+        }
+      }
       if (e.k === 'var') {
         const hit = rewrites.get(e.name);
         if (hit !== undefined) {

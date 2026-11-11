@@ -895,3 +895,51 @@ test('a zero init leaves the scaled counter standing alone', () => {
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).toContain('*(s32 *)67109080 = i << 6;');
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).not.toContain('0 +');
 });
+
+// A WALK OVER A STRUCT'S MEMBER ARRAY (pokeemerald:CreateBattleTowerMon:agbcc, synthetic:mixwalk):
+// the init is the member `a1->field_4`, an ARRAY, and the closed form reads it SUBSCRIPTED —
+// `a1->field_4[i]`, agbcc's ARRAY_REF, which materializes the member address before the loop where
+// `*(a1->field_4 + i)` folds the `+4` into the load. A POINTER init keeps `*(p + i)`.
+const MOVES = T.struct('Struct0', [
+  { off: 0, type: T.u(16), name: 'field_0' },
+  { off: 2, type: T.array(T.u(8), 2), name: '_pad0' },
+  { off: 4, type: T.array(T.u(16), 4), name: 'field_4' },
+]);
+const memberWalk = (init: Expr, a1Type: IrType = T.ptr(MOVES)): SFn => ({
+  name: 'f',
+  params: [{ name: 'a1', type: a1Type }],
+  locals: [
+    { name: 'v0', type: T.ptr(T.u(16)) },
+    { name: 'i', type: T.s(32) },
+    { name: 'sum', type: T.s(32) },
+  ],
+  retType: T.void(),
+  body: [
+    set('i', c(0)),
+    set('sum', c(0)),
+    set('v0', init),
+    {
+      k: 'dowhile',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(3) },
+      body: [
+        set('sum', plus(v('sum'), { k: 'index', base: v('v0'), idx: c(0), width: 2, signed: false })),
+        set('v0', plus(v('v0'), c(1))),
+        set('i', plus(v('i'), c(1))),
+      ],
+    },
+    { k: 'exprstmt', value: { k: 'call', fn: 'use', args: [v('sum')] } },
+  ],
+});
+
+test('a walk over a member array reads the closed form as the member subscript', () => {
+  const out = emit(unreduceAccumulators(memberWalk({ k: 'field', base: v('a1'), name: 'field_4' }), GBA));
+  expect(out).toContain('sum = sum + a1->field_4[i];');
+  expect(out).not.toContain('v0');
+});
+
+test('a walk from a pointer init keeps the dereferenced sum', () => {
+  // the same walk off a `u16 *` parameter: for a pointer `p[i]` IS `*(p + i)` to agbcc, so nothing
+  // is respelled
+  const out = emit(unreduceAccumulators(memberWalk(v('a1'), T.ptr(T.u(16))), GBA));
+  expect(out).toContain('sum = sum + *(a1 + i);');
+});
