@@ -3702,6 +3702,24 @@ function structureRanked(
       }
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r, ...(unsignedOrdering ? { unsignedCmp: true as const } : {}) };
     }
+    // A MEMBER ARRAY'S ADDRESS, `&base->field_K[0]`, spelled as the member itself, which decays to
+    // it: raise/structs.ts stamps `memberOff` on the `add(base, K)` that materializes the address
+    // of a member it seated off a strength-reduced walk (raise/memberarrays.ts `memberWalks`). The
+    // same cast rule as structure/memory-access.ts `arrayAccess`'s member path: a base that does
+    // not render as the struct pointer the member belongs to is cast to it.
+    if (d.opcode === 'add' && d.attrs.memberOff !== undefined) {
+      const base = d.operands.find((o) => defs.get(o)?.opcode !== 'const')!;
+      const bt = base.type;
+      const structTo = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to : null;
+      const be = e(base);
+      const rt = exprCType(be, vtEnv);
+      const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === structTo?.name;
+      return {
+        k: 'field',
+        base: ok || structTo === null ? be : { k: 'cast', to: T.ptr(structTo), e: be },
+        name: `field_${d.attrs.memberOff as number}`,
+      };
+    }
     if (ARITH_TO_BIN[d.opcode]) {
       const l = e(d.operands[0]);
       const r = d.operands.length === 2 ? e(d.operands[1]) : ({ k: 'const', value: d.attrs.imm as number } as Expr);

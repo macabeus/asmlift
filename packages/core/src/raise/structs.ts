@@ -55,6 +55,7 @@ import { IrType, StructField, T, UNION_VIEW_NAMES, intWidth, scalarTypeForAccess
 import type { StructType } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
+import type { MemberWalk } from './memberarrays';
 import { storeSigned } from './storesign';
 
 /** A single observed constant-offset access to a base: the op itself and its program point, its
@@ -269,7 +270,7 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
   let cursor = 0;
   let pad = 0;
   for (const f of dataFields) {
-    const aligned = roundUp(cursor, sizeAlign(fieldSize(f.type)));
+    const aligned = roundUp(cursor, fieldAlign(f.type));
     if (aligned > f.off) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': field at offset ${f.off} overlaps the prior field (aligned to ${aligned}) — unions not modelled`,
@@ -408,6 +409,12 @@ function castViewCell(members: readonly StructField[]): IrType | undefined {
   const cell = cells.find((m) => m.type.kind === 'int' && !m.type.signed) ?? cells[0];
   const transparent = members.every((m) => width(m) === 8 || width(m) === widest);
   return transparent && cell !== undefined ? cell.type : undefined;
+}
+
+/** The alignment C seats a recovered field at: its size, except an ARRAY, which is aligned as its
+ *  element (a member array `seatMemberWalks` seats is the only array that reaches `placeFields`). */
+function fieldAlign(t: IrType): number {
+  return t.kind === 'array' ? fieldAlign(t.elem) : sizeAlign(fieldSize(t));
 }
 
 /** Size in bytes of a recovered field's type (int width/8; pointer is word-sized 4; a union the
@@ -724,11 +731,70 @@ export function foldDisplacedAccesses(
   return folded;
 }
 
+/** SEAT the member arrays raise/memberarrays.ts read off strength-reduced walks (`memberWalks`) in
+ *  the struct this pass recovered for their base, or null when none seats. A member goes into a
+ *  GAP: the struct's data fields are laid out again with the member among them, through the same
+ *  `placeFields` that laid them out the first time, so a member overlapping a field — or a union's
+ *  rounded size — is refused by the rule that refuses any other overlap, and the pads around it are
+ *  re-derived rather than patched. Two walks of one member must agree on its element; the count is
+ *  the larger of their trip counts, the smallest that holds both (`fieldsOf`'s rule).
+ *
+ *  ALL OR NOTHING per base: the members are seated together or not at all, so a refusal leaves the
+ *  struct exactly as recovered and every walk on its cast spelling. On success each member address
+ *  is stamped `memberOff`, which structure.ts renders as `base->field_K`. */
+function seatMemberWalks(type: IrType, walks: readonly MemberWalk[]): IrType | null {
+  if (type.kind !== 'struct' || walks.length === 0) {
+    return null;
+  }
+  const byOff = new Map<number, MemberWalk[]>();
+  for (const w of walks) {
+    byOff.set(w.off, [...(byOff.get(w.off) ?? []), w]);
+  }
+  const members: StructField[] = [];
+  for (const [off, group] of byOff) {
+    if (group.some((w) => w.elemSize !== group[0].elemSize || w.signed !== group[0].signed)) {
+      return null; // one offset walked at two elements is a union view, not a member
+    }
+    const count = Math.max(...group.map((w) => w.count));
+    members.push({
+      off,
+      type: T.array(scalarTypeForAccess(group[0].elemSize, group[0].signed), count),
+      name: `field_${off}`,
+    });
+  }
+  const data = type.fields.filter((f) => !f.name.startsWith('_pad'));
+  if (data.some((f) => byOff.has(f.off))) {
+    return null; // the member's first element is a field already
+  }
+  let seated: IrType;
+  try {
+    seated = placeFields(
+      type.name,
+      [...data, ...members].sort((x, y) => x.off - y.off),
+    );
+  } catch (e) {
+    if (e instanceof StructOverlapError) {
+      return null;
+    }
+    throw e;
+  }
+  for (const w of walks) {
+    w.addr.attrs.memberOff = w.off;
+  }
+  return seated;
+}
+
 /** Recover struct-pointer types from access-pattern evidence. Runs after array legalization and
  *  before type recovery, so `recoverTypes` sees the base already typed and does not flatten it to a
  *  plain pointer. Returns the number of bases recovered as structs. `aggregateBoundary` is the
- *  compiler's struct/union size boundary, undefined where nobody measured it (`buildUnionStruct`). */
-export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined): number {
+ *  compiler's struct/union size boundary, undefined where nobody measured it (`buildUnionStruct`).
+ *  `walks` are the member arrays raise/memberarrays.ts `memberWalks` read off strength-reduced
+ *  loops, seated in the struct of their base (`seatMemberWalks`). */
+export function recognizeStructs(
+  fn: Fn,
+  aggregateBoundary: number | undefined,
+  walks: readonly MemberWalk[] = [],
+): number {
   const { accessesOf, order, arrayBases } = constOffsetAccesses(fn);
 
   // Does this base's address have a source of truth OUTSIDE this function's access set? Consulted
@@ -811,6 +877,17 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
         continue;
       }
       base.type = T.ptr(buildUnionStruct(`Struct${name}`, accesses, aggregateBoundary));
+    }
+    const recovered = base.type.kind === 'ptr' ? base.type.to : null;
+    const seated =
+      recovered === null
+        ? null
+        : seatMemberWalks(
+            recovered,
+            walks.filter((w) => w.base === base),
+          );
+    if (seated !== null) {
+      base.type = T.ptr(seated);
     }
     name++;
     count++;

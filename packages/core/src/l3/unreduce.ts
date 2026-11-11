@@ -418,8 +418,10 @@ function arithScale(t: IrType | undefined): number | null {
   if (t === undefined) {
     return null;
   }
-  if (t.kind === 'ptr') {
-    const bytes = ptrElemBytes(t.to);
+  if (t.kind === 'ptr' || t.kind === 'array') {
+    // an ARRAY in a `+` decays to a pointer to its element, so it scales as one: a struct's member
+    // array (raise/structs.ts `seatMemberWalks`) is an init `a1->field_4` of a `u16 *` walk
+    const bytes = ptrElemBytes(t.kind === 'ptr' ? t.to : t.elem);
     return bytes > 0 ? bytes : null;
   }
   return t.kind === 'int' && t.width === 32 ? 1 : null;
@@ -683,9 +685,14 @@ const hasContinueIn = (stmts: readonly Stmt[]): boolean =>
 
 // ── the re-evaluation gates ─────────────────────────────────────────────────────────────────
 
-/** every memory access in an expression, as its own node */
-const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
-  [...subterms(e)].filter((x): x is Extract<Expr, { k: 'index' | 'field' }> => x.k === 'index' || x.k === 'field');
+/** every memory access in an expression, as its own node. A member ARRAY (`a1->field_4` in a walk's
+ *  init) is not one: it names the member's ADDRESS, which C reads off the array's decay without
+ *  touching memory, and any read its base makes (`p->q->arr`'s `p->q`) is a node of its own. */
+const accessesIn = (e: Expr, vt: VarTypes): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
+  [...subterms(e)].filter(
+    (x): x is Extract<Expr, { k: 'index' | 'field' }> =>
+      x.k === 'index' || (x.k === 'field' && exprCType(x, vt)?.kind !== 'array'),
+  );
 
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
@@ -711,8 +718,13 @@ const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
  *  MEMORY ONLY. The NAMES the closed form reads are `init-loop-var`'s question and
  *  `init-name-escapes`', and a closed form with no memory access still has names — which is why
  *  the early return below is not "nothing can change this". */
-function movedReadAliasable(closed: Expr, evaluated: readonly Stmt[], window?: readonly [number, number]): boolean {
-  const reads = accessesIn(closed);
+function movedReadAliasable(
+  closed: Expr,
+  evaluated: readonly Stmt[],
+  vt: VarTypes,
+  window?: readonly [number, number],
+): boolean {
+  const reads = accessesIn(closed, vt);
   if (reads.length === 0) {
     return false; // no access ⇒ no write can reach it; its NAMES are the two gates above
   }
@@ -882,7 +894,7 @@ export function unreduceAccumulators(
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
         movedVolatile: exprReadsVolatile(initStmt.value, sfn),
-        movedAliasable: movedReadAliasable(initStmt.value, evaluated, window),
+        movedAliasable: movedReadAliasable(initStmt.value, evaluated, vt, window),
       };
       if (firstRejection(gates, ctx) !== null) {
         continue;
@@ -897,7 +909,7 @@ export function unreduceAccumulators(
       }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
-      if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(armed, triggers)) {
+      if (accessesIn(initStmt.value, vt).length > 0 && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
       rewrites.set(cand.name, closed.ok);
