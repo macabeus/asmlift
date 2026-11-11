@@ -4,8 +4,10 @@
 import { describe, expect, test } from 'vitest';
 
 import { aggregateType } from '../src/aggregate';
+import { cBackend } from '../src/backend/c';
 import { globalsFromContext } from '../src/proto-context';
-import { ARMV4T_AGBCC } from '../src/target';
+import { structuringOptions } from '../src/structuring-options';
+import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 const CTX = `
 typedef unsigned char u8;
@@ -134,5 +136,15 @@ describe('the struct element of an array a declaration context declares', () => 
     expect(el('gOne')).toBeUndefined();
     expect(el('gHalves')).toBeUndefined();
     expect(el('gPtrs')).toBeUndefined();
+  });
+
+  test('laid out for the structurer on agbcc alone, the one compiler the declared spelling is measured on', () => {
+    const contextGlobals = globalsFromContext(CTX, 'c');
+    const laid = (target: typeof ARMV4T_AGBCC) =>
+      structuringOptions({ target, returnsVoid: true, prototypes: {}, backend: cBackend, contextGlobals })
+        .contextArrayElements;
+    expect(laid(ARMV4T_AGBCC)?.has('gBgInfo')).toBe(true);
+    expect(laid(MIPS_IDO)).toBeUndefined();
+    expect(laid(PPC_MWCC)).toBeUndefined();
   });
 });

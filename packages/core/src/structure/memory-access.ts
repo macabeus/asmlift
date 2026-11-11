@@ -881,8 +881,10 @@ export function memAccess(
 // own element type and member names, which the declaration context states
 // (proto-context.ts `arrayElements`).
 //
-// The spelling is taken only where it names exactly the bytes and the value the cast form does.
-// Each refusal is a row of DECLARED_MEMBER_GATES, and the access then keeps the cast.
+// The spelling is taken only where it names exactly the bytes and the value the cast form does,
+// and only on agbcc (`arrayShapeFromStride`, read where the element is laid out): whether another
+// compiler tells the two spellings apart is unmeasured. Each refusal is a row of
+// DECLARED_MEMBER_GATES, and the access then keeps the cast.
 
 /** One struct-array member access the declared spelling `g[i].member` is asked of. */
 export interface DeclaredMemberAccess {
@@ -906,13 +908,17 @@ export interface DeclaredMemberAccess {
  *  WHAT IT DOES NOT ADMIT YET, each keeping the cast: a member of a nested struct or an array
  *  member (`aggregateType` gives neither a field), a pointer member read or written as a word
  *  (`member-type` compares integers only), a rank-2 array (`rank`), and every lift with no
- *  symbol map, where the structurer builds no symbol context (`/raw-globals` and a map-less row).
- *  No census seam reaches this table: its caller is `arrayAccess`, which no record outside core
+ *  symbol map (`/raw-globals` and a map-less row). That last one is where the lookup sits, on
+ *  the symbol context, and not what the evidence needs: the declaration context alone states the
+ *  element. It stays because the map-less sibling is the one candidate of a fan that still
+ *  spells the cast, so both readings rank; moving the lookup would make the declared spelling the
+ *  default there too, with no held-out measure of a map-less lift, and no variation that offers
+ *  the cast in its place. No census seam reaches this table: its caller is `arrayAccess`, which no record outside core
  *  holds, so `pnpm bench gates` cannot count it. */
 export const DECLARED_MEMBER_GATES: readonly Gate<DeclaredMemberAccess>[] = [
   {
     id: 'no-declared-element',
-    why: 'the context declares no array of a struct this target lays out under that name',
+    why: 'the context declares no array of a struct this target lays out under that name, or the target is not one whose declared-array subscript is its own object',
     sound: true,
     guardedBy: 'declared-element-member.test.ts: a struct array the context does not declare keeps the cast',
     rejects: (c) => c.element === undefined || c.element.type.kind !== 'struct',

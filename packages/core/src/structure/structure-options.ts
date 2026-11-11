@@ -433,7 +433,8 @@ export interface StructureOptions extends ArithCompilerFacts {
   /** `contextGlobals.arrayElements` laid out on this target: each context-declared array of a
    *  struct, its element as an IR struct (`aggregate.ts` `aggregateType`, named members at the
    *  target's offsets) and the array's rank. Built where the target is in hand
-   *  (structuring-options.ts); an element this target does not size is left out. Read where an
+   *  (structuring-options.ts), on a target whose declared-array subscript is its own object
+   *  (`arrayShapeFromStride`); an element this target does not size is left out. Read where an
    *  element's member is spelled through the declared array (memory-access.ts
    *  `declaredElementMember`). */
   contextArrayElements?: ReadonlyMap<string, { readonly type: IrType; readonly rank: number }>;

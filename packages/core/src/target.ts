@@ -1220,7 +1220,9 @@ export interface SpellingBehaviors {
   // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
   // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
   // unmeasured compiler behavior is to claim nothing. Read off the target by a raising pass
-  // (`inferGlobalArrays`), not by the structurer.
+  // (`inferGlobalArrays`), and by the options builder, which lays out a context-declared struct
+  // array's element only here (structuring-options.ts `contextArrayElementsOf`): `gBgInfo[i].hOfs`
+  // is that same declared-array subscript, and every cast spelling of it the pointer sum.
   arrayShapeFromStride?: boolean;
   // Does this compiler's C front end take a DESIGNATED array element in an initializer —
   // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or

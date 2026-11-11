@@ -71,7 +71,9 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
 /** Each struct array the context declares, its element laid out on `target`
  *  (`StructureOptions.contextArrayElements`), memoised per context and target: the four sites call
  *  the builder once per lift, and a project context declares hundreds of arrays. Empty spreads
- *  nothing, so a lift with no such array gets the options it had. */
+ *  nothing, so a lift with no such array gets the options it had. None on a target whose subscript
+ *  of a declared array is not shown to be another object than the cast's (`arrayShapeFromStride`):
+ *  the declared spelling is measured on agbcc alone. */
 const ELEMENTS = new WeakMap<
   ContextGlobals,
   Map<TargetDescription, ReadonlyMap<string, { readonly type: IrType; readonly rank: number }>>
@@ -80,7 +82,11 @@ function contextArrayElementsOf(
   context: ContextGlobals | undefined,
   target: TargetDescription,
 ): Pick<StructureOptions, 'contextArrayElements'> {
-  if (context?.arrayElements === undefined || context.arrayElements.size === 0) {
+  if (
+    context?.arrayElements === undefined ||
+    context.arrayElements.size === 0 ||
+    target.compilerBehaviors.arrayShapeFromStride !== true
+  ) {
     return {};
   }
   let perTarget = ELEMENTS.get(context);
