@@ -911,14 +911,12 @@ export function firstFreeStructIndex(fn: Fn): number {
  *  `withDeclared` asks for every name the graph uses, which is what a name allocator needs.
  *
  *  "Mentions", not "references": this walks `fn.blocks` at the moment structuring runs, and the
- *  result is CACHED on the SFn (`structure.ts`) and carried by every later `{...sfn}` pass, so a
- *  struct whose last use a subsequent L3 pass removed would still be declared. Sibling `locals` is
- *  reference-pruned after dead-store elimination (`l3/dce.ts`) for exactly that reason; this list is
- *  not. No pass drops such a use today — the IR-level DCE runs long before recognition, and l3/dce's
- *  `mustKeep` never drops a `field`/`index` — so the staleness is LATENT, not live, which is why it
- *  is recorded here rather than fixed speculatively. The fix, if a pass ever makes it reachable, is
- *  the one l3/symbol-refs.ts already applies to symbol references: derive at the consumption point
- *  (`backend/cfamily.ts` structDecls) instead of caching. */
+ *  result is CACHED on the SFn (`structure.ts`) and carried by every later `{...sfn}` pass, so it
+ *  can name a struct no expression spells: an access the structurer spells through a
+ *  context-declared array (structure/memory-access.ts `declaredElementMember`) leaves its
+ *  recovered element unnamed. The C-family printer therefore declares only the structs the printed
+ *  function names (`backend/cfamily.ts` structDecls), as l3/symbol-refs.ts derives symbol
+ *  references at the consumption point. */
 export function collectStructs(fn: Fn, withDeclared = false): StructType[] {
   const seen = new Map<string, StructType>();
   const consider = (t: IrType) => {
