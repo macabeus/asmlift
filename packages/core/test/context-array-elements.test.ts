@@ -3,7 +3,7 @@
 // through the declaration, `gBgInfo[i].hOfs`, rather than through a cast of the array's address.
 import { describe, expect, test } from 'vitest';
 
-import { aggregateType } from '../src/aggregate';
+import { aggregateTag, aggregateType } from '../src/aggregate';
 import { cBackend } from '../src/backend/c';
 import { globalsFromContext } from '../src/proto-context';
 import { structuringOptions } from '../src/structuring-options';
@@ -144,7 +144,17 @@ describe('the struct element of an array a declaration context declares', () => 
       structuringOptions({ target, returnsVoid: true, prototypes: {}, backend: cBackend, contextGlobals })
         .contextArrayElements;
     expect(laid(ARMV4T_AGBCC)?.has('gBgInfo')).toBe(true);
+    // a union element, however spelled, is no struct the IR names
+    expect(laid(ARMV4T_AGBCC)?.has('gU')).toBe(false);
     expect(laid(MIPS_IDO)).toBeUndefined();
     expect(laid(PPC_MWCC)).toBeUndefined();
+  });
+
+  test('one reading of the tag an aggregate spelling declares it by', () => {
+    expect(aggregateTag('struct  BgInfo')).toEqual({ tag: 'BgInfo', spelling: 'struct BgInfo' });
+    expect(aggregateTag('const union U')).toEqual({ tag: 'U', spelling: 'union U' });
+    expect(aggregateTag('volatile Pos')).toEqual({ tag: 'Pos', spelling: 'Pos' });
+    expect(aggregateTag('struct S *')).toBeUndefined();
+    expect(aggregateTag('enum E')).toBeUndefined();
   });
 });

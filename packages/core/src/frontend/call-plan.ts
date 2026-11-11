@@ -15,6 +15,7 @@
 // which frontend/call-arity.ts counts (`fallbackArgc`) and later trims (`trimClobberedCallArgs`).
 import {
   type ByValueArg,
+  aggregateTag,
   aggregateType,
   byValueCallArgs,
   byValueRefusal,
@@ -1452,15 +1453,11 @@ export function structLocalType(
 ): Extract<IrType, { kind: 'struct' }> | { refused: string } {
   // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
   // is what the declarations block defines it by, and a typedef name is that tag too
-  const spelling = (own.returns ?? '')
-    .replace(/\b(?:const|volatile)\b/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-  const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
-  if (tag === undefined) {
+  const named = aggregateTag(own.returns ?? '');
+  if (named === undefined) {
     return { refused: 'it names no type a local of it could be declared with' };
   }
-  const type = aggregateType(tag, spelling, returnedAggregate(own), target);
+  const type = aggregateType(named.tag, named.spelling, returnedAggregate(own), target);
   if (type?.kind !== 'struct') {
     return {
       refused:

@@ -103,6 +103,19 @@ export function aggregateType(
   return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
 
+/** The tag a struct or union spelling declares it by, with the spelling itself, qualifiers aside:
+ *  `struct Tag` and `union Tag` name theirs, and a bare name is a typedef the declarations block
+ *  defines under that name. Undefined for any other spelling, which names no type a local or an
+ *  element of it could be declared with. */
+export function aggregateTag(spelling: string): { tag: string; spelling: string } | undefined {
+  const s = spelling
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const tag = /^(?:(?:struct|union) )?([A-Za-z_]\w*)$/.exec(s)?.[1];
+  return tag === undefined ? undefined : { tag, spelling: s };
+}
+
 /** The IR type of a scalar or pointer member spelling: a pointer to a scalar keeps its pointee, any
  *  other pointer is `void *`, which lays out the same — a pointer to a function or to an array
  *  (`void (*)(u8)`, `u8 (*)[4]`) included, which is no integer to compare or shift. An integer
@@ -355,12 +368,8 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
       if (layout === undefined) {
         return { refused: 'the declaration does not lay it out (a context does, by defining the struct)', param: i };
       }
-      const spelling = t
-        .replace(/\b(?:const|volatile)\b/g, ' ')
-        .trim()
-        .replace(/\s+/g, ' ');
-      const tag = /^(?:struct\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
-      const type = tag === undefined ? undefined : aggregateType(tag, spelling, layout, target);
+      const named = aggregateTag(t);
+      const type = named === undefined ? undefined : aggregateType(named.tag, named.spelling, layout, target);
       if (type?.kind !== 'struct' || type.size === undefined) {
         return { refused: 'it is a union, or has a member this target does not size', param: i };
       }
