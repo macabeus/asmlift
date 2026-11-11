@@ -7952,6 +7952,46 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'unsigned short ptrelem(int i);',
     symbols: BGPTRS_MAP,
   },
+  // A member of a CONTEXT-DECLARED struct array, `gBgOfs[i].hOfs` (core
+  // structure/memory-access.ts `declaredElementMember`). Shaped on kleod:sub_0804C7FC:agbcc, which
+  // reads the index out of a script cursor and stores two members around calls. On agbcc only the
+  // declared array's subscript is an ARRAY_REF, and that expands base-first: every cast spelling
+  // of the base, `((struct Elem0 *)&gBgOfs)[i].field_8` included, places `ldr =gBgOfs` after the
+  // index scale instead of before the cursor's reload. So the lift needs the declared element
+  // type and its member names, which the row's `ctx` states and its candidates compile against
+  // (`candidateContext`). The map names the cursor only, which is what gives the structurer a
+  // symbol context (the spelling is taken only where a map is in play); it renders the same
+  // `extern void *gScript;` the row's `ctx` states.
+  {
+    sym: 'bgelemofs',
+    src:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);\n' +
+      'void bgelemofs(void){\n' +
+      '  gBgOfs[((u8 *)gScript)[2]].hOfs = readArg((u8 *)gScript + 3) * 16;\n' +
+      '  gBgOfs[((u8 *)gScript)[2]].vOfs = readArg((u8 *)gScript + 5) * 16;\n' +
+      '  gScript = (u8 *)gScript + 7;\n' +
+      '}',
+    features: ['struct', 'array', 'variable-index', 'global', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);\n' +
+      'void bgelemofs(void);',
+    proto: { bgelemofs: { returnsVoid: true }, readArg: { params: ['u8 *'], returns: 's32' } },
+    symbols: new Map([
+      [0x03004d84, [{ name: 'gScript', kind: 'data' as const, declared: true, shape: 'pointer' as const, size: 4 }]],
+    ]),
+    candidateContext:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);',
+  },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
   // 2026-09-02 — WHAT THIS FAMILY NOW MEASURES, because everything below it is the state at
   // AUTHORING TIME and three of the scores have moved. `raise/globalshape.ts` derives a global's

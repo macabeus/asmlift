@@ -19,6 +19,7 @@ import {
   unionViewAt,
 } from '../ir/types';
 import { Expr } from '../l3/ast';
+import { type Gate, firstRejection } from '../l3/gates';
 import {
   type DeclaredField,
   type SymbolInfo,
@@ -81,6 +82,19 @@ export interface SymRenderCtx {
   declRank: boolean;
   /** {@link memoFieldsOf} over `info`. */
   fieldsOf(name: string): DeclaredField[] | null;
+  /** The element a declaration context declares the array `name` of, laid out on this target
+   *  (StructureOptions `contextArrayElements`), and whether the array is declared volatile. Absent,
+   *  or undefined for a name, ⇒ no declared element: {@link declaredElementMember} keeps the cast. */
+  arrayElement?(name: string): DeclaredElementInfo | undefined;
+}
+
+/** A context-declared array's element as the structurer reads it: the element's IR struct (named
+ *  members at the target's offsets, `aggregate.ts` `aggregateType`), the array's rank, and whether
+ *  any byte of it is declared volatile. */
+export interface DeclaredElementInfo {
+  readonly type: IrType;
+  readonly rank: number;
+  readonly volatile: boolean;
 }
 
 // ── interior spelling through a POINTER-shaped global ────────────────────────────────────────
@@ -855,6 +869,136 @@ export function memAccess(
   };
 }
 
+// ── a struct-array element's member through the DECLARED array ───────────────────────────────
+// `((struct Elem0 *)&gBgInfo)[i].field_8` and `gBgInfo[i].hOfs` address the same bytes, and they
+// are not the same object on agbcc. Its build_array_ref (c-typeck.c:1383) builds an ARRAY_REF only
+// for a subscript of an object of ARRAY type that is no INDIRECT_REF, which is the declared array
+// alone; every cast base, a cast to the declared element type included, is the pointer sum, and the
+// two expand in a different order (an ARRAY_REF through get_inner_reference, base first). Compiled
+// on kleod:sub_0804C7FC:agbcc with the row's own command: the declared spelling is IDENTICAL to the
+// target and every cast spelling places `ldr r5, =gBgInfo` after the index scale instead of before
+// it. A recovered element struct cannot reach those bytes, so the spelling needs the declaration's
+// own element type and member names, which the declaration context states
+// (proto-context.ts `arrayElements`).
+//
+// The spelling is taken only where it names exactly the bytes and the value the cast form does.
+// Each refusal is a row of DECLARED_MEMBER_GATES, and the access then keeps the cast.
+
+/** One struct-array member access the declared spelling `g[i].member` is asked of. */
+export interface DeclaredMemberAccess {
+  /** the declaration context's element for the array, on this target */
+  readonly element: DeclaredElementInfo | undefined;
+  /** the byte stride the asm scales the index by */
+  readonly stride: number;
+  /** the declared element's member that starts at the access's byte, if any */
+  readonly member: StructField | undefined;
+  /** the type the cast spelling reads or writes there: the recovered element's field */
+  readonly access: IrType | undefined;
+  readonly isStore: boolean;
+  /** the access carries a qualifier, which only a cast has room for */
+  readonly qualified: boolean;
+}
+
+/** Which struct-array member accesses are spelled through the declared array. Every rule is
+ *  sound: removed, the spelling names other bytes, reads another value, drops a qualifier, or
+ *  (`no-declared-element`) has no element to spell.
+ *
+ *  WHAT IT DOES NOT ADMIT YET, each keeping the cast: a member of a nested struct or an array
+ *  member (`aggregateType` gives neither a field), a pointer member read or written as a word
+ *  (`member-type` compares integers only), a rank-2 array (`rank`), and every lift with no
+ *  symbol map, where the structurer builds no symbol context (`/raw-globals` and a map-less row).
+ *  No census seam reaches this table: its caller is `arrayAccess`, which no record outside core
+ *  holds, so `pnpm bench gates` cannot count it. */
+export const DECLARED_MEMBER_GATES: readonly Gate<DeclaredMemberAccess>[] = [
+  {
+    id: 'no-declared-element',
+    why: 'the context declares no array of a struct this target lays out under that name',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: a struct array the context does not declare keeps the cast',
+    rejects: (c) => c.element === undefined || c.element.type.kind !== 'struct',
+  },
+  {
+    id: 'qualified',
+    why: 'a volatile array or a qualified access needs the cast its qualifier goes on',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: a volatile struct array keeps the cast',
+    rejects: (c) => c.qualified || c.element?.volatile === true,
+  },
+  {
+    id: 'rank',
+    why: 'a multidimensional array needs a row subscript this spelling does not place',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: a rank-2 struct array keeps the cast',
+    rejects: (c) => c.element !== undefined && c.element.rank !== 1,
+  },
+  {
+    id: 'stride',
+    why: 'the declared element is not the stride the asm scales by, so `g[i]` would name other bytes',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: an element of another size keeps the cast',
+    rejects: (c) => c.element?.type.kind === 'struct' && c.element.type.size !== c.stride,
+  },
+  {
+    id: 'no-member',
+    why: 'no scalar member of the declared element starts at the accessed byte',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: an offset no member starts at keeps the cast',
+    rejects: (c) => c.element !== undefined && (c.member === undefined || c.member.type.kind !== 'int'),
+  },
+  {
+    id: 'member-type',
+    why: 'the member is not the access: another width names other bytes, another extension reads another value',
+    sound: true,
+    guardedBy: 'declared-element-member.test.ts: a member of another width or a load of another sign keeps the cast',
+    rejects: (c) => {
+      const m = c.member?.type;
+      const a = c.access;
+      return m?.kind === 'int' && (a?.kind !== 'int' || m.width !== a.width || (!c.isStore && m.signed !== a.signed));
+    },
+  },
+];
+
+/** `g[i].member` for a member access of a struct-array element whose base is the array's address,
+ *  spelled through the array the declaration context declares, or null for the cast form
+ *  (DECLARED_MEMBER_GATES says why). The element's IR type rides on the `index` node
+ *  (`baseElem`), which is how the C type walk reads the element's members: the name is not entered
+ *  in `SFn.globals`, which is also the addressable-base list the hoisting variations read. */
+function declaredElementMember(
+  name: string,
+  recovered: IrType,
+  idxExpr: Expr,
+  fieldOff: number,
+  elemSize: number,
+  signed: boolean,
+  sym: SymRenderCtx | undefined,
+  how: { isStore: boolean; qualified: boolean },
+): Expr | null {
+  const element = sym?.arrayElement?.(name);
+  const declared = element?.type.kind === 'struct' ? element.type : undefined;
+  const ctx: DeclaredMemberAccess = {
+    element,
+    stride: elemSize,
+    member: declared?.fields.find((f) => f.off === fieldOff),
+    access:
+      recovered.kind === 'ptr' && recovered.to.kind === 'struct'
+        ? recovered.to.fields.find((f) => f.off === fieldOff)?.type
+        : undefined,
+    ...how,
+  };
+  if (firstRejection(DECLARED_MEMBER_GATES, ctx) !== null) {
+    return null;
+  }
+  const index: Expr = {
+    k: 'index',
+    base: { k: 'var', name },
+    idx: idxExpr,
+    width: elemSize,
+    signed,
+    baseElem: element!.type,
+  };
+  return { k: 'field', base: index, name: ctx.member!.name };
+}
+
 // A variable-index array access `base[index]`; `base[index].field_K` when a `fieldOff` marks an
 // array-of-STRUCT element (raise/struct-arrays.ts); `base->field_K[index]` when a `memberOff` marks
 // an array MEMBER of a struct (raise/memberarrays.ts). The `.field` on an array element prints
@@ -878,6 +1022,7 @@ export function arrayAccess(
   ctype: (e: Expr) => IrType | undefined,
   sym?: SymRenderCtx,
   frameArray?: FrameArrayDecl,
+  how: { isStore: boolean; qualified: boolean } = { isStore: false, qualified: false },
 ): Expr {
   // An indexed access through a POINTER MEMBER's value is an ELEMENT of what it points at, exactly
   // as in memAccess — the index the aload already carries is the subscript, and any byte residual
@@ -948,6 +1093,13 @@ export function arrayAccess(
     };
   }
   if (fieldOff !== undefined) {
+    // the array the context declares, subscripted itself: agbcc's ARRAY_REF object (see above)
+    if (baseExpr.k === 'addr') {
+      const declared = declaredElementMember(baseExpr.name, bt, idxExpr, fieldOff, elemSize, signed, sym, how);
+      if (declared !== null) {
+        return declared;
+      }
+    }
     const structTo = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to : null;
     const rt = ctype(baseExpr);
     const ok = structTo !== null && rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === structTo.name;

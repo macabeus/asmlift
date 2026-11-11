@@ -524,6 +524,13 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       if (bt?.kind === 'array' && derefStrideOk(bt, e.width, e.signed)) {
         return bt.elem;
       }
+      // A base the walk cannot type, whose declaration states a STRUCT element of the node's stride:
+      // the element of a context-declared struct array, `gBgInfo[i]` under `.hOfs`
+      // (structure/memory-access.ts `declaredElementMember`). Read only where the walk answers
+      // nothing, as `baseElem` always is (see l3/ast.ts).
+      if (bt === undefined && e.baseElem?.kind === 'struct' && e.baseElem.size === e.width) {
+        return e.baseElem;
+      }
       return scalarTypeForAccess(e.width, e.signed);
     }
     case 'field': {

@@ -83,6 +83,7 @@ import {
   TWO_LEVEL_EXIT_GATES,
   TWO_LEVEL_REGION_GATES,
 } from './structure/loop-gates';
+import { DECLARED_MEMBER_GATES } from './structure/memory-access';
 import { NAME_COALESCE_GATES } from './structure/namecoalesce';
 
 /** Where `pnpm bench gates` counts a table: the census pass id, and the label of its line. */
@@ -188,6 +189,7 @@ export const GATE_TABLES: readonly GateTableEntry[] = [
     table: 'reader',
   }),
   entry('NAME_COALESCE_GATES', 'structure/namecoalesce', NAME_COALESCE_GATES as readonly Gate<never>[]),
+  entry('DECLARED_MEMBER_GATES', 'structure/memory-access', DECLARED_MEMBER_GATES as readonly Gate<never>[]),
   entry('INLINEBASE_GATES', 'l3/inlinebase', INLINEBASE_GATES as readonly Gate<never>[]),
   entry('OFFMEMBER_GATES', 'l3/offmember', OFFMEMBER_GATES as readonly Gate<never>[]),
   entry('VOL_SLOT_GATES', 'l3/volatileval', VOL_SLOT_GATES as readonly Gate<never>[]),
