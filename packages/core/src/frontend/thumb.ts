@@ -942,7 +942,7 @@ const REG_SPELLINGS = /^(r\d+|sp|lr|pc|sb|sl|fp|ip)$/i;
  *  real row can reach it. An authored synthetic one would subtract a permanently-declining row from
  *  a corpus whose denominator is a claim about reach, to cover a LEXICAL rule with no compiler
  *  behaviour behind it — the three wrong-C shapes named above are what the rule is worth, and
- *  `thumb-frontend.test.ts` pins each of them directly. A row would become the right home the day
+ *  `thumb-instructions.test.ts` pins each of them directly. A row would become the right home the day
  *  a project spells one, which is exactly what makes this a null and not a policy. */
 const upperCaseRegIn = (ops: string[]): string | null =>
   ops.flatMap((o) => o.match(/[A-Za-z_]\w*/g) ?? []).find((w) => REG_SPELLINGS.test(w) && w !== w.toLowerCase()) ??

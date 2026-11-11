@@ -86,7 +86,7 @@ export function inheritFlags<S>(bi: number, edges: FlagsEdges<S>): S | string {
   }
   // Asked BEFORE the conditional-branch arm. On Thumb every dispatch block also ends in a
   // conditional branch (`recoverJumpTable` only recognises a bounds block ending in `bhi`/`bls`),
-  // so there this arm buys the truer sentence and not the verdict — `thumb-frontend.test.ts` runs
+  // so there this arm buys the truer sentence and not the verdict — `thumb-instructions.test.ts` runs
   // that ablation. On PowerPC the conditional arm carries, so this arm is the one that refuses.
   if (edges.dispatches(p)) {
     return `no compare crosses the edge into '${here}': it leaves the jump-table dispatch in '${edges.label(p)}'`;

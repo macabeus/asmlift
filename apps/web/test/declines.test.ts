@@ -1235,7 +1235,7 @@ describe('the classifier is measured against the messages core can throw, not on
     // their REASON, and the class keys on the edge reasons rather than on the headline —
     // deliberately, because the headline is shared with subjects no edge model moves (flags
     // written by arithmetic or a call, a block with no predecessor). Both halves are pinned above,
-    // and the shapes themselves in `thumb-frontend.test.ts` and `ppc-frontend.test.ts`.
+    // and the shapes themselves in `thumb-instructions.test.ts` and `ppc-frontend.test.ts`.
     'cross-block-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
     // A GAP, not a throw: structure.ts's `neg_s` rule returns it through `mkGap`, so the C prints it as
     // an ASMLIFT_ERROR and no throw site carries it. Pinned above against its producer.
