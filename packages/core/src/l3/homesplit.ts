@@ -25,7 +25,7 @@
 // withholds would hide a program swap from both. The withhold itself is DATA: one rejection
 // prepended to the caller's own admission table, in the `Gate<BaseKey>` type that table already
 // has, so `firstRejection` attributes a refusal to it, `without` ablates it, and the composed table
-// is on `gate-contract.test.ts`'s roster like any other.
+// is in `gate-registry.ts` like any other.
 //
 // EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A two-key withhold
 // exists only where the caller's table binds three — `homesplit-fan-cap` admits no more — and there

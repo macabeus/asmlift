@@ -39,73 +39,48 @@
 //     retsink.sinkReturns = () => false;
 //     → TypeError: Cannot assign to read only property 'sinkReturns' of object '[object Module]'
 //
-// So the two unregistered passes with a seam cost an entry here, any other pass the seam its
-// caller does not have yet, and the registry is the place that will say so. `enumerateRanked` is
+// So a further pass with a seam costs a driver here, and any other pass first costs the seam its
+// caller does not have yet. WHICH TABLES a pass counts, and the label each line prints, are not
+// kept here: each table's `census` seat in `packages/core/src/gate-registry.ts` names them, the
+// same list the contract test iterates, and `PASSES` is built from it below. A driver only says
+// the order its `install` reads them in. A table seated in the registry under a pass with no
+// driver, or a driver whose labels the registry does not seat, throws when this module loads.
+// `enumerateRanked` is
 // deliberately the only driver: it is the same entry `bench fan` and the runner use, so a census
 // here counts the refusals the BENCHMARK'S configuration produced rather than a rig's.
 import { enumerateRanked } from '@asmlift/cli/rank';
 import {
-  FRAME_ESCAPE_GATES,
   FRAME_OBJECT_AUDIT,
   type FrameEscape,
   type HandBack,
-  RELIFT_HAND_BACK_GATES,
   auditFrameObjects,
 } from '@asmlift/core/frontend/frame-objects';
+import { GATE_TABLES } from '@asmlift/core/gate-registry';
 import type { Fn } from '@asmlift/core/ir/core';
-import { CASE_END_GOTO_GATES, type CaseEndSite, jumpToCaseEnds } from '@asmlift/core/l3/caseendgoto';
+import { type CaseEndSite, jumpToCaseEnds } from '@asmlift/core/l3/caseendgoto';
 import type { Gate } from '@asmlift/core/l3/gates';
 import { tallying } from '@asmlift/core/l3/gates';
 import type { UnmergeGates } from '@asmlift/core/l3/unmerge';
-import {
-  UNMERGE_ARM_GATES,
-  UNMERGE_RUNG_GATES,
-  UNMERGE_SITE_GATES,
-  UNMERGE_TOTALITY_GATES,
-  UNMERGE_VALUE_GATES,
-  unmergeJoins,
-} from '@asmlift/core/l3/unmerge';
+import { unmergeJoins } from '@asmlift/core/l3/unmerge';
 import { declaresVoidReturn } from '@asmlift/core/proto';
 import {
-  EXIT_TRAMPOLINE_GATES,
   type ExitTrampoline,
-  LATCH_GATES,
   type LatchCandidate,
   foldEmptyLatches,
   foldExitTrampolines,
 } from '@asmlift/core/raise/latch';
-import {
-  OFFSET_NAME_GATES,
-  OFFSET_NAME_PASS,
-  type OffsetAddress,
-  nameOffsetAddresses,
-} from '@asmlift/core/raise/offsetnames';
-import { type NarrowParamCandidate, PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '@asmlift/core/raise/paramwidth';
+import { type MemberArrayCandidate, recognizeMemberArrays } from '@asmlift/core/raise/memberarrays';
+import { type NarrowLocalCandidate, narrowBlockLocals } from '@asmlift/core/raise/narrowlocal';
+import { OFFSET_NAME_PASS, type OffsetAddress, nameOffsetAddresses } from '@asmlift/core/raise/offsetnames';
+import type { NarrowParamCandidate } from '@asmlift/core/raise/paramwidth';
 import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-recovery';
 import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
-import {
-  type FoldedTopTest,
-  type PeeledTest,
-  REROLL_GATES,
-  TOP_TEST_GATES,
-  rerollPeeledTests,
-} from '@asmlift/core/raise/reroll';
-import {
-  ARM_REREAD_GATES,
-  type ArmRereadSite,
-  SHARED_VALUE_GATES,
-  type SharedValueSite,
-} from '@asmlift/core/raise/shortcircuit';
-import {
-  DISPLACED_BASE_GATES,
-  DISPLACED_ROOT_GATES,
-  type DisplacedBase,
-  type DisplacedRoot,
-  foldDisplacedAccesses,
-} from '@asmlift/core/raise/structs';
-import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
-import { type RedundantParam, UNPRE_GATES, recomputeRedundantParams } from '@asmlift/core/raise/unpre';
-import { type ThreadedExit, UNTHREAD_GATES, unthreadLoopExits } from '@asmlift/core/raise/unthread';
+import { type FoldedTopTest, type PeeledTest, rerollPeeledTests } from '@asmlift/core/raise/reroll';
+import type { ArmRereadSite, SharedValueSite } from '@asmlift/core/raise/shortcircuit';
+import { type DisplacedBase, type DisplacedRoot, foldDisplacedAccesses } from '@asmlift/core/raise/structs';
+import { type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
+import { type RedundantParam, recomputeRedundantParams } from '@asmlift/core/raise/unpre';
+import { type ThreadedExit, unthreadLoopExits } from '@asmlift/core/raise/unthread';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
@@ -126,6 +101,13 @@ interface CensusablePass {
   readonly install: (wrapped: readonly (readonly Gate<never>[])[]) => () => void;
 }
 
+/** A pass's driver: the labels of the tables its `install` reads, in the order it reads them
+ *  (`w[0]` is the first label's table). The tables themselves come from the registry. */
+interface CensusDriver {
+  readonly tables: readonly string[];
+  readonly install: CensusablePass['install'];
+}
+
 /** Swap a `PRE_STRUCTURE_FOLDS` entry's call for one through the census's tables, BY ID. */
 function installFold(id: string, run: (fn: Fn) => number): () => void {
   const fold = PRE_STRUCTURE_FOLDS.find((f) => f.id === id);
@@ -139,17 +121,11 @@ function installFold(id: string, run: (fn: Fn) => number): () => void {
   };
 }
 
-export const PASSES: Record<string, CensusablePass> = {
+const DRIVERS: Record<string, CensusDriver> = {
   unmerge: {
     // The five tables in `UnmergeGates`' own order, which is the order `l3/unmerge.ts` documents
     // them in — SITE, ARM, VALUE, RUNG, then the TOTALITY table that judges the rewritten site.
-    tables: [
-      ['site', UNMERGE_SITE_GATES as readonly Gate<never>[]],
-      ['arm', UNMERGE_ARM_GATES as readonly Gate<never>[]],
-      ['value', UNMERGE_VALUE_GATES as readonly Gate<never>[]],
-      ['rung', UNMERGE_RUNG_GATES as readonly Gate<never>[]],
-      ['totality', UNMERGE_TOTALITY_GATES as readonly Gate<never>[]],
-    ],
+    tables: ['site', 'arm', 'value', 'rung', 'totality'],
     install: (w) => {
       // BY NAME, never by index. `PRE_RESPELL_VARIATIONS` holds one entry today, and a census taken
       // through the wrong one enumerates normally and reports an EMPTY table — the silent-zero
@@ -176,7 +152,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // l3/caseendgoto.ts's `CASE_END_GOTO_GATES` — which rule keeps a search loop's hit flag rather
     // than the case-end goto. ONE table, asked once per flag read after its loop, per structured
     // tree the enumeration respells.
-    tables: [['site', CASE_END_GOTO_GATES as readonly Gate<never>[]]],
+    tables: ['site'],
     install: (w) => {
       // BY NAME, never by index, for the reason the `unmerge` entry gives.
       const entry = PRE_RESPELL_VARIATIONS.find((p) => p.name === 'case-end-goto');
@@ -196,7 +172,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // check). The pass list runs once per LIFT, and `enumerateRanked` lifts a row more than once
     // (the shared lift, then each lift), so a count here is per evaluation, as the footer
     // says, and a site can be counted once per lift that reaches it.
-    tables: [['site', ARM_REREAD_GATES as readonly Gate<never>[]]],
+    tables: ['site'],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit');
@@ -216,7 +192,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // raise/shortcircuit.ts's `SHARED_VALUE_GATES` — the same fold's use-count refusals, asked once
     // per value the second condition block reads 2+ times itself, below every refusal but tree
     // ownership. Same seam and same per-lift counting as `arm-reread` above.
-    tables: [['value', SHARED_VALUE_GATES as readonly Gate<never>[]]],
+    tables: ['value'],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit');
@@ -237,7 +213,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // one. ONE table, asked once per narrow load a strictly wider access at the same base already
     // covers, so a base with no overlap contributes nothing and the count is a population of
     // OVERLAPS rather than of loads.
-    tables: [['read', TRUNC_LOAD_GATES as readonly Gate<never>[]]],
+    tables: ['read'],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'truncload');
@@ -259,10 +235,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // `DISPLACED_ROOT_GATES`, asked once per root over the bases that passed. On every lift that
     // reaches the pass, `/far-cast`'s included, which skips a base carrying a store before either
     // table sees it.
-    tables: [
-      ['base', DISPLACED_BASE_GATES as readonly Gate<never>[]],
-      ['root', DISPLACED_ROOT_GATES as readonly Gate<never>[]],
-    ],
+    tables: ['base', 'root'],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'displaced');
@@ -285,10 +258,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // block, so a parameter read through two extensions is counted twice; and `/narrow-param`'s
     // `PARAM_READER_WIDTH_GATES`, asked once per parameter some extension reads, on the lift that
     // asks whether the variation reaches as well as on its own. Both once per lift that reaches them.
-    tables: [
-      ['param', PARAM_WIDTH_GATES as readonly Gate<never>[]],
-      ['reader', PARAM_READER_WIDTH_GATES as readonly Gate<never>[]],
-    ],
+    tables: ['param', 'reader'],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'paramwidth');
@@ -310,7 +280,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // allowed to name. ONE table, asked once per site the walk resolves, and a site is only built
     // where the address already bottoms out at a `gaddr` plus a non-zero constant, so the rows with
     // no symbol map and the rows whose arithmetic stands on a parameter contribute nothing.
-    tables: [['offset', OFFSET_NAME_GATES as readonly Gate<never>[]]],
+    tables: ['offset'],
     install: (w) => {
       const restore = OFFSET_NAME_PASS.run;
       const gates = w[0] as readonly Gate<OffsetAddress>[];
@@ -323,14 +293,14 @@ export const PASSES: Record<string, CensusablePass> = {
   latchfold: {
     // raise/latch.ts's `LATCH_GATES` — which back-edge blocks fold into their edge. Asked once per block
     // with one successor, on every round of the fold's fixpoint, so a block refused twice counts twice.
-    tables: [['latch', LATCH_GATES as readonly Gate<never>[]]],
+    tables: ['latch'],
     install: (w) => installFold('latchfold', (fn) => foldEmptyLatches(fn, w[0] as readonly Gate<LatchCandidate>[])),
   },
   trampoline: {
     // raise/latch.ts's `EXIT_TRAMPOLINE_GATES` — which blocks on a loop's way out fold into their edge.
     // Asked once per block with a successor, on every round of the fold's fixpoint, so most counts
     // are blocks that were never trampolines (`trampoline-not-a-second-exit`).
-    tables: [['trampoline', EXIT_TRAMPOLINE_GATES as readonly Gate<never>[]]],
+    tables: ['trampoline'],
     install: (w) => installFold('trampoline', (fn) => foldExitTrampolines(fn, w[0] as readonly Gate<ExitTrampoline>[])),
   },
   unthread: {
@@ -339,7 +309,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // target ends in a `cond_br`, or in a `br` to an out-of-loop block that does (gcc2.7.2's forwarder
     // in front of the re-test, `retestOf`), and each of its params has a value, handed it by an
     // in-loop edge, that is defined at the exit — until one is admitted, on every round.
-    tables: [['unthread', UNTHREAD_GATES as readonly Gate<never>[]]],
+    tables: ['unthread'],
     install: (w) => installFold('unthread', (fn) => unthreadLoopExits(fn, w[0] as readonly Gate<ThreadedExit>[])),
   },
   reroll: {
@@ -347,10 +317,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // loop whose SHAPE admits a re-roll (the untabled residue its header names), per round. Then
     // `TOP_TEST_GATES`, once per rotated loop whose shape `restoreTopTest` reads: does its top test
     // come back.
-    tables: [
-      ['loop', REROLL_GATES as readonly Gate<never>[]],
-      ['top', TOP_TEST_GATES as readonly Gate<never>[]],
-    ],
+    tables: ['loop', 'top'],
     install: (w) =>
       installFold('reroll', (fn) =>
         rerollPeeledTests(fn, w[0] as readonly Gate<PeeledTest>[], w[1] as readonly Gate<FoldedTopTest>[]),
@@ -360,8 +327,53 @@ export const PASSES: Record<string, CensusablePass> = {
     // raise/unpre.ts's `UNPRE_GATES` — the scope of the parameter recompute. Asked once per block
     // parameter the fold's precondition admits (every in-edge hands one pure expression over
     // dominating leaves), per sweep.
-    tables: [['unpre', UNPRE_GATES as readonly Gate<never>[]]],
+    tables: ['unpre'],
     install: (w) => installFold('unpre', (fn) => recomputeRedundantParams(fn, w[0] as readonly Gate<RedundantParam>[])),
+  },
+  'member-arrays': {
+    // raise/memberarrays.ts's `MEMBER_ARRAY_GATES` — which bases read as a struct whose member is an
+    // array. ONE table, asked once per base group the candidate walk builds, per lift that
+    // reaches the pass.
+    tables: ['base'],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'member-arrays');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'member-arrays' — the pass's caller-side seam moved");
+      }
+      const gates = w[0] as readonly Gate<MemberArrayCandidate>[];
+      const restore = pass.run;
+      pass.run = (fn) => recognizeMemberArrays(fn, gates);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  narrowlocal: {
+    // raise/narrowlocal.ts's `NARROW_LOCAL_GATES` — which block parameters take the width of their
+    // sole reading extension. ONE table, asked once per carrier the candidate walk builds, per
+    // lift that reaches the pass. The swapped call is the entry's own, with the table passed
+    // where the entry leaves the default.
+    tables: ['carrier'],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'narrowlocal');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'narrowlocal' — the pass's caller-side seam moved");
+      }
+      const gates = w[0] as readonly Gate<NarrowLocalCandidate>[];
+      const restore = pass.run;
+      pass.run = (fn, _self, _opts, target, lifted) =>
+        narrowBlockLocals(
+          fn,
+          gates,
+          { hoistsSingleSetArm: target.compilerBehaviors.hoistsSingleSetArm },
+          lifted.mergeShapes,
+        );
+      return () => {
+        pass.run = restore;
+      };
+    },
   },
   'frame-objects': {
     // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.
@@ -369,10 +381,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // DECLINES the lift, so a row contributes at most one count per lift. And
     // `RELIFT_HAND_BACK_GATES`, once per end word a first audit asks to hand back to the slot
     // model, where the first rejection keeps that word in the one object.
-    tables: [
-      ['escape', FRAME_ESCAPE_GATES as readonly Gate<never>[]],
-      ['relift', RELIFT_HAND_BACK_GATES as readonly Gate<never>[]],
-    ],
+    tables: ['escape', 'relift'],
     install: (w) => {
       const restore = FRAME_OBJECT_AUDIT.run;
       const gates = w[0] as readonly Gate<FrameEscape>[];
@@ -384,6 +393,38 @@ export const PASSES: Record<string, CensusablePass> = {
     },
   },
 };
+
+/** Each driver with its tables, taken from the registry's census seats in the driver's order. */
+function censusablePasses(): Record<string, CensusablePass> {
+  const seated = new Map<string, Map<string, readonly Gate<never>[]>>();
+  for (const t of GATE_TABLES) {
+    if (!t.census) {
+      continue;
+    }
+    if (!(t.census.pass in DRIVERS)) {
+      throw new Error(
+        `gate-registry seats ${t.name} in census pass '${t.census.pass}', which has no driver in run/gate-census.ts`,
+      );
+    }
+    const tables = seated.get(t.census.pass) ?? new Map<string, readonly Gate<never>[]>();
+    tables.set(t.census.table, t.table);
+    seated.set(t.census.pass, tables);
+  }
+  return Object.fromEntries(
+    Object.entries(DRIVERS).map(([id, d]) => {
+      const tables = seated.get(id) ?? new Map<string, readonly Gate<never>[]>();
+      const labels = [...tables.keys()].sort();
+      if (labels.join() !== [...d.tables].sort().join()) {
+        throw new Error(
+          `census pass '${id}' reads tables [${d.tables.join(', ')}] but gate-registry seats [${labels.join(', ')}]`,
+        );
+      }
+      return [id, { tables: d.tables.map((l) => [l, tables.get(l)!] as const), install: d.install }];
+    }),
+  );
+}
+
+export const PASSES: Record<string, CensusablePass> = censusablePasses();
 
 export const CENSUSABLE_PASSES = Object.keys(PASSES);
 
