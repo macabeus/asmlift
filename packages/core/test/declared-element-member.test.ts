@@ -45,6 +45,26 @@ const H = `h:
 \t.word\tg
 `;
 
+// `typedef void (*Fp)(void); struct S3 { Fp p; u32 x; }; extern struct S3 g3[4];`
+//   s32 fpc(u32 i) { return (s32)g3[i].p > 5; }
+const FPC = `fpc:
+\tpush\t{lr}
+\tmov\tr2, #0
+\tldr\tr1, .L4
+\tlsl\tr0, r0, #3
+\tadd\tr0, r0, r1
+\tldr\tr0, [r0]
+\tcmp\tr0, #5
+\tble\t.L3
+\tmov\tr2, #1
+.L3:
+\tadd\tr0, r2, #0
+\tpop\t{r1}
+\tbx\tr1
+.L4:
+\t.word\tg3
+`;
+
 const TYPES = 'typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef short s16;\n';
 const S = 'struct S { u32 p; u16 a; u16 b; s16 c; u8 d; };\n';
 
@@ -55,7 +75,11 @@ const lift = (asm: string, ctx: string | undefined) =>
   decompile(asm.slice(0, asm.indexOf(':')), asm, ARMV4T_AGBCC, {
     symbols: MAP,
     ...(ctx === undefined ? {} : { contextGlobals: globalsFromContext(TYPES + ctx, 'c') }),
-    prototypes: { f: { params: ['u32', 'u16', 'u16'], returnsVoid: true }, h: { params: ['u32'], returns: 's32' } },
+    prototypes: {
+      f: { params: ['u32', 'u16', 'u16'], returnsVoid: true },
+      h: { params: ['u32'], returns: 's32' },
+      fpc: { params: ['u32'], returns: 's32' },
+    },
   }).source;
 
 describe('a struct-array member spelled through the declared array', () => {
@@ -109,6 +133,12 @@ describe('a struct-array member spelled through the declared array', () => {
     const src = lift(H, `${signedA}extern struct S g[4];`);
     expect(src).not.toMatch(/\bg\[a0\]\.a\b/);
     expect(src).toMatch(/\bg\[a0\]\.b\b/);
+  });
+
+  test('a member pointing at a function keeps the cast: the declared spelling compares it unsigned', () => {
+    const src = lift(FPC, 'typedef void (*Fp)(void);\nstruct S3 { Fp p; u32 x; };\nextern struct S3 g3[4];');
+    expect(src).not.toMatch(/\bg3\[a0\]\.p\b/);
+    expect(src).toContain('&g3)[a0]');
   });
 
   test('a store of another sign takes it: a store truncates to the member whatever its type', () => {

@@ -112,6 +112,24 @@ describe('the struct element of an array a declaration context declares', () => 
     expect(el('gMacro')).toBeUndefined();
   });
 
+  test('a member pointing at a function is a pointer, and a fixed-width member has its stated sign', () => {
+    const { arrayElements: els } = globalsFromContext(
+      `typedef unsigned short uint16_t; typedef signed char int8_t; typedef unsigned int size_t;
+       typedef void (*Fp)(void);
+       struct M { Fp f; void (*g)(int); uint16_t h; int8_t b; size_t n; };
+       extern struct M gM[2];`,
+      'c',
+    );
+    const t = aggregateType('M', 'struct M', els!.get('gM')!.layout, ARMV4T_AGBCC);
+    const field = (n: string) => (t?.kind === 'struct' ? t.fields.find((f) => f.name === n)?.type : undefined);
+    expect(field('f')?.kind).toBe('ptr');
+    expect(field('g')?.kind).toBe('ptr');
+    expect(field('h')).toEqual({ kind: 'int', width: 16, signed: false });
+    expect(field('b')).toEqual({ kind: 'int', width: 8, signed: true });
+    // `size_t` states no sign this reads, so no read of it is typed
+    expect(field('n')).toBeUndefined();
+  });
+
   test('a struct object, a scalar array and an array of pointers are no struct array', () => {
     expect(el('gOne')).toBeUndefined();
     expect(el('gHalves')).toBeUndefined();

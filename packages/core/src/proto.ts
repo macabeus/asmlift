@@ -789,7 +789,7 @@ export function declaredSigned(t: ParamType): boolean | undefined {
  *  GC/1.3.2 and GC/2.6, `int T::*` is 4 bytes passed in one register, where `void (T::*)(int)` is
  *  12, passed as the address of a copy the way a struct of that size is. A spelling with neither a
  *  `(` nor a `::` is a pointer exactly when it ends in its `*`. */
-function isAddress(s: string): boolean {
+export function isAddress(s: string): boolean {
   if (!s.includes('(') && !s.includes('::')) {
     return s.endsWith('*');
   }
