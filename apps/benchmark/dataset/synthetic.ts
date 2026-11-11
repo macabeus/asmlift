@@ -7498,6 +7498,35 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { dmaptrsrc: { params: ['s32', 's32'], returnsVoid: true } },
   },
   {
+    sym: 'gnamewalk',
+    src:
+      'struct Mon { u16 kind; u16 item; u16 moves[4]; u8 level; u8 pad[3]; s32 id; };\n' +
+      'extern struct Mon *gMonPtr;\n' +
+      'void TakeMove(u32 m, u16 move, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void gnamewalk(u32 m){ s32 i; u8 buf[36]; struct Mon *p = gMonPtr;\n' +
+      ' m += p->kind + p->level;\n' +
+      ' for (i = 0; i < 4; i++) TakeMove(m, p->moves[i], i);\n' +
+      ' TakeData(m, 1, &buf[32]); TakeData(m, 2, &buf[33]); }',
+    features: ['global', 'struct', 'pointer', 'variable-index'],
+    toolchains: [...FIVE],
+    ctx:
+      'struct Mon { u16 kind; u16 item; u16 moves[4]; u8 level; u8 pad[3]; s32 id; };\n' +
+      'extern struct Mon *gMonPtr;\n' +
+      'void TakeMove(u32 m, u16 move, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void gnamewalk(u32 m);',
+    proto: {
+      gnamewalk: { params: ['u32'], returnsVoid: true },
+      TakeMove: { params: ['u32', 'u16', 'u8'], returnsVoid: true },
+      TakeData: { params: ['u32', 's32', 'void *'], returnsVoid: true },
+    },
+    note:
+      'a walk whose init reads a GLOBAL name, over a loop that calls: the source loads `gMonPtr` ' +
+      'once, so an /unreduce spelling that moves the init into the loop re-reads it after every ' +
+      'call a callee may have rewritten it in (l3/unreduce.ts, moved-read-aliasable)',
+  },
+  {
     sym: 'cpufill',
     src:
       'void CpuSet(const void *src, void *dest, u32 control);\n' +
