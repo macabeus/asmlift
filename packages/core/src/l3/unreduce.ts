@@ -445,7 +445,7 @@ function arithScale(t: IrType | undefined): number | null {
  *  loop and reads `ldrh [r4, #0]`, the target's bytes; `*(a1->field_4 + v1)` folds the `+4` into
  *  `ldrh [r4, #4]`, two instructions off. So the subscript is the spelling of the walk the asm ran.
  *  A POINTER init is left alone: for a pointer operand `build_array_ref` IS `*(p + i)`, so the
- *  respelling would buy nothing and churn every existing closed form. */
+ *  rewrite would buy nothing and change every existing closed form. */
 function arraySubscript(read: Expr, closed: Expr, vt: VarTypes): Expr | null {
   if (read.k !== 'index' || read.idx.k !== 'const' || read.idx.value !== 0 || read.lead !== undefined) {
     return null;

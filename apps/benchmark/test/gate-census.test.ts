@@ -62,6 +62,7 @@ describe('the gate census seam', () => {
       'reroll',
       'unpre',
       'member-arrays',
+      'member-walks',
       'narrowlocal',
       'frame-objects',
     ]);

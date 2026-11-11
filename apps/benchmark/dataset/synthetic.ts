@@ -6097,7 +6097,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    TakeData(m, 3, &buf[32]);\n' +
       '    TakeData(m, 4, &buf[33]);\n' +
       '}',
-    features: ['array', 'variable-index', 'struct', 'field', 'loop', 'call'],
+    features: ['array', 'variable-index', 'struct', 'field'],
     toolchains: ['agbcc'],
     ctx:
       'void TakeBase(u32 m, u16 kind, u8 level, s32 id);\n' +
@@ -6131,7 +6131,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    TakeData(m, 3, &buf[32]);\n' +
       '    TakeData(m, 4, &buf[33]);\n' +
       '}',
-    features: ['array', 'variable-index', 'struct', 'field', 'loop', 'call'],
+    features: ['array', 'variable-index', 'struct', 'field'],
     toolchains: ['agbcc'],
     ctx:
       'void TakeBase(u32 m, u16 kind, u8 level, u32 flags);\n' +
