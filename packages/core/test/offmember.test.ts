@@ -252,9 +252,11 @@ describe('the declaration cannot collide with the two passes that already mint s
     const out = spellOperandMembers(WITH_SIBLINGS)!;
     expect(out.structs?.map((s) => s.name)).toEqual(['Elem0', 'Off0', 'Struct0']);
     const src = cBackend.emit(out);
-    expect(src).toContain('struct Elem0 {');
-    expect(src).toContain('struct Struct0 {');
     expect(src).toContain('struct Off0 {');
+    // the two siblings stand for structs other accesses would name; this tree's body names neither,
+    // and the printer declares only what the printed function names (backend/cfamily.ts structDecls)
+    expect(src).not.toContain('struct Elem0 {');
+    expect(src).not.toContain('struct Struct0 {');
   });
 
   test('and a tree already carrying an Off0 seeds past it', () => {
