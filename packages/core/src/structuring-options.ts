@@ -11,7 +11,7 @@
 // spread wins over an earlier one with the same key, so moving an input changes which value a
 // shared key ends with. A site that sets more (rank.ts's per-candidate settings) spreads this
 // object first and its own keys after it.
-import { aggregateType } from './aggregate';
+import { aggregateTag, aggregateType } from './aggregate';
 import type { IrType } from './ir/types';
 import type { LanguageBackend } from './l3/ast';
 import type { Prototypes } from './proto';
@@ -100,12 +100,8 @@ function contextArrayElementsOf(
     for (const [name, el] of context.arrayElements) {
       // the element's own qualifiers are the array's (`volatile` reaches the gate through
       // `contextGlobals.volatiles`), not part of the struct's name
-      const spelling = el.spelling
-        .replace(/\b(?:const|volatile)\b/g, ' ')
-        .trim()
-        .replace(/\s+/g, ' ');
-      const tag = /^(?:struct )?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
-      const type = tag === undefined ? undefined : aggregateType(tag, spelling, el.layout, target);
+      const named = aggregateTag(el.spelling);
+      const type = named === undefined ? undefined : aggregateType(named.tag, named.spelling, el.layout, target);
       if (type?.kind === 'struct' && type.size !== undefined && type.size > 0) {
         out.set(name, { type, rank: el.dims.length });
       }
