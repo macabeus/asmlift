@@ -8,6 +8,7 @@
 // (`vitest run apps/benchmark/test`) runs where no compiler is available, so the enumeration itself
 // is not what is exercised here.
 import { FRAME_OBJECT_AUDIT } from '@asmlift/core/frontend/frame-objects';
+import { GATE_TABLES } from '@asmlift/core/gate-registry';
 import { parse } from '@asmlift/core/ir/parse';
 import { T } from '@asmlift/core/ir/types';
 import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
@@ -20,7 +21,7 @@ import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
-import { CENSUSABLE_PASSES, PASSES, gateCensus } from '../src/run/gate-census';
+import { CENSUSABLE_PASSES, PASSES, censusablePasses, gateCensus } from '../src/run/gate-census';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -42,7 +43,7 @@ const emptyArmSite = (): SFn => ({
 const unmergeVariation = () => PRE_RESPELL_VARIATIONS.find((p) => p.name === 'unmerge')!;
 
 describe('the gate census seam', () => {
-  it('names the registered passes', () => {
+  it('names the censusable passes', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
     // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
@@ -60,9 +61,56 @@ describe('the gate census seam', () => {
       'unthread',
       'reroll',
       'unpre',
+      'member-arrays',
+      'narrowlocal',
       'frame-objects',
     ]);
   });
+
+  it("takes each pass's tables from the gate registry's census seats, in the driver's order", () => {
+    // The registry (packages/core/src/gate-registry.ts) is the one list the contract test also
+    // iterates, so a table seated there is censused here and nowhere is it typed twice.
+    const seats = GATE_TABLES.flatMap((t) => (t.census ? [[t.census.pass, t.census.table, t.table] as const] : []));
+    for (const [id, pass] of Object.entries(PASSES)) {
+      const fromRegistry = seats.filter(([p]) => p === id);
+      expect(pass.tables.map(([label]) => label).sort(), id).toEqual(fromRegistry.map(([, label]) => label).sort());
+      for (const [label, table] of pass.tables) {
+        expect(table, `${id}/${label}`).toBe(fromRegistry.find(([, l]) => l === label)![2]);
+      }
+    }
+    expect(new Set(seats.map(([p]) => p))).toEqual(new Set(CENSUSABLE_PASSES));
+  });
+
+  it('refuses a registry seat with no driver, and a driver whose labels are not its seats', () => {
+    // `PASSES` is built by this check when the module loads, so a mismatch in the real registry
+    // throws before any test here runs. These hand it the two bad shapes directly.
+    const table = GATE_TABLES.find((t) => t.name === 'UNPRE_GATES')!;
+    const install = () => () => {};
+    expect(() =>
+      censusablePasses([{ ...table, census: { pass: 'no-such-pass', table: 'unpre' } }], {
+        unpre: { tables: ['unpre'], install },
+      }),
+    ).toThrow(/UNPRE_GATES in census pass 'no-such-pass', which has no driver/);
+    expect(() => censusablePasses([table], { unpre: { tables: ['unpre', 'extra'], install } })).toThrow(
+      /census pass 'unpre' reads tables \[unpre, extra\] but gate-registry seats \[unpre\]/,
+    );
+    expect(() => censusablePasses([], { unpre: { tables: ['unpre'], install } })).toThrow(/seats \[\]/);
+    expect(Object.keys(censusablePasses([table], { unpre: { tables: ['unpre'], install } }))).toEqual(['unpre']);
+  });
+
+  it.each(['member-arrays', 'narrowlocal'])(
+    'swaps the %s pre-recovery entry and the undo restores it exactly',
+    (id) => {
+      const entry = () => PRE_RECOVERY_PASSES.find((p) => p.id === id)!;
+      const pass = PASSES[id];
+      const wrapped = pass.tables.map(([, t]) => tallying(t));
+      const before = entry().run;
+      const uninstall = pass.install(wrapped.map((w) => w.gates));
+      expect(entry().run).not.toBe(before);
+      uninstall();
+      expect(entry().run).toBe(before);
+    },
+  );
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {
     expect(PASSES.unmerge.tables.map(([name]) => name)).toEqual(['site', 'arm', 'value', 'rung', 'totality']);
@@ -199,7 +247,7 @@ describe('the gate census seam', () => {
 
   it('refuses a pass it cannot reach, rather than censusing zero', () => {
     // `raise/retsink.ts` takes its table as a parameter and is NOT censusable: its caller is a
-    // static import in `pipeline.ts`. The distinction this refusal draws is the whole registry.
+    // static import in `pipeline.ts`. The distinction this refusal draws is the whole list of drivers.
     expect(gateCensus({ pass: 'retsink' })).toBe(2);
   });
 });

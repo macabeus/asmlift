@@ -1,5 +1,5 @@
 // The contract every gate table is held to, in one place — so adopting `gates.ts` costs a pass one
-// line here rather than a test file of its own.
+// line in `src/gate-registry.ts` rather than a test file of its own.
 //
 // What is NOT here: the differential check that a SOUND gate is load-bearing. That one needs the
 // pass's own oracle (coalesce's lives in coalesce-fuzz.test.ts, driven off its table), so this file
@@ -9,186 +9,22 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DEAD_READ_GATES } from '../src/frontend/dead-reads';
-import { FRAME_ESCAPE_GATES, RELIFT_HAND_BACK_GATES } from '../src/frontend/frame-objects';
-import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from '../src/l3/advance';
-import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from '../src/l3/argcopy';
-import {
-  BASECSE_GATES,
-  BASEFOLD_GATES,
-  LIVEBASE_BLOCK_GATES,
-  LIVEBASE_GATES,
-  ORDERBASE_GATES,
-  UNFOLDED_GATES,
-} from '../src/l3/basecse';
-import { CASE_END_GOTO_GATES } from '../src/l3/caseendgoto';
-import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
+import { GATE_TABLES } from '../src/gate-registry';
 import { type Gate, ablateHeuristic, gateTableDefects, guardsOf } from '../src/l3/gates';
-import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
-import { INLINEBASE_GATES } from '../src/l3/inlinebase';
-import { OFFMEMBER_GATES } from '../src/l3/offmember';
-import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
-import { COUNTDOWN_GATES } from '../src/l3/reindex';
-import { REGIONBASE_GATES, SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src/l3/scopebase';
-import {
-  UNMERGE_ARM_GATES,
-  UNMERGE_RUNG_GATES,
-  UNMERGE_SITE_GATES,
-  UNMERGE_TOTALITY_GATES,
-  UNMERGE_VALUE_GATES,
-} from '../src/l3/unmerge';
-import { UNREDUCE_GATES } from '../src/l3/unreduce';
-import { VOL_SLOT_GATES } from '../src/l3/volatileval';
-import { VOL_STORE_GATES } from '../src/l3/volstore';
-import {
-  ADDRESS_GATES,
-  DECLARATION_ADDRESS_GATES,
-  ELEMENT_ADDRESS_GATES,
-  ORDER_SHAPE_GATES,
-  SHAPE_GATES,
-} from '../src/raise/globalshape';
-import { EXIT_TRAMPOLINE_GATES, LATCH_GATES } from '../src/raise/latch';
-import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
-import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
-import { OFFSET_NAME_GATES } from '../src/raise/offsetnames';
-import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
-import { REROLL_GATES, TOP_TEST_GATES } from '../src/raise/reroll';
-import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
-import { ARM_REREAD_GATES, SHARED_VALUE_GATES } from '../src/raise/shortcircuit';
-import { DISPLACED_BASE_GATES, DISPLACED_ROOT_GATES } from '../src/raise/structs';
-import { TRUNC_LOAD_GATES } from '../src/raise/truncload';
-import { UNPRE_GATES } from '../src/raise/unpre';
-import { UNTHREAD_GATES } from '../src/raise/unthread';
-import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
-import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
-import {
-  BREAK_TAIL_GATES,
-  BYPASS_TAIL_GATES,
-  CARRIER_NAME_GATES,
-  ENCLOSING_CARRIER_GATES,
-  EXIT_TAIL_GATES,
-  FOR_BOUND_GATES,
-  FOR_PLAN_GATES,
-  FOR_PLAN_IV_GATES,
-  FRESH_MERGE_GATES,
-  OUTWARD_EXIT_GATES,
-  TWO_LEVEL_BREAK_GATES,
-  TWO_LEVEL_EXIT_GATES,
-  TWO_LEVEL_REGION_GATES,
-} from '../src/structure/structure';
 
-// Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
-// placement heuristics ablated, LIVEBASE_BLOCK_GATES that one plus a selectivity rule —
-// well-formedness is inherited, but registering them keeps the roster the one place that answers
-// "what tables ship?"). A pass that adopts gates.ts and forgets this line gets no contract.
+// The tables come from `src/gate-registry.ts`, the one list of every table core ships, DERIVED and
+// COMPOSED tables included; its header says what an entry holds. `gate-registry.test.ts` reads the
+// declarations out of `src/` and fails when an exported table is missing from that list, so a pass
+// that adopts gates.ts cannot ship a table this file never checks.
 //
-// THE SCANNER AT THE BOTTOM CLOSES MOST OF THAT HOLE, and it is worth knowing where it stops. It
-// reads every `export const NAME: Gate<…>[]` out of `src/` and requires the name here, so an
-// exported table cannot ship unregistered. What it cannot see is a table that is not an exported
-// const with that annotation: a MODULE-PRIVATE one (scopebase.ts's `COUNTING_RULES` and
-// `LOOP_RULES`, which reach the roster only inside `SCOPEBASE_GATES` and `REGIONBASE_GATES`), and
-// one COMPOSED at runtime, like the `withholdingKey` entry at the end of this record. Those two
-// shapes stay on the author. Nor does it scan CONSULTATION sites, which would answer a different
-// question badly: of the 26 `firstRejection` calls in `src/`, 22 receive the table as a parameter
-// (`gates`, `gates.shape`, `rules`, `admission`) and only four name one, so a scan of the call
-// sites would find four tables and miss every table that is passed in.
-const TABLES: Record<string, readonly Gate<never>[]> = {
-  ARGCOPY_GATES: ARGCOPY_GATES as readonly Gate<never>[],
-  ARGCOPY_REGION_GATES: ARGCOPY_REGION_GATES as readonly Gate<never>[],
-  COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
-  ARM_DISJOINT_GATES: ARM_DISJOINT_GATES as readonly Gate<never>[],
-  BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
-  BASEFOLD_GATES: BASEFOLD_GATES as readonly Gate<never>[],
-  LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
-  LIVEBASE_BLOCK_GATES: LIVEBASE_BLOCK_GATES as readonly Gate<never>[],
-  UNFOLDED_GATES: UNFOLDED_GATES as readonly Gate<never>[],
-  ORDERBASE_GATES: ORDERBASE_GATES as readonly Gate<never>[],
-  PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
-  PREUPDATE_COND_GATES: PREUPDATE_COND_GATES as readonly Gate<never>[],
-  LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
-  EXIT_TRAMPOLINE_GATES: EXIT_TRAMPOLINE_GATES as readonly Gate<never>[],
-  REROLL_GATES: REROLL_GATES as readonly Gate<never>[],
-  UNTHREAD_GATES: UNTHREAD_GATES as readonly Gate<never>[],
-  UNPRE_GATES: UNPRE_GATES as readonly Gate<never>[],
-  TOP_TEST_GATES: TOP_TEST_GATES as readonly Gate<never>[],
-  FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
-  SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
-  ARM_REREAD_GATES: ARM_REREAD_GATES as readonly Gate<never>[],
-  SHARED_VALUE_GATES: SHARED_VALUE_GATES as readonly Gate<never>[],
-  TRUNC_LOAD_GATES: TRUNC_LOAD_GATES as readonly Gate<never>[],
-  // raise/structs.ts's displaced-access fold: one table per materialised base, one per root
-  DISPLACED_BASE_GATES: DISPLACED_BASE_GATES as readonly Gate<never>[],
-  DISPLACED_ROOT_GATES: DISPLACED_ROOT_GATES as readonly Gate<never>[],
-  ADDRESS_GATES: ADDRESS_GATES as readonly Gate<never>[],
-  SHAPE_GATES: SHAPE_GATES as readonly Gate<never>[],
-  // the two halves `ORDER_LICENCE_GATES` ships — an address table minus the declaration rule, and
-  // the shape rules that read the order fact
-  ELEMENT_ADDRESS_GATES: ELEMENT_ADDRESS_GATES as readonly Gate<never>[],
-  DECLARATION_ADDRESS_GATES: DECLARATION_ADDRESS_GATES as readonly Gate<never>[],
-  ORDER_SHAPE_GATES: ORDER_SHAPE_GATES as readonly Gate<never>[],
-  MEMBER_ARRAY_GATES: MEMBER_ARRAY_GATES as readonly Gate<never>[],
-  NARROW_LOCAL_GATES: NARROW_LOCAL_GATES as readonly Gate<never>[],
-  OFFSET_NAME_GATES: OFFSET_NAME_GATES as readonly Gate<never>[],
-  PARAM_WIDTH_GATES: PARAM_WIDTH_GATES as readonly Gate<never>[],
-  PARAM_READER_WIDTH_GATES: PARAM_READER_WIDTH_GATES as readonly Gate<never>[],
-  NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],
-  INLINEBASE_GATES: INLINEBASE_GATES as readonly Gate<never>[],
-  OFFMEMBER_GATES: OFFMEMBER_GATES as readonly Gate<never>[],
-  VOL_SLOT_GATES: VOL_SLOT_GATES as readonly Gate<never>[],
-  COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
-  VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],
-  UNREDUCE_GATES: UNREDUCE_GATES as readonly Gate<never>[],
-  CASE_END_GOTO_GATES: CASE_END_GOTO_GATES as readonly Gate<never>[],
-  // l3/unmerge.ts's five, one per context it judges — see its header for which is which
-  UNMERGE_SITE_GATES: UNMERGE_SITE_GATES as readonly Gate<never>[],
-  UNMERGE_ARM_GATES: UNMERGE_ARM_GATES as readonly Gate<never>[],
-  UNMERGE_VALUE_GATES: UNMERGE_VALUE_GATES as readonly Gate<never>[],
-  UNMERGE_RUNG_GATES: UNMERGE_RUNG_GATES as readonly Gate<never>[],
-  UNMERGE_TOTALITY_GATES: UNMERGE_TOTALITY_GATES as readonly Gate<never>[],
-  PTR_FIELD_GATES: PTR_FIELD_GATES as readonly Gate<never>[],
-  // l3/advance.ts's two: the chain's head, and each successor against the member before it. The
-  // same two address rules appear in both, as separate rule objects — a head re-spelled at a
-  // second site is wrong for the member table's reason, and gates.ts's header says a second
-  // consumer shares the PREDICATE rather than the rule.
-  ADVANCE_HEAD_GATES: ADVANCE_HEAD_GATES as readonly Gate<never>[],
-  ADVANCE_MEMBER_GATES: ADVANCE_MEMBER_GATES as readonly Gate<never>[],
-  FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
-  CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],
-  ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
-  // structure/exit-arms.ts's `earlyReturnArm`: when an arm writes a copy of a tail the exit path also runs
-  EXIT_TAIL_GATES: EXIT_TAIL_GATES as readonly Gate<never>[],
-  // ... and when an arm writes a copy of a return tail a path that bypasses the loop also enters
-  BYPASS_TAIL_GATES: BYPASS_TAIL_GATES as readonly Gate<never>[],
-  // structure.ts's two-level exit: which edge `foreverShape` takes for one, and the two places it
-  // is spelled (the loop's region, and the `break` out of a block)
-  TWO_LEVEL_EXIT_GATES: TWO_LEVEL_EXIT_GATES as readonly Gate<never>[],
-  TWO_LEVEL_REGION_GATES: TWO_LEVEL_REGION_GATES as readonly Gate<never>[],
-  TWO_LEVEL_BREAK_GATES: TWO_LEVEL_BREAK_GATES as readonly Gate<never>[],
-  // ... and when an edge out of an inner loop's body is that loop's outward exit, handed out
-  OUTWARD_EXIT_GATES: OUTWARD_EXIT_GATES as readonly Gate<never>[],
-  BREAK_TAIL_GATES: BREAK_TAIL_GATES as readonly Gate<never>[],
-  // structure.ts's `forPlanAt`: a `while (1)` read as a `for` past the loop's shape, and the rules
-  // over the update's and the init's copies, and over each reading of the latch's test as a compare
-  FOR_PLAN_GATES: FOR_PLAN_GATES as readonly Gate<never>[],
-  FOR_PLAN_IV_GATES: FOR_PLAN_IV_GATES as readonly Gate<never>[],
-  FOR_BOUND_GATES: FOR_BOUND_GATES as readonly Gate<never>[],
-  SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
-  SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
-  REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
-  HOMESPLIT_GATES: HOMESPLIT_GATES as readonly Gate<never>[],
-  HOMESPLIT_FAN_GATES: HOMESPLIT_FAN_GATES as readonly Gate<never>[],
-  // A table COMPOSED at runtime — `withholdingKey` prepends its rejection to a caller's own
-  // admission, so the shipped table is neither of the two consts. Registered over a representative
-  // composition: without it, a `withheld-key` id appearing in the table it wraps is a duplicate
-  // nothing checks, and `without()` would then ablate whichever came first.
-  WITHHELD_KEY_OVER_LIVEBASE_BLOCK: withholdingKey(LIVEBASE_BLOCK_GATES, 'c:0 4 true') as readonly Gate<never>[],
-  // frontend/frame-objects.ts: the retractions an escaped frame address costs
-  FRAME_ESCAPE_GATES: FRAME_ESCAPE_GATES as readonly Gate<never>[],
-  // frontend/frame-objects.ts: what keeps a frame's end word in the one object
-  RELIFT_HAND_BACK_GATES: RELIFT_HAND_BACK_GATES as readonly Gate<never>[],
-  // frontend/dead-reads.ts: the dead reads the lift must not stamp `volatile`
-  DEAD_READ_GATES: DEAD_READ_GATES as readonly Gate<never>[],
-};
+// What that scan cannot see is a table that is not an exported const: a MODULE-PRIVATE one
+// (scopebase.ts's `COUNTING_RULES` and `LOOP_RULES`, which reach the registry only inside
+// `SCOPEBASE_GATES` and `REGIONBASE_GATES`), and one COMPOSED at runtime, like the registry's
+// `withholdingKey` entry. Those two shapes stay on the author. Nor does it scan CONSULTATION sites,
+// which would answer a different question badly: of the 26 `firstRejection` calls in `src/`, 22
+// receive the table as a parameter (`gates`, `gates.shape`, `rules`, `admission`) and only four
+// name one, so a scan of the call sites would find four tables and miss every table that is passed
+// in.
 
 /** Every core test file's text, by file name, so a guard is looked up in the file it names. */
 const testFiles = new Map(
@@ -197,7 +33,7 @@ const testFiles = new Map(
     .map((f) => [f, readFileSync(join(__dirname, f), 'utf8')] as const),
 );
 
-describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
+describe.each(GATE_TABLES.map((t) => [t.name, t.table] as const))('%s', (_name, gates) => {
   test('is well-formed, and nothing calls itself sound without naming a guard', () => {
     expect(gateTableDefects(gates)).toEqual([]);
   });
@@ -236,33 +72,4 @@ describe('ablateHeuristic', () => {
   test('still throws on an unknown id', () => {
     expect(() => ablateHeuristic(table, 'no-such-gate')).toThrow(/no gate/);
   });
-});
-
-// The roster is hand-maintained and its one failure mode is OMISSION — a table that ships with no
-// contract, which no assertion inside this file can notice because the missing table is exactly
-// what it never sees. Derive the question instead: read the declarations out of the source.
-test('every gate table the source exports is on the roster above', () => {
-  const srcFiles: string[] = [];
-  const walk = (d: string): void => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) {
-        walk(p);
-      } else if (p.endsWith('.ts')) {
-        srcFiles.push(p);
-      }
-    }
-  };
-  walk(join(__dirname, '..', 'src'));
-  const declared = srcFiles.flatMap((f) =>
-    [...readFileSync(f, 'utf8').matchAll(/^export const ([A-Z][A-Z0-9_]*)\s*:\s*(?:readonly\s+)?Gate</gm)].map(
-      (m) => m[1],
-    ),
-  );
-  // REACH: a regex that stops matching would make the check below pass by finding nothing.
-  expect(declared.length, 'the declaration scan found no gate tables at all — its regex has rotted').toBeGreaterThan(
-    20,
-  );
-  const unregistered = [...new Set(declared.filter((n) => !(n in TABLES)))].sort();
-  expect(unregistered, `exported gate tables absent from TABLES: ${unregistered.join(', ')}`).toEqual([]);
 });

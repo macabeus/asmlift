@@ -174,7 +174,7 @@ const { values: opts, positionals } = parseArgs({
     force: { type: 'boolean', default: false },
     whole: { type: 'boolean', default: false },
     asm: { type: 'string' },
-    // gates only: which tabled pass to census (see run/gate-census.ts's registry).
+    // gates only: which tabled pass to census (see run/gate-census.ts's drivers).
     pass: { type: 'string' },
     // sweep only: the corpus-wide differential re-lift (run/sweep.ts). `--base`/`--base-dir` name
     // the OTHER tree; `--map-modes` which map modes to lift each row in; `--fan` adds enumeration

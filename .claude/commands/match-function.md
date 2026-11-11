@@ -235,9 +235,11 @@ Per commit:
   worked example, and `pnpm bench gates --pass unmerge` is what reading it back looks like. The
   parameter is NECESSARY AND NOT SUFFICIENT: the census also needs a caller-side seam a process
   outside core can reach — a mutable record holding the call, not a static import (whose bindings
-  are read-only). Five of the sixteen passes that take a table have one: `/unmerge` in
-  `PRE_RESPELL_VARIATIONS`, and every tabled pass in `PRE_RECOVERY_PASSES` (which is how `--pass
-  arm-reread` reaches the branch short-circuit fold) — not every pass in `raise/`. Making a pass
+  are read-only). Fifteen passes that take a table have one, and each has a census driver:
+  `/unmerge` and the case-end goto in `PRE_RESPELL_VARIATIONS`, every tabled pass in
+  `PRE_RECOVERY_PASSES` (which is how `--pass arm-reread` reaches the branch short-circuit fold),
+  every tabled fold in `PRE_STRUCTURE_FOLDS`, and the two standalone records `OFFSET_NAME_PASS` and
+  `FRAME_OBJECT_AUDIT` — not every pass in `raise/`. Making a pass
   censusable is therefore a claim about its CALLER, not about its table —
   `grep -n "WHAT PUTS A PASS IN THE REGISTRY" apps/benchmark/src/run/gate-census.ts`.
   A refusal that is a CONJUNCTION WITH BUY-BACKS cannot become a table at any price, and that
