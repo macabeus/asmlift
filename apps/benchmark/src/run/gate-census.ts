@@ -25,14 +25,15 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Fifteen passes have one — `unmergeJoins` and `jumpToCaseEnds` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, six passes in
+// holding the call. Sixteen passes have one — `unmergeJoins` and `jumpToCaseEnds` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, seven passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this file's
-// `arm-reread` and `shared-value`, one entry per table), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth` and `displaced`, the five folds
+// `arm-reread` and `shared-value`, one entry per table), `truncload`, `member-arrays`, `narrowlocal`, `paramwidth`, `displaced` and
+// `structs` (the member walks it seats, pass id `member-walks`), the five folds
 // in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `unthread`, `reroll`, `unpre`), whose
 // entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
-// `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. All fifteen
-// have a driver below, sixteen pass ids in all, because the branch fold has one per table. A
+// `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. All sixteen
+// have a driver below, seventeen pass ids in all, because the branch fold has one per table. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
 // `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has
 // none, because the binding is a read-only module-namespace property — measured, not argued:
@@ -71,7 +72,12 @@ import {
   foldEmptyLatches,
   foldExitTrampolines,
 } from '@asmlift/core/raise/latch';
-import { type MemberArrayCandidate, recognizeMemberArrays } from '@asmlift/core/raise/memberarrays';
+import {
+  type MemberArrayCandidate,
+  type MemberWalkCandidate,
+  memberWalks,
+  recognizeMemberArrays,
+} from '@asmlift/core/raise/memberarrays';
 import { type NarrowLocalCandidate, narrowBlockLocals } from '@asmlift/core/raise/narrowlocal';
 import { OFFSET_NAME_PASS, type OffsetAddress, nameOffsetAddresses } from '@asmlift/core/raise/offsetnames';
 import type { NarrowParamCandidate } from '@asmlift/core/raise/paramwidth';
@@ -79,7 +85,12 @@ import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-
 import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
 import { type FoldedTopTest, type PeeledTest, rerollPeeledTests } from '@asmlift/core/raise/reroll';
 import type { ArmRereadSite, SharedValueSite } from '@asmlift/core/raise/shortcircuit';
-import { type DisplacedBase, type DisplacedRoot, foldDisplacedAccesses } from '@asmlift/core/raise/structs';
+import {
+  type DisplacedBase,
+  type DisplacedRoot,
+  foldDisplacedAccesses,
+  recognizeStructs,
+} from '@asmlift/core/raise/structs';
 import { type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
 import { type RedundantParam, recomputeRedundantParams } from '@asmlift/core/raise/unpre';
 import { type ThreadedExit, unthreadLoopExits } from '@asmlift/core/raise/unthread';
@@ -346,6 +357,27 @@ const DRIVERS: Record<string, CensusDriver> = {
       const gates = w[0] as readonly Gate<MemberArrayCandidate>[];
       const restore = pass.run;
       pass.run = (fn) => recognizeMemberArrays(fn, gates);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  'member-walks': {
+    // raise/memberarrays.ts's `MEMBER_WALK_GATES` — which strength-reduced walks hand
+    // raise/structs.ts a member array to seat. ONE table, asked once per header parameter whose
+    // entry and back edges carry a materialized `add(P, K)` and its step, per lift that reaches the
+    // `structs` pass, whose entry reads the walks.
+    tables: ['walk'],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'structs');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'structs' — the member walks' caller-side seam moved");
+      }
+      const gates = w[0] as readonly Gate<MemberWalkCandidate>[];
+      const restore = pass.run;
+      pass.run = (fn, _self, _opts, target) =>
+        recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary, memberWalks(fn, gates));
       return () => {
         pass.run = restore;
       };

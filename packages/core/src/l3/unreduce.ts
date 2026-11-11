@@ -427,8 +427,10 @@ function arithScale(t: IrType | undefined): number | null {
   if (t === undefined) {
     return null;
   }
-  if (t.kind === 'ptr') {
-    const bytes = ptrElemBytes(t.to);
+  if (t.kind === 'ptr' || t.kind === 'array') {
+    // an ARRAY in a `+` decays to a pointer to its element, so it scales as one: a struct's member
+    // array (raise/structs.ts `seatMemberWalks`) is an init `a1->field_4` of a `u16 *` walk
+    const bytes = ptrElemBytes(t.kind === 'ptr' ? t.to : t.elem);
     return bytes > 0 ? bytes : null;
   }
   return t.kind === 'int' && t.width === 32 ? 1 : null;
@@ -692,19 +694,26 @@ const hasContinueIn = (stmts: readonly Stmt[]): boolean =>
 
 // ── the re-evaluation gates ─────────────────────────────────────────────────────────────────
 
-/** every memory access in an expression, as its own node */
-const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
-  [...subterms(e)].filter((x): x is Extract<Expr, { k: 'index' | 'field' }> => x.k === 'index' || x.k === 'field');
+/** every memory access in an expression, as its own node. A member ARRAY (`a1->field_4` in a walk's
+ *  init) is not one: it names the member's ADDRESS, which C reads off the array's decay without
+ *  touching memory, and any read its base makes (`p->q->arr`'s `p->q`) is a node of its own. */
+const accessesIn = (e: Expr, vt: VarTypes): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
+  [...subterms(e)].filter(
+    (x): x is Extract<Expr, { k: 'index' | 'field' }> =>
+      x.k === 'index' || (x.k === 'field' && exprCType(x, vt)?.kind !== 'array'),
+  );
 
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
 
 /** Does the init READ MEMORY that a write the region performs could change? An access (`index`,
  *  `field`), or a bare name `calleeWritable` (l3/storage.ts) says a callee or an aliasing store
- *  can write with no `assign` naming it — the write `init-loop-var` cannot see. The ONE spelling
- *  of the question: `movedReadAliasable` returns early on it, and the device-proof test asks it. */
-const initReadsMemory = (e: Expr, calleeWrites: (n: string) => boolean): boolean =>
-  accessesIn(e).length > 0 || namesUnder(e).some(calleeWrites);
+ *  can write with no `assign` naming it — the write `init-loop-var` cannot see. A member array
+ *  (`((struct S *)gPtr)->field_4`) is no access, but the name its base reads still counts here. The
+ *  ONE spelling of the question: `movedReadAliasable` returns early on it, and the device-proof
+ *  test asks it. */
+const initReadsMemory = (e: Expr, vt: VarTypes, calleeWrites: (n: string) => boolean): boolean =>
+  accessesIn(e, vt).length > 0 || namesUnder(e).some(calleeWrites);
 
 /** Does a READ land on a device register? Two readings, and neither is enough alone. The chain's
  *  ROOT is what places an access whose subscripts are not constant — `((struct E *)0x03003430)
@@ -732,13 +741,14 @@ const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
 function movedReadAliasable(
   closed: Expr,
   evaluated: readonly Stmt[],
+  vt: VarTypes,
   calleeWrites: (n: string) => boolean,
   window?: readonly [number, number],
 ): boolean {
-  if (!initReadsMemory(closed, calleeWrites)) {
+  if (!initReadsMemory(closed, vt, calleeWrites)) {
     return false; // no memory read ⇒ no write can reach it; its private NAMES are the two gates above
   }
-  const reads = accessesIn(closed);
+  const reads = accessesIn(closed, vt);
   for (const s of allStmts(evaluated)) {
     // a call or an unmodelled instruction may write anything
     if (stmtExprs(s).some(exprHasEffect)) {
@@ -906,7 +916,7 @@ export function unreduceAccumulators(
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
         movedVolatile: exprReadsVolatile(initStmt.value, sfn),
-        movedAliasable: movedReadAliasable(initStmt.value, evaluated, calleeWrites, window),
+        movedAliasable: movedReadAliasable(initStmt.value, evaluated, vt, calleeWrites, window),
       };
       if (firstRejection(gates, ctx) !== null) {
         continue;
@@ -921,7 +931,7 @@ export function unreduceAccumulators(
       }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
-      if (initReadsMemory(initStmt.value, calleeWrites) && deviceWritesMemory(armed, triggers)) {
+      if (initReadsMemory(initStmt.value, vt, calleeWrites) && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
       rewrites.set(cand.name, closed.ok);
