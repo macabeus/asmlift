@@ -21,6 +21,7 @@ import type { SFn } from '../ast';
 import { compoundAssignments } from './compound';
 import { hexBitLiterals } from './hex';
 import { subscriptZeroBesideConstants } from './ptr0';
+import { renumberLocals } from './renumber';
 import { callTruthTests } from './truthcall';
 import { voidTail } from './voidtail';
 
@@ -32,6 +33,8 @@ const PASSES: readonly ((fn: SFn) => SFn)[] = [
   subscriptZeroBesideConstants,
   hexBitLiterals,
   compoundAssignments,
+  // last: the rewrites above can only drop mentions, never add one
+  renumberLocals,
 ];
 
 /** The finished tree, re-spelled by every tree-level polish rewrite, in order. */
