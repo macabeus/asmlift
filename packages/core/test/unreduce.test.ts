@@ -733,7 +733,8 @@ test('an init reading a GLOBAL name declines over a region that may write it', (
   const armed = walk([st(cell(0x040000dc), v('acc'))]);
   expect(unreduceAccumulators(armed, GBA, ARMV4T_AGBCC.capabilities.deviceMemoryWriters)!.needsProof).toBe(true);
   // a global ARRAY's name decays to its link-time address and reads nothing: not aliasable over a
-  // call (`gArr + 2` then stops at `stride-units`, a typing question this gate does not answer)
+  // call (`gPtr + 2` over the array then stops at `stride-units`, a typing question this gate does
+  // not answer)
   expect(ctxFor(walk([take], [{ name: 'gPtr', type: T.array(T.u(16), 8) }])).movedAliasable).toBe(false);
   // and a LOCAL shadowing the global is private storage — the name binds to the local
   const shadowed = walk([take]);

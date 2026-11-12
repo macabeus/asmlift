@@ -21,8 +21,7 @@
 // which expressions are a local object's ADDRESS (`localAddresses`), the frame bytes a respelled
 // tree must keep reading as integers (contracts.ts `assertLocalStorageStaysInteger`).
 // And one about a name's VALUE, which two passes that move a read ask: can something the function
-// does not spell as an `assign` change it (`calleeWritable`)? Each pass used to keep its own
-// answer, and the two answers disagreed on a global array.
+// does not spell as an `assign` change it (`calleeWritable`)?
 import { type Expr, type SFn, type Stmt, assignsIn, dotBase, stmtChildren, taintOverAssigns, walkExprs } from './ast';
 
 export type Storage = 'local' | 'param' | 'global';

@@ -111,11 +111,8 @@
 //     loop calling `TakeMove(…)` would re-read `gPtr` after every call where the asm read it once.
 //     It counts as a read OUTSIDE the window — a name the C declares is not a device register —
 //     so it bars on the same writes and no others. Which names count is `calleeWritable`
-//     (l3/storage.ts), the one answer `l3/reindex.ts`'s invariant-addend test reads too: a scalar
-//     global, a non-array function-scope static (declared in `SFn.statics`, but in no class
-//     `nameStorage` names), and a name declared nowhere, because unknown storage is not private
-//     storage. A global or static ARRAY does not: its name decays to a link-time address and reads
-//     nothing. An address-escaped local counts as well, which `init-name-escapes` refuses first.
+//     (l3/storage.ts), the answer `l3/reindex.ts`'s invariant-addend test reads too; a global or
+//     static ARRAY does not, since its name decays to a link-time address and reads nothing.
 //
 // AND THE PREMISE THAT IS NOT ENOUGH, which this file recorded as a fact about the board and which
 // is FALSE. "A write to a hardware register is not a write to any object a C program declares" is
