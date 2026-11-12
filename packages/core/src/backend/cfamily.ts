@@ -809,6 +809,10 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean,
   // the reader will.
   const legal = legalizePointerWrites(fn0);
   const fn = polish ? polishTree(legal) : legal;
+  const stray = polish ? caseGotoViolation(fn.body) : null;
+  if (stray !== null) {
+    throw new Error(`c backend: the polished tree breaks a goto's contract: ${stray}`);
+  }
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME
   // params/locals the emitted declarations come from — so the printer judges exactly the C the
   // reader will see.
@@ -834,6 +838,21 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean,
     append(lines, printStmt(s, '    ', vt, leaf));
   }
   return lines;
+}
+
+/** The body, polished where `polish` asks and the polished tree prints. The polish only re-spells a
+ *  tree the printer accepts, so a polished tree it refuses (a `goto` the move left outside its
+ *  switch, a `break` bound to another statement) is a polish bug, and it must not become a refused
+ *  candidate the draft would have printed: the draft's body is printed instead. */
+function polishedBody(fn: SFn, leaf: LeafHook | undefined, designators: boolean, polish: boolean): string[] {
+  if (polish) {
+    try {
+      return cFamilyBody(fn, leaf, designators, true);
+    } catch {
+      // the draft below prints it, or throws its own refusal
+    }
+  }
+  return cFamilyBody(fn, leaf, designators, false);
 }
 
 /** One initial number: hex from 10 up, a negative one with its sign, so a byte table reads as the
@@ -999,7 +1018,7 @@ function assembleCFamily(
   }
   const printed = [
     `${signature} {`,
-    ...cFamilyBody(fn, leaf, designators && fn.designators === true, polish),
+    ...polishedBody(fn, leaf, designators && fn.designators === true, polish),
     '}',
   ].join('\n');
   const decls = structDecls(fn, printed);
