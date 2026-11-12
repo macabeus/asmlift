@@ -21,12 +21,14 @@ import type { SFn } from '../ast';
 import { compoundAssignments } from './compound';
 import { hexBitLiterals } from './hex';
 import { subscriptZeroBesideConstants } from './ptr0';
+import { callTruthTests } from './truthcall';
 import { voidTail } from './voidtail';
 
 /** The tree-level polish rewrites, in the order they run: the ones that move statements first, so
  *  the spelling ones see the statements where they end up. */
 const PASSES: readonly ((fn: SFn) => SFn)[] = [
   voidTail,
+  callTruthTests,
   subscriptZeroBesideConstants,
   hexBitLiterals,
   compoundAssignments,
