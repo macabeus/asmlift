@@ -5,7 +5,10 @@ import { type IrType, typeEquals } from '../ir/types';
 
 export type Expr =
   | { k: 'var'; name: string }
-  | { k: 'const'; value: number }
+  // `hex` is SPELLING, like `index.subscript`: print the literal in hexadecimal. Set only by the
+  // readability polish (l3/polish/hex.ts), on a value whose hex and decimal literals have the same
+  // C type, so it never changes what the literal is; `exprEquals` ignores it.
+  | { k: 'const'; value: number; hex?: true }
   // A `double` literal, carried as its IEEE bit pattern (ir/float-bits.ts) — a kind apart from the
   // integer `const`, so no integer fold, range test or signedness reading ever takes it for one.
   | { k: 'fconst'; bits: string }

@@ -51,7 +51,7 @@ describe('polish: p[0] beside a constant subscript of the same p', () => {
   test('a pointer cast base counts as a pointer', () => {
     const base: Expr = { k: 'cast', to: T.ptr(T.int(8, false)), e: c(0x4000000) };
     expect(cBackend.emit(fnOf(add(at(base, 0), at(base, 2)), T.int(32, true)))).toContain(
-      'return ((u8 *)67108864)[0] + ((u8 *)67108864)[2];',
+      'return ((u8 *)0x4000000)[0] + ((u8 *)0x4000000)[2];',
     );
   });
 });

@@ -18,9 +18,10 @@
 // the same printer with the polish off (`LanguageBackend.draft`, `emitDraft`), and the polish moves
 // what the reader sees and nothing the ranking decides.
 import type { SFn } from '../ast';
+import { hexBitLiterals } from './hex';
 import { subscriptZeroBesideConstants } from './ptr0';
 
 /** The finished tree, re-spelled by every tree-level polish rewrite, in order. */
 export function polishTree(fn: SFn): SFn {
-  return subscriptZeroBesideConstants(fn);
+  return hexBitLiterals(subscriptZeroBesideConstants(fn));
 }

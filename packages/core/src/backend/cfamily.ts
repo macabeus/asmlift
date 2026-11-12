@@ -330,7 +330,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     case 'var':
       return e.name;
     case 'const':
-      return String(e.value);
+      return e.hex === true ? `0x${e.value.toString(16)}` : String(e.value);
     // a negative literal is a prefix `-`, and parenthesizes where one would (`un` below)
     case 'fconst': {
       const s = doubleLiteral(e.bits);
