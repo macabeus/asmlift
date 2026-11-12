@@ -37,11 +37,16 @@ const ADDR_CAST_EXEMPT = /\(\s*[us]32\s*\)\s*&\s*[A-Za-z_]\w*|\(\s*u32\s*\)\s*([
 const GENERIC_LOCAL = /^(?:[av]\d+|arg\d+|sp\d*|var_\w+|temp_\w+|phi_\w+)$/;
 
 /** How many of the counted casts are exempt address spellings (always a subset of the casts
- *  regex's matches — each starts with a `(u32)`/`(s32)` that regex counts). */
-function countAddrCastExemptions(src: string): number {
+ *  regex's matches — each starts with a `(u32)`/`(s32)` that regex counts).
+ *
+ *  "Is this identifier a local?" is answered by its NAME's shape and, past that, by the declarations
+ *  the source itself prints (its parameter list and the declarations opening its body): a decompiler
+ *  that names a local or a parameter (`(u32)count`) truncates a value exactly as `(u32)v0` does, and
+ *  reading the name alone would exempt that cast as an address spelling. */
+function countAddrCastExemptions(src: string, declared: ReadonlySet<string>): number {
   let n = 0;
   for (const m of src.matchAll(ADDR_CAST_EXEMPT)) {
-    if (m[1] === undefined || !GENERIC_LOCAL.test(m[1])) {
+    if (m[1] === undefined || !(GENERIC_LOCAL.test(m[1]) || declared.has(m[1]))) {
       n++;
     }
   }
@@ -77,6 +82,19 @@ function fnParts(src: string): FnParts {
     decls.push({ line: lines[j], name: m[1] });
   }
   return { signature: lines[at], decls, stmts: lines.slice(j) };
+}
+
+/** Parameter and local names the source declares (`fnParts`). */
+function declaredNames(parts: FnParts): Set<string> {
+  const out = new Set(parts.decls.map((d) => d.name));
+  const params = /\((.*)\)\s*\{\s*$/.exec(parts.signature)?.[1] ?? '';
+  for (const p of params.split(',')) {
+    const m = /([A-Za-z_]\w*)\s*(?:\[[^\]]*\])*\s*$/.exec(p.trim());
+    if (m && m[1] !== 'void') {
+      out.add(m[1]);
+    }
+  }
+  return out;
 }
 
 /** Does `rhs` hold, outside parentheses, an operator that binds LOOSER than `+`/`-`? Then
@@ -200,7 +218,7 @@ export function assessQuality(src: string): QualityScore {
     countAll(
       src,
       /\(\s*(?:un)?signed\b[^)]*\)|\((?:u8|u16|u32|s8|s16|s32|int|char|short|long|void|float|double)\s*\**\s*\)/g,
-    ) - countAddrCastExemptions(src);
+    ) - countAddrCastExemptions(src, declaredNames(parts));
   const rawMem = countAll(src, /\*\(\s*[A-Za-z_][\w ]*\*+\s*\)\s*\(/g); // *(T*)( ... )
   // *(T*)0xADDR — an absolute-address deref (typically MMIO): the symbol/global was not
   // recovered. Counted for the report but NOT score-penalized (the score formula is pinned).

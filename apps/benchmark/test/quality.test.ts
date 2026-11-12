@@ -94,6 +94,15 @@ describe('assessQuality (pinned)', () => {
     expect(q.score).toBe(96);
   });
 
+  test('u32 casts of DECLARED names stay counted, whatever the name', () => {
+    // a parameter and a local named by a context or a renaming pass are values, not addresses;
+    // an undeclared bare name is still read as a code address
+    const q = assessQuality(
+      'u32 f(s32 count) {\n    s32 i;\n    i = count;\n    return (u32)count + (u32)i + (u32)Func;\n}\n',
+    );
+    expect(q.casts).toBe(2);
+  });
+
   test('absolute-address derefs are counted but not score-penalized', () => {
     const q = assessQuality('void f(void) {\n    *(vu16 *)0x04000052 = 0x100;\n}\n');
     expect(q.addrDeref).toBe(1);
