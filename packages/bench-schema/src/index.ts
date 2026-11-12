@@ -41,6 +41,34 @@ export interface QualityScore {
   unkGlue: number; // count of undecompiled-glue markers (apps/benchmark/src/eval/quality.ts)
   rawMem: number; // `*(T*)(p + N)` raw memory casts — type recovery failed (score-penalized)
   addrDeref: number; // `*(T*)0xADDR` absolute-address derefs — symbol recovery failed (counted, NOT score-penalized)
+  /** Spelling habits a reader would write differently, each COUNTED and none score-penalized (the
+   *  score formula is pinned). Textual readings of the source, as every other counter here is, so
+   *  they read m2c's output and asmlift's alike. Absent on an artifact merged before they existed;
+   *  `bench:merge` recomputes every row's quality, so a fresh artifact carries them on every side. */
+  habits?: QualityHabits;
+}
+
+/** One counter per spelling habit (apps/benchmark/src/eval/quality.ts says how each is read). */
+export interface QualityHabits {
+  /** `*p` where the same function also subscripts `p` by a constant (`p[2]`): `p[0]` reads alike */
+  ptrDeref0: number;
+  /** a decimal literal of 10 or more as a bitwise operand (`& 64`, `~255`, `255 << 8`) or an
+   *  address (`(u16 *)67109384`), where hex reads as the bits */
+  decimalMasks: number;
+  /** `x = x + 1;` / `x = x - 1;` as a statement or a `for` update, where `x++` reads alike */
+  incrStmts: number;
+  /** `L = L + E;` / `L = L - E;` (E not 1) as a statement, where `L += E` reads alike */
+  compoundStmts: number;
+  /** in a `void` function: a trailing `return;`, and an empty `default:` closing a switch */
+  voidTail: number;
+  /** `} else {` right after a branch that ends in `return` */
+  elseAfterReturn: number;
+  /** `f(x) != 0)` as a truth test of a call's result */
+  callNeZero: number;
+  /** `vN` local numbers skipped in the declared set (v0, v1, v3 skips one) */
+  localGaps: number;
+  /** declared locals the body never mentions */
+  unusedLocals: number;
 }
 
 /** objdiff difference-kind tally (structurally mirrors @match-kit/scoring's DiffBreakdown — spelled

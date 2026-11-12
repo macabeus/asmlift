@@ -9,7 +9,7 @@
 // FAIRNESS: m2c's `var_X`/`temp_X` and asmlift's `a0`/`v0` are each decompiler's normal
 // generic-local idiom (neither recovers real names without context) — NOT penalized. Only genuine
 // failure markers count as glue.
-import type { QualityScore } from '@asmlift/bench-schema';
+import type { QualityHabits, QualityScore } from '@asmlift/bench-schema';
 
 const GLUE_PATTERNS = [
   /M2C_ERROR/g,
@@ -48,7 +48,151 @@ function countAddrCastExemptions(src: string): number {
   return n;
 }
 
+/** The function's text split at its body: the signature line (the last line that opens a brace
+ *  after a parameter list, at column 0), the declarations that open the body, and the statements
+ *  after them. A source with no recognizable signature (a failure stub) has an empty body. */
+interface FnParts {
+  signature: string;
+  decls: { line: string; name: string }[];
+  stmts: string[];
+}
+
+const DECL_LINE =
+  /^ {4}(?:static |volatile |const |struct |union |unsigned |signed )*[A-Za-z_]\w*(?:\s+|\s*\*+\s*)\**([A-Za-z_]\w*)(?:\[[^\]]*\])*(?: = [^;]*)?;$/;
+const NOT_A_DECL = /^\s*(?:return|goto|break|continue|case|default)\b/;
+
+function fnParts(src: string): FnParts {
+  const lines = src.split('\n');
+  const at = lines.findIndex((l) => /^[A-Za-z_].*\)\s*\{\s*$/.test(l));
+  if (at < 0) {
+    return { signature: '', decls: [], stmts: [] };
+  }
+  const decls: { line: string; name: string }[] = [];
+  let j = at + 1;
+  for (; j < lines.length; j++) {
+    const m = DECL_LINE.exec(lines[j]);
+    if (!m || NOT_A_DECL.test(lines[j]) || /\(/.test(lines[j].split(' = ')[0])) {
+      break;
+    }
+    decls.push({ line: lines[j], name: m[1] });
+  }
+  return { signature: lines[at], decls, stmts: lines.slice(j) };
+}
+
+/** Does `rhs` hold, outside parentheses, an operator that binds LOOSER than `+`/`-`? Then
+ *  `x = x + rhs` printed flat groups as `(x + a) << 2`, and is no compound assignment. */
+function hasLooseTopLevelOp(rhs: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < rhs.length; i++) {
+    const c = rhs[i];
+    if (c === '(' || c === '[') {
+      depth++;
+    } else if (c === ')' || c === ']') {
+      depth--;
+    } else if (depth === 0 && /[<>=!&|^?]/.test(c) && !(c === '>' && rhs[i - 1] === '-')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The index of the `(` that opens the group closed at `close`, or -1. */
+function openingParen(s: string, close: number): number {
+  let depth = 0;
+  for (let k = close; k >= 0; k--) {
+    if (s[k] === ')') {
+      depth++;
+    } else if (s[k] === '(') {
+      depth--;
+      if (depth === 0) {
+        return k;
+      }
+    }
+  }
+  return -1;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The habit counters (`QualityHabits`), each a textual reading of the statements. */
+function assessHabits(parts: FnParts): QualityHabits {
+  const body = parts.stmts.join('\n');
+  const isVoid = /^(?:static\s+)?void\s/.test(parts.signature);
+
+  // `*p` beside `p[k]`: a deref is a `*` with no space before the name (the printer spaces a
+  // multiplication) that is not itself subscripted, called or a member access.
+  const subscripted = new Set([...body.matchAll(/\b([A-Za-z_]\w*)\[(?:0x[0-9a-fA-F]+|\d+)\]/g)].map((m) => m[1]));
+  let ptrDeref0 = 0;
+  for (const m of body.matchAll(/(?<![\w)\]])\*([A-Za-z_]\w*)\b(?!\s*[[(.]|->)/g)) {
+    if (subscripted.has(m[1])) {
+      ptrDeref0++;
+    }
+  }
+
+  const dec = '(?<![\\w.])[1-9]\\d+(?![\\w.])';
+  const decimalMasks = [
+    new RegExp(`(?<![&|])[&|^](?![&|=])\\s*(?:\\([\\w ]+\\)\\s*)?${dec}`, 'g'),
+    new RegExp(`${dec}\\s*[&|^](?![&|=])`, 'g'),
+    new RegExp(`~\\s*${dec}`, 'g'),
+    new RegExp(`${dec}\\s*(?:<<|>>)`, 'g'),
+    new RegExp(`\\*\\s*\\)\\s*${dec}`, 'g'),
+  ].reduce((n, re) => n + countAll(body, re), 0);
+
+  const incrStmts = countAll(body, /(?:^\s*|; )([A-Za-z_]\w*) = \1 [+-] 1(?:;$|\)(?= \{$))/gm);
+  let compoundStmts = 0;
+  for (const m of body.matchAll(/^\s*([^=;\n]+?) = ([^;\n]+);$/gm)) {
+    const lv = m[1];
+    const rest = m[2];
+    if (!rest.startsWith(`${lv} + `) && !rest.startsWith(`${lv} - `)) {
+      continue;
+    }
+    const rhs = rest.slice(lv.length + 3);
+    if (rhs !== '1' && !hasLooseTopLevelOp(rhs)) {
+      compoundStmts++;
+    }
+  }
+
+  let voidTail = 0;
+  if (isVoid) {
+    const stmts = parts.stmts.filter((l) => l.trim().length > 0);
+    if (stmts.length >= 2 && stmts[stmts.length - 2] === '    return;') {
+      voidTail++;
+    }
+    voidTail += countAll(body, /^ {4}default:\n\s*(?:return;|break;)\n {4}\}\n\}/gm);
+  }
+
+  const elseAfterReturn = countAll(body, /return\b[^;\n]*;\n\s*\} else\b/g);
+
+  let callNeZero = 0;
+  for (const m of body.matchAll(/\) != 0(?=\)| &&| \|\|)/g)) {
+    const open = openingParen(body, m.index);
+    const before = body.slice(0, open);
+    if (open > 0 && /(?:\bif \(|\bwhile \(|&& |\|\| |; |!\()[A-Za-z_]\w*$/.test(before)) {
+      callNeZero++;
+    }
+  }
+
+  const vs = [...new Set(parts.decls.map((d) => /^v(\d+)$/.exec(d.name)?.[1]).filter((v) => v !== undefined))]
+    .map(Number)
+    .sort((a, b) => a - b);
+  const localGaps = vs.length === 0 ? 0 : vs[vs.length - 1] + 1 - vs.length;
+  const unusedLocals = parts.decls.filter((d) => !new RegExp(`\\b${escapeRe(d.name)}\\b`).test(body)).length;
+
+  return {
+    ptrDeref0,
+    decimalMasks,
+    incrStmts,
+    compoundStmts,
+    voidTail,
+    elseAfterReturn,
+    callNeZero,
+    localGaps,
+    unusedLocals,
+  };
+}
+
 export function assessQuality(src: string): QualityScore {
+  const parts = fnParts(src);
   const lines = src.split('\n').filter((l) => l.trim().length > 0).length;
   const gotos = countAll(src, /\bgoto\b/g);
   const labels = countAll(src, /^\s*[A-Za-z_]\w*:\s*$/gm);
@@ -81,5 +225,5 @@ export function assessQuality(src: string): QualityScore {
   }
   score = Math.max(0, Math.min(100, score));
 
-  return { score, lines, gotos, casts, unkGlue, rawMem, addrDeref };
+  return { score, lines, gotos, casts, unkGlue, rawMem, addrDeref, habits: assessHabits(parts) };
 }
