@@ -895,3 +895,86 @@ test('a zero init leaves the scaled counter standing alone', () => {
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).toContain('*(s32 *)67109080 = i << 6;');
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).not.toContain('0 +');
 });
+
+// A WALK OVER A STRUCT'S MEMBER ARRAY (pokeemerald:CreateBattleTowerMon:agbcc, synthetic:mixwalk):
+// the init is the member `a1->field_4`, an ARRAY, and the closed form reads it SUBSCRIPTED —
+// `a1->field_4[i]`, agbcc's ARRAY_REF, which materializes the member address before the loop where
+// `*(a1->field_4 + i)` folds the `+4` into the load. A POINTER init keeps `*(p + i)`.
+const MOVES = T.struct('Struct0', [
+  { off: 0, type: T.u(16), name: 'field_0' },
+  { off: 2, type: T.array(T.u(8), 2), name: '_pad0' },
+  { off: 4, type: T.array(T.u(16), 4), name: 'field_4' },
+]);
+const memberWalk = (init: Expr, a1Type: IrType = T.ptr(MOVES)): SFn => ({
+  name: 'f',
+  params: [{ name: 'a1', type: a1Type }],
+  locals: [
+    { name: 'v0', type: T.ptr(T.u(16)) },
+    { name: 'i', type: T.s(32) },
+    { name: 'sum', type: T.s(32) },
+  ],
+  retType: T.void(),
+  body: [
+    set('i', c(0)),
+    set('sum', c(0)),
+    set('v0', init),
+    {
+      k: 'dowhile',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(3) },
+      body: [
+        set('sum', plus(v('sum'), { k: 'index', base: v('v0'), idx: c(0), width: 2, signed: false })),
+        set('v0', plus(v('v0'), c(1))),
+        set('i', plus(v('i'), c(1))),
+      ],
+    },
+    { k: 'exprstmt', value: { k: 'call', fn: 'use', args: [v('sum')] } },
+  ],
+});
+
+test('a walk over a member array reads the closed form as the member subscript', () => {
+  const out = emit(unreduceAccumulators(memberWalk({ k: 'field', base: v('a1'), name: 'field_4' }), GBA));
+  expect(out).toContain('sum = sum + a1->field_4[i];');
+  expect(out).not.toContain('v0');
+});
+
+test('a walk from a pointer init keeps the dereferenced sum', () => {
+  // the same walk off a `u16 *` parameter: for a pointer `p[i]` IS `*(p + i)` to agbcc, so nothing
+  // is respelled
+  const out = emit(unreduceAccumulators(memberWalk(v('a1'), T.ptr(T.u(16))), GBA));
+  expect(out).toContain('sum = sum + *(a1 + i);');
+});
+
+test('a member-array init whose base reads a GLOBAL name declines over a call', () => {
+  // `p = gPtr; for (i = 0; i < 4; i++) TakeMove(m, p->moves[i], i);` with the walk SEATED: the init
+  // is the member `((struct Struct0 *)gPtr)->field_4`, an ARRAY, so it is no access of its own —
+  // but the base still reads `gPtr`, which the call may rewrite. The closed form
+  // `((struct Struct0 *)gPtr)->field_4[i]` would re-read it after every call.
+  const seated: Expr = { k: 'field', base: { k: 'cast', to: T.ptr(MOVES), e: v('gPtr') }, name: 'field_4' };
+  const take: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'TakeMove', args: [v('sum')] } };
+  const walk = (globals: SFn['globals']): SFn => {
+    const s = memberWalk(seated);
+    const loop = s.body[3] as Extract<Stmt, { k: 'dowhile' }>;
+    return {
+      ...s,
+      globals,
+      body: [...s.body.slice(0, 3), { ...loop, body: [take, ...loop.body] }, ...s.body.slice(4)],
+    };
+  };
+  const overGlobal = walk([{ name: 'gPtr', type: T.ptr(T.u(8)) }]);
+  expect(unreduceAccumulators(overGlobal, GBA)).toBeNull();
+  // two accumulators reach the gates (`sum`'s zero init reads nothing): only the walk's is aliasable
+  const seen: AccCtx[] = [];
+  const capture: Gate<AccCtx> = {
+    id: 'capture',
+    why: 'test probe: record the context and admit nothing',
+    sound: false,
+    rejects: (x) => (seen.push(x), true),
+  };
+  unreduceAccumulators(overGlobal, GBA, undefined, [capture]);
+  expect(seen.map((x) => x.movedAliasable).sort()).toEqual([false, true]);
+  // with the gate ablated, the walk is admitted and spelled as the seated subscript — the gate is
+  // what refuses it
+  expect(
+    emit(unreduceAccumulators(overGlobal, GBA, undefined, without(UNREDUCE_GATES, 'moved-read-aliasable'))),
+  ).toContain('((struct Struct0 *)gPtr)->field_4[i]');
+});

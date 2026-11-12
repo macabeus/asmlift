@@ -31,7 +31,7 @@ import {
 import { recognizeFloatHelpers } from './floathelpers';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
-import { recognizeMemberArrays } from './memberarrays';
+import { memberWalks, recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
 import { fuseParamPairs, refuseSplitWideParams } from './pairparams';
@@ -274,9 +274,13 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
       foldDisplacedAccesses(fn, opts.displaced, target.compilerBehaviors, declaresVoidReturn(self)),
     dce: true,
   },
+  // `memberWalks` is read HERE, after `displaced`, so the walks it hands over are keyed on the
+  // bases `recognizeStructs` sees; it only reads the graph, and a walk is stamped only once its
+  // member is seated (raise/structs.ts `seatMemberWalks`).
   {
     id: 'structs',
-    run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary),
+    run: (fn, _self, _opts, target) =>
+      recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary, memberWalks(fn)),
     dce: false,
   },
   // AFTER `structs`, which synthesizes layouts for bases it can type and never for a frame object

@@ -290,6 +290,13 @@ function constAddend(op: Op, defs: Map<Value, Op>): { of: Value; k: number } | n
  *  the answer is a DECLARED element count, so a shape whose last index is not read off the asm has
  *  no honest one. */
 function boundedCount(fn: Fn, idx: Value, defs: Map<Value, Op>): number | null {
+  return countedLoop(fn, idx, defs)?.count ?? null;
+}
+
+/** `boundedCount`'s reading with the counter's constant START kept beside the count, for a reader
+ *  that needs the TRIP count rather than the last index: a pointer walk stepped beside the counter
+ *  (`memberWalkCandidates`) advances once per iteration, `count - start` times. */
+function countedLoop(fn: Fn, idx: Value, defs: Map<Value, Op>): { start: number; count: number } | null {
   const param = stripExt(idx, defs);
   const header = fn.blocks.find((b) => b.params.includes(param));
   if (header === undefined) {
@@ -314,7 +321,8 @@ function boundedCount(fn: Fn, idx: Value, defs: Map<Value, Op>): number | null {
   if (entry === undefined || back === undefined || back.op.opcode !== 'cond_br' || back.index !== 0) {
     return null;
   }
-  if ((defs.get(entry.op.successors[entry.index].args[slot])!.attrs.value as number) < 0) {
+  const start = defs.get(entry.op.successors[entry.index].args[slot])!.attrs.value as number;
+  if (start < 0) {
     return null;
   }
   // the back edge carries `param + 1`, possibly re-extended by the counter's own truncation
@@ -340,7 +348,7 @@ function boundedCount(fn: Fn, idx: Value, defs: Map<Value, Op>): number | null {
     return null;
   }
   const count = (bound.attrs.value as number) + (inclusive ? 1 : 0);
-  return count >= 1 ? count : null;
+  return count >= 1 ? { start, count } : null;
 }
 
 /** Every value that reaches the address of a NAMED global. A `gaddr` result is one; so is a block
@@ -597,4 +605,222 @@ export function recognizeMemberArrays(
   }
   // the now-dead `add`/`const` member addresses are reaped by the DRIVER's dce
   return admitted.length;
+}
+
+// ── the STRENGTH-REDUCED walk: a member array reached through a pointer giv ───────────────────
+//
+// THE SHAPE. agbcc's `strength_reduce` turns `for (i = 0; i <= 3; i++) use(p->m[i]);` into a pointer
+// giv: the member's address is materialized ONCE in the preheader and stepped by the element size,
+// and the index survives only as the loop's counter —
+//
+//   adds r4, r6, #4          %4 = add %1, {value=4}          (the member address: `&p->m[0]`)
+//   ldrh r1, [r4, #0]        %8 = load %6 {off=0, width=2}   (`*walk`, every iteration)
+//   adds r4, #2              %9 = add %6, {value=2}          (one element)
+//   adds r5, #1 / cmp r5, #3 / ble   (the counter `boundedCount` reads)
+//
+// so no `aload` exists and `recognizeMemberArrays` above has no site. The member is still the
+// evidence the materialized add states: agbcc puts `base + K` in a register before the loop only
+// for the member spelling (gcc/expr.c:5478-5513 forces `plus_constant(base, bitpos/8)` into a
+// register for a variable-offset COMPONENT_REF), where every cast spelling of the same access —
+// `*((u16 *)((u8 *)p + 4) + i)`, `((u16 *)((u8 *)p + 4))[i]`, `*(u16 *)((u8 *)p + 4 + i * 2)` —
+// folds the `+4` into the load displacement (`adds r4, r6, #0` / `ldrh r1, [r4, #4]`). Measured on
+// pokeemerald:CreateBattleTowerMon:agbcc with the row's own command line: the member subscript
+// matches byte for byte, every cast spelling misses by those two instructions.
+//
+// WHERE THE MEMBER GOES. This shape is the MIXED one: the base carries constant-offset scalar reads
+// too (`p->level`, `p->otId`), which is raise/structs.ts's struct — and `direct-access` above is
+// the reason `recognizeMemberArrays` leaves such a base alone. So this reading does not mint a
+// struct. It hands raise/structs.ts the member, and `recognizeStructs` SEATS it in a gap of the
+// struct it recovers from the constant-offset accesses, refusing the member wherever it would
+// overlap a field (`seatMemberWalks` there). A base no struct is recovered for gets nothing.
+//
+// THE COUNT is the walk's TRIP count, `count - start` of the counter stepped beside it, for the
+// reason `trailing-unbounded` gives: the count is a free parameter with a byte-observable lower
+// bound, so it is read off a loop or not declared at all.
+
+/** One member a strength-reduced walk reaches: the base, the member's offset and element, its
+ *  element count, and the `add(base, K)` that materializes its address. */
+export interface MemberWalk {
+  base: Value;
+  off: number;
+  elemSize: number;
+  signed: boolean;
+  count: number;
+  /** the materialized member address — raise/structs.ts stamps `memberOff` on it once seated */
+  addr: Op;
+}
+
+/** One walk as `MEMBER_WALK_GATES` judges it. */
+export interface MemberWalkCandidate {
+  /** the base is still untyped, so the struct recovery that would seat the member has not run */
+  untypedBase: boolean;
+  /** the base reaches the address of a NAMED global, whose declaration is the project's own */
+  namedGlobalBase: boolean;
+  /** the member offset is small enough to BE an offset rather than an absolute address */
+  offsetInRange: boolean;
+  /** the walk pointer is accessed, only at offset 0, only at its own step's width, with one
+   *  extension */
+  elementWalk: boolean;
+  /** the member address, the walk pointer and its step feed nothing but the walk */
+  noEscape: boolean;
+  /** the member offset is a non-negative multiple of the element size */
+  aligned: boolean;
+  /** a counted loop beside the walk states its trip count */
+  counted: boolean;
+}
+
+export const MEMBER_WALK_GATES: readonly Gate<MemberWalkCandidate>[] = [
+  {
+    id: 'base-typed',
+    why: 'an earlier recovery already typed this base from evidence of its own',
+    sound: false,
+    rejects: (c) => !c.untypedBase,
+  },
+  {
+    // `global-base` above, for the same reason: the member spelling cannot consult the project's
+    // own declaration of a named global's layout.
+    id: 'global-base',
+    why: "a named global's layout is the project's own declaration, not one to synthesize",
+    sound: false,
+    rejects: (c) => c.namedGlobalBase,
+  },
+  {
+    id: 'member-offset-range',
+    why: 'a materialized addend that large is an absolute address, not a member offset',
+    sound: false,
+    rejects: (c) => !c.offsetInRange,
+  },
+  {
+    // A walk read at a displacement, or at a width its step does not stride, walks something other
+    // than an array of its access width — an array of structs, or a byte pointer the source
+    // stepped by hand.
+    id: 'not-element-walk',
+    why: 'a walk not read at its own element, one element per step, is not a member array subscript',
+    sound: false,
+    guardedBy: 'member-arrays.test.ts: a walk read at a displacement declines',
+    rejects: (c) => !c.elementWalk,
+  },
+  {
+    // The walk pointer read after the loop, or the member address handed to a call, is a pointer
+    // the source HELD: the subscript spelling has no name for it.
+    id: 'walk-escape',
+    why: 'a walk pointer used as a value is one the source held, which a subscript does not spell',
+    sound: false,
+    guardedBy: 'member-arrays.test.ts: a walk pointer read after the loop declines',
+    rejects: (c) => !c.noEscape,
+  },
+  {
+    // SOUND, `member-align`'s reason: C seats a member at its own alignment.
+    id: 'member-align',
+    why: 'a member C cannot seat at its observed offset addresses different bytes than the asm did',
+    sound: true,
+    guardedBy: 'member-arrays.test.ts: a walk at an odd offset of a halfword declines',
+    rejects: (c) => !c.aligned,
+  },
+  {
+    id: 'walk-uncounted',
+    why: "nothing but a counted loop states the member's element count, and a count invents a sizeof",
+    sound: false,
+    guardedBy: 'member-arrays.test.ts: a walk beside no counted loop declines',
+    rejects: (c) => !c.counted,
+  },
+];
+
+/** Every strength-reduced member walk, with the facts `MEMBER_WALK_GATES` reads. Exported so a
+ *  census can price the table over the walks it refuses. */
+export function memberWalkCandidates(fn: Fn): { walk: MemberWalk; c: MemberWalkCandidate }[] {
+  const defs = defOpMap(fn);
+  const global = namedGlobals(fn, defs);
+  // every operand use and every edge-argument use, by value
+  const uses = new Map<Value, { op: Op; at: number; edge: boolean }[]>();
+  const use = (v: Value, op: Op, at: number, edge: boolean) => uses.set(v, [...(uses.get(v) ?? []), { op, at, edge }]);
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.operands.forEach((v, at) => use(v, op, at, false));
+      op.successors.forEach((s) => s.args.forEach((v) => use(v, op, -1, true)));
+    }
+  }
+  const out: { walk: MemberWalk; c: MemberWalkCandidate }[] = [];
+  for (const header of fn.blocks) {
+    const edges: { op: Op; index: number }[] = [];
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        op.successors.forEach((s, index) => {
+          if (s.block === header) {
+            edges.push({ op, index });
+          }
+        });
+      }
+    }
+    // the back edge is a `cond_br`'s taken arm — `countedLoop`'s shape — and the entry the other
+    const back = edges.find((e) => e.op.opcode === 'cond_br' && e.index === 0);
+    const entry = edges.find((e) => e !== back);
+    if (edges.length !== 2 || back === undefined || entry === undefined) {
+      continue;
+    }
+    // the counter beside the walk: the first parameter of this header a counted loop bounds
+    const counter = header.params
+      .map((p) => countedLoop(fn, p, defs))
+      .find((n): n is { start: number; count: number } => n !== null);
+    header.params.forEach((walkPtr, slot) => {
+      const addrDef = defs.get(entry.op.successors[entry.index].args[slot]);
+      const member = addrDef === undefined ? null : constAddend(addrDef, defs);
+      const stepVal = back.op.successors[back.index].args[slot];
+      const stepDef = defs.get(stepVal);
+      const step = stepDef === undefined ? null : constAddend(stepDef, defs);
+      if (addrDef === undefined || member === null || stepDef === undefined || step === null || step.of !== walkPtr) {
+        return;
+      }
+      const elemSize = step.k;
+      const walkUses = uses.get(walkPtr) ?? [];
+      const accesses = walkUses.filter((u) => (u.op.opcode === 'load' || u.op.opcode === 'store') && u.at === 0);
+      const loads = accesses.filter((u) => u.op.opcode === 'load');
+      const loadSigns = new Set(loads.map((u) => u.op.attrs.signed as boolean));
+      const elementWalk =
+        accesses.length > 0 &&
+        [1, 2, 4].includes(elemSize) &&
+        accesses.every((u) => u.op.attrs.off === 0 && u.op.attrs.width === elemSize) &&
+        loadSigns.size <= 1;
+      const noEscape =
+        walkUses.every((u) => accesses.includes(u) || (u.op === stepDef && !u.edge)) &&
+        (uses.get(stepVal) ?? []).every((u) => u.op === back.op && u.edge) &&
+        (uses.get(addrDef.results[0]) ?? []).every((u) => u.op === entry.op && u.edge) &&
+        // each of the two edge values reaches the header at this slot only
+        back.op.successors[back.index].args.filter((a) => a === stepVal).length === 1 &&
+        entry.op.successors[entry.index].args.filter((a) => a === addrDef.results[0]).length === 1;
+      const signed =
+        loads.length > 0
+          ? (loads[0].op.attrs.signed as boolean)
+          : accesses.length > 0 && storeSigned(accesses[0].op, elemSize);
+      const trips = counter === undefined ? 0 : counter.count - counter.start;
+      out.push({
+        walk: {
+          base: member.of,
+          off: member.k,
+          elemSize,
+          signed,
+          count: trips,
+          addr: addrDef,
+        },
+        c: {
+          untypedBase: member.of.type.kind === 'unknown',
+          namedGlobalBase: global.has(member.of) || defs.get(member.of)?.opcode === 'gaddr',
+          offsetInRange: member.k < MAX_MEMBER_OFFSET,
+          elementWalk,
+          noEscape,
+          aligned: member.k >= 0 && elemSize > 0 && member.k % elemSize === 0,
+          counted: trips >= 1,
+        },
+      });
+    });
+  }
+  return out;
+}
+
+/** The member walks `MEMBER_WALK_GATES` admits, for raise/structs.ts `recognizeStructs` to seat.
+ *  Reads the graph only: nothing is typed or stamped until a struct seats the member. */
+export function memberWalks(fn: Fn, gates: readonly Gate<MemberWalkCandidate>[] = MEMBER_WALK_GATES): MemberWalk[] {
+  return memberWalkCandidates(fn)
+    .filter((w) => firstRejection(gates, w.c) === null)
+    .map((w) => w.walk);
 }

@@ -71,6 +71,10 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       // a counted loop whose arms each step two pointers by 2: once unpre recomputes the latch's
       // `p + 2`, IDO's pointer walk reads closest as the index it was reduced from
       'synthetic:loop_elsebreak:ido7.1  unsigned/defsite/loop-entry/merge-names/unreduce',
+      // a member array walked beside constant-offset reads: the un-reduced walk reads the member
+      // subscript, the spelling that puts agbcc's member address in the preheader
+      'synthetic:mixwalk:agbcc  unsigned/unreduce',
+      'synthetic:mixwalk32:agbcc  unsigned/unreduce',
       // a switch on `p[i]` in a counted loop: the mwcc controls of the stolen-likely-slot rows
       'synthetic:sw_h3:mwcc_242_81  signed/unreduce',
       'synthetic:sw_h4:mwcc_242_81  signed/unreduce',

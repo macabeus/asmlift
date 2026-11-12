@@ -235,7 +235,7 @@ Per commit:
   worked example, and `pnpm bench gates --pass unmerge` is what reading it back looks like. The
   parameter is NECESSARY AND NOT SUFFICIENT: the census also needs a caller-side seam a process
   outside core can reach — a mutable record holding the call, not a static import (whose bindings
-  are read-only). Fifteen passes that take a table have one, and each has a census driver:
+  are read-only). Sixteen passes that take a table have one, and each has a census driver:
   `/unmerge` and the case-end goto in `PRE_RESPELL_VARIATIONS`, every tabled pass in
   `PRE_RECOVERY_PASSES` (which is how `--pass arm-reread` reaches the branch short-circuit fold),
   every tabled fold in `PRE_STRUCTURE_FOLDS`, and the two standalone records `OFFSET_NAME_PASS` and

@@ -6068,6 +6068,83 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sibwalk(u8 *d, u8 *s);',
     proto: { sibwalk: { returnsVoid: true } },
   },
+  // THE MIXED STRUCT: a member array walked by a counted loop on a base that is ALSO read at constant
+  // offsets (pokeemerald:CreateBattleTowerMon:agbcc's `src->moves[i]` beside `src->level`). Unlike
+  // `membnarrow`, the counter is wide, so agbcc's `strength_reduce` turns the subscript into a
+  // pointer giv: the member address `add r4, r6, #K` is materialized in the preheader and stepped by
+  // the element size, and no indexed access survives. Only the member subscript puts the `+K` there;
+  // every cast spelling of the access folds it into the load displacement (`ldrh r1, [r4, #K]`). The
+  // `buf` addresses are what make the placement observable: agbcc hoists them into the preheader, and
+  // a C statement before the loop cannot land the giv init below them. One row per element width —
+  // `u16`, and `s32`, which agbcc walks with `ldmia r4!, {r1}`.
+  {
+    sym: 'mixwalk',
+    src:
+      'struct S { u16 kind; u16 item; u16 moves[4]; u8 level; u8 pad[3]; s32 id; };\n' +
+      'void TakeBase(u32 m, u16 kind, u8 level, s32 id);\n' +
+      'void TakeMove(u32 m, u16 move, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void mixwalk(u32 m, struct S *s)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    u8 buf[36];\n' +
+      '\n' +
+      '    TakeBase(m, s->kind, s->level, s->id);\n' +
+      '    for (i = 0; i < 4; i++)\n' +
+      '        TakeMove(m, s->moves[i], i);\n' +
+      '    TakeData(m, 1, &buf[32]);\n' +
+      '    TakeData(m, 2, &buf[33]);\n' +
+      '    TakeData(m, 3, &buf[32]);\n' +
+      '    TakeData(m, 4, &buf[33]);\n' +
+      '}',
+    features: ['array', 'variable-index', 'struct', 'field'],
+    toolchains: ['agbcc'],
+    ctx:
+      'void TakeBase(u32 m, u16 kind, u8 level, s32 id);\n' +
+      'void TakeMove(u32 m, u16 move, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void mixwalk(u32 m, u8 *s);',
+    proto: {
+      mixwalk: { returnsVoid: true },
+      TakeBase: { returnsVoid: true },
+      TakeMove: { returnsVoid: true },
+      TakeData: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'mixwalk32',
+    src:
+      'struct T { u16 kind; u16 item; u32 flags; s32 vals[3]; u8 level; };\n' +
+      'void TakeBase(u32 m, u16 kind, u8 level, u32 flags);\n' +
+      'void TakeVal(u32 m, s32 val, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void mixwalk32(u32 m, struct T *t)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    u8 buf[36];\n' +
+      '\n' +
+      '    TakeBase(m, t->kind, t->level, t->flags);\n' +
+      '    for (i = 0; i < 3; i++)\n' +
+      '        TakeVal(m, t->vals[i], i);\n' +
+      '    TakeData(m, 1, &buf[32]);\n' +
+      '    TakeData(m, 2, &buf[33]);\n' +
+      '    TakeData(m, 3, &buf[32]);\n' +
+      '    TakeData(m, 4, &buf[33]);\n' +
+      '}',
+    features: ['array', 'variable-index', 'struct', 'field'],
+    toolchains: ['agbcc'],
+    ctx:
+      'void TakeBase(u32 m, u16 kind, u8 level, u32 flags);\n' +
+      'void TakeVal(u32 m, s32 val, u8 slot);\n' +
+      'void TakeData(u32 m, s32 id, void *p);\n' +
+      'void mixwalk32(u32 m, u8 *t);',
+    proto: {
+      mixwalk32: { returnsVoid: true },
+      TakeBase: { returnsVoid: true },
+      TakeVal: { returnsVoid: true },
+      TakeData: { returnsVoid: true },
+    },
+  },
 
   // WHERE A VALUE THAT SEVERAL PLACES NEED GETS ITS ONE HOME, in a function with no loop. The
   // `value-home` rows above are all loop-shaped or address-shaped: `/addr-home` homes a base

@@ -58,7 +58,7 @@ import {
   SHAPE_GATES,
 } from './raise/globalshape';
 import { EXIT_TRAMPOLINE_GATES, LATCH_GATES } from './raise/latch';
-import { MEMBER_ARRAY_GATES } from './raise/memberarrays';
+import { MEMBER_ARRAY_GATES, MEMBER_WALK_GATES } from './raise/memberarrays';
 import { NARROW_LOCAL_GATES } from './raise/narrowlocal';
 import { OFFSET_NAME_GATES } from './raise/offsetnames';
 import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from './raise/paramwidth';
@@ -170,6 +170,10 @@ export const GATE_TABLES: readonly GateTableEntry[] = [
   entry('MEMBER_ARRAY_GATES', 'raise/memberarrays', MEMBER_ARRAY_GATES as readonly Gate<never>[], {
     pass: 'member-arrays',
     table: 'base',
+  }),
+  entry('MEMBER_WALK_GATES', 'raise/memberarrays', MEMBER_WALK_GATES as readonly Gate<never>[], {
+    pass: 'member-walks',
+    table: 'walk',
   }),
   entry('NARROW_LOCAL_GATES', 'raise/narrowlocal', NARROW_LOCAL_GATES as readonly Gate<never>[], {
     pass: 'narrowlocal',

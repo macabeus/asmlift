@@ -17,7 +17,14 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { firstRejection, without } from '../src/l3/gates';
 import { dce } from '../src/pattern/engine';
-import { MEMBER_ARRAY_GATES, memberArrayCandidates, recognizeMemberArrays } from '../src/raise/memberarrays';
+import {
+  MEMBER_ARRAY_GATES,
+  MEMBER_WALK_GATES,
+  memberArrayCandidates,
+  memberWalkCandidates,
+  memberWalks,
+  recognizeMemberArrays,
+} from '../src/raise/memberarrays';
 import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructArrays } from '../src/raise/struct-arrays';
 import { recognizeStructs } from '../src/raise/structs';
@@ -34,7 +41,7 @@ function emit(ir: string, returnsVoid = true): string {
   if (recognizeMemberArrays(fn)) {
     dce(fn);
   }
-  recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
+  recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary, memberWalks(fn));
   recoverTypes(fn);
   verify(fn);
   return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, returnsVoid)));
@@ -509,5 +516,113 @@ ${COPY_AT_4}  %8: unk32 = const {value=1}
 }
 `),
     ).toEqual(['member-overrun', 'member-overrun']);
+  });
+});
+
+// THE STRENGTH-REDUCED WALK (`synthetic:mixwalk`, pokeemerald:CreateBattleTowerMon:agbcc): a wide
+// counter lets agbcc turn `p->moves[i]` into a pointer giv, so the member address `add(P, 4)` is
+// the walk's INIT and no indexed access survives. The base is read at constant offsets too, which
+// is raise/structs.ts's struct; the member is seated in a gap of it.
+describe('member-array recovery — the strength-reduced walk', () => {
+  /** `P` read at offsets 0 (u16) and 12 (u8), then walked from `add(P, K)` by `step` bytes over a
+   *  loop counted 0..`bound`, the element read at `disp` and `width`. `tail` goes in the exit block. */
+  const mixed = (
+    o: { k?: number; step?: number; width?: number; disp?: number; bound?: string; tail?: string } = {},
+  ) => {
+    const { k = 4, step = 2, width = 2, disp = 0, tail = '  ret %11\n' } = o;
+    const bound =
+      o.bound ??
+      `  %16: unk32 = const {value=3}
+  %17: unk32 = icmp_sle %15, %16
+`;
+    return `fn mix {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=2, signed=false}
+  %2: unk32 = load %0 {off=12, width=1, signed=false}
+  %3: unk32 = add %1, %2
+  %4: unk32 = const {value=${k}}
+  %5: unk32 = add %0, %4
+  %6: unk32 = const {value=0}
+  br ^bb1(%5, %6, %3)
+^bb1(%7: unk32, %8: unk32, %9: unk32):
+  %10: unk32 = load %7 {off=${disp}, width=${width}, signed=false}
+  %11: unk32 = add %9, %10
+  %12: unk32 = const {value=${step}}
+  %13: unk32 = add %7, %12
+  %14: unk32 = const {value=1}
+  %15: unk32 = add %8, %14
+${bound}  cond_br %17, ^bb1(%13, %15, %11), ^bb2()
+^bb2():
+${tail}}
+`;
+  };
+  const walkRefusals = (ir: string): (string | null)[] => {
+    const fn = parse(ir);
+    verify(fn);
+    return memberWalkCandidates(fn).map((w) => firstRejection(MEMBER_WALK_GATES, w.c));
+  };
+
+  test('a walk seats its member in the struct the constant-offset reads recover', () => {
+    const c = emit(mixed(), false);
+    // the member sits in the gap between the u16 at 0 and the byte at 12, counted by the loop
+    expect(c).toContain('struct Struct0 { u16 field_0; u8 _pad0[2]; u16 field_4[4]; u8 field_12; };');
+    // the walk's init is the member itself, decayed to its first element
+    expect(c).toMatch(/= a0->field_4;/);
+    expect(c).not.toContain('+ 4');
+  });
+
+  test('without a walk the same base keeps its gap as a pad', () => {
+    // the control: no seated member, so the struct is raise/structs.ts's own
+    const fn = parse(mixed());
+    verify(fn);
+    recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
+    recoverTypes(fn);
+    const c = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+    expect(c).toContain('struct Struct0 { u16 field_0; u8 _pad0[10]; u8 field_12; };');
+  });
+
+  test('a member that would overlap a field is not seated', () => {
+    // walked 0..4 from byte 4, the member runs to byte 14 — over the byte at 12. The struct stays
+    // as recovered and the walk keeps its cast spelling.
+    const c = emit(
+      mixed({
+        bound: `  %16: unk32 = const {value=4}
+  %17: unk32 = icmp_sle %15, %16
+`,
+      }),
+      false,
+    );
+    expect(c).toContain('struct Struct0 { u16 field_0; u8 _pad0[10]; u8 field_12; };');
+    expect(c).not.toContain('field_4');
+  });
+
+  test('the admitted walk passes every gate', () => {
+    expect(walkRefusals(mixed())).toEqual([null]);
+  });
+
+  test('a walk read at a displacement declines', () => {
+    expect(walkRefusals(mixed({ disp: 2 }))).toEqual(['not-element-walk']);
+    // …and one read at a width its step does not stride
+    expect(walkRefusals(mixed({ width: 1 }))).toEqual(['not-element-walk']);
+  });
+
+  test('a walk pointer read after the loop declines', () => {
+    expect(walkRefusals(mixed({ tail: '  ret %13\n' }))).toEqual(['walk-escape']);
+  });
+
+  test('a walk at an odd offset of a halfword declines', () => {
+    expect(walkRefusals(mixed({ k: 5 }))).toEqual(['member-align']);
+  });
+
+  test('a walk beside no counted loop declines', () => {
+    // the exit test compares against a runtime value, so no count states the member's size
+    expect(
+      walkRefusals(
+        mixed({
+          bound: `  %17: unk32 = icmp_sle %15, %3
+`,
+        }),
+      ),
+    ).toEqual(['walk-uncounted']);
   });
 });
