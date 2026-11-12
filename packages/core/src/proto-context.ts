@@ -1729,12 +1729,16 @@ export function withOwnContextMark(
 
 /** `prototypes` with the parameter names the context's declaration of `own` gives
  *  (`FnProto.paramNames`) carried on the table's own entry, where the table has one — stated, or
- *  carried under the mark — that names none, and that states a typed list of as many parameters.
+ *  carried under the mark — that names none, and that either states a typed list of as many
+ *  parameters or STATES NOTHING OF ITS PARAMETERS (`{ "returnsVoid": true }`: no list, count, word
+ *  or by-value key). In the second case the names pair with the lifted parameters by position, so
+ *  they are carried only where the declaration itself would hand them over ({@link ownParamNames}
+ *  on the context's entry: every parameter one word, no variadic list, no aggregate return).
  *  A table without an entry for `own` is returned as it is: the context's own entry reaches the lift
  *  under the mark (`withOwnContextMark`) or beside the table (`ownContextEntry`), and either carries
  *  its names. Names are read for nothing but printing (l3/names.ts), so a stated entry that takes
  *  them still bounds and lifts as it did; this is how a row whose manifest restates its own
- *  function's types still prints the header's names. */
+ *  function's types, or states only its void return, still prints the header's names. */
 export function withOwnParamNames(
   prototypes: Prototypes | undefined,
   own: string,
@@ -1743,24 +1747,33 @@ export function withOwnParamNames(
   const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
   const heard = Object.hasOwn(context, own) ? context[own] : undefined;
   const names = heard?.paramNames;
-  if (
-    p === undefined ||
-    p === null ||
-    p.paramNames !== undefined ||
-    names === undefined ||
-    !Array.isArray(p.params) ||
-    p.params.length !== names.length
-  ) {
+  if (p === undefined || p === null || p.paramNames !== undefined || names === undefined) {
     return prototypes;
   }
-  return { ...prototypes, [own]: { ...p, paramNames: names } };
+  const pairs = Array.isArray(p.params)
+    ? p.params.length === names.length
+    : statesNoParams(p) && ownParamNames({ [own]: heard! }, own) !== undefined;
+  return pairs ? { ...prototypes, [own]: { ...p, paramNames: names } } : prototypes;
+}
+
+/** Whether `p` says nothing about its parameters: no list or count, and no key that describes one. */
+function statesNoParams(p: FnProto): boolean {
+  return (
+    p.params === undefined &&
+    p.wordParams === undefined &&
+    p.byValueParams === undefined &&
+    p.byValueLayouts === undefined &&
+    p.variadicParams === undefined
+  );
 }
 
 /** The names the function `own` prints its parameters under (l3/names.ts), from the entry that
  *  states them — the table's, stated or marked, else the context's own entry handed beside it — where
  *  that entry's declared parameters pair one to one, in order, with the argument words the lift
  *  numbers its parameters by. Undefined, so every parameter keeps its `aN`, where they may not:
- *   - an entry that names no parameter, or states no typed list (a count, `()`, a variadic one);
+ *   - an entry that names no parameter, or states a count or a variadic list — an entry that
+ *     states nothing of its parameters keeps the names `withOwnParamNames` checked against the
+ *     declaration's own list before carrying them there;
  *   - a parameter that is not ONE WORD (`paramClassOf`): a 64-bit one takes a register pair, a
  *     floating one travels in the FPU's own registers on mwcc and IDO, and a struct passed by value
  *     fills any number of words (kleod's `sub_0800BEF0`) — each moves every later parameter off
@@ -1784,8 +1797,6 @@ export function ownParamNames(
     p === undefined ||
     p === null ||
     names === undefined ||
-    !Array.isArray(p.params) ||
-    p.params.length !== names.length ||
     p.variadicParams !== undefined ||
     declaresAggregateReturn(p) ||
     demangledName(own) !== null ||
@@ -1793,7 +1804,15 @@ export function ownParamNames(
   ) {
     return undefined;
   }
+  if (!Array.isArray(p.params)) {
+    // an entry that states nothing of its parameters carries names only where the declaration's
+    // own list passed this check when they were put there (`withOwnParamNames`)
+    return statesNoParams(p) ? names : undefined;
+  }
   const params = p.params;
+  if (params.length !== names.length) {
+    return undefined;
+  }
   return params.every((_, k) => paramClassOf(p, params, k) === 'word') ? names : undefined;
 }
 

@@ -134,7 +134,9 @@ export interface FnProto {
    *  lifts as the harness did. On a callee's entry it is ignored. */
   fromContext?: boolean;
   /** The NAMES a declaration gives its parameters, one per entry of a typed `params` list, in its
-   *  order. A context states it (`prototypesFromContext`) where every parameter is named, no two
+   *  order — or, on an own entry that states nothing of its parameters (`{ "returnsVoid": true }`),
+   *  one per lifted parameter, put there only where the declaration's own list pairs one to one
+   *  (proto-context.ts `withOwnParamNames`). A context states it (`prototypesFromContext`) where every parameter is named, no two
    *  alike. READ FOR NOTHING BUT THE PRINTED NAME of the function's own parameters (l3/names.ts,
    *  through proto-context.ts `ownParamNames`, which also says when the declaration's parameters
    *  pair one-to-one with the lifted ones): no lift, bound or call reads it, so an entry carrying
@@ -1057,10 +1059,11 @@ export function validatePrototypes(value: unknown): string[] {
         !Array.isArray(names) ||
         !names.every((n) => typeof n === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) ||
         new Set(names).size !== names.length ||
-        !Array.isArray(typed) ||
-        typed.length !== names.length
+        (typed !== undefined && (!Array.isArray(typed) || typed.length !== names.length))
       ) {
-        problems.push(`${sym}: "paramNames" must be a list of distinct identifiers, one per entry of a "params" list`);
+        problems.push(
+          `${sym}: "paramNames" must be a list of distinct identifiers, one per entry of a "params" list where one is stated`,
+        );
       }
     }
     const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =

@@ -1280,6 +1280,24 @@ describe("the declaration's parameter names", () => {
     expect(withOwnParamNames(undefined, 'f', ctx)).toBeUndefined();
   });
 
+  test('ride on a stated own entry that states nothing of its parameters, where the declaration pairs', () => {
+    // pokeemerald's StopScript: the manifest states `{ "returnsVoid": true }` and the header names `ctx`
+    const ctx = named('void f(struct S *ctx, int n);\nvoid g(long long w, int n);\nvoid h(int a, ...);');
+    expect(withOwnParamNames({ f: { returnsVoid: true } }, 'f', ctx)).toEqual({
+      f: { returnsVoid: true, paramNames: ['ctx', 'n'] },
+    });
+    expect(ownParamNames({ f: { returnsVoid: true, paramNames: ['ctx', 'n'] } }, 'f')).toEqual(['ctx', 'n']);
+    // …never where the declaration's own list does not pair one word per parameter
+    const pair = { g: { returnsVoid: true } };
+    expect(withOwnParamNames(pair, 'g', ctx)).toBe(pair);
+    const variadic = { h: { returnsVoid: true } };
+    expect(withOwnParamNames(variadic, 'h', ctx)).toBe(variadic);
+    // …nor over an entry that states something of its parameters without a list
+    const words = { f: { returnsVoid: true, wordParams: [0] } };
+    expect(withOwnParamNames(words, 'f', ctx)).toBe(words);
+    expect(validatePrototypes({ f: { returnsVoid: true, paramNames: ['ctx', 'n'] } })).toEqual([]);
+  });
+
   test('are handed to the printer only where each parameter is one argument word', () => {
     const names = (decl: string, own = 'f') => ownParamNames(named(decl), own);
     expect(names('void f(u8 s, s16 *p, int n);')).toEqual(['s', 'p', 'n']);
