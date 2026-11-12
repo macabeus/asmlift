@@ -32,7 +32,7 @@ import { print } from './ir/print';
 import { firstTrivialPhi, pruneDeadParams } from './ir/simplify';
 import { type IrType, T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
-import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
+import { LanguageBackend, SFn, emitDraft, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
@@ -317,7 +317,7 @@ function runTower(
       ownContextProto: own.ownContextProto,
       roleNames: opts.roleNames,
     }),
-    (t) => backend.emit(t),
+    (t) => emitDraft(backend, t),
     {},
     // ONE default-accepts memo for this lift, as rank.ts keeps one per lift: the copies the measured
     // default structures first carry `copyReturnTails`, so every run of their ladder asks
@@ -1240,7 +1240,9 @@ export interface ReturnTailReading {
  *  from their bytes than the copies on 89 and closer on 10 (MATCH 23 → 16).
  *
  *  THE UNIT IS THE WHOLE FUNCTION'S EMITTED SOURCE, in non-blank lines (`sourceLineCount`), and a
- *  tie goes to the join.
+ *  tie goes to the join. Emitted as the backend's DRAFT (`emitDraft`, the text before the
+ *  readability polish, l3/polish/): the polish drops lines a reader does not need, and it must not
+ *  move the reading this bound picks.
  *    - Whole function, not per branch: these are the two whole-function readings the ranked fan
  *      holds (rank.ts's default and its `/ret-copy` or `/ret-join` sibling), so the published tree
  *      is always one of them. A per-branch unit differs only where the join fires at two or more

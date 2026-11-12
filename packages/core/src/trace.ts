@@ -11,7 +11,7 @@ import type { CalleeBodies } from './frontend/callee-body';
 import type { Fn } from './ir/core';
 import { print } from './ir/print';
 import { verify } from './ir/verify';
-import type { LanguageBackend } from './l3/ast';
+import { type LanguageBackend, emitDraft } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import {
   type OnGap,
@@ -361,7 +361,7 @@ function traceTower(
       ownContextProto: ownContext.ownContextProto,
       roleNames: opts.roleNames,
     }),
-    (t) => backend.emit(t),
+    (t) => emitDraft(backend, t),
   );
   trace.push({
     id: 'stage:structure',

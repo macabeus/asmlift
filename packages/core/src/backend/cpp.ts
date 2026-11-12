@@ -135,101 +135,104 @@ export function bindSpecParams(
  *  slot model of the target it was lifted for. For a member function SFn.params[0] is `this`; the
  *  rest bind to `params` by `bindSpecParams`. */
 export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined): LanguageBackend {
+  // `polish`: the published text (`emit`) or the text before the C-family polish (`draft`).
+  const print = (fn: SFn, polish: boolean): string => {
+    // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
+    // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.
+    const thisVar = spec.cls ? fn.params[0]?.name : undefined;
+    const rename = new Map<string, string>(); // lifted var → C++ name
+    const recv = new Map<string, { cls: string; via: 'this' | string }>(); // var → member receiver
+    if (thisVar) {
+      rename.set(thisVar, 'this');
+      recv.set(thisVar, { cls: spec.cls!, via: 'this' });
+    }
+    const bound = bindSpecParams(spec, fn, floatSlots);
+    if (!bound) {
+      throw new Error(
+        `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +
+          `supply a signature whose float and integer parameters are the ones it takes`,
+      );
+    }
+    spec.params.forEach((p, i) => {
+      const v = bound[i];
+      if (!v) {
+        return;
+      }
+      rename.set(v, p.name);
+      if (p.type.ptr === 1 && spec.classes?.[p.type.base]) {
+        recv.set(v, { cls: p.type.base, via: p.name });
+      }
+    });
+
+    const field = (cls: string, k: number): string => {
+      const fields = spec.classes?.[cls]?.fields ?? [];
+      // The lifted index `k` counts WORD offsets. It coincides with the sequential field
+      // position ONLY when every field is word-sized (4 bytes), so a `short`/`char`/mixed-width
+      // struct would map `k` to the WRONG field. Rather than emit silently-wrong idiomatic C++,
+      // fail LOUD: a mixed layout needs byte-offset field resolution, which is follow-on work.
+      if (!fields.every((f) => typeWidth(f.type) === 4)) {
+        throw new Error(
+          `cpp backend: class ${cls} has a sub-word/mixed field layout — member access needs byte-offset recovery (not yet supported)`,
+        );
+      }
+      const f = fields[k];
+      if (!f) {
+        throw new Error(`cpp backend: no field at word offset ${k} of class ${cls}`);
+      }
+      return f.name;
+    };
+    // Leaf hook: rewrite an indexed access on a receiver into named member access, and a bare
+    // receiver/param var into its C++ name. Everything else falls through to shared C spelling.
+    //
+    // The member rewrite fires ONLY for a WORD access (`width === 4`): the word-index `field()`
+    // mapping assumes idx counts words, and the all-word-layout guard above checks the CLASS,
+    // not the ACCESS — a sub-word access on a word field (`lhz` from offset 4) would map its
+    // byte-scaled idx to the wrong member and read the wrong width, silently. The sub-word
+    // receiver access is spelled HERE too (the honest reinterpret cast, `((s16 *)this)[2]`):
+    // it cannot fall through to the shared legalization, because the hook RENAMES the receiver
+    // — the shared printer would judge the SFn var's recovered type while the reader sees the
+    // class pointer, and print an unscaled `this[2]` that C++ strides by sizeof(class).
+    // Correct bytes over idiomatic spelling, never the reverse.
+    const leaf: LeafHook = (e: Expr) => {
+      // `lead` (a multidimensional array global) is not a receiver access and must not be
+      // rewritten to one — the hook returns text, so a dropped subscript would be silent.
+      if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const' && !e.lead?.length) {
+        const r = recv.get(e.base.name);
+        if (r) {
+          if (e.width === 4) {
+            return r.via === 'this' ? field(r.cls, e.idx.value) : `${r.via}->${field(r.cls, e.idx.value)}`;
+          }
+          if (e.width === 1 || e.width === 2) {
+            return `((${e.signed ? 's' : 'u'}${e.width * 8} *)${r.via === 'this' ? 'this' : r.via})[${e.idx.value}]`;
+          }
+          // any other width is a struct-array STRIDE (a dot-form base) — not this rewrite's
+          // shape; fall through to the shared spelling so `.field` stays intact.
+        }
+      }
+      if (e.k === 'var') {
+        const nm = rename.get(e.name);
+        if (nm) {
+          return nm;
+        }
+      }
+      return null;
+    };
+
+    const paramList = spec.params.map((p) => declareCpp(p.type, p.name)).join(', ');
+    const decls = classDecls(spec, paramList);
+    const signature = `${spellType(spec.retType)} ${spec.cls ? spec.cls + '::' : ''}${spec.method}(${paramList})`;
+    // The spec names the parameters (`rename`, through the leaf hook), so the declaration's names
+    // are not asked for here; the locals' role names are (l3/names.ts, in `emitCFamily`)
+    const { paramNames: _declared, ...locals } = fn;
+    return (decls ? decls + '\n' : '') + emitCFamily(signature, locals, leaf, false, polish);
+  };
   return {
     id: 'cpp',
     spellsSwitchFallthrough: true,
     spellsSwitchBreak: true,
     spellsEarlyReturn: true,
-    emit(fn: SFn): string {
-      // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
-      // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.
-      const thisVar = spec.cls ? fn.params[0]?.name : undefined;
-      const rename = new Map<string, string>(); // lifted var → C++ name
-      const recv = new Map<string, { cls: string; via: 'this' | string }>(); // var → member receiver
-      if (thisVar) {
-        rename.set(thisVar, 'this');
-        recv.set(thisVar, { cls: spec.cls!, via: 'this' });
-      }
-      const bound = bindSpecParams(spec, fn, floatSlots);
-      if (!bound) {
-        throw new Error(
-          `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +
-            `supply a signature whose float and integer parameters are the ones it takes`,
-        );
-      }
-      spec.params.forEach((p, i) => {
-        const v = bound[i];
-        if (!v) {
-          return;
-        }
-        rename.set(v, p.name);
-        if (p.type.ptr === 1 && spec.classes?.[p.type.base]) {
-          recv.set(v, { cls: p.type.base, via: p.name });
-        }
-      });
-
-      const field = (cls: string, k: number): string => {
-        const fields = spec.classes?.[cls]?.fields ?? [];
-        // The lifted index `k` counts WORD offsets. It coincides with the sequential field
-        // position ONLY when every field is word-sized (4 bytes), so a `short`/`char`/mixed-width
-        // struct would map `k` to the WRONG field. Rather than emit silently-wrong idiomatic C++,
-        // fail LOUD: a mixed layout needs byte-offset field resolution, which is follow-on work.
-        if (!fields.every((f) => typeWidth(f.type) === 4)) {
-          throw new Error(
-            `cpp backend: class ${cls} has a sub-word/mixed field layout — member access needs byte-offset recovery (not yet supported)`,
-          );
-        }
-        const f = fields[k];
-        if (!f) {
-          throw new Error(`cpp backend: no field at word offset ${k} of class ${cls}`);
-        }
-        return f.name;
-      };
-      // Leaf hook: rewrite an indexed access on a receiver into named member access, and a bare
-      // receiver/param var into its C++ name. Everything else falls through to shared C spelling.
-      //
-      // The member rewrite fires ONLY for a WORD access (`width === 4`): the word-index `field()`
-      // mapping assumes idx counts words, and the all-word-layout guard above checks the CLASS,
-      // not the ACCESS — a sub-word access on a word field (`lhz` from offset 4) would map its
-      // byte-scaled idx to the wrong member and read the wrong width, silently. The sub-word
-      // receiver access is spelled HERE too (the honest reinterpret cast, `((s16 *)this)[2]`):
-      // it cannot fall through to the shared legalization, because the hook RENAMES the receiver
-      // — the shared printer would judge the SFn var's recovered type while the reader sees the
-      // class pointer, and print an unscaled `this[2]` that C++ strides by sizeof(class).
-      // Correct bytes over idiomatic spelling, never the reverse.
-      const leaf: LeafHook = (e: Expr) => {
-        // `lead` (a multidimensional array global) is not a receiver access and must not be
-        // rewritten to one — the hook returns text, so a dropped subscript would be silent.
-        if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const' && !e.lead?.length) {
-          const r = recv.get(e.base.name);
-          if (r) {
-            if (e.width === 4) {
-              return r.via === 'this' ? field(r.cls, e.idx.value) : `${r.via}->${field(r.cls, e.idx.value)}`;
-            }
-            if (e.width === 1 || e.width === 2) {
-              return `((${e.signed ? 's' : 'u'}${e.width * 8} *)${r.via === 'this' ? 'this' : r.via})[${e.idx.value}]`;
-            }
-            // any other width is a struct-array STRIDE (a dot-form base) — not this rewrite's
-            // shape; fall through to the shared spelling so `.field` stays intact.
-          }
-        }
-        if (e.k === 'var') {
-          const nm = rename.get(e.name);
-          if (nm) {
-            return nm;
-          }
-        }
-        return null;
-      };
-
-      const paramList = spec.params.map((p) => declareCpp(p.type, p.name)).join(', ');
-      const decls = classDecls(spec, paramList);
-      const signature = `${spellType(spec.retType)} ${spec.cls ? spec.cls + '::' : ''}${spec.method}(${paramList})`;
-      // The spec names the parameters (`rename`, through the leaf hook), so the declaration's names
-      // are not asked for here; the locals' role names are (l3/names.ts, in `emitCFamily`)
-      const { paramNames: _declared, ...locals } = fn;
-      return (decls ? decls + '\n' : '') + emitCFamily(signature, locals, leaf, false);
-    },
+    emit: (fn: SFn): string => print(fn, true),
+    draft: (fn: SFn): string => print(fn, false),
     comment: cComment, // C++ shares C's block-comment spelling
   };
 }

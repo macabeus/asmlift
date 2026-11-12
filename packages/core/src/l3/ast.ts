@@ -643,10 +643,23 @@ export interface LanguageBackend {
    *  structurer reads it through `StructureOptions.spellEarlyReturns`. */
   readonly spellsEarlyReturn: boolean;
   emit(fn: SFn): string;
+  /** The text `emit` printed BEFORE its readability polish (l3/polish/), where the backend has one.
+   *  The polish only re-spells, and the bytes are the draft's; but a decision that reads PRINTED
+   *  TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`), rank's
+   *  goto/cast/line tie-break and its duplicate-source collapse (rank.ts) — reads this, so a polish
+   *  that drops a line or merges two spellings into one text moves no reading and no winner. Read it
+   *  through {@link emitDraft}; absent ⇒ `emit` has no polish. */
+  draft?(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm
   // alongside the emitted marker, so a human/LLM has the raw material to finish by hand.
   comment(text: string): string;
+}
+
+/** The backend's text before its polish (`LanguageBackend.draft`), or its emitted text where it has
+ *  none: what every decision that reads printed text measures. */
+export function emitDraft(backend: LanguageBackend, fn: SFn): string {
+  return backend.draft ? backend.draft(fn) : backend.emit(fn);
 }
 
 /** The dot-form base of a `field` node — the array-element `index` node under an

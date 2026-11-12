@@ -40,7 +40,7 @@ import { verify } from './ir/verify';
 import { advancedBases } from './l3/advance';
 import { materializeArgBases } from './l3/argbase';
 import { argCopyCandidates } from './l3/argcopy';
-import type { LanguageBackend, SFn } from './l3/ast';
+import { type LanguageBackend, type SFn, emitDraft } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
@@ -245,6 +245,10 @@ export interface Candidate {
    *  the candidate's name; `joinVariations` prints it. */
   variations: readonly string[];
   source: string;
+  /** `compareScored`'s goto, cast and line counts, read off the backend's DRAFT (the text before
+   *  the readability polish, `LanguageBackend.draft`) so the polish moves no winner. Absent ⇒ read
+   *  off `source`. */
+  tie?: TieShape;
   /** Which PREFERENCE this candidate carries — the symbol-map setting's index (0 = the map's own
    *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the settings in
    *  preference order, and a lower preference WINS a score tie: when both compile to the same bytes the
@@ -506,12 +510,23 @@ interface TreeSources {
 interface TreeSource {
   variations: readonly Variation[];
   source: string;
+  /** the backend's text before its readability polish (`emitDraft`): what two candidates are
+   *  duplicates by, and what `compareScored`'s goto/cast/line terms count (`Candidate.tie`) */
+  draft: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
   /** see `Candidate.matchOnly` — set by a variation that cannot establish its own semantics */
   matchOnly?: true;
   /** see `Candidate.signedUnsignedCompare` */
   signedUnsignedCompare?: true;
+}
+
+/** A tree's published text and its draft (`LanguageBackend.draft`), one string where the polish
+ *  changed nothing. */
+function emitted(backend: LanguageBackend, t: SFn): { source: string; draft: string } {
+  const source = backend.emit(t);
+  const draft = emitDraft(backend, t);
+  return { source, draft: draft === source ? source : draft };
 }
 
 /** Did `bound-plus-one-counter-wraps` CAUSE this structuring's decline? The rule fires from every
@@ -1149,7 +1164,7 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
+      sources.push({ variations: [], ...emitted(backend, sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
     } catch (e) {
       reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
@@ -1253,7 +1268,7 @@ export function enumerateCandidates(
         assertCaseGotosNarrow(alt);
         sources.push({
           variations,
-          source: backend.emit(alt),
+          ...emitted(backend, alt),
           ...refsOf(alt),
           ...volOf(alt),
           ...proof,
@@ -1307,7 +1322,7 @@ export function enumerateCandidates(
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
-                  source: backend.emit(shaped.out),
+                  ...emitted(backend, shaped.out),
                   ...refsOf(shaped.out),
                   ...volOf(shaped.out),
                   // a shape derived from a proof-gated spelling inherits the requirement
@@ -2542,7 +2557,7 @@ export function enumerateCandidates(
                 const read = structureReturnTailReading(
                   fn,
                   { ...structOpts, joinPastReturns: copiesBarred },
-                  (t) => backend.emit(t),
+                  (t) => emitDraft(backend, t),
                   hooks,
                   acceptsMemo,
                 );
@@ -2684,6 +2699,11 @@ export function enumerateCandidates(
             }
             for (const sp of sources) {
               const source = sp.source;
+              // Duplicates by the DRAFT, not the published text: the polish prints two different
+              // trees as one text where they differ only in what it re-spells (a local's number, an
+              // unused declaration), and collapsing those would keep the first route's variations
+              // where the tie-break below used to pick the other's.
+              const draft = sp.draft;
               // Collapse a candidate whose source is identical (a function with no divergent `if`
               // structures the same either way): no point scoring a duplicate. Deduping the
               // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
@@ -2717,7 +2737,7 @@ export function enumerateCandidates(
               // would have to say which it means, and the published `winnerVariations` must not
               // change — so build it when a round needs the census, not before. Until then the only
               // sound census is an ablation.
-              const dup = seen.get(source);
+              const dup = seen.get(draft);
               if (dup !== undefined) {
                 // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the
                 // published artifact is the text, so a spelling some sound route also produces is a
@@ -2754,6 +2774,7 @@ export function enumerateCandidates(
               const made: Candidate = {
                 variations,
                 source,
+                tie: tieShape(draft),
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
@@ -2763,7 +2784,7 @@ export function enumerateCandidates(
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
                 ...(liftSetting.keepStores ? { farStoreCast: true as const } : {}),
               };
-              seen.set(source, made);
+              seen.set(draft, made);
               out.push(made);
             }
           }
@@ -2946,6 +2967,10 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
  *
+ *  ALL THREE COUNT THE DRAFT (`Candidate.tie`): the text before the readability polish (l3/polish/),
+ *  which drops lines and re-spells, and would otherwise pick a different winner among spellings
+ *  that score alike while publishing nothing the ranking measured.
+ *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
@@ -2966,11 +2991,25 @@ export function compareScored<S extends { score: number }>(
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     (a.farStoreCast ? 1 : 0) - (b.farStoreCast ? 1 : 0) ||
-    gotoCount(a.source) - gotoCount(b.source) ||
-    castCount(a.source) - castCount(b.source) ||
-    lineCount(a.source) - lineCount(b.source) ||
+    tieCompare(a.tie ?? tieShape(a.source), b.tie ?? tieShape(b.source)) ||
     a.order - b.order
   );
+}
+
+/** The readability counts `compareScored` breaks a score tie by, in its order. */
+export interface TieShape {
+  readonly gotos: number;
+  readonly casts: number;
+  readonly lines: number;
+}
+
+/** {@link TieShape} of one rendered source. */
+export function tieShape(source: string): TieShape {
+  return { gotos: gotoCount(source), casts: castCount(source), lines: lineCount(source) };
+}
+
+function tieCompare(a: TieShape, b: TieShape): number {
+  return a.gotos - b.gotos || a.casts - b.casts || a.lines - b.lines;
 }
 
 /** `goto` statements in a candidate's rendered source — the readability tie-break above, asked

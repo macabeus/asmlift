@@ -15,15 +15,22 @@ export const cBackend: LanguageBackend = {
   spellsSwitchFallthrough: true,
   spellsSwitchBreak: true,
   spellsEarlyReturn: true,
-  emit(fn: SFn): string {
-    // The SAME declarator placement the local list and the struct-field printer use, so one
-    // function cannot spell the `*` on the type in its signature and on the declarator in its
-    // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).
-    return emitCFamily(
-      (named) =>
-        `${cType(named.retType)} ${named.name}(${named.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void'})`,
-      fn,
-    );
-  },
+  emit: (fn: SFn): string => emitC(fn, true),
+  draft: (fn: SFn): string => emitC(fn, false),
   comment: cComment,
 };
+
+/** `polish`: the published text, or the text before the C-family polish (`LanguageBackend.draft`). */
+function emitC(fn: SFn, polish: boolean): string {
+  // The SAME declarator placement the local list and the struct-field printer use, so one
+  // function cannot spell the `*` on the type in its signature and on the declarator in its
+  // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).
+  return emitCFamily(
+    (named) =>
+      `${cType(named.retType)} ${named.name}(${named.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void'})`,
+    fn,
+    undefined,
+    true,
+    polish,
+  );
+}
