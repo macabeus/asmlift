@@ -11,6 +11,8 @@
 // spread wins over an earlier one with the same key, so moving an input changes which value a
 // shared key ends with. A site that sets more (rank.ts's per-candidate settings) spreads this
 // object first and its own keys after it.
+import { aggregateTag, aggregateType } from './aggregate';
+import type { IrType } from './ir/types';
 import type { LanguageBackend } from './l3/ast';
 import type { Prototypes } from './proto';
 import type { ContextGlobals } from './proto-context';
@@ -60,7 +62,52 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...(inputs.onGap !== undefined ? { onGap: inputs.onGap } : {}),
     ...(inputs.symbols ? { symbols: inputs.symbols } : {}),
     ...(inputs.contextGlobals ? { contextGlobals: inputs.contextGlobals } : {}),
+    ...contextArrayElementsOf(inputs.contextGlobals, target),
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
   };
+}
+
+/** Each struct array the context declares, its element laid out on `target`
+ *  (`StructureOptions.contextArrayElements`), memoised per context and target: every lift site calls
+ *  the builder, and a project context declares hundreds of arrays. Empty spreads
+ *  nothing, so a lift with no such array gets the options it had. None on a target whose subscript
+ *  of a declared array is not shown to be another object than the cast's (`arrayShapeFromStride`):
+ *  the declared spelling is measured on agbcc alone. */
+const ELEMENTS = new WeakMap<
+  ContextGlobals,
+  Map<TargetDescription, ReadonlyMap<string, { readonly type: IrType; readonly rank: number }>>
+>();
+function contextArrayElementsOf(
+  context: ContextGlobals | undefined,
+  target: TargetDescription,
+): Pick<StructureOptions, 'contextArrayElements'> {
+  if (
+    context?.arrayElements === undefined ||
+    context.arrayElements.size === 0 ||
+    target.compilerBehaviors.arrayShapeFromStride !== true
+  ) {
+    return {};
+  }
+  let perTarget = ELEMENTS.get(context);
+  if (perTarget === undefined) {
+    perTarget = new Map();
+    ELEMENTS.set(context, perTarget);
+  }
+  let laid = perTarget.get(target);
+  if (laid === undefined) {
+    const out = new Map<string, { readonly type: IrType; readonly rank: number }>();
+    for (const [name, el] of context.arrayElements) {
+      // the element's own qualifiers are the array's (`volatile` reaches the gate through
+      // `contextGlobals.volatiles`), not part of the struct's name
+      const named = aggregateTag(el.spelling);
+      const type = named === undefined ? undefined : aggregateType(named.tag, named.spelling, el.layout, target);
+      if (type?.kind === 'struct' && type.size !== undefined && type.size > 0) {
+        out.set(name, { type, rank: el.dims.length });
+      }
+    }
+    laid = out;
+    perTarget.set(target, laid);
+  }
+  return laid.size > 0 ? { contextArrayElements: laid } : {};
 }

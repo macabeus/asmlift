@@ -10,9 +10,11 @@ import {
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredCallArgs,
+  declaredSigned,
   declaredWidth,
   declaresAggregateReturn,
   declaresVoidReturn,
+  isAddress,
   ownArgumentWords,
   ownLeadingWordParams,
   paramClassOf,
@@ -101,8 +103,24 @@ export function aggregateType(
   return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
 
+/** The tag a struct or union spelling declares it by, with the spelling itself, qualifiers aside:
+ *  `struct Tag` and `union Tag` name theirs, and a bare name is a typedef the declarations block
+ *  defines under that name. Undefined for any other spelling, which names no type a local or an
+ *  element of it could be declared with. */
+export function aggregateTag(spelling: string): { tag: string; spelling: string } | undefined {
+  const s = spelling
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const tag = /^(?:(?:struct|union) )?([A-Za-z_]\w*)$/.exec(s)?.[1];
+  return tag === undefined ? undefined : { tag, spelling: s };
+}
+
 /** The IR type of a scalar or pointer member spelling: a pointer to a scalar keeps its pointee, any
- *  other pointer is `void *`, which lays out the same. */
+ *  other pointer is `void *`, which lays out the same — a pointer to a function or to an array
+ *  (`void (*)(u8)`, `u8 (*)[4]`) included, which is no integer to compare or shift. An integer
+ *  whose signedness the spelling does not state (`size_t`, `uintptr_t`) is left untyped, as a
+ *  plain `char` is. */
 function scalarType(spelling: string): IrType | undefined {
   const s = spelling
     .replace(/\b(?:const|volatile)\b/g, ' ')
@@ -111,11 +129,15 @@ function scalarType(spelling: string): IrType | undefined {
   if (s.endsWith('*')) {
     return T.ptr(scalarType(s.slice(0, -1)) ?? T.void());
   }
+  if (isAddress(s)) {
+    return T.ptr(T.void());
+  }
   if (s === 'float' || s === 'double') {
     return s === 'float' ? T.f32() : T.f64();
   }
   const bits = declaredWidth(s);
-  return bits === undefined || s === 'char' ? undefined : T.int(bits, !/^u\d|\bunsigned\b/.test(s));
+  const signed = declaredSigned(s);
+  return bits === undefined || signed === undefined ? undefined : T.int(bits, signed);
 }
 
 function memberSize(m: AggregateMember, target: TargetDescription): { size: number; align: number } | undefined {
@@ -346,12 +368,8 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
       if (layout === undefined) {
         return { refused: 'the declaration does not lay it out (a context does, by defining the struct)', param: i };
       }
-      const spelling = t
-        .replace(/\b(?:const|volatile)\b/g, ' ')
-        .trim()
-        .replace(/\s+/g, ' ');
-      const tag = /^(?:struct\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
-      const type = tag === undefined ? undefined : aggregateType(tag, spelling, layout, target);
+      const named = aggregateTag(t);
+      const type = named === undefined ? undefined : aggregateType(named.tag, named.spelling, layout, target);
       if (type?.kind !== 'struct' || type.size === undefined) {
         return { refused: 'it is a union, or has a member this target does not size', param: i };
       }

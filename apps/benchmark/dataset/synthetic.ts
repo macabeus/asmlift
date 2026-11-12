@@ -488,6 +488,51 @@ const PROBE_NEST_MAP: SymbolMap = new Map([
   ],
 ]);
 
+/** The declarations every row of the declared struct-array stress family opens with, as its
+ *  generated corpus wrote them, less the `u8`..`s32` typedefs the candidate prelude declares. */
+const STRESS_ARRAY_PRELUDE =
+  'typedef unsigned char uint8_t; typedef signed char int8_t; typedef unsigned short uint16_t;\n' +
+  'typedef short int16_t; typedef unsigned int uint32_t; typedef int int32_t;\n' +
+  'typedef u8 bool8;\n' +
+  'void foo(void); u32 bar(u32); void baz(u32);\n' +
+  'extern u8 gIdx; extern u8 gIdxs[8]; extern u32 gN;\n';
+
+/** The symbol map of that family: the corpus's linked ELF on its prelude's scalar globals, as the
+ *  ELF provider reports them. The declared spelling is taken only with a map (the structurer's
+ *  symbol context), and the corpus measured every row with one. */
+/** The prelude's callees, as its declarations state them: asmlift is told what m2c's ctx is. */
+const STRESS_ARRAY_CALLEES: Prototypes = {
+  foo: { returnsVoid: true },
+  bar: { params: ['u32'], returns: 'u32' },
+  baz: { params: ['u32'], returnsVoid: true },
+};
+
+const STRESS_ARRAY_MAP: SymbolMap = new Map([
+  [
+    0x02000000,
+    [
+      {
+        name: 'gIdxs',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'array' as const,
+        size: 8,
+        elemSize: 1,
+        elemSigned: false,
+        dims: [8],
+      },
+    ],
+  ],
+  [
+    0x02000008,
+    [{ name: 'gIdx', kind: 'data' as const, declared: true, shape: 'scalar' as const, size: 1, signed: false }],
+  ],
+  [
+    0x02000048,
+    [{ name: 'gN', kind: 'data' as const, declared: true, shape: 'scalar' as const, size: 4, signed: false }],
+  ],
+]);
+
 export const SYNTHETIC: SynthSpec[] = [
   // ── baseline ──────────────────────────────────────────────────────────────────────────
   // The control group: a function carrying no other feature. Its body must derive no tag at all
@@ -8061,6 +8106,257 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'unsigned short ptrelem(int i);',
     symbols: BGPTRS_MAP,
+  },
+  // A member of a CONTEXT-DECLARED struct array, `gBgOfs[i].hOfs` (core
+  // structure/memory-access.ts `declaredElementMember`). Shaped on kleod:sub_0804C7FC:agbcc, which
+  // reads the index out of a script cursor and stores two members around calls: every inline cast
+  // spelling of the base places `ldr =gBgOfs` after the index scale, and the declared spelling,
+  // which the row's `ctx` states and its candidates compile against (`candidateContext`), before
+  // it. The map names the cursor only, so the structurer has a symbol context (the spelling is
+  // taken only with a map); it renders the same `extern void *gScript;` the `ctx` states.
+  {
+    sym: 'bgelemofs',
+    src:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);\n' +
+      'void bgelemofs(void){\n' +
+      '  gBgOfs[((u8 *)gScript)[2]].hOfs = readArg((u8 *)gScript + 3) * 16;\n' +
+      '  gBgOfs[((u8 *)gScript)[2]].vOfs = readArg((u8 *)gScript + 5) * 16;\n' +
+      '  gScript = (u8 *)gScript + 7;\n' +
+      '}',
+    features: ['struct', 'array', 'variable-index', 'global', 'field', 'store'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);\n' +
+      'void bgelemofs(void);',
+    proto: { bgelemofs: { returnsVoid: true }, readArg: { params: ['u8 *'], returns: 's32' } },
+    symbols: new Map([
+      [0x03004d84, [{ name: 'gScript', kind: 'data' as const, declared: true, shape: 'pointer' as const, size: 4 }]],
+    ]),
+    candidateContext:
+      'struct BgOfs { void *pTiles; void *pMap; u16 hOfs; u16 vOfs; u16 col; u16 row; u8 size; };\n' +
+      'extern struct BgOfs gBgOfs[4];\n' +
+      'extern void *gScript;\n' +
+      's32 readArg(u8 *p);',
+  },
+  // ── DECLARED STRUCT-ARRAY MEMBER: THE SHAPES A GENERATED STRESS CORPUS FOUND UNCOVERED ─────────
+  // `bgelemofs` above was the only row of the declared spelling (`g[i].member`, core
+  // structure/memory-access.ts `declaredElementMember`). These are the shapes a generated agbcc
+  // corpus of that default found and the bench lacked, each source copied from the corpus as it was
+  // generated. The one edit: the corpus's own `u8`..`s32` typedef line pair is dropped, because the
+  // candidate prelude (`C_TYPEDEFS`) already declares those names and agbcc refuses a repeated
+  // typedef. Every row sets `candidateContext`: the declared spelling compiles only where the
+  // translation unit declares the array as that struct (the harness keeps `arrayElements` only for
+  // the names it declares, src/cases/synthetic.ts `compiledContextGlobals`).
+  //
+  // PINNED TO agbcc, because the declared spelling is laid out only where a subscript of the
+  // declared array is another object than the cast's (`arrayShapeFromStride`, agbcc's
+  // build_array_ref fork); the corpus was agbcc and on the other toolchains these rows would
+  // measure the cast they already spell.
+  //
+  // What each measured there (plain default, objdump line diff, origin before the spelling -> after):
+  //   GAINED, each 2..48 -> MATCH: t_e4_rv (minimal read), t_e3_idxgs (3-byte element, index from a
+  //     u8 table), t_e10_idxcall (10-byte element, index from a call), t_e36_multi (two stores, one
+  //     past offset 32), t_est_rv / t_est_cmpu (stdint members: guard the declared sign),
+  //     t_sw_switch / t_sw_ifelse (members in switch and if/else arms).
+  //   FURTHER GUARDS, nonmatch on both, the declared spelling worse where agbcc formed no ARRAY_REF:
+  //     t_est_pidx (`p = g; p[i].f`, 2 -> 4), t_tw_cp2 (two arrays of two element types, 17 -> 23),
+  //     freemonpal below (pokeemerald FreeMonIconPalette, index in its own statement, 2 -> 8).
+  //   CONTROLS that must keep the cast (a gate refuses each): pointer member, nested member, rank 2,
+  //     packed, union element, member array, bitfield, volatile array, enum member.
+  // A one-word struct or union element read bare (`struct { s32 a; } g[8]` -> `return g[a0];`) is a
+  // noncompile on both sides and is not here.
+  //
+  // Ranked here (`pnpm bench run --only <sym>`, at authoring): every gained row and both corpus
+  // FURTHER guards MATCH, the fan holding the cast sibling; freemonpal is 2 off. Of the controls,
+  // t_r2_rv, t_pk_rb, t_vo_ra and t_en_re are nonmatches, and t_ma_rj is a NONCOMPILE: the inferred
+  // rank-2 shape spells `g_ma[a0][a1]`, which the declared struct array refuses. That is the shape
+  // inference, not the declared element, and the row stands as found.
+  ...(
+    [
+      [
+        't_e4_rv',
+        'struct E4 { u16 a; s16 b; };\nextern struct E4 g_e4[8];\nextern struct E4 h_e4[6];',
+        'u16 t_e4_rv(u32 i) { return g_e4[i].a; }',
+        ['load'],
+        { t_e4_rv: { params: ['u32'], returns: 'u16' } },
+      ],
+      [
+        't_e3_idxgs',
+        'struct E3 { u8 a; u8 b; s8 c; };\nextern struct E3 g_e3[8];\nextern struct E3 h_e3[6];',
+        'u8 t_e3_idxgs(u32 k) { return g_e3[gIdxs[k]].a; }',
+        ['load', 'table'],
+        { t_e3_idxgs: { params: ['u32'], returns: 'u8' } },
+      ],
+      [
+        't_e10_idxcall',
+        'struct E10 { u16 a; s16 b; u16 c; u8 d; s8 e; u16 f; };\nextern struct E10 g_e10[8];\nextern struct E10 h_e10[6];',
+        'void t_e10_idxcall(u16 x) { g_e10[bar(1)].a = x; }',
+        ['store'],
+        { t_e10_idxcall: { params: ['u16'], returnsVoid: true } },
+      ],
+      [
+        't_e36_multi',
+        'struct E36 { u32 w0; u32 w1; u32 w2; u32 w3; u32 w4; u32 w5; u32 w6; u32 w7; u16 a; s16 b; };\nextern struct E36 g_e36[8];\nextern struct E36 h_e36[6];',
+        'void t_e36_multi(u32 i, u32 x, s16 y) { g_e36[i].w0 = x; g_e36[i].b = y; }',
+        ['store'],
+        { t_e36_multi: { params: ['u32', 'u32', 's16'], returnsVoid: true } },
+      ],
+      [
+        't_est_rv',
+        'struct EST { uint8_t a; int8_t b; uint16_t c; int16_t d; uint32_t e; int32_t f; };\nextern struct EST g_est[8];\nextern struct EST h_est[6];',
+        'uint8_t t_est_rv(u32 i) { return g_est[i].a; }',
+        ['load', 'unsigned'],
+        { t_est_rv: { params: ['u32'], returns: 'uint8_t' } },
+      ],
+      [
+        't_est_cmpu',
+        'struct EST { uint8_t a; int8_t b; uint16_t c; int16_t d; uint32_t e; int32_t f; };\nextern struct EST g_est[8];\nextern struct EST h_est[6];',
+        'void t_est_cmpu(u32 i) { if (g_est[i].a > 5) foo(); }',
+        ['load', 'unsigned', 'compare'],
+        { t_est_cmpu: { params: ['u32'], returnsVoid: true } },
+      ],
+      [
+        't_sw_switch',
+        'struct SCA { u16 a; u16 b; };\nextern struct SCA g_sca[8]; extern u16 gScal;',
+        'void t_sw_switch(u32 i, u32 k) { switch (k) { case 0: g_sca[i].a = 1; break; case 1: g_sca[i].b = 2; break; case 2: g_sca[i].a = 3; break; case 3: foo(); break; } }',
+        ['store'],
+        { t_sw_switch: { params: ['u32', 'u32'], returnsVoid: true } },
+      ],
+      [
+        't_sw_ifelse',
+        'struct SCA { u16 a; u16 b; };\nextern struct SCA g_sca[8]; extern u16 gScal;',
+        'void t_sw_ifelse(u32 i, u32 c) { if (c) g_sca[i].a = 1; else g_sca[i].b = 2; }',
+        ['store', 'branch'],
+        { t_sw_ifelse: { params: ['u32', 'u32'], returnsVoid: true } },
+      ],
+      [
+        't_est_pidx',
+        'struct EST { uint8_t a; int8_t b; uint16_t c; int16_t d; uint32_t e; int32_t f; };\nextern struct EST g_est[8];\nextern struct EST h_est[6];',
+        'int32_t t_est_pidx(u32 i) { struct EST *p = g_est; return p[i].f; }',
+        ['load', 'pointer'],
+        { t_est_pidx: { params: ['u32'], returns: 'int32_t' } },
+      ],
+      [
+        't_tw_cp2',
+        'struct TA { u16 a; u16 b; };\nstruct TB { u32 x; u8 y; };\nextern struct TA g_ta[8]; extern struct TB g_tb[8];',
+        'void t_tw_cp2(u32 i) { g_tb[i].x = g_ta[i].a + g_ta[i].b; }',
+        ['load', 'store'],
+        { t_tw_cp2: { params: ['u32'], returnsVoid: true } },
+      ],
+      [
+        't_cp_rp',
+        'struct CP { u8 *p; u16 a; s16 b; };\nextern struct CP g_cp[8];',
+        'u8 t_cp_rp(u32 i) { return g_cp[i].p[1]; }',
+        ['load', 'pointer'],
+        { t_cp_rp: { params: ['u32'], returns: 'u8' } },
+      ],
+      [
+        't_cn_ry',
+        'struct IN { u8 x; u8 y; };\nstruct CN { struct IN in; u16 a; };\nextern struct CN g_cn[8];',
+        'u8 t_cn_ry(u32 i) { return g_cn[i].in.y; }',
+        ['load'],
+        { t_cn_ry: { params: ['u32'], returns: 'u8' } },
+      ],
+      [
+        't_r2_rv',
+        'struct E4R { u16 a; s16 b; };\nextern struct E4R g_r2[4][4];',
+        'u16 t_r2_rv(u32 i, u32 j) { return g_r2[i][j].a; }',
+        ['load', 'matrix'],
+        { t_r2_rv: { params: ['u32', 'u32'], returns: 'u16' } },
+      ],
+      [
+        't_pk_rb',
+        'struct __attribute__((packed)) CPK { u8 a; u16 b; };\nextern struct CPK g_pk[8];',
+        'u16 t_pk_rb(u32 i) { return g_pk[i].b; }',
+        ['load'],
+        { t_pk_rb: { params: ['u32'], returns: 'u16' } },
+      ],
+      [
+        't_un_wb',
+        'union UU { u32 w; u16 h; u8 b; };\nextern union UU g_un[8];',
+        'void t_un_wb(u32 i, u8 x) { g_un[i].b = x; }',
+        ['union', 'store'],
+        { t_un_wb: { params: ['u32', 'u8'], returnsVoid: true } },
+      ],
+      [
+        't_ma_rj',
+        'struct CMA { u8 arr[4]; u16 a; };\nextern struct CMA g_ma[8];',
+        'u8 t_ma_rj(u32 i, u32 j) { return g_ma[i].arr[j]; }',
+        ['load'],
+        { t_ma_rj: { params: ['u32', 'u32'], returns: 'u8' } },
+      ],
+      [
+        't_bf_rb',
+        'struct CBF { u16 a:4; u16 b:12; u16 c; };\nextern struct CBF g_bf[8];',
+        'u16 t_bf_rb(u32 i) { return g_bf[i].b; }',
+        ['bitfield', 'load'],
+        { t_bf_rb: { params: ['u32'], returns: 'u16' } },
+      ],
+      [
+        't_vo_ra',
+        'struct E4V { u16 a; s16 b; };\nextern volatile struct E4V g_vo[8];',
+        'u16 t_vo_ra(u32 i) { return g_vo[i].a; }',
+        ['load'],
+        { t_vo_ra: { params: ['u32'], returns: 'u16' } },
+      ],
+      [
+        't_en_re',
+        'enum EE { EE_A, EE_B };\nstruct CEN { u8 k; enum EE e; char c; bool8 f; };\nextern struct CEN g_en[8];',
+        'u32 t_en_re(u32 i) { return g_en[i].e; }',
+        ['load'],
+        { t_en_re: { params: ['u32'], returns: 'u32' } },
+      ],
+    ] satisfies [string, string, string, string[], Prototypes][]
+  ).map(([sym, decls, fn, features, proto]): SynthSpec => ({
+    sym,
+    src: `${STRESS_ARRAY_PRELUDE}${decls}\n${fn}`,
+    features: ['struct', 'array', 'variable-index', 'global', 'field', ...features],
+    toolchains: ['agbcc'],
+    ctx: `${STRESS_ARRAY_PRELUDE}${decls}\n${fn.slice(0, fn.indexOf('{')).trimEnd()};`,
+    proto: { ...STRESS_ARRAY_CALLEES, ...proto },
+    symbols: STRESS_ARRAY_MAP,
+    candidateContext: `${STRESS_ARRAY_PRELUDE}${decls}`,
+  })),
+  // pokeemerald src/pokemon_icon.c FreeMonIconPalette with its declarations (include/sprite.h,
+  // include/pokemon_icon.h): the table index is its own statement, so agbcc loads the table base
+  // after it, as a pointer sum would; the declared spelling hoists the base load above the index.
+  {
+    sym: 'freemonpal',
+    src:
+      'struct SpritePalette { const u16 *data; u16 tag; };\n' +
+      'extern const u8 gMonIconPaletteIndices[];\n' +
+      'extern const struct SpritePalette gMonIconPaletteTable[];\n' +
+      'void FreeSpritePaletteByTag(u16 tag);\n' +
+      'void freemonpal(u16 species)\n' +
+      '{\n' +
+      '    u8 palIndex;\n' +
+      '    palIndex = gMonIconPaletteIndices[species];\n' +
+      '    FreeSpritePaletteByTag(gMonIconPaletteTable[palIndex].tag);\n' +
+      '}',
+    features: ['struct', 'array', 'variable-index', 'global', 'field', 'table'],
+    toolchains: ['agbcc'],
+    ctx:
+      'struct SpritePalette { const u16 *data; u16 tag; };\n' +
+      'extern const u8 gMonIconPaletteIndices[];\n' +
+      'extern const struct SpritePalette gMonIconPaletteTable[];\n' +
+      'void FreeSpritePaletteByTag(u16 tag);\n' +
+      'void freemonpal(u16 species);',
+    proto: {
+      freemonpal: { params: ['u16'], returnsVoid: true },
+      FreeSpritePaletteByTag: { params: ['u16'], returnsVoid: true },
+    },
+    symbols: new Map([[0x080054a0, [{ name: 'FreeSpritePaletteByTag', kind: 'code' as const, declared: true }]]]),
+    candidateContext:
+      'struct SpritePalette { const u16 *data; u16 tag; };\n' +
+      'extern const u8 gMonIconPaletteIndices[];\n' +
+      'extern const struct SpritePalette gMonIconPaletteTable[];\n' +
+      'void FreeSpritePaletteByTag(u16 tag);',
   },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
   // 2026-09-02 — WHAT THIS FAMILY NOW MEASURES, because everything below it is the state at

@@ -56,6 +56,30 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
 const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] =>
   ctx === undefined ? undefined : contextGlobalsNamed(`text ${ctx}`, ctx, language);
 
+/** The row's context globals with `arrayElements` kept only for the arrays its candidates COMPILE
+ *  against. Every other fact the structurer reads off a context it spells through a cast that
+ *  compiles under any declaration; an element's member, `gBgOfs[i].hOfs`, compiles only where the
+ *  translation unit declares the array as that struct. A real row's candidates compile inside its
+ *  context, and so does a synthetic row's against its `candidateContext`; any other synthetic row
+ *  compiles against the declarations each candidate synthesizes, which declare no struct. */
+function compiledContextGlobals(
+  found: Case['contextGlobals'],
+  candidateContext: string | undefined,
+  language: 'c' | 'c++',
+): Case['contextGlobals'] {
+  if (found?.arrayElements === undefined || found.arrayElements.size === 0) {
+    return found;
+  }
+  const compiled =
+    candidateContext === undefined
+      ? new Set<string>()
+      : (contextGlobalsNamed(`text ${candidateContext}`, candidateContext, language)?.declared ?? new Set<string>());
+  return {
+    ...found,
+    arrayElements: new Map([...found.arrayElements].filter(([name]) => compiled.has(name))),
+  };
+}
+
 export interface SyntheticFilter {
   only?: string; // substring match on the symbol
   toolchain?: ToolchainId;
@@ -92,7 +116,11 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       const tc = TOOLCHAINS[tcId];
       const codegen = codegenFor(tcId, cflags);
       const ctx = spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx;
-      const contextGlobals = contextGlobalsOf(ctx, spec.lang ?? 'c');
+      const contextGlobals = compiledContextGlobals(
+        contextGlobalsOf(ctx, spec.lang ?? 'c'),
+        spec.candidateContext,
+        spec.lang ?? 'c',
+      );
       // The row's ctx declares its own function as a header does, and a `--context` lift reads that
       // entry as a soft bound on the argument registers where `proto` states none: carried here
       // under its mark (core `withOwnContextMark`), as the real tier carries a vendored context's.

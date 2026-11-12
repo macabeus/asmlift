@@ -129,6 +129,25 @@ export interface ContextGlobals {
    *  a `reference`, whose cell no spelling names, so the structurer declines a function that
    *  touches it. */
   storage: ReadonlyMap<string, DeclaredStorage>;
+  /** The objects declared as an ARRAY OF A STRUCT OR UNION the context lays out, with that element:
+   *  `extern struct BgInfo gBgInfo[4];` is `{ spelling: 'struct BgInfo', dims: [4], layout }`. The
+   *  structurer reads it to spell an element's member through the declaration (`gBgInfo[i].hOfs`,
+   *  structure/memory-access.ts `declaredElementMember`). An array whose element is laid out by an
+   *  attribute, has a member this cannot read, or whose inner extent is not a constant is left out;
+   *  so is one declared through an array typedef. The outermost extent is null where the
+   *  declaration leaves it unsized (`extern struct S gS[];`). Absent reads as empty: a context
+   *  read by an older reader states no element. */
+  arrayElements?: ReadonlyMap<string, DeclaredArrayElement>;
+}
+
+/** The element of an array a context declares ({@link ContextGlobals.arrayElements}). */
+export interface DeclaredArrayElement {
+  /** the element type as the declaration writes it (`struct BgInfo`, `BgInfo`) */
+  spelling: string;
+  /** the extents, outermost first; the outermost is null where it is unsized */
+  dims: (number | null)[];
+  /** the element's members, which the target lays out (`aggregate.ts`) */
+  layout: AggregateLayout;
 }
 
 /** What one declared object that is no aggregate occupies ({@link ContextGlobals.storage}). */
@@ -169,6 +188,8 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx);
   const scope: VolatileScope = { table, typedefs: typedefTypes(ctx), bodies: tagBodies(ctx), ctx, read: new Map() };
+  const layoutOf = layoutReader(ctx, table);
+  const arrayElements = new Map<string, DeclaredArrayElement>();
   const aggregates = new Set<string>();
   const volatiles = new Set<string>();
   const pointeeVolatiles = new Set<string>();
@@ -201,6 +222,10 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
+        const element = arrayElement(t, table, layoutOf, ctx.tokens);
+        if (element !== undefined) {
+          arrayElements.set(x.name, element);
+        }
       } else if (t.derivations[0]?.kind !== 'function') {
         storage.set(x.name, declaredStorage(t, table, scope.typedefs, ctx.tokens));
       }
@@ -223,7 +248,38 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       structTypes.set(name, named);
     }
   }
-  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes, storage };
+  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes, storage, arrayElements };
+}
+
+/** The struct or union element of an object declared `t`, where its declarator makes it an array of
+ *  one the context lays out ({@link ContextGlobals.arrayElements}). Only the declarator's own
+ *  extents are read: an array typedef keeps its extents in the typedef, which this leaves out. */
+function arrayElement(
+  t: DeclaredType,
+  table: TypeTable,
+  layoutOf: LayoutOf,
+  tokens: Tokens,
+): DeclaredArrayElement | undefined {
+  if (t.derivations.length === 0 || !t.derivations.every((d) => d.kind === 'array')) {
+    return undefined;
+  }
+  const dims: (number | null)[] = [];
+  for (const [i, d] of t.derivations.entries()) {
+    const n = d.kind === 'array' && d.size !== undefined ? constantValue(tokens, d.size) : undefined;
+    if (n === undefined && !(i === 0 && d.kind === 'array' && d.size === undefined)) {
+      return undefined;
+    }
+    if (n !== undefined && n <= 0) {
+      return undefined;
+    }
+    dims.push(n ?? null);
+  }
+  const element: DeclaredType = { ...t, derivations: [] };
+  const layout = layoutOf(element, 0) ?? layoutOf(resolve(element, table.typedefs, tokens), 0);
+  if (layout?.members === undefined) {
+    return undefined;
+  }
+  return { spelling: spellType(element, tokens), dims, layout };
 }
 
 /** The object a C declaration with a storage class and no type specifier declares, C89's implicit

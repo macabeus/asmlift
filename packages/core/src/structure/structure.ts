@@ -816,6 +816,7 @@ function structureRanked(
     orderLicensedGlobals,
     pointerGlobals,
     contextGlobals,
+    contextArrayElements,
     enumBytes,
     plainCharSigned,
   } = opts;
@@ -1327,6 +1328,13 @@ function structureRanked(
         ptrElements: ptrElementSpellingWanted,
         declRank: declRankSpellingWanted,
         fieldsOf: memoFieldsOf((n) => symbols.get(n)),
+        arrayElement: (n) => {
+          const el = contextArrayElements?.get(n);
+          return el === undefined
+            ? undefined
+            : { ...el, volatile: contextGlobals?.volatiles.has(n) === true || symbols.get(n)?.volatile === true };
+        },
+        baseFirst: (n) => orderLicensedGlobals?.has(n) === true,
       }
     : undefined;
 
@@ -3501,6 +3509,7 @@ function structureRanked(
         ctype,
         symCtx,
         frameArrayFor(d),
+        { isStore: false, qualified: qualifiedBy(d) !== null },
       );
       return pinnedAccess(d, access);
     }
@@ -4722,6 +4731,7 @@ function structureRanked(
             ctype,
             symCtx,
             frameArrayFor(op),
+            { isStore: true, qualified: qualifiedBy(op) !== null },
           ),
         );
         // a struct-array element's field: `base[i].field_K`, whose flat cell is

@@ -510,6 +510,19 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       // a `castViews` field, `((u8 *)p)[1]` (structure/memory-access.ts `memAccess`) — is told apart by the
       // same rule that minted it, and reads its scalar.
       const bt = rec(e.base);
+      // The element of a context-declared struct array (`gBgInfo[i]` under `.hOfs`). It also wins
+      // over a SCALAR pointee, the bare-array spelling's note of the same name in `SFn.globals`,
+      // since the candidate compiles against the declaration; a struct pointee still wins (l3/ast.ts
+      // `baseElem` on precedence).
+      if (
+        e.baseElem?.kind === 'struct' &&
+        e.baseElem.size === e.width &&
+        (bt === undefined ||
+          (bt.kind === 'ptr' && bt.to.kind === 'int') ||
+          (bt.kind === 'array' && bt.elem.kind === 'int'))
+      ) {
+        return e.baseElem;
+      }
       if (
         bt?.kind === 'ptr' &&
         bt.to.kind === 'struct' &&

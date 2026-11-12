@@ -3,6 +3,7 @@
 // the hooks report (`JoinPastReturnsSite`), and the declared-callee tables cut to what one body
 // calls (`calledOnly`).
 import { Block } from '../ir/core';
+import type { IrType } from '../ir/types';
 import { Stmt, walkExprs } from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import type { ContextGlobals } from '../proto-context';
@@ -411,9 +412,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   inferredSymbols?: Map<string, SymbolInfo>;
   /** THE ORDER HALF of the same derivation (raise/globalshape.ts `orderLicensedGlobals`): the
    *  globals whose address the assembly materialized BEFORE it scaled the index. Not a shape and
-   *  not a declaration — nothing is spelled from it here — it is stamped onto every `index` node it
-   *  reaches (`Expr.baseOrdered`, l3/ast.ts) for the L3 pass that decides whether a base gets a
-   *  HOME.
+   *  not a declaration. It is stamped onto every `index` node it reaches (`Expr.baseOrdered`,
+   *  l3/ast.ts) for the L3 pass that decides whether a base gets a HOME, and with a symbol map it
+   *  picks the declared struct-array spelling over the cast (memory-access.ts DECLARED_MEMBER_GATES
+   *  `base-order`): the one spelling choice it makes, between two that name the same bytes.
    *
    *  A SUPERSET of `inferredSymbols`' names, and its own field for exactly that reason: a struct
    *  element is licensed here and has no shape there. */
@@ -429,6 +431,14 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  re-derives. Read with the map setting and without it: a context declaration is what every
    *  candidate compiles against, whichever names it spells. */
   contextGlobals?: ContextGlobals;
+  /** `contextGlobals.arrayElements` laid out on this target: each context-declared array of a
+   *  struct, its element as an IR struct (`aggregate.ts` `aggregateType`, named members at the
+   *  target's offsets) and the array's rank. Built where the target is in hand
+   *  (structuring-options.ts), on a target whose declared-array subscript is its own object
+   *  (`arrayShapeFromStride`); an element this target does not size is left out. Read where an
+   *  element's member is spelled through the declared array (memory-access.ts
+   *  `declaredElementMember`). */
+  contextArrayElements?: ReadonlyMap<string, { readonly type: IrType; readonly rank: number }>;
 }
 
 /** Where one `if`, comparison tree or jump table took the join past its early returns

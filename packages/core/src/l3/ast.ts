@@ -204,13 +204,21 @@ export type Expr =
        *  construction for anything a producer could state AND for a statement gone stale. What
        *  the consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
        *  answers nothing (cfamily.ts `legalizedIndexBase`), so wherever the walk can read the base
-       *  it corrects a stale statement instead of being overridden by it. The one producer,
+       *  it corrects a stale statement instead of being overridden by it. The first producer,
        *  structure/memory-access.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
        *  has just passed `spellsAccessType` on — and that predicate IS
        *  `typeEquals(T.int(width*8, elemSigned), scalarTypeForAccess(width, signed))`, so
        *  `derefStrideOk` over the stated pointer is true by construction at every width (4 by
        *  `width === 4`, 1 and 2 by `to.signed === signed`). The obligation is on the PRODUCER:
        *  state the type the access's own width and signedness agree with.
+       *
+       *  The second, `declaredElementMember` there, states a STRUCT: the element of a
+       *  context-declared struct array (`gBgInfo[i]`), whose size it has checked against the
+       *  node's stride. Only a dot-form `field` base carries one, which the printer spells
+       *  unlegalized, and `exprCType` reads it (l3/typing.ts) so the member under it is typed.
+       *  Its precedence is wider by one case: it also wins over a SCALAR pointee the walk reads,
+       *  which is the bare-array spelling's note of the same name (`gCells[k] = gCells[j]`
+       *  beside `gCells[i].tile`), since the candidate compiles against the declaration it states.
        *
        *  THE ALTERNATIVE REJECTED: teach `exprCType` the pointee layout, the way
        *  `sym.noteGlobal` types the bare-array spelling —

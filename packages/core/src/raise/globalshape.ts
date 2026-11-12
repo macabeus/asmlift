@@ -68,6 +68,13 @@
 // compiles index-first), which is why `ORDER_SHAPE_GATES` below owns its rules instead of
 // selecting that one.
 //
+// `orderLicensedGlobals` has a second reader, and that one asks about the FORK alone:
+// structure/memory-access.ts's `base-order` row spells a struct element's member through the
+// declared array (`g[i].a`, A's ARRAY_REF) only for a licensed name, and keeps the cast (C's
+// pointer sum) for the rest. `struct S *p = &g[i]; p->a` is C's order, and its lift matches only
+// through the cast. B's home makes the licence over-admit there too, which costs that spelling's
+// codegen and never a value, since both spellings name the same bytes.
+//
 // EVERY CENSUS IN THIS FILE WAS TAKEN OVER ONE ARTIFACT AND IS DATED BY IT: `186360ca`
 // (2026-09-03), whose 370 agbcc rows include 359 that lift. Refusals are retaken through
 // `arrayShapeRefusals`, the licence tables through `orderLicensedGlobals` and `inferGlobalArrays`;
@@ -980,10 +987,13 @@ export function inferGlobalArrays(
  *  pointer local over `&gSym` reproduces the bytes under any declaration of `gSym`, exactly as the
  *  cast spelling it re-homes does.
  *
- *  A GENERATOR, never a classifier. Its consumer (`l3/basecse.ts`'s `order-licensed`, reached from
- *  rank's `/orderbase` roster row) uses it to OFFER a candidate beside the inline spelling, which
- *  the differ then referees — so an over-licensed name costs fan and a tie-break, never meaning.
- *  Empty for every target that has not opted in. */
+ *  Never a classifier of meaning. It has two consumers, and neither changes what a candidate
+ *  computes. `l3/basecse.ts`'s `order-licensed`, reached from rank's `/orderbase` roster row, uses
+ *  it to OFFER a candidate beside the inline spelling, which the differ then referees, so an
+ *  over-licensed name costs fan and a tie-break. structure/memory-access.ts's `base-order` row of
+ *  DECLARED_MEMBER_GATES picks between two spellings of the same bytes, `g[i].member` and the cast
+ *  `((T *)&g)[i].field_K`, by it: a name this set leaves out keeps the cast. A wrong answer there
+ *  costs a default spelling's codegen, never a value. Empty for every target that has not opted in. */
 export function orderLicensedGlobals(
   fn: Fn,
   target: TargetDescription,

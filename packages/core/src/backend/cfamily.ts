@@ -901,9 +901,27 @@ function initialized(
  *  The struct type is SELF-DESCRIBING: any padding needed to seat fields at their exact offsets is
  *  already present as real `u8[N]` pad fields — both raise/struct-arrays.ts (element strides) and
  *  raise/structs.ts (unaccessed leading/interior gaps) interleave them where natural C alignment
- *  does not already cover the offset. This just declares each field in order. */
-function structDecls(fn: SFn): string[] {
-  return (fn.structs ?? []).map((s) => renderStructDecl(s.name, s.fields));
+ *  does not already cover the offset. This just declares each field in order.
+ *
+ *  Only a struct the printed function (`printed`) names is declared, or one a declared struct's
+ *  field names: `SFn.structs` is what the graph mentioned when structuring ran (raise/structs.ts
+ *  `collectStructs`), and an access spelled through a context-declared array
+ *  (structure/memory-access.ts `declaredElementMember`) leaves its recovered element unnamed. */
+function structDecls(fn: SFn, printed: string): string[] {
+  const decls = (fn.structs ?? []).map((s) => ({ name: s.name, text: renderStructDecl(s.name, s.fields) }));
+  const names = (text: string, name: string) => new RegExp(`\\b${name}\\b`).test(text);
+  const kept = new Set<string>();
+  for (let reach = printed, grew = true; grew;) {
+    grew = false;
+    for (const d of decls) {
+      if (!kept.has(d.name) && names(reach, d.name)) {
+        kept.add(d.name);
+        reach += `\n${d.text}`;
+        grew = true;
+      }
+    }
+  }
+  return decls.filter((d) => kept.has(d.name)).map((d) => d.text);
 }
 
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body.
@@ -922,13 +940,10 @@ export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, design
   if (stray !== null) {
     throw new Error(`c backend: ${stray}`);
   }
-  const decls = structDecls(fn);
+  const printed = [`${signature} {`, ...cFamilyBody(fn, leaf, designators && fn.designators === true), '}'].join('\n');
+  const decls = structDecls(fn, printed);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
-  return (
-    preamble +
-    [`${signature} {`, ...cFamilyBody(fn, leaf, designators && fn.designators === true), '}'].join('\n') +
-    '\n'
-  );
+  return preamble + printed + '\n';
 }
 
 // One C-family comment spelling, shared by the C and C++ backends. A `*` followed by `/`
