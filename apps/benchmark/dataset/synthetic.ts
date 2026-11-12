@@ -8071,9 +8071,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // declared element type and its member names, which the row's `ctx` states and its candidates
   // compile against (`candidateContext`); a cast base in a pointer local assigned at its first use
   // would too, a placement core rank-variations.ts ORDERBASE_HOISTS withholds. The map names the
-  // cursor only, which is what gives the structurer a
-  // symbol context (the spelling is taken only where a map is in play); it renders the same
-  // `extern void *gScript;` the row's `ctx` states.
+  // cursor only, which gives the structurer a symbol context (the spelling is taken only where a
+  // map is in play); it renders the same `extern void *gScript;` the row's `ctx` states.
   {
     sym: 'bgelemofs',
     src:

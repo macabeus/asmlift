@@ -922,14 +922,13 @@ export interface DeclaredMemberAccess {
  *
  *  WHAT IT DOES NOT ADMIT YET, each keeping the cast: a member of a nested struct or an array
  *  member (`aggregateType` gives neither a field), a pointer member read or written as a word
- *  (`no-member`, whose scalar test takes integers only), a rank-2 array (`rank`), and every lift with no
- *  symbol map (`/raw-globals` and a map-less row). That last one is where the lookup sits, on
- *  the symbol context, and not what the evidence needs: the declaration context alone states the
- *  element. It stays because the map-less sibling is the one candidate of a fan that still
- *  spells the cast, so both readings rank; moving the lookup would make the declared spelling the
- *  default there too, with no held-out measure of a map-less lift, and no variation that offers
- *  the cast in its place. No census seam reaches this table: its caller is `arrayAccess`, which no record outside core
- *  holds, so `pnpm bench gates` cannot count it. */
+ *  (`no-member`, whose scalar test takes integers only), a rank-2 array (`rank`), and every lift
+ *  with no symbol map (`/raw-globals` and a map-less row). The lookup sits on the symbol context
+ *  although the declaration context alone states the element, so that the map-less sibling stays
+ *  the fan's one cast candidate and both readings rank.
+ *
+ *  KNOWN GAP: no census seam reaches this table (its caller, `arrayAccess`, is held by no record
+ *  outside core), so `pnpm bench gates` cannot count it. */
 export const DECLARED_MEMBER_GATES: readonly Gate<DeclaredMemberAccess>[] = [
   {
     id: 'no-declared-element',
