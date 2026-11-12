@@ -28,8 +28,10 @@
 //      kind could slip past. A name the context declares and the function never mentions may be
 //      shadowed: a block-scope name hides a file-scope one only where it is spelled;
 //   4. no two renamed variables take one name;
-//   5. the emitted dialect is C: the C++ backend binds its own parameter names to the mangled
-//      signature (backend/cpp.ts).
+//   5. in a unit compiled as C++ (`SFn.dialect`), the name is no C++ keyword (`CXX_KEYWORDS`): a C
+//      header may name a parameter `new` or `class`. A C++ unit prints through this C backend
+//      too, so it takes the role names like any other; the receiver and the mangled signature
+//      are refused upstream (`ownParamNames`: a mangled name or an implicit argument names none).
 import {
   type Expr,
   type SFn,
@@ -64,11 +66,63 @@ const RESERVED = new Set([
   'LANGUAGE_PASCAL',
 ]);
 
+/** The keywords C++ reserves that C does not: a name C accepts and a C++ unit cannot declare. */
+const CXX_KEYWORDS = new Set([
+  'and',
+  'and_eq',
+  'asm',
+  'bitand',
+  'bitor',
+  'bool',
+  'catch',
+  'class',
+  'compl',
+  'const_cast',
+  'delete',
+  'dynamic_cast',
+  'explicit',
+  'export',
+  'false',
+  'friend',
+  'inline',
+  'mutable',
+  'namespace',
+  'new',
+  'not',
+  'not_eq',
+  'operator',
+  'or',
+  'or_eq',
+  'private',
+  'protected',
+  'public',
+  'reinterpret_cast',
+  'static_cast',
+  'template',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeid',
+  'typename',
+  'using',
+  'virtual',
+  'wchar_t',
+  'xor',
+  'xor_eq',
+]);
+
 const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
 
-/** Whether `name` may be printed as a variable at all, before anything it might collide with. */
-function printable(name: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !/^_[_A-Z]/.test(name) && !RESERVED.has(name);
+/** Whether `name` may be printed as a variable of `fn` at all, before anything it might collide
+ *  with. */
+function printable(name: string, fn: SFn): boolean {
+  return (
+    /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+    !/^_[_A-Z]/.test(name) &&
+    !RESERVED.has(name) &&
+    (fn.dialect !== 'c++' || !CXX_KEYWORDS.has(name))
+  );
 }
 
 /** One rename `fn` asks for, before the collision check: the variable, and the names it may take
@@ -107,9 +161,6 @@ function proposed(fn: SFn): Proposal[] {
  *  itself where it gives none. `printed` is `fn` as the backend prints it, asked for only where a
  *  rename is proposed: every identifier it spells is one no new name may take. */
 export function nameVariables(fn: SFn, printed: () => string): SFn {
-  if (fn.dialect === 'c++') {
-    return fn;
-  }
   const asked = proposed(fn);
   if (asked.length === 0) {
     return fn;
@@ -124,7 +175,7 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
   const renames = new Map<string, string>();
   const taken = new Set<string>();
   for (const { from, to } of asked) {
-    const free = to.find((n) => printable(n) && !spelled.has(n) && !taken.has(n));
+    const free = to.find((n) => printable(n, fn) && !spelled.has(n) && !taken.has(n));
     if (free !== undefined) {
       renames.set(from, free);
       taken.add(free);

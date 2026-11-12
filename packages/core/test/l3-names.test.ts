@@ -55,9 +55,10 @@ describe("the declaration's parameter names", () => {
     expect(cBackend.emit(sum(['__x', '_Y']))).toContain('s32 f(s32 a0, s32 a1)');
   });
 
-  test('the C++ backend binds its own names and is left alone', () => {
-    const fn = { ...sum(['x', 'y']), dialect: 'c++' as const };
-    expect(nameVariables(fn, () => '')).toBe(fn);
+  test('a unit compiled as C++ prints them too, save a C++ keyword', () => {
+    expect(cBackend.emit({ ...sum(['x', 'y']), dialect: 'c++' })).toContain('s32 f(s32 x, s32 y)');
+    expect(cBackend.emit({ ...sum(['new', 'y']), dialect: 'c++' })).toContain('s32 f(s32 a0, s32 y)');
+    expect(cBackend.emit(sum(['new', 'y']))).toContain('s32 f(s32 new, s32 y)');
   });
 
   test('a function with nothing to rename is printed once, as it was', () => {
