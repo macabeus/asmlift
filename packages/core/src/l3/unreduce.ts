@@ -110,10 +110,12 @@
 //     it: a callee or a store through a pointer can rewrite it with no `assign` in sight, so a
 //     loop calling `TakeMove(…)` would re-read `gPtr` after every call where the asm read it once.
 //     It counts as a read OUTSIDE the window — a name the C declares is not a device register —
-//     so it bars on the same writes and no others. A name declared nowhere (a static, an
-//     undeclared symbol) counts as well: unknown storage is not private storage. An ARRAY-typed
-//     global does not: its name decays to a link-time address and reads nothing (`l3/reindex.ts`'s
-//     invariant-addend test draws the same line between a private name and a global one).
+//     so it bars on the same writes and no others. Which names count is `calleeWritable`
+//     (l3/storage.ts), the one answer `l3/reindex.ts`'s invariant-addend test reads too: a scalar
+//     global, a non-array function-scope static (declared in `SFn.statics`, but in no class
+//     `nameStorage` names), and a name declared nowhere, because unknown storage is not private
+//     storage. A global or static ARRAY does not: its name decays to a link-time address and reads
+//     nothing. An address-escaped local counts as well, which `init-name-escapes` refuses first.
 //
 // AND THE PREMISE THAT IS NOT ENOUGH, which this file recorded as a fact about the board and which
 // is FALSE. "A write to a hardware register is not a write to any object a C program declares" is
@@ -212,7 +214,7 @@ import {
   walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
-import { type Storage, nameStorage } from './storage';
+import { calleeWritable } from './storage';
 import { type VarTypes, declaredTypes, exprCType, ptrElemBytes } from './typing';
 
 /** Why `relate` refused — one tag per question it asks. `relate` is the only place that knows
@@ -254,7 +256,7 @@ export interface AccCtx {
   movedEffect: boolean;
   /** the closed form reads a `volatile` object */
   movedVolatile: boolean;
-  /** the closed form reads memory — an access, or a global name — the region's own writes cannot
+  /** the closed form reads memory — an access, or a name a callee can write — the region's own writes cannot
    *  be told apart from */
   movedAliasable: boolean;
 }
@@ -700,21 +702,12 @@ const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
 
-/** The names whose READ is a memory read no `index` or `field` node spells: every name that is
- *  neither a local nor a param — a global, a static, or a name declared nowhere (unknown storage is
- *  not private storage) — less a global ARRAY, whose name decays to its link-time address and
- *  reads nothing. A callee or a store through a pointer can write such a name where no `assign`
- *  names it, which is the write `init-loop-var` and `init-name-escapes` cannot see. */
-function memoryNameTest(sfn: SFn): (name: string) => boolean {
-  const storage: ReadonlyMap<string, Storage> = nameStorage(sfn);
-  const arrays = new Set(
-    [...(sfn.globals ?? []), ...(sfn.statics ?? [])].filter((g) => g.type.kind === 'array').map((g) => g.name),
-  );
-  return (n) => {
-    const s = storage.get(n);
-    return s !== 'local' && s !== 'param' && !arrays.has(n);
-  };
-}
+/** Does the init READ MEMORY that a write the region performs could change? An access (`index`,
+ *  `field`), or a bare name `calleeWritable` (l3/storage.ts) says a callee or an aliasing store
+ *  can write with no `assign` naming it — the write `init-loop-var` cannot see. The ONE spelling
+ *  of the question: `movedReadAliasable` returns early on it, and the device-proof test asks it. */
+const initReadsMemory = (e: Expr, calleeWrites: (n: string) => boolean): boolean =>
+  accessesIn(e).length > 0 || namesUnder(e).some(calleeWrites);
 
 /** Does a READ land on a device register? Two readings, and neither is enough alone. The chain's
  *  ROOT is what places an access whose subscripts are not constant — `((struct E *)0x03003430)
@@ -736,19 +729,19 @@ const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
  *
  *  MEMORY ONLY. The PRIVATE names the closed form reads (locals and params) are `init-loop-var`'s
  *  question and `init-name-escapes`', and a closed form with no memory access still has names —
- *  which is why the early return below is not "nothing can change this". A GLOBAL name is memory:
- *  `readsGlobal` says the closed form reads one (`memoryNameTest`), and it bars on the same writes
- *  an access does. It is never a device read — a name the C declares is not a device register. */
+ *  which is why the early return below is not "nothing can change this". A name a callee can write
+ *  (`initReadsMemory`) is memory, and it bars on the same writes an access does. It is never a
+ *  device read — a name the C declares is not a device register. */
 function movedReadAliasable(
   closed: Expr,
   evaluated: readonly Stmt[],
-  readsGlobal: boolean,
+  calleeWrites: (n: string) => boolean,
   window?: readonly [number, number],
 ): boolean {
-  const reads = accessesIn(closed);
-  if (reads.length === 0 && !readsGlobal) {
+  if (!initReadsMemory(closed, calleeWrites)) {
     return false; // no memory read ⇒ no write can reach it; its private NAMES are the two gates above
   }
+  const reads = accessesIn(closed);
   for (const s of allStmts(evaluated)) {
     // a call or an unmodelled instruction may write anything
     if (stmtExprs(s).some(exprHasEffect)) {
@@ -841,7 +834,7 @@ export function unreduceAccumulators(
 ): UnreduceResult | null {
   const body = [...sfn.body];
   const vt: VarTypes = declaredTypes(sfn);
-  const isMemoryName = memoryNameTest(sfn);
+  const calleeWrites = calleeWritable(sfn);
   const deletedInits = new Set<Stmt>();
   const deletedLocals = new Set<string>();
   let changed = false;
@@ -885,7 +878,6 @@ export function unreduceAccumulators(
       const initIdx = sfn.body.indexOf(initStmt);
       const evaluated = motionRegion(sfn.body, loop, li, initIdx, startIdx);
       const ctrLocal = sfn.locals.find((l) => l.name === ctr);
-      const readsGlobal = namesUnder(initStmt.value).some(isMemoryName);
       // The units the accumulator's step counts in, against the units the closed form's `+` would
       // scale by. Both sides must be KNOWN and equal — see `stride-units`.
       const accScale = arithScale(cand.type);
@@ -917,7 +909,7 @@ export function unreduceAccumulators(
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
         movedVolatile: exprReadsVolatile(initStmt.value, sfn),
-        movedAliasable: movedReadAliasable(initStmt.value, evaluated, readsGlobal, window),
+        movedAliasable: movedReadAliasable(initStmt.value, evaluated, calleeWrites, window),
       };
       if (firstRejection(gates, ctx) !== null) {
         continue;
@@ -932,7 +924,7 @@ export function unreduceAccumulators(
       }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
-      if ((accessesIn(initStmt.value).length > 0 || readsGlobal) && deviceWritesMemory(armed, triggers)) {
+      if (initReadsMemory(initStmt.value, calleeWrites) && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
       rewrites.set(cand.name, closed.ok);
