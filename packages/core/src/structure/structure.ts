@@ -1334,6 +1334,7 @@ function structureRanked(
             ? undefined
             : { ...el, volatile: contextGlobals?.volatiles.has(n) === true || symbols.get(n)?.volatile === true };
         },
+        baseFirst: (n) => orderLicensedGlobals?.has(n) === true,
       }
     : undefined;
 
