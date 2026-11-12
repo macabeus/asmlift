@@ -48,6 +48,8 @@ export interface StructuringInputs {
   /** The names the function's own declaration gives its parameters (proto-context.ts
    *  `ownParamNames`): printed by the C backend, read by nothing else (`SFn.paramNames`). */
   paramNames?: readonly string[];
+  /** Print loop counters and the returned local under role names (`SFn.roleNames`). */
+  roleNames?: boolean;
 }
 
 /** The structurer's options for one lift: `structureOptionsFor` (the target's compiler behaviours,
@@ -69,6 +71,7 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
     ...(inputs.paramNames?.length ? { declaredParamNames: inputs.paramNames } : {}),
+    ...(inputs.roleNames ? { nameRoles: true } : {}),
   };
 }
 

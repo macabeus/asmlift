@@ -151,6 +151,7 @@ export async function rankCandidatesInBrowser(
   const refused: RefusedDeclaration[] = [];
   const candidates = enumerateCandidates(name, asm, target, {
     backend: cBackend,
+    roleNames: true,
     ...(symbols ? { symbols } : {}),
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });

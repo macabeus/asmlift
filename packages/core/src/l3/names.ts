@@ -30,7 +30,17 @@
 //   4. no two renamed variables take one name;
 //   5. the emitted dialect is C: the C++ backend binds its own parameter names to the mangled
 //      signature (backend/cpp.ts).
-import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
+import {
+  type Expr,
+  type SFn,
+  type Stmt,
+  exprChildren,
+  mapExprChildren,
+  mapStmtExprs,
+  stmtExprs,
+  stmtLists,
+  walkExprs,
+} from './ast';
 
 /** Identifiers a compiler this project serves predefines as macros outside the reserved namespace
  *  (`_` + a capital, or `__`), which a parameter or a local must not be spelled as: the host `cpp`
@@ -61,17 +71,34 @@ function printable(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !/^_[_A-Z]/.test(name) && !RESERVED.has(name);
 }
 
-/** The renames `fn` asks for, old name to new, before the collision check: the declaration's
- *  parameter names where they pair one to one. */
-function proposed(fn: SFn): Map<string, string> {
-  const out = new Map<string, string>();
+/** One rename `fn` asks for, before the collision check: the variable, and the names it may take
+ *  in order of preference, the first one free winning. */
+interface Proposal {
+  from: string;
+  to: readonly string[];
+}
+
+/** The counter names, by how many counted loops enclose the loop: `i`, then `j`, then `k`. */
+const COUNTERS = ['i', 'j', 'k'] as const;
+
+/** The renames `fn` asks for: the declaration's parameter names where they pair one to one, then
+ *  each loop counter's name, then `result`. */
+function proposed(fn: SFn): Proposal[] {
+  const out: Proposal[] = [];
   const names = fn.paramNames;
   if (names !== undefined && names.length === fn.params.length) {
     fn.params.forEach((p, k) => {
       if (names[k] !== p.name) {
-        out.set(p.name, names[k]);
+        out.push({ from: p.name, to: [names[k]] });
       }
     });
+  }
+  const roles = fn.roleNames ? roleNames(fn) : { counters: new Map<string, readonly string[]>() };
+  for (const [from, to] of roles.counters) {
+    out.push({ from, to });
+  }
+  if (roles.result !== undefined) {
+    out.push({ from: roles.result, to: ['result'] });
   }
   return out;
 }
@@ -84,7 +111,7 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
     return fn;
   }
   const asked = proposed(fn);
-  if (asked.size === 0) {
+  if (asked.length === 0) {
     return fn;
   }
   const spelled = new Set(printed().match(IDENTIFIER) ?? []);
@@ -96,13 +123,208 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
   }
   const renames = new Map<string, string>();
   const taken = new Set<string>();
-  for (const [from, to] of asked) {
-    if (printable(to) && !spelled.has(to) && !taken.has(to)) {
-      renames.set(from, to);
-      taken.add(to);
+  for (const { from, to } of asked) {
+    const free = to.find((n) => printable(n) && !spelled.has(n) && !taken.has(n));
+    if (free !== undefined) {
+      renames.set(from, free);
+      taken.add(free);
     }
   }
   return renames.size === 0 ? fn : renamed(fn, renames);
+}
+
+// ── role names ───────────────────────────────────────────────────────────────────────────────────
+//
+// A COUNTER is a local a loop's condition reads whose every write is either ONE initialization
+// ahead of the loop — the `for`'s own init, or an assignment earlier in the statement list the loop
+// sits in — or a step of one inside the loop's own body, not inside a loop nested in it:
+// `v = v + 1`, `v = v - 1` (under a cast to its own type too), `v++` or `v--`. A local written
+// anywhere else, or initialized twice — the coalescer's one carrier for two loops' counters, which
+// is a variable with two roles — is no counter. A loop takes the first counter its condition
+// reads, named `i` where no counted loop encloses it, `j` under one, `k` under two; one that cannot
+// have that name (taken, or spelled) takes the next free one, and a fourth level takes none.
+//
+// THE RESULT is the one local every `return` returns, read bare, the last statement of the
+// function being one of those returns — and no counter, which would give it two roles.
+//
+// Both are print-only like the parameter names: a local's name is no codegen fact, and the
+// collision check is the same.
+
+type Loop = Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>;
+
+/** One write of a local: where it sits, and what it is. */
+interface Write {
+  /** the loops enclosing it, outermost first (a `for`'s own init is outside its loop) */
+  loops: readonly Loop[];
+  /** a step of the local by one */
+  step: boolean;
+  /** the statement list and index holding it, for an `assign` statement */
+  at?: { list: readonly Stmt[]; index: number };
+  /** the `for` whose init it is */
+  initOf?: Loop;
+}
+
+/** The locals a role name may be given: scalar locals with no frame object, no initializer and no
+ *  qualifier, whose address nothing takes. */
+function candidates(fn: SFn): Set<string> {
+  const out = new Set(
+    fn.locals
+      .filter(
+        (l) =>
+          (l.type.kind === 'int' || l.type.kind === 'ptr') &&
+          l.frame === undefined &&
+          l.uninit === undefined &&
+          l.volatile === undefined &&
+          l.pointeeVolatile === undefined &&
+          l.init === undefined,
+      )
+      .map((l) => l.name),
+  );
+  for (const e of walkExprs(fn.body)) {
+    if (e.k === 'addr') {
+      out.delete(e.name);
+    }
+  }
+  return out;
+}
+
+/** Whether `value`, assigned to `name`, steps it by one: `name ± 1` or `1 + name`, under any
+ *  integer cast. */
+function stepsByOne(name: string, value: Expr): boolean {
+  const e = value.k === 'cast' && value.to.kind === 'int' ? value.e : value;
+  if (e.k !== 'bin' || (e.op !== '+' && e.op !== '-')) {
+    return false;
+  }
+  const isVar = (x: Expr) => x.k === 'var' && x.name === name;
+  const isOne = (x: Expr) => x.k === 'const' && x.value === 1;
+  return (isVar(e.l) && isOne(e.r)) || (e.op === '+' && isOne(e.l) && isVar(e.r));
+}
+
+/** The counter and result names `fn` asks for (see above). */
+function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?: string } {
+  const eligible = candidates(fn);
+  const counters = new Map<string, readonly string[]>();
+  if (eligible.size === 0) {
+    return { counters };
+  }
+  const writes = new Map<string, Write[]>();
+  const record = (name: string, w: Write) => {
+    if (eligible.has(name)) {
+      (writes.get(name) ?? writes.set(name, []).get(name)!).push(w);
+    }
+  };
+  const loopsOrder: { loop: Loop; loops: readonly Loop[] }[] = [];
+  const steps = (e: Expr, loops: readonly Loop[]) => {
+    const stack = [e];
+    while (stack.length > 0) {
+      const x = stack.pop()!;
+      if (x.k === 'postincr') {
+        record(x.name, { loops, step: true });
+      }
+      stack.push(...exprChildren(x));
+    }
+  };
+  const visit = (list: readonly Stmt[], loops: readonly Loop[]) => {
+    list.forEach((s, index) => {
+      if (s.k === 'for') {
+        // the init runs once, outside the loop; the step runs with the body
+        const inner = [...loops, s];
+        if (s.init.k === 'assign') {
+          record(s.init.name, { loops, step: false, initOf: s });
+          steps(s.init.value, loops);
+        } else {
+          visit([s.init], loops);
+        }
+        loopsOrder.push({ loop: s, loops });
+        steps(s.cond, inner);
+        visit([s.inc], inner);
+        visit(s.body, inner);
+        return;
+      }
+      if (s.k === 'assign') {
+        record(s.name, { loops, step: stepsByOne(s.name, s.value), at: { list, index } });
+      }
+      for (const e of stmtExprs(s)) {
+        steps(e, s.k === 'while' || s.k === 'dowhile' ? [...loops, s] : loops);
+      }
+      if (s.k === 'while' || s.k === 'dowhile') {
+        loopsOrder.push({ loop: s, loops });
+        visit(s.body, [...loops, s]);
+        return;
+      }
+      for (const l of stmtLists(s)) {
+        visit(l, loops);
+      }
+    });
+  };
+  visit(fn.body, []);
+
+  // which loop each counted local counts, in the order the loops are written
+  const counterOf = new Map<Loop, string>();
+  for (const { loop } of loopsOrder) {
+    const read: string[] = [];
+    for (const e of walkExprs([{ k: 'exprstmt', value: loop.cond }])) {
+      if (e.k === 'var' && !read.includes(e.name)) {
+        read.push(e.name);
+      }
+    }
+    const counter = read.find((v) => !counters.has(v) && counts(writes.get(v) ?? [], loop));
+    if (counter !== undefined) {
+      counterOf.set(loop, counter);
+      counters.set(counter, []);
+    }
+  }
+  for (const { loop, loops } of loopsOrder) {
+    const v = counterOf.get(loop);
+    if (v !== undefined) {
+      const depth = loops.filter((l) => counterOf.has(l)).length;
+      counters.set(v, COUNTERS.slice(depth));
+    }
+  }
+  return { counters, result: resultOf(fn, eligible, counters) };
+}
+
+/** Whether `ws`, every write of one local, makes it `loop`'s counter (see above). */
+function counts(ws: readonly Write[], loop: Loop): boolean {
+  const inside = ws.filter((w) => w.loops.includes(loop));
+  const outside = ws.filter((w) => !w.loops.includes(loop));
+  if (inside.length === 0 || !inside.every((w) => w.step && w.loops[w.loops.length - 1] === loop)) {
+    return false;
+  }
+  if (outside.length !== 1 || outside[0].step) {
+    return false;
+  }
+  const [init] = outside;
+  if (init.initOf !== undefined) {
+    return init.initOf === loop;
+  }
+  // an assignment earlier in the list the loop sits in, no `for` init of its own beside it
+  return (
+    init.at !== undefined &&
+    (loop.k !== 'for' || loop.init.k !== 'assign') &&
+    init.at.list.indexOf(loop) > init.at.index
+  );
+}
+
+/** The local every `return` of `fn` returns, bare, where the last statement is one of them and it
+ *  is no counter. */
+function resultOf(fn: SFn, eligible: ReadonlySet<string>, counters: ReadonlyMap<string, unknown>): string | undefined {
+  const last = fn.body[fn.body.length - 1];
+  if (last?.k !== 'return' || last.value?.k !== 'var') {
+    return undefined;
+  }
+  const r = last.value.name;
+  if (!eligible.has(r) || counters.has(r)) {
+    return undefined;
+  }
+  const visit = (list: readonly Stmt[]): boolean =>
+    list.every(
+      (s) =>
+        (s.k !== 'return' || (s.value?.k === 'var' && s.value.name === r)) &&
+        (s.k !== 'for' || visit([s.init, s.inc])) &&
+        stmtLists(s).every(visit),
+    );
+  return visit(fn.body) ? r : undefined;
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each

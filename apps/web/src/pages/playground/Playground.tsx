@@ -250,6 +250,8 @@ export function Playground({
       return decompile(fnName, debounced.asm, flags.resolved.target, {
         backend: langBackend.backend,
         onGap: 'annotate',
+        // loop counters and the returned local under role names, as the CLI prints them
+        roleNames: true,
         ...(symbolMap ? { symbols: symbolMap } : {}),
       });
     } catch (e) {
@@ -276,6 +278,7 @@ export function Playground({
         report: decompileTraced(fnName, debounced.asm, flags.resolved, {
           backend: langBackend.backend,
           onGap: 'annotate',
+          roleNames: true,
           ...(symbolMap ? { symbols: symbolMap } : {}),
         }).report,
       };

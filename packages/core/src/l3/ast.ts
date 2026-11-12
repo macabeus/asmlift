@@ -548,6 +548,11 @@ export interface SFn {
    *  names where they pair one to one with `params` and collide with nothing (l3/names.ts). Every
    *  pass keeps naming the parameters `aN` in the tree. */
   paramNames?: readonly string[];
+  /** Print each loop counter as `i`/`j`/`k` and the one returned local as `result` (l3/names.ts),
+   *  an emission policy like `paramNames`. Set by the structurer where the caller asks for it
+   *  (`StructureOptions.nameRoles`): the CLI, the benchmark and the web app do; the library's own
+   *  default keeps the structurer's `vN`, which is the name every test of a lift's shape reads. */
+  roleNames?: true;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
   /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its

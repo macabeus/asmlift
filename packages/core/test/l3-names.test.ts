@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
-import type { SFn } from '../src/l3/ast';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { nameVariables } from '../src/l3/names';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
@@ -83,5 +83,126 @@ describe("the declaration's parameter names", () => {
     expect(lift({ params: ['s32', 'u8'], returns: 's32', paramNames: ['x', 'shift'] })).toContain('x << shift');
     // a parameter that is not one argument word names none
     expect(lift({ params: ['s32', 'float'], returns: 's32', paramNames: ['x', 'shift'] })).not.toContain('shift');
+  });
+});
+
+// Role names: `i`/`j`/`k` for a loop's counter by how many counted loops enclose it, and `result`
+// for the one local every return returns.
+describe('role names', () => {
+  const v = (name: string): Expr => ({ k: 'var', name });
+  const c = (value: number): Expr => ({ k: 'const', value });
+  const set = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
+  const step = (name: string): Stmt => set(name, { k: 'bin', op: '+', l: v(name), r: c(1) });
+  const lt = (name: string, n: number): Expr => ({ k: 'bin', op: '<', l: v(name), r: c(n) });
+  const work = (...args: Expr[]): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'work', args } });
+  const fn = (locals: string[], body: Stmt[], retType = T.void()): SFn => ({
+    name: 'f',
+    params: [{ name: 'a0', type: s32 }],
+    locals: locals.map((name) => ({ name, type: s32 })),
+    retType,
+    body,
+    roleNames: true,
+  });
+
+  test('nested counters are i, j and k, outermost first, in a for or a do-while', () => {
+    const body: Stmt[] = [
+      set('v0', c(0)),
+      {
+        k: 'dowhile',
+        cond: lt('v0', 4),
+        body: [
+          {
+            k: 'for',
+            init: set('v1', c(0)),
+            cond: lt('v1', 8),
+            inc: step('v1'),
+            body: [
+              set('v2', c(0)),
+              { k: 'while', cond: lt('v2', 2), body: [work(v('v0'), v('v1'), v('v2')), step('v2')] },
+            ],
+          },
+          step('v0'),
+        ],
+      },
+    ];
+    const out = cBackend.emit(fn(['v0', 'v1', 'v2'], body));
+    expect(out).toContain('i = 0;');
+    expect(out).toContain('for (j = 0; j < 8; j = j + 1)');
+    expect(out).toContain('k = 0;');
+    expect(out).toContain('work(i, j, k);');
+    expect(out).not.toMatch(/\bv[0-9]\b/);
+  });
+
+  test('two loops in sequence, each with its own counter, take i and then j', () => {
+    const loop = (n: string): Stmt[] => [set(n, c(0)), { k: 'while', cond: lt(n, 3), body: [work(v(n)), step(n)] }];
+    const out = cBackend.emit(fn(['v0', 'v1'], [...loop('v0'), ...loop('v1')]));
+    expect(out).toContain('work(i);');
+    expect(out).toContain('work(j);');
+  });
+
+  test('a local with two roles is no counter: reset for a second loop, or written past a step', () => {
+    const loop = (n: string): Stmt[] => [set(n, c(0)), { k: 'while', cond: lt(n, 3), body: [work(v(n)), step(n)] }];
+    // the coalescer's one carrier for two loops' counters
+    expect(cBackend.emit(fn(['v0'], [...loop('v0'), ...loop('v0')]))).not.toMatch(/\bi\b/);
+    // written by something other than a step inside the loop
+    const scaled: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: lt('v0', 9), body: [work(v('v0')), set('v0', { k: 'bin', op: '*', l: v('v0'), r: c(2) })] },
+    ];
+    expect(cBackend.emit(fn(['v0'], scaled))).toContain('work(v0);');
+    // stepped only inside a nested loop
+    const deep: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: lt('v0', 9), body: [{ k: 'while', cond: v('a0'), body: [step('v0')] }] },
+    ];
+    expect(cBackend.emit(fn(['v0'], deep))).toContain('v0 = 0;');
+  });
+
+  test('a counter name the function spells is passed over for the next free one', () => {
+    const body: Stmt[] = [
+      set('v0', c(0)),
+      {
+        k: 'while',
+        cond: lt('v0', 3),
+        body: [{ k: 'exprstmt', value: { k: 'call', fn: 'i', args: [v('v0')] } }, step('v0')],
+      },
+    ];
+    expect(cBackend.emit(fn(['v0'], body))).toContain('i(j);');
+  });
+
+  test('the one local every return returns is the result, where it plays no other role', () => {
+    const body: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'if', cond: v('a0'), then: [set('v0', c(5)), { k: 'return', value: v('v0') }], else: [] },
+      work(),
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return result;');
+    // a return of anything else
+    const other: Stmt[] = [
+      { k: 'if', cond: v('a0'), then: [{ k: 'return', value: c(1) }], else: [] },
+      set('v0', c(0)),
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], other, s32))).toContain('return v0;');
+    // a counter returned stays the counter
+    const counted: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: lt('v0', 3), body: [work(v('v0')), step('v0')] },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], counted, s32))).toContain('return i;');
+  });
+
+  test('only where the caller asks for them', () => {
+    const body: Stmt[] = [set('v0', c(0)), work(), { k: 'return', value: v('v0') }];
+    const { roleNames: _asked, ...plain } = fn(['v0'], body, s32);
+    expect(cBackend.emit(plain)).toContain('return v0;');
+    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return result;');
+  });
+
+  test('a local whose address is taken, or that is a frame object, keeps its name', () => {
+    const body: Stmt[] = [set('v0', c(0)), work({ k: 'addr', name: 'v0' }), { k: 'return', value: v('v0') }];
+    expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
   });
 });

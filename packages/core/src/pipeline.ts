@@ -116,6 +116,10 @@ export interface DecompileOptions {
    *  `fromContext` is read as this, and taken out of the table (proto-context.ts
    *  `splitOwnContext`). */
   ownContextProto?: FnProto;
+  /** Print each loop counter and the one returned local under a role name (`i`/`j`/`k`, `result`;
+   *  l3/names.ts). Off by default, so a lift reads the structurer's own `vN`; the CLI, the
+   *  benchmark and the web app turn it on. A name is no codegen fact: it moves no score. */
+  roleNames?: boolean;
   /** OPTIONAL bodies of callees the input does not define, found elsewhere by the driver (the CLI
    *  reads them off `tools.asmlift.elf`): each answers what its callee can read of its arguments
    *  where the input holds no label of that name (frontend/callee-body.ts). Absent ⇒ only the
@@ -309,6 +313,7 @@ function runTower(
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
       paramNames: ownParamNames(prototypes, name, own.ownContextProto),
+      roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),
     {},

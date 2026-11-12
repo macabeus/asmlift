@@ -188,6 +188,8 @@ export interface EnumerateOptions {
   contextGlobals?: ContextGlobals;
   /** same contract as DecompileOptions.ownContextProto */
   ownContextProto?: FnProto;
+  /** same contract as DecompileOptions.roleNames */
+  roleNames?: boolean;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
@@ -589,6 +591,7 @@ export function enumerateCandidates(
     symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
     contextGlobals: opts.contextGlobals,
     paramNames: ownParamNames(prototypes, name, ownContext.ownContextProto),
+    roleNames: opts.roleNames,
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the

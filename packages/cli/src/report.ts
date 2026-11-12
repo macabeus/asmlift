@@ -84,6 +84,7 @@ export async function decompileWithReport(
           mapSymbols,
           opts.contextGlobals,
           ownParamNames(own.prototypes, name, own.ownContextProto),
+          opts.roleNames === true,
         )
     : undefined;
 
@@ -170,6 +171,7 @@ function probedSource(
   mapSymbols: Map<string, SymbolInfo> | undefined,
   contextGlobals: ContextGlobals | undefined,
   paramNames: readonly string[] | undefined,
+  roleNames: boolean,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -204,6 +206,7 @@ function probedSource(
         contextGlobals,
         inferredSymbols,
         paramNames,
+        roleNames,
       }),
       (t) => backend.emit(t),
     );

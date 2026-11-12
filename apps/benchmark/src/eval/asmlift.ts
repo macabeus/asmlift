@@ -97,6 +97,9 @@ export function rankOptionsFor(
     ...(symbols ? { symbols } : {}),
     ...(contextGlobals ? { contextGlobals } : {}),
     ...(calleeBodies ? { calleeBodies } : {}),
+    // loop counters and the returned local under role names, as the CLI the repro script runs prints
+    // them (core l3/names.ts): print-only, so no candidate scores differently
+    roleNames: true,
   };
 }
 
