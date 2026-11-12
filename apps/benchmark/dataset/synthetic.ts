@@ -7524,7 +7524,11 @@ export const SYNTHETIC: SynthSpec[] = [
     note:
       'a walk whose init reads a GLOBAL name, over a loop that calls: the source loads `gMonPtr` ' +
       'once, so an /unreduce spelling that moves the init into the loop re-reads it after every ' +
-      'call a callee may have rewritten it in (l3/unreduce.ts, moved-read-aliasable)',
+      'call a callee may have rewritten it in (l3/unreduce.ts, moved-read-aliasable). The row ' +
+      'records the shape on every toolchain; it does not guard the gate: the wrong spelling ' +
+      'compiles to other bytes, never wins, and its score is the same with the gate gone (only ' +
+      'the fan, which no exit code reads, grows). The guard is the GLOBAL-name test in ' +
+      'unreduce.test.ts, with its ablation case',
   },
   {
     sym: 'cpufill',
