@@ -710,6 +710,17 @@ describe('v3 — expression-base walk', () => {
         const body: Stmt[] = [{ k: 'assign', name: 'a1', value: deref16 }, inc('p'), inc('i')];
         expect(cBackend.emit(reindexWalks(withGlobal(body))!)).toContain('a1 = ((u16 *)(a0 + (gK << 1)))[i];');
       });
+      test('a global ARRAY addend survives a call: its name is a link-time address no write moves', () => {
+        // `calleeWritable` (l3/storage.ts) — the answer l3/unreduce.ts's moved init reads as well
+        const body = halfBody();
+        body.splice(1, 0, call);
+        const f = u16Fn(at({ k: 'cast', to: T.u(32), e: v('gTab') }), body);
+        f.globals = [{ name: 'gTab', type: T.array(T.u(8), 16) }];
+        expect(reindexWalks(f)).not.toBeNull();
+        // the same name as a SCALAR is written by the callee, and refuses
+        f.globals = [{ name: 'gTab', type: s32t }];
+        expect(reindexWalks(f)).toBeNull();
+      });
       test('refused: a local addend whose address escapes, beside a call', () => {
         const body = halfBody();
         body.splice(1, 0, { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'k' }] } });

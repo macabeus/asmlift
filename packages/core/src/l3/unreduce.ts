@@ -105,7 +105,14 @@
 //     0x03FFFFF0 whose element is 0x04000010 is a device read, and the root alone does not say
 //     so). Anything else — a store through a local pointer, a call, a read rooted at no constant
 //     at all — REFUSES, which is `ir/alias.ts`'s posture ("unknown BARS") applied where there is
-//     no symbol map to resolve a name through.
+//     no symbol map to resolve a name through. A bare GLOBAL NAME in the init (`gPtr` in
+//     `(u16 *)((u8 *)gPtr + 4)`) is a memory read too, though no `index` or `field` node spells
+//     it: a callee or a store through a pointer can rewrite it with no `assign` in sight, so a
+//     loop calling `TakeMove(…)` would re-read `gPtr` after every call where the asm read it once.
+//     It counts as a read OUTSIDE the window — a name the C declares is not a device register —
+//     so it bars on the same writes and no others. Which names count is `calleeWritable`
+//     (l3/storage.ts), the answer `l3/reindex.ts`'s invariant-addend test reads too; a global or
+//     static ARRAY does not, since its name decays to a link-time address and reads nothing.
 //
 // AND THE PREMISE THAT IS NOT ENOUGH, which this file recorded as a fact about the board and which
 // is FALSE. "A write to a hardware register is not a write to any object a C program declares" is
@@ -204,6 +211,7 @@ import {
   walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { calleeWritable } from './storage';
 import { type VarTypes, declaredTypes, exprCType, ptrElemBytes } from './typing';
 
 /** Why `relate` refused — one tag per question it asks. `relate` is the only place that knows
@@ -245,7 +253,8 @@ export interface AccCtx {
   movedEffect: boolean;
   /** the closed form reads a `volatile` object */
   movedVolatile: boolean;
-  /** the closed form reads memory the region's own writes cannot be told apart from */
+  /** the closed form reads memory — an access, or a name a callee can write — the region's own writes cannot
+   *  be told apart from */
   movedAliasable: boolean;
 }
 
@@ -690,6 +699,13 @@ const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
 
+/** Does the init READ MEMORY that a write the region performs could change? An access (`index`,
+ *  `field`), or a bare name `calleeWritable` (l3/storage.ts) says a callee or an aliasing store
+ *  can write with no `assign` naming it — the write `init-loop-var` cannot see. The ONE spelling
+ *  of the question: `movedReadAliasable` returns early on it, and the device-proof test asks it. */
+const initReadsMemory = (e: Expr, calleeWrites: (n: string) => boolean): boolean =>
+  accessesIn(e).length > 0 || namesUnder(e).some(calleeWrites);
+
 /** Does a READ land on a device register? Two readings, and neither is enough alone. The chain's
  *  ROOT is what places an access whose subscripts are not constant — `((struct E *)0x03003430)
  *  [a1].field_4` has no compile-time address at all — and a read with no root is unplaceable, so
@@ -708,14 +724,21 @@ const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
  *  lands outside it. See the file header, including the premise this does NOT establish (a device
  *  that writes memory itself: `deviceWritesMemory` below).
  *
- *  MEMORY ONLY. The NAMES the closed form reads are `init-loop-var`'s question and
- *  `init-name-escapes`', and a closed form with no memory access still has names — which is why
- *  the early return below is not "nothing can change this". */
-function movedReadAliasable(closed: Expr, evaluated: readonly Stmt[], window?: readonly [number, number]): boolean {
-  const reads = accessesIn(closed);
-  if (reads.length === 0) {
-    return false; // no access ⇒ no write can reach it; its NAMES are the two gates above
+ *  MEMORY ONLY. The PRIVATE names the closed form reads (locals and params) are `init-loop-var`'s
+ *  question and `init-name-escapes`', and a closed form with no memory access still has names —
+ *  which is why the early return below is not "nothing can change this". A name a callee can write
+ *  (`initReadsMemory`) is memory, and it bars on the same writes an access does. It is never a
+ *  device read — a name the C declares is not a device register. */
+function movedReadAliasable(
+  closed: Expr,
+  evaluated: readonly Stmt[],
+  calleeWrites: (n: string) => boolean,
+  window?: readonly [number, number],
+): boolean {
+  if (!initReadsMemory(closed, calleeWrites)) {
+    return false; // no memory read ⇒ no write can reach it; its private NAMES are the two gates above
   }
+  const reads = accessesIn(closed);
   for (const s of allStmts(evaluated)) {
     // a call or an unmodelled instruction may write anything
     if (stmtExprs(s).some(exprHasEffect)) {
@@ -808,6 +831,7 @@ export function unreduceAccumulators(
 ): UnreduceResult | null {
   const body = [...sfn.body];
   const vt: VarTypes = declaredTypes(sfn);
+  const calleeWrites = calleeWritable(sfn);
   const deletedInits = new Set<Stmt>();
   const deletedLocals = new Set<string>();
   let changed = false;
@@ -882,7 +906,7 @@ export function unreduceAccumulators(
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
         movedVolatile: exprReadsVolatile(initStmt.value, sfn),
-        movedAliasable: movedReadAliasable(initStmt.value, evaluated, window),
+        movedAliasable: movedReadAliasable(initStmt.value, evaluated, calleeWrites, window),
       };
       if (firstRejection(gates, ctx) !== null) {
         continue;
@@ -897,7 +921,7 @@ export function unreduceAccumulators(
       }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
-      if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(armed, triggers)) {
+      if (initReadsMemory(initStmt.value, calleeWrites) && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
       rewrites.set(cand.name, closed.ok);

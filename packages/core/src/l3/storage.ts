@@ -20,6 +20,8 @@
 // One question about LOCAL storage sits beside them, because it is asked from the same lists:
 // which expressions are a local object's ADDRESS (`localAddresses`), the frame bytes a respelled
 // tree must keep reading as integers (contracts.ts `assertLocalStorageStaysInteger`).
+// And one about a name's VALUE, which two passes that move a read ask: can something the function
+// does not spell as an `assign` change it (`calleeWritable`)?
 import { type Expr, type SFn, type Stmt, assignsIn, dotBase, stmtChildren, taintOverAssigns, walkExprs } from './ast';
 
 export type Storage = 'local' | 'param' | 'global';
@@ -48,6 +50,32 @@ export function declaredGlobals(sfn: SFn): Set<string> {
 /** Names whose ADDRESS is the global's — a shadowed one excluded (see the header). */
 export function addressableGlobals(sfn: SFn): Set<string> {
   return new Set([...nameStorage(sfn)].filter(([, s]) => s === 'global').map(([n]) => n));
+}
+
+/** Can a CALLEE, or a store through an aliasing pointer, change what reading the bare name `n`
+ *  yields, with no `assign` naming it? The question a pass asks before it moves a read of `n`
+ *  below a call or a store (l3/reindex.ts's invariant addend, l3/unreduce.ts's moved init).
+ *  • A param or a local: only when the function takes its address (`&n` anywhere in the body —
+ *    function-wide, because a stashed pointer outlives the statement that made it).
+ *  • An ARRAY (a global, or a function-scope static in `SFn.statics`): never. The name is not an
+ *    lvalue; it decays to its link-time address, and no write moves that.
+ *  • Anything else: yes — a scalar global, a non-array static (declared, but in no class
+ *    `nameStorage` names), and a name declared nowhere, because unknown storage is not private
+ *    storage.
+ *  A local or param shadowing a global binds the name, so the first rule wins (see the header). */
+export function calleeWritable(sfn: SFn): (n: string) => boolean {
+  const storage = nameStorage(sfn);
+  const addressTaken = new Set([...walkExprs(sfn.body)].flatMap((e) => (e.k === 'addr' ? [e.name] : [])));
+  const arrays = new Set(
+    [...(sfn.globals ?? []), ...(sfn.statics ?? [])].filter((g) => g.type.kind === 'array').map((g) => g.name),
+  );
+  return (n) => {
+    const s = storage.get(n);
+    if (s === 'local' || s === 'param') {
+      return addressTaken.has(n);
+    }
+    return !arrays.has(n);
+  };
 }
 
 /** The ADDRESSES of a tree's local objects — the frame bytes, which nothing but the function's own

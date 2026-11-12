@@ -105,7 +105,7 @@ import {
 } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { takenNames } from './hoist';
-import { nameStorage } from './storage';
+import { calleeWritable, nameStorage } from './storage';
 import { type VarTypes, declaredTypes } from './typing';
 
 interface WalkLoop {
@@ -580,7 +580,7 @@ function exprWalkSpelling(
   ptrVars: Map<string, IrType>,
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
-  privateNames: ReadonlySet<string>,
+  calleeWrites: (n: string) => boolean,
 ): ExprWalkSpelling | null {
   const p = init.name;
   const pT = ptrVars.get(p);
@@ -666,10 +666,11 @@ function exprWalkSpelling(
     restVars.add(base.name);
   }
   // INVARIANT across the loop, because the indexed spelling re-reads every name on every pass
-  // where the walk read it once, at the init: no `assign` in the body writes it, and — unless it
-  // is a param or a local whose address is never taken — no call and no memory store in the loop
-  // can either. A global (`p = (u16 *)(b + gK * 2)`, `g()` in the body) or an escaped local is
-  // written by a callee or through an aliasing pointer with no `assign` in sight.
+  // where the walk read it once, at the init: no `assign` in the body writes it, and — unless
+  // `calleeWritable` (storage.ts) clears it: a param or a local whose address is never taken, or
+  // an array name, which decays to its link-time address — no call and no memory store in the loop
+  // can either. A scalar global (`p = (u16 *)(b + gK * 2)`, `g()` in the body) or an escaped local
+  // is written by a callee or through an aliasing pointer with no `assign` in sight.
   // (a `postincr` is an assign in expression clothing; a `marker` is an instruction nobody modelled)
   const loopExprs = [...walkExprs([dw])];
   const loopWritesMemory = loopExprs.some((e) => e.k === 'call' || e.k === 'marker') || stmtsStore(dw.body);
@@ -680,7 +681,7 @@ function exprWalkSpelling(
         volatileLocals.has(n) ||
         dw.body.some((st) => stmtAssigns(st, n)) ||
         loopExprs.some((e) => e.k === 'postincr' && e.name === n) ||
-        (loopWritesMemory && !privateNames.has(n)),
+        (loopWritesMemory && calleeWrites(n)),
     )
   ) {
     return null;
@@ -716,7 +717,7 @@ function tryExprWalk(
   fnBody: Stmt[],
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
-  privateNames: ReadonlySet<string>,
+  calleeWrites: (n: string) => boolean,
 ): { loop: Stmt; run: number; kept: Stmt[] } | null {
   let nTail = 0;
   while (nTail < dw.body.length && isUnitIncrement(dw.body[dw.body.length - 1 - nTail]) !== null) {
@@ -735,7 +736,7 @@ function tryExprWalk(
       fnBody,
       declTypes,
       volatileLocals,
-      privateNames,
+      calleeWrites,
     );
     if (r) {
       return r;
@@ -754,7 +755,7 @@ function tryExprWalkRun(
   fnBody: Stmt[],
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
-  privateNames: ReadonlySet<string>,
+  calleeWrites: (n: string) => boolean,
 ): { loop: Stmt; run: number; kept: Stmt[] } | null {
   // BOTH kinds of step as the body's contiguous TAIL (any order): every deref then runs with `i`
   // completed steps equal to each `p`'s, which is what `BASE[i + REST]` states. A step anywhere
@@ -807,7 +808,7 @@ function tryExprWalkRun(
     if (st === ivInit || mentionsVar(dw.cond, st.name)) {
       continue;
     }
-    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, privateNames);
+    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, calleeWrites);
     if (s !== null) {
       spellings.set(s.p, s);
     }
@@ -872,10 +873,8 @@ export function reindexWalks(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
   const storage = nameStorage(sfn);
-  // v3's invariant-addend test: the names no callee and no aliasing store can write — a param or a
-  // local whose address the function never takes
-  const addressTaken = new Set([...walkExprs(sfn.body)].flatMap((e) => (e.k === 'addr' ? [e.name] : [])));
-  const privateNames = new Set([...storage].filter(([n, c]) => c !== 'global' && !addressTaken.has(n)).map(([n]) => n));
+  // v3's invariant-addend test: can a callee or an aliasing store write the name (storage.ts)
+  const calleeWrites = calleeWritable(sfn);
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -981,7 +980,7 @@ export function reindexWalks(
       // v3 — the up-counting walk with an expression base: `p = (T *)(EXPR)` immediately
       // ahead of a counter-carried do-while (see tryExprWalk)
       if (s.k === 'dowhile') {
-        const v3 = tryExprWalk(out, s, ptrVars, sfn.body, declTypes, volatileLocals, privateNames);
+        const v3 = tryExprWalk(out, s, ptrVars, sfn.body, declTypes, volatileLocals, calleeWrites);
         if (v3) {
           // the walk inits are subsumed by the indexed spelling; the counter's init stays
           out.splice(out.length - v3.run, v3.run, ...v3.kept);

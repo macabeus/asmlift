@@ -691,6 +691,64 @@ test('an init reading an address-escaped local declines', () => {
   expect(unreduceAccumulators(s, GBA)).toBeNull();
 });
 
+test('an init reading a GLOBAL name declines over a region that may write it', () => {
+  // `p = gPtr; for (i = 0; i < 4; i++) TakeMove(m, p->moves[i], i);` — the asm loads `gPtr` ONCE,
+  // above the loop. No `index` or `field` node spells that read: the init is `gPtr + 2`, a bare
+  // name, and nothing ASSIGNS `gPtr` or takes its address here, so neither `init-loop-var`,
+  // `init-name-escapes` nor the access scan sees it. A callee can rewrite it, and the closed form
+  // would re-read it after every call. The walk is a `u16 *` stepped by one element, as
+  // `p->moves[i]` is.
+  const walk = (body: Stmt[], globals: SFn['globals'] = [{ name: 'gPtr', type: T.ptr(T.u(16)) }]): SFn =>
+    fill(
+      {
+        globals,
+        locals: [
+          { name: 'acc', type: T.ptr(T.u(16)) },
+          { name: 'i', type: T.s(32) },
+        ],
+      },
+      [
+        set('i', c(0)),
+        set('acc', plus(v('gPtr'), c(2))),
+        {
+          k: 'while',
+          cond: { k: 'bin', op: '<=', l: v('i'), r: c(3) },
+          body: [...body, set('acc', plus(v('acc'), c(1))), set('i', plus(v('i'), c(1)))],
+        },
+      ],
+    );
+  const take: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'TakeMove', args: [v('acc')] } };
+  expect(unreduceAccumulators(walk([take]), GBA)).toBeNull();
+  expect(ctxFor(walk([take])).movedAliasable).toBe(true);
+  // a store through an ordinary pointer can land on it as well
+  expect(unreduceAccumulators(walk([st(cell(0x02000000), v('acc'))]), GBA)).toBeNull();
+  // a name declared NOWHERE is unknown storage, not private storage
+  expect(unreduceAccumulators(walk([take], []), GBA)).toBeNull();
+  // …while a region that writes only DEVICE cells cannot: a name the C declares is not a device
+  // register, so the read stays where the access rule would leave it
+  const deviceOnly = walk([st(cell(0x040000d8), v('acc'))]);
+  expect(ctxFor(deviceOnly).movedAliasable).toBe(false);
+  expect(emit(unreduceAccumulators(deviceOnly, GBA))).toContain('gPtr');
+  // …except under a transfer the loop arms, where the device writes memory itself: proof owed
+  const armed = walk([st(cell(0x040000dc), v('acc'))]);
+  expect(unreduceAccumulators(armed, GBA, ARMV4T_AGBCC.capabilities.deviceMemoryWriters)!.needsProof).toBe(true);
+  // a global ARRAY's name decays to its link-time address and reads nothing: not aliasable over a
+  // call (`gPtr + 2` over the array then stops at `stride-units`, a typing question this gate does
+  // not answer)
+  expect(ctxFor(walk([take], [{ name: 'gPtr', type: T.array(T.u(16), 8) }])).movedAliasable).toBe(false);
+  // and a LOCAL shadowing the global is private storage — the name binds to the local
+  const shadowed = walk([take]);
+  const local = fill(
+    { ...shadowed, locals: [...shadowed.locals, { name: 'gPtr', type: T.ptr(T.u(16)) }] },
+    shadowed.body,
+  );
+  expect(unreduceAccumulators(local, GBA)).not.toBeNull();
+  // with the gate ablated, the call region is admitted — the gate is what refuses it
+  expect(
+    unreduceAccumulators(walk([take]), GBA, undefined, without(UNREDUCE_GATES, 'moved-read-aliasable')),
+  ).not.toBeNull();
+});
+
 test('a scale between the counter and the sum must carry the WHOLE stride', () => {
   // `(a0 << 6) + a1` walked by 1: the counter's own stride through that shift is 64, so no
   // substitution relates the two. A rule that fell back to the bare counter here would spell a
