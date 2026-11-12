@@ -878,22 +878,13 @@ export function memAccess(
 // are not the same object on agbcc. Its build_array_ref (c-typeck.c:1383) builds an ARRAY_REF only
 // for a subscript of an object of ARRAY type that is no INDIRECT_REF, which is the declared array
 // alone; every cast base, a cast to the declared element type included, is the pointer sum, and the
-// two expand in a different order (an ARRAY_REF through get_inner_reference, base first). Compiled
-// on kleod:sub_0804C7FC:agbcc with the row's own command: the declared spelling is IDENTICAL to the
-// target and every INLINE cast spelling places `ldr r5, =gBgInfo` after the index scale instead of
-// before it. The recovered element reaches those bytes too, but only through a pointer-local home
-// assigned at its first use (`p0 = (struct Elem0 *)&gBgInfo;` after the call), the `first-use`
-// placement of ORDERBASE_HOISTS that rank-variations.ts withholds. So this spelling is not the only
-// one that matches: it is the source's own reading, through the element type and member names the
-// declaration context states (proto-context.ts `arrayElements`), and it needs no extra candidate.
-//
-// The spelling is taken only where it names exactly the bytes and the value the cast form does,
-// only on agbcc (`arrayShapeFromStride`, read where the element is laid out): whether another
-// compiler tells the two spellings apart is unmeasured, and only where the asm loaded the array's
-// address before it scaled the index (the order licence, raise/globalshape.ts): a source that
-// took a pointer to the element (`struct S *p = &g[i]; p->a`) scales first, and its cast lift
-// matches where this one does not. Each refusal is a row of DECLARED_MEMBER_GATES, and the
-// access then keeps the cast.
+// ARRAY_REF expands base first (get_inner_reference). On kleod:sub_0804C7FC:agbcc the declared
+// spelling compiles IDENTICAL to the target, and every inline cast spelling places the base load
+// after the index scale. The cast form still matches through a pointer local assigned at first use,
+// the `first-use` placement ORDERBASE_HOISTS withholds (rank-variations.ts); the declared spelling
+// is the source's own reading and needs no extra candidate. It is taken only where it names the
+// bytes and the value the cast form does, on agbcc alone (`arrayShapeFromStride`; other compilers
+// unmeasured). Each refusal is a row of DECLARED_MEMBER_GATES, and the access then keeps the cast.
 
 /** One struct-array member access the declared spelling `g[i].member` is asked of. */
 export interface DeclaredMemberAccess {

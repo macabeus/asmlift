@@ -131,11 +131,8 @@ export interface ContextGlobals {
   storage: ReadonlyMap<string, DeclaredStorage>;
   /** The objects declared as an ARRAY OF A STRUCT OR UNION the context lays out, with that element:
    *  `extern struct BgInfo gBgInfo[4];` is `{ spelling: 'struct BgInfo', dims: [4], layout }`. The
-   *  structurer reads it to spell an element's member through the declaration (`gBgInfo[i].hOfs`),
-   *  which is not the cast spelling's object on every compiler: agbcc builds an ARRAY_REF only for
-   *  a subscript of the declared array itself (c-typeck.c build_array_ref), and that expands
-   *  base-first, so a cast base places the array's address load elsewhere
-   *  (structure/memory-access.ts `declaredElementMember`). An array whose element is laid out by an
+   *  structurer reads it to spell an element's member through the declaration (`gBgInfo[i].hOfs`,
+   *  structure/memory-access.ts `declaredElementMember`). An array whose element is laid out by an
    *  attribute, has a member this cannot read, or whose inner extent is not a constant is left out;
    *  so is one declared through an array typedef. The outermost extent is null where the
    *  declaration leaves it unsized (`extern struct S gS[];`). Absent reads as empty: a context
