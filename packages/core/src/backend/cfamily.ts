@@ -16,6 +16,7 @@ import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBas
 import { foldConstantImages } from '../l3/constinit';
 import { nameVariables } from '../l3/names';
 import { polishTree } from '../l3/polish';
+import { compoundSum } from '../l3/polish/compound';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
@@ -486,6 +487,21 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
   }
 }
 
+/** What follows the target of a statement the polish marked `compound` (l3/polish/compound.ts):
+ *  `++`, `--`, ` += e` or ` -= e`. Null — print the plain assignment — unless the value is still
+ *  the target plus or minus something and no `const` static's address in it takes a cast
+ *  (`printConverted`), which the plain spelling would have added around the whole sum. */
+function compoundSpelling(target: Expr, value: Expr, vt: PrintEnv, pe: (e: Expr, p: number) => string): string | null {
+  const sum = compoundSum(target, value);
+  if (sum === null || constEscape(value, vt) !== null) {
+    return null;
+  }
+  if (sum.rhs.k === 'const' && (sum.rhs.value === 1 || sum.rhs.value === -1)) {
+    return (sum.op === '+') === (sum.rhs.value === 1) ? '++' : '--';
+  }
+  return ` ${sum.op}= ${pe(sum.rhs, 99)}`;
+}
+
 /** `dest = fn(args)` for a call whose `args[0]` is the address of the struct it returns: a local
  *  declared with that struct type, named by its address. Any other destination has no spelling
  *  that hands the callee the same pointer — compiled, `*(struct Blob64 *)&gDst = makeblob(gBlob);`
@@ -502,12 +518,20 @@ function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
-    case 'assign':
-      return [`${indent}${s.name} = ${printConverted(s.value, vt, leaf)};`];
-    case 'store':
+    case 'assign': {
+      const lhs = s.name;
+      const op = s.compound ? compoundSpelling({ k: 'var', name: s.name }, s.value, vt, pe) : null;
+      return [`${indent}${op === null ? `${lhs} = ${printConverted(s.value, vt, leaf)}` : `${lhs}${op}`};`];
+    }
+    case 'store': {
       // The lvalue is a full Expr (`index` or `field`), so the leaf hook spells a member write
       // (`this->x = …`) exactly as it spells a member read.
-      return [`${indent}${pe(s.lval, 2)} = ${printConverted(s.value, vt, leaf)};`];
+      const op = s.compound ? compoundSpelling(s.lval, s.value, vt, pe) : null;
+      // `++`/`--` are POSTFIX: the target binds tighter than them, so a prefix-shaped one
+      // parenthesizes (`(*p)++`, never `*p++`, which increments the pointer)
+      const lhs = pe(s.lval, op === '++' || op === '--' ? 1 : 2);
+      return [`${indent}${op === null ? `${lhs} = ${printConverted(s.value, vt, leaf)}` : `${lhs}${op}`};`];
+    }
     case 'exprstmt':
       if (s.value.k === 'call' && s.value.sret !== undefined) {
         return [`${indent}${structReturnCall(s.value, vt, leaf)};`];

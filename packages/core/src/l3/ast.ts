@@ -329,11 +329,14 @@ export type BinOp =
   | '||';
 
 export type Stmt =
-  | { k: 'assign'; name: string; value: Expr }
+  // `compound` (on `assign` and `store`) is SPELLING, like `const.hex`: print `x += e` / `x++` for
+  // a value that is the target plus or minus `e`. Set only by the readability polish
+  // (l3/polish/compound.ts), where evaluating the target once is evaluating it twice.
+  | { k: 'assign'; name: string; value: Expr; compound?: true }
   // A memory write to an lvalue expression (`index` → `base[idx] = value` / `*base = value`;
   // `field` → `base->name = value`). Carrying the lvalue as an Expr keeps stores symmetric with
   // the load side, so the same leaf-hook / field spelling serves reads and writes alike.
-  | { k: 'store'; lval: Expr; value: Expr }
+  | { k: 'store'; lval: Expr; value: Expr; compound?: true }
   | { k: 'exprstmt'; value: Expr } // a side-effecting expression (e.g. a void call)
   | { k: 'if'; cond: Expr; then: Stmt[]; else: Stmt[] }
   | { k: 'while'; cond: Expr; body: Stmt[] }
