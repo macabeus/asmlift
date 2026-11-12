@@ -943,3 +943,38 @@ test('a walk from a pointer init keeps the dereferenced sum', () => {
   const out = emit(unreduceAccumulators(memberWalk(v('a1'), T.ptr(T.u(16))), GBA));
   expect(out).toContain('sum = sum + *(a1 + i);');
 });
+
+test('a member-array init whose base reads a GLOBAL name declines over a call', () => {
+  // `p = gPtr; for (i = 0; i < 4; i++) TakeMove(m, p->moves[i], i);` with the walk SEATED: the init
+  // is the member `((struct Struct0 *)gPtr)->field_4`, an ARRAY, so it is no access of its own —
+  // but the base still reads `gPtr`, which the call may rewrite. The closed form
+  // `((struct Struct0 *)gPtr)->field_4[i]` would re-read it after every call.
+  const seated: Expr = { k: 'field', base: { k: 'cast', to: T.ptr(MOVES), e: v('gPtr') }, name: 'field_4' };
+  const take: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'TakeMove', args: [v('sum')] } };
+  const walk = (globals: SFn['globals']): SFn => {
+    const s = memberWalk(seated);
+    const loop = s.body[3] as Extract<Stmt, { k: 'dowhile' }>;
+    return {
+      ...s,
+      globals,
+      body: [...s.body.slice(0, 3), { ...loop, body: [take, ...loop.body] }, ...s.body.slice(4)],
+    };
+  };
+  const overGlobal = walk([{ name: 'gPtr', type: T.ptr(T.u(8)) }]);
+  expect(unreduceAccumulators(overGlobal, GBA)).toBeNull();
+  // two accumulators reach the gates (`sum`'s zero init reads nothing): only the walk's is aliasable
+  const seen: AccCtx[] = [];
+  const capture: Gate<AccCtx> = {
+    id: 'capture',
+    why: 'test probe: record the context and admit nothing',
+    sound: false,
+    rejects: (x) => (seen.push(x), true),
+  };
+  unreduceAccumulators(overGlobal, GBA, undefined, [capture]);
+  expect(seen.map((x) => x.movedAliasable).sort()).toEqual([false, true]);
+  // with the gate ablated, the walk is admitted and spelled as the seated subscript — the gate is
+  // what refuses it
+  expect(
+    emit(unreduceAccumulators(overGlobal, GBA, undefined, without(UNREDUCE_GATES, 'moved-read-aliasable'))),
+  ).toContain('((struct Struct0 *)gPtr)->field_4[i]');
+});
