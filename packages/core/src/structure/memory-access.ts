@@ -86,6 +86,10 @@ export interface SymRenderCtx {
    *  (StructureOptions `contextArrayElements`), and whether the array is declared volatile. Absent,
    *  or undefined for a name, ⇒ no declared element: {@link declaredElementMember} keeps the cast. */
   arrayElement?(name: string): DeclaredElementInfo | undefined;
+  /** Whether the assembly materialized `name`'s address BEFORE it scaled the index (StructureOptions
+   *  `orderLicensedGlobals`, raise/globalshape.ts): the base-first order an agbcc ARRAY_REF expands
+   *  in. Absent ⇒ never: {@link declaredElementMember} keeps the cast. */
+  baseFirst?(name: string): boolean;
 }
 
 /** A context-declared array's element as the structurer reads it: the element's IR struct (named
@@ -884,9 +888,12 @@ export function memAccess(
 // declaration context states (proto-context.ts `arrayElements`), and it needs no extra candidate.
 //
 // The spelling is taken only where it names exactly the bytes and the value the cast form does,
-// and only on agbcc (`arrayShapeFromStride`, read where the element is laid out): whether another
-// compiler tells the two spellings apart is unmeasured. Each refusal is a row of
-// DECLARED_MEMBER_GATES, and the access then keeps the cast.
+// only on agbcc (`arrayShapeFromStride`, read where the element is laid out): whether another
+// compiler tells the two spellings apart is unmeasured, and only where the asm loaded the array's
+// address before it scaled the index (the order licence, raise/globalshape.ts): a source that
+// took a pointer to the element (`struct S *p = &g[i]; p->a`) scales first, and its cast lift
+// matches where this one does not. Each refusal is a row of DECLARED_MEMBER_GATES, and the
+// access then keeps the cast.
 
 /** One struct-array member access the declared spelling `g[i].member` is asked of. */
 export interface DeclaredMemberAccess {
@@ -901,15 +908,21 @@ export interface DeclaredMemberAccess {
   readonly isStore: boolean;
   /** the access carries a qualifier, which only a cast has room for */
   readonly qualified: boolean;
+  /** the assembly loaded the array's address before it scaled the index (the order licence) */
+  readonly baseFirst: boolean;
 }
 
-/** Which struct-array member accesses are spelled through the declared array. Every rule is
- *  sound: removed, the spelling names other bytes, reads another value, drops a qualifier, or
- *  (`no-declared-element`) has no element to spell.
+/** Which struct-array member accesses are spelled through the declared array. Every rule but
+ *  the last is sound: removed, the spelling names other bytes, reads another value, drops a
+ *  qualifier, or (`no-declared-element`) has no element to spell. The last, `base-order`, is a
+ *  codegen rule: both spellings name the same bytes, and it keeps the cast where the assembly
+ *  scaled the index before it loaded the array's address, which is the pointer sum's order and not
+ *  the ARRAY_REF's (`struct S *p = &g[i]; p->a = x;` compiles that way, and its lift through the
+ *  cast is IDENTICAL while `g[i].a` moves the base load ahead of the scale).
  *
  *  WHAT IT DOES NOT ADMIT YET, each keeping the cast: a member of a nested struct or an array
  *  member (`aggregateType` gives neither a field), a pointer member read or written as a word
- *  (`member-type` compares integers only), a rank-2 array (`rank`), and every lift with no
+ *  (`no-member`, whose scalar test takes integers only), a rank-2 array (`rank`), and every lift with no
  *  symbol map (`/raw-globals` and a map-less row). That last one is where the lookup sits, on
  *  the symbol context, and not what the evidence needs: the declaration context alone states the
  *  element. It stays because the map-less sibling is the one candidate of a fan that still
@@ -964,6 +977,13 @@ export const DECLARED_MEMBER_GATES: readonly Gate<DeclaredMemberAccess>[] = [
       return m?.kind === 'int' && (a?.kind !== 'int' || m.width !== a.width || (!c.isStore && m.signed !== a.signed));
     },
   },
+  {
+    id: 'base-order',
+    why: "the asm scaled the index before it loaded the array's address: the pointer sum's order, which the cast reproduces and the declared array's ARRAY_REF (base first) does not",
+    sound: false,
+    guardedBy: 'declared-element-member.test.ts: an element reached through a pointer to it keeps the cast',
+    rejects: (c) => !c.baseFirst,
+  },
 ];
 
 /** `g[i].member` for a member access of a struct-array element whose base is the array's address,
@@ -992,6 +1012,7 @@ function declaredElementMember(
         ? recovered.to.fields.find((f) => f.off === fieldOff)?.type
         : undefined,
     ...how,
+    baseFirst: sym?.baseFirst?.(name) === true,
   };
   if (firstRejection(DECLARED_MEMBER_GATES, ctx) !== null) {
     return null;

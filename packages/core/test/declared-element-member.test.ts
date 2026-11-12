@@ -47,6 +47,23 @@ const H = `h:
 \t.word\tg
 `;
 
+// The same element reached through a pointer to it, which agbcc compiles index scale first:
+//   void ptr(u32 i, u16 x) { struct S *p = &g[i]; p->a = x; p->b = x; }
+const PTR = `ptr:
+\tlsl\tr1, r1, #0x10
+\tlsr\tr1, r1, #0x10
+\tlsl\tr2, r0, #0x1
+\tadd\tr2, r2, r0
+\tlsl\tr2, r2, #0x2
+\tldr\tr0, .L3
+\tadd\tr2, r2, r0
+\tstrh\tr1, [r2, #0x4]
+\tstrh\tr1, [r2, #0x6]
+\tbx\tlr
+.L3:
+\t.word\tg
+`;
+
 // `typedef void (*Fp)(void); struct S3 { Fp p; u32 x; }; extern struct S3 g3[4];`
 //   s32 fpc(u32 i) { return (s32)g3[i].p > 5; }
 const FPC = `fpc:
@@ -100,6 +117,7 @@ const lift = (asm: string, ctx: string | undefined) =>
       f: { params: ['u32', 'u16', 'u16'], returnsVoid: true },
       h: { params: ['u32'], returns: 's32' },
       fpc: { params: ['u32'], returns: 's32' },
+      ptr: { params: ['u32', 'u16'], returnsVoid: true },
     },
   }).source;
 
@@ -182,6 +200,14 @@ describe('a struct-array member spelled through the declared array', () => {
     }).source;
     expect(src).toMatch(/\bgCells\[a2\] = gCells\[a1\];/);
     expect(src).toMatch(/\bgCells\[a0\]\.tile\b/);
+  });
+
+  test('an element reached through a pointer to it keeps the cast', () => {
+    // the index is scaled before `g` is loaded: the pointer sum's order, which `g[i].a` does not
+    // compile to (its ARRAY_REF loads the base first) and the cast reproduces
+    const src = lift(PTR, `${S}extern struct S g[4];`);
+    expect(src).not.toMatch(/\bg\[a0\]/);
+    expect(src).toContain('&g)[a0].field_4 = a1;');
   });
 
   test('a store of another sign takes it: a store truncates to the member whatever its type', () => {

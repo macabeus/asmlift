@@ -412,9 +412,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   inferredSymbols?: Map<string, SymbolInfo>;
   /** THE ORDER HALF of the same derivation (raise/globalshape.ts `orderLicensedGlobals`): the
    *  globals whose address the assembly materialized BEFORE it scaled the index. Not a shape and
-   *  not a declaration — nothing is spelled from it here — it is stamped onto every `index` node it
-   *  reaches (`Expr.baseOrdered`, l3/ast.ts) for the L3 pass that decides whether a base gets a
-   *  HOME.
+   *  not a declaration. It is stamped onto every `index` node it reaches (`Expr.baseOrdered`,
+   *  l3/ast.ts) for the L3 pass that decides whether a base gets a HOME, and with a symbol map it
+   *  picks the declared struct-array spelling over the cast (memory-access.ts DECLARED_MEMBER_GATES
+   *  `base-order`): the one spelling choice it makes, between two that name the same bytes.
    *
    *  A SUPERSET of `inferredSymbols`' names, and its own field for exactly that reason: a struct
    *  element is licensed here and has no shape there. */
