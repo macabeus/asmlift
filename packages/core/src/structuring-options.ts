@@ -70,8 +70,8 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...contextArrayElementsOf(inputs.contextGlobals, target),
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
-    ...(inputs.paramNames?.length ? { declaredParamNames: inputs.paramNames } : {}),
-    ...(inputs.roleNames ? { nameRoles: true } : {}),
+    ...(inputs.paramNames?.length ? { paramNames: inputs.paramNames } : {}),
+    ...(inputs.roleNames ? { roleNames: true } : {}),
   };
 }
 

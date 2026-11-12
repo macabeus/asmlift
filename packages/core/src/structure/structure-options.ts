@@ -200,9 +200,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   // The names the function's own declaration gives its parameters, carried to the backend on
   // `SFn.paramNames` (see there). Built by `structuringOptions` from proto-context.ts
   // `ownParamNames`, which hands them over only where each declared parameter is one argument word.
-  declaredParamNames?: readonly string[];
+  paramNames?: readonly string[];
   // Print each loop counter and the returned local under a role name (`SFn.roleNames`, l3/names.ts).
-  nameRoles?: boolean;
+  roleNames?: boolean;
   // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
   // of the same name says which do).
   designatedInitializers?: boolean;

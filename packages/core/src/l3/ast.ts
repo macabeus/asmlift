@@ -543,14 +543,14 @@ export interface SFn {
    *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
   declaredReturns?: Readonly<Record<string, string>>;
   /** The names the function's own declaration gives its parameters, in order (proto-context.ts
-   *  `ownParamNames`), set by the structurer from `StructureOptions.declaredParamNames`. An emission
+   *  `ownParamNames`), set by the structurer from `StructureOptions.paramNames`. An emission
    *  policy like `slotOrder`: no pass reads it, and the C backend prints the parameters under these
    *  names where they pair one to one with `params` and collide with nothing (l3/names.ts). Every
    *  pass keeps naming the parameters `aN` in the tree. */
   paramNames?: readonly string[];
   /** Print each loop counter as `i`/`j`/`k` and the one returned local as `result` (l3/names.ts),
    *  an emission policy like `paramNames`. Set by the structurer where the caller asks for it
-   *  (`StructureOptions.nameRoles`): the CLI, the benchmark and the web app do; the library's own
+   *  (`StructureOptions.roleNames`): the CLI, the benchmark and the web app do; the library's own
    *  default keeps the structurer's `vN`, which is the name every test of a lift's shape reads. */
   roleNames?: true;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
