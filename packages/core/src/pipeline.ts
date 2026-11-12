@@ -128,9 +128,9 @@ export interface DecompileOptions {
   calleeBodies?: CalleeBodies;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
-  /** Print through the readability polish (`SFn.polish`, l3/polish/): `x++`, hex masks, no `else`
-   *  after a return. The bytes are the same; the library default is off, so the text is the tree as
-   *  structured. The CLI, the benchmark and the web app turn it on. */
+  /** Print through the readability polish (`SFn.polish`, l3/polish/): `x++`, hex masks, `p[0]`,
+   *  dense local numbers. The bytes are the same; the library default is off, so the text is the
+   *  tree as structured. The CLI, the benchmark and the web app turn it on. */
   polish?: boolean;
   /** force the return-tail copies (`StructureOptions.copyReturnTails`, rank.ts's `/ret-copy`).
    *  Absent ⇒ the shorter of the copies and the join past early returns, ties to the join

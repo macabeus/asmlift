@@ -3,9 +3,13 @@
 //
 // WHAT MAY LIVE HERE. A rewrite whose C is the SAME PROGRAM in every dialect the printer serves and
 // compiles to the same bytes on every compiler the bench covers — `*p` as `p[0]`, `x = x + 1` as
-// `x++`, a dropped `else` after a `return`. Not a rewrite the compiler can see: an early return's
-// polarity, a narrower declared type or a `do`/`while` turned `for` move code on agbcc, so they are
-// ranked candidates (a variation), never a polish. Each rewrite is its own module, states the
+// `x++`. Not a rewrite the compiler can see: an early return's polarity, a narrower declared type or
+// a `do`/`while` turned `for` move code on agbcc, so they are ranked candidates (a variation), never
+// a polish. Nor is dropping the `else` after a branch that returns, which reads as the same program
+// and is NOT the same tree to agbcc: in `sa3:VramMalloc`'s inner loop,
+// `if (c) { return x; } else { if (d) break; v2 = …; }` and its flattened twin allocate registers
+// differently (agbcc -O2 -mthumb-interwork, compiled), and the flattened candidate scored 9 rows
+// where its draft scored 35 or more. Each rewrite is its own module, states the
 // condition under which it does not fire, and is pinned by its own test.
 //
 // WHERE IT RUNS, and why that is the whole design. The polish runs inside `emitCFamily`, last, on the
