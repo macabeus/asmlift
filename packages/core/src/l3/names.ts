@@ -138,14 +138,19 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // A COUNTER is a local a loop's condition reads whose every write is either ONE initialization
 // ahead of the loop — the `for`'s own init, or an assignment earlier in the statement list the loop
 // sits in — or a step of one inside the loop's own body, not inside a loop nested in it:
-// `v = v + 1`, `v = v - 1` (under a cast to its own type too), `v++` or `v--`. A local written
+// `v = v + 1`, `v = v - 1`, `v = v + -1` (the decrement mwcc, kmc and IDO lifts print; under a
+// cast to its own type too), `v++` or `v--`. A counter is an INTEGER: a pointer stepped by one
+// is a cursor walking memory (`while (*p != 255) { …; p = p + 1; }`), not an index. A local written
 // anywhere else, or initialized twice — the coalescer's one carrier for two loops' counters, which
 // is a variable with two roles — is no counter. A loop takes the first counter its condition
 // reads, named `i` where no counted loop encloses it, `j` under one, `k` under two; one that cannot
 // have that name (taken, or spelled) takes the next free one, and a fourth level takes none.
 //
 // THE RESULT is the one local every `return` returns, read bare, the last statement of the
-// function being one of those returns — and no counter, which would give it two roles.
+// function being one of those returns — and no counter or cursor, which would give it two roles:
+// not a loop's counter, not a pointer stepped by one inside a loop (a cursor returned where it
+// stopped, ac-decomp's `mMck_search_sep`), and not an integer stepped by one inside a loop whose
+// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one.
 //
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
 // collision check is the same.
@@ -188,15 +193,15 @@ function candidates(fn: SFn): Set<string> {
   return out;
 }
 
-/** Whether `value`, assigned to `name`, steps it by one: `name ± 1` or `1 + name`, under any
- *  integer cast. */
+/** Whether `value`, assigned to `name`, steps it by one: `name ± 1`, `name ± -1` or `±1 + name`,
+ *  under any integer cast. */
 function stepsByOne(name: string, value: Expr): boolean {
   const e = value.k === 'cast' && value.to.kind === 'int' ? value.e : value;
   if (e.k !== 'bin' || (e.op !== '+' && e.op !== '-')) {
     return false;
   }
   const isVar = (x: Expr) => x.k === 'var' && x.name === name;
-  const isOne = (x: Expr) => x.k === 'const' && x.value === 1;
+  const isOne = (x: Expr) => x.k === 'const' && (x.value === 1 || x.value === -1);
   return (isVar(e.l) && isOne(e.r)) || (e.op === '+' && isOne(e.l) && isVar(e.r));
 }
 
@@ -259,8 +264,8 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
   };
   visit(fn.body, []);
 
-  // which loop each counted local counts, in the order the loops are written
-  const counterOf = new Map<Loop, string>();
+  // the locals each loop's condition reads, in the order it reads them
+  const tested = new Map<Loop, string[]>();
   for (const { loop } of loopsOrder) {
     const read: string[] = [];
     for (const e of walkExprs([{ k: 'exprstmt', value: loop.cond }])) {
@@ -268,7 +273,15 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
         read.push(e.name);
       }
     }
-    const counter = read.find((v) => !counters.has(v) && counts(writes.get(v) ?? [], loop));
+    tested.set(loop, read);
+  }
+  const integer = new Set(fn.locals.filter((l) => l.type.kind === 'int').map((l) => l.name));
+  // which loop each counted local counts, in the order the loops are written
+  const counterOf = new Map<Loop, string>();
+  for (const { loop } of loopsOrder) {
+    const counter = tested
+      .get(loop)!
+      .find((v) => integer.has(v) && !counters.has(v) && counts(writes.get(v) ?? [], loop));
     if (counter !== undefined) {
       counterOf.set(loop, counter);
       counters.set(counter, []);
@@ -281,7 +294,10 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
       counters.set(v, COUNTERS.slice(depth));
     }
   }
-  return { counters, result: resultOf(fn, eligible, counters) };
+  // a local stepped inside a loop that is a cursor (any pointer) or the loop's own tested index
+  const walks = (v: string) =>
+    (writes.get(v) ?? []).some((w) => w.step && w.loops.some((l) => !integer.has(v) || tested.get(l)!.includes(v)));
+  return { counters, result: resultOf(fn, eligible, (v) => counters.has(v) || walks(v)) };
 }
 
 /** Whether `ws`, every write of one local, makes it `loop`'s counter (see above). */
@@ -307,14 +323,14 @@ function counts(ws: readonly Write[], loop: Loop): boolean {
 }
 
 /** The local every `return` of `fn` returns, bare, where the last statement is one of them and it
- *  is no counter. */
-function resultOf(fn: SFn, eligible: ReadonlySet<string>, counters: ReadonlyMap<string, unknown>): string | undefined {
+ *  plays no other role (`otherRole`). */
+function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string) => boolean): string | undefined {
   const last = fn.body[fn.body.length - 1];
   if (last?.k !== 'return' || last.value?.k !== 'var') {
     return undefined;
   }
   const r = last.value.name;
-  if (!eligible.has(r) || counters.has(r)) {
+  if (!eligible.has(r) || otherRole(r)) {
     return undefined;
   }
   const visit = (list: readonly Stmt[]): boolean =>

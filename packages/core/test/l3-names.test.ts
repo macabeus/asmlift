@@ -201,6 +201,67 @@ describe('role names', () => {
     expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return result;');
   });
 
+  test('a countdown spelled `v + -1` is a counter, as mwcc, kmc and IDO lifts print it', () => {
+    const down: Stmt[] = [
+      set('v0', v('a0')),
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '!=', l: v('v0'), r: c(0) },
+        body: [work(v('v0')), set('v0', { k: 'bin', op: '+', l: v('v0'), r: c(-1) })],
+      },
+    ];
+    expect(cBackend.emit(fn(['v0'], down))).toContain('i = i + -1;');
+  });
+
+  // pokeemerald's StringCopy: `while (*v0 != 255) { *v1 = *v0; v1 = v1 + 1; v0 = v0 + 1; } return v1;`
+  const u8p = T.ptr(T.u(8));
+  const deref = (name: string): Expr => ({ k: 'index', base: v(name), idx: c(0), width: 1, signed: false });
+  const copy = (): SFn => ({
+    ...fn(
+      [],
+      [
+        set('v0', v('a0')),
+        set('v1', v('a0')),
+        {
+          k: 'while',
+          cond: { k: 'bin', op: '!=', l: deref('v0'), r: c(255) },
+          body: [work(deref('v0'), v('v1')), step('v1'), step('v0')],
+        },
+        { k: 'return', value: v('v1') },
+      ],
+      u8p,
+    ),
+    locals: [
+      { name: 'v0', type: u8p },
+      { name: 'v1', type: u8p },
+    ],
+  });
+
+  test('a pointer stepped by one is a cursor, not a counter', () => {
+    const out = cBackend.emit(copy());
+    expect(out).not.toMatch(/\bi\b/);
+    expect(out).toContain('v0 = v0 + 1;');
+  });
+
+  test('a returned cursor, or an index its loop tests, is no result; a tally its loop does not test is', () => {
+    expect(cBackend.emit(copy())).toContain('return v1;');
+    // an integer the loop tests but no counter (initialized twice): an index, not the result
+    const index: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'if', cond: v('a0'), then: [set('v0', c(1))], else: [] },
+      { k: 'while', cond: lt('v0', 3), body: [work(v('v0')), step('v0')] },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], index, s32))).toContain('return v0;');
+    // a tally: stepped in a loop that tests something else
+    const tally: Stmt[] = [
+      set('v0', c(0)),
+      { k: 'while', cond: v('a0'), body: [work(), step('v0')] },
+      { k: 'return', value: v('v0') },
+    ];
+    expect(cBackend.emit(fn(['v0'], tally, s32))).toContain('return result;');
+  });
+
   test('a local whose address is taken, or that is a frame object, keeps its name', () => {
     const body: Stmt[] = [set('v0', c(0)), work({ k: 'addr', name: 'v0' }), { k: 'return', value: v('v0') }];
     expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
