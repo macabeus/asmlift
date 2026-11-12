@@ -45,6 +45,9 @@ export interface StructuringInputs {
   inferredSymbols?: Map<string, SymbolInfo>;
   /** The order half of the same reading (raise/globalshape.ts `orderLicensedGlobals`). */
   orderLicensedGlobals?: ReadonlySet<string>;
+  /** The names the function's own declaration gives its parameters (proto-context.ts
+   *  `ownParamNames`): printed by the C backend, read by nothing else (`SFn.paramNames`). */
+  paramNames?: readonly string[];
 }
 
 /** The structurer's options for one lift: `structureOptionsFor` (the target's compiler behaviours,
@@ -65,6 +68,7 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     ...contextArrayElementsOf(inputs.contextGlobals, target),
     ...(inputs.inferredSymbols?.size ? { inferredSymbols: inputs.inferredSymbols } : {}),
     ...(inputs.orderLicensedGlobals?.size ? { orderLicensedGlobals: inputs.orderLicensedGlobals } : {}),
+    ...(inputs.paramNames?.length ? { declaredParamNames: inputs.paramNames } : {}),
   };
 }
 

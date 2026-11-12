@@ -46,7 +46,7 @@ import {
   ownReturnWidth,
   prototypesFromSymbols,
 } from './proto';
-import { type ContextGlobals, splitOwnContext } from './proto-context';
+import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -308,6 +308,7 @@ function runTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
+      paramNames: ownParamNames(prototypes, name, own.ownContextProto),
     }),
     (t) => backend.emit(t),
     {},

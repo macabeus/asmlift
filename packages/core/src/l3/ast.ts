@@ -542,6 +542,12 @@ export interface SFn {
   /** Each declared callee's return type as the project spells it, never printed: whether a call a
    *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
   declaredReturns?: Readonly<Record<string, string>>;
+  /** The names the function's own declaration gives its parameters, in order (proto-context.ts
+   *  `ownParamNames`), set by the structurer from `StructureOptions.declaredParamNames`. An emission
+   *  policy like `slotOrder`: no pass reads it, and the C backend prints the parameters under these
+   *  names where they pair one to one with `params` and collide with nothing (l3/names.ts). Every
+   *  pass keeps naming the parameters `aN` in the tree. */
+  paramNames?: readonly string[];
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
   /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its

@@ -22,7 +22,7 @@ import {
   stubResult,
 } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import { type ContextGlobals, splitOwnContext } from './proto-context';
+import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { structuringOptions } from './structuring-options';
@@ -356,6 +356,7 @@ function traceTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
+      paramNames: ownParamNames(prototypes, name, ownContext.ownContextProto),
     }),
     (t) => backend.emit(t),
   );

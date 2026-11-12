@@ -197,6 +197,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   declaredReturns?: Readonly<Record<string, string>>;
   // The emitted C is compiled as C++ (`SFn.dialect`).
   dialect?: 'c++';
+  // The names the function's own declaration gives its parameters, carried to the backend on
+  // `SFn.paramNames` (see there). Built by `structuringOptions` from proto-context.ts
+  // `ownParamNames`, which hands them over only where each declared parameter is one argument word.
+  declaredParamNames?: readonly string[];
   // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
   // of the same name says which do).
   designatedInitializers?: boolean;

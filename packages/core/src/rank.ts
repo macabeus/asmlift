@@ -75,7 +75,7 @@ import {
   structureReturnTailReading,
 } from './pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
-import { type ContextGlobals, splitOwnContext } from './proto-context';
+import { type ContextGlobals, ownParamNames, splitOwnContext } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
@@ -588,6 +588,7 @@ export function enumerateCandidates(
     backend,
     symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
     contextGlobals: opts.contextGlobals,
+    paramNames: ownParamNames(prototypes, name, ownContext.ownContextProto),
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the

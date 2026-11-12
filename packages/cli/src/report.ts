@@ -14,7 +14,7 @@ import type { AsmLayout, Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder 
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureReturnTailReading } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
-import { type ContextGlobals, splitOwnContext } from '@asmlift/core/proto-context';
+import { type ContextGlobals, ownParamNames, splitOwnContext } from '@asmlift/core/proto-context';
 import { structuringOptions } from '@asmlift/core/structuring-options';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import type { ResolvedTarget, TargetDescription } from '@asmlift/core/target';
@@ -83,6 +83,7 @@ export async function decompileWithReport(
           inferredSymbols,
           mapSymbols,
           opts.contextGlobals,
+          ownParamNames(own.prototypes, name, own.ownContextProto),
         )
     : undefined;
 
@@ -168,6 +169,7 @@ function probedSource(
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
   contextGlobals: ContextGlobals | undefined,
+  paramNames: readonly string[] | undefined,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -201,6 +203,7 @@ function probedSource(
         symbols: mapSymbols,
         contextGlobals,
         inferredSymbols,
+        paramNames,
       }),
       (t) => backend.emit(t),
     );
