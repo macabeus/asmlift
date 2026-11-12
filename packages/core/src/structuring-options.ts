@@ -69,8 +69,8 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
 }
 
 /** Each struct array the context declares, its element laid out on `target`
- *  (`StructureOptions.contextArrayElements`), memoised per context and target: the four sites call
- *  the builder once per lift, and a project context declares hundreds of arrays. Empty spreads
+ *  (`StructureOptions.contextArrayElements`), memoised per context and target: every lift site calls
+ *  the builder, and a project context declares hundreds of arrays. Empty spreads
  *  nothing, so a lift with no such array gets the options it had. None on a target whose subscript
  *  of a declared array is not shown to be another object than the cast's (`arrayShapeFromStride`):
  *  the declared spelling is measured on agbcc alone. */
