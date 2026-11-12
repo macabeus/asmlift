@@ -57,6 +57,8 @@ export interface StructuringInputs {
   ownContextProto?: FnProto;
   /** Print loop counters and the returned local under role names (`SFn.roleNames`). */
   roleNames?: boolean;
+  /** Print through the readability polish (`SFn.polish`). */
+  polish?: boolean;
 }
 
 /** The structurer's options for one lift: `structureOptionsFor` (the target's compiler behaviours,
@@ -87,6 +89,7 @@ export function structuringOptions(inputs: StructuringInputs): StructureOptions 
     (declaresVoidReturn(stated) || stated?.declaredVoid === true || declaresVoidReturn(ownContextProto))
       ? { declaredVoid: true }
       : {}),
+    ...(inputs.polish ? { polishText: true } : {}),
   };
 }
 

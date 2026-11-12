@@ -17,6 +17,7 @@ const fnOf = (body: Stmt[], locals: SFn['locals'] = [{ name: 'v0', type: T.int(3
   ],
   locals,
   retType: T.void(),
+  polish: true,
   body,
 });
 
@@ -94,8 +95,10 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
       ),
     );
     expect(out).toContain('    gCount = gCount + 1;');
-    expect(out).toContain('    v1 = v1 + 1;');
-    expect(out).toContain('    v0 = v0 + g();');
+    // (renumbered by first mention: the volatile `v1` is met first and prints as `v0`)
+    expect(out).toContain('    volatile s32 v0;');
+    expect(out).toContain('    v0 = v0 + 1;');
+    expect(out).toContain('    v1 = v1 + g();');
     expect(out).not.toContain('+=');
     expect(out).not.toContain('++');
   });

@@ -192,6 +192,8 @@ export interface EnumerateOptions {
   roleNames?: boolean;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
+  /** same contract as DecompileOptions.polish */
+  polish?: boolean;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -608,6 +610,7 @@ export function enumerateCandidates(
     contextGlobals: opts.contextGlobals,
     ownContextProto: ownContext.ownContextProto,
     roleNames: opts.roleNames,
+    polish: opts.polish,
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the

@@ -212,6 +212,8 @@ export interface StructureOptions extends ArithCompilerFacts {
   // The compiler's C refuses C's implicit pointer conversions (`SFn.strictConversions`; the compiler
   // behavior `strictPointerConversions` says which does).
   strictPointerConversions?: boolean;
+  // Print the tree through the readability polish (`SFn.polish`, l3/polish/).
+  polishText?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering

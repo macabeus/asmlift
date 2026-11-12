@@ -14,6 +14,7 @@ const fnOf = (body: Stmt[], retType = T.void()): SFn => ({
   params: [{ name: 'a0', type: T.int(32, true) }],
   locals: [],
   retType,
+  polish: true,
   body,
 });
 

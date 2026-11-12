@@ -14,6 +14,7 @@ const fnOf = (value: Expr, paramType = T.ptr(T.int(8, false))): SFn => ({
   params: [{ name: 'a0', type: paramType }],
   locals: [],
   retType: T.int(32, true),
+  polish: true,
   body: [{ k: 'return', value }],
 });
 

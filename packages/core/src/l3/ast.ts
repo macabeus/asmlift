@@ -577,6 +577,11 @@ export interface SFn {
    *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
    *  into a pointer slot, wherever it would for C++. */
   strictConversions?: true;
+  /** Print through the readability polish (l3/polish/): an emission policy, asked for by the caller
+   *  (`polish` on decompile, rank and trace options; on in the CLI, the benchmark and the web app),
+   *  so the core library's default text — which hundreds of tests pin as the shape a lift takes — is
+   *  the tree as structured. The backend's `draft` ignores it. */
+  polish?: true;
 }
 
 /** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s

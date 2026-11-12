@@ -845,7 +845,7 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean,
  *  switch, a `break` bound to another statement) is a polish bug, and it must not become a refused
  *  candidate the draft would have printed: the draft's body is printed instead. */
 function polishedBody(fn: SFn, leaf: LeafHook | undefined, designators: boolean, polish: boolean): string[] {
-  if (polish) {
+  if (polish && fn.polish === true) {
     try {
       return cFamilyBody(fn, leaf, designators, true);
     } catch {

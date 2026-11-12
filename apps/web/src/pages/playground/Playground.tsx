@@ -252,6 +252,7 @@ export function Playground({
         onGap: 'annotate',
         // loop counters and the returned local under role names, as the CLI prints them
         roleNames: true,
+        polish: true,
         ...(symbolMap ? { symbols: symbolMap } : {}),
       });
     } catch (e) {
@@ -279,6 +280,7 @@ export function Playground({
           backend: langBackend.backend,
           onGap: 'annotate',
           roleNames: true,
+          polish: true,
           ...(symbolMap ? { symbols: symbolMap } : {}),
         }).report,
       };

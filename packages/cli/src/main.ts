@@ -917,6 +917,7 @@ export async function runCli(
         // loop counters and the returned local under role names (core l3/names.ts)
         roleNames: true,
         ...(calleeBodies ? { calleeBodies } : {}),
+        polish: true,
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -986,6 +987,7 @@ export async function runCli(
       ...(ownContextProto ? { ownContextProto } : {}),
       roleNames: true,
       ...(calleeBodies ? { calleeBodies } : {}),
+      polish: true,
     });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's

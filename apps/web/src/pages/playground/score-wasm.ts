@@ -153,6 +153,7 @@ export async function rankCandidatesInBrowser(
     backend: cBackend,
     roleNames: true,
     ...(symbols ? { symbols } : {}),
+    polish: true,
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });
 

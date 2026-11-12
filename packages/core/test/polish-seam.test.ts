@@ -24,6 +24,15 @@ describe('the polish seam', () => {
     expect(emitDraft(cBackend, fn)).toBe(cBackend.draft!(fn));
   });
 
+  test('a tree that does not ask for the polish prints its draft', () => {
+    const plain: SFn = {
+      ...fn,
+      body: [{ k: 'return', value: { k: 'bin', op: '&', l: { k: 'var', name: 'a0' }, r: { k: 'const', value: 64 } } }],
+    };
+    expect(cBackend.emit(plain)).toBe(cBackend.draft!(plain));
+    expect(cBackend.emit({ ...plain, polish: true })).toContain('a0 & 0x40');
+  });
+
   test('a backend with no polish drafts what it emits', () => {
     expect(pascalBackend.draft).toBeUndefined();
     expect(emitDraft(pascalBackend, fn)).toBe(pascalBackend.emit(fn));

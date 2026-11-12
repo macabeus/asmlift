@@ -14,6 +14,7 @@ const ret = (value: Expr): string =>
     params: [{ name: 'a0', type: T.int(32, false) }],
     locals: [],
     retType: T.int(32, false),
+    polish: true,
     body: [{ k: 'return', value }],
   } satisfies SFn);
 
@@ -60,6 +61,7 @@ describe('polish: hex for bits, decimal for counts', () => {
       params: [{ name: 'a0', type: T.int(32, false) }],
       locals: [],
       retType: T.int(32, false),
+      polish: true,
       body: [{ k: 'return', value: bin('&', v('a0'), c(64)) }],
     };
     expect(cBackend.draft!(fn)).toContain('a0 & 64');
