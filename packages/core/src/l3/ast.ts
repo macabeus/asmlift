@@ -1485,6 +1485,45 @@ export function stmtLists(s: Stmt): Stmt[][] {
   }
 }
 
+/** How a rename treats an ADDRESS of a renamed name (`&v`). The printed names rename it with the
+ *  rest. The coalescer and the register spelling keep it as it was: the coalescer's `addr` gap is
+ *  pinned in coalesce.test.ts ("KNOWN GAP, PINNED RATHER THAN FIXED"), because closing it changes
+ *  which candidates compile — a measured change, not this walk's to make. */
+export interface RenameOptions {
+  /** rename `addr` nodes too (default true) */
+  addresses?: boolean;
+}
+
+/** `e` with every mention of a variable `renames` names ({@link mentionedName}: a read, an
+ *  address, a step) spelled under its new name; an address only under `opts.addresses`. */
+export function renameInExpr(e: Expr, renames: ReadonlyMap<string, string>, opts: RenameOptions = {}): Expr {
+  const m = mapExprChildren(e, (c) => renameInExpr(c, renames, opts));
+  const name = m.k === 'addr' && opts.addresses === false ? undefined : mentionedName(m);
+  const to = name === undefined ? undefined : renames.get(name);
+  return to === undefined ? m : ({ ...m, name: to } as Expr);
+}
+
+/** `body` with every variable `renames` names spelled under its new name: each mention of it
+ *  ({@link renameInExpr}) and each assignment to it, at any depth, a `for`'s init and step
+ *  included. THE ONE RENAME WALK of L3: the coalescer's merge, the register spelling's phi split
+ *  and the printed names (l3/names.ts) all go through it, so a node kind that comes to name a
+ *  variable is one edit to `mentionedName`, never a declared name its use was not renamed to. */
+export function renameVariables(
+  body: readonly Stmt[],
+  renames: ReadonlyMap<string, string>,
+  opts: RenameOptions = {},
+): Stmt[] {
+  const target = (s: Stmt): Stmt => {
+    if (s.k === 'assign') {
+      const to = renames.get(s.name);
+      return to === undefined ? s : { ...s, name: to };
+    }
+    const m = mapStmtLists(s, (l) => l.map(target));
+    return m.k === 'for' ? { ...m, init: target(m.init), inc: target(m.inc) } : m;
+  };
+  return body.map((s) => target(mapStmtExprs(s, (e) => renameInExpr(e, renames, opts))));
+}
+
 /** The SETTER half of {@link stmtLists}: `s` with each of its nested lists replaced by `f` applied
  *  to it, in the same order `stmtLists` yields them. A caller that rebuilds a tree around one
  *  nested list therefore writes no `Stmt`-kind switch of its own — the pair lives here so a new

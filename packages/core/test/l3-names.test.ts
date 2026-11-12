@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
-import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { type Expr, type SFn, type Stmt, renameVariables } from '../src/l3/ast';
 import { nameVariables } from '../src/l3/names';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
@@ -266,5 +266,32 @@ describe('role names', () => {
   test('a local whose address is taken, or that is a frame object, keeps its name', () => {
     const body: Stmt[] = [set('v0', c(0)), work({ k: 'addr', name: 'v0' }), { k: 'return', value: v('v0') }];
     expect(cBackend.emit(fn(['v0'], body, s32))).toContain('return v0;');
+  });
+});
+
+// The one rename walk every L3 rename goes through (ast.ts `renameVariables`): the coalescer's
+// merge, the register spelling's phi split and the printed names.
+describe('the rename walk', () => {
+  test('renames every node that names a variable, and every assignment, at any depth', () => {
+    const v0: Expr = { k: 'var', name: 'v0' };
+    const body: Stmt[] = [
+      {
+        k: 'for',
+        init: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
+        cond: { k: 'bin', op: '<', l: v0, r: { k: 'const', value: 3 } },
+        inc: { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v0, r: { k: 'const', value: 1 } } },
+        body: [
+          { k: 'exprstmt', value: { k: 'call', fn: 'work', args: [{ k: 'addr', name: 'v0' }] } },
+          { k: 'exprstmt', value: { k: 'postincr', name: 'v0', by: 1 } },
+          { k: 'assign', name: 'v1', value: v0 },
+        ],
+      },
+    ];
+    const out = JSON.stringify(renameVariables(body, new Map([['v0', 'i']])));
+    expect(out).not.toContain('"v0"');
+    expect(out).toContain('"v1"');
+    // the coalescer and the register spelling keep an address as it was (coalesce.test.ts's pinned gap)
+    const kept = renameVariables(body, new Map([['v0', 'i']]), { addresses: false });
+    expect(JSON.stringify(kept).match(/"v0"/g)).toHaveLength(1);
   });
 });

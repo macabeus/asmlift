@@ -29,7 +29,7 @@
 //        (`r = E; return r`). Emitted as a SEPARATE result (with/without R3) when R1/R2 fired:
 //        which tail the source spelled is itself ambiguous.
 import { IrType, T } from '../ir/types';
-import { Expr, SFn, Stmt, exprEquals, mapExprChildren } from './ast';
+import { Expr, SFn, Stmt, exprEquals, mapExprChildren, renameInExpr, renameVariables } from './ast';
 import { declaredTypes, exprCType } from './typing';
 
 const exprEq = exprEquals;
@@ -52,60 +52,9 @@ function isPure(e: Expr): boolean {
   }
 }
 
-/** Every mention of var `from` in an expr renamed to `to`. */
-function renameVar(e: Expr, from: string, to: string): Expr {
-  if (e.k === 'var') {
-    return e.name === from ? { k: 'var', name: to } : e;
-  }
-  if (e.k === 'postincr') {
-    return e.name === from ? { ...e, name: to } : e;
-  }
-  return mapExprChildren(e, (c) => renameVar(c, from, to));
-}
-
-function renameInStmt(s: Stmt, from: string, to: string): Stmt {
-  const rx = (e: Expr): Expr => renameVar(e, from, to);
-  switch (s.k) {
-    case 'assign':
-      return { ...s, name: s.name === from ? to : s.name, value: rx(s.value) };
-    case 'store':
-      return { ...s, lval: rx(s.lval), value: rx(s.value) };
-    case 'exprstmt':
-      return { ...s, value: rx(s.value) };
-    case 'return':
-      return s.value ? { ...s, value: rx(s.value) } : s;
-    case 'if':
-      return {
-        ...s,
-        cond: rx(s.cond),
-        then: s.then.map((x) => renameInStmt(x, from, to)),
-        else: s.else.map((x) => renameInStmt(x, from, to)),
-      };
-    case 'while':
-    case 'dowhile':
-      return { ...s, cond: rx(s.cond), body: s.body.map((x) => renameInStmt(x, from, to)) };
-    case 'for':
-      return {
-        ...s,
-        init: renameInStmt(s.init, from, to),
-        cond: rx(s.cond),
-        inc: renameInStmt(s.inc, from, to),
-        body: s.body.map((x) => renameInStmt(x, from, to)),
-      };
-    case 'switch':
-      return {
-        ...s,
-        scrutinee: rx(s.scrutinee),
-        cases: s.cases.map((c) => ({ ...c, body: c.body.map((x) => renameInStmt(x, from, to)) })),
-        default: s.default ? s.default.map((x) => renameInStmt(x, from, to)) : undefined,
-      };
-    case 'break':
-    case 'continue':
-    case 'goto':
-    case 'caseEndGoto':
-      return s;
-  }
-}
+/** The phi split renames reads, steps and writes of the value variable and, as it always has, no
+ *  address of it (ast.ts `RenameOptions`). */
+const KEEP_ADDRESSES = { addresses: false } as const;
 
 const FLIP: Record<string, string> = { '<': '>=', '<=': '>', '>': '<=', '>=': '<', '==': '!=', '!=': '==' };
 
@@ -288,11 +237,17 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
               out.push({
                 k: 'if',
                 cond: flipped,
-                then: [{ k: 'assign', name: w, value: renameVar(renameSubexpr(upd, E, v), v, w) }],
+                then: [
+                  {
+                    k: 'assign',
+                    name: w,
+                    value: renameInExpr(renameSubexpr(upd, E, v), new Map([[v, w]]), KEEP_ADDRESSES),
+                  },
+                ],
                 else: [],
               });
               // every LATER statement reads the phi var under its new name
-              const rest = stmts.slice(i + 1).map((x) => renameInStmt(x, v, w));
+              const rest = renameVariables(stmts.slice(i + 1), new Map([[v, w]]), KEEP_ADDRESSES);
               out.push(...r1List(rest));
               fired++;
               deadValueVar = v;

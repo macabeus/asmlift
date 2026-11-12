@@ -595,8 +595,8 @@ describe('rename', () => {
 
     // KNOWN GAP, PINNED RATHER THAN FIXED: `namesIn` counts an `addr` leaf (`&sp0`, the frame
     // object an `laddr` renders as) toward a local's span, so a pair CAN be built for such a local
-    // — but `rename` rewrites only `var` leaves, so the `&` form of the absorbed name survives a
-    // merge that deleted its declaration. Closing it changes which candidates compile, which is a
+    // — but `rename` rewrites no `addr` leaf (ast.ts `renameVariables` under `addresses: false`),
+    // so the `&` form of the absorbed name survives a merge that deleted its declaration. Closing it changes which candidates compile, which is a
     // measured change and not a cleanup, so this asserts today's behaviour EXACTLY: every position
     // but the `&` form is rewritten. A fix must flip both expectations together.
     const survivors = [...walkExprs(merged!.sfn.body)].filter((e) => (e.k === 'var' || e.k === 'addr') && e.name === a);

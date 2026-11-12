@@ -32,17 +32,7 @@
 //      header may name a parameter `new` or `class`. A C++ unit prints through this C backend
 //      too, so it takes the role names like any other; the receiver and the mangled signature
 //      are refused upstream (`ownParamNames`: a mangled name or an implicit argument names none).
-import {
-  type Expr,
-  type SFn,
-  type Stmt,
-  exprChildren,
-  mapExprChildren,
-  mapStmtExprs,
-  stmtExprs,
-  stmtLists,
-  walkExprs,
-} from './ast';
+import { type Expr, type SFn, type Stmt, exprChildren, renameVariables, stmtExprs, stmtLists, walkExprs } from './ast';
 
 /** Identifiers a compiler this project serves predefines as macros outside the reserved namespace
  *  (`_` + a capital, or `__`), which a parameter or a local must not be spelled as: the host `cpp`
@@ -395,52 +385,13 @@ function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string)
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each
- *  read, write, step and address of it. */
+ *  read, write, step and address of it (ast.ts `renameVariables`). */
 function renamed(fn: SFn, renames: ReadonlyMap<string, string>): SFn {
   const to = (n: string): string => renames.get(n) ?? n;
-  const expr = (e: Expr): Expr => {
-    const m = mapExprChildren(e, expr);
-    return m.k === 'var' || m.k === 'postincr' || m.k === 'addr' ? { ...m, name: to(m.name) } : m;
-  };
-  const stmt = (s: Stmt): Stmt => {
-    const m = mapStmtExprs(s, expr);
-    return renameAssigns(m, to);
-  };
   return {
     ...fn,
     params: fn.params.map((p) => ({ ...p, name: to(p.name) })),
     locals: fn.locals.map((l) => ({ ...l, name: to(l.name) })),
-    body: fn.body.map(stmt),
+    body: renameVariables(fn.body, renames),
   };
-}
-
-/** `s` with the target of every assignment in it, at any depth, renamed. `mapStmtExprs` maps
- *  expressions only, so the targets are a walk of their own. */
-function renameAssigns(s: Stmt, to: (n: string) => string): Stmt {
-  const list = (xs: Stmt[]): Stmt[] => xs.map((x) => renameAssigns(x, to));
-  switch (s.k) {
-    case 'assign':
-      return { ...s, name: to(s.name) };
-    case 'if':
-      return { ...s, then: list(s.then), else: list(s.else) };
-    case 'while':
-    case 'dowhile':
-      return { ...s, body: list(s.body) };
-    case 'for':
-      return { ...s, init: renameAssigns(s.init, to), inc: renameAssigns(s.inc, to), body: list(s.body) };
-    case 'switch':
-      return {
-        ...s,
-        cases: s.cases.map((c) => ({ ...c, body: list(c.body) })),
-        ...(s.default ? { default: list(s.default) } : {}),
-      };
-    case 'store':
-    case 'exprstmt':
-    case 'return':
-    case 'break':
-    case 'continue':
-    case 'goto':
-    case 'caseEndGoto':
-      return s;
-  }
 }
