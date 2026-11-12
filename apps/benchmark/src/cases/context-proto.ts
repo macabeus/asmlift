@@ -15,6 +15,7 @@ import {
   prototypesFromContext,
   withContextPrototypes,
   withOwnContextMark,
+  withOwnParamNames,
   withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
@@ -27,7 +28,8 @@ const parsed = new Map<string, Prototypes>();
  *  (`withContextPrototypes`, which says whose entry wins and why the row's own is left out) — and,
  *  where the manifest states no entry for the row's own function, the context's own entry under
  *  its mark (`withOwnContextMark`), which bounds the lift's argument registers softly as a
- *  `--context` lift's does, and which the row publishes so its `--proto` replay lifts the same. */
+ *  `--context` lift's does, and which the row publishes so its `--proto` replay lifts the same. Either
+ *  own entry carries the context's parameter names (`withOwnParamNames`). */
 export function rowPrototypes(
   manifest: Prototypes | undefined,
   { ctxI, ctxFile }: { ctxI: string; ctxFile: string },
@@ -42,11 +44,17 @@ export function rowPrototypes(
   const key = `${language} ${ctxFile}`;
   let derived = parsed.get(key);
   if (derived === undefined) {
-    derived = prototypesFromContext(ctxI, language);
+    derived = prototypesFromContext(ctxI, language, { names: true });
     parsed.set(key, derived);
   }
-  const merged = withOwnContextMark(
-    withContextPrototypes(withOwnReturnLayout(manifest, sym, ctxI, language), derived, sym, symbols, target),
+  // …and the names the context's declaration gives its parameters, on the own entry whichever of
+  // the two states it (core `withOwnParamNames`): read for nothing but the printed names
+  const merged = withOwnParamNames(
+    withOwnContextMark(
+      withContextPrototypes(withOwnReturnLayout(manifest, sym, ctxI, language), derived, sym, symbols, target),
+      sym,
+      derived,
+    ),
     sym,
     derived,
   );

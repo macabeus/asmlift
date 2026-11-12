@@ -25,7 +25,8 @@ describe('a real row prototype table', () => {
     expect(p).toEqual({
       callee: { returns: 's32', params: ['s32'] },
       other: { params: 3 },
-      self: { returnsVoid: true, params: ['s32'], fromContext: true },
+      // …carrying the names its declaration gives its parameters, which only the printer reads
+      self: { returnsVoid: true, params: ['s32'], paramNames: ['x'], fromContext: true },
     });
     expect(validatePrototypes(p)).toEqual([]);
     // a manifest entry for the row states it, and the context's is not carried

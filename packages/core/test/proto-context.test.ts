@@ -4,14 +4,16 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaredCallArgs, declaredWidth } from '../src/proto';
+import { declaredCallArgs, declaredWidth, validatePrototypes } from '../src/proto';
 import {
   globalsFromContext,
   ownContextEntry,
+  ownParamNames,
   prototypesFromContext,
   splitOwnContext,
   withContextPrototypes,
   withOwnContextMark,
+  withOwnParamNames,
 } from '../src/proto-context';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -1227,5 +1229,86 @@ describe("the own context entry's mark", () => {
   test("an entry handed over beside the table wins over the table's mark", () => {
     const given = { params: ['int'], returns: 'int' };
     expect(splitOwnContext(withOwnContextMark(undefined, 'f', ctx), 'f', given).ownContextProto).toBe(given);
+  });
+});
+
+// The names a declaration gives its parameters (`FnProto.paramNames`): read only where asked for,
+// carried on the own entry whichever path states it, never on a callee's, and handed to the printer
+// (`ownParamNames`) only where each declared parameter is the one argument word the lift numbers.
+describe("the declaration's parameter names", () => {
+  const named = (decl: string, language: 'c' | 'c++' = 'c') =>
+    prototypesFromContext(`struct S { int a, b, c; };\n${decl}`, language, { names: true });
+
+  test('are read only where asked for, and only where every parameter is named, no two alike', () => {
+    expect(prototypesFromContext('s16 F(u8 s, s16 x, s16 y);', 'c').F).toEqual({
+      params: ['u8', 's16', 's16'],
+      returns: 's16',
+    });
+    expect(named('s16 F(u8 s, s16 x, s16 y);').F?.paramNames).toEqual(['s', 'x', 'y']);
+    expect(named('s16 F(u8, s16 x);').F?.paramNames).toBeUndefined();
+    expect(named('void F(void);').F?.paramNames).toBeUndefined();
+    expect(named('void F();').F?.paramNames).toBeUndefined();
+    expect(named('void F(int a, ...);').F?.paramNames).toBeUndefined();
+  });
+
+  test('two declarations that name a parameter differently are one function, and the later names it', () => {
+    expect(named('int F(int a);\nint F(int b);').F).toEqual({ params: ['int'], returns: 'int', paramNames: ['b'] });
+  });
+
+  test('a callee carries none into the table a lift reads', () => {
+    const ctx = named('int f(short s, int n);\nint g(int k);');
+    const table = withContextPrototypes(undefined, ctx, 'f', undefined, ARMV4T_AGBCC);
+    expect(table).toEqual({ g: { params: ['int'], returns: 'int' } });
+  });
+
+  test('ride on the own entry, marked or stated', () => {
+    const ctx = named('int f(short s, int n);\nint g(int k);');
+    const marked = withOwnParamNames(withOwnContextMark(undefined, 'f', ctx), 'f', ctx);
+    expect(marked?.f).toEqual({ params: ['short', 'int'], returns: 'int', paramNames: ['s', 'n'], fromContext: true });
+    expect(splitOwnContext(marked, 'f').ownContextProto?.paramNames).toEqual(['s', 'n']);
+    // a manifest or `--proto` that restates the types still prints the header's names
+    expect(withOwnParamNames({ f: { params: ['s16', 's32'] } }, 'f', ctx)).toEqual({
+      f: { params: ['s16', 's32'], paramNames: ['s', 'n'] },
+    });
+    // …but not over a list of another length, a count, or names it already states
+    const three = { f: { params: ['s32', 's32', 's32'] } };
+    expect(withOwnParamNames(three, 'f', ctx)).toBe(three);
+    const count = { f: { params: 2 } };
+    expect(withOwnParamNames(count, 'f', ctx)).toBe(count);
+    const own = { f: { params: ['s32', 's32'], paramNames: ['p', 'q'] } };
+    expect(withOwnParamNames(own, 'f', ctx)).toBe(own);
+    expect(withOwnParamNames(undefined, 'f', ctx)).toBeUndefined();
+  });
+
+  test('are handed to the printer only where each parameter is one argument word', () => {
+    const names = (decl: string, own = 'f') => ownParamNames(named(decl), own);
+    expect(names('void f(u8 s, s16 *p, int n);')).toEqual(['s', 'p', 'n']);
+    // a register pair, an FPU register and a by-value struct each move every later parameter
+    expect(names('void f(long long w, int n);')).toBeUndefined();
+    expect(names('void f(float x, int n);')).toBeUndefined();
+    expect(names('void f(struct S s, int n);')).toBeUndefined();
+    expect(names('void f(Unknown u, int n);')).toBeUndefined();
+    // a struct returned by value may take argument 0 for its hidden pointer
+    expect(names('struct S f(int n);')).toBeUndefined();
+    // a receiver no declaration lists
+    expect(ownParamNames(named('int get__3Fooi(int n);'), 'get__3Fooi')).toBeUndefined();
+    // the entry beside the table, where the table states none
+    expect(ownParamNames({}, 'f', { params: ['s32'], paramNames: ['n'] })).toEqual(['n']);
+    // …and where the table's entry names none (one the symbol map supplied)
+    expect(ownParamNames({ f: { params: ['s32'] } }, 'f', { params: ['s32'], paramNames: ['n'] })).toEqual(['n']);
+    expect(ownParamNames({ f: { params: ['s32'] } }, 'f')).toBeUndefined();
+  });
+
+  test('are a valid key of a hand-written table only as a list of identifiers beside a list', () => {
+    expect(validatePrototypes({ f: { params: ['s32'], paramNames: ['n'] } })).toEqual([]);
+    for (const bad of [
+      { params: ['s32'], paramNames: ['n', 'm'] },
+      { params: 1, paramNames: ['n'] },
+      { params: ['s32', 's32'], paramNames: ['n', 'n'] },
+      { params: ['s32'], paramNames: ['1n'] },
+      { params: ['s32'], paramNames: 'n' },
+    ]) {
+      expect(validatePrototypes({ f: bad }), JSON.stringify(bad)).toHaveLength(1);
+    }
   });
 });

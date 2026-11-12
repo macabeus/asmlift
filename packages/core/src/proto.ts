@@ -133,6 +133,14 @@ export interface FnProto {
    *  entry a `--context` lift was handed: a benchmark row publishes it so its `--proto` replay
    *  lifts as the harness did. On a callee's entry it is ignored. */
   fromContext?: boolean;
+  /** The NAMES a declaration gives its parameters, one per entry of a typed `params` list, in its
+   *  order. A context states it (`prototypesFromContext`) where every parameter is named, no two
+   *  alike. READ FOR NOTHING BUT THE PRINTED NAME of the function's own parameters (l3/names.ts,
+   *  through proto-context.ts `ownParamNames`, which also says when the declaration's parameters
+   *  pair one-to-one with the lifted ones): no lift, bound or call reads it, so an entry carrying
+   *  it lifts exactly as one without it. On a callee's entry it is never kept
+   *  (`withContextPrototypes` drops it). */
+  paramNames?: readonly string[];
 }
 
 /** A struct or union a declaration spells: what it is, and its members as the header lists them.
@@ -1030,16 +1038,30 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'byValueParams' &&
         key !== 'byValueLayouts' &&
         key !== 'variadicParams' &&
-        key !== 'fromContext'
+        key !== 'fromContext' &&
+        key !== 'paramNames'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams", "byValueLayouts", "variadicParams" or "fromContext")',
+            '"byValueParams", "byValueLayouts", "variadicParams", "fromContext" or "paramNames")',
         );
       }
     }
     if ('fromContext' in proto && typeof (proto as { fromContext?: unknown }).fromContext !== 'boolean') {
       problems.push(`${sym}: "fromContext" must be a boolean`);
+    }
+    if ('paramNames' in proto) {
+      const names = (proto as { paramNames?: unknown }).paramNames;
+      const typed = (proto as { params?: unknown }).params;
+      if (
+        !Array.isArray(names) ||
+        !names.every((n) => typeof n === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) ||
+        new Set(names).size !== names.length ||
+        !Array.isArray(typed) ||
+        typed.length !== names.length
+      ) {
+        problems.push(`${sym}: "paramNames" must be a list of distinct identifiers, one per entry of a "params" list`);
+      }
     }
     const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =
       proto as {

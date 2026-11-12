@@ -26,6 +26,7 @@ import {
   ownContextEntry,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnParamNames,
   withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
@@ -754,15 +755,21 @@ export async function runCli(
         stderr: `asmlift: cannot read --context file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
-    const fromContext = prototypesFromContext(text, unitTarget.dialect ?? 'c');
+    const fromContext = prototypesFromContext(text, unitTarget.dialect ?? 'c', { names: true });
     ownContextProto =
       prototypes !== undefined && Object.hasOwn(prototypes, name) ? undefined : ownContextEntry(fromContext, name);
-    prototypes = withContextPrototypes(
-      withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
-      fromContext,
+    // …the names the header gives the function's parameters riding on a stated entry too, where
+    // `--proto` restates its types (`withOwnParamNames`): only the printed names read them
+    prototypes = withOwnParamNames(
+      withContextPrototypes(
+        withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
+        fromContext,
+        name,
+        symbols,
+        unitTarget,
+      ),
       name,
-      symbols,
-      unitTarget,
+      fromContext,
     );
     contextGlobals = globalsFromContext(text, unitTarget.dialect ?? 'c');
   }
