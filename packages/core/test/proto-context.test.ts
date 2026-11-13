@@ -1314,7 +1314,7 @@ describe("the declaration's parameter names", () => {
     expect(names('struct S f(int n);')).toBeUndefined();
     expect(names('struct U f(int n);')).toBeUndefined();
     expect(names('struct W { int a; };\nstruct W f(int n);', 'f', MIPS_IDO)).toBeUndefined();
-    // …where one handed back in registers takes none (kleod's `sub_08014184`: agbcc, r0)
+    // …where one handed back in registers takes none (agbcc's one-word struct in r0)
     expect(names('struct W { int a; };\nstruct W f(unsigned short x, unsigned char y);')).toEqual(['x', 'y']);
     expect(names('struct P { int a, b; };\nstruct P f(int n);', 'f', PPC_MWCC)).toEqual(['n']);
     // a receiver no declaration lists
@@ -1328,7 +1328,7 @@ describe("the declaration's parameter names", () => {
     expect(ownParamNames({ f: { params: ['s32'] } }, 'f', ARMV4T_AGBCC)).toBeUndefined();
   });
 
-  test('are a valid key of a hand-written table only as a list of identifiers beside a list', () => {
+  test('are a valid key of a hand-written table only as distinct identifiers, one per stated param', () => {
     expect(validatePrototypes({ f: { params: ['s32'], paramNames: ['n'] } })).toEqual([]);
     for (const bad of [
       { params: ['s32'], paramNames: ['n', 'm'] },

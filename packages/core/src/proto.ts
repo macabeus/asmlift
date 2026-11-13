@@ -136,12 +136,10 @@ export interface FnProto {
   /** The NAMES a declaration gives its parameters, one per entry of a typed `params` list, in its
    *  order — or, on an own entry that states nothing of its parameters (`{ "returnsVoid": true }`),
    *  one per lifted parameter, put there only where the declaration's own list pairs one to one
-   *  (proto-context.ts `withOwnParamNames`). A context states it (`prototypesFromContext`) where every parameter is named, no two
-   *  alike. READ FOR NOTHING BUT THE PRINTED NAME of the function's own parameters (l3/names.ts,
-   *  through proto-context.ts `ownParamNames`, which also says when the declaration's parameters
-   *  pair one-to-one with the lifted ones): no lift, bound or call reads it, so an entry carrying
-   *  it lifts exactly as one without it. On a callee's entry it is never kept
-   *  (`withContextPrototypes` drops it). */
+   *  (proto-context.ts `withOwnParamNames`). A context states it where every parameter is named, no
+   *  two alike. READ FOR NOTHING BUT THE PRINTED NAME of the function's own parameters (l3/names.ts,
+   *  through proto-context.ts `ownParamNames`): no lift, bound or call reads it, so an entry
+   *  carrying it lifts exactly as one without it. A callee's entry never keeps it. */
   paramNames?: readonly string[];
 }
 

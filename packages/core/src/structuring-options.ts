@@ -51,10 +51,8 @@ export interface StructuringInputs {
   /** The context's own declaration of `name`, split out of the table (proto-context.ts
    *  `splitOwnContext`). Read here for the printed names only: the parameter names
    *  (`SFn.paramNames`, from `ownParamNames` over `prototypes` and this entry) and whether either
-   *  entry declares a void return (`SFn.declaredVoid`), each derived here and at no site: the four
-   *  sites once each called `ownParamNames` by hand, and the cli probe's call read the caller's
-   *  table before the symbol merge while its structuring read the merged one, so the probe printed
-   *  declared names the headline lift refused. */
+   *  entry declares a void return (`SFn.declaredVoid`), both derived here and at no call site, so
+   *  they are read off the same merged table the structuring reads. */
   ownContextProto?: FnProto;
   /** Print loop counters and the returned local under role names (`SFn.roleNames`). */
   roleNames?: boolean;

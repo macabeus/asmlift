@@ -13,8 +13,8 @@
 //
 // WHY `emit` OWNS IT, as it owns the slot order (l3/slotorder.ts says why at length): every L3 pass
 // and every respell variation keeps reading the structurer's names (`a0`, `v3`), several of them by
-// position in the declaration list, and the seven `.emit(` call sites all print the same names. Run
-// any earlier, a variation that appends a local would mint a name beside a renamed one.
+// position in the declaration list, and every `.emit(` call site prints the same names. Run any
+// earlier, a variation that appends a local would mint a name beside a renamed one.
 //
 // REFUSALS. A new name is printed only where it changes no meaning:
 //   1. the declaration's parameters pair one to one with the lifted ones: `ownParamNames` hands
@@ -29,9 +29,8 @@
 //      shadowed: a block-scope name hides a file-scope one only where it is spelled;
 //   4. no two renamed variables take one name;
 //   5. in a unit compiled as C++ (`SFn.dialect`), the name is no C++ keyword (`CXX_KEYWORDS`): a C
-//      header may name a parameter `new` or `class`. A C++ unit prints through the C backend
-//      too, so it takes the role names like any other; the receiver and the mangled signature
-//      are refused upstream (`ownParamNames`: a mangled name or an implicit argument names none).
+//      header may name a parameter `new` or `class`. The receiver and the mangled signature are
+//      refused upstream (`ownParamNames`).
 //
 // Both C-family backends apply these names (backend/cfamily.ts `emitCFamily`). The C++ backend
 // names the parameters from its own spec, so it asks only for the locals' role names. The Pascal
@@ -204,18 +203,14 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // have that name (taken, or spelled) takes the next free one, and a fourth level takes none.
 //
 // THE RESULT is the one local every `return` returns, read bare, the last statement of the
-// function being one of those returns — and no counter or cursor, which would give it two roles:
-// not a loop's counter, not a pointer stepped by one inside a loop (a cursor returned where it
-// stopped, ac-decomp's `mMck_search_sep`), and not an integer stepped by one inside a loop whose
-// condition reads it. An integer stepped in a loop that does not test it (a tally) stays one. It
-// is assigned on every path into each return (`assignedBeforeEveryReturn`): a local set on one
-// arm only is a register's leftover, not the function's value (snowboardkids2's
-// `func_800154A8_160A8`, a void function whose lift returns what one path left in v0). And it is
-// read nowhere ahead of its last write but in its own update (`readBeforeItsLastWrite`): such a
-// read is the coalescer's carrier holding another value first, tested or copied before the result
-// is computed. No local is the result of a function whose own declaration returns void
-// (`SFn.declaredVoid`): kleod's `void EepromTimerIntr(void);` lifts returning r0's leftover, and
-// `result` would call that leftover the function's value.
+// function being one of those returns. It plays no second role: no loop's counter, no pointer
+// stepped by one inside a loop (a cursor returned where it stopped, ac-decomp's
+// `mMck_search_sep`), no integer stepped by one inside a loop whose condition reads it (an index;
+// a tally its loop does not test stays one). It is assigned on every path into each return
+// (`assignedBeforeEveryReturn`) — a local set on one arm only is a register's leftover, not the
+// function's value — and read nowhere ahead of its last write but in its own update
+// (`readBeforeItsLastWrite`). No local is the result of a function whose own declaration returns
+// void (`SFn.declaredVoid`): kleod's `void EepromTimerIntr(void);` lifts returning r0's leftover.
 //
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
 // collision check is the same.
@@ -413,9 +408,8 @@ function resultOf(fn: SFn, eligible: ReadonlySet<string>, otherRole: (v: string)
 /** Whether `r` is assigned on every path into each `return` of `body`. Read conservatively, as a
  *  forward walk that may answer "unset" for a path that sets it: an `if` sets it only where both
  *  arms do, a `while` or `for` body may run no times, a `do`-`while` body counts only where nothing
- *  in it jumps out early (`break`, `continue`, a `goto`), and a `switch` sets nothing. A statement
- *  entered with the local unset may still find it set, because a write is never undone, so each
- *  body is walked from the state its statement was entered with. */
+ *  in it jumps out early (`break`, `continue`, a `goto`), and a `switch` sets nothing. Each body is
+ *  walked from the state its statement was entered with, for the returns inside it. */
 function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
   type Reach = 'set' | 'unset' | 'gone';
   const join = (a: Reach, b: Reach): Reach =>

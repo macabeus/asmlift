@@ -90,9 +90,7 @@ describe("the declaration's parameter names", () => {
   });
 
   // The names are derived where the structuring options are, over the table those options read:
-  // a site cannot hand the structurer names off another table. The cli's score probe once passed
-  // names read off the caller's table, before the symbol merge, while its structuring read the
-  // merged one, whose map-given struct return through memory refuses them.
+  // a symbol map that merges in a struct returned through memory refuses them.
   test('are derived from the table the structuring options read, the symbol merge included', () => {
     const table: Record<string, FnProto> = { F: { params: ['u8', 'u8'], paramNames: ['x', 'y'] } };
     const symbols = new Map([

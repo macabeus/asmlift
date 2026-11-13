@@ -1783,7 +1783,7 @@ function statesNoParams(p: FnProto): boolean {
  *     its position;
  *   - a struct or union returned by value through memory, or where `target`'s rule cannot say
  *     (aggregate.ts `returnsInMemory`), whose hidden pointer takes argument 0 — one it hands back in
- *     registers takes no argument word (agbcc's one-word struct in r0: kleod's `sub_08014184`), as
+ *     registers takes no argument word (agbcc's one-word struct in r0), as
  *     the lift's own bound reads it (`ownArgumentWordsOn`);
  *   - a C++ member function or a mangled free function, whose receiver is no declared parameter.
  *  The lifted parameter count is checked against the list where the names are printed, and a

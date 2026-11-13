@@ -160,10 +160,9 @@ const DECL_RESERVED = new Set<string>([
  *  names them positionally) and coalesced/temp locals `v0…`/`t0…` (structure.ts's `localNames`
  *  accepts exactly `/^[vt]\d+$/`). This is the grammar of the TREE this module reads, not of the
  *  printed C: the C-family printer renames parameters to their declared names and locals to role
- *  names (`i`, `j`, `k`, `result`) at emit (l3/names.ts), after this check. That rename refuses
- *  any name the printed function already spells, so a global the target names `result` keeps the
- *  local its `vN`, and the collision below stays the only one. A global spelled `aN` or `vN` that
- *  the printed C would not mint after the rename is still refused here, which is conservative.
+ *  names (`i`, `j`, `k`, `result`) at emit (l3/names.ts), after this check, refusing any name the
+ *  printed function already spells; so refusing a global spelled `aN` or `vN` here is
+ *  conservative where the rename would not print it.
  *  A global the target names with one of these names cannot be declared beside the C that spells
  *  it — see the refusal in `refsOf`, which is the one that kills the spelling rather than the line.
  *
