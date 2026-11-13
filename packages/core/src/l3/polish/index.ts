@@ -21,9 +21,10 @@
 // core library's default backends print the tree as structured, which hundreds of tests pin.
 //
 // A polished backend keeps the inner printer as its `draft`, and the return-tail reading's size bound
-// reads that (pipeline.ts `structureReturnTailReading`), as do rank's duplicate collapse and its
-// goto/cast/line tie-break: a polish that drops a line must not move a reading or a winner, and two
-// trees the polish prints as one text are still two candidates.
+// reads that (pipeline.ts `structureReturnTailReading`), as does rank's duplicate collapse: a polish
+// that drops a line must not move a reading, and two trees the polish prints as one text are still
+// two candidates. Rank's goto/cast/line tie-break reads the PUBLISHED text, the one the report's
+// quality metric counts (rank.ts `compareScored`).
 //
 // WHAT THE COMPILER SEES DEPENDS ON THE LEVEL. At a level that compiles each statement as it is
 // written (`PolishFacts.literal`), three of these re-spellings are other code: `x++` and `x += k`

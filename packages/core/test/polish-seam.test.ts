@@ -8,7 +8,7 @@ import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
 import { type SFn, emitDraft } from '../src/l3/ast';
 import { polishFactsOf, polished } from '../src/l3/polish';
-import { compareScored, tieShape } from '../src/rank';
+import { compareScored } from '../src/rank';
 import { targetFor } from '../src/target';
 
 const fn: SFn = {
@@ -48,12 +48,11 @@ describe('the polish seam', () => {
     expect(polishFactsOf(targetFor('mwcc_242_81', ['-O4,p']).target).literal).toBe(false);
   });
 
-  test("compareScored breaks a score tie by the draft's counts, not the published text's", () => {
+  test('compareScored breaks a score tie by the published text, the one the report counts', () => {
     type C = Parameters<typeof compareScored>[0];
     const base = { variations: [], preference: 0, score: { score: 0 } };
-    // `a` publishes the shorter text, but its draft was the longer: the draft decides
-    const a = { ...base, order: 0, source: 'x;\n', tie: tieShape('x;\ny;\nz;\n') };
-    const b = { ...base, order: 1, source: 'x;\ny;\n', tie: tieShape('x;\ny;\n') };
+    const a = { ...base, order: 0, source: 'x;\ny;\n' };
+    const b = { ...base, order: 1, source: 'x;\n' };
     expect(compareScored(a as unknown as C, b as unknown as C)).toBeGreaterThan(0);
   });
 });

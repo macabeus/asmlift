@@ -651,10 +651,10 @@ export interface LanguageBackend {
   readonly spellsEarlyReturn: boolean;
   emit(fn: SFn): string;
   /** The text `emit` printed BEFORE its readability polish (l3/polish/), on a backend `polished`
-   *  made. The polish only re-spells, and the bytes are the draft's; but a decision that reads
-   *  PRINTED TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`),
-   *  rank's goto/cast/line tie-break and its duplicate-source collapse (rank.ts) — reads this, so a
-   *  polish that drops a line or prints two trees as one text moves no reading and no winner. Read it through
+   *  made. The polish only re-spells, and the bytes are the draft's; but two decisions that read
+   *  PRINTED TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`)
+   *  and rank's duplicate-source collapse (rank.ts) — read this, so a polish that drops a line or
+   *  prints two trees as one text moves no reading and merges no candidates. Read it through
    *  {@link emitDraft}; absent ⇒ `emit` has no polish. */
   draft?(fn: SFn): string;
   /** `emit` through the readability polish for a compiler with these facts, where the backend has

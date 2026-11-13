@@ -245,10 +245,6 @@ export interface Candidate {
    *  the candidate's name; `joinVariations` prints it. */
   variations: readonly string[];
   source: string;
-  /** `compareScored`'s goto, cast and line counts, read off the backend's DRAFT (the text before
-   *  the readability polish, `LanguageBackend.draft`) so the polish moves no winner. Absent ⇒ read
-   *  off `source`. */
-  tie?: TieShape;
   /** Which PREFERENCE this candidate carries — the symbol-map setting's index (0 = the map's own
    *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the settings in
    *  preference order, and a lower preference WINS a score tie: when both compile to the same bytes the
@@ -511,7 +507,7 @@ interface TreeSource {
   variations: readonly Variation[];
   source: string;
   /** the backend's text before its readability polish (`emitDraft`): what two candidates are
-   *  duplicates by, and what `compareScored`'s goto/cast/line terms count (`Candidate.tie`) */
+   *  duplicates by */
   draft: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
@@ -2774,7 +2770,6 @@ export function enumerateCandidates(
               const made: Candidate = {
                 variations,
                 source,
-                tie: tieShape(draft),
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
@@ -2967,9 +2962,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
  *
- *  ALL THREE COUNT THE DRAFT (`Candidate.tie`): the text before the readability polish (l3/polish/),
- *  which drops lines and re-spells, and would otherwise pick a different winner among spellings
- *  that score alike while publishing nothing the ranking measured.
+ *  ALL THREE COUNT THE PUBLISHED TEXT, after the readability polish (l3/polish/), for the same
+ *  reason again: the report counts that text. A tie-break runs only among equal scores, so it moves
+ *  no score; what it picks is the text the reader gets.
  *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
@@ -2991,25 +2986,11 @@ export function compareScored<S extends { score: number }>(
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     (a.farStoreCast ? 1 : 0) - (b.farStoreCast ? 1 : 0) ||
-    tieCompare(a.tie ?? tieShape(a.source), b.tie ?? tieShape(b.source)) ||
+    gotoCount(a.source) - gotoCount(b.source) ||
+    castCount(a.source) - castCount(b.source) ||
+    lineCount(a.source) - lineCount(b.source) ||
     a.order - b.order
   );
-}
-
-/** The readability counts `compareScored` breaks a score tie by, in its order. */
-export interface TieShape {
-  readonly gotos: number;
-  readonly casts: number;
-  readonly lines: number;
-}
-
-/** {@link TieShape} of one rendered source. */
-export function tieShape(source: string): TieShape {
-  return { gotos: gotoCount(source), casts: castCount(source), lines: lineCount(source) };
-}
-
-function tieCompare(a: TieShape, b: TieShape): number {
-  return a.gotos - b.gotos || a.casts - b.casts || a.lines - b.lines;
 }
 
 /** `goto` statements in a candidate's rendered source — the readability tie-break above, asked
