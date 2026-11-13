@@ -279,6 +279,17 @@ describe('role names', () => {
       ret,
     ];
     expect(named(['v0'], sum)).toContain('return result;');
+    // a read inside a loop that writes it reads the value that loop computes (sa3's sa2__sub_8085654)
+    const iterated: Stmt[] = [
+      set('v0', v('a0')),
+      {
+        k: 'dowhile',
+        cond: v('a0'),
+        body: [work(v('v0')), set('v0', { k: 'bin', op: '-', l: v('v0'), r: c(1) })],
+      },
+      ret,
+    ];
+    expect(named(['v0'], iterated)).toContain('return result;');
     // a read after the last write reads the result itself, a do-while's condition included
     expect(named(['v0'], [set('v0', c(3)), work(v('v0')), ret])).toContain('return result;');
     expect(

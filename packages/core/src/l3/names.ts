@@ -462,51 +462,68 @@ function assignedBeforeEveryReturn(body: readonly Stmt[], r: string): boolean {
 }
 
 /** Whether `r` is read ahead of its last write, in the order the statements are written: anywhere
- *  but a `return` or the value of an assignment to `r` itself (`r = r + x`, an accumulator). Such
- *  a read is a second role: the coalescer's one carrier for a value tested or copied before the
- *  result is computed (pokeemerald's `GetImprisonedMovesCount`: `v0 = 0; if (v0 < gBattlersCount)
- *  { v3 = v0; …; v0 = v3; } return v0;`). A read after the last write reads the result itself. */
+ *  but a `return` or the value of an assignment to `r` itself (`r = r + x`, an accumulator), and
+ *  outside every loop that also writes it. Such a read is a second role: the coalescer's one
+ *  carrier for a value tested or copied before the result is computed (pokeemerald's
+ *  `GetImprisonedMovesCount`: `v0 = 0; if (v0 < gBattlersCount) { v3 = v0; …; v0 = v3; } return
+ *  v0;`, and the `v0 = a * b; w0 = v0; …; v0 = w0 >> 8;` of `MathUtil_Mul16`). A read after the
+ *  last write reads the result itself, and one inside a loop that writes it reads the value that
+ *  loop is computing (sa3's `sa2__sub_8085654`, `do { v1 = … (v2 - a1) …; v2 = v2 - v1; } while
+ *  (…);`, or a count a loop tests before it resets it). */
 function readBeforeItsLastWrite(body: readonly Stmt[], r: string): boolean {
+  type Loops = readonly Stmt[];
   let order = 0;
   let lastWrite = -1;
-  let firstRead = Number.POSITIVE_INFINITY;
+  const writtenIn = new Set<Stmt>();
+  const readAt: { order: number; loops: Loops }[] = [];
+  const wrote = (loops: Loops) => {
+    lastWrite = order;
+    for (const l of loops) {
+      writtenIn.add(l);
+    }
+  };
   // a step of `r` (`r++`) is a write that reads only itself, as an accumulator's assignment is
-  const reads = (e: Expr) => {
+  const reads = (e: Expr, loops: Loops) => {
     for (const x of walkExprs([{ k: 'exprstmt', value: e }])) {
       if (x.k === 'var' && x.name === r) {
-        firstRead = Math.min(firstRead, order);
+        readAt.push({ order, loops });
       } else if (x.k === 'postincr' && x.name === r) {
-        lastWrite = order;
+        wrote(loops);
       }
     }
   };
-  const visit = (list: readonly Stmt[]) => {
+  const visit = (list: readonly Stmt[], loops: Loops) => {
     for (const s of list) {
       order++;
       if (s.k === 'assign' && s.name === r) {
-        lastWrite = order;
+        wrote(loops);
+      } else if (s.k === 'for') {
+        // the init runs once, outside the loop; the condition and the step run with the body
+        visit([s.init], loops);
+        const inner = [...loops, s];
+        reads(s.cond, inner);
+        visit([...s.body, s.inc], inner);
       } else if (s.k === 'dowhile') {
         // written `do { … } while (c);`: the condition comes after the body
-        visit(s.body);
+        const inner = [...loops, s];
+        visit(s.body, inner);
         order++;
-        reads(s.cond);
-        continue;
-      } else if (s.k !== 'return') {
-        for (const e of stmtExprs(s)) {
-          reads(e);
-        }
-      }
-      if (s.k === 'for') {
-        visit([s.init, ...s.body, s.inc]);
+        reads(s.cond, inner);
       } else {
+        const inner = isLoop(s) ? [...loops, s] : loops;
+        if (s.k !== 'return') {
+          for (const e of stmtExprs(s)) {
+            reads(e, inner);
+          }
+        }
         for (const l of stmtLists(s)) {
-          visit(l);
+          visit(l, inner);
         }
       }
     }
   };
-  visit(body);
-  return firstRead < lastWrite;
+  visit(body, []);
+  return readAt.some((x) => x.order < lastWrite && !x.loops.some((l) => writtenIn.has(l)));
 }
 
 /** `fn` with every variable `renames` names spelled under its new name: its declaration and each
