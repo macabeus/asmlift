@@ -118,7 +118,8 @@ export interface DecompileOptions {
   ownContextProto?: FnProto;
   /** Print each loop counter and the one returned local under a role name (`i`/`j`/`k`, `result`;
    *  l3/names.ts). Off by default, so a lift reads the structurer's own `vN`; the CLI, the
-   *  benchmark and the web app turn it on. A name is no codegen fact: it moves no score. */
+   *  benchmark and the web app turn it on. A name is no codegen fact: it moves no score. Both
+   *  C-family backends print them (C and C++); the Pascal backend does not. */
   roleNames?: boolean;
   /** OPTIONAL bodies of callees the input does not define, found elsewhere by the driver (the CLI
    *  reads them off `tools.asmlift.elf`): each answers what its callee can read of its arguments

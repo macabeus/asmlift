@@ -544,7 +544,7 @@ export interface SFn {
   declaredReturns?: Readonly<Record<string, string>>;
   /** The names the function's own declaration gives its parameters, in order (proto-context.ts
    *  `ownParamNames`), set by the structurer from `StructureOptions.paramNames`. An emission
-   *  policy like `slotOrder`: no pass reads it, and the C backend prints the parameters under these
+   *  policy like `slotOrder`: no pass reads it, and the C-family printer prints the parameters under these
    *  names where they pair one to one with `params` and collide with nothing (l3/names.ts). Every
    *  pass keeps naming the parameters `aN` in the tree. */
   paramNames?: readonly string[];

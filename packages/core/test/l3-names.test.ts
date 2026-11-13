@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { cppBackend } from '../src/backend/cpp';
 import { T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt, renameVariables } from '../src/l3/ast';
 import { nameVariables } from '../src/l3/names';
@@ -284,6 +285,28 @@ describe('role names', () => {
     expect(out).toContain('} while (i++ <= a0 && v0 != 0);');
     expect(out).toContain('return i;');
     expect(out).not.toMatch(/\bresult\b/);
+  });
+
+  // `int K(int n){ int s = 0; int q; for (q = 0; q < n; q++) s += ext(q); return s; }`
+  test('the C++ backend prints them too, under the parameter names its own spec gives', () => {
+    const body: Stmt[] = [
+      set('v1', c(0)),
+      {
+        k: 'for',
+        init: set('v0', c(0)),
+        cond: { k: 'bin', op: '<', l: v('v0'), r: v('a0') },
+        inc: step('v0'),
+        body: [set('v1', { k: 'bin', op: '+', l: v('v1'), r: { k: 'call', fn: 'ext', args: [v('v0')] } })],
+      },
+      { k: 'return', value: v('v1') },
+    ];
+    const int = { base: 'int', ptr: 0 };
+    const cpp = cppBackend({ method: 'K', retType: int, params: [{ name: 'n', type: int }] }, undefined);
+    // the declaration's names are the spec's to give: one that disagrees is not asked for
+    const out = cpp.emit({ ...fn(['v0', 'v1'], body, s32), paramNames: ['m'] });
+    expect(out).toContain('for (i = 0; i < n; i = i + 1)');
+    expect(out).toContain('return result;');
+    expect(out).not.toMatch(/\bv[0-9]\b|\bm\b/);
   });
 
   test('a local whose address is taken, or that is a frame object, keeps its name', () => {

@@ -29,9 +29,14 @@
 //      shadowed: a block-scope name hides a file-scope one only where it is spelled;
 //   4. no two renamed variables take one name;
 //   5. in a unit compiled as C++ (`SFn.dialect`), the name is no C++ keyword (`CXX_KEYWORDS`): a C
-//      header may name a parameter `new` or `class`. A C++ unit prints through this C backend
+//      header may name a parameter `new` or `class`. A C++ unit prints through the C backend
 //      too, so it takes the role names like any other; the receiver and the mangled signature
 //      are refused upstream (`ownParamNames`: a mangled name or an implicit argument names none).
+//
+// Both C-family backends apply these names (backend/cfamily.ts `emitCFamily`). The C++ backend
+// names the parameters from its own spec, so it asks only for the locals' role names. The Pascal
+// backend applies none: its identifiers are case-insensitive, so the collision check over the
+// printed text would not hold.
 import { type Expr, type SFn, type Stmt, exprChildren, renameVariables, stmtExprs, stmtLists, walkExprs } from './ast';
 
 /** Identifiers a compiler this project serves predefines as macros outside the reserved namespace

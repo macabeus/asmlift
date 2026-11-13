@@ -14,6 +14,7 @@ import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
 import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
+import { nameVariables } from '../l3/names';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
@@ -927,8 +928,27 @@ function structDecls(fn: SFn, printed: string): string[] {
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body.
  *  `designators`: the LANGUAGE spells an array element by index in an initializer (C, not C++).
  *  Whether the compiler's dialect parses one is the function's own fact (`SFn.designators`); an
- *  initializer is spelled by index only where both say yes. */
-export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, designators = true): string {
+ *  initializer is spelled by index only where both say yes.
+ *
+ *  The names a reader would give the parameters and locals (l3/names.ts) are applied HERE too, for
+ *  the reason the slot order is: both C-family backends print them, and the collision check reads
+ *  the function as THIS backend prints it — its signature, its leaf spellings — under the
+ *  structurer's own names. `signature` is a line, or the line spelled over the renamed function
+ *  (the C backend's, whose parameters the declaration may name). */
+export function emitCFamily(
+  signature: string | ((fn: SFn) => string),
+  fn0: SFn,
+  leaf?: LeafHook,
+  designators = true,
+): string {
+  const print = (fn: SFn) =>
+    assembleCFamily(typeof signature === 'string' ? signature : signature(fn), fn, leaf, designators);
+  let plain: string | undefined;
+  const fn = nameVariables(fn0, () => (plain ??= print(fn0)));
+  return fn === fn0 ? (plain ?? print(fn0)) : print(fn);
+}
+
+function assembleCFamily(signature: string, fn0: SFn, leaf: LeafHook | undefined, designators: boolean): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
   // `cBackend.emit` and `cppBackend(...).emit`, so both C-family backends print them and no `.emit(`

@@ -225,7 +225,10 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
       const paramList = spec.params.map((p) => declareCpp(p.type, p.name)).join(', ');
       const decls = classDecls(spec, paramList);
       const signature = `${spellType(spec.retType)} ${spec.cls ? spec.cls + '::' : ''}${spec.method}(${paramList})`;
-      return (decls ? decls + '\n' : '') + emitCFamily(signature, fn, leaf, false);
+      // The spec names the parameters (`rename`, through the leaf hook), so the declaration's names
+      // are not asked for here; the locals' role names are (l3/names.ts, in `emitCFamily`)
+      const { paramNames: _declared, ...locals } = fn;
+      return (decls ? decls + '\n' : '') + emitCFamily(signature, locals, leaf, false);
     },
     comment: cComment, // C++ shares C's block-comment spelling
   };
