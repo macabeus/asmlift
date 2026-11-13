@@ -76,7 +76,8 @@ describe('a real row prototype table', () => {
     const p = rowPrototypes({ self: { returnsVoid: true } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC);
     const asm = 'self:\n  mflr r0\n  bl callee\n  blr\n';
     expect(referencedPrototypes(p, asm, 'self')).toEqual({
-      self: { returnsVoid: true },
+      // the context's `void self(s32 x);` names the parameter the manifest's entry leaves unstated
+      self: { returnsVoid: true, paramNames: ['x'] },
       callee: { returns: 's32', params: ['s32'] },
     });
     expect(referencedPrototypes(undefined, asm, 'self')).toBeUndefined();
