@@ -27,10 +27,9 @@
 // quality metric counts (rank.ts `compareScored`).
 //
 // WHAT THE COMPILER SEES DEPENDS ON THE LEVEL. At a level that compiles each statement as it is
-// written (`PolishFacts.literal`), three of these re-spellings are other code: `x++` and `x += k`
-// on gcc 2.7.2 and KMC gcc at -O0 even for an `int` local, a trailing `return;` (an explicit branch
-// to the epilogue on agbcc, IDO and both gcc 2.7.2 builds at -O0), and an unused local (a frame slot
-// on agbcc, IDO at -O0 and -O1, and both gcc 2.7.2 builds at -O0). Each pass that is other code
+// written (`PolishFacts.literal`), two of these re-spellings are other code: `x++` and `x += k` on
+// gcc 2.7.2 and KMC gcc at -O0 even for an `int` local, and a trailing `return;` (an explicit branch
+// to the epilogue on agbcc, IDO and both gcc 2.7.2 builds at -O0). Each pass that is other code
 // there says so and stands down. The trailing `return;` is other code at an optimizing level too,
 // on agbcc and both gcc 2.7.2 builds, once the body returns early elsewhere, so `voidTail` fires only
 // on a body with no other `return`. The rest compile alike at every level measured.

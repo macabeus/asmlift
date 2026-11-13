@@ -25,8 +25,8 @@ const fnOf = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   body,
 });
 
-describe('polish: locals numbered densely in first-use order, unused ones dropped', () => {
-  test('renames by first mention, keeps declaration positions, drops an unused scalar', () => {
+describe('polish: locals numbered densely in first-use order', () => {
+  test('renames by first mention and keeps declaration positions; an unused local is numbered last', () => {
     const fn = fnOf(
       [local('v5'), local('v0'), local('v7'), local('v2')],
       [
@@ -36,13 +36,13 @@ describe('polish: locals numbered densely in first-use order, unused ones droppe
       ],
     );
     expect(pc.emit(fn)).toBe(
-      's32 f(s32 a0) {\n    s32 v1;\n    s32 v0;\n    v0 = a0;\n    v1 = v0 + a0;\n    return v1 * v0;\n}\n',
+      's32 f(s32 a0) {\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v0;\n    v0 = a0;\n    v1 = v0 + a0;\n    return v1 * v0;\n}\n',
     );
     // the draft keeps the tree's names, which the variation names spell
     expect(pc.draft!(fn)).toContain('    s32 v7;');
   });
 
-  test('at a level that compiles each statement as written an unused local stays: it holds a frame slot', () => {
+  test('an unused local stays declared at every level: at -O0 it holds a frame slot', () => {
     const fn = fnOf(
       [local('v0'), local('v1'), local('v2')],
       [
@@ -51,9 +51,10 @@ describe('polish: locals numbered densely in first-use order, unused ones droppe
         { k: 'return', value: v('v2') },
       ],
     );
-    // still renamed — a name is no frame slot — and the unused one is numbered after the used ones
-    expect(polished(cBackend, { literal: true }).emit(fn)).toContain('    s32 v0;\n    s32 v2;\n    s32 v1;\n');
-    expect(pc.emit(fn)).toContain('    s32 v0;\n    s32 v1;\n    v0 = a0;');
+    // renamed — a name is no frame slot — with the unused one numbered after the used ones
+    const want = '    s32 v0;\n    s32 v2;\n    s32 v1;\n';
+    expect(polished(cBackend, { literal: true }).emit(fn)).toContain(want);
+    expect(pc.emit(fn)).toContain(want);
   });
 
   test('a local named on purpose keeps its name and takes no number', () => {
@@ -79,7 +80,7 @@ describe('polish: locals numbered densely in first-use order, unused ones droppe
     expect(pc.emit(fn)).toContain('    s32 v3;\n    v3 = v0;');
   });
 
-  test('an unused volatile, frame or array local stays declared', () => {
+  test('an unused volatile, frame or array local keeps its name', () => {
     const fn = fnOf(
       [
         local('v0', { volatile: true }),

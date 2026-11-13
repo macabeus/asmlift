@@ -1,5 +1,5 @@
 // Locals numbered as a reader meets them: `v0`, `v1`, `v2` in the order the body first mentions
-// them, with no gaps, and a declared local the body never mentions not declared at all.
+// them, with no gaps.
 //
 // A RENAME, NOT A REORDER. The declarations keep the positions the printer gave them, because the
 // position is not a spelling: agbcc hands spilled locals their frame slots by declaration rank
@@ -10,18 +10,16 @@
 // new name would collide with any other identifier the function names: a parameter, another local,
 // a static, a global or a callee.
 //
-// A local is dropped only where it cannot be the program's: unmentioned, not `volatile`, not a frame
-// object, with no initializer and no spill home, and of a scalar or pointer type. An unused array or
-// struct is an object the frame may still hold. And never at a level that compiles each statement as
-// written (`PolishFacts.literal`): there an unused `s32` still takes a frame slot and moves every
-// other slot's offset — `sub sp, #16` against `#12` on agbcc at -O0, and the same on IDO 7.1 at -O0
-// and -O1 and on gcc 2.7.2 and KMC gcc at -O0 (compiled). At agbcc -O1/-O2, IDO -O2, gcc 2.7.2 and
-// KMC gcc -O1/-O2 and every mwcc level the benchmark ranks at, it compiles alike. The renaming is
-// pure spelling at every level.
+// A RENAME AND NOTHING ELSE, so it is pure spelling at every level. Dropping a declared local the
+// body never mentions is not this pass's to do: at a level that compiles each statement as written
+// (`PolishFacts.literal`) an unused `s32` still takes a frame slot and moves every other slot's
+// offset (`sub sp, #16` against `#12` on agbcc at -O0, and the same on IDO 7.1 at -O0 and -O1 and on
+// gcc 2.7.2 and KMC gcc at -O0, compiled), and every unused local the benchmark's lifts printed was
+// a walk pointer l3/reindex.ts had re-spelled away and left declared, which it now removes itself.
+// An unmentioned generic local still takes the next number, after the mentioned ones.
 //
 // The variation names a candidate is published under (`coalesce-v4-v0`) keep the names the tree had
 // when the variation ran, before this renumbering.
-import type { PolishFacts } from '.';
 import { type Expr, type SFn, type Stmt, exprChildren, mapStmtLists } from '../ast';
 import { mapExprDeep } from './walk';
 
@@ -101,16 +99,6 @@ function mentionOrder(fn: SFn): string[] {
   return out;
 }
 
-type Local = SFn['locals'][number];
-
-const droppable = (l: Local): boolean =>
-  !l.volatile &&
-  l.frame === undefined &&
-  l.init === undefined &&
-  l.uninit === undefined &&
-  l.slots === undefined &&
-  (l.type.kind === 'int' || l.type.kind === 'ptr');
-
 function renameStmt(s: Stmt, to: ReadonlyMap<string, string>): Stmt {
   const e = (x: Expr): Expr =>
     mapExprDeep(x, (n) =>
@@ -142,10 +130,10 @@ function renameStmt(s: Stmt, to: ReadonlyMap<string, string>): Stmt {
   }
 }
 
-export function renumberLocals(fn: SFn, facts: PolishFacts): SFn {
+export function renumberLocals(fn: SFn): SFn {
   const order = mentionOrder(fn);
   const mentioned = new Set(order);
-  const locals = fn.locals.filter((l) => mentioned.has(l.name) || facts.literal || !droppable(l));
+  const locals = fn.locals;
   const generic = new Set(locals.filter((l) => GENERIC.test(l.name)).map((l) => l.name));
   const ranked = [
     ...order.filter((n) => generic.has(n)),
@@ -162,7 +150,7 @@ export function renumberLocals(fn: SFn, facts: PolishFacts): SFn {
   ]);
   const renames = [...to].some(([a, b]) => a !== b) && ![...to.values()].some((n) => others.has(n));
   if (!renames) {
-    return locals.length === fn.locals.length ? fn : { ...fn, locals };
+    return fn;
   }
   return {
     ...fn,

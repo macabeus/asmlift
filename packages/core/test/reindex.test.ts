@@ -490,6 +490,8 @@ describe('v3 — expression-base walk', () => {
     expect(r).not.toBeNull();
     const src = JSON.stringify(r!.body);
     expect(src).not.toContain('"name":"p"');
+    // the pointer had no mention left, so its declaration went with it; the counter's stays
+    expect(r!.locals.map((l) => l.name)).toEqual(['i']);
     // idx = i + a2*a1, base = a0 — the sole bare-var addend
     expect(src).toContain(
       '{"k":"index","base":{"k":"var","name":"a0"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"bin","op":"*","l":{"k":"var","name":"a2"},"r":{"k":"var","name":"a1"}}},"width":1,"signed":false}',
