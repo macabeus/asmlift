@@ -357,7 +357,7 @@ function traceTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
-      paramNames: ownParamNames(prototypes, name, ownContext.ownContextProto),
+      paramNames: ownParamNames(prototypes, name, target, ownContext.ownContextProto),
       roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),

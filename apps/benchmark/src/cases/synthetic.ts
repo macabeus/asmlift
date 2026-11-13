@@ -131,7 +131,7 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       const proto =
         ctxProtos === undefined
           ? spec.proto
-          : withOwnParamNames(withOwnContextMark(spec.proto, spec.sym, ctxProtos), spec.sym, ctxProtos);
+          : withOwnParamNames(withOwnContextMark(spec.proto, spec.sym, ctxProtos), spec.sym, ctxProtos, codegen.target);
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',

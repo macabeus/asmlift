@@ -590,7 +590,7 @@ export function enumerateCandidates(
     backend,
     symbols: opts.symbols ? symbolsByName(opts.symbols) : undefined,
     contextGlobals: opts.contextGlobals,
-    paramNames: ownParamNames(prototypes, name, ownContext.ownContextProto),
+    paramNames: ownParamNames(prototypes, name, target, ownContext.ownContextProto),
     roleNames: opts.roleNames,
   });
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`

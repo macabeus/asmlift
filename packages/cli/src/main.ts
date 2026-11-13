@@ -770,6 +770,7 @@ export async function runCli(
       ),
       name,
       fromContext,
+      unitTarget,
     );
     contextGlobals = globalsFromContext(text, unitTarget.dialect ?? 'c');
   }

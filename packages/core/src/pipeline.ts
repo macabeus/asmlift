@@ -312,7 +312,7 @@ function runTower(
       contextGlobals: opts.contextGlobals,
       inferredSymbols,
       orderLicensedGlobals: orderLicensed,
-      paramNames: ownParamNames(prototypes, name, own.ownContextProto),
+      paramNames: ownParamNames(prototypes, name, target, own.ownContextProto),
       roleNames: opts.roleNames,
     }),
     (t) => backend.emit(t),

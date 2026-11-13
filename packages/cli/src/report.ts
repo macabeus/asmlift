@@ -83,7 +83,7 @@ export async function decompileWithReport(
           inferredSymbols,
           mapSymbols,
           opts.contextGlobals,
-          ownParamNames(own.prototypes, name, own.ownContextProto),
+          ownParamNames(own.prototypes, name, target, own.ownContextProto),
           opts.roleNames === true,
         )
     : undefined;

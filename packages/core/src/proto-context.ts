@@ -1,3 +1,4 @@
+import { returnedAggregate, returnsInMemory } from './aggregate';
 import { constantValue, integerLiteral } from './cdecl/constant';
 import type { Tokens } from './cdecl/lex';
 import {
@@ -1733,7 +1734,8 @@ export function withOwnContextMark(
  *  parameters or STATES NOTHING OF ITS PARAMETERS (`{ "returnsVoid": true }`: no list, count, word
  *  or by-value key). In the second case the names pair with the lifted parameters by position, so
  *  they are carried only where the declaration itself would hand them over ({@link ownParamNames}
- *  on the context's entry: every parameter one word, no variadic list, no aggregate return).
+ *  on the context's entry, on `target`: every parameter one word, no variadic list, no struct
+ *  returned through memory).
  *  A table without an entry for `own` is returned as it is: the context's own entry reaches the lift
  *  under the mark (`withOwnContextMark`) or beside the table (`ownContextEntry`), and either carries
  *  its names. Names are read for nothing but printing (l3/names.ts), so a stated entry that takes
@@ -1743,6 +1745,7 @@ export function withOwnParamNames(
   prototypes: Prototypes | undefined,
   own: string,
   context: Prototypes,
+  target: TargetDescription,
 ): Prototypes | undefined {
   const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
   const heard = Object.hasOwn(context, own) ? context[own] : undefined;
@@ -1752,7 +1755,7 @@ export function withOwnParamNames(
   }
   const pairs = Array.isArray(p.params)
     ? p.params.length === names.length
-    : statesNoParams(p) && ownParamNames({ [own]: heard! }, own) !== undefined;
+    : statesNoParams(p) && ownParamNames({ [own]: heard! }, own, target) !== undefined;
   return pairs ? { ...prototypes, [own]: { ...p, paramNames: names } } : prototypes;
 }
 
@@ -1778,7 +1781,10 @@ function statesNoParams(p: FnProto): boolean {
  *     floating one travels in the FPU's own registers on mwcc and IDO, and a struct passed by value
  *     fills any number of words (kleod's `sub_0800BEF0`) — each moves every later parameter off
  *     its position;
- *   - a struct or union returned by value, whose hidden pointer may be argument 0;
+ *   - a struct or union returned by value through memory, or where `target`'s rule cannot say
+ *     (aggregate.ts `returnsInMemory`), whose hidden pointer takes argument 0 — one it hands back in
+ *     registers takes no argument word (agbcc's one-word struct in r0: kleod's `sub_08014184`), as
+ *     the lift's own bound reads it (`ownArgumentWordsOn`);
  *   - a C++ member function or a mangled free function, whose receiver is no declared parameter.
  *  The lifted parameter count is checked against the list where the names are printed, and a
  *  function lifted with any other count keeps every `aN` (kleod's `sub_0803F68C`, declared with
@@ -1786,6 +1792,7 @@ function statesNoParams(p: FnProto): boolean {
 export function ownParamNames(
   prototypes: Prototypes | undefined,
   own: string,
+  target: TargetDescription,
   ownContextProto?: FnProto,
 ): readonly string[] | undefined {
   const stated = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
@@ -1798,7 +1805,7 @@ export function ownParamNames(
     p === null ||
     names === undefined ||
     p.variadicParams !== undefined ||
-    declaresAggregateReturn(p) ||
+    (declaresAggregateReturn(p) && returnsInMemory(returnedAggregate(p), target) !== false) ||
     demangledName(own) !== null ||
     implicitArgumentWords(own) !== 0
   ) {

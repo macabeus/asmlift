@@ -36,7 +36,7 @@ export function rowPrototypes(
   language: 'c' | 'c++',
   sym: string,
   symbols: SymbolMap | undefined,
-  target: Pick<TargetDescription, 'doubleArgWords'>,
+  target: TargetDescription,
 ): Prototypes | undefined {
   if (ctxI === '') {
     return manifest;
@@ -57,6 +57,7 @@ export function rowPrototypes(
     ),
     sym,
     derived,
+    target,
   );
   return merged !== undefined && Object.keys(merged).length > 0 ? merged : undefined;
 }
