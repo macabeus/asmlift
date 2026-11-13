@@ -1759,6 +1759,30 @@ export function withOwnParamNames(
   return pairs ? { ...prototypes, [own]: { ...p, paramNames: names } } : prototypes;
 }
 
+/** `prototypes` with `declaredVoid` (`FnProto.declaredVoid`) on the table's own stated entry for
+ *  `own`, where the context's declaration of `own` returns void and that entry does not say so
+ *  itself; otherwise the table as it is. An entry carried under the mark is the context's own and
+ *  states its void already. Read for nothing but the printed names, so the entry lifts as it did. */
+export function withOwnDeclaredVoid(
+  prototypes: Prototypes | undefined,
+  own: string,
+  context: Prototypes,
+): Prototypes | undefined {
+  const p = prototypes !== undefined && Object.hasOwn(prototypes, own) ? prototypes[own] : undefined;
+  const heard = Object.hasOwn(context, own) ? context[own] : undefined;
+  if (
+    p === undefined ||
+    p === null ||
+    p.fromContext === true ||
+    p.declaredVoid === true ||
+    declaresVoidReturn(p) ||
+    !declaresVoidReturn(heard)
+  ) {
+    return prototypes;
+  }
+  return { ...prototypes, [own]: { ...p, declaredVoid: true } };
+}
+
 /** Whether `p` says nothing about its parameters: no list or count, and no key that describes one. */
 function statesNoParams(p: FnProto): boolean {
   return (

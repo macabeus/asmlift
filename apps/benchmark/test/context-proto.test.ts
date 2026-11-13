@@ -29,9 +29,11 @@ describe('a real row prototype table', () => {
       self: { returnsVoid: true, params: ['s32'], paramNames: ['x'], fromContext: true },
     });
     expect(validatePrototypes(p)).toEqual([]);
-    // a manifest entry for the row states it, and the context's is not carried
+    // a manifest entry for the row states it, and the context's is not carried — but for the void
+    // it declares, which only the printed names read (`declaredVoid`)
     expect(rowPrototypes({ self: { params: 2 } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC)?.self).toEqual({
       params: 2,
+      declaredVoid: true,
     });
     // nor is one the bound cannot lay out
     const variadic = 'typedef signed long s32; void self(s32 x, ...);';

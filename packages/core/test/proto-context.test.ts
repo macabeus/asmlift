@@ -13,6 +13,7 @@ import {
   splitOwnContext,
   withContextPrototypes,
   withOwnContextMark,
+  withOwnDeclaredVoid,
   withOwnParamNames,
 } from '../src/proto-context';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
@@ -1278,6 +1279,21 @@ describe("the declaration's parameter names", () => {
     const own = { f: { params: ['s32', 's32'], paramNames: ['p', 'q'] } };
     expect(withOwnParamNames(own, 'f', ctx, ARMV4T_AGBCC)).toBe(own);
     expect(withOwnParamNames(undefined, 'f', ctx, ARMV4T_AGBCC)).toBeUndefined();
+  });
+
+  // kleod's EepromTimerIntr, declared `void EepromTimerIntr(void);` and restated by `--proto '{"EepromTimerIntr":{}}'`
+  test("the context's void rides on a stated own entry that does not say so itself", () => {
+    const ctx = named('void f(void);\nint g(void);');
+    expect(withOwnDeclaredVoid({ f: {} }, 'f', ctx)).toEqual({ f: { declaredVoid: true } });
+    expect(withOwnDeclaredVoid({ f: { params: [] } }, 'f', ctx)).toEqual({ f: { params: [], declaredVoid: true } });
+    // …never on an entry that says void itself, a marked entry, a non-void declaration, or no entry
+    const stated = { f: { returnsVoid: true } };
+    expect(withOwnDeclaredVoid(stated, 'f', ctx)).toBe(stated);
+    const marked = withOwnContextMark(undefined, 'f', ctx);
+    expect(withOwnDeclaredVoid(marked, 'f', ctx)).toBe(marked);
+    const value = { g: {} };
+    expect(withOwnDeclaredVoid(value, 'g', ctx)).toBe(value);
+    expect(withOwnDeclaredVoid(undefined, 'f', ctx)).toBeUndefined();
   });
 
   test('ride on a stated own entry that states nothing of its parameters, where the declaration pairs', () => {

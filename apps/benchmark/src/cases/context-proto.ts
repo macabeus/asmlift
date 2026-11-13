@@ -15,6 +15,7 @@ import {
   prototypesFromContext,
   withContextPrototypes,
   withOwnContextMark,
+  withOwnDeclaredVoid,
   withOwnParamNames,
   withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
@@ -47,17 +48,22 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language, { names: true });
     parsed.set(key, derived);
   }
-  // …and the names the context's declaration gives its parameters, on the own entry whichever of
-  // the two states it (core `withOwnParamNames`): read for nothing but the printed names
-  const merged = withOwnParamNames(
-    withOwnContextMark(
-      withContextPrototypes(withOwnReturnLayout(manifest, sym, ctxI, language), derived, sym, symbols, target),
+  // …and the names the context's declaration gives its parameters, and the void it declares, on
+  // the own entry whichever of the two states it (core `withOwnParamNames`, `withOwnDeclaredVoid`):
+  // read for nothing but the printed names
+  const merged = withOwnDeclaredVoid(
+    withOwnParamNames(
+      withOwnContextMark(
+        withContextPrototypes(withOwnReturnLayout(manifest, sym, ctxI, language), derived, sym, symbols, target),
+        sym,
+        derived,
+      ),
       sym,
       derived,
+      target,
     ),
     sym,
     derived,
-    target,
   );
   return merged !== undefined && Object.keys(merged).length > 0 ? merged : undefined;
 }

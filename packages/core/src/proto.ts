@@ -141,6 +141,13 @@ export interface FnProto {
    *  through proto-context.ts `ownParamNames`): no lift, bound or call reads it, so an entry
    *  carrying it lifts exactly as one without it. A callee's entry never keeps it. */
   paramNames?: readonly string[];
+  /** ON THE FUNCTION'S OWN STATED ENTRY, `true` says its declaration context declares it void
+   *  where the entry itself does not (proto-context.ts `withOwnDeclaredVoid`): a `--proto` entry
+   *  restating the function takes the place of the context's own entry, and with it the void that
+   *  entry declared. READ FOR NOTHING BUT THE PRINTED NAMES (l3/names.ts names no local `result` in
+   *  such a function, `SFn.declaredVoid`): it is not `returnsVoid`, and no lift, bound or call reads
+   *  it, so an entry carrying it lifts exactly as one without it. */
+  declaredVoid?: true;
 }
 
 /** A struct or union a declaration spells: what it is, and its members as the header lists them.
@@ -1039,16 +1046,20 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'byValueLayouts' &&
         key !== 'variadicParams' &&
         key !== 'fromContext' &&
-        key !== 'paramNames'
+        key !== 'paramNames' &&
+        key !== 'declaredVoid'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams", "byValueLayouts", "variadicParams", "fromContext" or "paramNames")',
+            '"byValueParams", "byValueLayouts", "variadicParams", "fromContext", "paramNames" or "declaredVoid")',
         );
       }
     }
     if ('fromContext' in proto && typeof (proto as { fromContext?: unknown }).fromContext !== 'boolean') {
       problems.push(`${sym}: "fromContext" must be a boolean`);
+    }
+    if ('declaredVoid' in proto && (proto as { declaredVoid?: unknown }).declaredVoid !== true) {
+      problems.push(`${sym}: "declaredVoid" must be true where it is stated`);
     }
     if ('paramNames' in proto) {
       const names = (proto as { paramNames?: unknown }).paramNames;

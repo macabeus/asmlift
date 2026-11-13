@@ -26,6 +26,7 @@ import {
   ownContextEntry,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnDeclaredVoid,
   withOwnParamNames,
   withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
@@ -758,19 +759,24 @@ export async function runCli(
     const fromContext = prototypesFromContext(text, unitTarget.dialect ?? 'c', { names: true });
     ownContextProto =
       prototypes !== undefined && Object.hasOwn(prototypes, name) ? undefined : ownContextEntry(fromContext, name);
-    // …the names the header gives the function's parameters riding on a stated entry too, where
-    // `--proto` restates its types (`withOwnParamNames`): only the printed names read them
-    prototypes = withOwnParamNames(
-      withContextPrototypes(
-        withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
-        fromContext,
+    // …the names the header gives the function's parameters, and the void it declares, riding on a
+    // stated entry too, where `--proto` restates its types (`withOwnParamNames`,
+    // `withOwnDeclaredVoid`): only the printed names read them
+    prototypes = withOwnDeclaredVoid(
+      withOwnParamNames(
+        withContextPrototypes(
+          withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
+          fromContext,
+          name,
+          symbols,
+          unitTarget,
+        ),
         name,
-        symbols,
+        fromContext,
         unitTarget,
       ),
       name,
       fromContext,
-      unitTarget,
     );
     contextGlobals = globalsFromContext(text, unitTarget.dialect ?? 'c');
   }

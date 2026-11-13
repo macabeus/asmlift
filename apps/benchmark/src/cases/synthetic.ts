@@ -3,7 +3,12 @@
 import { onlySelects } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { declarationsKeptWithHeaders, renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
-import { prototypesFromContext, withOwnContextMark, withOwnParamNames } from '@asmlift/core/proto-context';
+import {
+  prototypesFromContext,
+  withOwnContextMark,
+  withOwnDeclaredVoid,
+  withOwnParamNames,
+} from '@asmlift/core/proto-context';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
@@ -125,13 +130,23 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       // entry as a soft bound on the argument registers where `proto` states none: carried here
       // under its mark (core `withOwnContextMark`), as the real tier carries a vendored context's.
       // Either own entry carries the names the ctx's declaration gives its parameters
-      // (`withOwnParamNames`), which only the printed names read.
+      // (`withOwnParamNames`), and a stated one the void it declares (`withOwnDeclaredVoid`), which
+      // only the printed names read.
       const ctxProtos =
         spec.ctx === undefined ? undefined : prototypesFromContext(spec.ctx, spec.lang ?? 'c', { names: true });
       const proto =
         ctxProtos === undefined
           ? spec.proto
-          : withOwnParamNames(withOwnContextMark(spec.proto, spec.sym, ctxProtos), spec.sym, ctxProtos, codegen.target);
+          : withOwnDeclaredVoid(
+              withOwnParamNames(
+                withOwnContextMark(spec.proto, spec.sym, ctxProtos),
+                spec.sym,
+                ctxProtos,
+                codegen.target,
+              ),
+              spec.sym,
+              ctxProtos,
+            );
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',

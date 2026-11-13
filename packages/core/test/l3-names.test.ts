@@ -306,6 +306,12 @@ describe('role names', () => {
       decompile('f', asm, ARMV4T_AGBCC, { roleNames: true, ...(ownContextProto ? { ownContextProto } : {}) }).source;
     expect(lift()).toContain('return result;');
     expect(lift({ params: [], returns: 'void' })).toContain('return v0;');
+    // a stated entry that restates the function carries the context's void beside it, and lifts the same
+    const stated = (proto: FnProto) =>
+      decompile('f', asm, ARMV4T_AGBCC, { roleNames: true, prototypes: { f: proto } }).source;
+    expect(stated({})).toContain('return result;');
+    expect(stated({ declaredVoid: true })).toContain('return v0;');
+    expect(stated({ declaredVoid: true }).replace(/\bv0\b/g, 'result')).toBe(stated({}));
   });
 
   test('only where the caller asks for them', () => {
