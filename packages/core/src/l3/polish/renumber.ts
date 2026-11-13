@@ -12,10 +12,16 @@
 //
 // A local is dropped only where it cannot be the program's: unmentioned, not `volatile`, not a frame
 // object, with no initializer and no spill home, and of a scalar or pointer type. An unused array or
-// struct is an object the frame may still hold.
+// struct is an object the frame may still hold. And never at a level that compiles each statement as
+// written (`PolishFacts.literal`): there an unused `s32` still takes a frame slot and moves every
+// other slot's offset — `sub sp, #16` against `#12` on agbcc at -O0, and the same on IDO 7.1 at -O0
+// and -O1 and on gcc 2.7.2 and KMC gcc at -O0 (compiled). At agbcc -O1/-O2, IDO -O2, gcc 2.7.2 and
+// KMC gcc -O1/-O2 and every mwcc level the benchmark ranks at, it compiles alike. The renaming is
+// pure spelling at every level.
 //
 // The variation names a candidate is published under (`coalesce-v4-v0`) keep the names the tree had
 // when the variation ran, before this renumbering.
+import type { PolishFacts } from '.';
 import { type Expr, type SFn, type Stmt, exprChildren, mapStmtLists } from '../ast';
 import { mapExprDeep } from './walk';
 
@@ -136,10 +142,10 @@ function renameStmt(s: Stmt, to: ReadonlyMap<string, string>): Stmt {
   }
 }
 
-export function renumberLocals(fn: SFn): SFn {
+export function renumberLocals(fn: SFn, facts: PolishFacts): SFn {
   const order = mentionOrder(fn);
   const mentioned = new Set(order);
-  const locals = fn.locals.filter((l) => mentioned.has(l.name) || !droppable(l));
+  const locals = fn.locals.filter((l) => mentioned.has(l.name) || facts.literal || !droppable(l));
   const generic = new Set(locals.filter((l) => GENERIC.test(l.name)).map((l) => l.name));
   const ranked = [
     ...order.filter((n) => generic.has(n)),

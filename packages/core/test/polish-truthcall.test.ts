@@ -3,6 +3,10 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { polished } from '../src/l3/polish';
+
+/** The C backend through the polish, at an optimizing level. */
+const pc = polished(cBackend, { literal: false });
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -15,13 +19,12 @@ const fnOf = (body: Stmt[]): SFn => ({
   params: [{ name: 'a0', type: T.int(32, true) }],
   locals: [],
   retType: T.int(32, true),
-  polish: true,
   body,
 });
 
 describe('polish: a call tested for truth drops its `!= 0`', () => {
   test('an if test, a loop test and the operands of && and !', () => {
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf([
         { k: 'if', cond: bin('!=', g(v('a0')), c(0)), then: [call('h')], else: [] },
         { k: 'while', cond: bin('&&', bin('!=', v('a0'), c(0)), bin('!=', g(v('a0')), c(0))), body: [call('h')] },
@@ -37,7 +40,7 @@ describe('polish: a call tested for truth drops its `!= 0`', () => {
   });
 
   test('a compare with anything but the literal 0 stays', () => {
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf([
         { k: 'if', cond: bin('!=', g(v('a0')), c(1)), then: [call('h')], else: [] },
         { k: 'return', value: c(0) },

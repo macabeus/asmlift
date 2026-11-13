@@ -15,7 +15,7 @@ import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/
 import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, caseGotoViolation, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { nameVariables } from '../l3/names';
-import { polishTree } from '../l3/polish';
+import { type PolishFacts, polishTree } from '../l3/polish';
 import { compoundSum } from '../l3/polish/compound';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -804,15 +804,12 @@ function legalizePointerWrites(fn: SFn): SFn {
 /** The body of a C-family function: local declarations + statements, one string per line. The
  *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
  *  that is the language-divergent part each backend owns. */
-function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean, polish: boolean): string[] {
+function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean, polish?: PolishFacts): string[] {
   // The readability polish (l3/polish/) runs last, over the legalized tree, so it sees every cast
-  // the reader will.
+  // the reader will. A pass that throws throws out of `emit`, as any refusal of the printer does:
+  // the polish only re-spells a tree the printer accepts, so a throw there is a bug to see.
   const legal = legalizePointerWrites(fn0);
-  const fn = polish ? polishTree(legal) : legal;
-  const stray = polish ? caseGotoViolation(fn.body) : null;
-  if (stray !== null) {
-    throw new Error(`c backend: the polished tree breaks a goto's contract: ${stray}`);
-  }
+  const fn = polish ? polishTree(legal, polish) : legal;
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME
   // params/locals the emitted declarations come from — so the printer judges exactly the C the
   // reader will see.
@@ -838,21 +835,6 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean,
     append(lines, printStmt(s, '    ', vt, leaf));
   }
   return lines;
-}
-
-/** The body, polished where `polish` asks and the polished tree prints. The polish only re-spells a
- *  tree the printer accepts, so a polished tree it refuses (a `goto` the move left outside its
- *  switch, a `break` bound to another statement) is a polish bug, and it must not become a refused
- *  candidate the draft would have printed: the draft's body is printed instead. */
-function polishedBody(fn: SFn, leaf: LeafHook | undefined, designators: boolean, polish: boolean): string[] {
-  if (polish && fn.polish === true) {
-    try {
-      return cFamilyBody(fn, leaf, designators, true);
-    } catch {
-      // the draft below prints it, or throws its own refusal
-    }
-  }
-  return cFamilyBody(fn, leaf, designators, false);
 }
 
 /** One initial number: hex from 10 up, a negative one with its sign, so a byte table reads as the
@@ -975,9 +957,8 @@ function structDecls(fn: SFn, printed: string): string[] {
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body.
  *  `designators`: the LANGUAGE spells an array element by index in an initializer (C, not C++).
  *  Whether the compiler's dialect parses one is the function's own fact (`SFn.designators`); an
- *  initializer is spelled by index only where both say yes. `polish`: apply the readability polish
- *  (l3/polish/) — off only for a backend's `draft`, the text decisions that read printed text
- *  measure.
+ *  initializer is spelled by index only where both say yes. `polish`: print through the readability
+ *  polish (l3/polish/) for a compiler with these facts — given only by a backend's `polishedEmit`.
  *
  *  The names a reader would give the parameters and locals (l3/names.ts) are applied HERE too, for
  *  the reason the slot order is: both C-family backends print them, and the collision check reads
@@ -989,7 +970,7 @@ export function emitCFamily(
   fn0: SFn,
   leaf?: LeafHook,
   designators = true,
-  polish = true,
+  polish?: PolishFacts,
 ): string {
   const print = (fn: SFn) =>
     assembleCFamily(typeof signature === 'string' ? signature : signature(fn), fn, leaf, designators, polish);
@@ -1003,7 +984,7 @@ function assembleCFamily(
   fn0: SFn,
   leaf: LeafHook | undefined,
   designators: boolean,
-  polish: boolean,
+  polish: PolishFacts | undefined,
 ): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
@@ -1018,7 +999,7 @@ function assembleCFamily(
   }
   const printed = [
     `${signature} {`,
-    ...polishedBody(fn, leaf, designators && fn.designators === true, polish),
+    ...cFamilyBody(fn, leaf, designators && fn.designators === true, polish),
     '}',
   ].join('\n');
   const decls = structDecls(fn, printed);

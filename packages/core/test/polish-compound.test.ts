@@ -3,6 +3,10 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { polished } from '../src/l3/polish';
+
+/** The C backend through the polish, at an optimizing level. */
+const pc = polished(cBackend, { literal: false });
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -17,7 +21,6 @@ const fnOf = (body: Stmt[], locals: SFn['locals'] = [{ name: 'v0', type: T.int(3
   ],
   locals,
   retType: T.void(),
-  polish: true,
   body,
 });
 
@@ -34,15 +37,15 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
         body: [{ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [] } }],
       },
     ]);
-    const out = cBackend.emit(fn);
+    const out = pc.emit(fn);
     expect(out).toContain('    v0++;');
     expect(out).toContain('    a1--;');
     expect(out).toContain('for (v0 = 0; v0 < a1; v0++) {');
-    expect(cBackend.draft!(fn)).toContain('    v0 = v0 + 1;');
+    expect(pc.draft!(fn)).toContain('    v0 = v0 + 1;');
   });
 
   test('a compound add and subtract, to a local and through a plain address', () => {
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf([
         { k: 'assign', name: 'v0', value: bin('+', v('v0'), c(3)) },
         { k: 'store', lval: at(v('a0'), v('a1')), value: bin('-', at(v('a0'), v('a1')), c(5)) },
@@ -54,7 +57,7 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
 
   test('a prefix-shaped target parenthesizes under ++: `(*p)++`, never `*p++`', () => {
     const deref: Expr = { k: 'index', base: v('a0'), idx: c(0), width: 1, signed: false };
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf([
         { k: 'store', lval: deref, value: bin('+', deref, c(1)) },
         { k: 'store', lval: deref, value: bin('+', deref, c(4)) },
@@ -64,8 +67,15 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
     expect(out).toContain('    *a0 += 4;');
   });
 
+  test('none at a level that compiles each statement as written: agbcc -O0 spells `(*p)++` apart', () => {
+    const deref: Expr = { k: 'index', base: v('a0'), idx: c(0), width: 1, signed: false };
+    const fn = fnOf([{ k: 'store', lval: deref, value: bin('+', deref, c(1)) }]);
+    expect(polished(cBackend, { literal: true }).emit(fn)).toContain('    *a0 = *a0 + 1;');
+    expect(pc.emit(fn)).toContain('    (*a0)++;');
+  });
+
   test('a value that is not a literal keeps the plain spelling: IDO orders the add differently', () => {
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf([
         { k: 'assign', name: 'v0', value: bin('+', v('v0'), bin('*', v('a1'), c(3))) },
         { k: 'assign', name: 'v0', value: bin('-', v('v0'), v('a1')) },
@@ -76,7 +86,7 @@ describe('polish: x++ and x += e for a statement that reads back what it writes'
   });
 
   test('refused: a global, a volatile local, a target that loads, a value with a call', () => {
-    const out = cBackend.emit(
+    const out = pc.emit(
       fnOf(
         [
           { k: 'assign', name: 'gCount', value: bin('+', v('gCount'), c(1)) },

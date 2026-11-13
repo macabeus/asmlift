@@ -790,7 +790,6 @@ function structureRanked(
     dialect,
     designatedInitializers = false,
     strictPointerConversions = false,
-    polishText = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -8627,7 +8626,6 @@ function structureRanked(
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),
     ...(strictPointerConversions ? { strictConversions: true as const } : {}),
-    ...(polishText ? { polish: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;

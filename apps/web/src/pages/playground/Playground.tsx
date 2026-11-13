@@ -4,6 +4,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { renderDeclarations } from '@asmlift/core/declare';
 import { detectName } from '@asmlift/core/detect';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
+import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
 import { type DecompileResult, decompile } from '@asmlift/core/pipeline';
 import { type CanonicalToolchainId, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { decompileTraced } from '@asmlift/core/trace';
@@ -206,8 +207,10 @@ export function Playground({
     if (!debounced.asm.trim() || !fnName || nameInvalid || 'error' in flags) {
       return null;
     }
+    // the readability polish (core l3/polish/), for the compiler at the flags given
+    const facts = polishFactsOf(flags.resolved.target);
     if (debounced.backendId !== 'cpp') {
-      return { backend: BACKENDS[debounced.backendId].backend! };
+      return { backend: polished(BACKENDS[debounced.backendId].backend!, facts) };
     }
     try {
       const { target } = flags.resolved;
@@ -221,7 +224,7 @@ export function Playground({
             }).sfn,
             target.fpu?.slots,
           );
-      return { backend: cppBackend(spec, target.fpu?.slots) };
+      return { backend: polished(cppBackend(spec, target.fpu?.slots), facts) };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
@@ -252,7 +255,6 @@ export function Playground({
         onGap: 'annotate',
         // loop counters and the returned local under role names, as the CLI prints them
         roleNames: true,
-        polish: true,
         ...(symbolMap ? { symbols: symbolMap } : {}),
       });
     } catch (e) {
@@ -280,7 +282,6 @@ export function Playground({
           backend: langBackend.backend,
           onGap: 'annotate',
           roleNames: true,
-          polish: true,
           ...(symbolMap ? { symbols: symbolMap } : {}),
         }).report,
       };

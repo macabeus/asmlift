@@ -14,8 +14,12 @@
 //     -mips2, compiled), where `v4 += 4` and `v1++` compile alike;
 //   • the statement is exactly the target, `+` or `-`, and the literal: a cast the pointer-write
 //     legalization put around the sum (it runs first) is no compound.
+//   • not at a level that compiles each statement as written (`PolishFacts.literal`): there
+//     `(*p)++` and `p[i]++` are other code on agbcc and mwcc, a `u8` local's `v--` on agbcc and
+//     mwcc, and even an `int` local's `v++` on gcc 2.7.2 and KMC gcc (compiled at -O0).
 // `1` is spelled `++`/`--`. The statement keeps its node; `compound` asks the printer for the
 // spelling, and the printer checks the shape again before using it.
+import type { PolishFacts } from '.';
 import { type Expr, type SFn, type Stmt, exprChildren, exprEquals, exprReadsVolatile, mapStmtLists } from '../ast';
 
 /** Reads only declared non-volatile locals and parameters and constants, and loads nothing. */
@@ -50,7 +54,10 @@ export function compoundSum(target: Expr, value: Expr): { op: '+' | '-'; rhs: Ex
     : null;
 }
 
-export function compoundAssignments(fn: SFn): SFn {
+export function compoundAssignments(fn: SFn, facts: PolishFacts): SFn {
+  if (facts.literal) {
+    return fn;
+  }
   const names = new Set([
     ...fn.params.map((p) => p.name),
     ...fn.locals.filter((l) => !l.volatile && !l.pointeeVolatile).map((l) => l.name),

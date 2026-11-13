@@ -6,6 +6,7 @@
 // this backend owns only the C SIGNATURE line. The Pascal backend implements the same
 // LanguageBackend interface over the same L3 with its OWN spelling.
 import { LanguageBackend, SFn } from '../l3/ast';
+import type { PolishFacts } from '../l3/polish';
 import { cComment, cDeclare, cType, emitCFamily } from './cfamily';
 
 export { cComment }; // re-export: the shared spelling lives in cfamily.ts
@@ -15,13 +16,13 @@ export const cBackend: LanguageBackend = {
   spellsSwitchFallthrough: true,
   spellsSwitchBreak: true,
   spellsEarlyReturn: true,
-  emit: (fn: SFn): string => emitC(fn, true),
-  draft: (fn: SFn): string => emitC(fn, false),
+  emit: (fn: SFn): string => emitC(fn),
+  polishedEmit: (fn: SFn, facts: PolishFacts): string => emitC(fn, facts),
   comment: cComment,
 };
 
-/** `polish`: the published text, or the text before the C-family polish (`LanguageBackend.draft`). */
-function emitC(fn: SFn, polish: boolean): string {
+/** `polish`: print through the C-family readability polish for a compiler with these facts. */
+function emitC(fn: SFn, polish?: PolishFacts): string {
   // The SAME declarator placement the local list and the struct-field printer use, so one
   // function cannot spell the `*` on the type in its signature and on the declarator in its
   // body. Spelled over the function as named (cfamily.ts `emitCFamily`, l3/names.ts).

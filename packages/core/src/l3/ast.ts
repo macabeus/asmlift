@@ -2,6 +2,7 @@
 // concrete language (C / Pascal / C++) and prints it. "Return a value" and binary ops
 // are neutral nodes here; each backend owns its own spelling.
 import { type IrType, typeEquals } from '../ir/types';
+import type { PolishFacts } from './polish';
 
 export type Expr =
   | { k: 'var'; name: string }
@@ -577,11 +578,6 @@ export interface SFn {
    *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
    *  into a pointer slot, wherever it would for C++. */
   strictConversions?: true;
-  /** Print through the readability polish (l3/polish/): an emission policy, asked for by the caller
-   *  (`polish` on decompile, rank and trace options; on in the CLI, the benchmark and the web app),
-   *  so the core library's default text — which hundreds of tests pin as the shape a lift takes — is
-   *  the tree as structured. The backend's `draft` ignores it. */
-  polish?: true;
 }
 
 /** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s
@@ -654,13 +650,16 @@ export interface LanguageBackend {
    *  structurer reads it through `StructureOptions.spellEarlyReturns`. */
   readonly spellsEarlyReturn: boolean;
   emit(fn: SFn): string;
-  /** The text `emit` printed BEFORE its readability polish (l3/polish/), where the backend has one.
-   *  The polish only re-spells, and the bytes are the draft's; but a decision that reads PRINTED
-   *  TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`), rank's
-   *  goto/cast/line tie-break and its duplicate-source collapse (rank.ts) — reads this, so a polish
-   *  that drops a line or merges two spellings into one text moves no reading and no winner. Read it
-   *  through {@link emitDraft}; absent ⇒ `emit` has no polish. */
+  /** The text `emit` printed BEFORE its readability polish (l3/polish/), on a backend `polished`
+   *  made. The polish only re-spells, and the bytes are the draft's; but a decision that reads
+   *  PRINTED TEXT — the return-tail reading's size bound (pipeline.ts `structureReturnTailReading`),
+   *  rank's goto/cast/line tie-break and its duplicate-source collapse (rank.ts) — reads this, so a
+   *  polish that drops a line or prints two trees as one text moves no reading and no winner. Read it through
+   *  {@link emitDraft}; absent ⇒ `emit` has no polish. */
   draft?(fn: SFn): string;
+  /** `emit` through the readability polish for a compiler with these facts, where the backend has
+   *  one (the C family). Callers do not call it: `polished` (l3/polish/) builds a backend from it. */
+  polishedEmit?(fn: SFn, facts: PolishFacts): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm
   // alongside the emitted marker, so a human/LLM has the raw material to finish by hand.

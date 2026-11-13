@@ -45,8 +45,6 @@ export interface RankOptions {
   roleNames?: boolean;
   /** same contract as DecompileOptions.calleeBodies */
   calleeBodies?: CalleeBodies;
-  /** same contract as DecompileOptions.polish */
-  polish?: boolean;
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
@@ -92,7 +90,6 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     ...(opts.ownContextProto ? { ownContextProto: opts.ownContextProto } : {}),
     ...(opts.roleNames ? { roleNames: true } : {}),
     ...(opts.calleeBodies ? { calleeBodies: opts.calleeBodies } : {}),
-    ...(opts.polish ? { polish: true } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });

@@ -6,6 +6,8 @@ import type { DecompilerResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { type RankOptions, type RankedResult, decompileRanked, decompileRankedParallel } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
+import { cBackend } from '@asmlift/core/backend/c';
+import { polishFactsOf, polished } from '@asmlift/core/l3/polish/index';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
@@ -100,8 +102,8 @@ export function rankOptionsFor(
     // loop counters and the returned local under role names, as the CLI the repro script runs prints
     // them (core l3/names.ts): print-only, so no candidate scores differently
     roleNames: true,
-    // the readability polish (core `DecompileOptions.polish`), as the CLI prints it
-    polish: true,
+    // the readability polish (core l3/polish/), as the CLI prints it
+    backend: polished(cBackend, polishFactsOf(codegen.target)),
   };
 }
 

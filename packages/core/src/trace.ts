@@ -106,7 +106,6 @@ export interface TraceOptions {
   ownContextProto?: FnProto; // the context's own entry, as in decompile()
   roleNames?: boolean; // role names for counters and the result, as in decompile()
   calleeBodies?: CalleeBodies; // bodies of callees outside the input, as in decompile()
-  polish?: boolean; // the readability polish, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
    *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
@@ -361,7 +360,6 @@ function traceTower(
       orderLicensedGlobals: orderLicensed,
       ownContextProto: ownContext.ownContextProto,
       roleNames: opts.roleNames,
-      polish: opts.polish,
     }),
     (t) => emitDraft(backend, t),
   );

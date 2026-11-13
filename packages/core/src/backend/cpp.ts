@@ -14,6 +14,7 @@
 // field access. Virtual dispatch, references, and constructors/destructors are deliberately not
 // built ahead of an inhabitant.
 import { Expr, LanguageBackend, SFn, walkExprs } from '../l3/ast';
+import type { PolishFacts } from '../l3/polish';
 import { type CppType, declareCpp, mangle, spellType } from '../mangle';
 import type { TargetDescription } from '../target';
 import { LeafHook, cComment, emitCFamily } from './cfamily';
@@ -135,8 +136,8 @@ export function bindSpecParams(
  *  slot model of the target it was lifted for. For a member function SFn.params[0] is `this`; the
  *  rest bind to `params` by `bindSpecParams`. */
 export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined): LanguageBackend {
-  // `polish`: the published text (`emit`) or the text before the C-family polish (`draft`).
-  const print = (fn: SFn, polish: boolean): string => {
+  // `polish`: print through the C-family readability polish for a compiler with these facts.
+  const print = (fn: SFn, polish?: PolishFacts): string => {
     // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
     // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.
     const thisVar = spec.cls ? fn.params[0]?.name : undefined;
@@ -231,8 +232,8 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
     spellsSwitchFallthrough: true,
     spellsSwitchBreak: true,
     spellsEarlyReturn: true,
-    emit: (fn: SFn): string => print(fn, true),
-    draft: (fn: SFn): string => print(fn, false),
+    emit: (fn: SFn): string => print(fn),
+    polishedEmit: (fn: SFn, facts: PolishFacts): string => print(fn, facts),
     comment: cComment, // C++ shares C's block-comment spelling
   };
 }
