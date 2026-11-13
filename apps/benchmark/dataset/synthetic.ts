@@ -1772,7 +1772,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'vtailret',
     src: 'void j(void);\nvoid m(s32 a);\ns32 k(s32 a);\nvoid vtailret(s32 a){ if (a > 3) { j(); } else if (a) { m(a); return; } else { k(a); } m(1); return; }',
-    features: ['branch', 'call'],
+    features: ['branch'],
     toolchains: ['agbcc', 'gcc2.7.2', 'gcc2.7.2kmc'],
     ctx: 'void j(void); void m(s32 a); s32 k(s32 a); void vtailret(s32 a);',
     proto: {

@@ -20,7 +20,7 @@
 // { m(a); return; } k(a); return;` and its twin without the last `return;` differ on agbcc -O1 and
 // -O2 and on gcc 2.7.2 and KMC gcc -O1 and -O2 (`if (a) { j(); } else { m(a); return; } k(a);` on
 // agbcc -O1 and both gcc 2.7.2 builds at -O1 and -O2), the same on IDO -O2 and mwcc -O4,p. So the
-// pass fires only on a body whose trailing `return;` is its one `return` (`synthetic:vtailret`
+// pass fires only on a body whose trailing `return;` is its one `return` (the synthetic row `vtailret`
 // pins the other case on agbcc and both gcc 2.7.2 builds).
 //
 // NOT ALSO `return;` → `break;` in a switch that ends the function, which reads as the same program
