@@ -37,7 +37,18 @@
 // names the parameters from its own spec, so it asks only for the locals' role names. The Pascal
 // backend applies none: its identifiers are case-insensitive, so the collision check over the
 // printed text would not hold.
-import { type Expr, type SFn, type Stmt, exprChildren, renameVariables, stmtExprs, stmtLists, walkExprs } from './ast';
+import {
+  type Expr,
+  type Loop,
+  type SFn,
+  type Stmt,
+  exprChildren,
+  isLoop,
+  renameVariables,
+  stmtExprs,
+  stmtLists,
+  walkExprs,
+} from './ast';
 
 /** Identifiers a compiler this project serves predefines as macros outside the reserved namespace
  *  (`_` + a capital, or `__`), which a parameter or a local must not be spelled as: the host `cpp`
@@ -204,8 +215,6 @@ export function nameVariables(fn: SFn, printed: () => string): SFn {
 // Both are print-only like the parameter names: a local's name is no codegen fact, and the
 // collision check is the same.
 
-type Loop = Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>;
-
 /** One write of a local: where it sits, and what it is. */
 interface Write {
   /** the loops enclosing it, outermost first (a `for`'s own init is outside its loop) */
@@ -298,10 +307,13 @@ function roleNames(fn: SFn): { counters: Map<string, readonly string[]>; result?
       if (s.k === 'assign') {
         record(s.name, { loops, step: stepsByOne(s.name, s.value), at: { list, index } });
       }
+      // every other loop (ast.ts `isLoop`, so a new repeating kind is one too): its condition and
+      // body run per iteration
+      const repeats = isLoop(s);
       for (const e of stmtExprs(s)) {
-        steps(e, s.k === 'while' || s.k === 'dowhile' ? [...loops, s] : loops);
+        steps(e, repeats ? [...loops, s] : loops);
       }
-      if (s.k === 'while' || s.k === 'dowhile') {
+      if (repeats) {
         loopsOrder.push({ loop: s, loops });
         visit(s.body, [...loops, s]);
         return;
